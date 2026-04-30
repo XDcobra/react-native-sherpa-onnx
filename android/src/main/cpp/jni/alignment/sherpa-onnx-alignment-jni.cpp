@@ -5,6 +5,7 @@
 #include <jni.h>
 
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -86,6 +87,17 @@ std::vector<int32_t> JIntArrayToVector(JNIEnv* env, jintArray array) {
   for (jint v : tmp) {
     out.push_back(static_cast<int32_t>(v));
   }
+  return out;
+}
+
+std::string WithAlignmentCodePrefix(const std::string& message, const char* fallbackCode) {
+  if (message.rfind("ALIGNMENT_", 0) == 0 || message.rfind("OFFLINE_OOM", 0) == 0) {
+    return message;
+  }
+
+  std::string out = fallbackCode;
+  out += ": ";
+  out += message;
   return out;
 }
 
@@ -336,16 +348,20 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jstring jGranularity) {
   try {
     if (!jModelPath || !jText || !jSamples) {
-      throw std::runtime_error("nativeAlignAccurateFromFloatPcm: null argument");
+      throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: null argument");
     }
 
     const std::string modelPath = JStringToUtf8(env, jModelPath);
     const std::string text = JStringToUtf8(env, jText);
     const std::string granularity = JStringToUtf8(env, jGranularity);
 
+    if (modelPath.empty()) {
+      throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
+    }
+
     const jsize n = env->GetArrayLength(jSamples);
     if (n <= 0) {
-      throw std::runtime_error("samples array is empty");
+      throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: samples array is empty");
     }
     std::vector<float> samples(static_cast<size_t>(n));
     env->GetFloatArrayRegion(jSamples, 0, n, samples.data());
@@ -359,11 +375,16 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
         granularity);
 
     return AlignmentResultToJavaHashMap(env, result);
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(env, "OFFLINE_OOM: native accurate alignment out of memory");
+    return nullptr;
   } catch (const std::exception& e) {
-    ThrowRuntimeException(env, e.what());
+    ThrowRuntimeException(
+        env,
+        WithAlignmentCodePrefix(e.what(), "ALIGNMENT_NATIVE_ACCURATE_FAILED").c_str());
     return nullptr;
   } catch (...) {
-    ThrowRuntimeException(env, "Accurate alignment (PCM) failed");
+    ThrowRuntimeException(env, "ALIGNMENT_NATIVE_UNKNOWN: Accurate alignment (PCM) failed");
     return nullptr;
   }
 }
@@ -420,6 +441,10 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::string language = JStringToUtf8(env, jLanguage);
 
+    if (modelPath.empty()) {
+      throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
+    }
+
     const jsize n = env->GetArrayLength(jSamples);
     if (n <= 0) {
       throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: samples array is empty");
@@ -437,11 +462,16 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
         language);
 
     return ForcedCtcResultToJavaHashMap(env, result);
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(env, "OFFLINE_OOM: forced CTC alignment out of memory");
+    return nullptr;
   } catch (const std::exception& e) {
-    ThrowRuntimeException(env, e.what());
+    ThrowRuntimeException(
+        env,
+        WithAlignmentCodePrefix(e.what(), "ALIGNMENT_FORCED_CTC_FAILED").c_str());
     return nullptr;
   } catch (...) {
-    ThrowRuntimeException(env, "ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed");
+    ThrowRuntimeException(env, "ALIGNMENT_NATIVE_UNKNOWN: forced CTC alignment failed");
     return nullptr;
   }
 }

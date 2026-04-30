@@ -105,6 +105,51 @@ std::string ParseAlignmentModelPath(NSDictionary *options) {
   return std::string([trimmed UTF8String]);
 }
 
+PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm) {
+  if (pcm == nil) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice descriptor is required.");
+  }
+
+  NSString *audioBufferId = [pcm[@"audioBufferId"] isKindOfClass:[NSString class]]
+      ? pcm[@"audioBufferId"]
+      : nil;
+  NSString *trimmedId = audioBufferId != nil
+      ? [audioBufferId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmedId.length == 0) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId is required.");
+  }
+
+  id startRaw = pcm[@"startSample"];
+  id countRaw = pcm[@"sampleCount"];
+  if (![startRaw isKindOfClass:[NSNumber class]] || ![countRaw isKindOfClass:[NSNumber class]]) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount are required.");
+  }
+
+  const double startValue = [(NSNumber *)startRaw doubleValue];
+  const double countValue = [(NSNumber *)countRaw doubleValue];
+  if (!std::isfinite(startValue) || !std::isfinite(countValue)) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount must be finite numbers.");
+  }
+
+  const int32_t startSample = static_cast<int32_t>(startValue);
+  const int32_t sampleCount = static_cast<int32_t>(countValue);
+  if (startValue != static_cast<double>(startSample) ||
+      countValue != static_cast<double>(sampleCount)) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount must be integers.");
+  }
+
+  if (startSample < 0 || sampleCount <= 0) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice must be within offline buffer bounds.");
+  }
+
+  return PcmSliceDescriptor{
+      std::string([trimmedId UTF8String]),
+      startSample,
+      sampleCount,
+  };
+}
+
 std::string ParseSegmentationBufferId(NSDictionary *options) {
   if (options == nil) {
     throw std::runtime_error("ALIGNMENT_ERROR: options.segmentationBufferId is required for mode=vad.");

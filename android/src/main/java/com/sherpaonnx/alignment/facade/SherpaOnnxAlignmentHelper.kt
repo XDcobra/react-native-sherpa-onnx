@@ -2,14 +2,12 @@ package com.sherpaonnx.alignment.facade
 
 import android.util.Log
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.alignment.core.AlignmentErrorCodes
 import com.sherpaonnx.alignment.core.AlignmentOptionParsers
 import com.sherpaonnx.alignment.core.AlignmentPromiseUtils
 import com.sherpaonnx.alignment.core.AlignmentResultMapper
 import com.sherpaonnx.alignment.core.SttAlignmentSegment
-import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.segment.pipeline.SegmentErrorCodes
@@ -542,23 +540,61 @@ internal class SherpaOnnxAlignmentHelper {
     }
   }
 
-  private fun readableArrayToFloatArray(samples: ReadableArray): FloatArray {
-    val out = FloatArray(samples.size())
-    for (i in 0 until samples.size()) {
-      if (samples.isNull(i)) {
-        out[i] = 0f
-        continue
-      }
-      val value = samples.getDouble(i)
-      out[i] = if (value.isFinite()) value.toFloat() else 0f
+  private fun parseKnownAlignmentCode(message: String?): String? {
+    val source = message?.trim().orEmpty()
+    if (source.isEmpty()) {
+      return null
     }
-    return out
+    val prefix = source.substringBefore(':').trim()
+    return when (prefix) {
+      AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+      AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+      AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+      AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE,
+      AlignmentErrorCodes.ERR_NATIVE_UNKNOWN,
+      AlignmentErrorCodes.OFFLINE_OOM,
+      AlignmentErrorCodes.ERR_ALIGNMENT,
+      AlignmentErrorCodes.ERR_CONSTRAINED_ACCURATE -> prefix
+      else -> null
+    }
   }
 
-  fun alignAccurateForcedCtcFromPcm(
+  private fun resolveOfflinePcmSlice(
+    pcm: ReadableMap,
+    sampleRate: Int,
+  ): FloatArray {
+    val descriptor = AlignmentOptionParsers.parsePcmSliceDescriptor(pcm)
+    val entry = PipelineAudioRegistry.getOffline(descriptor.audioBufferId)
+      ?: throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: offline audio buffer not found: ${descriptor.audioBufferId}",
+      )
+
+    if (entry.sampleRate != sampleRate) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: sampleRate mismatch for pcm slice.",
+      )
+    }
+
+    val endExclusive = descriptor.startSample + descriptor.sampleCount
+    if (descriptor.startSample < 0 || descriptor.sampleCount <= 0 || endExclusive > entry.numSamples) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice must be within offline buffer bounds.",
+      )
+    }
+
+    val slice = entry.readSlice(descriptor.startSample, descriptor.sampleCount)
+    if (slice.isEmpty()) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice produced no samples.",
+      )
+    }
+    return slice
+  }
+
+  fun alignAccurateFromPcm(
     modelPath: String,
-    windowText: String,
-    samples: ReadableArray,
+    text: String,
+    pcm: ReadableMap,
     sampleRate: Double,
     granularity: String,
     language: String?,
@@ -569,17 +605,17 @@ internal class SherpaOnnxAlignmentHelper {
         val normalizedModelPath = modelPath.trim()
         if (normalizedModelPath.isEmpty()) {
           promise.reject(
-            "ALIGNMENT_FORCED_CTC_FAILED",
-            "ALIGNMENT_FORCED_CTC_FAILED: modelPath is required.",
+            AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+            "${AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED}: modelPath is required.",
           )
           return@execute
         }
 
-        val normalizedWindowText = windowText.trim()
-        if (normalizedWindowText.isEmpty()) {
+        val normalizedText = text.trim()
+        if (normalizedText.isEmpty()) {
           promise.reject(
-            "ALIGNMENT_FORCED_CTC_FAILED",
-            "ALIGNMENT_FORCED_CTC_FAILED: windowText must not be empty.",
+            AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+            "${AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED}: text must not be empty.",
           )
           return@execute
         }
@@ -587,8 +623,73 @@ internal class SherpaOnnxAlignmentHelper {
         val normalizedSampleRate = sampleRate.toInt()
         if (!sampleRate.isFinite() || normalizedSampleRate <= 0) {
           promise.reject(
-            "ALIGNMENT_FORCED_CTC_FAILED",
-            "ALIGNMENT_FORCED_CTC_FAILED: sampleRate must be positive.",
+            AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+            "${AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED}: sampleRate must be positive.",
+          )
+          return@execute
+        }
+
+        val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
+        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
+        val raw = nativeAlignAccurateFromFloatPcm(
+          normalizedModelPath,
+          normalizedText,
+          slice,
+          normalizedSampleRate,
+          normalizedGranularity,
+        )
+
+        promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
+      } catch (e: OutOfMemoryError) {
+        Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
+        promise.reject(
+          AlignmentErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("alignment"),
+          e,
+        )
+      } catch (e: Exception) {
+        val code = parseKnownAlignmentCode(e.message) ?: AlignmentErrorCodes.ERR_NATIVE_UNKNOWN
+        val message = (e.message ?: "$code: Native accurate alignment failed").trim()
+        Log.e(AlignmentErrorCodes.TAG, message, e)
+        promise.reject(code, message, e)
+      }
+    }
+  }
+
+  fun alignAccurateForcedCtcFromPcm(
+    modelPath: String,
+    windowText: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        val normalizedModelPath = modelPath.trim()
+        if (normalizedModelPath.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+            "${AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED}: modelPath is required.",
+          )
+          return@execute
+        }
+
+        val normalizedWindowText = windowText.trim()
+        if (normalizedWindowText.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+            "${AlignmentErrorCodes.ERR_FORCED_CTC_FAILED}: windowText must not be empty.",
+          )
+          return@execute
+        }
+
+        val normalizedSampleRate = sampleRate.toInt()
+        if (!sampleRate.isFinite() || normalizedSampleRate <= 0) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+            "${AlignmentErrorCodes.ERR_FORCED_CTC_FAILED}: sampleRate must be positive.",
           )
           return@execute
         }
@@ -597,19 +698,12 @@ internal class SherpaOnnxAlignmentHelper {
           .normalizeGranularity(granularity)
           .let { if (it == "character") "word" else it }
 
-        val pcm = readableArrayToFloatArray(samples)
-        if (pcm.isEmpty()) {
-          promise.reject(
-            "ALIGNMENT_FORCED_CTC_FAILED",
-            "ALIGNMENT_FORCED_CTC_FAILED: samples are empty.",
-          )
-          return@execute
-        }
+        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
 
         val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
           normalizedModelPath,
           normalizedWindowText,
-          pcm,
+          slice,
           normalizedSampleRate,
           normalizedGranularity,
           language?.trim().orEmpty(),
@@ -624,14 +718,10 @@ internal class SherpaOnnxAlignmentHelper {
           e,
         )
       } catch (e: Exception) {
-        val message = e.message ?: "ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed"
-        val prefixed = if (message.startsWith("ALIGNMENT_FORCED_CTC_FAILED:")) {
-          message
-        } else {
-          "ALIGNMENT_FORCED_CTC_FAILED: $message"
-        }
-        Log.e(AlignmentErrorCodes.TAG, prefixed, e)
-        promise.reject("ALIGNMENT_FORCED_CTC_FAILED", prefixed, e)
+        val code = parseKnownAlignmentCode(e.message) ?: AlignmentErrorCodes.ERR_NATIVE_UNKNOWN
+        val message = (e.message ?: "$code: forced CTC alignment failed").trim()
+        Log.e(AlignmentErrorCodes.TAG, message, e)
+        promise.reject(code, message, e)
       }
     }
   }

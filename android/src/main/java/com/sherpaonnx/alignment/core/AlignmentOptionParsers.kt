@@ -4,6 +4,12 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 
 internal object AlignmentOptionParsers {
+  data class PcmSliceDescriptor(
+    val audioBufferId: String,
+    val startSample: Int,
+    val sampleCount: Int,
+  )
+
   fun normalizeMode(mode: String): String {
     val normalized = mode.trim().lowercase()
     return when (normalized) {
@@ -107,6 +113,56 @@ internal object AlignmentOptionParsers {
       )
     }
     return intValue
+  }
+
+  fun parsePcmSliceDescriptor(pcm: ReadableMap?): PcmSliceDescriptor {
+    val descriptor = pcm
+      ?: throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice descriptor is required.",
+      )
+
+    val audioBufferId = descriptor.getString("audioBufferId")?.trim().orEmpty()
+    if (audioBufferId.isEmpty()) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm.audioBufferId is required.",
+      )
+    }
+
+    val startRaw = if (descriptor.hasKey("startSample")) {
+      descriptor.getDouble("startSample")
+    } else {
+      Double.NaN
+    }
+    val countRaw = if (descriptor.hasKey("sampleCount")) {
+      descriptor.getDouble("sampleCount")
+    } else {
+      Double.NaN
+    }
+
+    if (!startRaw.isFinite() || !countRaw.isFinite()) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm.startSample and pcm.sampleCount must be finite numbers.",
+      )
+    }
+
+    val startSample = startRaw.toInt()
+    val sampleCount = countRaw.toInt()
+    if (startRaw != startSample.toDouble() || countRaw != sampleCount.toDouble()) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm.startSample and pcm.sampleCount must be integers.",
+      )
+    }
+    if (startSample < 0 || sampleCount <= 0) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice must be within offline buffer bounds.",
+      )
+    }
+
+    return PcmSliceDescriptor(
+      audioBufferId = audioBufferId,
+      startSample = startSample,
+      sampleCount = sampleCount,
+    )
   }
 
   private fun readableArrayToIntArray(array: ReadableArray): IntArray {

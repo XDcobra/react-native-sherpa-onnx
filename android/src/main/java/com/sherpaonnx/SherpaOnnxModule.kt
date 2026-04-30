@@ -3681,7 +3681,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun alignAccurateForcedCtcFromPcm(
     modelPath: String,
     windowText: String,
-    samples: ReadableArray,
+    pcm: ReadableMap,
     sampleRate: Double,
     granularity: String,
     language: String?,
@@ -3690,7 +3690,27 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.alignAccurateForcedCtcFromPcm(
       modelPath,
       windowText,
-      samples,
+      pcm,
+      sampleRate,
+      granularity,
+      language,
+      promise,
+    )
+  }
+
+  override fun alignAccurateFromPcm(
+    modelPath: String,
+    text: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignAccurateFromPcm(
+      modelPath,
+      text,
+      pcm,
       sampleRate,
       granularity,
       language,

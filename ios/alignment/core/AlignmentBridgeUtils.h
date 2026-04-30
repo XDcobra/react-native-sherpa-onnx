@@ -24,10 +24,17 @@ namespace sherpaonnx {
 namespace alignment {
 namespace bridge {
 
+struct PcmSliceDescriptor {
+	std::string audioBufferId;
+	int32_t startSample;
+	int32_t sampleCount;
+};
+
 std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options);
 std::vector<float> ParseFloatSamples(NSArray *samples);
 int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRate);
 std::string ParseAlignmentModelPath(NSDictionary *options);
+PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm);
 std::string ParseSegmentationBufferId(NSDictionary *options);
 std::string ParseSegmentationSource(NSDictionary *options);
 int32_t ParseMinAnchors(NSDictionary *options, int32_t defaultValue = 2);

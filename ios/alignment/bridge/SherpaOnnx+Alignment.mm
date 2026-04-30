@@ -81,6 +81,11 @@ static NSString *const kAlignmentErrTextBufferEmpty = @"ALIGNMENT_TEXT_BUFFER_EM
 static NSString *const kAlignmentErrAudioBufferNotFound = @"ALIGNMENT_AUDIO_BUFFER_NOT_FOUND";
 static NSString *const kAlignmentErrAudioBufferKindMismatch = @"ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH";
 static NSString *const kAlignmentErrAudioBufferEmpty = @"ALIGNMENT_AUDIO_BUFFER_EMPTY";
+static NSString *const kAlignmentErrModelLoadFailed = @"ALIGNMENT_MODEL_LOAD_FAILED";
+static NSString *const kAlignmentErrNativeAccurateFailed = @"ALIGNMENT_NATIVE_ACCURATE_FAILED";
+static NSString *const kAlignmentErrForcedCtcFailed = @"ALIGNMENT_FORCED_CTC_FAILED";
+static NSString *const kAlignmentErrAnchorOutOfRange = @"ALIGNMENT_ANCHOR_OUT_OF_RANGE";
+static NSString *const kAlignmentErrNativeUnknown = @"ALIGNMENT_NATIVE_UNKNOWN";
 static NSString *const kAlignmentErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kAlignmentOfflineOomMessage =
     @"Not enough memory for offline alignment. Please use smaller chunks or a streaming-friendly pipeline.";
@@ -94,7 +99,7 @@ static NSString *extractAlignmentCodeFromMessage(NSString *message) {
   if (r.location == NSNotFound || r.location == 0) return kAlignmentErrCode;
   NSString *prefix = [[message substringToIndex:r.location]
       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([prefix hasPrefix:@"ALIGNMENT_"]) {
+  if ([prefix hasPrefix:@"ALIGNMENT_"] || [prefix isEqualToString:@"OFFLINE_OOM"]) {
     return prefix;
   }
   return kAlignmentErrCode;
@@ -673,9 +678,157 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
   });
 }
 
+- (void)alignAccurateFromPcm:(NSString *)modelPath
+                         text:(NSString *)text
+                          pcm:(NSDictionary *)pcm
+                   sampleRate:(double)sampleRate
+                  granularity:(NSString *)granularity
+                     language:(NSString *)language
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
+{
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    try {
+      const std::string modelPathStr =
+          (modelPath != nil) ? std::string([modelPath UTF8String]) : std::string();
+      const std::string textStr =
+          (text != nil) ? std::string([text UTF8String]) : std::string();
+      const std::string granularityStr =
+          sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
+      const std::string languageStr =
+          (language != nil) ? std::string([language UTF8String]) : std::string();
+        (void)languageStr;
+
+      if (modelPathStr.empty()) {
+        reject(kAlignmentErrModelLoadFailed,
+               @"ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required.",
+               nil);
+        return;
+      }
+      if (textStr.empty()) {
+        reject(kAlignmentErrNativeAccurateFailed,
+               @"ALIGNMENT_NATIVE_ACCURATE_FAILED: text must not be empty.",
+               nil);
+        return;
+      }
+      if (!std::isfinite(sampleRate) || sampleRate <= 0.0) {
+        reject(kAlignmentErrNativeAccurateFailed,
+               @"ALIGNMENT_NATIVE_ACCURATE_FAILED: sampleRate must be positive.",
+               nil);
+        return;
+      }
+
+      const auto descriptor = sherpaonnx::alignment::bridge::ParsePcmSliceDescriptor(pcm);
+      if (descriptor.audioBufferId.rfind("off_", 0) != 0) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId must reference an offline audio buffer.",
+               nil);
+        return;
+      }
+
+      int bufferSampleRate = 0;
+      int bufferNumSamples = 0;
+      std::string metaErrCode;
+      std::string metaErrMsg;
+      if (!pa_get_offline_metadata(
+              descriptor.audioBufferId,
+              &bufferSampleRate,
+              &bufferNumSamples,
+              &metaErrCode,
+              &metaErrMsg)) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId was not found.",
+               nil);
+        return;
+      }
+
+      const int requestedSampleRate = static_cast<int>(sampleRate);
+      if (bufferSampleRate != requestedSampleRate) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: sampleRate mismatch for pcm slice.",
+               nil);
+        return;
+      }
+
+      const int64_t endExclusive =
+          static_cast<int64_t>(descriptor.startSample) +
+          static_cast<int64_t>(descriptor.sampleCount);
+      if (descriptor.startSample < 0 || descriptor.sampleCount <= 0 ||
+          endExclusive > static_cast<int64_t>(bufferNumSamples)) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice must be within offline buffer bounds.",
+               nil);
+        return;
+      }
+
+      std::vector<float> samples;
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_get_offline_samples_slice(
+              descriptor.audioBufferId,
+              descriptor.startSample,
+              descriptor.sampleCount,
+              &samples,
+              &sliceErrCode,
+              &sliceErrMsg) ||
+          samples.empty()) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: failed to resolve pcm slice from offline buffer.",
+               nil);
+        return;
+      }
+
+      sherpa_onnx::alignment::AlignmentResult result;
+      try {
+        result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+            modelPathStr,
+            textStr,
+            samples.data(),
+            samples.size(),
+            requestedSampleRate,
+            granularityStr);
+      } catch (const std::exception &e) {
+        throw std::runtime_error(
+            std::string("ALIGNMENT_NATIVE_ACCURATE_FAILED: ") + e.what());
+      }
+
+      NSMutableArray *subtitles =
+          [NSMutableArray arrayWithCapacity:result.subtitles.size()];
+      for (const auto &item : result.subtitles) {
+        [subtitles addObject:@{
+          @"text": [NSString stringWithUTF8String:item.text.c_str()] ?: @"",
+          @"start": @(item.start_s),
+          @"end": @(item.end_s),
+        }];
+      }
+
+      const std::string normalizedTimingMode =
+          alignmentTimingModeToSegmentTimingMode(result.timing_mode, "accurate");
+      resolve(@{
+        @"subtitles": subtitles,
+        @"timingMode": [NSString stringWithUTF8String:normalizedTimingMode.c_str()] ?: @"accurate",
+      });
+    } catch (const std::bad_alloc &) {
+      reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
+    } catch (const std::exception &e) {
+      NSString *errorMsg = [NSString stringWithUTF8String:e.what()]
+          ?: @"ALIGNMENT_NATIVE_UNKNOWN: native accurate alignment failed";
+      NSString *code = extractAlignmentCodeFromMessage(errorMsg);
+      if ([code isEqualToString:kAlignmentErrCode]) {
+        code = kAlignmentErrNativeUnknown;
+      }
+      reject(code, errorMsg, nil);
+    } catch (...) {
+      reject(kAlignmentErrNativeUnknown,
+             @"ALIGNMENT_NATIVE_UNKNOWN: native accurate alignment failed",
+             nil);
+    }
+  });
+}
+
 - (void)alignAccurateForcedCtcFromPcm:(NSString *)modelPath
                            windowText:(NSString *)windowText
-                              samples:(NSArray *)samples
+                                  pcm:(NSDictionary *)pcm
                            sampleRate:(double)sampleRate
                           granularity:(NSString *)granularity
                              language:(NSString *)language
@@ -694,28 +847,80 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
           (language != nil) ? std::string([language UTF8String]) : std::string();
 
       if (modelPathStr.empty()) {
-        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
-               @"ALIGNMENT_FORCED_CTC_FAILED: modelPath is required.",
+        reject(kAlignmentErrModelLoadFailed,
+               @"ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required.",
                nil);
         return;
       }
       if (windowTextStr.empty()) {
-        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+        reject(kAlignmentErrForcedCtcFailed,
                @"ALIGNMENT_FORCED_CTC_FAILED: windowText is required.",
                nil);
         return;
       }
       if (!std::isfinite(sampleRate) || sampleRate <= 0.0) {
-        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
+        reject(kAlignmentErrForcedCtcFailed,
                @"ALIGNMENT_FORCED_CTC_FAILED: sampleRate must be positive.",
                nil);
         return;
       }
 
-      std::vector<float> pcm = sherpaonnx::alignment::bridge::ParseFloatSamples(samples);
-      if (pcm.empty()) {
-        reject(@"ALIGNMENT_FORCED_CTC_FAILED",
-               @"ALIGNMENT_FORCED_CTC_FAILED: samples are empty.",
+      const auto descriptor = sherpaonnx::alignment::bridge::ParsePcmSliceDescriptor(pcm);
+      if (descriptor.audioBufferId.rfind("off_", 0) != 0) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId must reference an offline audio buffer.",
+               nil);
+        return;
+      }
+
+      int bufferSampleRate = 0;
+      int bufferNumSamples = 0;
+      std::string metaErrCode;
+      std::string metaErrMsg;
+      if (!pa_get_offline_metadata(
+              descriptor.audioBufferId,
+              &bufferSampleRate,
+              &bufferNumSamples,
+              &metaErrCode,
+              &metaErrMsg)) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId was not found.",
+               nil);
+        return;
+      }
+
+      const int requestedSampleRate = static_cast<int>(sampleRate);
+      if (bufferSampleRate != requestedSampleRate) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: sampleRate mismatch for pcm slice.",
+               nil);
+        return;
+      }
+
+      const int64_t endExclusive =
+          static_cast<int64_t>(descriptor.startSample) +
+          static_cast<int64_t>(descriptor.sampleCount);
+      if (descriptor.startSample < 0 || descriptor.sampleCount <= 0 ||
+          endExclusive > static_cast<int64_t>(bufferNumSamples)) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice must be within offline buffer bounds.",
+               nil);
+        return;
+      }
+
+      std::vector<float> samples;
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_get_offline_samples_slice(
+              descriptor.audioBufferId,
+              descriptor.startSample,
+              descriptor.sampleCount,
+              &samples,
+              &sliceErrCode,
+              &sliceErrMsg) ||
+          samples.empty()) {
+        reject(kAlignmentErrAnchorOutOfRange,
+               @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: failed to resolve pcm slice from offline buffer.",
                nil);
         return;
       }
@@ -723,14 +928,20 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
       const std::string effectiveGranularity =
           (granularityStr == "character") ? "word" : granularityStr;
 
-      const auto result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
-          modelPathStr,
-          windowTextStr,
-          pcm.data(),
-          pcm.size(),
-          static_cast<int32_t>(sampleRate),
-          effectiveGranularity,
-          languageStr);
+      sherpa_onnx::alignment::ForcedCtcResult result;
+      try {
+        result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
+            modelPathStr,
+            windowTextStr,
+            samples.data(),
+            samples.size(),
+            requestedSampleRate,
+            effectiveGranularity,
+            languageStr);
+      } catch (const std::exception &e) {
+        throw std::runtime_error(
+            std::string("ALIGNMENT_FORCED_CTC_FAILED: ") + e.what());
+      }
 
       NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:result.tokens.size()];
       for (const auto &token : result.tokens) {
@@ -753,14 +964,15 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
       reject(kAlignmentErrOfflineOom, kAlignmentOfflineOomMessage, nil);
     } catch (const std::exception &e) {
       NSString *errorMsg = [NSString stringWithUTF8String:e.what()]
-          ?: @"ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed";
-      NSString *code = [errorMsg hasPrefix:@"ALIGNMENT_FORCED_CTC_FAILED:"]
-          ? @"ALIGNMENT_FORCED_CTC_FAILED"
-          : extractAlignmentCodeFromMessage(errorMsg);
+          ?: @"ALIGNMENT_NATIVE_UNKNOWN: forced CTC alignment failed";
+      NSString *code = extractAlignmentCodeFromMessage(errorMsg);
+      if ([code isEqualToString:kAlignmentErrCode]) {
+        code = kAlignmentErrNativeUnknown;
+      }
       reject(code, errorMsg, nil);
     } catch (...) {
-      reject(@"ALIGNMENT_FORCED_CTC_FAILED",
-             @"ALIGNMENT_FORCED_CTC_FAILED: forced CTC alignment failed",
+      reject(kAlignmentErrNativeUnknown,
+             @"ALIGNMENT_NATIVE_UNKNOWN: forced CTC alignment failed",
              nil);
     }
   });
