@@ -3228,6 +3228,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineSegmentBufferIfEmpty(
+    targetBufferId: String,
+    liveBufferId: String,
+    mode: String?,
+    promise: Promise
+  ) {
+    try {
+      com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.populateOfflineFromLiveIfEmpty(
+        targetBufferId,
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun getPipelineSegmentBufferInfo(bufferId: String, promise: Promise) {
     try {
       val offline = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
