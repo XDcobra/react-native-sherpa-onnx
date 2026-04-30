@@ -143,6 +143,7 @@ jest.mock('../../linker/linker', () => ({
       },
     ],
     globalConfidence: 0.895,
+    linkMapId: 'link_map_asr',
   }),
 }));
 
@@ -194,6 +195,7 @@ describe('asrMediated/driver pipeline', () => {
     expect(out).toMatchObject({
       outputSegmentBufferId: 'seg_out',
       segmentsWritten: 2,
+      linkMap: { linkMapId: 'link_map_asr' },
     });
   });
 });

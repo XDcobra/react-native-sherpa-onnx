@@ -90,6 +90,12 @@ jest.mock('../../../segmentbuffer', () => ({
   populateOfflineSegmentBufferIfEmpty: jest.fn().mockResolvedValue(undefined),
   releasePipelineSegmentBuffer: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../../../segment', () => ({
+  createSegmentLinkMap: jest
+    .fn()
+    .mockResolvedValue({ linkMapId: 'slm_stuck_1' }),
+  addSegmentLink: jest.fn().mockResolvedValue({ linkId: 'lnk_stuck_1' }),
+}));
 
 import { runAccurateChunkedForcedCtc } from '../driver';
 

@@ -77,6 +77,12 @@ jest.mock('../../../segmentbuffer', () => ({
   populateOfflineSegmentBufferIfEmpty: jest.fn().mockResolvedValue(undefined),
   releasePipelineSegmentBuffer: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../../../segment', () => ({
+  createSegmentLinkMap: jest
+    .fn()
+    .mockResolvedValue({ linkMapId: 'slm_opts_1' }),
+  addSegmentLink: jest.fn().mockResolvedValue({ linkId: 'lnk_opts_1' }),
+}));
 
 import SherpaOnnx from '../../../NativeSherpaOnnx';
 import { runAccurateChunkedForcedCtc } from '../driver';
