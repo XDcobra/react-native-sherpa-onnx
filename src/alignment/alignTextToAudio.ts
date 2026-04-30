@@ -27,7 +27,7 @@ function normalizeGranularity(
 /**
  * Character granularity requires accurate (CTC) mode.
  */
-export function assertAlignmentGranularityForMode(
+function assertAlignmentGranularityForMode(
   mode: 'proportional' | 'estimated' | 'aligned' | 'off' | 'vad',
   granularity: AlignmentGranularity
 ): void {
@@ -65,33 +65,19 @@ async function buildNativeOptions(
         'ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.'
       );
     }
+    if (options.segmentation?.mode === 'auto') {
+      throw new Error(
+        'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategies are not available in this phase.'
+      );
+    }
     const base: Record<string, unknown> = {
       modelPath: resolved,
       ...(language.length > 0 ? { language } : {}),
     };
-    const hasSegmentation = Object.prototype.hasOwnProperty.call(
-      options,
-      'segmentation'
-    );
-    if (hasSegmentation && options.segmentation?.source !== 'vad') {
+    if (options.segmentation?.mode !== 'off' && options.segmentation != null) {
       throw new Error(
-        'ALIGNMENT_ERROR: accurate+segmentation requires options.segmentation.source="vad".'
+        'ALIGNMENT_OPTIONS_INVALID: accurate segmentation must be omitted or use mode="off" in this phase.'
       );
-    }
-    if (options.segmentation?.source === 'vad') {
-      const segmentationBufferId = resolveOfflineSegmentBufferId(
-        options.segmentation.segmentBuffer
-      );
-      const rawMinAnchors = options.segmentation.minAnchors;
-      const minAnchors = rawMinAnchors == null ? 2 : Number(rawMinAnchors);
-      if (!Number.isInteger(minAnchors) || minAnchors < 1 || minAnchors > 10) {
-        throw new Error(
-          'ALIGNMENT_ERROR: segmentation.minAnchors must be an integer between 1 and 10.'
-        );
-      }
-      base.segmentationSource = 'vad';
-      base.segmentationBufferId = segmentationBufferId;
-      base.minAnchors = minAnchors;
     }
     return base;
   }
@@ -139,7 +125,7 @@ async function buildNativeOptions(
 /**
  * Build alignment segments into a caller-provided offline segment buffer.
  */
-export const alignTextToAudio: AlignTextToAudioFn = async (
+export const runAlignTextToAudio: AlignTextToAudioFn = async (
   textIn,
   audioIn,
   segmentOut,
@@ -154,24 +140,12 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
       'ALIGNMENT_ERROR: mode=vad supports only sentence or word granularity.'
     );
   }
-  if (
-    mode === 'accurate' &&
-    options.segmentation?.source === 'vad' &&
-    granularity === 'character'
-  ) {
+  if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     throw new Error(
-      'ALIGNMENT_ERROR: accurate+vad supports only sentence or word granularity.'
+      'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategies are not available in this phase.'
     );
   }
-  if (
-    mode === 'vad' &&
-    (!options.segmentation || options.segmentation.source !== 'vad')
-  ) {
-    throw new Error(
-      'ALIGNMENT_ERROR: mode=vad requires options.segmentation with source="vad".'
-    );
-  }
-  if (mode === 'vad') {
+  if (options.mode === 'vad') {
     const segmentation = options.segmentation;
     if (!segmentation || segmentation.source !== 'vad') {
       throw new Error(

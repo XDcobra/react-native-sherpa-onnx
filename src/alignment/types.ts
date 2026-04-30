@@ -32,6 +32,29 @@ export interface AlignmentVadSegmentationConfig {
   minAnchors?: number;
 }
 
+export type AlignmentMappingStrategy = 'asr_mediated' | 'chunked_forced_ctc';
+
+export interface AlignmentAsrConfig {
+  hypothesisTextBuffer: OfflineTextBufferIdSource;
+}
+
+export type AlignmentAccurateSegmentationConfig =
+  | {
+      mode: 'off';
+    }
+  | {
+      mode: 'auto';
+      anchorSegmentBuffer: OfflineSegmentBufferIdSource;
+      mappingStrategy: 'asr_mediated';
+      asr: AlignmentAsrConfig;
+    }
+  | {
+      mode: 'auto';
+      anchorSegmentBuffer: OfflineSegmentBufferIdSource;
+      mappingStrategy: 'chunked_forced_ctc';
+      asr?: never;
+    };
+
 export type AlignmentTimingMode =
   | 'proportional'
   | 'estimated'
@@ -72,14 +95,19 @@ export type AlignTextToAudioOptionsAccurate =
       modelPath: ModelPathConfig;
       granularity?: AlignmentGranularity;
       language?: string;
-      segmentation?: never;
+      segmentation?: {
+        mode: 'off';
+      };
     }
   | {
       mode: 'accurate';
       modelPath: ModelPathConfig;
       granularity?: 'sentence' | 'word';
       language?: string;
-      segmentation: AlignmentVadSegmentationConfig;
+      segmentation: Extract<
+        AlignmentAccurateSegmentationConfig,
+        { mode: 'auto' }
+      >;
     };
 
 /** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
@@ -102,3 +130,11 @@ export type AlignTextToAudioFn = (
   segmentOut: OfflineSegmentBufferIdSource,
   options: AlignTextToAudioOptions
 ) => Promise<AlignTextToAudioWriteResult>;
+
+export type AlignmentErrorCode =
+  | 'ALIGNMENT_OPTIONS_INVALID'
+  | 'ALIGNMENT_MODEL_PATH_INVALID'
+  | 'ALIGNMENT_GRANULARITY_INVALID'
+  | 'ALIGNMENT_ASR_HYPOTHESIS_MISSING'
+  | 'ALIGNMENT_NOT_IMPLEMENTED'
+  | 'ALIGNMENT_ENGINE_DESTROYED';
