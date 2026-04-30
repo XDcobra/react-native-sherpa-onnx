@@ -78,7 +78,12 @@ jest.mock('../../../segmentbuffer', () => ({
   releasePipelineSegmentBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
+import SherpaOnnx from '../../../NativeSherpaOnnx';
 import { runAccurateStrategyB } from '../driver';
+
+const native = SherpaOnnx as unknown as {
+  alignAccurateForcedCtcFromPcm: jest.Mock;
+};
 
 const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   getPipelineSegmentBufferInfo: jest.Mock;
@@ -143,5 +148,27 @@ describe('strategyB/driver options', () => {
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' });
+  });
+
+  test('propagates ALIGNMENT_FORCED_CTC_FAILED from native forced CTC calls', async () => {
+    native.alignAccurateForcedCtcFromPcm.mockRejectedValueOnce(
+      Object.assign(
+        new Error('ALIGNMENT_FORCED_CTC_FAILED: native forced ctc failed'),
+        {
+          code: 'ALIGNMENT_FORCED_CTC_FAILED',
+        }
+      )
+    );
+
+    await expect(
+      runAccurateStrategyB({
+        textIn: 'txt_ref',
+        audioIn: 'off_audio',
+        segmentOut: 'seg_out',
+        anchorSegmentBuffer: 'seg_anchor',
+        modelPath: { type: 'file', path: '/m' },
+        granularity: 'word',
+      })
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_FAILED' });
   });
 });

@@ -136,10 +136,94 @@ describe('linker/runLinker', () => {
         },
       ],
     });
-    expect(out).toMatchSnapshot({
-      diagnostics: {
-        elapsedMs: expect.any(Number),
+    expect(out).toMatchInlineSnapshot(
+      {
+        diagnostics: {
+          elapsedMs: expect.any(Number),
+        },
       },
-    });
+      `
+      {
+        "diagnostics": {
+          "ambiguousAnchorCount": 0,
+          "anchorCount": 2,
+          "coveragePercent": 100,
+          "elapsedMs": Any<Number>,
+          "hypTokenCount": 4,
+          "medianConfidence": 0.97,
+          "minConfidence": 0.94,
+          "nearestAnchorFallbackCount": 0,
+          "refTokenCount": 4,
+          "unassignedAnchorCount": 0,
+          "unmatchedReferenceTokenCount": 0,
+        },
+        "globalConfidence": 0.97,
+        "linkMapId": "link_map_1",
+        "mappingUnits": [
+          {
+            "anchorEndSample": 14400,
+            "anchorSegmentId": "seg_a",
+            "anchorStartSample": 0,
+            "audioRangeMs": {
+              "endMs": 700,
+              "startMs": 0,
+            },
+            "confidence": 1,
+            "hypRange": {
+              "endCharIndex": 11,
+              "startCharIndex": 0,
+            },
+            "overlapRatio": 1,
+            "refRange": {
+              "endCharIndex": 11,
+              "startCharIndex": 0,
+            },
+            "referenceEndToken": 2,
+            "referenceStartToken": 0,
+          },
+          {
+            "anchorEndSample": 32000,
+            "anchorSegmentId": "seg_b",
+            "anchorStartSample": 14400,
+            "audioRangeMs": {
+              "endMs": 1700,
+              "startMs": 700,
+            },
+            "confidence": 0.94,
+            "hypRange": {
+              "endCharIndex": 22,
+              "startCharIndex": 12,
+            },
+            "overlapRatio": 0.8,
+            "refRange": {
+              "endCharIndex": 22,
+              "startCharIndex": 12,
+            },
+            "referenceEndToken": 4,
+            "referenceStartToken": 2,
+          },
+        ],
+        "status": "ok",
+        "version": 0,
+      }
+    `
+    );
+  });
+
+  test('throws ALIGNMENT_LINKER_FAILED when hypothesis token and timestamp arrays mismatch', async () => {
+    textbuffer.getOfflineTextBufferTimestampsSlice.mockResolvedValueOnce([
+      fixture.hypothesisTimestampsSec[0],
+    ]);
+
+    await expect(
+      runLinker({
+        audioIn: 'off_audio',
+        anchors: 'seg_anchor',
+        referenceText: 'txt_ref',
+        hypothesisTextBuffer: 'txt_hyp',
+        granularity: 'word',
+        language: 'en',
+      })
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_LINKER_FAILED' });
   });
 });

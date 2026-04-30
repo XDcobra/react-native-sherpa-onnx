@@ -140,4 +140,25 @@ describe('AlignmentEngine options validation', () => {
     ).rejects.toMatchObject({ code: 'ALIGNMENT_ENGINE_DESTROYED' });
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
+
+  it('passes through ALIGNMENT_NOT_IMPLEMENTED from native bridge', async () => {
+    const engine = createAlignment();
+    native.alignOfflineTextToAudio.mockRejectedValueOnce(
+      Object.assign(
+        new Error('ALIGNMENT_NOT_IMPLEMENTED: row not implemented natively'),
+        {
+          code: 'ALIGNMENT_NOT_IMPLEMENTED',
+        }
+      )
+    );
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'accurate',
+        modelPath: { type: 'file', path: '/tmp/model' },
+        granularity: 'word',
+        segmentation: { mode: 'off' },
+      })
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_NOT_IMPLEMENTED' });
+  });
 });

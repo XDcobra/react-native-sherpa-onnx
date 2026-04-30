@@ -91,10 +91,15 @@ jest.mock('../../linker/linker', () => ({
   runLinker: jest.fn(),
 }));
 
+import SherpaOnnx from '../../../NativeSherpaOnnx';
 import { runAccurateStrategyA } from '../driver';
 
 const linker = jest.requireMock('../../linker/linker') as {
   runLinker: jest.Mock;
+};
+
+const native = SherpaOnnx as unknown as {
+  alignAccurateFromPcm: jest.Mock;
 };
 
 const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
@@ -161,5 +166,57 @@ describe('strategyA/driver options', () => {
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_LINKER_NO_MAPPING' });
+  });
+
+  test('propagates ALIGNMENT_NATIVE_ACCURATE_FAILED from native accurate calls', async () => {
+    linker.runLinker.mockResolvedValue({
+      version: 0,
+      status: 'ok',
+      mappingUnits: [
+        {
+          anchorSegmentId: 'seg_anchor_0',
+          anchorStartSample: 0,
+          anchorEndSample: 100,
+          referenceStartToken: 0,
+          referenceEndToken: 1,
+          refRange: { startCharIndex: 0, endCharIndex: 5 },
+          hypRange: { startCharIndex: 0, endCharIndex: 5 },
+          audioRangeMs: { startMs: 0, endMs: 100 },
+          confidence: 0.9,
+        },
+      ],
+      globalConfidence: 0.9,
+    });
+    segmentbuffer.getOfflineSegmentBufferSegments.mockResolvedValueOnce([
+      {
+        id: 'seg_anchor_0',
+        kind: 'speech',
+        sourceAudioBufferId: 'off_audio',
+        startSample: 0,
+        endSample: 16000,
+        sampleRate: 16000,
+        durationMs: 1000,
+      },
+    ]);
+    native.alignAccurateFromPcm.mockRejectedValueOnce(
+      Object.assign(
+        new Error('ALIGNMENT_NATIVE_ACCURATE_FAILED: native inference failed'),
+        {
+          code: 'ALIGNMENT_NATIVE_ACCURATE_FAILED',
+        }
+      )
+    );
+
+    await expect(
+      runAccurateStrategyA({
+        textIn: 'txt_ref',
+        audioIn: 'off_audio',
+        segmentOut: 'seg_out',
+        anchorSegmentBuffer: 'seg_anchor',
+        hypothesisTextBuffer: 'txt_hyp',
+        modelPath: { type: 'file', path: '/m' },
+        granularity: 'word',
+      })
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_NATIVE_ACCURATE_FAILED' });
   });
 });
