@@ -1,3 +1,4 @@
+import type { ModelPathConfig } from '../types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
@@ -67,14 +68,15 @@ export type AlignTextToAudioOptionsEstimated = {
 export type AlignTextToAudioOptionsAccurate =
   | {
       mode: 'accurate';
-      alignmentModelPath: string;
+      /** Same shape as STT/VAD `modelPath`; resolved before the native bridge. */
+      modelPath: ModelPathConfig;
       granularity?: AlignmentGranularity;
       language?: string;
       segmentation?: never;
     }
   | {
       mode: 'accurate';
-      alignmentModelPath: string;
+      modelPath: ModelPathConfig;
       granularity?: 'sentence' | 'word';
       language?: string;
       segmentation: AlignmentVadSegmentationConfig;

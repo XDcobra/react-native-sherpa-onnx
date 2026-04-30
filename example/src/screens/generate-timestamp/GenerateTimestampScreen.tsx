@@ -769,7 +769,7 @@ export default function GenerateTimestampScreen() {
           ? await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
               mode: 'accurate',
               granularity,
-              alignmentModelPath: initializedModelPath!,
+              modelPath: { type: 'file', path: initializedModelPath! },
             })
           : mode === 'vad' || mode === 'accurate_vad'
           ? await (async () => {
@@ -800,7 +800,7 @@ export default function GenerateTimestampScreen() {
                 return alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
                   mode: 'accurate',
                   granularity: proportionalGranularity,
-                  alignmentModelPath: initializedModelPath!,
+                  modelPath: { type: 'file', path: initializedModelPath! },
                   segmentation: {
                     source: 'vad',
                     segmentBuffer: vadSegmentOut,

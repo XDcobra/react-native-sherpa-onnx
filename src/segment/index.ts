@@ -59,9 +59,21 @@ import type {
   SegmentationEngineRef,
   SegmentationPolicy,
 } from './engine-types';
+import { resolveModelPath } from '../utils';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+
+async function segmentationPolicyForNative(
+  policy: SegmentationPolicy
+): Promise<Object> {
+  const { modelPath: modelPathConfig, ...rest } = policy;
+  const out: Record<string, unknown> = { ...rest };
+  if (modelPathConfig != null) {
+    out.modelPath = await resolveModelPath(modelPathConfig);
+  }
+  return out as Object;
+}
 
 const offlineAudioSegmentBufferByParentBufferId = new Map<string, string>();
 const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
@@ -589,10 +601,11 @@ export async function attachSegmentationEngine(
   }
 
   const policy = config.policy ?? resolveDefaultPolicy(domain);
+  const nativePolicy = await segmentationPolicyForNative(policy);
   const attached = await getNative().attachSegmentationEngine(
     bufferId,
     domain,
-    policy as unknown as Object
+    nativePolicy
   );
 
   registerAttachedSegmentationEngine(bufferId, attached.engineId, domain, {
@@ -648,10 +661,11 @@ export async function segmentOfflineBuffer(
     const bufferId = resolvePipelineTextBufferId(
       buffer as PipelineTextBufferIdSource
     );
+    const nativePolicy = await segmentationPolicyForNative(policy);
     const out = await getNative().segmentOfflineBuffer(
       bufferId,
       'text',
-      policy as unknown as Object
+      nativePolicy
     );
 
     const createdAtMs = Date.now();
@@ -691,10 +705,11 @@ export async function segmentOfflineBuffer(
     );
   }
 
+  const nativePolicy = await segmentationPolicyForNative(policy);
   const out = await getNative().segmentOfflineBuffer(
     audioBufferId,
     'speech',
-    policy as unknown as Object
+    nativePolicy
   );
   if (!isSegmentBufferId(out.bufferId)) {
     throw new Error(

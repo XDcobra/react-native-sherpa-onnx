@@ -23,10 +23,10 @@ internal object AlignmentOptionParsers {
   }
 
   fun parseAlignmentModelPath(options: ReadableMap?): String {
-    val p = options?.getString("alignmentModelPath")?.trim().orEmpty()
+    val p = options?.getString("modelPath")?.trim().orEmpty()
     if (p.isBlank()) {
       throw IllegalArgumentException(
-        "ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.",
+        "ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.",
       )
     }
     return p

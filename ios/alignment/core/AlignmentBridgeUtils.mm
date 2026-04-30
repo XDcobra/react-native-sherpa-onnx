@@ -74,14 +74,14 @@ int32_t ParseEstimatedSampleRate(
 }
 
 std::string ParseAlignmentModelPath(NSDictionary *options) {
-  NSString *path = [options[@"alignmentModelPath"] isKindOfClass:[NSString class]]
-      ? options[@"alignmentModelPath"]
+  NSString *path = [options[@"modelPath"] isKindOfClass:[NSString class]]
+      ? options[@"modelPath"]
       : nil;
   NSString *trimmed = path != nil
       ? [path stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
       : @"";
   if (trimmed == nil || trimmed.length == 0) {
-    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.");
+    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.");
   }
   return std::string([trimmed UTF8String]);
 }

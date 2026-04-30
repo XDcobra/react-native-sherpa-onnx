@@ -725,7 +725,8 @@ struct SegEnginePolicy {
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
   std::string punctuationInstanceId;
-  std::string vadModelId;
+  /** Resolved filesystem path (from JS); used for speech_vad_model. */
+  std::string modelPath;
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
   int vadMinSilenceMs = 250;
@@ -866,17 +867,17 @@ static bool seg_init_vad_runtime(
     return false;
   }
 
-  const std::string modelPath = seg_resolve_vad_model_path(engine->policy.vadModelId);
-  if (modelPath.empty()) {
+  const std::string resolvedVadPath = seg_resolve_vad_model_path(engine->policy.modelPath);
+  if (resolvedVadPath.empty()) {
     if (errorOut) {
-      *errorOut = "speech_vad_model model not found for vadModelId: " + engine->policy.vadModelId;
+      *errorOut = "speech_vad_model model not found for modelPath: " + engine->policy.modelPath;
     }
     return false;
   }
 
   VadRuntimeConfig cfg;
-  cfg.modelType = seg_vad_model_type_from_path(modelPath);
-  cfg.modelPath = modelPath;
+  cfg.modelType = seg_vad_model_type_from_path(resolvedVadPath);
+  cfg.modelPath = resolvedVadPath;
   cfg.sampleRate = std::max(1, sampleRate);
   cfg.numThreads = 1;
   cfg.provider = "cpu";
@@ -1311,7 +1312,16 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   if ([p[@"hangoverMs"] respondsToSelector:@selector(intValue)]) out.hangoverMs = std::max(0, [p[@"hangoverMs"] intValue]);
   if ([p[@"checkpointIntervalMs"] respondsToSelector:@selector(intValue)]) out.checkpointIntervalMs = std::max(0, [p[@"checkpointIntervalMs"] intValue]);
   if ([p[@"punctuationInstanceId"] isKindOfClass:[NSString class]]) out.punctuationInstanceId = [p[@"punctuationInstanceId"] UTF8String] ?: "";
-  if ([p[@"vadModelId"] isKindOfClass:[NSString class]]) out.vadModelId = [p[@"vadModelId"] UTF8String] ?: "";
+  id rawModelPath = p[@"modelPath"];
+  if ([rawModelPath isKindOfClass:[NSString class]]) {
+    out.modelPath = [rawModelPath UTF8String] ?: "";
+  } else if ([rawModelPath isKindOfClass:[NSDictionary class]]) {
+    NSDictionary *mp = (NSDictionary *)rawModelPath;
+    id pathVal = mp[@"path"];
+    if ([pathVal isKindOfClass:[NSString class]]) {
+      out.modelPath = [pathVal UTF8String] ?: "";
+    }
+  }
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
   if ([p[@"vadMinSilenceMs"] respondsToSelector:@selector(intValue)]) out.vadMinSilenceMs = std::max(1, [p[@"vadMinSilenceMs"] intValue]);
@@ -1319,7 +1329,7 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
 }
 
 static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
-  return @{
+  NSMutableDictionary *md = [@{
     @"evaluator": [NSString stringWithUTF8String:p.evaluator.c_str()] ?: @"",
     @"maxLengthChars": @(p.maxLengthChars),
     @"sentenceBoundary": @(p.sentenceBoundary),
@@ -1330,11 +1340,17 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"hangoverMs": @(p.hangoverMs),
     @"checkpointIntervalMs": @(p.checkpointIntervalMs),
     @"punctuationInstanceId": [NSString stringWithUTF8String:p.punctuationInstanceId.c_str()] ?: @"",
-    @"vadModelId": [NSString stringWithUTF8String:p.vadModelId.c_str()] ?: @"",
     @"vadThreshold": @(p.vadThreshold),
     @"vadMinSpeechMs": @(p.vadMinSpeechMs),
     @"vadMinSilenceMs": @(p.vadMinSilenceMs),
-  };
+  } mutableCopy];
+  if (!p.modelPath.empty()) {
+    md[@"modelPath"] = @{
+      @"type": @"file",
+      @"path": [NSString stringWithUTF8String:p.modelPath.c_str()] ?: @"",
+    };
+  }
+  return md;
 }
 
 static NSDictionary *seg_engine_info_to_dict(const std::shared_ptr<SegEngine> &engine) {

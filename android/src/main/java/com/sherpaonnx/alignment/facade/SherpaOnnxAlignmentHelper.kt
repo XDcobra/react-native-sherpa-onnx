@@ -538,7 +538,7 @@ internal class SherpaOnnxAlignmentHelper {
     sampleRate: Int,
     mode: String,
     granularity: String,
-    alignmentModelPath: String?,
+    modelPath: String?,
     onSuccess: (segments: List<SttAlignmentSegment>, timingMode: String) -> Unit,
     onError: (message: String, error: Throwable?) -> Unit,
   ) {
@@ -569,12 +569,12 @@ internal class SherpaOnnxAlignmentHelper {
           )
 
           "accurate" -> {
-            val modelPath = alignmentModelPath?.trim().orEmpty()
-            if (modelPath.isEmpty()) {
-              throw IllegalArgumentException("ALIGNMENT_MODEL_MISSING: alignmentModelPath is required for accurate mode")
+            val resolved = modelPath?.trim().orEmpty()
+            if (resolved.isEmpty()) {
+              throw IllegalArgumentException("ALIGNMENT_MODEL_MISSING: modelPath is required for accurate mode")
             }
             nativeAlignAccurateFromFloatPcm(
-              modelPath,
+              resolved,
               text,
               samples,
               sampleRate,

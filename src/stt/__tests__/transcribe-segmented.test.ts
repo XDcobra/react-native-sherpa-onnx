@@ -142,7 +142,7 @@ describe('stt segmented transcribe', () => {
           mode: 'auto',
           policy: {
             evaluator: 'speech_vad_model',
-            vadModelId: '/models/vad/silero_vad.onnx',
+            modelPath: { type: 'file', path: '/models/vad/silero_vad.onnx' },
           },
         },
       }

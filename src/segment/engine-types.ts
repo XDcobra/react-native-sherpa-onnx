@@ -1,3 +1,5 @@
+import type { ModelPathConfig } from '../types';
+
 export type SegmentationEvaluator =
   | 'text_synthetic_auto'
   | 'text_punctuation_assisted'
@@ -17,7 +19,11 @@ export interface SegmentationPolicy {
   hangoverMs?: number;
   checkpointIntervalMs?: number;
   punctuationInstanceId?: string;
-  vadModelId?: string;
+  /**
+   * Required for `speech_vad_model` (same shape as STT/VAD `modelPath`).
+   * Resolved to an absolute path before the native bridge.
+   */
+  modelPath?: ModelPathConfig;
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;

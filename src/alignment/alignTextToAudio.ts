@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { resolveModelPath } from '../utils';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,
@@ -51,21 +52,21 @@ function toNativeMode(
   throw new Error(`Unsupported alignment mode: ${String(mode)}`);
 }
 
-function buildNativeOptions(
+async function buildNativeOptions(
   options: AlignTextToAudioOptions
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const language =
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const alignmentModelPath = options.alignmentModelPath?.trim();
-    if (!alignmentModelPath) {
+    const resolved = (await resolveModelPath(options.modelPath)).trim();
+    if (!resolved) {
       throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.'
+        'ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.'
       );
     }
     const base: Record<string, unknown> = {
-      alignmentModelPath,
+      modelPath: resolved,
       ...(language.length > 0 ? { language } : {}),
     };
     const hasSegmentation = Object.prototype.hasOwnProperty.call(
@@ -197,7 +198,7 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
   const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
   const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
 
-  const nativeOptions = buildNativeOptions(options);
+  const nativeOptions = await buildNativeOptions(options);
 
   return SherpaOnnx.alignOfflineTextToAudio(
     textInBufferId,

@@ -1015,7 +1015,7 @@ AlignmentResult AlignAccurateFromPcm(
   AssertGranularity("aligned", granularity);
 
   if (model_path.empty()) {
-    throw std::runtime_error("alignmentModelPath is required for accurate mode");
+    throw std::runtime_error("modelPath is required for accurate mode");
   }
   if (text.empty()) {
     throw std::runtime_error("text is required");
