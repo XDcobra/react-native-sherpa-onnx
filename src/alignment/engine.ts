@@ -1,6 +1,5 @@
 import type { ModelPathConfig } from '../types';
 import { runAlignTextToAudio } from './alignTextToAudio';
-import { runLinker } from './linker/linker';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -253,24 +252,12 @@ export function createAlignment(
 
       if (
         options.mode === 'accurate' &&
-        options.segmentation?.mode === 'auto'
+        options.segmentation?.mode === 'auto' &&
+        options.segmentation.mappingStrategy === 'chunked_forced_ctc'
       ) {
-        if (options.segmentation.mappingStrategy === 'asr_mediated') {
-          await runLinker({
-            audioIn,
-            anchors: options.segmentation.anchorSegmentBuffer,
-            referenceText: textIn,
-            hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
-            granularity: options.granularity === 'word' ? 'word' : 'token',
-            ...(typeof options.language === 'string'
-              ? { language: options.language }
-              : {}),
-          });
-        }
-
         throw createAlignmentError(
           'ALIGNMENT_NOT_IMPLEMENTED',
-          'accurate segmentation strategies are reserved for sub-03/sub-04.'
+          'accurate segmentation strategy "chunked_forced_ctc" is reserved for sub-04.'
         );
       }
 

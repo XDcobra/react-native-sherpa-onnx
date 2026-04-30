@@ -66,8 +66,18 @@ export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
   warningCode?: string;
+  warnings?: AlignmentWarning[];
   vadAnchorCount?: number;
   minAnchorsApplied?: number;
+}
+
+export type AlignmentWarningCode =
+  | 'ALIGNMENT_PARTIAL_COVERAGE'
+  | 'ALIGNMENT_LOW_CONFIDENCE_UNIT_PRESENT';
+
+export interface AlignmentWarning {
+  code: AlignmentWarningCode;
+  message: string;
 }
 
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
@@ -138,6 +148,9 @@ export type AlignmentErrorCode =
   | 'ALIGNMENT_ASR_HYPOTHESIS_MISSING'
   | 'ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS'
   | 'ALIGNMENT_LINKER_INPUT_INVALID'
+  | 'ALIGNMENT_LINKER_NO_MAPPING'
   | 'ALIGNMENT_LINKER_FAILED'
+  | 'ALIGNMENT_ANCHOR_OUT_OF_RANGE'
+  | 'ALIGNMENT_NATIVE_ACCURATE_FAILED'
   | 'ALIGNMENT_NOT_IMPLEMENTED'
   | 'ALIGNMENT_ENGINE_DESTROYED';

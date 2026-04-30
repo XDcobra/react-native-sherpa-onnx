@@ -778,6 +778,12 @@ export interface Spec extends TurboModule {
     sourceAudioBufferId?: string;
   }>;
 
+  populateOfflineSegmentBufferIfEmpty(
+    targetBufferId: string,
+    liveBufferId: string,
+    mode?: string
+  ): Promise<void>;
+
   getPipelineSegmentBufferInfo(bufferId: string): Promise<{
     bufferId: string;
     kind: string;

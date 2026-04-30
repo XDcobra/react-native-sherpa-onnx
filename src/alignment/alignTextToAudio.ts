@@ -6,6 +6,7 @@ import {
   resolveOfflineSegmentBufferId,
 } from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
+import { runAccurateStrategyA } from './strategyA/driver';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -131,6 +132,27 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   segmentOut,
   options
 ) => {
+  if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
+    if (options.segmentation.mappingStrategy === 'asr_mediated') {
+      return runAccurateStrategyA({
+        textIn,
+        audioIn,
+        segmentOut,
+        anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
+        hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
+        modelPath: options.modelPath,
+        granularity: options.granularity === 'word' ? 'word' : 'sentence',
+        ...(typeof options.language === 'string'
+          ? { language: options.language }
+          : {}),
+      });
+    }
+
+    throw new Error(
+      'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategy "chunked_forced_ctc" is reserved for sub-04.'
+    );
+  }
+
   const mode = toNativeMode(options.mode);
   const granularity = normalizeGranularity(options.granularity);
   const normalizedMode = mode === 'accurate' ? 'aligned' : mode;
@@ -138,11 +160,6 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   if (mode === 'vad' && granularity === 'character') {
     throw new Error(
       'ALIGNMENT_ERROR: mode=vad supports only sentence or word granularity.'
-    );
-  }
-  if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
-    throw new Error(
-      'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategies are not available in this phase.'
     );
   }
   if (options.mode === 'vad') {

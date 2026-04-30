@@ -31,6 +31,8 @@ export type {
   AlignmentGranularity,
   AlignmentMappingStrategy,
   AlignmentModelType,
+  AlignmentWarning,
+  AlignmentWarningCode,
   AlignmentTimestamp,
   AlignmentTimingMode,
 } from './types';
