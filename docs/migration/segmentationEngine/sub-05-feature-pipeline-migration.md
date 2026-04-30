@@ -5,7 +5,7 @@
 - **Phase 3 (Enhancement offline segmentiert + Streaming `continuous_frames`):** Completed — Offline Enhancement nutzt optional den Phase-1c-Audio-Orchestrator, befüllt das Caller-`audioOut` via `populateOfflineAudioBufferIfEmpty`, Streaming Enhancement kann `continuous_frames` als Checkpoint-only Attach nutzen, und native Offline-Segmentation bleibt chunked.
 - **Phase 4 (Punctuation offline segmentiert + Streaming `OnlinePunctuation`):** Completed — Offline Punctuation bleibt `OfflineTextBuffer -> OfflineTextBuffer` und nutzt optional den Text-Orchestrator; Streaming Punctuation ist neu, nutzt echtes `OnlinePunctuation` mit `LiveTextBuffer -> LiveTextBuffer`; `TextPunctuationAssistedEvaluator` unterstützt `punctuationInstanceId`.
 - **Phase 5 (TTS, vier Modi + Incremental-Removal):** Completed — Offline one-shot bleibt Default, segmentierter Offline-Pfad nutzt `runOfflineTextToAudioPipeline`/`runOfflineTtsPipeline`, Streaming unterstützt `mode:'off'` und `mode:'auto'` via Segmentation-Engine-Attach, `tts_produced` Links werden im segmentierten Offline-Pfad erzeugt, und `src/tts/incremental/**` wurde entfernt.
-- **Weitere Features in diesem Dokument (Alignment, …):** weiterhin offen / spätere Phasen.
+- **Phase 6 (Alignment + `alignment` links):** Completed — Alignment ist auf dem aktuellen `AlignmentEngine`-Pfad (`accurate` mit `mappingStrategy: asr_mediated | chunked_forced_ctc`) integriert; `SegmentLinkMap` wird erzeugt/genutzt (`linkType: 'alignment'`), und Legacy-Fake-Live-Pfade sind nicht mehr aktiv.
 - Depends on: Sub-Plan 01, 02, 03, 04
 
 ## Purpose
@@ -244,23 +244,29 @@ Enhancement uses the unified segmentation contract at the API level but retains 
 
 ### Current State
 
-- **Offline Alignment:** `alignTextToAudio(text, audio)`. Single-shot offline.
-- **Fake-Live Alignment:** Manual orchestration — chunk-/segment-wise offline alignment, merge results. **Custom segmentation logic.**
+- **AlignmentEngine:** `createAlignment().alignTextToAudio(textIn, audioIn, segmentOut, options)` ist der produktive Pfad.
+- **`accurate` segmented:** nutzt `mappingStrategy: 'asr_mediated' | 'chunked_forced_ctc'` mit `anchorSegmentBuffer` (speech anchors) aus Segmentation.
+- **Linkage:** `SegmentLinkMap` wird mit `linkType: 'alignment'` materialisiert und als Ergebnis verfügbar gemacht.
 
 ### Target State
 
-- **Offline Alignment:** Unchanged for small inputs.
-- **Fake-Live Alignment:** `LiveTextBuffer + LiveAudioBuffer + SegmentationEngine → per-segment OfflineAlignment → LiveSegmentBuffer`. The Segmentation Engine handles text/audio segmentation; alignment runs per segment.
-- **Cross-Domain Linkage:** A first-class `SegmentLinkMap` tracks which text segments correspond to which speech segments.
+- **Offline one-shot (`accurate` + `segmentation: off`):** bleibt unverändert.
+- **Segmented accurate:** `SegmentationEngine` liefert speech anchors; Alignment verarbeitet per-anchor Slices (`asr_mediated` oder `chunked_forced_ctc`) ohne custom fake-live orchestration.
+- **Cross-domain linkage:** Für relevante text↔speech-Paare werden `alignment`-Links erzeugt; bidirektionale LinkMap-Queries sind nutzbar.
 
 ### Migration Steps
 
-1. Add `segmentation` option to alignment API.
-2. Implement fake-live alignment orchestration:
-   - Segmentation produces text + speech segments with linkage.
-   - Per linked pair: extract text + audio slices → offline alignment → merge timing.
-3. Remove custom segmentation logic from alignment fake-live code.
-4. Use `SegmentLinkMap` (from Sub-Plan 01) with `linkType: 'alignment'` for each aligned pair.
+1. `segmentation`-Option in Alignment auf finalen Contract heben (`accurate` + `mode:'auto'` + Strategy-Selector).
+2. `SegmentLinkMap` als first-class Artifact durchreichen und für `alignment`-Links nutzen.
+3. Keine Reaktivierung von Legacy/Fake-Live-Custompfaden; bei nicht erfüllbaren Contracts deterministisch fehlschlagen.
+4. Tests auf LinkMap-Erzeugung, `linkType:'alignment'`, bidirektionale Queries und no-fallback Verhalten absichern.
+
+### Phase 6 Progress (Completed)
+
+- Completed: Alignment nutzt durchgehend den Engine-first Pfad (`createAlignment`/`alignTextToAudio`), kein freestanding/legacy fake-live entry.
+- Completed: `asr_mediated` gibt die vom Linker erzeugte `SegmentLinkMap` an den Alignment-Call zurück.
+- Completed: `chunked_forced_ctc` materialisiert `SegmentLinkMap` ebenfalls deterministisch und fügt pro geschriebenem Segment `linkType: 'alignment'` hinzu.
+- Completed: Fehler auf LinkMap-Materialisierung werden als expliziter Fehler propagiert (kein stiller Fallback auf legacy/custom path).
 
 ---
 

@@ -60,6 +60,8 @@ All modes share the same offline buffer setup:
 
 ```ts
 import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+import { segmentOfflineBuffer } from 'react-native-sherpa-onnx/segment';
 import {
   createOfflineAudioBufferFromFile,
   releasePipelineAudioBuffer,
@@ -70,10 +72,26 @@ import {
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import {
+  createEmptyOfflineTextBuffer,
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+
+// 0) App-level model configuration: all are ModelPathConfig.
+const ALIGNMENT_MODEL: ModelPathConfig = {
+  type: 'file',
+  path: '/abs/path/to/wav2vec2-alignment-model',
+};
+const STT_MODEL: ModelPathConfig = {
+  type: 'file',
+  path: '/abs/path/to/stt-model',
+};
+const VAD_MODEL: ModelPathConfig = {
+  type: 'file',
+  path: '/abs/path/to/vad-model',
+};
 
 const engine = createAlignment();
 const textBuf = await createOfflineTextBufferFromText('Hello world.');
@@ -138,36 +156,73 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 ### `accurate + auto` asrMediated (`asr_mediated`)
 
 ```ts
-// 1) VAD standalone: create speech anchors in an offline segment buffer.
-const vadSegmentOut = await createEmptyOfflineSegmentBuffer({
+const stt = await createSTT({
+  modelPath: STT_MODEL,
+  modelType: 'auto',
+});
+
+// 1) R = reference transcript (ground-truth script), not ASR output.
+const textBuf = await createOfflineTextBufferFromText(
+  'The full reference transcript that should be aligned to audio.'
+);
+
+// 2) input audio buffer for both STT and alignment.
+const audioBuf = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
+
+// 3) caller-owned output buffer where alignment segments will be written.
+const segmentOut = await createEmptyOfflineSegmentBuffer({
   sourceAudioBufferId: audioBuf,
 });
 
-const vad = await createStreamingVAD({
-  modelPath: { type: 'file', path: '/abs/path/to/vad/model' },
-  modelType: 'auto',
-  sampleRate: 16000,
-});
-await vad.process({
-  audioIn: audioBuf,
-  segmentOut: vadSegmentOut, // VAD writes speech-anchor segments into this offline segment buffer
-  options: { chunkSize: 512 },
+// 4) speech anchors (seg_off_*) from SegmentationEngine.
+//    asr_mediated consumes these anchors via segmentation.anchorSegmentBuffer.
+const anchorRef = await segmentOfflineBuffer(audioBuf, {
+  evaluator: 'speech_vad_model',
+  modelPath: VAD_MODEL,
+  vadMinSpeechMs: 200,
+  vadMinSilenceMs: 500,
 });
 
-// 2) Alignment asrMediated: caller provides anchors + hypothesis buffer with timestamps.
+// 5) H = ASR hypothesis buffer filled by STT.
+//    Important: for asr_mediated, H must provide token timestamps.
+const asrHypothesisOut = await createEmptyOfflineTextBuffer();
+await stt.transcribe(audioBuf, asrHypothesisOut, {
+  segmentation: { mode: 'off' },
+});
+
+// 6) accurate + auto + asr_mediated:
+//    - textIn: reference text R
+//    - audioIn: full offline audio
+//    - anchorSegmentBuffer: speech anchors from step 4
+//    - hypothesisTextBuffer: STT hypothesis H from step 5
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
-  modelPath: { type: 'file', path: '/abs/path/to/model.onnx' },
+  modelPath: ALIGNMENT_MODEL,
   segmentation: {
     mode: 'auto',
-    anchorSegmentBuffer: vadSegmentOut,
+    anchorSegmentBuffer: anchorRef,
     mappingStrategy: 'asr_mediated',
     asr: {
       hypothesisTextBuffer: asrHypothesisOut,
     },
   },
 });
+
+// Optional: link map handle for cross-domain text<->speech relations.
+console.log(write.outputSegmentBufferId, write.segmentsWritten, write.linkMap);
+
+// 7) cleanup (important for long-running apps).
+await engine.destroy().catch(() => {});
+await stt.destroy().catch(() => {});
+await releasePipelineTextBuffer(textBuf).catch(() => {});
+await releasePipelineTextBuffer(asrHypothesisOut).catch(() => {});
+await releasePipelineSegmentBuffer(anchorRef.segmentBufferId).catch(() => {});
+await releasePipelineSegmentBuffer(segmentOut).catch(() => {});
+await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 ```
 
 ### `accurate + auto` chunkedForcedCtc (`chunked_forced_ctc`)
@@ -254,7 +309,7 @@ function assertAlignmentGranularityForMode(
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelPath: ModelPathConfig; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { mode: 'auto'; anchorSegmentBuffer: OfflineSegmentBufferIdSource; mappingStrategy: 'asr_mediated' \\| 'chunked_forced_ctc'; asr?: { hypothesisTextBuffer: OfflineTextBufferIdSource } } }` |
 | `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
-| `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number }` |
+| `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number; linkMap?: SegmentLinkMapRef; warningCode?: string; warnings?: AlignmentWarning[] }` |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
 | `OfflineAudioBufferIdSource` | From `react-native-sherpa-onnx/audiobuffer` |
 | `OfflineSegmentBufferIdSource` | From `react-native-sherpa-onnx/segmentbuffer` |
