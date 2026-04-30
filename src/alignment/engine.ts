@@ -250,17 +250,6 @@ export function createAlignment(
       guardNotDestroyed();
       validateAlignTextToAudioOptions(options);
 
-      if (
-        options.mode === 'accurate' &&
-        options.segmentation?.mode === 'auto' &&
-        options.segmentation.mappingStrategy === 'chunked_forced_ctc'
-      ) {
-        throw createAlignmentError(
-          'ALIGNMENT_NOT_IMPLEMENTED',
-          'accurate segmentation strategy "chunked_forced_ctc" is reserved for sub-04.'
-        );
-      }
-
       return runAlignTextToAudio(textIn, audioIn, segmentOut, options);
     },
     async destroy(): Promise<void> {

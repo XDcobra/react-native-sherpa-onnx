@@ -7,6 +7,7 @@ import {
 } from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { runAccurateStrategyA } from './strategyA/driver';
+import { runAccurateStrategyB } from './strategyB/driver';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -66,18 +67,13 @@ async function buildNativeOptions(
         'ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.'
       );
     }
-    if (options.segmentation?.mode === 'auto') {
-      throw new Error(
-        'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategies are not available in this phase.'
-      );
-    }
     const base: Record<string, unknown> = {
       modelPath: resolved,
       ...(language.length > 0 ? { language } : {}),
     };
     if (options.segmentation?.mode !== 'off' && options.segmentation != null) {
       throw new Error(
-        'ALIGNMENT_OPTIONS_INVALID: accurate segmentation must be omitted or use mode="off" in this phase.'
+        'ALIGNMENT_OPTIONS_INVALID: accurate segmentation options are routed by the strategy drivers and cannot be sent through native options directly.'
       );
     }
     return base;
@@ -148,9 +144,17 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       });
     }
 
-    throw new Error(
-      'ALIGNMENT_NOT_IMPLEMENTED: accurate+segmentation strategy "chunked_forced_ctc" is reserved for sub-04.'
-    );
+    return runAccurateStrategyB({
+      textIn,
+      audioIn,
+      segmentOut,
+      anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
+      modelPath: options.modelPath,
+      granularity: options.granularity === 'word' ? 'word' : 'sentence',
+      ...(typeof options.language === 'string'
+        ? { language: options.language }
+        : {}),
+    });
   }
 
   const mode = toNativeMode(options.mode);
