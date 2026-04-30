@@ -20,7 +20,7 @@ import {
 } from 'react-native-sherpa-onnx';
 import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
-  alignTextToAudio,
+  createAlignment,
   detectAlignmentModel,
   type AlignmentGranularity,
   type AlignmentModelType,
@@ -704,12 +704,6 @@ export default function GenerateTimestampScreen() {
       );
       return;
     }
-    const parsedMinAnchors = Number(minAnchorsInput.trim());
-    const minAnchors =
-      Number.isInteger(parsedMinAnchors) && parsedMinAnchors >= 1
-        ? parsedMinAnchors
-        : 2;
-
     if (!selectedAudioUri) {
       setErrorSource('generate');
       setError('Please choose an audio file first.');
@@ -728,6 +722,7 @@ export default function GenerateTimestampScreen() {
     setErrorSource(null);
     setResult(null);
 
+    const alignment = createAlignment();
     let cleanupPath: string | null = null;
     let textBufferId: string | null = null;
     let audioBufferId: string | null = null;
@@ -766,11 +761,16 @@ export default function GenerateTimestampScreen() {
       const writeStartedAt = Date.now();
       const writeResult =
         mode === 'accurate'
-          ? await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
-              mode: 'accurate',
-              granularity,
-              modelPath: { type: 'file', path: initializedModelPath! },
-            })
+          ? await alignment.alignTextToAudio(
+              textBuffer,
+              audioBuffer,
+              segmentOut,
+              {
+                mode: 'accurate',
+                granularity,
+                modelPath: { type: 'file', path: initializedModelPath! },
+              }
+            )
           : mode === 'vad' || mode === 'accurate_vad'
           ? await (async () => {
               const vadConfig = getVadModelPathConfig(initializedVadModelId!, {
@@ -797,30 +797,45 @@ export default function GenerateTimestampScreen() {
                 },
               });
               if (mode === 'accurate_vad') {
-                return alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
-                  mode: 'accurate',
+                return alignment.alignTextToAudio(
+                  textBuffer,
+                  audioBuffer,
+                  segmentOut,
+                  {
+                    mode: 'accurate',
+                    granularity: proportionalGranularity,
+                    modelPath: { type: 'file', path: initializedModelPath! },
+                    segmentation: {
+                      mode: 'auto',
+                      anchorSegmentBuffer: vadSegmentOut,
+                      mappingStrategy: 'chunked_forced_ctc',
+                    },
+                  }
+                );
+              }
+              return alignment.alignTextToAudio(
+                textBuffer,
+                audioBuffer,
+                segmentOut,
+                {
+                  mode: 'vad',
                   granularity: proportionalGranularity,
-                  modelPath: { type: 'file', path: initializedModelPath! },
                   segmentation: {
                     source: 'vad',
                     segmentBuffer: vadSegmentOut,
-                    minAnchors,
                   },
-                });
-              }
-              return alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
-                mode: 'vad',
-                granularity: proportionalGranularity,
-                segmentation: {
-                  source: 'vad',
-                  segmentBuffer: vadSegmentOut,
-                },
-              });
+                }
+              );
             })()
-          : await alignTextToAudio(textBuffer, audioBuffer, segmentOut, {
-              mode: 'proportional',
-              granularity: proportionalGranularity,
-            });
+          : await alignment.alignTextToAudio(
+              textBuffer,
+              audioBuffer,
+              segmentOut,
+              {
+                mode: 'proportional',
+                granularity: proportionalGranularity,
+              }
+            );
       const writeDurationMs = Date.now() - writeStartedAt;
       const segments = await getOfflineSegmentBufferSegments(
         segmentOut,
@@ -886,6 +901,9 @@ export default function GenerateTimestampScreen() {
         );
       }
       await (vadEngine as VADEngine | null)?.destroy?.().catch(() => {
+        // ignore cleanup errors
+      });
+      await alignment.destroy().catch(() => {
         // ignore cleanup errors
       });
       setRunning(false);
