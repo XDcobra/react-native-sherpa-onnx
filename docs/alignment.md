@@ -115,7 +115,7 @@ const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
 const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
-  alignmentModelPath: '/abs/path/to/model.onnx',
+  modelPath: { type: 'file', path: '/abs/path/to/model.onnx' },
 });
 ```
 
@@ -142,7 +142,7 @@ const vadSegmentOut = await createEmptyOfflineSegmentBuffer({
 });
 
 const vad = await createStreamingVAD({
-  modelPath: '/abs/path/to/vad/model',
+  modelPath: { type: 'file', path: '/abs/path/to/vad/model' },
   modelType: 'auto',
   sampleRate: 16000,
 });
@@ -156,7 +156,7 @@ await vad.process({
 const write = await alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word', // sentence|word only for accurate+vad
-  alignmentModelPath: '/abs/path/to/model.onnx',
+  modelPath: { type: 'file', path: '/abs/path/to/model.onnx' },
   segmentation: {
     source: 'vad',
     segmentBuffer: vadSegmentOut, // pass buffer handle directly
@@ -228,7 +228,7 @@ function assertAlignmentGranularityForMode(
 | --- | --- |
 | `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; alignmentModelPath: string; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource; minAnchors?: number } }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelPath: ModelPathConfig; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource; minAnchors?: number } }` (same `ModelPathConfig` as STT/VAD) |
 | `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
 | `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number }` |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
@@ -249,7 +249,7 @@ function assertAlignmentGranularityForMode(
 | `SEGMENT_BUFFER_NOT_FOUND` | output segment buffer id not found |
 | `SEGMENT_BUFFER_KIND_MISMATCH` | expected `seg_off_*` output buffer |
 | `SEGMENT_INVALID_STATE` | output segment buffer already populated |
-| `ALIGNMENT_MODEL_MISSING` | accurate mode without `alignmentModelPath` |
+| `ALIGNMENT_MODEL_MISSING` | accurate mode without `modelPath` |
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
 | `ALIGNMENT_CONSTRAINED_ACCURATE_ERROR` | constrained accurate execution failed inside valid `accurate + vad` run |
 | `ALIGNMENT_ERROR` | generic native alignment failure |

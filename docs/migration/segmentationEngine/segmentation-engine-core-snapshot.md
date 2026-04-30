@@ -125,7 +125,7 @@ export interface SegmentationPolicy {
   maxSegmentMs?: number;
   hangoverMs?: number;
   checkpointIntervalMs?: number;
-  vadModelId?: string;
+  modelPath?: ModelPathConfig; // `speech_vad_model` — same shape as STT/VAD; JS resolves before native
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;

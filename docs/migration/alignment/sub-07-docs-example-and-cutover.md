@@ -1,0 +1,162 @@
+# Sub-Plan 07 — Docs, Example & Cutover
+
+## Status
+- **Planned**
+- Depends on: sub-01..06
+- Last sub-plan in the alignment migration.
+
+---
+
+## 1. Scope
+
+Finalize the migration:
+
+- Rewrite `docs/alignment.md` to match the `AlignmentEngine` + locked decisions.
+- Update example screen `example/src/screens/generate-timestamp/GenerateTimestampScreen.tsx` to use the engine API exclusively.
+- Mark superseded sections in `accurate-vad-segmentation-high-level-plan.md` and other migration docs.
+- Hard-cut: ensure there is no remaining reference to `alignTextToAudio` as a public symbol.
+- Update `alignment_migration_overview.md` `Fortschritts-Tracking` to `Completed` once all gates from sub-06 pass.
+
+---
+
+## 2. Non-Goals
+
+- No new SDK code, no new tests, no new behavior.
+- No public migration guide writing for external users (locked decision: hard cut, no migration docs required).
+
+---
+
+## 3. Current State (Ist)
+
+- `docs/alignment.md` was updated for `modelPath: ModelPathConfig` but still describes a freestanding `alignTextToAudio` style.
+- `example/src/screens/generate-timestamp/GenerateTimestampScreen.tsx` calls `alignTextToAudio` directly.
+- `accurate-vad-segmentation-high-level-plan.md` contains plan content that is now subsumed by the new sub-plans.
+
+---
+
+## 4. Target State (Soll)
+
+### 4.1 `docs/alignment.md`
+
+Sections (target outline):
+
+1. Overview (modes 1–5).
+2. Quickstart with `createAlignment` + `engine.alignTextToAudio`.
+3. Per-mode option tables with `modelPath: ModelPathConfig` examples.
+4. Strategy A (`asr_mediated`) walkthrough — points to `alignment-asr-mediated-ts-example.md`.
+5. Strategy B (`chunked_forced_ctc`) walkthrough.
+6. Result schema (`AlignTextToAudioWriteResult`) including warnings.
+7. Error catalog (links to sub-06 §7 catalog).
+8. FAQ — including:
+   - "Why no silent fallback?"
+   - "What does OOM look like?"
+   - "Why hard cut without legacy aliases?"
+9. Cross-references to migration sub-plans (read-only links).
+
+### 4.2 Example screen
+
+`example/src/screens/generate-timestamp/GenerateTimestampScreen.tsx`:
+
+- Replace top-level `alignTextToAudio` import with `createAlignment`.
+- Lifecycle: create engine on mount, destroy on unmount.
+- Each mode demo (proportional, estimated, accurate one-shot, accurate auto Strategy A, accurate auto Strategy B, vad) becomes a button.
+- Use `modelPath: { type: 'file', path: ... }`.
+
+### 4.3 Superseded docs
+
+- `docs/migration/alignment/accurate-vad-segmentation-high-level-plan.md`:
+  - Top-of-file banner: "Superseded by `alignment_migration_overview.md` and sub-plans."
+  - Keep buffer/anchor contract notes if they remain unique; otherwise cross-link.
+- `docs/migration/alignment/alignment-public-modes-plan.md` keeps its role as **product surface source-of-truth**; update header to point at overview for migration sequencing.
+
+### 4.4 Hard cut verification
+
+- Repo grep: no production import of `alignTextToAudio` from public path.
+- Public surface snapshot test from sub-06 stays green.
+- Release notes (internal): mention engine API shift; no caller migration steps required because of hard cut policy.
+
+---
+
+## 5. Public Contract / API Changes
+
+- None beyond what sub-01..05 already locked.
+- Documentation only.
+
+---
+
+## 6. Native + JS Implementation Tasks (Checklist)
+
+### Documentation
+
+- [ ] Rewrite `docs/alignment.md` per §4.1.
+- [ ] Update `docs/migration/alignment/alignment-public-modes-plan.md` header.
+- [ ] Update `docs/migration/alignment/accurate-vad-segmentation-high-level-plan.md` header banner.
+- [ ] Cross-link sub-plans in overview (already done in `alignment_migration_overview.md`).
+
+### Example app
+
+- [ ] `GenerateTimestampScreen.tsx`:
+  - [ ] Use `createAlignment`.
+  - [ ] Show engine reuse across mode buttons.
+  - [ ] Add row 4a + 4b demo entries (gated behind a model-path selection UI element).
+
+### Cleanup
+
+- [ ] Confirm no internal callers of `alignTextToAudio` outside `src/alignment/`.
+- [ ] Confirm no leftover references to `alignmentModelPath` and `vadModelId` anywhere in the repo (docs, example, tests).
+- [ ] Update `CHANGELOG` (internal) with the breaking change note.
+
+### Tracking
+
+- [ ] Flip `alignment_migration_overview.md` table rows to `Completed (YYYY-MM-DD)`.
+
+---
+
+## 7. Error Codes / Diagnostics
+
+- No new codes.
+- Documentation lists the canonical catalog (mirrors sub-06 §7).
+
+---
+
+## 8. Test Plan (Jest, no E2E)
+
+- Public surface snapshot (sub-06) green.
+- Repo-grep test (sub-06) green.
+- No additional tests required.
+
+---
+
+## 9. Risks + Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Docs and code drift after release | Lock to `alignment_migration_overview.md`; review checklist requires sub-06 green |
+| Example screen falls behind API | Sub-07 task list explicitly updates the screen as part of the migration |
+| Old migration plans confuse readers | Banner + cross-links; supersede notes |
+
+---
+
+## 10. Exit Criteria (DoD)
+
+- [ ] `docs/alignment.md` rewritten and reviewed.
+- [ ] Example screen builds and runs against engine API on both platforms.
+- [ ] Repo greps pass (no leftover legacy names).
+- [ ] Overview table fully `Completed`.
+
+---
+
+## 11. Dependency Matrix
+
+| Needs | From | Why |
+|-------|------|-----|
+| Final API (engine) | sub-01 | Docs + example reference it |
+| Linker schema | sub-02 | Docs reference rich result |
+| Strategy A behavior | sub-03 | Docs walkthrough |
+| Strategy B behavior | sub-04 | Docs walkthrough |
+| Native parity | sub-05 | Docs cite identical iOS/Android behavior |
+| Test gates | sub-06 | Cutover requires green tests |
+
+| Blocks | Reason |
+|--------|--------|
+| (none — final phase) | — |
