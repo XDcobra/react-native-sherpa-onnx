@@ -592,6 +592,10 @@ export async function runAccurateAsrMediated(
     return {
       outputSegmentBufferId: segmentOutBufferId,
       segmentsWritten: aggregatedSegments.length,
+      ...(typeof linkerResult.linkMapId === 'string' &&
+      linkerResult.linkMapId.length > 0
+        ? { linkMap: { linkMapId: linkerResult.linkMapId } }
+        : {}),
       ...(warningCode ? { warningCode } : {}),
       ...(warnings.length > 0 ? { warnings } : {}),
     };

@@ -32,6 +32,7 @@ import type {
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
 import { resolveModelPath } from '../../utils';
+import { addSegmentLink, createSegmentLinkMap } from '../../segment';
 import type {
   AlignmentErrorCode,
   AlignmentWarning,
@@ -259,6 +260,17 @@ function toWarningCode(
   return warnings[0]?.code;
 }
 
+function deriveLinkConfidence(
+  diagnostics: ChunkedForcedCtcNativeResult['diagnostics']
+): number | undefined {
+  const blankRatio = diagnostics?.ctcBlankRatio;
+  if (typeof blankRatio !== 'number' || !Number.isFinite(blankRatio)) {
+    return undefined;
+  }
+  const confidence = 1 - blankRatio;
+  return Math.max(0, Math.min(1, confidence));
+}
+
 function mapNativeChunkedForcedCtcError(
   error: unknown
 ): ChunkedForcedCtcRuntimeError {
@@ -397,6 +409,16 @@ export async function runAccurateChunkedForcedCtc(
   const outputLiveSegmentBuffer = await createLiveSegmentBuffer({
     sourceAudioBufferId: audioInBufferId,
   });
+  const linkMap = await createSegmentLinkMap({
+    textBufferId: textInBufferId,
+    audioBufferId: audioInBufferId,
+  }).catch((error) => {
+    throw createChunkedForcedCtcError(
+      'ALIGNMENT_LINKER_FAILED',
+      'chunkedForcedCtc failed to create alignment SegmentLinkMap.',
+      error
+    );
+  });
 
   let segmentsWritten = 0;
   let consecutiveNoProgress = 0;
@@ -478,6 +500,8 @@ export async function runAccurateChunkedForcedCtc(
       }
 
       if (nativeResult.tokens.length > 0) {
+        const linkConfidence = deriveLinkConfidence(nativeResult.diagnostics);
+        const textSegmentId = `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`;
         for (const token of nativeResult.tokens) {
           const localStartSample = Math.max(
             0,
@@ -500,18 +524,43 @@ export async function runAccurateChunkedForcedCtc(
               ? ((endSample - startSample) / anchor.sampleRate) * 1000
               : 0;
 
-          await appendLiveSegment(outputLiveSegmentBuffer.bufferId, {
-            kind: 'alignment',
-            sourceAudioBufferId: audioInBufferId,
-            startSample,
-            endSample,
-            sampleRate: anchor.sampleRate,
-            durationMs,
-            payload: {
-              text: token.text,
-              timingMode: 'accurate',
-              granularity,
+          const appended = await appendLiveSegment(
+            outputLiveSegmentBuffer.bufferId,
+            {
+              kind: 'alignment',
+              sourceAudioBufferId: audioInBufferId,
+              startSample,
+              endSample,
+              sampleRate: anchor.sampleRate,
+              durationMs,
+              payload: {
+                text: token.text,
+                timingMode: 'accurate',
+                granularity,
+              },
+            }
+          );
+          await addSegmentLink(linkMap, {
+            textSegmentId,
+            speechSegmentId: appended.segmentId,
+            linkType: 'alignment',
+            ...(typeof linkConfidence === 'number'
+              ? { confidence: linkConfidence }
+              : {}),
+            meta: {
+              strategy: 'chunked_forced_ctc',
+              consumedWindow: {
+                startUnitIndex: consumedWindow.startUnitIndex,
+                endUnitIndex: consumedWindow.endUnitIndex,
+                unitCount: consumedWindow.unitCount,
+              },
             },
+          }).catch((error) => {
+            throw createChunkedForcedCtcError(
+              'ALIGNMENT_LINKER_FAILED',
+              'chunkedForcedCtc failed to materialize alignment links.',
+              error
+            );
           });
           segmentsWritten += 1;
         }
@@ -523,21 +572,44 @@ export async function runAccurateChunkedForcedCtc(
             ? ((fallbackEnd - fallbackStart) / anchor.sampleRate) * 1000
             : 0;
 
-        await appendLiveSegment(outputLiveSegmentBuffer.bufferId, {
-          kind: 'alignment',
-          sourceAudioBufferId: audioInBufferId,
-          startSample: fallbackStart,
-          endSample: fallbackEnd,
-          sampleRate: anchor.sampleRate,
-          durationMs: fallbackDurationMs,
-          payload: {
-            text:
-              consumedWindow.text.length > 0
-                ? consumedWindow.text
-                : '[alignment]',
-            timingMode: 'accurate',
-            granularity,
+        const appended = await appendLiveSegment(
+          outputLiveSegmentBuffer.bufferId,
+          {
+            kind: 'alignment',
+            sourceAudioBufferId: audioInBufferId,
+            startSample: fallbackStart,
+            endSample: fallbackEnd,
+            sampleRate: anchor.sampleRate,
+            durationMs: fallbackDurationMs,
+            payload: {
+              text:
+                consumedWindow.text.length > 0
+                  ? consumedWindow.text
+                  : '[alignment]',
+              timingMode: 'accurate',
+              granularity,
+            },
+          }
+        );
+        await addSegmentLink(linkMap, {
+          textSegmentId: `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`,
+          speechSegmentId: appended.segmentId,
+          linkType: 'alignment',
+          meta: {
+            strategy: 'chunked_forced_ctc',
+            fallback: true,
+            consumedWindow: {
+              startUnitIndex: consumedWindow.startUnitIndex,
+              endUnitIndex: consumedWindow.endUnitIndex,
+              unitCount: consumedWindow.unitCount,
+            },
           },
+        }).catch((error) => {
+          throw createChunkedForcedCtcError(
+            'ALIGNMENT_LINKER_FAILED',
+            'chunkedForcedCtc failed to materialize fallback alignment links.',
+            error
+          );
         });
         segmentsWritten += 1;
       }
@@ -564,6 +636,7 @@ export async function runAccurateChunkedForcedCtc(
     return {
       outputSegmentBufferId: segmentOutBufferId,
       segmentsWritten,
+      linkMap,
       ...(warningCode ? { warningCode } : {}),
       ...(warnings.length > 0 ? { warnings } : {}),
     };

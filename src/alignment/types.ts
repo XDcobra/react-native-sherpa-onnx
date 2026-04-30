@@ -1,6 +1,7 @@
 import type { ModelPathConfig } from '../types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 
 export interface AlignmentTimestamp {
@@ -65,6 +66,7 @@ export type AlignmentTimingMode =
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
+  linkMap?: SegmentLinkMapRef;
   warningCode?: string;
   warnings?: AlignmentWarning[];
   vadAnchorCount?: number;
