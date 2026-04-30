@@ -1,7 +1,7 @@
 # Sub-Plan 02 — Linker Core (Path 3, ASR-mediated)
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: sub-01
 - Prerequisite for: sub-03, sub-05 (parts), sub-06
 
@@ -54,7 +54,7 @@ export interface LinkerInput {
 
 export interface LinkerResultV0 {
   version: 0;
-  units: LinkerMappingUnit[];
+  mappingUnits: LinkerMappingUnit[];
   globalConfidence: number; // [0,1]
   warnings: LinkerWarning[];
   diagnostics: {
@@ -129,24 +129,25 @@ export async function runLinker(input: LinkerInput): Promise<LinkerResultV0>;
 
 ### TypeScript
 
-- [ ] `src/alignment/linker/types.ts` — types per §4.1.
-- [ ] `src/alignment/linker/normalize.ts` — text normalization (locale-aware).
-- [ ] `src/alignment/linker/dtw.ts` — DTW pass with bounded band; cost function for token swaps/inserts/deletes.
-- [ ] `src/alignment/linker/anchorMap.ts` — anchor lookup, midpoint mapping, gap detection.
-- [ ] `src/alignment/linker/confidence.ts` — per-unit + global confidence formulas (documented constants).
-- [ ] `src/alignment/linker/linker.ts` — orchestrator returning `LinkerResultV0`.
-- [ ] Strict input validation (anchors non-empty, hypothesis token count > 0, R length > 0).
+- [x] `src/alignment/linker/types.ts` — types per §4.1.
+- [x] `src/alignment/linker/normalize.ts` — text normalization (locale-aware).
+- [x] `src/alignment/linker/dtw.ts` — DTW pass with bounded band; cost function for token swaps/inserts/deletes.
+- [x] `src/alignment/linker/anchorMap.ts` — anchor lookup, midpoint mapping, gap detection.
+- [x] `src/alignment/linker/confidence.ts` — per-unit + global confidence formulas (documented constants).
+- [x] `src/alignment/linker/linker.ts` — orchestrator returning `LinkerResultV0`.
+- [x] Strict input validation (anchors non-empty, hypothesis token count > 0, R length > 0).
 
 ### Native (optional kernel; required only if benchmark fails TS path)
 
 - [ ] Android: `android/src/main/java/com/sherpaonnx/alignment/linker/LinkerKernel.kt` + `LinkerBridge.kt` exposed via `SherpaOnnxModule.kt`.
 - [ ] iOS: `ios/alignment/linker/LinkerKernel.{h,mm}` + bridge in `SherpaOnnx+Alignment.mm`.
 - [ ] `NativeSherpaOnnx.ts`: add `linkTranscriptToAudio(opts)` entry mirroring TS shape.
+  - Optional path deferred: TS implementation meets P2 DoD without native kernel changes.
 
 ### Hypothesis ingestion
 
-- [ ] Define a typed read for hypothesis tokens with timestamps.
-- [ ] Reject inputs missing per-token timestamps with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`.
+- [x] Define a typed read for hypothesis tokens with timestamps.
+- [x] Reject inputs missing per-token timestamps with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`.
 
 ---
 
@@ -202,11 +203,11 @@ Warnings (non-fatal, on `LinkerResultV0.warnings`):
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] `LinkerResultV0` shape matches `alignment-public-modes-plan.md` Linker schema.
-- [ ] All Jest tests in §8 green.
-- [ ] Snapshot tests show stable, deterministic output.
-- [ ] Validation produces correct codes from §7.
-- [ ] No public re-exports for linker; only `AlignmentEngine` consumes it.
+- [x] `LinkerResultV0` shape matches `alignment-public-modes-plan.md` Linker schema.
+- [x] All Jest tests in §8 green.
+- [x] Snapshot tests show stable, deterministic output.
+- [x] Validation produces correct codes from §7.
+- [x] No public re-exports for linker; only `AlignmentEngine` consumes it.
 
 ---
 
@@ -223,3 +224,11 @@ Warnings (non-fatal, on `LinkerResultV0.warnings`):
 | sub-03 | Strategy A consumes `LinkerResultV0` |
 | sub-05 | Native parity for optional linker kernel |
 | sub-06 | Test matrix references linker fixtures |
+
+---
+
+## Document history
+
+| Date | Change |
+|------|--------|
+| 2026-04-30 | P2 completed: internal linker core (`types/normalize/dtw/anchorMap/confidence/linker`) implemented in TS, input validation + error codes wired, deterministic Jest suite added, and engine now consumes linker for ASR-mediated preflight before deferred Strategy A CTC integration |

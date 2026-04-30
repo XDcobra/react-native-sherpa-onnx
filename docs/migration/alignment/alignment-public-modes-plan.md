@@ -1,5 +1,9 @@
 # Alignment: Public Modes & Accurate-Path Strategies (High-Level Plan)
 
+> Sequencing note: This file is the product/API surface source-of-truth.
+> For migration phase ordering and execution tracking, use
+> `docs/migration/alignment/alignment_migration_overview.md`.
+
 ## Purpose
 
 This document is the **migration-facing overview** for the next offline alignment shape:
@@ -418,7 +422,7 @@ type LinkerResultV0 = {
 
 ## Implementation sequencing (suggested)
 
-1. **`AlignmentEngine` public surface:** Introduce **`createAlignment`**, **`AlignmentEngine`** with **`alignTextToAudio`**, **`destroy`**. **Remove** exported freestanding **`alignTextToAudio`**; update `src/alignment/index.ts`, tests, and examples. Optional split methods only if option types become unwieldy.
+1. **`AlignmentEngine` public surface:** Introduce **`createAlignment`**, **`AlignmentEngine`** with **`alignTextToAudio`**, **`destroy`**. **Remove** exported freestanding **`alignTextToAudio`**; update `src/alignment/index.ts`, tests, and examples. Optional split methods only if option types become unwieldy. Implementation checklist and DoD: `docs/migration/alignment/sub-01-public-api-contract.md`.
 2. **Types & public contract:** Add strategy discriminator for `accurate` + segmentation on (e.g. `mappingStrategy: 'asr_mediated' | 'chunked_forced_ctc'`). Keep standalone timing mode as **`mode: 'vad'`** (row 5). Register **`ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`** for ASR-mediated when `timestampCount === 0` (deterministic; document in `docs/alignment.md`).
 3. **Linker (Path 3):** Define module boundary, inputs/outputs (buffers + link map / span list), ASR + DTW integration; unit tests independent of alignment.
 4. **Strategy A:** Wire `mappingStrategy: 'asr_mediated'` → linker → per-anchor CTC in alignment; **remove** monotonic weight mapping from this path. Validate hypothesis timestamps before DTW; **fail fast** if missing.

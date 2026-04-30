@@ -1,7 +1,7 @@
 # Sub-Plan 01 — Public API Contract (`AlignmentEngine`)
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: none (entry phase)
 - Prerequisite for: sub-02, sub-03, sub-04, sub-05, sub-07
 
@@ -94,11 +94,13 @@ export function createAlignment(
 - `AlignTextToAudioOptionsAccurate`
   - `mode: 'accurate'`
   - `modelPath: ModelPathConfig` (required)
-  - `granularity: 'token' | 'word'`
+  - `granularity: 'sentence' | 'word' | 'character'` (character only when segmentation is off)
   - `language?: string`
-  - `segmentation?:` `{ mode: 'off' }` | `{ mode: 'auto' }` (auto enables row 4)
-  - `mappingStrategy?: 'asr_mediated' | 'chunked_forced_ctc'` (only meaningful when `segmentation.mode === 'auto'`)
-  - `asr?: { hypothesisTextBuffer: OfflineTextBufferRef }` (required for `'asr_mediated'`)
+  - `segmentation?:` `{ mode: 'off' }` | `{ mode: 'auto', anchorSegmentBuffer, mappingStrategy, asr? }` (auto enables row 4)
+  - when `segmentation.mode === 'auto'`:
+    - `mappingStrategy: 'asr_mediated' | 'chunked_forced_ctc'`
+    - `asr: { hypothesisTextBuffer: OfflineTextBufferRef }` is required for `'asr_mediated'`
+    - `asr` is forbidden for `'chunked_forced_ctc'`
 - `AlignTextToAudioOptionsProportional` / `Estimated` — unchanged shape.
 - `AlignTextToAudioOptionsVad` — unchanged shape.
 
@@ -132,32 +134,32 @@ export function createAlignment(
 
 ### TypeScript
 
-- [ ] Create `src/alignment/engine.ts`:
-  - [ ] `createAlignment(options?: AlignmentEngineOptions)` returns object implementing `AlignmentEngine`.
-  - [ ] `engine.alignTextToAudio(...)` validates options → calls into `runAlignTextToAudio` (renamed internal).
-  - [ ] `engine.destroy()` no-op in v1; returns resolved promise.
-- [ ] Rename current `alignTextToAudio` to internal `runAlignTextToAudio` in `src/alignment/alignTextToAudio.ts`; remove default export.
-- [ ] Update `src/alignment/types.ts`:
-  - [ ] Tighten `segmentation` discriminated union for accurate.
-  - [ ] Add `mappingStrategy` and `asr.hypothesisTextBuffer`.
-  - [ ] Public re-export adjustments per 4.1.
-- [ ] Update `src/alignment/index.ts`:
-  - [ ] Drop freestanding `alignTextToAudio` export.
-  - [ ] Add `createAlignment` + `AlignmentEngine` re-exports.
-  - [ ] Keep `detectAlignmentModel` unchanged.
+- [x] Create `src/alignment/engine.ts`:
+  - [x] `createAlignment(options?: AlignmentEngineOptions)` returns object implementing `AlignmentEngine`.
+  - [x] `engine.alignTextToAudio(...)` validates options → calls into `runAlignTextToAudio` (renamed internal).
+  - [x] `engine.destroy()` no-op in v1; returns resolved promise.
+- [x] Rename current `alignTextToAudio` to internal `runAlignTextToAudio` in `src/alignment/alignTextToAudio.ts`; remove default export.
+- [x] Update `src/alignment/types.ts`:
+  - [x] Tighten `segmentation` discriminated union for accurate.
+  - [x] Add `mappingStrategy` and `asr.hypothesisTextBuffer`.
+  - [x] Public re-export adjustments per 4.1.
+- [x] Update `src/alignment/index.ts`:
+  - [x] Drop freestanding `alignTextToAudio` export.
+  - [x] Add `createAlignment` + `AlignmentEngine` re-exports.
+  - [x] Keep `detectAlignmentModel` unchanged.
 
 ### Validation layer (TS)
 
-- [ ] Strict union validation for `mode`, `mappingStrategy`, `granularity`.
-- [ ] Reject raw `string` for accurate `modelPath` with `ALIGNMENT_MODEL_PATH_INVALID`.
-- [ ] Enforce: if `mode === 'accurate'` and `segmentation?.mode === 'auto'`:
+- [x] Strict union validation for `mode`, `mappingStrategy`, `granularity`.
+- [x] Reject raw `string` for accurate `modelPath` with `ALIGNMENT_MODEL_PATH_INVALID`.
+- [x] Enforce: if `mode === 'accurate'` and `segmentation?.mode === 'auto'`:
   - if `mappingStrategy === 'asr_mediated'` → require `asr.hypothesisTextBuffer`.
   - if `mappingStrategy === 'chunked_forced_ctc'` → forbid `asr`.
 
 ### Native
 
-- [ ] No native changes in this sub-plan — existing rows 1/2/3/5 continue to use current bridge entry.
-- [ ] Add explicit JS-side gate: rows 4a/4b throw `ALIGNMENT_NOT_IMPLEMENTED` before reaching native; native path remains untouched.
+- [x] No native changes in this sub-plan — existing rows 1/2/3/5 continue to use current bridge entry.
+- [x] Add explicit JS-side gate: rows 4a/4b throw `ALIGNMENT_NOT_IMPLEMENTED` before reaching native; native path remains untouched.
 
 ---
 
@@ -210,11 +212,11 @@ export function createAlignment(
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] All TS tasks in §6 done.
-- [ ] All Jest tests in §8 green.
-- [ ] No remaining import of `alignTextToAudio` from `src/alignment` outside `src/alignment/`.
-- [ ] `docs/migration/alignment/alignment-public-modes-plan.md` cross-links to this sub-plan.
-- [ ] Overview `Fortschritts-Tracking` flipped to `Completed`.
+- [x] All TS tasks in §6 done.
+- [x] All Jest tests in §8 green.
+- [x] No remaining import of `alignTextToAudio` from `src/alignment` outside `src/alignment/`.
+- [x] `docs/migration/alignment/alignment-public-modes-plan.md` cross-links to this sub-plan.
+- [x] Overview `Fortschritts-Tracking` flipped to `Completed`.
 
 ---
 
@@ -232,3 +234,11 @@ export function createAlignment(
 | sub-04 | Strategy B wires through engine |
 | sub-05 | Native parity work piggybacks on engine surface |
 | sub-07 | Docs & cutover assume engine API exists |
+
+---
+
+## Document history
+
+| Date | Change |
+|------|--------|
+| 2026-04-30 | P1 implementation completed: engine API + hard cut export removal + strict validation + Jest coverage + overview status update |

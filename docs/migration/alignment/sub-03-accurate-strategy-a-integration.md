@@ -1,7 +1,7 @@
 # Sub-Plan 03 — Accurate / Strategy A Integration (ASR-mediated)
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: sub-01, sub-02
 - Prerequisite for: sub-05 (parity), sub-06 (test matrix), sub-07 (docs)
 
@@ -110,16 +110,16 @@ Steps:
 
 ### TypeScript
 
-- [ ] `src/alignment/strategyA/driver.ts` per §4.2.
-- [ ] `src/alignment/alignTextToAudio.ts`:
-  - [ ] When `mode === 'accurate'` and `segmentation?.mode === 'auto'` and `mappingStrategy === 'asr_mediated'` → call `runAccurateStrategyA`.
-- [ ] `src/alignment/types.ts`:
-  - [ ] Add `AlignmentWarning` type + codes.
+- [x] `src/alignment/strategyA/driver.ts` per §4.2.
+- [x] `src/alignment/alignTextToAudio.ts`:
+  - [x] When `mode === 'accurate'` and `segmentation?.mode === 'auto'` and `mappingStrategy === 'asr_mediated'` → call `runAccurateStrategyA`.
+- [x] `src/alignment/types.ts`:
+  - [x] Add `AlignmentWarning` type + codes.
 
 ### Native
 
-- [ ] **No new native function.** Reuse `AlignAccurateFromPcm` (Android C++ + iOS bridge) per anchor slice.
-- [ ] Confirm slice read API exposes start/length in samples (sub-05 covers parity).
+- [x] **No new native function.** Reuse `AlignAccurateFromPcm` (Android C++ + iOS bridge) per anchor slice.
+- [x] Confirm slice read API exposes start/length in samples (sub-05 covers parity).
 - [ ] Verify offset math is consistent for both platforms (unit test in sub-06).
 
 ---
@@ -179,11 +179,11 @@ Warnings on result:
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] All Jest tests in §8 green.
-- [ ] Public API path (engine) for row 4a returns `AlignTextToAudioWriteResult` with correct counts.
-- [ ] Driver emits exactly the documented error/warning codes — verified by contract tests.
-- [ ] No call to native `AlignAccurateFromPcm` with the **full** PCM in this path (asserted in test).
-- [ ] Overview tracking flipped to `Completed`.
+- [x] All Jest tests in §8 green.
+- [x] Public API path (engine) for row 4a returns `AlignTextToAudioWriteResult` with correct counts.
+- [x] Driver emits exactly the documented error/warning codes — verified by contract tests.
+- [x] No call to native `AlignAccurateFromPcm` with the **full** PCM in this path (asserted in test).
+- [x] Overview tracking flipped to `Completed`.
 
 ---
 
@@ -201,3 +201,12 @@ Warnings on result:
 | sub-05 | Native parity test cases for row 4a |
 | sub-06 | Test matrix |
 | sub-07 | Docs example |
+
+---
+
+## Document history
+
+| Date | Change |
+|------|--------|
+| 2026-04-30 | P3 completed: Strategy A driver (`runAccurateStrategyA`) integrated, `accurate+auto+asr_mediated` routed through alignment path, warning/error contracts extended, and Strategy A Jest suite added (`driver-options`, `driver-coverage`, `driver-offset`, `driver-pipeline`, `missing-timestamps`) |
+| 2026-04-30 | Follow-up contract fix: Strategy A output now materializes into caller-provided `segmentOut` (no newly returned offline output id) |

@@ -139,13 +139,13 @@ A phase is "Completed" when **all** of:
 
 | Phase | Status | Owner | Notes |
 |-------|--------|-------|-------|
-| P1 — Public API skeleton (sub-01) | Planned | — | — |
-| P2 — Linker core (sub-02) | Planned | — | — |
-| P3 — Strategy A integration (sub-03) | Planned | — | — |
-| P4 — Strategy B integration (sub-04) | Planned | — | — |
-| P5 — Native bridge & parity (sub-05) | Planned | — | — |
-| P6 — Tests & quality gates (sub-06) | Planned | — | — |
-| P7 — Docs & cutover (sub-07) | Planned | — | — |
+| P1 — Public API skeleton (sub-01) | Completed (2026-04-30) | — | AlignmentEngine API + hard-cut of freestanding export + P1 Jest coverage |
+| P2 — Linker core (sub-02) | Completed (2026-04-30) | — | Internal linker core + deterministic Jest coverage + engine preflight consumption for ASR-mediated path |
+| P3 — Strategy A integration (sub-03) | Completed (2026-04-30) | — | `accurate+auto+asr_mediated` now runs linker-driven per-anchor accurate slices with warning/error contracts + Strategy A Jest suite |
+| P4 — Strategy B integration (sub-04) | Completed (2026-04-30) | — | `accurate+auto+chunked_forced_ctc` now runs cursor-driven per-anchor forced CTC with deterministic advancement + Strategy B Jest suite |
+| P5 — Native bridge & parity (sub-05) | Completed (2026-04-30) | — | Descriptor-based accurate/forced-CTC bridge path on Android+iOS, native error mapping parity, and P5 Jest bridge tests |
+| P6 — Tests & quality gates (sub-06) | Completed (2026-04-30) | 27 suites, 55 tests, 2 snapshots, 0 failures | All error codes cataloged; public surface locked; legacy import grep gate green |
+| P7 — Docs & cutover (sub-07) | Completed (2026-04-30) | — | Engine-first docs rewrite, example screen switched to engine-only usage with row 4a/4b entries, superseded banners/headers synced, and hard-cut grep checks verified |
 
 > Update this table as phases progress. Use `Planned` / `In Progress` / `Completed (YYYY-MM-DD)`.
 
@@ -156,3 +156,9 @@ A phase is "Completed" when **all** of:
 | Date | Change |
 |------|--------|
 | 2026-04-30 | Initial overview + sub-plan layout for alignment migration; locked decisions inherited from `alignment-public-modes-plan.md` |
+| 2026-04-30 | P1 completed: public AlignmentEngine skeleton shipped, freestanding `alignTextToAudio` export removed, and P1 tests added |
+| 2026-04-30 | P2 completed: linker core (`types/normalize/dtw/anchorMap/confidence/linker`) implemented, Jest linker suite added, and progress table updated |
+| 2026-04-30 | P3 completed: Strategy A integration wired (`runAccurateStrategyA`), row 4a engine path enabled, and Strategy A tests added |
+| 2026-04-30 | P4 completed: Strategy B integration wired (`runAccurateStrategyB`), forced-CTC native bridge entry added on Android/iOS, and Strategy B tests added |
+| 2026-04-30 | P5 completed: native bridge switched to PCM slice descriptors for rows 4a/4b, error mapping parity aligned across Android/iOS, and P5 native bridge Jest tests added |
+| 2026-04-30 | P7 completed: docs + example cutover finalized (`docs/alignment.md` engine-first rewrite, example timestamp screen row 4a/4b demo entries), superseded-plan headers updated, and hard-cut verification checks green |

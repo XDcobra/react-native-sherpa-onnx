@@ -1,7 +1,7 @@
 # Sub-Plan 06 — Tests & Quality Gates
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: sub-01, sub-02, sub-03, sub-04, sub-05
 - Prerequisite for: sub-07 (cutover gate)
 
@@ -84,52 +84,52 @@ Contract tests assert shape and codes — independent of implementation:
 
 #### sub-01 (Public API)
 
-- [ ] `src/alignment/__tests__/engine-create.test.ts`
-- [ ] `src/alignment/__tests__/engine-options-validation.test.ts`
-- [ ] `src/alignment/__tests__/engine-no-freestanding-export.test.ts`
-- [ ] `src/alignment/__tests__/engine-row-parity.test.ts`
+- [x] `src/alignment/__tests__/engine-create.test.ts`
+- [x] `src/alignment/__tests__/engine-options-validation.test.ts`
+- [x] `src/alignment/__tests__/engine-no-freestanding-export.test.ts`
+- [x] `src/alignment/__tests__/engine-row-parity.test.ts`
 
 #### sub-02 (Linker)
 
-- [ ] `src/alignment/linker/__tests__/normalize.test.ts`
-- [ ] `src/alignment/linker/__tests__/dtw.test.ts`
-- [ ] `src/alignment/linker/__tests__/anchorMap.test.ts`
-- [ ] `src/alignment/linker/__tests__/confidence.test.ts`
-- [ ] `src/alignment/linker/__tests__/runLinker.test.ts`
-- [ ] `src/alignment/linker/__tests__/runLinker-missing-timestamps.test.ts`
+- [x] `src/alignment/linker/__tests__/normalize.test.ts`
+- [x] `src/alignment/linker/__tests__/dtw.test.ts`
+- [x] `src/alignment/linker/__tests__/anchorMap.test.ts`
+- [x] `src/alignment/linker/__tests__/confidence.test.ts`
+- [x] `src/alignment/linker/__tests__/runLinker.test.ts`
+- [x] `src/alignment/linker/__tests__/runLinker-missing-timestamps.test.ts`
 
 #### sub-03 (Strategy A)
 
-- [ ] `src/alignment/strategyA/__tests__/driver-options.test.ts`
-- [ ] `src/alignment/strategyA/__tests__/driver-coverage.test.ts`
-- [ ] `src/alignment/strategyA/__tests__/driver-offset.test.ts`
-- [ ] `src/alignment/strategyA/__tests__/driver-pipeline.test.ts`
-- [ ] `src/alignment/strategyA/__tests__/missing-timestamps.test.ts`
+- [x] `src/alignment/strategyA/__tests__/driver-options.test.ts`
+- [x] `src/alignment/strategyA/__tests__/driver-coverage.test.ts`
+- [x] `src/alignment/strategyA/__tests__/driver-offset.test.ts`
+- [x] `src/alignment/strategyA/__tests__/driver-pipeline.test.ts`
+- [x] `src/alignment/strategyA/__tests__/missing-timestamps.test.ts`
 
 #### sub-04 (Strategy B)
 
-- [ ] `src/alignment/strategyB/__tests__/cursor.test.ts`
-- [ ] `src/alignment/strategyB/__tests__/driver-options.test.ts`
-- [ ] `src/alignment/strategyB/__tests__/driver-progress.test.ts`
-- [ ] `src/alignment/strategyB/__tests__/driver-pipeline.test.ts`
-- [ ] `src/alignment/strategyB/__tests__/driver-stuck.test.ts`
-- [ ] `src/alignment/strategyB/__tests__/native-spec.test.ts`
+- [x] `src/alignment/strategyB/__tests__/cursor.test.ts`
+- [x] `src/alignment/strategyB/__tests__/driver-options.test.ts`
+- [x] `src/alignment/strategyB/__tests__/driver-progress.test.ts`
+- [x] `src/alignment/strategyB/__tests__/driver-pipeline.test.ts`
+- [x] `src/alignment/strategyB/__tests__/driver-stuck.test.ts`
+- [x] `src/alignment/strategyB/__tests__/native-spec.test.ts`
 
 #### sub-05 (Native bridge & parity)
 
-- [ ] `src/alignment/__tests__/native-spec-shape.test.ts`
-- [ ] `src/alignment/__tests__/native-bridge-slice-call.test.ts`
-- [ ] `src/alignment/__tests__/native-bridge-error-mapping.test.ts`
+- [x] `src/alignment/__tests__/native-spec-shape.test.ts`
+- [x] `src/alignment/__tests__/native-bridge-slice-call.test.ts`
+- [x] `src/alignment/__tests__/native-bridge-error-mapping.test.ts`
 
 #### Cross-cutting
 
-- [ ] `src/alignment/__tests__/error-codes-catalog.test.ts`
+- [x] `src/alignment/__tests__/error-codes-catalog.test.ts`
   - Each code from sub-01..05 has at least one positive test asserting it is produced.
 
 ### Lint / static gates
 
-- [ ] Add a repo-wide grep test that fails CI when `alignTextToAudio` is imported as a value from `'react-native-sherpa-onnx'` outside `src/alignment/`.
-- [ ] Add a Jest test that snapshots `Object.keys(require('../index'))` to lock public surface.
+- [x] `src/alignment/__tests__/legacy-import-guard.test.ts` — Jest test that fails CI when `alignTextToAudio` is imported as a value from `'react-native-sherpa-onnx'` outside `src/alignment/`.
+- [x] `src/alignment/__tests__/public-surface-snapshot.test.ts` — Jest test that locks `Object.keys(require('../index'))` via inline snapshot.
 
 ---
 
@@ -201,11 +201,11 @@ CI must run: `yarn jest src/alignment` with all suites green.
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] All test files in §6 created and passing locally.
-- [ ] `yarn jest src/alignment` exits 0.
-- [ ] Public surface snapshot matches sub-01 §4.1.
-- [ ] Error catalog test references **all** codes in §7.
-- [ ] Overview tracking flipped to `Completed`.
+- [x] All test files in §6 created and passing locally.
+- [x] `yarn jest src/alignment` exits 0 (27 suites, 55 tests, 2 snapshots, 0 failures).
+- [x] Public surface snapshot matches sub-01 §4.1.
+- [x] Error catalog test references **all** codes in §7.
+- [x] Overview tracking flipped to `Completed`.
 
 ---
 

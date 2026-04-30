@@ -1,7 +1,7 @@
 # Sub-Plan 04 — Accurate / Strategy B Integration (Chunked Forced CTC)
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: sub-01
 - Prerequisite for: sub-05 (parity), sub-06 (test matrix), sub-07 (docs)
 
@@ -123,35 +123,35 @@ Failure: throws/rejects with structured error including `code: 'FORCED_CTC_FAILE
 
 ### TypeScript
 
-- [ ] `src/alignment/strategyB/driver.ts` per §4.2.
-- [ ] `src/alignment/strategyB/cursor.ts`:
-  - [ ] Token-aware cursor (token + word granularity).
-  - [ ] Window sizing rule documented as constants.
-- [ ] `src/alignment/alignTextToAudio.ts`:
-  - [ ] Route `mode === 'accurate' && segmentation?.mode === 'auto' && mappingStrategy === 'chunked_forced_ctc'` → `runAccurateStrategyB`.
+- [x] `src/alignment/strategyB/driver.ts` per §4.2.
+- [x] `src/alignment/strategyB/cursor.ts`:
+  - [x] Token-aware cursor (token + word granularity).
+  - [x] Window sizing rule documented as constants.
+- [x] `src/alignment/alignTextToAudio.ts`:
+  - [x] Route `mode === 'accurate' && segmentation?.mode === 'auto' && mappingStrategy === 'chunked_forced_ctc'` → `runAccurateStrategyB`.
 
 ### Native
 
 #### Android (C++ + JNI)
 
-- [ ] `android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp`:
-  - [ ] Implement `AlignAccurateForcedCtcFromPcm` (separate function next to `AlignAccurateFromPcm`).
-  - [ ] Reuse existing CTC graph builder; force-decode against `windowText`.
-  - [ ] Produce `consumedTokenCount` based on emitted/forced path.
-- [ ] `android/src/main/java/com/sherpaonnx/alignment/facade/SherpaOnnxAlignmentHelper.kt`:
-  - [ ] Add Kotlin facade method `alignAccurateForcedCtc(...)`.
-- [ ] `android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt`:
-  - [ ] Bridge new method.
+- [x] `android/src/main/cpp/alignment/sherpa_onnx_alignment_engine.cpp`:
+  - [x] Implement `AlignAccurateForcedCtcFromPcm` (separate function next to `AlignAccurateFromPcm`).
+  - [x] Reuse existing CTC graph builder; force-decode against `windowText`.
+  - [x] Produce `consumedTokenCount` based on emitted/forced path.
+- [x] `android/src/main/java/com/sherpaonnx/alignment/facade/SherpaOnnxAlignmentHelper.kt`:
+  - [x] Add Kotlin facade method `alignAccurateForcedCtc(...)`.
+- [x] `android/src/main/java/com/sherpaonnx/SherpaOnnxModule.kt`:
+  - [x] Bridge new method.
 
 #### iOS
 
-- [ ] `ios/alignment/core/AlignmentBridgeUtils.{h,mm}` — parsing + result mapping.
-- [ ] `ios/alignment/bridge/SherpaOnnx+Alignment.mm` — bridge new method.
-- [ ] Reuse C++ kernel via shared sources where possible.
+- [x] `ios/alignment/core/AlignmentBridgeUtils.{h,mm}` — parsing + result mapping.
+- [x] `ios/alignment/bridge/SherpaOnnx+Alignment.mm` — bridge new method.
+- [x] Reuse C++ kernel via shared sources where possible.
 
 #### NativeSherpaOnnx.ts
 
-- [ ] Add typed entry for `AlignAccurateForcedCtcFromPcm`.
+- [x] Add typed entry for `AlignAccurateForcedCtcFromPcm`.
 
 ---
 
@@ -211,11 +211,11 @@ Warnings on result:
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] Native function on both platforms; identical inputs/outputs.
-- [ ] Driver passes all tests in §8.
-- [ ] Engine path returns `AlignTextToAudioWriteResult` for row 4b.
-- [ ] No call to `AlignAccurateFromPcm` (full audio) on this path.
-- [ ] Overview tracking flipped to `Completed`.
+- [x] Native function on both platforms; identical inputs/outputs.
+- [x] Driver passes all tests in §8.
+- [x] Engine path returns `AlignTextToAudioWriteResult` for row 4b.
+- [x] No call to `AlignAccurateFromPcm` (full audio) on this path.
+- [x] Overview tracking flipped to `Completed`.
 
 ---
 
@@ -233,3 +233,11 @@ Warnings on result:
 | sub-05 | Parity test for row 4b |
 | sub-06 | Test matrix |
 | sub-07 | Docs |
+
+---
+
+## Document history
+
+| Date | Change |
+|------|--------|
+| 2026-04-30 | P4 completed: Strategy B (`chunked_forced_ctc`) wired with cursor+window driver, native forced-CTC bridge entry added on Android/iOS, and Strategy B Jest suite added (`cursor`, `driver-options`, `driver-progress`, `driver-pipeline`, `driver-stuck`, `native-spec`) |

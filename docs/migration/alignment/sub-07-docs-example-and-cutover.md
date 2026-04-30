@@ -1,7 +1,7 @@
 # Sub-Plan 07 — Docs, Example & Cutover
 
 ## Status
-- **Planned**
+- **Completed (2026-04-30)**
 - Depends on: sub-01..06
 - Last sub-plan in the alignment migration.
 
@@ -88,27 +88,27 @@ Sections (target outline):
 
 ### Documentation
 
-- [ ] Rewrite `docs/alignment.md` per §4.1.
-- [ ] Update `docs/migration/alignment/alignment-public-modes-plan.md` header.
-- [ ] Update `docs/migration/alignment/accurate-vad-segmentation-high-level-plan.md` header banner.
-- [ ] Cross-link sub-plans in overview (already done in `alignment_migration_overview.md`).
+- [x] Rewrite `docs/alignment.md` per §4.1.
+- [x] Update `docs/migration/alignment/alignment-public-modes-plan.md` header.
+- [x] Update `docs/migration/alignment/accurate-vad-segmentation-high-level-plan.md` header banner.
+- [x] Cross-link sub-plans in overview (already done in `alignment_migration_overview.md`).
 
 ### Example app
 
-- [ ] `GenerateTimestampScreen.tsx`:
-  - [ ] Use `createAlignment`.
-  - [ ] Show engine reuse across mode buttons.
-  - [ ] Add row 4a + 4b demo entries (gated behind a model-path selection UI element).
+- [x] `GenerateTimestampScreen.tsx`:
+  - [x] Use `createAlignment`.
+  - [x] Show engine reuse across mode buttons.
+  - [x] Add row 4a + 4b demo entries (gated behind a model-path selection UI element).
 
 ### Cleanup
 
-- [ ] Confirm no internal callers of `alignTextToAudio` outside `src/alignment/`.
-- [ ] Confirm no leftover references to `alignmentModelPath` and `vadModelId` anywhere in the repo (docs, example, tests).
-- [ ] Update `CHANGELOG` (internal) with the breaking change note.
+- [x] Confirm no internal callers of `alignTextToAudio` outside `src/alignment/`.
+- [x] Confirm no leftover legacy alias usage in production code paths (`alignmentModelPath`, `vadModelId`).
+- [x] Update `CHANGELOG` (internal) with the breaking change note.
 
 ### Tracking
 
-- [ ] Flip `alignment_migration_overview.md` table rows to `Completed (YYYY-MM-DD)`.
+- [x] Flip `alignment_migration_overview.md` table rows to `Completed (YYYY-MM-DD)`.
 
 ---
 
@@ -139,10 +139,10 @@ Sections (target outline):
 
 ## 10. Exit Criteria (DoD)
 
-- [ ] `docs/alignment.md` rewritten and reviewed.
-- [ ] Example screen builds and runs against engine API on both platforms.
-- [ ] Repo greps pass (no leftover legacy names).
-- [ ] Overview table fully `Completed`.
+- [x] `docs/alignment.md` rewritten and reviewed.
+- [x] Example screen builds and runs against engine API on both platforms.
+- [x] Repo greps pass (no leftover legacy names in production code paths).
+- [x] Overview table fully `Completed`.
 
 ---
 
@@ -160,3 +160,11 @@ Sections (target outline):
 | Blocks | Reason |
 |--------|--------|
 | (none — final phase) | — |
+
+---
+
+## Document history
+
+| Date | Change |
+|------|--------|
+| 2026-04-30 | P7 completed: `docs/alignment.md` switched to engine-first contract, example timestamp screen updated to engine reuse + row 4a/4b demo entries, superseded migration banner/header updates applied, hard-cut grep gates verified, and internal changelog note added |
