@@ -1,6 +1,5 @@
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import {
-  getOfflineAudioBufferSamplesSlice,
   getPipelineAudioBufferInfo,
   resolvePipelineAudioBufferId,
 } from '../../audiobuffer';
@@ -258,6 +257,59 @@ function toWarningCode(
   return warnings[0]?.code;
 }
 
+function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
+  const errorObj =
+    typeof error === 'object' && error != null
+      ? (error as { code?: unknown; message?: unknown })
+      : undefined;
+
+  const codeFromObject =
+    typeof errorObj?.code === 'string' ? errorObj.code.trim() : '';
+  const messageFromObject =
+    typeof errorObj?.message === 'string' ? errorObj.message.trim() : '';
+  const messageFromError =
+    error instanceof Error ? error.message.trim() : messageFromObject;
+
+  const codeFromMessage = (() => {
+    const idx = messageFromError.indexOf(':');
+    if (idx <= 0) {
+      return '';
+    }
+    return messageFromError.slice(0, idx).trim();
+  })();
+
+  const normalizedCode =
+    codeFromObject.length > 0 ? codeFromObject : codeFromMessage;
+
+  if (normalizedCode === 'OFFLINE_OOM') {
+    return createStrategyBError(
+      'OFFLINE_OOM',
+      messageFromError || 'OFFLINE_OOM: Native alignment ran out of memory.',
+      error
+    );
+  }
+
+  if (
+    normalizedCode === 'ALIGNMENT_MODEL_LOAD_FAILED' ||
+    normalizedCode === 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' ||
+    normalizedCode === 'ALIGNMENT_FORCED_CTC_FAILED'
+  ) {
+    return createStrategyBError(
+      normalizedCode,
+      messageFromError ||
+        `${normalizedCode}: Native forced CTC alignment failed.`,
+      error
+    );
+  }
+
+  return createStrategyBError(
+    'ALIGNMENT_NATIVE_UNKNOWN',
+    messageFromError ||
+      'ALIGNMENT_NATIVE_UNKNOWN: Native forced CTC alignment failed with an unknown error.',
+    error
+  );
+}
+
 interface RunAccurateStrategyBInput {
   textIn: OfflineTextBufferIdSource;
   audioIn: OfflineAudioBufferIdSource;
@@ -366,33 +418,24 @@ export async function runAccurateStrategyB(
         break;
       }
 
-      const slice = getOfflineAudioBufferSamplesSlice(
-        audioInBufferId,
-        anchor.startSample,
-        anchorFrameCount
-      );
-      if (slice.length === 0) {
-        continue;
-      }
-
       let nativeResult: StrategyBNativeResult;
       try {
         nativeResult = parseNativeResult(
           await SherpaOnnx.alignAccurateForcedCtcFromPcm(
             resolvedModelPath,
             textWindow.text,
-            Array.from(slice),
+            {
+              audioBufferId: audioInBufferId,
+              startSample: anchor.startSample,
+              sampleCount: anchorFrameCount,
+            },
             audioInfo.sampleRate,
             granularity,
             typeof input.language === 'string' ? input.language : undefined
           )
         );
       } catch (error) {
-        throw createStrategyBError(
-          'ALIGNMENT_FORCED_CTC_FAILED',
-          `Native forced CTC alignment failed for anchor ${anchor.id}.`,
-          error
-        );
+        throw mapNativeStrategyBError(error);
       }
 
       const maxAdvance = Math.min(

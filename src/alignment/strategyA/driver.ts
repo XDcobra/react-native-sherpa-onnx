@@ -1,9 +1,6 @@
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import {
-  createOfflineAudioBufferFromSamples,
-  getOfflineAudioBufferSamplesSlice,
   getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
 } from '../../audiobuffer';
 import type {
@@ -12,7 +9,6 @@ import type {
 } from '../../audiobuffer/types';
 import {
   appendLiveSegment,
-  createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
   finalizeLiveSegmentBuffer,
   getOfflineSegmentBufferSegments,
@@ -22,16 +18,13 @@ import {
   resolveOfflineSegmentBufferId,
 } from '../../segmentbuffer';
 import type {
-  AlignmentSegmentMeta,
   OfflineSegmentBufferInfo,
   OfflineSegmentBufferIdSource,
   SpeechSegmentMeta,
 } from '../../segmentbuffer/types';
 import {
-  createOfflineTextBufferFromText,
   getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
-  releasePipelineTextBuffer,
   resolveOfflineTextBufferId,
 } from '../../textbuffer';
 import type {
@@ -262,15 +255,63 @@ function assertAnchorRangeWithinAudio(
   }
 }
 
+interface StrategyANativeSubtitle {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function parseStrategyANativeSubtitles(
+  raw: unknown
+): StrategyANativeSubtitle[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((item) => {
+      if (typeof item !== 'object' || item == null) {
+        return null;
+      }
+
+      const text =
+        typeof (item as { text?: unknown }).text === 'string'
+          ? ((item as { text: string }).text ?? '').trim()
+          : '';
+      const start = Number((item as { start?: unknown }).start);
+      const end = Number((item as { end?: unknown }).end);
+
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return null;
+      }
+
+      const safeStart = Math.max(0, start);
+      const safeEnd = Math.max(safeStart, end);
+
+      return {
+        text,
+        start: safeStart,
+        end: safeEnd,
+      };
+    })
+    .filter((item): item is StrategyANativeSubtitle => item != null);
+}
+
 function toAggregatedSegments(
   anchor: StrategyAAnchor,
   sourceAudioBufferId: string,
   granularity: 'sentence' | 'word',
-  localSegments: AlignmentSegmentMeta[]
+  nativeSubtitles: StrategyANativeSubtitle[]
 ): StrategyAAggregatedAlignmentSegment[] {
-  return localSegments.map((segment) => {
-    const localStart = Math.max(0, Math.trunc(segment.startSample));
-    const localEnd = Math.max(localStart, Math.trunc(segment.endSample));
+  return nativeSubtitles.map((subtitle) => {
+    const localStart = Math.max(
+      0,
+      Math.trunc(subtitle.start * anchor.sampleRate)
+    );
+    const localEnd = Math.max(
+      localStart,
+      Math.trunc(subtitle.end * anchor.sampleRate)
+    );
 
     const globalStart = anchor.startSample + localStart;
     const globalEnd = anchor.startSample + localEnd;
@@ -284,40 +325,72 @@ function toAggregatedSegments(
         ? ((endSample - startSample) / anchor.sampleRate) * 1000
         : 0;
 
-    const payload = segment.payload;
-    const payloadText =
-      typeof payload?.text === 'string' && payload.text.trim().length > 0
-        ? payload.text
-        : '';
-
     return {
       sourceAudioBufferId,
       startSample,
       endSample,
       sampleRate: anchor.sampleRate,
       durationMs,
-      ...(typeof payload?.confidence === 'number'
-        ? { confidence: payload.confidence }
-        : {}),
       payload: {
-        text: payloadText.length > 0 ? payloadText : '[alignment]',
+        text: subtitle.text.length > 0 ? subtitle.text : '[alignment]',
         timingMode: 'accurate',
         granularity,
-        ...(typeof payload?.confidence === 'number'
-          ? { confidence: payload.confidence }
-          : {}),
-        ...(payload?.tokenMetadata != null
-          ? { tokenMetadata: payload.tokenMetadata }
-          : {}),
-        ...(payload?.wordMetadata != null
-          ? { wordMetadata: payload.wordMetadata }
-          : {}),
-        ...(Array.isArray(payload?.languageHints)
-          ? { languageHints: payload.languageHints }
-          : {}),
       },
     };
   });
+}
+
+function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
+  const errorObj =
+    typeof error === 'object' && error != null
+      ? (error as { code?: unknown; message?: unknown })
+      : undefined;
+
+  const codeFromObject =
+    typeof errorObj?.code === 'string' ? errorObj.code.trim() : '';
+  const messageFromObject =
+    typeof errorObj?.message === 'string' ? errorObj.message.trim() : '';
+  const messageFromError =
+    error instanceof Error ? error.message.trim() : messageFromObject;
+
+  const codeFromMessage = (() => {
+    const idx = messageFromError.indexOf(':');
+    if (idx <= 0) {
+      return '';
+    }
+    return messageFromError.slice(0, idx).trim();
+  })();
+
+  const normalizedCode =
+    codeFromObject.length > 0 ? codeFromObject : codeFromMessage;
+
+  if (normalizedCode === 'OFFLINE_OOM') {
+    return createStrategyAError(
+      'OFFLINE_OOM',
+      messageFromError || 'OFFLINE_OOM: Native alignment ran out of memory.',
+      error
+    );
+  }
+
+  if (
+    normalizedCode === 'ALIGNMENT_MODEL_LOAD_FAILED' ||
+    normalizedCode === 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' ||
+    normalizedCode === 'ALIGNMENT_NATIVE_ACCURATE_FAILED'
+  ) {
+    return createStrategyAError(
+      normalizedCode,
+      messageFromError ||
+        `${normalizedCode}: Native accurate alignment failed.`,
+      error
+    );
+  }
+
+  return createStrategyAError(
+    'ALIGNMENT_NATIVE_UNKNOWN',
+    messageFromError ||
+      'ALIGNMENT_NATIVE_UNKNOWN: Native accurate alignment failed with an unknown error.',
+    error
+  );
 }
 
 interface RunAccurateStrategyAInput {
@@ -428,89 +501,44 @@ export async function runAccurateStrategyA(
     assertAnchorRangeWithinAudio(job.anchor, audioInfo);
 
     const frameCount = job.anchor.endSample - job.anchor.startSample;
-    const slice = getOfflineAudioBufferSamplesSlice(
-      audioInBufferId,
-      job.anchor.startSample,
-      frameCount
-    );
-    if (slice.length === 0) {
+    if (frameCount <= 0) {
       continue;
     }
 
-    const tmpAudio = createOfflineAudioBufferFromSamples(
-      slice,
-      audioInfo.sampleRate,
-      audioInfo.channelCount
-    );
-
-    let tmpText: Awaited<
-      ReturnType<typeof createOfflineTextBufferFromText>
-    > | null = null;
-    let tmpSegmentOut: Awaited<
-      ReturnType<typeof createEmptyOfflineSegmentBuffer>
-    > | null = null;
-
-    try {
-      tmpText = await createOfflineTextBufferFromText(job.referenceText);
-      tmpSegmentOut = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: tmpAudio.bufferId,
-      });
-
+    const nativeResultRaw = await (async () => {
       try {
-        await SherpaOnnx.alignOfflineTextToAudio(
-          tmpText.bufferId,
-          tmpAudio.bufferId,
-          tmpSegmentOut.bufferId,
-          'accurate',
-          granularity,
+        return SherpaOnnx.alignAccurateFromPcm(
+          resolvedModelPath,
+          job.referenceText,
           {
-            modelPath: resolvedModelPath,
-            ...(typeof input.language === 'string' &&
-            input.language.trim().length > 0
-              ? { language: input.language }
-              : {}),
-          }
+            audioBufferId: audioInBufferId,
+            startSample: job.anchor.startSample,
+            sampleCount: frameCount,
+          },
+          audioInfo.sampleRate,
+          granularity,
+          typeof input.language === 'string' ? input.language : undefined
         );
       } catch (error) {
-        throw createStrategyAError(
-          'ALIGNMENT_NATIVE_ACCURATE_FAILED',
-          `Native accurate slice alignment failed for anchor ${job.anchor.id}.`,
-          error
-        );
+        throw mapNativeStrategyAError(error);
       }
+    })();
 
-      const localSegmentsRaw = await getOfflineSegmentBufferSegments(
-        tmpSegmentOut.bufferId,
-        0,
-        4096
-      );
-      const localAlignmentSegments = localSegmentsRaw.filter(
-        (segment): segment is AlignmentSegmentMeta =>
-          segment.kind === 'alignment'
-      );
-      aggregatedSegments.push(
-        ...toAggregatedSegments(
-          job.anchor,
-          audioInBufferId,
-          granularity,
-          localAlignmentSegments
-        )
-      );
-    } finally {
-      if (tmpSegmentOut != null) {
-        await releasePipelineSegmentBuffer(tmpSegmentOut.bufferId).catch(() => {
-          // Best-effort cleanup for temporary segment outputs.
-        });
-      }
-      if (tmpText != null) {
-        await releasePipelineTextBuffer(tmpText.bufferId).catch(() => {
-          // Best-effort cleanup for temporary text slices.
-        });
-      }
-      await releasePipelineAudioBuffer(tmpAudio.bufferId).catch(() => {
-        // Best-effort cleanup for temporary audio slices.
-      });
+    const nativeSubtitles = parseStrategyANativeSubtitles(
+      (nativeResultRaw as { subtitles?: unknown }).subtitles
+    );
+    if (nativeSubtitles.length === 0) {
+      continue;
     }
+
+    aggregatedSegments.push(
+      ...toAggregatedSegments(
+        job.anchor,
+        audioInBufferId,
+        granularity,
+        nativeSubtitles
+      )
+    );
   }
 
   if (aggregatedSegments.length === 0) {

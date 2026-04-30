@@ -1126,10 +1126,34 @@ export interface Spec extends TurboModule {
    * Forced CTC alignment on a single PCM slice + text window.
    * Used by Strategy B (`chunked_forced_ctc`) to advance a cursor across anchors.
    */
+  alignAccurateFromPcm(
+    modelPath: string,
+    text: string,
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
+    sampleRate: number,
+    granularity: 'sentence' | 'word' | 'character',
+    language?: string
+  ): Promise<{
+    subtitles: Array<{
+      text: string;
+      start: number;
+      end: number;
+    }>;
+    timingMode: string;
+  }>;
+
   alignAccurateForcedCtcFromPcm(
     modelPath: string,
     windowText: string,
-    samples: number[],
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
     sampleRate: number,
     granularity: 'sentence' | 'word',
     language?: string
