@@ -43,8 +43,8 @@ Sections (target outline):
 1. Overview (modes 1–5).
 2. Quickstart with `createAlignment` + `engine.alignTextToAudio`.
 3. Per-mode option tables with `modelPath: ModelPathConfig` examples.
-4. Strategy A (`asr_mediated`) walkthrough — points to `alignment-asr-mediated-ts-example.md`.
-5. Strategy B (`chunked_forced_ctc`) walkthrough.
+4. `asrMediated` (`asr_mediated`) walkthrough — points to `alignment-asr-mediated-ts-example.md`.
+5. `chunkedForcedCtc` (`chunked_forced_ctc`) walkthrough.
 6. Result schema (`AlignTextToAudioWriteResult`) including warnings.
 7. Error catalog (links to sub-06 §7 catalog).
 8. FAQ — including:
@@ -59,7 +59,7 @@ Sections (target outline):
 
 - Replace top-level `alignTextToAudio` import with `createAlignment`.
 - Lifecycle: create engine on mount, destroy on unmount.
-- Each mode demo (proportional, estimated, accurate one-shot, accurate auto Strategy A, accurate auto Strategy B, vad) becomes a button.
+- Each mode demo (proportional, estimated, accurate one-shot, accurate auto `asrMediated`, accurate auto `chunkedForcedCtc`, vad) becomes a button.
 - Use `modelPath: { type: 'file', path: ... }`.
 
 ### 4.3 Superseded docs
@@ -152,8 +152,8 @@ Sections (target outline):
 |-------|------|-----|
 | Final API (engine) | sub-01 | Docs + example reference it |
 | Linker schema | sub-02 | Docs reference rich result |
-| Strategy A behavior | sub-03 | Docs walkthrough |
-| Strategy B behavior | sub-04 | Docs walkthrough |
+| `asrMediated` behavior | sub-03 | Docs walkthrough |
+| `chunkedForcedCtc` behavior | sub-04 | Docs walkthrough |
 | Native parity | sub-05 | Docs cite identical iOS/Android behavior |
 | Test gates | sub-06 | Cutover requires green tests |
 

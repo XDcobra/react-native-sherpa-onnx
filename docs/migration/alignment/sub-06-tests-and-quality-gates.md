@@ -27,7 +27,7 @@ Explicitly: **no E2E**. Real models on real devices are out of scope for this ph
 ## 3. Current State (Ist)
 
 - Existing alignment Jest tests cover the freestanding `alignTextToAudio` legacy surface.
-- No tests for `AlignmentEngine`, linker, Strategy A driver, Strategy B driver, or native bridge call shapes for the new methods.
+- No tests for `AlignmentEngine`, linker, `asrMediated` driver, `chunkedForcedCtc` driver, or native bridge call shapes for the new methods.
 
 ---
 
@@ -47,9 +47,9 @@ src/alignment/__tests__/fixtures/
     short-en.json                 // R, H tokens with timestamps, anchors
     partial-coverage-en.json
     missing-timestamps-en.json
-  strategyA/
+  asrMediated/
     pipeline-en.json              // anchors + R + linker mock outputs + native mock outputs
-  strategyB/
+  chunkedForcedCtc/
     pipeline-en.json              // anchors + R + native mock outputs (consumed counts)
     stuck-en.json
   parity/
@@ -98,22 +98,22 @@ Contract tests assert shape and codes — independent of implementation:
 - [x] `src/alignment/linker/__tests__/runLinker.test.ts`
 - [x] `src/alignment/linker/__tests__/runLinker-missing-timestamps.test.ts`
 
-#### sub-03 (Strategy A)
+#### sub-03 (`asrMediated`)
 
-- [x] `src/alignment/strategyA/__tests__/driver-options.test.ts`
-- [x] `src/alignment/strategyA/__tests__/driver-coverage.test.ts`
-- [x] `src/alignment/strategyA/__tests__/driver-offset.test.ts`
-- [x] `src/alignment/strategyA/__tests__/driver-pipeline.test.ts`
-- [x] `src/alignment/strategyA/__tests__/missing-timestamps.test.ts`
+- [x] `src/alignment/asrMediated/__tests__/driver-options.test.ts`
+- [x] `src/alignment/asrMediated/__tests__/driver-coverage.test.ts`
+- [x] `src/alignment/asrMediated/__tests__/driver-offset.test.ts`
+- [x] `src/alignment/asrMediated/__tests__/driver-pipeline.test.ts`
+- [x] `src/alignment/asrMediated/__tests__/missing-timestamps.test.ts`
 
-#### sub-04 (Strategy B)
+#### sub-04 (`chunkedForcedCtc`)
 
-- [x] `src/alignment/strategyB/__tests__/cursor.test.ts`
-- [x] `src/alignment/strategyB/__tests__/driver-options.test.ts`
-- [x] `src/alignment/strategyB/__tests__/driver-progress.test.ts`
-- [x] `src/alignment/strategyB/__tests__/driver-pipeline.test.ts`
-- [x] `src/alignment/strategyB/__tests__/driver-stuck.test.ts`
-- [x] `src/alignment/strategyB/__tests__/native-spec.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/cursor.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/driver-options.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/driver-progress.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/driver-pipeline.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/driver-stuck.test.ts`
+- [x] `src/alignment/chunkedForcedCtc/__tests__/native-spec.test.ts`
 
 #### sub-05 (Native bridge & parity)
 
@@ -179,8 +179,8 @@ This sub-plan **is** the test plan. Quality gate at completion:
 | Public surface lock | Snapshot test green |
 | Engine row parity (1, 2, 3, 5) | Engine path produces same native payload as legacy did |
 | Linker determinism | Snapshot of `LinkerResultV0` stable across runs |
-| Strategy A integration | Pipeline test green; offsets correct |
-| Strategy B integration | Cursor + stuck + residual cases green |
+| `asrMediated` integration | Pipeline test green; offsets correct |
+| `chunkedForcedCtc` integration | Cursor + stuck + residual cases green |
 | Native spec | Native method names + parameters present |
 | Error catalog | All codes asserted at least once |
 

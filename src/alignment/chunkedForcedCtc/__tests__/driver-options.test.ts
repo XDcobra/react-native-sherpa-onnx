@@ -79,7 +79,7 @@ jest.mock('../../../segmentbuffer', () => ({
 }));
 
 import SherpaOnnx from '../../../NativeSherpaOnnx';
-import { runAccurateStrategyB } from '../driver';
+import { runAccurateChunkedForcedCtc } from '../driver';
 
 const native = SherpaOnnx as unknown as {
   alignAccurateForcedCtcFromPcm: jest.Mock;
@@ -90,7 +90,7 @@ const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   getOfflineSegmentBufferSegments: jest.Mock;
 };
 
-describe('strategyB/driver options', () => {
+describe('chunkedForcedCtc/driver options', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -114,7 +114,7 @@ describe('strategyB/driver options', () => {
     );
 
     await expect(
-      runAccurateStrategyB({
+      runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -139,7 +139,7 @@ describe('strategyB/driver options', () => {
     ]);
 
     await expect(
-      runAccurateStrategyB({
+      runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -161,7 +161,7 @@ describe('strategyB/driver options', () => {
     );
 
     await expect(
-      runAccurateStrategyB({
+      runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',

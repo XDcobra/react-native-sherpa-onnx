@@ -7,7 +7,7 @@ jest.mock('../../../NativeSherpaOnnx', () => ({
 
 import SherpaOnnx from '../../../NativeSherpaOnnx';
 
-describe('strategyB/native spec', () => {
+describe('chunkedForcedCtc/native spec', () => {
   test('exposes alignAccurateForcedCtcFromPcm on NativeSherpaOnnx', () => {
     expect(
       typeof (

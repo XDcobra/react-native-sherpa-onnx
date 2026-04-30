@@ -1123,8 +1123,8 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Forced CTC alignment on a single PCM slice + text window.
-   * Used by Strategy B (`chunked_forced_ctc`) to advance a cursor across anchors.
+   * Accurate alignment on a single PCM slice.
+   * Used by `asr_mediated` to align each linker-assigned anchor slice.
    */
   alignAccurateFromPcm(
     modelPath: string,
@@ -1146,6 +1146,10 @@ export interface Spec extends TurboModule {
     timingMode: string;
   }>;
 
+  /**
+   * Forced CTC alignment on a single PCM slice + text window.
+   * Used by `chunked_forced_ctc` to advance a cursor across anchors.
+   */
   alignAccurateForcedCtcFromPcm(
     modelPath: string,
     windowText: string,

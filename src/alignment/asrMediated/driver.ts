@@ -41,19 +41,19 @@ import type {
 } from '../types';
 import type { LinkerWarning } from '../linker/types';
 import type {
-  StrategyAAggregatedAlignmentSegment,
-  StrategyAAnchor,
-  StrategyAAnchorJob,
+  AsrMediatedAggregatedAlignmentSegment,
+  AsrMediatedAnchor,
+  AsrMediatedAnchorJob,
 } from './types';
 
-type StrategyARuntimeError = Error & { code: AlignmentErrorCode };
+type AsrMediatedRuntimeError = Error & { code: AlignmentErrorCode };
 
-function createStrategyAError(
+function createAsrMediatedError(
   code: AlignmentErrorCode,
   message: string,
   cause?: unknown
-): StrategyARuntimeError {
-  const error = new Error(`${code}: ${message}`) as StrategyARuntimeError;
+): AsrMediatedRuntimeError {
+  const error = new Error(`${code}: ${message}`) as AsrMediatedRuntimeError;
   error.code = code;
   if (cause instanceof Error) {
     (error as Error & { cause?: unknown }).cause = cause;
@@ -72,7 +72,7 @@ function asOfflineTextBufferInfo(
   ) {
     return info as OfflineTextBufferInfo;
   }
-  throw createStrategyAError(
+  throw createAsrMediatedError(
     'ALIGNMENT_OPTIONS_INVALID',
     `${fieldName} must resolve to an offline text buffer.`
   );
@@ -86,7 +86,7 @@ function asOfflineAudioBufferInfo(info: unknown): OfflineAudioBufferInfo {
   ) {
     return info as OfflineAudioBufferInfo;
   }
-  throw createStrategyAError(
+  throw createAsrMediatedError(
     'ALIGNMENT_OPTIONS_INVALID',
     'audioIn must resolve to an offline audio buffer.'
   );
@@ -103,7 +103,7 @@ function asOfflineSegmentBufferInfo(
   ) {
     return info as OfflineSegmentBufferInfo;
   }
-  throw createStrategyAError(
+  throw createAsrMediatedError(
     'ALIGNMENT_OPTIONS_INVALID',
     `${fieldName} must resolve to an offline segment buffer.`
   );
@@ -158,7 +158,7 @@ function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function toSpeechAnchors(segments: unknown[]): StrategyAAnchor[] {
+function toSpeechAnchors(segments: unknown[]): AsrMediatedAnchor[] {
   return segments
     .filter(
       (segment): segment is SpeechSegmentMeta =>
@@ -177,9 +177,9 @@ function toSpeechAnchors(segments: unknown[]): StrategyAAnchor[] {
 
 function buildAnchorJobs(
   referenceText: string,
-  anchors: StrategyAAnchor[],
-  units: StrategyAAnchorJob['mappingUnits']
-): StrategyAAnchorJob[] {
+  anchors: AsrMediatedAnchor[],
+  units: AsrMediatedAnchorJob['mappingUnits']
+): AsrMediatedAnchorJob[] {
   const anchorsById = new Map(anchors.map((anchor) => [anchor.id, anchor]));
   const grouped = new Map<string, typeof units>();
 
@@ -195,7 +195,7 @@ function buildAnchorJobs(
     current.push(unit);
   }
 
-  const jobs: StrategyAAnchorJob[] = [];
+  const jobs: AsrMediatedAnchorJob[] = [];
   for (const [anchorSegmentId, groupedUnits] of grouped.entries()) {
     const anchor = anchorsById.get(anchorSegmentId);
     if (!anchor) {
@@ -240,7 +240,7 @@ function buildAnchorJobs(
 }
 
 function assertAnchorRangeWithinAudio(
-  anchor: StrategyAAnchor,
+  anchor: AsrMediatedAnchor,
   audioInfo: OfflineAudioBufferInfo
 ): void {
   if (
@@ -248,22 +248,22 @@ function assertAnchorRangeWithinAudio(
     anchor.endSample <= anchor.startSample ||
     anchor.endSample > audioInfo.numSamples
   ) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_ANCHOR_OUT_OF_RANGE',
       `Anchor ${anchor.id} exceeds audio bounds (${anchor.startSample}-${anchor.endSample} over 0-${audioInfo.numSamples}).`
     );
   }
 }
 
-interface StrategyANativeSubtitle {
+interface AsrMediatedNativeSubtitle {
   text: string;
   start: number;
   end: number;
 }
 
-function parseStrategyANativeSubtitles(
+function parseAsrMediatedNativeSubtitles(
   raw: unknown
-): StrategyANativeSubtitle[] {
+): AsrMediatedNativeSubtitle[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -294,15 +294,15 @@ function parseStrategyANativeSubtitles(
         end: safeEnd,
       };
     })
-    .filter((item): item is StrategyANativeSubtitle => item != null);
+    .filter((item): item is AsrMediatedNativeSubtitle => item != null);
 }
 
 function toAggregatedSegments(
-  anchor: StrategyAAnchor,
+  anchor: AsrMediatedAnchor,
   sourceAudioBufferId: string,
   granularity: 'sentence' | 'word',
-  nativeSubtitles: StrategyANativeSubtitle[]
-): StrategyAAggregatedAlignmentSegment[] {
+  nativeSubtitles: AsrMediatedNativeSubtitle[]
+): AsrMediatedAggregatedAlignmentSegment[] {
   return nativeSubtitles.map((subtitle) => {
     const localStart = Math.max(
       0,
@@ -340,7 +340,7 @@ function toAggregatedSegments(
   });
 }
 
-function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
+function mapNativeAsrMediatedError(error: unknown): AsrMediatedRuntimeError {
   const errorObj =
     typeof error === 'object' && error != null
       ? (error as { code?: unknown; message?: unknown })
@@ -365,7 +365,7 @@ function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
     codeFromObject.length > 0 ? codeFromObject : codeFromMessage;
 
   if (normalizedCode === 'OFFLINE_OOM') {
-    return createStrategyAError(
+    return createAsrMediatedError(
       'OFFLINE_OOM',
       messageFromError || 'OFFLINE_OOM: Native alignment ran out of memory.',
       error
@@ -377,7 +377,7 @@ function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
     normalizedCode === 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' ||
     normalizedCode === 'ALIGNMENT_NATIVE_ACCURATE_FAILED'
   ) {
-    return createStrategyAError(
+    return createAsrMediatedError(
       normalizedCode,
       messageFromError ||
         `${normalizedCode}: Native accurate alignment failed.`,
@@ -385,7 +385,7 @@ function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
     );
   }
 
-  return createStrategyAError(
+  return createAsrMediatedError(
     'ALIGNMENT_NATIVE_UNKNOWN',
     messageFromError ||
       'ALIGNMENT_NATIVE_UNKNOWN: Native accurate alignment failed with an unknown error.',
@@ -393,7 +393,7 @@ function mapNativeStrategyAError(error: unknown): StrategyARuntimeError {
   );
 }
 
-interface RunAccurateStrategyAInput {
+interface RunAccurateAsrMediatedInput {
   textIn: OfflineTextBufferIdSource;
   audioIn: OfflineAudioBufferIdSource;
   segmentOut: OfflineSegmentBufferIdSource;
@@ -404,8 +404,8 @@ interface RunAccurateStrategyAInput {
   language?: string;
 }
 
-export async function runAccurateStrategyA(
-  input: RunAccurateStrategyAInput
+export async function runAccurateAsrMediated(
+  input: RunAccurateAsrMediatedInput
 ): Promise<AlignTextToAudioWriteResult> {
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(input.audioIn);
@@ -445,9 +445,9 @@ export async function runAccurateStrategyA(
     'segmentOut'
   );
   if ((segmentOutInfo.segmentCount ?? 0) > 0) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_OPTIONS_INVALID',
-      'segmentOut must be an empty offline segment buffer for Strategy A output materialization.'
+      'segmentOut must be an empty offline segment buffer for asrMediated output materialization.'
     );
   }
   const granularity = normalizeGranularity(input.granularity);
@@ -464,9 +464,9 @@ export async function runAccurateStrategyA(
   });
 
   if (linkerResult.mappingUnits.length === 0) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_LINKER_NO_MAPPING',
-      'Linker returned no usable mapping units for Strategy A.'
+      'Linker returned no usable mapping units for asrMediated.'
     );
   }
 
@@ -477,7 +477,7 @@ export async function runAccurateStrategyA(
   );
   const anchors = toSpeechAnchors(anchorsRaw);
   if (anchors.length === 0) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_LINKER_INPUT_INVALID',
       'Anchor segment buffer must contain at least one speech segment.'
     );
@@ -489,13 +489,13 @@ export async function runAccurateStrategyA(
     linkerResult.mappingUnits
   );
   if (jobs.length === 0) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_LINKER_NO_MAPPING',
       'No anchor jobs could be materialized from linker units.'
     );
   }
 
-  const aggregatedSegments: StrategyAAggregatedAlignmentSegment[] = [];
+  const aggregatedSegments: AsrMediatedAggregatedAlignmentSegment[] = [];
 
   for (const job of jobs) {
     assertAnchorRangeWithinAudio(job.anchor, audioInfo);
@@ -520,11 +520,11 @@ export async function runAccurateStrategyA(
           typeof input.language === 'string' ? input.language : undefined
         );
       } catch (error) {
-        throw mapNativeStrategyAError(error);
+        throw mapNativeAsrMediatedError(error);
       }
     })();
 
-    const nativeSubtitles = parseStrategyANativeSubtitles(
+    const nativeSubtitles = parseAsrMediatedNativeSubtitles(
       (nativeResultRaw as { subtitles?: unknown }).subtitles
     );
     if (nativeSubtitles.length === 0) {
@@ -542,9 +542,9 @@ export async function runAccurateStrategyA(
   }
 
   if (aggregatedSegments.length === 0) {
-    throw createStrategyAError(
+    throw createAsrMediatedError(
       'ALIGNMENT_LINKER_NO_MAPPING',
-      'Strategy A produced no aligned segments after per-anchor accurate runs.'
+      'asrMediated produced no aligned segments after per-anchor accurate runs.'
     );
   }
 
@@ -579,9 +579,9 @@ export async function runAccurateStrategyA(
         'fullIfSpooled'
       );
     } catch (error) {
-      throw createStrategyAError(
+      throw createAsrMediatedError(
         'ALIGNMENT_OPTIONS_INVALID',
-        'Failed to materialize Strategy A output into caller-provided segmentOut buffer.',
+        'Failed to materialize asrMediated output into caller-provided segmentOut buffer.',
         error
       );
     }

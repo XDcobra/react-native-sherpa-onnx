@@ -2,7 +2,7 @@
 
 ## Status
 - **Completed (2026-04-30)**
-- Depends on: sub-01 (surface), sub-02 (linker), sub-03 (Strategy A), sub-04 (Strategy B)
+- Depends on: sub-01 (surface), sub-02 (linker), sub-03 (`asrMediated`), sub-04 (`chunkedForcedCtc`)
 - Prerequisite for: sub-06 (parity tests), sub-07 (docs / cutover)
 
 ---
@@ -11,7 +11,7 @@
 
 Make the native side correct and **identical between Android and iOS** for:
 
-- Slice-based PCM reads from `OfflineAudioBuffer` for per-anchor processing (Strategy A and B).
+- Slice-based PCM reads from `OfflineAudioBuffer` for per-anchor processing (`asrMediated` and `chunkedForcedCtc`).
 - Native bridge methods registered in `NativeSherpaOnnx.ts` for:
   - `AlignAccurateFromPcm` (existing; revisit for slice support).
   - `AlignAccurateForcedCtcFromPcm` (new in sub-04).
@@ -58,7 +58,7 @@ AlignAccurateFromPcm({
 })
 ```
 
-For Strategy B:
+For `chunkedForcedCtc`:
 
 ```
 AlignAccurateForcedCtcFromPcm({

@@ -1,11 +1,11 @@
-# Sub-Plan 04 — Accurate / Strategy B Integration (Chunked Forced CTC)
+# Sub-Plan 04 — Accurate / chunkedForcedCtc Integration (Chunked Forced CTC)
 
 ## Status
 - **Completed (2026-04-30)**
 - Depends on: sub-01
 - Prerequisite for: sub-05 (parity), sub-06 (test matrix), sub-07 (docs)
 
-> Note: independent of sub-02 (linker is **not** used in Strategy B).
+> Note: independent of sub-02 (linker is **not** used in `chunkedForcedCtc`).
 
 ---
 
@@ -35,7 +35,7 @@ Pipeline (alignment-only, no ASR dependency):
 
 ## 2. Non-Goals
 
-- No ASR / linker dependency (intentional: Strategy B is alignment-only).
+- No ASR / linker dependency (intentional: `chunkedForcedCtc` is alignment-only).
 - No anchor production logic; depends on caller providing anchors via `audioIn` / segmentation engine attachment.
 - No silent fallback to row 3.
 - No backtracking across anchors (a token consumed by anchor `n` is final for that anchor).
@@ -55,7 +55,7 @@ Pipeline (alignment-only, no ASR dependency):
 ### 4.1 Driver location
 
 ```
-src/alignment/strategyB/
+src/alignment/chunkedForcedCtc/
   driver.ts
   cursor.ts        // R token/char cursor + window heuristics
   types.ts
@@ -65,7 +65,7 @@ src/alignment/strategyB/
 ### 4.2 Driver outline
 
 ```typescript
-async function runAccurateStrategyB(opts: {
+async function runAccurateChunkedForcedCtc(opts: {
   textIn: OfflineTextBufferRef;
   audioIn: OfflineAudioBufferRef;
   anchors: OfflineSegmentBufferRef;
@@ -123,12 +123,12 @@ Failure: throws/rejects with structured error including `code: 'FORCED_CTC_FAILE
 
 ### TypeScript
 
-- [x] `src/alignment/strategyB/driver.ts` per §4.2.
-- [x] `src/alignment/strategyB/cursor.ts`:
+- [x] `src/alignment/chunkedForcedCtc/driver.ts` per §4.2.
+- [x] `src/alignment/chunkedForcedCtc/cursor.ts`:
   - [x] Token-aware cursor (token + word granularity).
   - [x] Window sizing rule documented as constants.
 - [x] `src/alignment/alignTextToAudio.ts`:
-  - [x] Route `mode === 'accurate' && segmentation?.mode === 'auto' && mappingStrategy === 'chunked_forced_ctc'` → `runAccurateStrategyB`.
+  - [x] Route `mode === 'accurate' && segmentation?.mode === 'auto' && mappingStrategy === 'chunked_forced_ctc'` → `runAccurateChunkedForcedCtc`.
 
 ### Native
 
@@ -176,23 +176,23 @@ Warnings on result:
 
 ### Unit
 
-- `src/alignment/strategyB/__tests__/cursor.test.ts` — advancement, window math, granularity.
-- `src/alignment/strategyB/__tests__/driver-options.test.ts` — invalid options.
-- `src/alignment/strategyB/__tests__/driver-progress.test.ts` — warning vs error transitions.
+- `src/alignment/chunkedForcedCtc/__tests__/cursor.test.ts` — advancement, window math, granularity.
+- `src/alignment/chunkedForcedCtc/__tests__/driver-options.test.ts` — invalid options.
+- `src/alignment/chunkedForcedCtc/__tests__/driver-progress.test.ts` — warning vs error transitions.
 
 ### Integration (mocked native)
 
-- `src/alignment/strategyB/__tests__/driver-pipeline.test.ts`:
+- `src/alignment/chunkedForcedCtc/__tests__/driver-pipeline.test.ts`:
   - Mocks `AlignAccurateForcedCtcFromPcm` to consume known token counts per anchor.
   - Asserts cursor advancement.
   - Asserts global timestamps.
   - Asserts residual warning when last anchor under-consumes.
-- `src/alignment/strategyB/__tests__/driver-stuck.test.ts`:
+- `src/alignment/chunkedForcedCtc/__tests__/driver-stuck.test.ts`:
   - Mock returns 0 consumed twice → throws `ALIGNMENT_FORCED_CTC_STUCK`.
 
 ### Contract
 
-- `src/alignment/strategyB/__tests__/native-spec.test.ts`:
+- `src/alignment/chunkedForcedCtc/__tests__/native-spec.test.ts`:
   - Asserts the JS-side `NativeSherpaOnnx` spec includes `AlignAccurateForcedCtcFromPcm`.
 
 ---
@@ -240,4 +240,4 @@ Warnings on result:
 
 | Date | Change |
 |------|--------|
-| 2026-04-30 | P4 completed: Strategy B (`chunked_forced_ctc`) wired with cursor+window driver, native forced-CTC bridge entry added on Android/iOS, and Strategy B Jest suite added (`cursor`, `driver-options`, `driver-progress`, `driver-pipeline`, `driver-stuck`, `native-spec`) |
+| 2026-04-30 | P4 completed: `chunkedForcedCtc` (`chunked_forced_ctc`) wired with cursor+window driver, native forced-CTC bridge entry added on Android/iOS, and `chunkedForcedCtc` Jest suite added (`cursor`, `driver-options`, `driver-progress`, `driver-pipeline`, `driver-stuck`, `native-spec`) |

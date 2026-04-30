@@ -1,19 +1,19 @@
 import type { LinkerMappingUnit, LinkerResultV0 } from '../linker/types';
 
-export interface StrategyAAnchor {
+export interface AsrMediatedAnchor {
   id: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
 }
 
-export interface StrategyAAnchorJob {
-  anchor: StrategyAAnchor;
+export interface AsrMediatedAnchorJob {
+  anchor: AsrMediatedAnchor;
   referenceText: string;
   mappingUnits: LinkerMappingUnit[];
 }
 
-export interface StrategyAAggregatedAlignmentSegment {
+export interface AsrMediatedAggregatedAlignmentSegment {
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
@@ -31,7 +31,7 @@ export interface StrategyAAggregatedAlignmentSegment {
   };
 }
 
-export interface StrategyAIntermediateResult {
+export interface AsrMediatedIntermediateResult {
   linkerResult: LinkerResultV0;
-  segments: StrategyAAggregatedAlignmentSegment[];
+  segments: AsrMediatedAggregatedAlignmentSegment[];
 }

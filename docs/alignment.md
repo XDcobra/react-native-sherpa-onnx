@@ -31,8 +31,8 @@ Granularity rules:
 | `estimated` | `sentence`, `word` | Offline text + `segmentSampleCounts` (+ optional `sampleRate`) | Uses estimated chunk/sample timeline to assign timestamps | Not forced alignment; quality depends on provided chunk counts |
 | `accurate` | `sentence`, `word`, `character` | Offline text + offline audio + wav2vec2 alignment model | CTC forced alignment on waveform and text | `character` is supported only in plain `accurate` (without segmentation) |
 | `vad` | `sentence`, `word` | Offline text + VAD speech anchors from `seg_off_*` | Splits text by granularity, then maps units monotonically to VAD speech anchors (`vadMonotonicWeightDP`) and writes `alignment` segments only for mapped units | If `textUnits > vadAnchors`, multiple units merge into one output segment |
-| `accurate` + `mappingStrategy: 'asr_mediated'` | `sentence`, `word` | Offline text + offline audio + wav2vec2 + speech anchors + hypothesis text buffer with token timestamps | Linker-assisted per-anchor accurate alignment (Strategy A, row 4a) | Missing timestamps reject with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`; no fallback |
-| `accurate` + `mappingStrategy: 'chunked_forced_ctc'` | `sentence`, `word` | Offline text + offline audio + wav2vec2 + speech anchors | Cursor-driven per-anchor forced CTC (Strategy B, row 4b) | Emits deterministic progress/residual warnings; no fallback |
+| `accurate` + `mappingStrategy: 'asr_mediated'` | `sentence`, `word` | Offline text + offline audio + wav2vec2 + speech anchors + hypothesis text buffer with token timestamps | Linker-assisted per-anchor accurate alignment (asrMediated, row 4a) | Missing timestamps reject with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`; no fallback |
+| `accurate` + `mappingStrategy: 'chunked_forced_ctc'` | `sentence`, `word` | Offline text + offline audio + wav2vec2 + speech anchors | Cursor-driven per-anchor forced CTC (chunkedForcedCtc, row 4b) | Emits deterministic progress/residual warnings; no fallback |
 
 For `vad` mode, mismatch behavior is deterministic by design:
 - `textUnits > vadAnchors`: multiple text units can be merged into one anchor/segment.
@@ -40,8 +40,8 @@ For `vad` mode, mismatch behavior is deterministic by design:
 - `vadAnchorCount = 0`: valid success path with `segmentsWritten = 0` (no reject).
 
 For `accurate` with segmentation auto:
-- Strategy A requires caller-provided hypothesis token timestamps.
-- Strategy B runs without ASR dependency.
+- `asrMediated` requires caller-provided hypothesis token timestamps.
+- `chunkedForcedCtc` runs without ASR dependency.
 - Both paths are anchor-constrained and deterministic; no silent fallback to other modes.
 
 ### Common surprises
@@ -51,8 +51,8 @@ For `accurate` with segmentation auto:
 - Short utterances such as `"Hello World"` often become a single VAD speech anchor.
   - With one anchor and two words, output is typically one `alignment` segment with combined text.
 - If you need long-form accurate alignment, prefer `accurate` with `segmentation.mode='auto'`:
-  - `mappingStrategy: 'asr_mediated'` (Strategy A, row 4a)
-  - `mappingStrategy: 'chunked_forced_ctc'` (Strategy B, row 4b)
+  - `mappingStrategy: 'asr_mediated'` (`asrMediated`, row 4a)
+  - `mappingStrategy: 'chunked_forced_ctc'` (`chunkedForcedCtc`, row 4b)
 
 ## Quick start
 
@@ -135,7 +135,7 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 });
 ```
 
-### `accurate + auto` Strategy A (`asr_mediated`)
+### `accurate + auto` asrMediated (`asr_mediated`)
 
 ```ts
 // 1) VAD standalone: create speech anchors in an offline segment buffer.
@@ -154,7 +154,7 @@ await vad.process({
   options: { chunkSize: 512 },
 });
 
-// 2) Alignment Strategy A: caller provides anchors + hypothesis buffer with timestamps.
+// 2) Alignment asrMediated: caller provides anchors + hypothesis buffer with timestamps.
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
@@ -170,7 +170,7 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 });
 ```
 
-### `accurate + auto` Strategy B (`chunked_forced_ctc`)
+### `accurate + auto` chunkedForcedCtc (`chunked_forced_ctc`)
 
 ```ts
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
@@ -276,8 +276,8 @@ function assertAlignmentGranularityForMode(
 | `ALIGNMENT_MODEL_MISSING` | accurate mode without `modelPath` |
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
 | `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` | ASR-mediated strategy requires timestamped hypothesis tokens |
-| `ALIGNMENT_LINKER_NO_MAPPING` | Strategy A linker produced no usable mapping units |
-| `ALIGNMENT_FORCED_CTC_STUCK` | Strategy B had no progress on two consecutive anchors |
+| `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
+| `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on two consecutive anchors |
 | `ALIGNMENT_NATIVE_UNKNOWN` | native bridge returned unknown error shape |
 | `OFFLINE_OOM` | not enough memory for offline alignment |
 

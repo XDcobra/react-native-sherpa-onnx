@@ -1,7 +1,7 @@
 import type {
-  StrategyBCursorState,
-  StrategyBCursorUnit,
-  StrategyBCursorWindow,
+  ChunkedForcedCtcCursorState,
+  ChunkedForcedCtcCursorUnit,
+  ChunkedForcedCtcCursorWindow,
 } from './types';
 
 const WORD_WINDOW_MIN_UNITS = 3;
@@ -18,8 +18,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function splitWordUnits(sourceText: string): StrategyBCursorUnit[] {
-  const units: StrategyBCursorUnit[] = [];
+function splitWordUnits(sourceText: string): ChunkedForcedCtcCursorUnit[] {
+  const units: ChunkedForcedCtcCursorUnit[] = [];
   const wordRegex = /\S+/g;
   let match = wordRegex.exec(sourceText);
   while (match != null) {
@@ -34,8 +34,8 @@ function splitWordUnits(sourceText: string): StrategyBCursorUnit[] {
   return units;
 }
 
-function splitSentenceUnits(sourceText: string): StrategyBCursorUnit[] {
-  const units: StrategyBCursorUnit[] = [];
+function splitSentenceUnits(sourceText: string): ChunkedForcedCtcCursorUnit[] {
+  const units: ChunkedForcedCtcCursorUnit[] = [];
 
   let segmentStart = 0;
   const n = sourceText.length;
@@ -93,10 +93,10 @@ function resolveWindowUnitCount(
 }
 
 function windowFromRange(
-  cursor: StrategyBCursorState,
+  cursor: ChunkedForcedCtcCursorState,
   startUnitIndex: number,
   endUnitIndex: number
-): StrategyBCursorWindow {
+): ChunkedForcedCtcCursorWindow {
   if (startUnitIndex >= endUnitIndex) {
     return {
       text: '',
@@ -133,10 +133,10 @@ function windowFromRange(
   };
 }
 
-export function createStrategyBCursor(
+export function createChunkedForcedCtcCursor(
   sourceText: string,
   granularity: 'sentence' | 'word'
-): StrategyBCursorState {
+): ChunkedForcedCtcCursorState {
   const normalized = sourceText.trim();
   const units =
     granularity === 'word'
@@ -151,18 +151,22 @@ export function createStrategyBCursor(
   };
 }
 
-export function getRemainingUnitCount(cursor: StrategyBCursorState): number {
+export function getRemainingUnitCount(
+  cursor: ChunkedForcedCtcCursorState
+): number {
   return Math.max(0, cursor.units.length - cursor.cursorIndex);
 }
 
-export function isCursorExhausted(cursor: StrategyBCursorState): boolean {
+export function isCursorExhausted(
+  cursor: ChunkedForcedCtcCursorState
+): boolean {
   return getRemainingUnitCount(cursor) === 0;
 }
 
 export function peekCursorWindow(
-  cursor: StrategyBCursorState,
+  cursor: ChunkedForcedCtcCursorState,
   anchorDurationMs: number
-): StrategyBCursorWindow {
+): ChunkedForcedCtcCursorWindow {
   if (isCursorExhausted(cursor)) {
     return {
       text: '',
@@ -181,9 +185,9 @@ export function peekCursorWindow(
 }
 
 export function peekCursorPrefix(
-  cursor: StrategyBCursorState,
+  cursor: ChunkedForcedCtcCursorState,
   consumedUnitCount: number
-): StrategyBCursorWindow {
+): ChunkedForcedCtcCursorWindow {
   const safeCount = Number.isFinite(consumedUnitCount)
     ? Math.max(0, Math.trunc(consumedUnitCount))
     : 0;
@@ -207,7 +211,7 @@ export function peekCursorPrefix(
 }
 
 export function advanceCursor(
-  cursor: StrategyBCursorState,
+  cursor: ChunkedForcedCtcCursorState,
   consumedUnitCount: number
 ): number {
   const safeCount = Number.isFinite(consumedUnitCount)

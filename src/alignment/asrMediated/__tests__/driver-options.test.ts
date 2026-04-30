@@ -92,7 +92,7 @@ jest.mock('../../linker/linker', () => ({
 }));
 
 import SherpaOnnx from '../../../NativeSherpaOnnx';
-import { runAccurateStrategyA } from '../driver';
+import { runAccurateAsrMediated } from '../driver';
 
 const linker = jest.requireMock('../../linker/linker') as {
   runLinker: jest.Mock;
@@ -106,7 +106,7 @@ const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   getOfflineSegmentBufferSegments: jest.Mock;
 };
 
-describe('strategyA/driver options', () => {
+describe('asrMediated/driver options', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -133,7 +133,7 @@ describe('strategyA/driver options', () => {
     segmentbuffer.getOfflineSegmentBufferSegments.mockResolvedValue([]);
 
     await expect(
-      runAccurateStrategyA({
+      runAccurateAsrMediated({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -156,7 +156,7 @@ describe('strategyA/driver options', () => {
     });
 
     await expect(
-      runAccurateStrategyA({
+      runAccurateAsrMediated({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -208,7 +208,7 @@ describe('strategyA/driver options', () => {
     );
 
     await expect(
-      runAccurateStrategyA({
+      runAccurateAsrMediated({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',

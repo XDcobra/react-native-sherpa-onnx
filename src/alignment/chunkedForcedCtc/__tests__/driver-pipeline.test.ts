@@ -105,7 +105,7 @@ jest.mock('../../../segmentbuffer', () => ({
   releasePipelineSegmentBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { runAccurateStrategyB } from '../driver';
+import { runAccurateChunkedForcedCtc } from '../driver';
 import SherpaOnnx from '../../../NativeSherpaOnnx';
 
 const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
@@ -115,9 +115,9 @@ const native = SherpaOnnx as unknown as {
   alignAccurateForcedCtcFromPcm: jest.Mock;
 };
 
-describe('strategyB/driver pipeline', () => {
+describe('chunkedForcedCtc/driver pipeline', () => {
   test('advances cursor across anchors and writes global timestamps', async () => {
-    const out = await runAccurateStrategyB({
+    const out = await runAccurateChunkedForcedCtc({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',

@@ -118,15 +118,15 @@ jest.mock('../../linker/linker', () => ({
   }),
 }));
 
-import { runAccurateStrategyA } from '../driver';
+import { runAccurateAsrMediated } from '../driver';
 
 const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   appendLiveSegment: jest.Mock;
 };
 
-describe('strategyA/driver offset', () => {
+describe('asrMediated/driver offset', () => {
   test('applies anchor start offset to local accurate timestamps', async () => {
-    await runAccurateStrategyA({
+    await runAccurateAsrMediated({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',

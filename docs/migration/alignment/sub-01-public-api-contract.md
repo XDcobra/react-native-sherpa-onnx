@@ -22,7 +22,7 @@ Define and ship the **target public surface** of the alignment feature with no b
 ## 2. Non-Goals
 
 - No linker logic (sub-02).
-- No Strategy A or B implementation (sub-03/04).
+- No `asrMediated` or `chunkedForcedCtc` implementation (sub-03/04).
 - No new native model paths.
 - No native parity work beyond keeping current behavior intact.
 
@@ -170,8 +170,8 @@ export function createAlignment(
 | `ALIGNMENT_OPTIONS_INVALID` | JS | Mode discriminator wrong / unknown enum |
 | `ALIGNMENT_MODEL_PATH_INVALID` | JS | Accurate mode without `modelPath: ModelPathConfig` |
 | `ALIGNMENT_GRANULARITY_INVALID` | JS | Granularity not allowed for selected mode |
-| `ALIGNMENT_ASR_HYPOTHESIS_MISSING` | JS | Strategy A without `asr.hypothesisTextBuffer` |
-| `ALIGNMENT_NOT_IMPLEMENTED` | JS | Strategy A/B requested before sub-03/04 ship |
+| `ALIGNMENT_ASR_HYPOTHESIS_MISSING` | JS | `asrMediated` without `asr.hypothesisTextBuffer` |
+| `ALIGNMENT_NOT_IMPLEMENTED` | JS | `asrMediated`/`chunkedForcedCtc` requested before sub-03/04 ship |
 | `ALIGNMENT_ENGINE_DESTROYED` | JS | Method called after `destroy()` |
 
 > Codes are `error.message` prefix tokens; JS layer wraps with `Error` containing `code` field.
@@ -230,8 +230,8 @@ export function createAlignment(
 | Blocks | Reason |
 |--------|--------|
 | sub-02 | Linker is consumed via engine method |
-| sub-03 | Strategy A wires through engine |
-| sub-04 | Strategy B wires through engine |
+| sub-03 | `asrMediated` wires through engine |
+| sub-04 | `chunkedForcedCtc` wires through engine |
 | sub-05 | Native parity work piggybacks on engine surface |
 | sub-07 | Docs & cutover assume engine API exists |
 

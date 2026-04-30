@@ -23,12 +23,12 @@ Related legacy notes (superseded for mapping semantics when this plan lands):
 
 ## Architecture decision: where each strategy lives
 
-| Strategy | Owner (SDK component) | Rationale |
-|----------|------------------------|-----------|
-| **A — ASR-mediated** | **Dedicated linker/orchestrator** (Path 3: see below) **+** Alignment | Produces **reference text ↔ audio time** couplings and per-anchor text spans; **reusable** beyond alignment (subtitles, karaoke, search/indexing). **Not** implemented as a new SegmentationEngine policy (keeps the engine lean; avoids ASR+DTW as a “policy” inside the same surface as energy/VAD). |
-| **B — Chunked forced CTC + token cursor** | **Alignment engine / alignment native path only** | Text consumption is **driven by the CTC model**; not a separable cross-domain segmenter. No meaningful reuse for other features without the alignment model. |
+| Internal name | Owner (SDK component) | Rationale |
+|---------------|------------------------|-----------|
+| **asrMediated** | **Dedicated linker/orchestrator** (Path 3: see below) **+** Alignment | Produces **reference text ↔ audio time** couplings and per-anchor text spans; **reusable** beyond alignment (subtitles, karaoke, search/indexing). **Not** implemented as a new SegmentationEngine policy (keeps the engine lean; avoids ASR+DTW as a “policy” inside the same surface as energy/VAD). |
+| **chunkedForcedCtc** | **Alignment engine / alignment native path only** | Text consumption is **driven by the CTC model**; not a separable cross-domain segmenter. No meaningful reuse for other features without the alignment model. |
 
-**Path 3 (Strategy A) in one sentence:** introduce a **reusable cross-domain module** (working name: **transcript–audio linker** or similar) that:
+**Path 3 (`asrMediated`) in one sentence:** introduce a **reusable cross-domain module** (working name: **transcript–audio linker** or similar) that:
 
 - consumes **speech anchors** (from SegmentationEngine, e.g. `speech_vad_model` on offline audio),
 - consumes a **caller-filled hypothesis `OfflineTextBuffer`** **H** (tokens + timestamps from STT — the **caller** runs `transcribe` before alignment; **`AlignmentEngine#alignTextToAudio` does not invoke STT** for ASR-mediated),
@@ -134,7 +134,7 @@ Field names (`anchorSegmentBuffer`, `mappingStrategy`, nested `segmentation`) ar
 <td><code>accurate</code></td>
 <td><strong>On</strong> (<code>segmentation</code> with <code>mode: 'auto'</code> and speech policy, e.g. <code>speech_vad_model</code>; anchors in <code>seg_off_*</code>; <strong>pre-filled ASR hypothesis buffer</strong> for linker)</td>
 <td><strong>Yes</strong></td>
-<td><strong>Strategy A — ASR-mediated</strong> via <strong>linker (Path 3)</strong> + CTC in Alignment</td>
+<td><strong>asrMediated — ASR-mediated</strong> via <strong>linker (Path 3)</strong> + CTC in Alignment</td>
 <td>Caller runs <strong><code>transcribe</code> → H</strong>; segmentation → speech anchors; <strong>linker</strong> → per-anchor reference spans (R↔H DTW); <strong>AlignmentEngine</strong> path → CTC per slice only. <strong>No internal STT</strong> on <strong><code>engine.alignTextToAudio</code></strong>. <strong>OOM-safe</strong> (long audio). Reusable linker for future non-alignment features.</td>
 <td><code>mappingStrategy: 'asr_mediated'</code> + <code>segmentation</code> with <code>anchorSegmentBuffer</code> + <code>asr.hypothesisTextBuffer</code> — <strong>expanded:</strong> <a href="#target-options-sketches-by-row">§ Row 4a</a></td>
 </tr>
@@ -143,7 +143,7 @@ Field names (`anchorSegmentBuffer`, `mappingStrategy`, nested `segmentation`) ar
 <td><code>accurate</code></td>
 <td><strong>On</strong> (same anchor contract as 4a)</td>
 <td><strong>Yes</strong></td>
-<td><strong>Strategy B — Chunked forced CTC + token cursor</strong> (Alignment <strong>only</strong>)</td>
+<td><strong>chunkedForcedCtc — Chunked forced CTC + token cursor</strong> (Alignment <strong>only</strong>)</td>
 <td>No ASR; cursor + windowed CTC per anchor; <strong>OOM-safe</strong>; more edge-case sensitive than A.</td>
 <td>Same as 4a but <code>mappingStrategy: 'chunked_forced_ctc'</code> and <strong>no</strong> <code>asr</code> block — <strong>expanded:</strong> <a href="#target-options-sketches-by-row">§ Row 4b</a></td>
 </tr>
@@ -280,7 +280,7 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 
 ---
 
-## `accurate` — segmentation on: Strategy A (ASR-mediated, Path 3 linker)
+## `accurate` — segmentation on: asrMediated (ASR-mediated, Path 3 linker)
 
 **Goal:** Robust, data-driven assignment of **which substring of the reference transcript** belongs to **which speech anchor window**, without length-only heuristics — implemented so the **same building block** can serve alignment today and **subtitles / karaoke / indexing** tomorrow.
 
@@ -311,14 +311,14 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 **Hypothesis must carry token timestamps (deterministic, no fallback):**
 
 - ASR-mediated requires the STT hypothesis **H** (`OfflineTextBuffer` after `transcribe`) to expose **token-level timestamps** via the existing text-buffer metadata (e.g. **`timestampCount > 0`** from `getPipelineTextBufferInfo`, consistent with `getOfflineTextBufferTimestampsSlice`). Not every sherpa-onnx STT model populates `r.timestamps`; that is **model- and configuration-dependent**.
-- If **`timestampCount === 0`** (or timestamps cannot be paired with tokens for linking), implementations **must reject** with a dedicated error — **no silent fallback** to Strategy B, monotonic weight mapping, or other heuristics inside ASR-mediated.
+- If **`timestampCount === 0`** (or timestamps cannot be paired with tokens for linking), implementations **must reject** with a dedicated error — **no silent fallback** to `chunkedForcedCtc`, monotonic weight mapping, or other heuristics inside ASR-mediated.
 - **Suggested code:** **`ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`**. Error text should instruct the caller to use an STT pack/settings that emit token timestamps (per model docs), or to choose another **`mappingStrategy`** / **`accurate`** variant / mode (`chunked_forced_ctc`, full-buffer `accurate`, `proportional`, `estimated`, `vad`, etc.).
 
 **Codebase + target TS call site:** see [alignment-asr-mediated-ts-example.md](alignment-asr-mediated-ts-example.md) (verified STT → `OfflineTextBuffer` + token/timestamp slices; `segmentOfflineBuffer` anchors; **`createAlignment` + `engine.alignTextToAudio`** after implementation; timestamp requirement and error code).
 
 ---
 
-## `accurate` — segmentation on: Strategy B (chunked forced CTC + token cursor, Alignment only)
+## `accurate` — segmentation on: chunkedForcedCtc (chunked forced CTC + token cursor, Alignment only)
 
 **Goal:** Long-form safe path **without** requiring ASR on the alignment route.
 
@@ -425,8 +425,8 @@ type LinkerResultV0 = {
 1. **`AlignmentEngine` public surface:** Introduce **`createAlignment`**, **`AlignmentEngine`** with **`alignTextToAudio`**, **`destroy`**. **Remove** exported freestanding **`alignTextToAudio`**; update `src/alignment/index.ts`, tests, and examples. Optional split methods only if option types become unwieldy. Implementation checklist and DoD: `docs/migration/alignment/sub-01-public-api-contract.md`.
 2. **Types & public contract:** Add strategy discriminator for `accurate` + segmentation on (e.g. `mappingStrategy: 'asr_mediated' | 'chunked_forced_ctc'`). Keep standalone timing mode as **`mode: 'vad'`** (row 5). Register **`ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`** for ASR-mediated when `timestampCount === 0` (deterministic; document in `docs/alignment.md`).
 3. **Linker (Path 3):** Define module boundary, inputs/outputs (buffers + link map / span list), ASR + DTW integration; unit tests independent of alignment.
-4. **Strategy A:** Wire `mappingStrategy: 'asr_mediated'` → linker → per-anchor CTC in alignment; **remove** monotonic weight mapping from this path. Validate hypothesis timestamps before DTW; **fail fast** if missing.
-5. **Strategy B:** Implement **only** inside alignment; wire `mappingStrategy: 'chunked_forced_ctc'`; remove heuristic from this path when ready.
+4. **asrMediated:** Wire `mappingStrategy: 'asr_mediated'` → linker → per-anchor CTC in alignment; **remove** monotonic weight mapping from this path. Validate hypothesis timestamps before DTW; **fail fast** if missing.
+5. **chunkedForcedCtc:** Implement **only** inside alignment; wire `mappingStrategy: 'chunked_forced_ctc'`; remove heuristic from this path when ready.
 6. **Tests:** long-audio fixtures (synthetic + real), mismatch cases, empty anchors, `minAnchors` thresholds; linker tests without full alignment where possible.
 7. **Docs:** update `docs/alignment.md` and retire/supersede paragraphs that mandate `vadMonotonicWeightDP` for constrained accurate.
 8. **Future:** expose linker APIs for non-alignment features (subtitles, karaoke, indexing) when product-ready — **without** moving linker logic into SegmentationEngine.

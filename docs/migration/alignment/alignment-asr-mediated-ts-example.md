@@ -28,7 +28,7 @@ Strategy **`mappingStrategy: 'asr_mediated'`** is **only defined** when the hypo
 
 **Contract (target implementation):**
 
-- After `transcribe` (or equivalent), if **`getPipelineTextBufferInfo(hypothesisBufferId).timestampCount === 0`** (or timestamps unusable for pairing with hypothesis tokens), the SDK **must fail** with an explicit error — **no silent fallback** to proportional mapping, Strategy B, or another heuristic.
+- After `transcribe` (or equivalent), if **`getPipelineTextBufferInfo(hypothesisBufferId).timestampCount === 0`** (or timestamps unusable for pairing with hypothesis tokens), the SDK **must fail** with an explicit error — **no silent fallback** to proportional mapping, `chunkedForcedCtc`, or another heuristic.
 
 **Suggested error identifier (implement verbatim across JS/native):**
 

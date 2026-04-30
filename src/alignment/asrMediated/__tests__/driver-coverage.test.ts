@@ -127,11 +127,11 @@ jest.mock('../../linker/linker', () => ({
   }),
 }));
 
-import { runAccurateStrategyA } from '../driver';
+import { runAccurateAsrMediated } from '../driver';
 
-describe('strategyA/driver coverage', () => {
+describe('asrMediated/driver coverage', () => {
   test('emits non-fatal partial coverage + low-confidence warnings', async () => {
-    const out = await runAccurateStrategyA({
+    const out = await runAccurateAsrMediated({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',

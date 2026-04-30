@@ -1,20 +1,20 @@
 import type { AlignmentSegmentMeta } from '../../segmentbuffer/types';
 
-export interface StrategyBAnchor {
+export interface ChunkedForcedCtcAnchor {
   id: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
 }
 
-export interface StrategyBNativeToken {
+export interface ChunkedForcedCtcNativeToken {
   text: string;
   startMs: number;
   endMs: number;
 }
 
-export interface StrategyBNativeResult {
-  tokens: StrategyBNativeToken[];
+export interface ChunkedForcedCtcNativeResult {
+  tokens: ChunkedForcedCtcNativeToken[];
   consumedTokenCount: number;
   diagnostics?: {
     ctcBlankRatio?: number;
@@ -22,13 +22,13 @@ export interface StrategyBNativeResult {
   };
 }
 
-export interface StrategyBCursorUnit {
+export interface ChunkedForcedCtcCursorUnit {
   text: string;
   startCharIndex: number;
   endCharIndex: number;
 }
 
-export interface StrategyBCursorWindow {
+export interface ChunkedForcedCtcCursorWindow {
   text: string;
   startUnitIndex: number;
   endUnitIndex: number;
@@ -37,14 +37,14 @@ export interface StrategyBCursorWindow {
   endCharIndex: number;
 }
 
-export interface StrategyBCursorState {
+export interface ChunkedForcedCtcCursorState {
   sourceText: string;
-  units: StrategyBCursorUnit[];
+  units: ChunkedForcedCtcCursorUnit[];
   cursorIndex: number;
   granularity: 'sentence' | 'word';
 }
 
-export interface StrategyBAggregatedAlignmentSegment
+export interface ChunkedForcedCtcAggregatedAlignmentSegment
   extends Omit<AlignmentSegmentMeta, 'kind' | 'id'> {
   kind: 'alignment';
 }

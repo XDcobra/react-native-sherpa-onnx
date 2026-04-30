@@ -1,14 +1,17 @@
 import {
   advanceCursor,
-  createStrategyBCursor,
+  createChunkedForcedCtcCursor,
   getRemainingUnitCount,
   peekCursorPrefix,
   peekCursorWindow,
 } from '../cursor';
 
-describe('strategyB/cursor', () => {
+describe('chunkedForcedCtc/cursor', () => {
   test('splits word granularity and advances deterministically', () => {
-    const cursor = createStrategyBCursor('alpha beta gamma delta', 'word');
+    const cursor = createChunkedForcedCtcCursor(
+      'alpha beta gamma delta',
+      'word'
+    );
 
     expect(getRemainingUnitCount(cursor)).toBe(4);
 
@@ -28,7 +31,7 @@ describe('strategyB/cursor', () => {
   });
 
   test('splits sentence granularity and keeps punctuation', () => {
-    const cursor = createStrategyBCursor('One. Two! Three?', 'sentence');
+    const cursor = createChunkedForcedCtcCursor('One. Two! Three?', 'sentence');
 
     expect(getRemainingUnitCount(cursor)).toBe(3);
 

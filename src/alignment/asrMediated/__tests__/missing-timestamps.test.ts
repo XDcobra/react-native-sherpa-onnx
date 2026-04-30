@@ -69,12 +69,12 @@ jest.mock('../../../NativeSherpaOnnx', () => ({
   },
 }));
 
-import { runAccurateStrategyA } from '../driver';
+import { runAccurateAsrMediated } from '../driver';
 
-describe('strategyA/missing-timestamps', () => {
+describe('asrMediated/missing-timestamps', () => {
   test('propagates ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS', async () => {
     await expect(
-      runAccurateStrategyA({
+      runAccurateAsrMediated({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',

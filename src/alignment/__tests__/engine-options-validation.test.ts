@@ -91,7 +91,7 @@ describe('AlignmentEngine options validation', () => {
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
-  it('emits ALIGNMENT_ASR_HYPOTHESIS_MISSING when strategy A omits hypothesis buffer', async () => {
+  it('emits ALIGNMENT_ASR_HYPOTHESIS_MISSING when asrMediated omits hypothesis buffer', async () => {
     const engine = createAlignment();
 
     await expect(
@@ -109,7 +109,7 @@ describe('AlignmentEngine options validation', () => {
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
-  it('emits ALIGNMENT_OPTIONS_INVALID when strategy B incorrectly passes asr config', async () => {
+  it('emits ALIGNMENT_OPTIONS_INVALID when chunkedForcedCtc incorrectly passes asr config', async () => {
     const engine = createAlignment();
 
     await expect(

@@ -105,16 +105,16 @@ jest.mock('../linker/linker', () => ({
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
-import { runAccurateStrategyA } from '../strategyA/driver';
-import { runAccurateStrategyB } from '../strategyB/driver';
+import { runAccurateAsrMediated } from '../asrMediated/driver';
+import { runAccurateChunkedForcedCtc } from '../chunkedForcedCtc/driver';
 
 describe('alignment/native bridge slice calls', () => {
-  test('row 4a strategy A passes pcm descriptor to native accurate call', async () => {
+  test('row 4a asrMediated passes pcm descriptor to native accurate call', async () => {
     const native = SherpaOnnx as unknown as {
       alignAccurateFromPcm: jest.Mock;
     };
 
-    await runAccurateStrategyA({
+    await runAccurateAsrMediated({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',
@@ -139,12 +139,12 @@ describe('alignment/native bridge slice calls', () => {
     );
   });
 
-  test('row 4b strategy B passes pcm descriptor to forced-ctc call', async () => {
+  test('row 4b chunkedForcedCtc passes pcm descriptor to forced-ctc call', async () => {
     const native = SherpaOnnx as unknown as {
       alignAccurateForcedCtcFromPcm: jest.Mock;
     };
 
-    await runAccurateStrategyB({
+    await runAccurateChunkedForcedCtc({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',

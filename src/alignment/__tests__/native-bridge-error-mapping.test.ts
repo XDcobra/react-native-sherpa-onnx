@@ -105,8 +105,8 @@ jest.mock('../linker/linker', () => ({
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
-import { runAccurateStrategyA } from '../strategyA/driver';
-import { runAccurateStrategyB } from '../strategyB/driver';
+import { runAccurateAsrMediated } from '../asrMediated/driver';
+import { runAccurateChunkedForcedCtc } from '../chunkedForcedCtc/driver';
 
 describe('alignment/native bridge error mapping', () => {
   beforeEach(() => {
@@ -127,7 +127,7 @@ describe('alignment/native bridge error mapping', () => {
     );
 
     await expect(
-      runAccurateStrategyA({
+      runAccurateAsrMediated({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -150,7 +150,7 @@ describe('alignment/native bridge error mapping', () => {
     );
 
     await expect(
-      runAccurateStrategyB({
+      runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
@@ -170,7 +170,7 @@ describe('alignment/native bridge error mapping', () => {
     );
 
     await expect(
-      runAccurateStrategyB({
+      runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',
         audioIn: 'off_audio',
         segmentOut: 'seg_out',

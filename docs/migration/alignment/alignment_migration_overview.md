@@ -7,12 +7,12 @@ Alle Dateien liegen unter `docs/migration/alignment/`:
 | Datei | Inhalt |
 |---|---|
 | [alignment-public-modes-plan.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/alignment-public-modes-plan.md) | **Public Modes Plan** — Modes, Strategies A/B, AlignmentEngine API, Linker v0 schema, locked decisions |
-| [alignment-asr-mediated-ts-example.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/alignment-asr-mediated-ts-example.md) | **Reference TypeScript example** for Strategy A (ASR-mediated) target call site |
+| [alignment-asr-mediated-ts-example.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/alignment-asr-mediated-ts-example.md) | **Reference TypeScript example** for `asrMediated` (ASR-mediated) target call site |
 | [accurate-vad-segmentation-high-level-plan.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/accurate-vad-segmentation-high-level-plan.md) | **Legacy** plan superseded for mapping semantics; some buffer/anchor contract notes still apply |
 | [sub-01-public-api-contract.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-01-public-api-contract.md) | **Public API Contract** — `AlignmentEngine`, `createAlignment`, `engine.alignTextToAudio`, options shape, error catalog |
 | [sub-02-linker-path3-core.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-02-linker-path3-core.md) | **Linker (Path 3) Core** — reusable transcript-audio linker, rich `LinkerResultV0` (link-map + confidence), R↔H DTW |
-| [sub-03-accurate-strategy-a-integration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-03-accurate-strategy-a-integration.md) | **Strategy A integration** — wires Linker output into per-anchor `AlignAccurateFromPcm`; ASR hypothesis contract |
-| [sub-04-accurate-strategy-b-integration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-04-accurate-strategy-b-integration.md) | **Strategy B integration** — alignment-only chunked forced CTC + token cursor + window/backtrack policy |
+| [sub-03-accurate-asr-mediated-integration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-03-accurate-asr-mediated-integration.md) | **asrMediated integration** — wires Linker output into per-anchor `AlignAccurateFromPcm`; ASR hypothesis contract |
+| [sub-04-accurate-chunked-forced-ctc-integration.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-04-accurate-chunked-forced-ctc-integration.md) | **chunkedForcedCtc integration** — alignment-only chunked forced CTC + token cursor + window/backtrack policy |
 | [sub-05-native-bridge-and-platform-parity.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-05-native-bridge-and-platform-parity.md) | **Native bridge + parity** — slice reads, NativeSherpaOnnx surface, Android/iOS parity, OOM passthrough |
 | [sub-06-tests-and-quality-gates.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-06-tests-and-quality-gates.md) | **Tests & gates** — Jest unit/integration matrix without E2E; deterministic fixtures; contract tests |
 | [sub-07-docs-example-and-cutover.md](file:///Volumes/SSD/dev/react-native-sherpa-onnx/docs/migration/alignment/sub-07-docs-example-and-cutover.md) | **Docs + cutover** — `docs/alignment.md` rewrite, example screen update, hard-cut removal of legacy export |
@@ -28,8 +28,8 @@ Alle Dateien liegen unter `docs/migration/alignment/`:
 | 1 | `proportional` | — | No | duration × text-weight | unchanged |
 | 2 | `estimated` | — | No | caller `segmentSampleCounts` | unchanged |
 | 3 | `accurate` | off | Yes | full-buffer CTC | row 3 (one-shot) |
-| 4a | `accurate` | on | Yes | **Strategy A** — ASR-mediated linker + CTC | rich linker result |
-| 4b | `accurate` | on | Yes | **Strategy B** — chunked forced CTC + token cursor | alignment-only |
+| 4a | `accurate` | on | Yes | **asrMediated** — ASR-mediated linker + CTC | rich linker result |
+| 4b | `accurate` | on | Yes | **chunkedForcedCtc** — chunked forced CTC + token cursor | alignment-only |
 | 5 | `vad` | on | No | anchor-only timing | unchanged surface |
 
 ### Public API surface (target)
@@ -73,8 +73,8 @@ iOS (Obj-C++ + C++)
 |-------|-------------|--------|----------------|-----|
 | **P1 — Public API skeleton** | sub-01 | Introduce `AlignmentEngine`/`createAlignment`; remove freestanding export; option types updated; current native call site preserved for rows 1–3 + 5 | none | All existing rows still pass via engine path; no behavior change for rows 1, 2, 3, 5; legacy export gone |
 | **P2 — Linker core (Path 3)** | sub-02 | Linker module with `LinkerResultV0` + reference↔hypothesis DTW + slice assignment; native + JS plumbing; standalone tests | P1 | Linker callable from JS for given (anchors, R, H); deterministic fixtures pass; richer link map + confidence |
-| **P3 — Strategy A integration** | sub-03 | Wire `mappingStrategy: 'asr_mediated'`; per-anchor CTC on slices using linker mapping units; `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` enforced | P2 | Row 4a runs end-to-end on fixtures; no monotonic weight mapping in this path; explicit failure when timestamps missing |
-| **P4 — Strategy B integration** | sub-04 | Implement `mappingStrategy: 'chunked_forced_ctc'`; cursor + window + backtrack purely inside alignment | P1 | Row 4b runs end-to-end on fixtures; no ASR dependency; deterministic per-anchor advancement |
+| **P3 — asrMediated integration** | sub-03 | Wire `mappingStrategy: 'asr_mediated'`; per-anchor CTC on slices using linker mapping units; `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` enforced | P2 | Row 4a runs end-to-end on fixtures; no monotonic weight mapping in this path; explicit failure when timestamps missing |
+| **P4 — chunkedForcedCtc integration** | sub-04 | Implement `mappingStrategy: 'chunked_forced_ctc'`; cursor + window + backtrack purely inside alignment | P1 | Row 4b runs end-to-end on fixtures; no ASR dependency; deterministic per-anchor advancement |
 | **P5 — Native bridge & parity** | sub-05 | Slice-based PCM reads (no full PCM in 4a/4b); Android/iOS parity; error/diagnostics surfacing; OOM passthrough | P2, P3, P4 | Both platforms produce identical-bounded outputs on shared fixtures; no full-PCM read in 4a/4b |
 | **P6 — Tests & quality gates** | sub-06 | Jest matrix (unit + integration), contract tests for error codes, golden fixtures, no-E2E rule | P1–P5 | All Jest suites green; contract codes asserted; granularity rules enforced; coverage of failure modes |
 | **P7 — Docs & cutover** | sub-07 | `docs/alignment.md` rewrite, example screen, hard cut release notes (intern), cleanup of legacy paragraphs | P1–P6 | Docs in sync; example uses target API; legacy doc paragraphs marked superseded; release-ready |
@@ -141,8 +141,8 @@ A phase is "Completed" when **all** of:
 |-------|--------|-------|-------|
 | P1 — Public API skeleton (sub-01) | Completed (2026-04-30) | — | AlignmentEngine API + hard-cut of freestanding export + P1 Jest coverage |
 | P2 — Linker core (sub-02) | Completed (2026-04-30) | — | Internal linker core + deterministic Jest coverage + engine preflight consumption for ASR-mediated path |
-| P3 — Strategy A integration (sub-03) | Completed (2026-04-30) | — | `accurate+auto+asr_mediated` now runs linker-driven per-anchor accurate slices with warning/error contracts + Strategy A Jest suite |
-| P4 — Strategy B integration (sub-04) | Completed (2026-04-30) | — | `accurate+auto+chunked_forced_ctc` now runs cursor-driven per-anchor forced CTC with deterministic advancement + Strategy B Jest suite |
+| P3 — asrMediated integration (sub-03) | Completed (2026-04-30) | — | `accurate+auto+asr_mediated` now runs linker-driven per-anchor accurate slices with warning/error contracts + asrMediated Jest suite |
+| P4 — chunkedForcedCtc integration (sub-04) | Completed (2026-04-30) | — | `accurate+auto+chunked_forced_ctc` now runs cursor-driven per-anchor forced CTC with deterministic advancement + chunkedForcedCtc Jest suite |
 | P5 — Native bridge & parity (sub-05) | Completed (2026-04-30) | — | Descriptor-based accurate/forced-CTC bridge path on Android+iOS, native error mapping parity, and P5 Jest bridge tests |
 | P6 — Tests & quality gates (sub-06) | Completed (2026-04-30) | 27 suites, 55 tests, 2 snapshots, 0 failures | All error codes cataloged; public surface locked; legacy import grep gate green |
 | P7 — Docs & cutover (sub-07) | Completed (2026-04-30) | — | Engine-first docs rewrite, example screen switched to engine-only usage with row 4a/4b entries, superseded banners/headers synced, and hard-cut grep checks verified |
@@ -158,7 +158,7 @@ A phase is "Completed" when **all** of:
 | 2026-04-30 | Initial overview + sub-plan layout for alignment migration; locked decisions inherited from `alignment-public-modes-plan.md` |
 | 2026-04-30 | P1 completed: public AlignmentEngine skeleton shipped, freestanding `alignTextToAudio` export removed, and P1 tests added |
 | 2026-04-30 | P2 completed: linker core (`types/normalize/dtw/anchorMap/confidence/linker`) implemented, Jest linker suite added, and progress table updated |
-| 2026-04-30 | P3 completed: Strategy A integration wired (`runAccurateStrategyA`), row 4a engine path enabled, and Strategy A tests added |
-| 2026-04-30 | P4 completed: Strategy B integration wired (`runAccurateStrategyB`), forced-CTC native bridge entry added on Android/iOS, and Strategy B tests added |
+| 2026-04-30 | P3 completed: asrMediated integration wired (`runAccurateAsrMediated`), row 4a engine path enabled, and asrMediated tests added |
+| 2026-04-30 | P4 completed: chunkedForcedCtc integration wired (`runAccurateChunkedForcedCtc`), forced-CTC native bridge entry added on Android/iOS, and chunkedForcedCtc tests added |
 | 2026-04-30 | P5 completed: native bridge switched to PCM slice descriptors for rows 4a/4b, error mapping parity aligned across Android/iOS, and P5 native bridge Jest tests added |
 | 2026-04-30 | P7 completed: docs + example cutover finalized (`docs/alignment.md` engine-first rewrite, example timestamp screen row 4a/4b demo entries), superseded-plan headers updated, and hard-cut verification checks green |

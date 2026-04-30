@@ -40,26 +40,28 @@ import type {
 } from '../types';
 import {
   advanceCursor,
-  createStrategyBCursor,
+  createChunkedForcedCtcCursor,
   getRemainingUnitCount,
   isCursorExhausted,
   peekCursorPrefix,
   peekCursorWindow,
 } from './cursor';
 import type {
-  StrategyBAnchor,
-  StrategyBNativeResult,
-  StrategyBNativeToken,
+  ChunkedForcedCtcAnchor,
+  ChunkedForcedCtcNativeResult,
+  ChunkedForcedCtcNativeToken,
 } from './types';
 
-type StrategyBRuntimeError = Error & { code: AlignmentErrorCode };
+type ChunkedForcedCtcRuntimeError = Error & { code: AlignmentErrorCode };
 
-function createStrategyBError(
+function createChunkedForcedCtcError(
   code: AlignmentErrorCode,
   message: string,
   cause?: unknown
-): StrategyBRuntimeError {
-  const error = new Error(`${code}: ${message}`) as StrategyBRuntimeError;
+): ChunkedForcedCtcRuntimeError {
+  const error = new Error(
+    `${code}: ${message}`
+  ) as ChunkedForcedCtcRuntimeError;
   error.code = code;
   if (cause instanceof Error) {
     (error as Error & { cause?: unknown }).cause = cause;
@@ -79,7 +81,7 @@ function asOfflineTextBufferInfo(
     return info as OfflineTextBufferInfo;
   }
 
-  throw createStrategyBError(
+  throw createChunkedForcedCtcError(
     'ALIGNMENT_OPTIONS_INVALID',
     `${fieldName} must resolve to an offline text buffer.`
   );
@@ -94,7 +96,7 @@ function asOfflineAudioBufferInfo(info: unknown): OfflineAudioBufferInfo {
     return info as OfflineAudioBufferInfo;
   }
 
-  throw createStrategyBError(
+  throw createChunkedForcedCtcError(
     'ALIGNMENT_OPTIONS_INVALID',
     'audioIn must resolve to an offline audio buffer.'
   );
@@ -112,7 +114,7 @@ function asOfflineSegmentBufferInfo(
     return info as OfflineSegmentBufferInfo;
   }
 
-  throw createStrategyBError(
+  throw createChunkedForcedCtcError(
     'ALIGNMENT_OPTIONS_INVALID',
     `${fieldName} must resolve to an offline segment buffer.`
   );
@@ -124,7 +126,7 @@ function normalizeGranularity(
   return granularity === 'word' ? 'word' : 'sentence';
 }
 
-function toSpeechAnchors(segments: unknown[]): StrategyBAnchor[] {
+function toSpeechAnchors(segments: unknown[]): ChunkedForcedCtcAnchor[] {
   return segments
     .filter(
       (segment): segment is SpeechSegmentMeta =>
@@ -142,7 +144,7 @@ function toSpeechAnchors(segments: unknown[]): StrategyBAnchor[] {
 }
 
 function assertAnchorRangeWithinAudio(
-  anchor: StrategyBAnchor,
+  anchor: ChunkedForcedCtcAnchor,
   audioInfo: OfflineAudioBufferInfo
 ): void {
   if (
@@ -150,14 +152,14 @@ function assertAnchorRangeWithinAudio(
     anchor.endSample <= anchor.startSample ||
     anchor.endSample > audioInfo.numSamples
   ) {
-    throw createStrategyBError(
+    throw createChunkedForcedCtcError(
       'ALIGNMENT_ANCHOR_OUT_OF_RANGE',
       `Anchor ${anchor.id} exceeds audio bounds (${anchor.startSample}-${anchor.endSample} over 0-${audioInfo.numSamples}).`
     );
   }
 }
 
-function parseNativeTokens(rawTokens: unknown): StrategyBNativeToken[] {
+function parseNativeTokens(rawTokens: unknown): ChunkedForcedCtcNativeToken[] {
   if (!Array.isArray(rawTokens)) {
     return [];
   }
@@ -186,10 +188,10 @@ function parseNativeTokens(rawTokens: unknown): StrategyBNativeToken[] {
         endMs: normalizedEnd,
       };
     })
-    .filter((token): token is StrategyBNativeToken => token != null);
+    .filter((token): token is ChunkedForcedCtcNativeToken => token != null);
 }
 
-function parseNativeResult(raw: unknown): StrategyBNativeResult {
+function parseNativeResult(raw: unknown): ChunkedForcedCtcNativeResult {
   if (typeof raw !== 'object' || raw == null) {
     return {
       tokens: [],
@@ -257,7 +259,9 @@ function toWarningCode(
   return warnings[0]?.code;
 }
 
-function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
+function mapNativeChunkedForcedCtcError(
+  error: unknown
+): ChunkedForcedCtcRuntimeError {
   const errorObj =
     typeof error === 'object' && error != null
       ? (error as { code?: unknown; message?: unknown })
@@ -282,7 +286,7 @@ function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
     codeFromObject.length > 0 ? codeFromObject : codeFromMessage;
 
   if (normalizedCode === 'OFFLINE_OOM') {
-    return createStrategyBError(
+    return createChunkedForcedCtcError(
       'OFFLINE_OOM',
       messageFromError || 'OFFLINE_OOM: Native alignment ran out of memory.',
       error
@@ -294,7 +298,7 @@ function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
     normalizedCode === 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' ||
     normalizedCode === 'ALIGNMENT_FORCED_CTC_FAILED'
   ) {
-    return createStrategyBError(
+    return createChunkedForcedCtcError(
       normalizedCode,
       messageFromError ||
         `${normalizedCode}: Native forced CTC alignment failed.`,
@@ -302,7 +306,7 @@ function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
     );
   }
 
-  return createStrategyBError(
+  return createChunkedForcedCtcError(
     'ALIGNMENT_NATIVE_UNKNOWN',
     messageFromError ||
       'ALIGNMENT_NATIVE_UNKNOWN: Native forced CTC alignment failed with an unknown error.',
@@ -310,7 +314,7 @@ function mapNativeStrategyBError(error: unknown): StrategyBRuntimeError {
   );
 }
 
-interface RunAccurateStrategyBInput {
+interface RunAccurateChunkedForcedCtcInput {
   textIn: OfflineTextBufferIdSource;
   audioIn: OfflineAudioBufferIdSource;
   segmentOut: OfflineSegmentBufferIdSource;
@@ -320,8 +324,8 @@ interface RunAccurateStrategyBInput {
   language?: string;
 }
 
-export async function runAccurateStrategyB(
-  input: RunAccurateStrategyBInput
+export async function runAccurateChunkedForcedCtc(
+  input: RunAccurateChunkedForcedCtcInput
 ): Promise<AlignTextToAudioWriteResult> {
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(input.audioIn);
@@ -360,9 +364,9 @@ export async function runAccurateStrategyB(
   );
 
   if ((segmentOutInfo.segmentCount ?? 0) > 0) {
-    throw createStrategyBError(
+    throw createChunkedForcedCtcError(
       'ALIGNMENT_OPTIONS_INVALID',
-      'segmentOut must be an empty offline segment buffer for Strategy B output materialization.'
+      'segmentOut must be an empty offline segment buffer for chunkedForcedCtc output materialization.'
     );
   }
 
@@ -381,7 +385,7 @@ export async function runAccurateStrategyB(
     };
   }
 
-  const cursor = createStrategyBCursor(referenceTextRaw, granularity);
+  const cursor = createChunkedForcedCtcCursor(referenceTextRaw, granularity);
   if (isCursorExhausted(cursor)) {
     return {
       outputSegmentBufferId: segmentOutBufferId,
@@ -418,7 +422,7 @@ export async function runAccurateStrategyB(
         break;
       }
 
-      let nativeResult: StrategyBNativeResult;
+      let nativeResult: ChunkedForcedCtcNativeResult;
       try {
         nativeResult = parseNativeResult(
           await SherpaOnnx.alignAccurateForcedCtcFromPcm(
@@ -435,7 +439,7 @@ export async function runAccurateStrategyB(
           )
         );
       } catch (error) {
-        throw mapNativeStrategyBError(error);
+        throw mapNativeChunkedForcedCtcError(error);
       }
 
       const maxAdvance = Math.min(
@@ -452,13 +456,13 @@ export async function runAccurateStrategyB(
         addWarning(
           warnings,
           'ALIGNMENT_ANCHOR_NO_PROGRESS',
-          'At least one anchor consumed zero tokens during Strategy B forced CTC.'
+          'At least one anchor consumed zero tokens during chunkedForcedCtc forced CTC.'
         );
 
         if (consecutiveNoProgress >= 2) {
-          throw createStrategyBError(
+          throw createChunkedForcedCtcError(
             'ALIGNMENT_FORCED_CTC_STUCK',
-            'Strategy B made no cursor progress for two consecutive anchors.'
+            'chunkedForcedCtc made no cursor progress for two consecutive anchors.'
           );
         }
 
@@ -551,7 +555,7 @@ export async function runAccurateStrategyB(
       addWarning(
         warnings,
         'ALIGNMENT_RESIDUAL_TOKENS_REMAINING',
-        'Strategy B completed anchors with residual reference tokens remaining.'
+        'chunkedForcedCtc completed anchors with residual reference tokens remaining.'
       );
     }
 

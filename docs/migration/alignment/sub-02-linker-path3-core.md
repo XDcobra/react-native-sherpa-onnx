@@ -9,7 +9,7 @@
 
 ## 1. Scope
 
-Implement the **reusable transcript↔audio linker** that powers Strategy A. It produces a **rich result model** (`LinkerResultV0` = link map + confidence + diagnostics) consumable by alignment v1 and reusable by future features (subtitles, karaoke, search highlight). The linker takes:
+Implement the **reusable transcript↔audio linker** that powers `asrMediated`. It produces a **rich result model** (`LinkerResultV0` = link map + confidence + diagnostics) consumable by alignment v1 and reusable by future features (subtitles, karaoke, search highlight). The linker takes:
 
 - `audioIn: OfflineAudioBufferRef`
 - `anchors: OfflineSegmentBufferRef` (speech anchors)
@@ -23,7 +23,7 @@ Implement the **reusable transcript↔audio linker** that powers Strategy A. It 
 ## 2. Non-Goals
 
 - No CTC inside linker (CTC happens in sub-03 per anchor).
-- No `Strategy B` logic.
+- No `chunkedForcedCtc` logic.
 - No model loading inside linker — pure DSP/text alignment over inputs.
 - No public `Linker` SDK surface; v1 is internal-only and consumed by `AlignmentEngine`.
 
@@ -221,7 +221,7 @@ Warnings (non-fatal, on `LinkerResultV0.warnings`):
 
 | Blocks | Reason |
 |--------|--------|
-| sub-03 | Strategy A consumes `LinkerResultV0` |
+| sub-03 | `asrMediated` consumes `LinkerResultV0` |
 | sub-05 | Native parity for optional linker kernel |
 | sub-06 | Test matrix references linker fixtures |
 
@@ -231,4 +231,4 @@ Warnings (non-fatal, on `LinkerResultV0.warnings`):
 
 | Date | Change |
 |------|--------|
-| 2026-04-30 | P2 completed: internal linker core (`types/normalize/dtw/anchorMap/confidence/linker`) implemented in TS, input validation + error codes wired, deterministic Jest suite added, and engine now consumes linker for ASR-mediated preflight before deferred Strategy A CTC integration |
+| 2026-04-30 | P2 completed: internal linker core (`types/normalize/dtw/anchorMap/confidence/linker`) implemented in TS, input validation + error codes wired, deterministic Jest suite added, and engine now consumes linker for ASR-mediated preflight before deferred `asrMediated` CTC integration |

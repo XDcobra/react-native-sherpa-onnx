@@ -140,13 +140,13 @@ const MODE_OPTIONS: ModeOption[] = [
   },
   {
     value: 'accurate_auto_asr',
-    label: 'accurate + auto (Strategy A / asr_mediated)',
+    label: 'accurate + auto (asrMediated / asr_mediated)',
     description:
       'Anchor-constrained accurate alignment via ASR-mediated linker (requires anchors + hypothesis buffer)',
   },
   {
     value: 'accurate_auto_forced',
-    label: 'accurate + auto (Strategy B / chunked_forced_ctc)',
+    label: 'accurate + auto (chunkedForcedCtc / chunked_forced_ctc)',
     description: 'Anchor-constrained accurate alignment via forced CTC cursor',
   },
   {
@@ -1280,7 +1280,7 @@ export default function GenerateTimestampScreen() {
                 {(mode === 'accurate_auto_asr' ||
                   mode === 'accurate_auto_forced') && (
                   <Text style={styles.sectionDescription}>
-                    Auto-accurate modes require speech anchors. Strategy A also
+                    Auto-accurate modes require speech anchors. asrMediated also
                     requires a timestamped ASR hypothesis buffer.
                   </Text>
                 )}

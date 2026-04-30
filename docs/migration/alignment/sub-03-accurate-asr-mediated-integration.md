@@ -1,4 +1,4 @@
-# Sub-Plan 03 — Accurate / Strategy A Integration (ASR-mediated)
+# Sub-Plan 03 — Accurate / asrMediated Integration (ASR-mediated)
 
 ## Status
 - **Completed (2026-04-30)**
@@ -32,7 +32,7 @@ Pipeline:
 
 ## 2. Non-Goals
 
-- No Strategy B logic (sub-04).
+- No `chunkedForcedCtc` logic (sub-04).
 - No support for missing-timestamp hypotheses; hard fail with explicit code.
 - No offline VAD here; anchor production is upstream.
 - No silent fallback to row 3 ("full-buffer CTC") when linker fails.
@@ -52,7 +52,7 @@ Pipeline:
 ### 4.1 Driver location
 
 ```
-src/alignment/strategyA/
+src/alignment/asrMediated/
   driver.ts         // orchestrates linker → per-anchor CTC
   types.ts          // internal types (AnchorJob, AnchorResult)
   __tests__/
@@ -61,7 +61,7 @@ src/alignment/strategyA/
 ### 4.2 Driver outline
 
 ```typescript
-async function runAccurateStrategyA(opts: {
+async function runAccurateAsrMediated(opts: {
   textIn: OfflineTextBufferRef;
   audioIn: OfflineAudioBufferRef;
   anchors: OfflineSegmentBufferRef;
@@ -110,9 +110,9 @@ Steps:
 
 ### TypeScript
 
-- [x] `src/alignment/strategyA/driver.ts` per §4.2.
+- [x] `src/alignment/asrMediated/driver.ts` per §4.2.
 - [x] `src/alignment/alignTextToAudio.ts`:
-  - [x] When `mode === 'accurate'` and `segmentation?.mode === 'auto'` and `mappingStrategy === 'asr_mediated'` → call `runAccurateStrategyA`.
+  - [x] When `mode === 'accurate'` and `segmentation?.mode === 'auto'` and `mappingStrategy === 'asr_mediated'` → call `runAccurateAsrMediated`.
 - [x] `src/alignment/types.ts`:
   - [x] Add `AlignmentWarning` type + codes.
 
@@ -147,13 +147,13 @@ Warnings on result:
 
 ### Unit
 
-- `src/alignment/strategyA/__tests__/driver-options.test.ts` — input validation (anchor empty, H empty).
-- `src/alignment/strategyA/__tests__/driver-coverage.test.ts` — partial coverage emits warning, not error.
-- `src/alignment/strategyA/__tests__/driver-offset.test.ts` — global timeline correctness for known anchor offsets.
+- `src/alignment/asrMediated/__tests__/driver-options.test.ts` — input validation (anchor empty, H empty).
+- `src/alignment/asrMediated/__tests__/driver-coverage.test.ts` — partial coverage emits warning, not error.
+- `src/alignment/asrMediated/__tests__/driver-offset.test.ts` — global timeline correctness for known anchor offsets.
 
 ### Integration (mocked native)
 
-- `src/alignment/strategyA/__tests__/driver-pipeline.test.ts`:
+- `src/alignment/asrMediated/__tests__/driver-pipeline.test.ts`:
   - Mocks `runLinker` to return a fixed `LinkerResultV0`.
   - Mocks native `AlignAccurateFromPcm` per slice with deterministic outputs.
   - Asserts `segmentOut` contains expected segments with global timestamps.
@@ -161,7 +161,7 @@ Warnings on result:
 
 ### Contract
 
-- `src/alignment/strategyA/__tests__/missing-timestamps.test.ts` — H without timestamps rejects with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`.
+- `src/alignment/asrMediated/__tests__/missing-timestamps.test.ts` — H without timestamps rejects with `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`.
 
 ---
 
@@ -208,5 +208,5 @@ Warnings on result:
 
 | Date | Change |
 |------|--------|
-| 2026-04-30 | P3 completed: Strategy A driver (`runAccurateStrategyA`) integrated, `accurate+auto+asr_mediated` routed through alignment path, warning/error contracts extended, and Strategy A Jest suite added (`driver-options`, `driver-coverage`, `driver-offset`, `driver-pipeline`, `missing-timestamps`) |
-| 2026-04-30 | Follow-up contract fix: Strategy A output now materializes into caller-provided `segmentOut` (no newly returned offline output id) |
+| 2026-04-30 | P3 completed: `asrMediated` driver (`runAccurateAsrMediated`) integrated, `accurate+auto+asr_mediated` routed through alignment path, warning/error contracts extended, and `asrMediated` Jest suite added (`driver-options`, `driver-coverage`, `driver-offset`, `driver-pipeline`, `missing-timestamps`) |
+| 2026-04-30 | Follow-up contract fix: `asrMediated` output now materializes into caller-provided `segmentOut` (no newly returned offline output id) |

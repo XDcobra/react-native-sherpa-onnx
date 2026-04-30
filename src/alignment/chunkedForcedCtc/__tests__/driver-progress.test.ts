@@ -21,8 +21,8 @@ jest.mock('../../../audiobuffer', () => ({
     state: 'immutable',
     sampleRate: 16000,
     channelCount: 1,
-    numSamples: 32000,
-    durationMs: 2000,
+    numSamples: 16000,
+    durationMs: 1000,
   }),
   getOfflineAudioBufferSamplesSlice: jest.fn(() => new Float32Array(1600)),
 }));
@@ -33,11 +33,11 @@ jest.mock('../../../textbuffer', () => ({
     bufferId: 'txt_ref',
     kind: 'offlineTextBuffer',
     state: 'immutable',
-    utf16Length: 20,
+    utf16Length: 24,
   }),
   getOfflineTextBufferTextSlice: jest
     .fn()
-    .mockResolvedValue('alpha beta gamma'),
+    .mockResolvedValue('alpha beta gamma delta'),
 }));
 
 jest.mock('../../../segmentbuffer', () => ({
@@ -56,7 +56,7 @@ jest.mock('../../../segmentbuffer', () => ({
       bufferId: 'seg_anchor',
       kind: 'offlineSegmentBuffer',
       state: 'immutable',
-      segmentCount: 2,
+      segmentCount: 1,
     });
   }),
   getOfflineSegmentBufferSegments: jest.fn().mockResolvedValue([
@@ -66,15 +66,6 @@ jest.mock('../../../segmentbuffer', () => ({
       sourceAudioBufferId: 'off_audio',
       startSample: 0,
       endSample: 1600,
-      sampleRate: 16000,
-      durationMs: 100,
-    },
-    {
-      id: 'seg_anchor_1',
-      kind: 'speech',
-      sourceAudioBufferId: 'off_audio',
-      startSample: 1600,
-      endSample: 3200,
       sampleRate: 16000,
       durationMs: 100,
     },
@@ -91,19 +82,29 @@ jest.mock('../../../segmentbuffer', () => ({
   releasePipelineSegmentBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { runAccurateStrategyB } from '../driver';
+import { runAccurateChunkedForcedCtc } from '../driver';
 
-describe('strategyB/driver stuck detection', () => {
-  test('throws ALIGNMENT_FORCED_CTC_STUCK after two consecutive no-progress anchors', async () => {
-    await expect(
-      runAccurateStrategyB({
-        textIn: 'txt_ref',
-        audioIn: 'off_audio',
-        segmentOut: 'seg_out',
-        anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
-        granularity: 'word',
-      })
-    ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_STUCK' });
+describe('chunkedForcedCtc/driver progress', () => {
+  test('emits no-progress and residual warnings when anchors consume nothing', async () => {
+    const out = await runAccurateChunkedForcedCtc({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      modelPath: { type: 'file', path: '/m' },
+      granularity: 'word',
+    });
+
+    expect(out.outputSegmentBufferId).toBe('seg_out');
+    expect(out.segmentsWritten).toBe(0);
+    expect(out.warningCode).toBe('ALIGNMENT_ANCHOR_NO_PROGRESS');
+    expect(out.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'ALIGNMENT_ANCHOR_NO_PROGRESS' }),
+        expect.objectContaining({
+          code: 'ALIGNMENT_RESIDUAL_TOKENS_REMAINING',
+        }),
+      ])
+    );
   });
 });

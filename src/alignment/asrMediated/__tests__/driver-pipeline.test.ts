@@ -147,7 +147,7 @@ jest.mock('../../linker/linker', () => ({
 }));
 
 import SherpaOnnx from '../../../NativeSherpaOnnx';
-import { runAccurateStrategyA } from '../driver';
+import { runAccurateAsrMediated } from '../driver';
 
 const native = SherpaOnnx as unknown as {
   alignAccurateFromPcm: jest.Mock;
@@ -158,9 +158,9 @@ const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   populateOfflineSegmentBufferIfEmpty: jest.Mock;
 };
 
-describe('strategyA/driver pipeline', () => {
+describe('asrMediated/driver pipeline', () => {
   test('runs per-anchor accurate slices and aggregates deterministic output', async () => {
-    const out = await runAccurateStrategyA({
+    const out = await runAccurateAsrMediated({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
       segmentOut: 'seg_out',

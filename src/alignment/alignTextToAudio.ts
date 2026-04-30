@@ -6,8 +6,8 @@ import {
   resolveOfflineSegmentBufferId,
 } from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
-import { runAccurateStrategyA } from './strategyA/driver';
-import { runAccurateStrategyB } from './strategyB/driver';
+import { runAccurateAsrMediated } from './asrMediated/driver';
+import { runAccurateChunkedForcedCtc } from './chunkedForcedCtc/driver';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -130,7 +130,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
 ) => {
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
-      return runAccurateStrategyA({
+      return runAccurateAsrMediated({
         textIn,
         audioIn,
         segmentOut,
@@ -144,7 +144,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       });
     }
 
-    return runAccurateStrategyB({
+    return runAccurateChunkedForcedCtc({
       textIn,
       audioIn,
       segmentOut,
