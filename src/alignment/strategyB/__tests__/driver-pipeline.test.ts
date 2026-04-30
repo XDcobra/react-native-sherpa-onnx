@@ -106,9 +106,13 @@ jest.mock('../../../segmentbuffer', () => ({
 }));
 
 import { runAccurateStrategyB } from '../driver';
+import SherpaOnnx from '../../../NativeSherpaOnnx';
 
 const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
   appendLiveSegment: jest.Mock;
+};
+const native = SherpaOnnx as unknown as {
+  alignAccurateForcedCtcFromPcm: jest.Mock;
 };
 
 describe('strategyB/driver pipeline', () => {
@@ -126,6 +130,20 @@ describe('strategyB/driver pipeline', () => {
     expect(out.outputSegmentBufferId).toBe('seg_out');
     expect(out.segmentsWritten).toBe(5);
     expect(out.warnings).toBeUndefined();
+
+    expect(native.alignAccurateForcedCtcFromPcm).toHaveBeenNthCalledWith(
+      1,
+      '/resolved/alignment.onnx',
+      expect.any(String),
+      {
+        audioBufferId: 'off_audio',
+        startSample: 0,
+        sampleCount: 16000,
+      },
+      16000,
+      'word',
+      'en'
+    );
 
     expect(segmentbuffer.appendLiveSegment).toHaveBeenCalledTimes(5);
     expect(segmentbuffer.appendLiveSegment).toHaveBeenNthCalledWith(

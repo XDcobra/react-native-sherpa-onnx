@@ -11,7 +11,7 @@ jest.mock('../../../utils', () => ({
 }));
 
 jest.mock('../../../audiobuffer', () => ({
-  resolveOfflineAudioBufferId: jest.fn((id: string) => id),
+  resolvePipelineAudioBufferId: jest.fn((id: string) => id),
   getPipelineAudioBufferInfo: jest.fn().mockResolvedValue({
     bufferId: 'off_audio',
     kind: 'offlinePcmBuffer',
@@ -21,9 +21,6 @@ jest.mock('../../../audiobuffer', () => ({
     numSamples: 64000,
     durationMs: 4000,
   }),
-  getOfflineAudioBufferSamplesSlice: jest.fn(),
-  createOfflineAudioBufferFromSamples: jest.fn(),
-  releasePipelineAudioBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../../textbuffer', () => ({
@@ -37,8 +34,6 @@ jest.mock('../../../textbuffer', () => ({
     })
   ),
   getOfflineTextBufferTextSlice: jest.fn().mockResolvedValue('hello'),
-  createOfflineTextBufferFromText: jest.fn(),
-  releasePipelineTextBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../../segmentbuffer', () => ({
@@ -60,7 +55,6 @@ jest.mock('../../../segmentbuffer', () => ({
     });
   }),
   getOfflineSegmentBufferSegments: jest.fn(),
-  createEmptyOfflineSegmentBuffer: jest.fn(),
   createLiveSegmentBuffer: jest.fn(),
   appendLiveSegment: jest.fn(),
   finalizeLiveSegmentBuffer: jest.fn(),
@@ -71,7 +65,7 @@ jest.mock('../../../segmentbuffer', () => ({
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
-    alignOfflineTextToAudio: jest.fn(),
+    alignAccurateFromPcm: jest.fn(),
   },
 }));
 

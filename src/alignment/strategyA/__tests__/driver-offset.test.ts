@@ -1,9 +1,9 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
-    alignOfflineTextToAudio: jest.fn().mockResolvedValue({
-      outputSegmentBufferId: 'seg_tmp_out',
-      segmentsWritten: 1,
+    alignAccurateFromPcm: jest.fn().mockResolvedValue({
+      subtitles: [{ text: 'hello', start: 0.000625, end: 0.001875 }],
+      timingMode: 'accurate',
     }),
   },
 }));
@@ -13,7 +13,7 @@ jest.mock('../../../utils', () => ({
 }));
 
 jest.mock('../../../audiobuffer', () => ({
-  resolveOfflineAudioBufferId: jest.fn((id: string) => id),
+  resolvePipelineAudioBufferId: jest.fn((id: string) => id),
   getPipelineAudioBufferInfo: jest.fn().mockResolvedValue({
     bufferId: 'off_audio',
     kind: 'offlinePcmBuffer',
@@ -23,20 +23,6 @@ jest.mock('../../../audiobuffer', () => ({
     numSamples: 64000,
     durationMs: 4000,
   }),
-  getOfflineAudioBufferSamplesSlice: jest.fn(() => new Float32Array(160)),
-  createOfflineAudioBufferFromSamples: jest.fn(() => ({
-    bufferId: 'off_tmp_audio',
-    info: {
-      bufferId: 'off_tmp_audio',
-      kind: 'offlinePcmBuffer',
-      state: 'immutable',
-      sampleRate: 16000,
-      channelCount: 1,
-      numSamples: 160,
-      durationMs: 10,
-    },
-  })),
-  releasePipelineAudioBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../../textbuffer', () => ({
@@ -59,22 +45,6 @@ jest.mock('../../../textbuffer', () => ({
     });
   }),
   getOfflineTextBufferTextSlice: jest.fn().mockResolvedValue('hello world'),
-  createOfflineTextBufferFromText: jest.fn().mockResolvedValue({
-    bufferId: 'txt_tmp',
-    info: {
-      bufferId: 'txt_tmp',
-      kind: 'offlineTextBuffer',
-      state: 'immutable',
-      utf16Length: 5,
-      tokenCount: 0,
-      timestampCount: 0,
-      durationCount: 0,
-      hasLang: false,
-      hasEmotion: false,
-      hasEvent: false,
-    },
-  }),
-  releasePipelineTextBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../../segmentbuffer', () => ({
@@ -95,47 +65,17 @@ jest.mock('../../../segmentbuffer', () => ({
       segmentCount: 1,
     });
   }),
-  getOfflineSegmentBufferSegments: jest.fn((bufferId: string) => {
-    if (bufferId === 'seg_anchor') {
-      return Promise.resolve([
-        {
-          id: 'seg_anchor_0',
-          kind: 'speech',
-          sourceAudioBufferId: 'off_audio',
-          startSample: 1000,
-          endSample: 1400,
-          sampleRate: 16000,
-          durationMs: 25,
-        },
-      ]);
-    }
-
-    return Promise.resolve([
-      {
-        id: 'seg_local_0',
-        kind: 'alignment',
-        sourceAudioBufferId: 'off_tmp_audio',
-        startSample: 10,
-        endSample: 30,
-        sampleRate: 16000,
-        durationMs: 1.25,
-        payload: {
-          text: 'hello',
-          timingMode: 'accurate',
-          granularity: 'word',
-        },
-      },
-    ]);
-  }),
-  createEmptyOfflineSegmentBuffer: jest.fn().mockResolvedValue({
-    bufferId: 'seg_tmp_out',
-    info: {
-      bufferId: 'seg_tmp_out',
-      kind: 'offlineSegmentBuffer',
-      state: 'immutable',
-      segmentCount: 0,
+  getOfflineSegmentBufferSegments: jest.fn().mockResolvedValue([
+    {
+      id: 'seg_anchor_0',
+      kind: 'speech',
+      sourceAudioBufferId: 'off_audio',
+      startSample: 1000,
+      endSample: 1400,
+      sampleRate: 16000,
+      durationMs: 25,
     },
-  }),
+  ]),
   createLiveSegmentBuffer: jest.fn().mockResolvedValue({
     bufferId: 'seg_live_out',
     info: {
