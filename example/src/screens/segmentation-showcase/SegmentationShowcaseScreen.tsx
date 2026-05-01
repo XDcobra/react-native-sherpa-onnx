@@ -98,6 +98,8 @@ type AudioSegmentationState = {
   selectedVadModelId: string | null;
   initializedVadModelId: string | null;
   initializedVadModelPath: string | null;
+  /** Resolved {@link FileSource} passed to `speech_vad_model` policy (same as detectVadModel input). */
+  initializedVadFileSource: FileSource | null;
   detectedVadModelType: VADModelType | null;
 };
 
@@ -309,6 +311,7 @@ export default function SegmentationShowcaseScreen() {
     selectedVadModelId: null,
     initializedVadModelId: null,
     initializedVadModelPath: null,
+    initializedVadFileSource: null,
     detectedVadModelType: null,
   });
 
@@ -331,17 +334,6 @@ export default function SegmentationShowcaseScreen() {
       return getAssetModelPath(modelId);
     },
     [downloadedPunctuationModelIds, padModelsPath, padPunctuationModelIds]
-  );
-
-  const resolveVadModelPath = useCallback(
-    (modelId: string): ModelPathConfig =>
-      getVadModelPathConfig(modelId, {
-        padModelIds: padVadModelIds,
-        padModelsPath,
-        bundledFolders: bundledVadFolders,
-        downloadedIds: new Set(downloadedVadIds),
-      }),
-    [bundledVadFolders, downloadedVadIds, padModelsPath, padVadModelIds]
   );
 
   const loadAvailablePunctuationModels = useCallback(async () => {
@@ -535,6 +527,9 @@ export default function SegmentationShowcaseScreen() {
           initializedVadModelPath: initializedStillAvailable
             ? prev.initializedVadModelPath
             : null,
+          initializedVadFileSource: initializedStillAvailable
+            ? prev.initializedVadFileSource
+            : null,
           detectedVadModelType: initializedStillAvailable
             ? prev.detectedVadModelType
             : null,
@@ -560,6 +555,7 @@ export default function SegmentationShowcaseScreen() {
         selectedVadModelId: null,
         initializedVadModelId: null,
         initializedVadModelPath: null,
+        initializedVadFileSource: null,
         detectedVadModelType: null,
       }));
     } finally {
@@ -659,8 +655,14 @@ export default function SegmentationShowcaseScreen() {
     setVadStatus(null);
 
     try {
-      const vadConfig = resolveVadModelPath(audioState.selectedVadModelId);
-      const detection = await detectVadModel(await toDetectSource(vadConfig), {
+      const vadConfig = getVadModelPathConfig(audioState.selectedVadModelId, {
+        padModelIds: padVadModelIds,
+        padModelsPath,
+        bundledFolders: bundledVadFolders,
+        downloadedIds: new Set(downloadedVadIds),
+      });
+      const fileSource = await toDetectSource(vadConfig);
+      const detection = await detectVadModel(fileSource, {
         modelType: 'auto',
       });
       const modelPath = detection.paths?.model?.trim();
@@ -679,6 +681,7 @@ export default function SegmentationShowcaseScreen() {
         ...prev,
         initializedVadModelId: prev.selectedVadModelId,
         initializedVadModelPath: modelPath,
+        initializedVadFileSource: fileSource,
         detectedVadModelType: modelType,
       }));
       setVadStatus(
@@ -691,13 +694,20 @@ export default function SegmentationShowcaseScreen() {
         ...prev,
         initializedVadModelId: null,
         initializedVadModelPath: null,
+        initializedVadFileSource: null,
         detectedVadModelType: null,
       }));
       setError(`VAD model init failed: ${normalizeErrorMessage(err)}`);
     } finally {
       setInitializingVadModel(false);
     }
-  }, [audioState.selectedVadModelId, resolveVadModelPath]);
+  }, [
+    audioState.selectedVadModelId,
+    bundledVadFolders,
+    downloadedVadIds,
+    padModelsPath,
+    padVadModelIds,
+  ]);
 
   const handleRunTextSegmentation = useCallback(async () => {
     if (!textState.inputText.trim()) {
@@ -820,7 +830,7 @@ export default function SegmentationShowcaseScreen() {
     if (
       audioState.evaluator === 'speech_vad_model' &&
       (!audioState.selectedVadModelId ||
-        !audioState.initializedVadModelPath ||
+        !audioState.initializedVadFileSource ||
         audioState.initializedVadModelId !== audioState.selectedVadModelId)
     ) {
       setError(
@@ -856,7 +866,7 @@ export default function SegmentationShowcaseScreen() {
             }
           : {
               evaluator: 'speech_vad_model',
-              modelPath: resolveVadModelPath(audioState.selectedVadModelId!),
+              modelPath: audioState.initializedVadFileSource!,
               vadThreshold: audioState.vadThreshold,
               vadMinSpeechMs: audioState.vadMinSpeechMs,
               vadMinSilenceMs: audioState.vadMinSilenceMs,
@@ -887,8 +897,8 @@ export default function SegmentationShowcaseScreen() {
     audioState.energyThresholdDb,
     audioState.evaluator,
     audioState.hangoverMs,
+    audioState.initializedVadFileSource,
     audioState.initializedVadModelId,
-    audioState.initializedVadModelPath,
     audioState.maxSegmentMs,
     audioState.minSegmentMs,
     audioState.selectedVadModelId,
@@ -896,7 +906,6 @@ export default function SegmentationShowcaseScreen() {
     audioState.vadMinSilenceMs,
     audioState.vadMinSpeechMs,
     audioState.vadThreshold,
-    resolveVadModelPath,
   ]);
 
   const canRunTextSegmentation =
@@ -913,7 +922,7 @@ export default function SegmentationShowcaseScreen() {
     !!audioState.audioFile &&
     (audioState.evaluator === 'speech_energy_silence' ||
       (!!audioState.selectedVadModelId &&
-        !!audioState.initializedVadModelPath &&
+        !!audioState.initializedVadFileSource &&
         audioState.initializedVadModelId === audioState.selectedVadModelId));
 
   return (
@@ -1402,7 +1411,8 @@ export default function SegmentationShowcaseScreen() {
                     speech_vad_model
                   </Text>
                   <Text style={styles.optionDescription}>
-                    Segment with a detected VAD model via policy.modelPath.
+                    Segment with a VAD bundle via policy.modelPath (FileSource;
+                    same detect path as streaming VAD).
                   </Text>
                 </Pressable>
               </View>

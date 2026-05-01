@@ -1,4 +1,40 @@
+import type { FileSource } from '../fileio/types';
 import type { SegmentationPolicy } from './engine-types';
+
+function isFileSource(value: unknown): value is FileSource {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  const kind = v.kind;
+  if (kind === 'fs') {
+    return typeof v.path === 'string' && v.path.trim().length > 0;
+  }
+  if (kind === 'app') {
+    const base = v.base;
+    return (
+      (base === 'cache' ||
+        base === 'documents' ||
+        base === 'files' ||
+        base === 'tmp' ||
+        base === 'externalFiles') &&
+      typeof v.path === 'string' &&
+      v.path.trim().length > 0
+    );
+  }
+  if (kind === 'contentUri' || kind === 'securityScoped') {
+    return typeof v.uri === 'string' && v.uri.trim().length > 0;
+  }
+  if (kind === 'pad') {
+    return (
+      typeof v.packName === 'string' &&
+      v.packName.trim().length > 0 &&
+      typeof v.path === 'string' &&
+      v.path.trim().length > 0
+    );
+  }
+  return false;
+}
 
 export interface ValidateSegmentationOptions {
   mode?: 'off' | 'manual' | 'auto';
@@ -87,10 +123,22 @@ export function validateSegmentationConfig(
         `${errorPrefix}: ${featureName} requires a speech segmentation evaluator; received ${evaluator}`
       );
     }
-    if (evaluator === 'speech_vad_model' && !policy.modelPath) {
+    if (policy.modelPath != null && evaluator !== 'speech_vad_model') {
       throw new Error(
-        `${errorPrefix}: speech_vad_model requires policy.modelPath`
+        `${errorPrefix}: policy.modelPath is only valid for speech_vad_model`
       );
+    }
+    if (evaluator === 'speech_vad_model') {
+      if (!policy.modelPath) {
+        throw new Error(
+          `${errorPrefix}: speech_vad_model requires policy.modelPath`
+        );
+      }
+      if (!isFileSource(policy.modelPath)) {
+        throw new Error(
+          `${errorPrefix}: speech_vad_model requires policy.modelPath to be a valid FileSource`
+        );
+      }
     }
   }
 

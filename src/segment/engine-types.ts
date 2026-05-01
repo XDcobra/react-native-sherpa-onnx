@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 
 export type SegmentationEvaluator =
   | 'text_synthetic_auto'
@@ -27,10 +27,10 @@ export interface SegmentationPolicy {
   checkpointIntervalMs?: number;
   punctuationInstanceId?: string;
   /**
-   * Required for `speech_vad_model` (same shape as STT/VAD `modelPath`).
-   * Resolved to an absolute path before the native bridge.
+   * Required for `speech_vad_model`. Same `FileSource` model location as
+   * `detectVadModel` / `createStreamingVAD`; JS runs detection before native attach.
    */
-  modelPath?: ModelPathConfig;
+  modelPath?: FileSource;
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;

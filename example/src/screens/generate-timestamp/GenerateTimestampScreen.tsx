@@ -1164,10 +1164,12 @@ export default function GenerateTimestampScreen() {
           )
         : null;
       const vadModelPath = activeMode.requiresVadModel
-        ? resolveModelPathForCatalog(
-            preparedVadModelId!,
-            ModelCategory.Vad,
-            vadCatalog
+        ? await toDetectSource(
+            resolveModelPathForCatalog(
+              preparedVadModelId!,
+              ModelCategory.Vad,
+              vadCatalog
+            )
           )
         : null;
       const sttModelPath = activeMode.requiresSttModel
@@ -1593,7 +1595,7 @@ export default function GenerateTimestampScreen() {
             <ModelPreparationCard
               stepLabel={stepLabels.vad!}
               title="Prepare VAD anchors"
-              description="Best-practice anchor generation here follows the docs: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelPath }). The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
+              description="Best-practice anchor generation: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelPath: FileSource }) — same detect path as streaming VAD. The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
               loading={loadingModelCatalogs}
               emptyMessage="No VAD models found. Add one under assets/models, PAD/documents/models, or downloads (category: vad)."
               models={vadCatalog.entries}

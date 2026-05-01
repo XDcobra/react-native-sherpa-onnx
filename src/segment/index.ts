@@ -59,7 +59,6 @@ import type {
   SegmentationEngineRef,
   SegmentationPolicy,
 } from './engine-types';
-import { resolveModelPath } from '../utils';
 import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
@@ -104,10 +103,36 @@ function normalizeSentenceBoundaryCharsForNative(
   return out.length > 0 ? out : undefined;
 }
 
+function normalizeSegmentationPolicyFromNative(
+  raw: unknown
+): SegmentationPolicy {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('SEGMENT_INTERNAL: invalid native segmentation policy');
+  }
+  const p = { ...(raw as Record<string, unknown>) } as Record<string, unknown>;
+  const mp = p.modelPath;
+  if (mp != null) {
+    if (typeof mp === 'string' && mp.trim().length > 0) {
+      p.modelPath = { kind: 'fs', path: mp.trim() };
+    } else if (typeof mp === 'object' && !Array.isArray(mp)) {
+      const m = mp as Record<string, unknown>;
+      if (m.kind === 'fs' && typeof m.path === 'string') {
+        p.modelPath = { kind: 'fs', path: m.path };
+      } else if (m.type === 'file' && typeof m.path === 'string') {
+        p.modelPath = { kind: 'fs', path: m.path };
+      } else {
+        delete p.modelPath;
+      }
+    }
+  }
+  delete p.modelType;
+  return p as unknown as SegmentationPolicy;
+}
+
 async function segmentationPolicyForNative(
   policy: SegmentationPolicy
 ): Promise<Object> {
-  const { modelPath: modelPathConfig, sentenceBoundaryChars, ...rest } = policy;
+  const { modelPath: fileSource, sentenceBoundaryChars, ...rest } = policy;
   const out: Record<string, unknown> = { ...rest };
   const normalized = normalizeSentenceBoundaryCharsForNative(
     sentenceBoundaryChars
@@ -115,8 +140,39 @@ async function segmentationPolicyForNative(
   if (normalized !== undefined) {
     out.sentenceBoundaryChars = normalized;
   }
-  if (modelPathConfig != null) {
-    out.modelPath = await resolveModelPath(modelPathConfig);
+  if (policy.evaluator === 'speech_vad_model') {
+    if (fileSource == null) {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: speech_vad_model requires policy.modelPath'
+      );
+    }
+    const { detectVadModel } = await import('../vad/engine');
+    const detect = await detectVadModel(fileSource, { modelType: 'auto' });
+    const onnxPath = detect.paths?.model?.trim();
+    if (
+      !detect.success ||
+      onnxPath == null ||
+      onnxPath.length === 0 ||
+      detect.modelType == null ||
+      detect.modelType === ''
+    ) {
+      const detail =
+        typeof detect.error === 'string' && detect.error.trim().length > 0
+          ? detect.error.trim()
+          : 'VAD model detection failed';
+      throw Object.assign(
+        new Error(
+          `POLICY_MODEL_UNAVAILABLE: speech_vad_model requires a detectable VAD bundle (${detail})`
+        ),
+        { code: 'POLICY_MODEL_UNAVAILABLE' }
+      );
+    }
+    out.modelPath = onnxPath;
+    out.modelType = detect.modelType;
+  } else if (fileSource != null) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: policy.modelPath is only valid for speech_vad_model'
+    );
   }
   return out as Object;
 }
@@ -210,7 +266,7 @@ function toEngineInfo(raw: {
     engineId: raw.engineId,
     attachedBufferId: raw.attachedBufferId,
     domain: raw.domain,
-    policy: raw.policy as SegmentationPolicy,
+    policy: normalizeSegmentationPolicyFromNative(raw.policy),
     state: raw.state,
     totalSegmentsCommitted: raw.totalSegmentsCommitted,
     ...(typeof raw.lastSegmentId === 'string' && raw.lastSegmentId.length > 0

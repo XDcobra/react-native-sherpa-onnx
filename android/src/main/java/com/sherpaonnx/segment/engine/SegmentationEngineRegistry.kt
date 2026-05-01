@@ -104,8 +104,10 @@ data class SegmentationEnginePolicy(
   val hangoverMs: Int = 300,
   val checkpointIntervalMs: Int = 0,
   val punctuationInstanceId: String? = null,
-  /** Resolved filesystem path to VAD model file or directory (from JS `resolveModelPath`). */
+  /** Absolute path to the VAD `.onnx` file (from JS `detectVadModel`). */
   val modelPath: String? = null,
+  /** `silero_vad` or `ten_vad` (from JS `detectVadModel`). */
+  val modelType: String? = null,
   val vadThreshold: Double? = null,
   val vadMinSpeechMs: Int? = null,
   val vadMinSilenceMs: Int? = null,
@@ -554,45 +556,6 @@ private class SpeechEnergySilenceEngine(
   }
 }
 
-private fun inferVadModelType(modelPath: String): String {
-  val lower = modelPath.lowercase()
-  return if (lower.contains("ten")) "ten_vad" else "silero_vad"
-}
-
-private fun resolveVadModelPath(rawPath: String): String {
-  val raw = rawPath.trim()
-  if (raw.isEmpty()) {
-    throw SegmentationEngineException(
-      code = "POLICY_MODEL_UNAVAILABLE",
-      message = "speech_vad_model requires non-empty policy.modelPath",
-    )
-  }
-
-  val direct = File(raw)
-  if (direct.isFile) return direct.absolutePath
-
-  if (direct.isDirectory) {
-    val candidates = listOf(
-      "silero_vad.onnx",
-      "silero.onnx",
-      "model.onnx",
-      "ten_vad.onnx",
-      "ten-vad.onnx",
-    )
-    for (candidate in candidates) {
-      val file = File(direct, candidate)
-      if (file.isFile) {
-        return file.absolutePath
-      }
-    }
-  }
-
-  throw SegmentationEngineException(
-    code = "POLICY_MODEL_UNAVAILABLE",
-    message = "speech_vad_model model not found for modelPath: $rawPath",
-  )
-}
-
 private fun resolveVadRuntime(
   policy: SegmentationEnginePolicy,
   sampleRate: Int,
@@ -603,8 +566,32 @@ private fun resolveVadRuntime(
       message = "speech_vad_model requires policy.modelPath",
     )
 
-  val modelPath = resolveVadModelPath(pathRaw)
-  val modelType = inferVadModelType(modelPath)
+  val modelPath = pathRaw.trim()
+  if (modelPath.isEmpty()) {
+    throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message = "speech_vad_model requires non-empty policy.modelPath",
+    )
+  }
+  val onnxFile = File(modelPath)
+  if (!onnxFile.isFile) {
+    throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message = "speech_vad_model modelPath must be an existing .onnx file: $modelPath",
+    )
+  }
+  val modelType =
+    policy.modelType?.trim()
+      ?: throw SegmentationEngineException(
+        code = "POLICY_MODEL_UNAVAILABLE",
+        message = "speech_vad_model requires policy.modelType from VAD detection",
+      )
+  if (modelType != "silero_vad" && modelType != "ten_vad") {
+    throw SegmentationEngineException(
+      code = "POLICY_MODEL_UNAVAILABLE",
+      message = "speech_vad_model unsupported modelType: $modelType",
+    )
+  }
   val baseRuntimeOptions = defaultRuntimeOptions(modelType)
   val overridden = withRuntimeOverrides(
     base = baseRuntimeOptions,
@@ -629,7 +616,7 @@ private fun resolveVadRuntime(
   val runtime = try {
     createVadRuntime(
       modelType = modelType,
-      modelPath = modelPath,
+      modelPath = onnxFile.absolutePath,
       sampleRate = sampleRate,
       provider = "cpu",
       numThreads = 1,
@@ -971,6 +958,7 @@ private fun parsePolicy(
       readInt(rawPolicy, "checkpointIntervalMs", 0).coerceAtLeast(0),
     punctuationInstanceId = readString(rawPolicy, "punctuationInstanceId"),
     modelPath = readString(rawPolicy, "modelPath"),
+    modelType = readString(rawPolicy, "modelType"),
     vadThreshold = (rawPolicy["vadThreshold"] as? Number)?.toDouble(),
     vadMinSpeechMs = (rawPolicy["vadMinSpeechMs"] as? Number)?.toInt(),
     vadMinSilenceMs = (rawPolicy["vadMinSilenceMs"] as? Number)?.toInt(),

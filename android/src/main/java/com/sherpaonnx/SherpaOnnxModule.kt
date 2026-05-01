@@ -2926,10 +2926,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     policy.putInt("maxSegmentMs", info.policy.maxSegmentMs)
     policy.putInt("hangoverMs", info.policy.hangoverMs)
     policy.putInt("checkpointIntervalMs", info.policy.checkpointIntervalMs)
-    info.policy.modelPath?.let { resolvedPath ->
+    info.policy.modelPath?.let { onnxPath ->
       val modelPathMap = Arguments.createMap()
-      modelPathMap.putString("type", "file")
-      modelPathMap.putString("path", resolvedPath)
+      modelPathMap.putString("kind", "fs")
+      modelPathMap.putString("path", onnxPath)
       policy.putMap("modelPath", modelPathMap)
     }
     info.policy.vadThreshold?.let { policy.putDouble("vadThreshold", it) }

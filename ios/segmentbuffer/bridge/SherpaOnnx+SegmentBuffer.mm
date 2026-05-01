@@ -897,8 +897,10 @@ struct SegEnginePolicy {
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
   std::string punctuationInstanceId;
-  /** Resolved filesystem path (from JS); used for speech_vad_model. */
+  /** Absolute path to VAD `.onnx` (from JS `detectVadModel`). */
   std::string modelPath;
+  /** `silero_vad` or `ten_vad` (from JS `detectVadModel`). */
+  std::string modelType;
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
   int vadMinSilenceMs = 250;
@@ -979,54 +981,13 @@ static bool seg_file_exists(const std::string &path) {
     fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]];
 }
 
-static bool seg_directory_exists(const std::string &path) {
+static bool seg_is_regular_file(const std::string &path) {
   if (path.empty()) return false;
   BOOL isDir = NO;
   BOOL exists = [[NSFileManager defaultManager]
     fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]
     isDirectory:&isDir];
-  return exists && isDir;
-}
-
-static std::string seg_join_path(const std::string &dir, const std::string &name) {
-  if (dir.empty()) return name;
-  if (dir.back() == '/') return dir + name;
-  return dir + "/" + name;
-}
-
-static std::string seg_resolve_vad_model_path(const std::string &modelId) {
-  const std::string trimmed = modelId;
-  if (trimmed.empty()) {
-    return "";
-  }
-
-  if (seg_file_exists(trimmed)) {
-    return trimmed;
-  }
-
-  if (seg_directory_exists(trimmed)) {
-    static const std::vector<std::string> kCandidates = {
-      "silero_vad.onnx",
-      "silero.onnx",
-      "model.onnx",
-      "ten_vad.onnx",
-      "ten-vad.onnx",
-    };
-    for (const auto &name : kCandidates) {
-      const std::string candidate = seg_join_path(trimmed, name);
-      if (seg_file_exists(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return "";
-}
-
-static std::string seg_vad_model_type_from_path(const std::string &modelPath) {
-  std::string lower = modelPath;
-  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-  return lower.find("ten") != std::string::npos ? "ten_vad" : "silero_vad";
+  return exists && !isDir;
 }
 
 static bool seg_init_vad_runtime(
@@ -1039,17 +1000,25 @@ static bool seg_init_vad_runtime(
     return false;
   }
 
-  const std::string resolvedVadPath = seg_resolve_vad_model_path(engine->policy.modelPath);
-  if (resolvedVadPath.empty()) {
+  const std::string &onnxPath = engine->policy.modelPath;
+  if (onnxPath.empty() || !seg_is_regular_file(onnxPath)) {
     if (errorOut) {
-      *errorOut = "speech_vad_model model not found for modelPath: " + engine->policy.modelPath;
+      *errorOut = "speech_vad_model modelPath must be an existing .onnx file: " + onnxPath;
+    }
+    return false;
+  }
+
+  const std::string &mt = engine->policy.modelType;
+  if (mt != "silero_vad" && mt != "ten_vad") {
+    if (errorOut) {
+      *errorOut = "speech_vad_model requires modelType silero_vad or ten_vad";
     }
     return false;
   }
 
   VadRuntimeConfig cfg;
-  cfg.modelType = seg_vad_model_type_from_path(resolvedVadPath);
-  cfg.modelPath = resolvedVadPath;
+  cfg.modelType = mt;
+  cfg.modelPath = onnxPath;
   cfg.sampleRate = std::max(1, sampleRate);
   cfg.numThreads = 1;
   cfg.provider = "cpu";
@@ -1515,6 +1484,9 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
       out.modelPath = [pathVal UTF8String] ?: "";
     }
   }
+  if ([p[@"modelType"] isKindOfClass:[NSString class]]) {
+    out.modelType = [p[@"modelType"] UTF8String] ?: "";
+  }
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
   if ([p[@"vadMinSilenceMs"] respondsToSelector:@selector(intValue)]) out.vadMinSilenceMs = std::max(1, [p[@"vadMinSilenceMs"] intValue]);
@@ -1546,7 +1518,7 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
   }
   if (!p.modelPath.empty()) {
     md[@"modelPath"] = @{
-      @"type": @"file",
+      @"kind": @"fs",
       @"path": [NSString stringWithUTF8String:p.modelPath.c_str()] ?: @"",
     };
   }

@@ -44,8 +44,10 @@ jest.mock('../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async (c: { path: string }) => c.path),
+const mockDetectVadModel = jest.fn();
+
+jest.mock('../../vad/engine', () => ({
+  detectVadModel: (...args: unknown[]) => mockDetectVadModel(...args),
 }));
 
 jest.mock('../../segmentbuffer', () => ({
@@ -78,7 +80,7 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
 
   const vadPolicy = {
     evaluator: 'speech_vad_model' as const,
-    modelPath: { type: 'file' as const, path: '/models/vad/silero_vad.onnx' },
+    modelPath: { kind: 'fs' as const, path: '/models/vad/silero_vad.onnx' },
     vadThreshold: 0.48,
     vadMinSpeechMs: 120,
     vadMinSilenceMs: 300,
@@ -87,6 +89,13 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     releaseSegmentationStateForBuffer(LIVE_AUDIO_ID);
+
+    mockDetectVadModel.mockResolvedValue({
+      success: true,
+      modelType: 'silero_vad',
+      paths: { model: '/models/vad/silero_vad.onnx' },
+      isStreaming: false,
+    });
 
     native.attachSegmentationEngine.mockResolvedValue({
       engineId: ENGINE_ID,
@@ -131,9 +140,29 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
       expect.objectContaining({
         evaluator: 'speech_vad_model',
         modelPath: '/models/vad/silero_vad.onnx',
+        modelType: 'silero_vad',
         vadThreshold: 0.48,
       })
     );
+    expect(mockDetectVadModel).toHaveBeenCalledWith(
+      vadPolicy.modelPath,
+      expect.objectContaining({ modelType: 'auto' })
+    );
+  });
+
+  it('throws POLICY_MODEL_UNAVAILABLE when detectVadModel fails', async () => {
+    mockDetectVadModel.mockResolvedValueOnce({
+      success: false,
+      error: 'missing onnx',
+    });
+
+    await expect(
+      attachSegmentationEngine(LIVE_AUDIO_ID, { policy: vadPolicy })
+    ).rejects.toMatchObject({
+      code: 'POLICY_MODEL_UNAVAILABLE',
+      message: expect.stringContaining('missing onnx'),
+    });
+    expect(native.attachSegmentationEngine).not.toHaveBeenCalled();
   });
 
   it('exposes SegmentationEngineInfo snapshot for VAD-attached engine', async () => {
