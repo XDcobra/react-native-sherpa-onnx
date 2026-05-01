@@ -3,6 +3,7 @@ import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
+import { validateSegmentationConfig } from '../segment/validation';
 import { resolveModelPath } from '../utils';
 import type { EnhancementModelType } from './types';
 import type {
@@ -137,21 +138,24 @@ export async function createStreamingEnhancement(
         );
       }
 
-      const mode = enhanceOptions?.segmentation?.mode ?? 'off';
-      let attachedSegmentationEngineId: string | undefined;
-      if (mode !== 'off') {
-        const policy = enhanceOptions?.segmentation?.policy ?? {
-          evaluator: 'continuous_frames' as const,
+      const segmentation = validateSegmentationConfig({
+        mode: enhanceOptions?.segmentation?.mode,
+        policy: enhanceOptions?.segmentation?.policy,
+        featureName: 'streaming enhancement',
+        domain: 'speech',
+        supportsManual: true,
+        defaultPolicy: {
+          evaluator: 'continuous_frames',
           checkpointIntervalMs: 1000,
-        };
-        if (policy.evaluator !== 'continuous_frames') {
-          throw new Error(
-            'ENHANCEMENT_INVALID_SEGMENTATION: streaming enhancement supports only continuous_frames policy'
-          );
-        }
+        },
+        supportedEvaluators: ['continuous_frames'],
+        errorPrefix: 'ENHANCEMENT_INVALID_SEGMENTATION',
+      });
 
+      let attachedSegmentationEngineId: string | undefined;
+      if (segmentation.mode === 'auto') {
         const attached = await attachSegmentationEngine(normalizedInputId, {
-          policy,
+          policy: segmentation.policy,
         });
         attachedSegmentationEngineId = attached.engineId;
       }

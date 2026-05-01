@@ -2,6 +2,7 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
+import { validateSegmentationConfig } from '../segment/validation';
 import {
   getPipelineTextBufferInfo,
   resolvePipelineTextBufferId,
@@ -126,32 +127,25 @@ export async function createStreamingPunctuation(
         );
       }
 
-      const mode = punctuateOptions?.segmentation?.mode ?? 'off';
-      let attachedSegmentationEngineId: string | undefined;
-      if (mode !== 'off') {
-        const policy = punctuateOptions?.segmentation?.policy ?? {
-          evaluator: 'text_punctuation_assisted' as const,
+      const segmentation = validateSegmentationConfig({
+        mode: punctuateOptions?.segmentation?.mode,
+        policy: punctuateOptions?.segmentation?.policy,
+        featureName: 'streaming punctuation',
+        domain: 'text',
+        supportsManual: true,
+        defaultPolicy: {
+          evaluator: 'text_punctuation_assisted',
           punctuationInstanceId: instanceId,
           sentenceBoundary: true,
           maxLengthChars: 500,
-        };
-        if (
-          policy.evaluator !== 'text_synthetic_auto' &&
-          policy.evaluator !== 'text_punctuation_assisted'
-        ) {
-          throw new Error(
-            `PUNCTUATION_INVALID_SEGMENTATION: streaming punctuation requires a text segmentation evaluator; received ${policy.evaluator}`
-          );
-        }
-        if (
-          policy.evaluator === 'text_punctuation_assisted' &&
-          !policy.punctuationInstanceId
-        ) {
-          throw new Error(
-            'PUNCTUATION_INVALID_SEGMENTATION: text_punctuation_assisted requires policy.punctuationInstanceId'
-          );
-        }
-        const attached = await attachSegmentationEngine(inputId, { policy });
+        },
+      });
+
+      let attachedSegmentationEngineId: string | undefined;
+      if (segmentation.mode === 'auto') {
+        const attached = await attachSegmentationEngine(inputId, {
+          policy: segmentation.policy,
+        });
         attachedSegmentationEngineId = attached.engineId;
       }
 

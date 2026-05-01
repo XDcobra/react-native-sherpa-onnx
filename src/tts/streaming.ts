@@ -26,6 +26,7 @@ import type {
 } from '../audiobuffer/types';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
+import { validateSegmentationConfig } from '../segment/validation';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
 import {
@@ -261,39 +262,23 @@ export async function createStreamingTTS(
         );
       }
 
-      const mode = pipelineOptions?.segmentation?.mode ?? 'off';
-      const policy = pipelineOptions?.segmentation?.policy;
-      if ((mode === 'off' || mode === 'manual') && policy) {
-        throw new Error(
-          `SEGMENTATION_POLICY_INVALID: streaming TTS ignores segmentation.policy when segmentation.mode='${mode}'; use mode='auto'`
-        );
-      }
-      let attachedSegmentationEngineId: string | undefined;
-      if (mode === 'auto') {
-        const resolvedPolicy = policy ?? {
-          evaluator: 'text_synthetic_auto' as const,
+      const segmentation = validateSegmentationConfig({
+        mode: pipelineOptions?.segmentation?.mode,
+        policy: pipelineOptions?.segmentation?.policy,
+        featureName: 'streaming TTS',
+        domain: 'text',
+        supportsManual: true,
+        defaultPolicy: {
+          evaluator: 'text_synthetic_auto',
           sentenceBoundary: true,
           maxLengthChars: 500,
-        };
-        if (
-          resolvedPolicy.evaluator !== 'text_synthetic_auto' &&
-          resolvedPolicy.evaluator !== 'text_punctuation_assisted'
-        ) {
-          throw new Error(
-            `SEGMENTATION_POLICY_INVALID: live TTS requires a text segmentation evaluator; received ${resolvedPolicy.evaluator}`
-          );
-        }
-        if (
-          resolvedPolicy.evaluator === 'text_punctuation_assisted' &&
-          !resolvedPolicy.punctuationInstanceId
-        ) {
-          throw new Error(
-            'SEGMENTATION_POLICY_INVALID: text_punctuation_assisted requires policy.punctuationInstanceId'
-          );
-        }
+        },
+      });
 
+      let attachedSegmentationEngineId: string | undefined;
+      if (segmentation.mode === 'auto') {
         const attached = await attachSegmentationEngine(textInLiveBufferId, {
-          policy: resolvedPolicy,
+          policy: segmentation.policy,
         });
         attachedSegmentationEngineId = attached.engineId;
       }

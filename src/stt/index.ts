@@ -23,6 +23,7 @@ import type {
   SttTranscribeOptions,
   SttRuntimeConfig,
 } from './types';
+import { validateSegmentationConfig } from '../segment/validation';
 import type { ModelPathConfig } from '../types';
 import type { FileSource } from '../fileio/types';
 import { resolveModelPath } from '../utils';
@@ -270,8 +271,23 @@ export async function createSTT(
         typeof textOut === 'string' ? textOut : textOut.bufferId
       );
 
-      const segmentationMode = options?.segmentation?.mode ?? 'off';
-      const segmentationEnabled = segmentationMode !== 'off';
+      const segmentation = validateSegmentationConfig({
+        mode: options?.segmentation?.mode,
+        policy: options?.segmentation?.policy,
+        featureName: 'offline STT',
+        domain: 'speech',
+        supportsManual: false,
+        defaultPolicy: {
+          evaluator: 'speech_energy_silence',
+          silenceThresholdMs: 500,
+          energyThresholdDb: -40,
+          minSegmentMs: 1000,
+          maxSegmentMs: 30000,
+          hangoverMs: 300,
+        },
+      });
+
+      const segmentationEnabled = segmentation.mode !== 'off';
 
       if (!segmentationEnabled) {
         await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
@@ -296,8 +312,8 @@ export async function createSTT(
         },
         {
           segmentation: {
-            mode: segmentationMode,
-            policy: options?.segmentation?.policy,
+            mode: segmentation.mode,
+            policy: segmentation.policy,
           },
           errorRecovery: options?.errorRecovery,
           maxRetriesPerSegment: options?.maxRetriesPerSegment,
