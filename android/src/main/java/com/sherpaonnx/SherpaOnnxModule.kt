@@ -68,14 +68,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
-    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { liveId, rec, segIdx, totalSeg ->
+    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { segmentBufferId, rec, segIdx, totalSeg ->
       try {
         val eventEmitter = reactApplicationContext
           .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         val annotation = com.sherpaonnx.segment.engine.SegmentationEngineRegistry
           .peekSegmentAnnotation(rec.id)
         val m = com.facebook.react.bridge.Arguments.createMap()
-        m.putString("liveBufferId", liveId)
+        m.putString("segmentBufferId", segmentBufferId)
         m.putString("segmentId", rec.id)
         m.putInt("segmentIndex", segIdx)
         m.putInt("totalSegments", totalSeg)

@@ -1585,7 +1585,7 @@ bool seg_engine_peek_annotation(
 
       __weak SherpaOnnx *weakModule = self;
       entry->segmentAppendedEmitter = [weakModule](
-        const std::string &liveId,
+        const std::string &segmentBufferId,
         const SegRecord &rec,
         int segIdx,
         int totalSegments
@@ -1593,7 +1593,7 @@ bool seg_engine_peek_annotation(
         SherpaOnnx *module = weakModule;
         if (!module) return;
         NSMutableDictionary *body = [NSMutableDictionary dictionary];
-        body[@"liveBufferId"] = [NSString stringWithUTF8String:liveId.c_str()] ?: @"";
+        body[@"segmentBufferId"] = [NSString stringWithUTF8String:segmentBufferId.c_str()] ?: @"";
         body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()] ?: @"";
         body[@"segmentIndex"] = @(segIdx);
         body[@"totalSegments"] = @(totalSegments);
@@ -2065,7 +2065,7 @@ bool seg_engine_peek_annotation(
     }
     __weak SherpaOnnx *weakModule = self;
     entry->segmentAppendedEmitter = [weakModule](
-      const std::string &bufId,
+      const std::string &segmentBufferId,
       const SegRecord &rec,
       int segIdx,
       int totalSegments
@@ -2075,7 +2075,7 @@ bool seg_engine_peek_annotation(
         return;
       }
       NSMutableDictionary *body = [NSMutableDictionary dictionary];
-      body[@"liveBufferId"] = [NSString stringWithUTF8String:bufId.c_str()];
+      body[@"segmentBufferId"] = [NSString stringWithUTF8String:segmentBufferId.c_str()];
       body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()];
       body[@"segmentIndex"] = @(segIdx);
       body[@"totalSegments"] = @(totalSegments);

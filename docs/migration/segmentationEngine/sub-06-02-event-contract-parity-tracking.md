@@ -29,7 +29,7 @@
 
 | ID | Thema | Klassifikation | Entscheidungs-Status |
 |----|--------|----------------|----------------------|
-| EC-01 | Wire + TS: `liveBufferId` in `pipelineLiveSegmentAppended` / öffentliche Segment-Events | `must-fix` (Major Cut, siehe Entscheidung) | `accepted` |
+| EC-01 | Wire + TS: `liveBufferId` in `pipelineLiveSegmentAppended` / öffentliche Segment-Events | `must-fix` (Major Cut, siehe Entscheidung) | **Code umgesetzt** (2026-05-01) |
 | EC-02 | `totalSegments` im Wire `pipelineLiveSegmentAppended` (autoritativ Native) + TS | `must-fix` | `accepted` (Code umgesetzt, siehe unten) |
 | EC-03 | Text-Segment-Events: Dedup über `segmentIndex` in TS | `deferred` (siehe [future-work](../../future-work/segmentation-ec-03-live-text-segment-index-dedup-invariant.md)) | `deferred` |
 | EC-04 | `reason` / `source` / `createdAtMs` bei Speech-Segmenten (`pipelineLiveSegmentAppended`) | `must-fix` | `accepted` (Umsetzungsplan unten; Code offen) |
@@ -83,15 +83,15 @@ Verwechslung Segment- vs. Audio-ID; unnötige Kompatibilitätsschichten, wenn da
 
 ### Follow-up (Implementierung — Checkliste)
 
-- [ ] Android: `SherpaOnnxModule.kt` — Payload-Key `segmentBufferId`.
-- [ ] iOS: `SherpaOnnx+SegmentBuffer.mm` — Payload-Key `segmentBufferId`.
-- [ ] TS: `src/segmentbuffer/types.ts` — öffentliche Event-Typen.
-- [ ] TS: `src/segmentbuffer/index.ts` — Listener + Callback-Registrierung + Error-Event.
-- [ ] TS: `src/audiobuffer/__tests__/segment-events.test.ts` (+ weitere betroffene Tests).
-- [ ] Optional: Kotlin-Bridge-Parameter in `SegmentBufferEventBridge` / Lambda von `liveId` zu `segmentBufferId` umbenennen (nur Code-Klarheit, kein Wire).
-- [ ] User-facing Doku / `NativeSherpaOnnx.ts` Kommentar aktualisieren.
-- [ ] Repo-weit nach Mock-Payloads mit `liveBufferId` unter `pipelineLiveSegmentAppended` suchen und bereinigen.
-- [ ] **Example-App:** z. B. `example/src/screens/vad/VADScreen.tsx` — nach Typ-Umbenennung prüfen, ob irgendwo `event.liveBufferId` auf **Segment-Appended**-Events zugegriffen wird (aktuell nur andere Felder); ggf. auf `event.segmentBufferId` umstellen, falls genutzt.
+- [x] Android: `SherpaOnnxModule.kt` — Payload-Key `segmentBufferId`.
+- [x] iOS: `SherpaOnnx+SegmentBuffer.mm` — Payload-Key `segmentBufferId`.
+- [x] TS: `src/segmentbuffer/types.ts` — öffentliche Event-Typen.
+- [x] TS: `src/segmentbuffer/index.ts` — Listener + Callback-Registrierung + Error-Event.
+- [x] TS: `src/audiobuffer/__tests__/segment-events.test.ts` (+ weitere betroffene Tests).
+- [x] Optional: Kotlin-Bridge-Parameter in `SegmentBufferEventBridge` / Lambda von `liveId` zu `segmentBufferId` umbenennen (nur Code-Klarheit, kein Wire).
+- [x] User-facing Doku / `NativeSherpaOnnx.ts` Kommentar aktualisieren.
+- [x] Repo-weit nach Mock-Payloads mit `liveBufferId` unter `pipelineLiveSegmentAppended` suchen und bereinigen.
+- [x] **Example-App:** z. B. `example/src/screens/vad/VADScreen.tsx` — nach Typ-Umbenennung prüfen, ob irgendwo `event.liveBufferId` auf **Segment-Appended**-Events zugegriffen wird (aktuell nur andere Felder); ggf. auf `event.segmentBufferId` umstellen, falls genutzt.
 
 ---
 
@@ -421,13 +421,14 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 | 2026-05-01 | **EC-07:** Frühere **`acceptable-deviation` / `draft`**-Entscheidung verworfen. Stattdessen **`must-fix` / `accepted`**: öffentliche Parität durch **`subscribeLiveTextBufferEvents`** (Thin-Wrapper um bestehende Registry), einheitliche Zwei-Ebenen-Doku (Create + optional Subscribe) für Text und Audio; Umsetzungsplan und Checkliste im EC-07-Abschnitt. |
 | 2026-05-01 | **EC-08:** Frühere „keine Umbenennung / Glossar“-Entscheidung verworfen. **`must-fix` / `accepted`**: Cold/Clean Cut — **`pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended`**; **`pipelineLiveSegmentAppended`** unverändert; Umsetzungsplan und Checkliste im EC-08-Abschnitt. |
 | 2026-05-01 | **EC-08 (Umsetzung):** Umbenennung in iOS, Android, TS, Tests und Doku abgeschlossen. `rg` verifiziert (0 Treffer im Produktcode); Jest-Tests `segment-events.test.ts` erfolgreich. |
+| 2026-05-01 | **EC-01 (Umsetzung):** Umbenennung von `liveBufferId` zu `segmentBufferId` für `pipelineLiveSegmentAppended` und `pipelineLiveSegmentError` in iOS, Android, TS, Tests und Doku abgeschlossen. |
 
 ---
 
 ## Nächste Schritte (Phase 7)
 
 1. Maintainer-Review: jedes `draft` → `accepted` oder revidiert.
-2. **EC-01:** Implementierung gemäß Checkliste im Abschnitt EC-01 (Native → TS-Typen → `segmentbuffer`-Modul → Tests → Doku); danach die Checkboxen dort abhaken und ggf. „Resolved“-Datum ergänzen.
+2. [x] **EC-01:** Implementierung gemäß Checkliste im Abschnitt EC-01 (Native → TS-Typen → `segmentbuffer`-Modul → Tests → Doku); danach die Checkboxen dort abhaken und ggf. „Resolved“-Datum ergänzen.
 3. **EC-02:** Umsetzung siehe Abschnitt EC-02 (Code umgesetzt); verbleibende Mocks per `rg pipelineLiveSegmentAppended` prüfen.
 4. **EC-04:** Native Wire immer `reason` / `source` / `createdAtMs` (Variante A oder B laut Abschnitt EC-04) + Matrix-Tests + kurzer Doku-Absatz; danach EC-04-Follow-up-Checkboxen abhaken.
 5. **EC-05:** Umsetzung gemäß Abschnitt EC-05 (Kotlin-Rekursion + Tests); Checkboxen dort abhaken.

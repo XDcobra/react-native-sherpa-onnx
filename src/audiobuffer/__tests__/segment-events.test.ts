@@ -114,7 +114,7 @@ describe('audiobuffer segment event wiring', () => {
     });
 
     emitEvent('pipelineLiveSegmentAppended', {
-      liveBufferId: 'seg_live_11111111-1111-1111-1111-111111111111',
+      segmentBufferId: 'seg_live_11111111-1111-1111-1111-111111111111',
       sourceAudioBufferId: liveBufferId,
       segmentId: 'seg_1',
       segmentIndex: 0,
