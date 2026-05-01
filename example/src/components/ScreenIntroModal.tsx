@@ -69,6 +69,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Voice activity detection showcase',
     body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
   },
+  SegmentationShowcase: {
+    title: 'Segmentation playground',
+    body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
+  },
   Diarization: {
     title: 'Speaker diarization preview',
     body: 'This placeholder screen shows where speaker diarization will land later. It is intended to help you think about speaker separation in multi-speaker pipelines and outputs.',

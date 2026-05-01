@@ -12,6 +12,7 @@ import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcas
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
+import SegmentationShowcaseScreen from '../screens/segmentation-showcase/SegmentationShowcaseScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
@@ -109,6 +110,13 @@ export default function RootNavigator() {
         component={VADScreen}
         options={{
           title: 'Voice Activity Detection',
+        }}
+      />
+      <Stack.Screen
+        name="SegmentationShowcase"
+        component={SegmentationShowcaseScreen}
+        options={{
+          title: 'Segmentation Showcase',
         }}
       />
       <Stack.Screen
