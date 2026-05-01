@@ -33,7 +33,7 @@
 | EC-02 | `totalSegments` im Wire `pipelineLiveSegmentAppended` (autoritativ Native) + TS | `must-fix` | `accepted` (Code umgesetzt, siehe unten) |
 | EC-03 | Text-Segment-Events: Dedup über `segmentIndex` in TS | `deferred` (siehe [future-work](../../future-work/segmentation-ec-03-live-text-segment-index-dedup-invariant.md)) | `deferred` |
 | EC-04 | `reason` / `source` / `createdAtMs` bei Speech-Segmenten (`pipelineLiveSegmentAppended`) | `must-fix` | **Code umgesetzt** (2026-05-01) |
-| EC-05 | `payload`-Shape: Android nur flache JSON-Typen vs. iOS volle Deserialisierung | `must-fix` | `accepted` (Plan unten; Code offen) |
+| EC-05 | `payload`-Shape: Android nur flache JSON-Typen vs. iOS volle Deserialisierung | `must-fix` | **Code umgesetzt** (2026-05-01) |
 | EC-06 | Finalize: Audio `manual` vs. `auto` / Plattform-Parität / `reason: 'finalize'` | `must-fix` | `accepted` (Audit + Plan unten; Code offen) |
 | EC-07 | Öffentliche Callback-API: Parität Text ↔ Audio (`subscribeLiveTextBufferEvents`) | `must-fix` | `accepted` (Umsetzungsplan unten; Code offen) |
 | EC-08 | Wire: `pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended` (einheitliches `*SegmentAppended`-Muster) | `must-fix` (Major Cut, siehe Entscheidung) | **Code umgesetzt** (2026-05-01) |
@@ -247,10 +247,10 @@ Android **an iOS angleichen**: **rekursive** Abbildung `JSONObject` / `JSONArray
 
 ### Follow-up (Checkliste)
 
-- [ ] Kotlin-Hilfsdatei + Integration `SherpaOnnxModule.kt`.
-- [ ] Tests (verschachtelt + flach).
+- [x] Kotlin-Hilfsdatei + Integration `SherpaOnnxModule.kt`.
+- [x] Tests (verschachtelt + flach).
 - [ ] Optional: Satz in User-/Segment-Doku.
-- [ ] Nach Merge: Checkboxen abhaken und Änderungshistorie mit „Resolved“-Hinweis ergänzen.
+- [x] Nach Merge: Checkboxen abhaken und Änderungshistorie mit „Resolved“-Hinweis ergänzen.
 
 ---
 
@@ -423,6 +423,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 | 2026-05-01 | **EC-08 (Umsetzung):** Umbenennung in iOS, Android, TS, Tests und Doku abgeschlossen. `rg` verifiziert (0 Treffer im Produktcode); Jest-Tests `segment-events.test.ts` erfolgreich. |
 | 2026-05-01 | **EC-01 (Umsetzung):** Umbenennung von `liveBufferId` zu `segmentBufferId` für `pipelineLiveSegmentAppended` und `pipelineLiveSegmentError` in iOS, Android, TS, Tests und Doku abgeschlossen. |
 | 2026-05-01 | **EC-04 (Umsetzung):** Variante A (Emit-Defaults) für Speech-Segmente (`reason`, `source`, `createdAtMs`) in iOS, Android und TS-Tests umgesetzt. |
+| 2026-05-01 | **EC-05 (Umsetzung):** Rekursives JSON-Mapping (JSONObject/JSONArray -> WritableMap/WritableArray) für Android implementiert; Parität zu iOS hergestellt; Tests in `segment-events.test.ts` erweitert. |
 
 ---
 
@@ -432,7 +433,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 2. [x] **EC-01:** Implementierung gemäß Checkliste im Abschnitt EC-01 (Native → TS-Typen → `segmentbuffer`-Modul → Tests → Doku); danach die Checkboxen dort abhaken und ggf. „Resolved“-Datum ergänzen.
 3. **EC-02:** Umsetzung siehe Abschnitt EC-02 (Code umgesetzt); verbleibende Mocks per `rg pipelineLiveSegmentAppended` prüfen.
 4. [x] **EC-04:** Native Wire immer `reason` / `source` / `createdAtMs` (Variante A oder B laut Abschnitt EC-04) + Matrix-Tests + kurzer Doku-Absatz; danach EC-04-Follow-up-Checkboxen abhaken.
-5. **EC-05:** Umsetzung gemäß Abschnitt EC-05 (Kotlin-Rekursion + Tests); Checkboxen dort abhaken.
+5. [x] **EC-05:** Umsetzung gemäß Abschnitt EC-05 (Kotlin-Rekursion + Tests); Checkboxen dort abhaken.
 6. **EC-06:** Finalize-Metadaten vor Event-Emit absichern, `continuous_frames`-Entscheidung treffen, Manual/Auto-Testmatrix ergänzen.
 7. **EC-07:** `subscribeLiveTextBufferEvents` implementieren, exportieren, Jest + öffentliche Doku (Zwei-Ebenen-Story mit Audio); Checkliste im EC-07-Abschnitt abhaken.
 8. [x] **EC-08:** Wire- und TS-Umbenennung **`pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended`** (Android, iOS, TS, Tests, Doku); `rg pipelineLiveTextSegment` = 0 im Produktcode; Checkliste im EC-08-Abschnitt abhaken.

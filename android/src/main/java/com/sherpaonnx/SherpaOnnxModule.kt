@@ -97,20 +97,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         if (!rec.payloadJson.isNullOrEmpty()) {
           try {
             val jo = org.json.JSONObject(rec.payloadJson)
-            val p = com.facebook.react.bridge.Arguments.createMap()
-            val keys = jo.keys()
-            while (keys.hasNext()) {
-              val k = keys.next()
-              if (!jo.isNull(k)) {
-                when (val v = jo.get(k)) {
-                  is String -> p.putString(k, v)
-                  is Int -> p.putInt(k, v)
-                  is Long -> p.putDouble(k, v.toDouble())
-                  is Double -> p.putDouble(k, v)
-                  is Boolean -> p.putBoolean(k, v)
-                }
-              }
-            }
+            val p = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(jo)
             m.putMap("payload", p)
           } catch (_: Exception) {
           }
@@ -2972,24 +2959,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     record.payloadJson?.let { payloadJson ->
       try {
         val json = JSONObject(payloadJson)
-        val payload = Arguments.createMap()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-          val key = keys.next()
-          if (json.isNull(key)) {
-            payload.putNull(key)
-            continue
-          }
-          when (val value = json.get(key)) {
-            is String -> payload.putString(key, value)
-            is Int -> payload.putInt(key, value)
-            is Long -> payload.putDouble(key, value.toDouble())
-            is Float -> payload.putDouble(key, value.toDouble())
-            is Double -> payload.putDouble(key, value)
-            is Boolean -> payload.putBoolean(key, value)
-            else -> payload.putString(key, value.toString())
-          }
-        }
+        val payload = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
         out.putMap("payload", payload)
       } catch (_: Exception) {
       }
@@ -3357,24 +3327,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     link.metaJson?.let { rawMeta ->
       try {
         val json = JSONObject(rawMeta)
-        val meta = Arguments.createMap()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-          val key = keys.next()
-          if (json.isNull(key)) {
-            meta.putNull(key)
-            continue
-          }
-          when (val value = json.get(key)) {
-            is String -> meta.putString(key, value)
-            is Int -> meta.putInt(key, value)
-            is Long -> meta.putDouble(key, value.toDouble())
-            is Float -> meta.putDouble(key, value.toDouble())
-            is Double -> meta.putDouble(key, value)
-            is Boolean -> meta.putBoolean(key, value)
-            else -> meta.putString(key, value.toString())
-          }
-        }
+        val meta = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
         out.putMap("meta", meta)
       } catch (_: Exception) {
         // Ignore malformed meta JSON.
