@@ -163,6 +163,32 @@ Spooling options:
 - `temporary`: delete spool on release (default true for auto temp paths)
 - `thresholdBytes`: activation threshold for `mode: 'auto'`
 
+**Listener cleanup:** `createLiveTextBuffer` returns a ref with an `unsubscribeEvents` function. Calling `live.unsubscribeEvents()` removes **only** the callbacks passed during this `createLiveTextBuffer` call.
+
+#### `subscribeLiveTextBufferEvents(liveBuffer, callbacks)`
+
+```ts
+function subscribeLiveTextBufferEvents(
+  liveBuffer: LiveTextBufferIdSource,
+  callbacks: LiveTextBufferCallbacks
+): () => void;
+```
+
+```ts
+const unsub = subscribeLiveTextBufferEvents(live, {
+  onPartial: (e) => console.log(e.partialText),
+  onSegment: (e) => console.log(e.segment.text),
+  onError: (e) => console.error(e.message),
+});
+
+// later:
+unsub();
+```
+
+Use this for the **advanced "two-level" event story** (shared with `audiobuffer`):
+1. **Default:** Pass callbacks to `createLiveTextBuffer` and use `live.unsubscribeEvents()`.
+2. **Advanced:** Attach additional listeners later (e.g. from a different UI component) using `subscribeLiveTextBufferEvents`. The returned function unregisters **only** the listeners from that specific call.
+
 #### `createLiveTextBufferFromOffline(offlineBuffer)`
 
 ```ts

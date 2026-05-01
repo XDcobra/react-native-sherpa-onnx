@@ -272,6 +272,8 @@ const live = await createEmptyLiveAudioBuffer({
 });
 ```
 
+**Listener cleanup:** `createEmptyLiveAudioBuffer` returns a ref with an `unsubscribeEvents` function. Calling `live.unsubscribeEvents()` removes **only** the callbacks passed during this `createEmptyLiveAudioBuffer` call.
+
 #### `ingestFileToLiveAudioBuffer(liveBuffer, source, options?)`
 
 ```ts
@@ -333,8 +335,14 @@ const unsub = subscribeLiveAudioBufferEvents(live, {
   onFramesAppended: (e) => console.log(e.frameCount),
   onError: (e) => console.error(e.message, e.liveBufferId),
 });
+
+// later:
 unsub();
 ```
+
+Use this for the **advanced "two-level" event story** (shared with `textbuffer`):
+1. **Default:** Pass callbacks to `createEmptyLiveAudioBuffer` and use `live.unsubscribeEvents()`.
+2. **Advanced:** Attach additional listeners later (e.g. from a different UI component) using `subscribeLiveAudioBufferEvents`. The returned function unregisters **only** the listeners from that specific call.
 
 #### `startMicToLiveAudioBuffer(liveBuffer, options?)` / `stopMicToLiveAudioBuffer()`
 

@@ -35,7 +35,7 @@
 | EC-04 | `reason` / `source` / `createdAtMs` bei Speech-Segmenten (`pipelineLiveSegmentAppended`) | `must-fix` | **Code umgesetzt** (2026-05-01) |
 | EC-05 | `payload`-Shape: Android nur flache JSON-Typen vs. iOS volle Deserialisierung | `must-fix` | **Code umgesetzt** (2026-05-01) |
 | EC-06 | Finalize: Audio `manual` vs. `auto` / Plattform-Parität / `reason: 'finalize'` | `must-fix` | **Code umgesetzt** (2026-05-01) |
-| EC-07 | Öffentliche Callback-API: Parität Text ↔ Audio (`subscribeLiveTextBufferEvents`) | `must-fix` | `accepted` (Umsetzungsplan unten; Code offen) |
+| EC-07 | Öffentliche Callback-API: Parität Text ↔ Audio (`subscribeLiveTextBufferEvents`) | `must-fix` | **Code umgesetzt** (2026-05-01) |
 | EC-08 | Wire: `pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended` (einheitliches `*SegmentAppended`-Muster) | `must-fix` (Major Cut, siehe Entscheidung) | **Code umgesetzt** (2026-05-01) |
 
 ---
@@ -351,11 +351,11 @@ Kein Laufzeit-Bug, aber **inkonsistente öffentliche Oberfläche**: Nutzerinnen,
 
 ### Follow-up (Checkliste)
 
-- [ ] `subscribeLiveTextBufferEvents` in **`src/textbuffer/index.ts`** implementieren + JSDoc.
-- [ ] Paket-Exporte prüfen/ergänzen (`src/index.ts` o. Ä.).
-- [ ] Jest-Abdeckung (s. Umsetzungstabelle Schritt 5).
-- [ ] Öffentliche Buffer-/SDK-Doku: einheitliche **Zwei-Ebenen**-Story (Create vs. Subscribe) für Text **und** Audio.
-- [ ] Nach Merge: Checkboxen abhaken; diese Tabelle (EC-07-Zeile) auf „Code umgesetzt“ / ggf. **Resolved**-Datum in der Änderungshistorie.
+- [x] `subscribeLiveTextBufferEvents` in **`src/textbuffer/index.ts`** implementieren + JSDoc.
+- [x] Paket-Exporte prüfen/ergänzen (`src/index.ts` o. Ä.).
+- [x] Jest-Abdeckung (s. Umsetzungstabelle Schritt 5).
+- [x] Öffentliche Buffer-/SDK-Doku: einheitliche **Zwei-Ebenen**-Story (Create vs. Subscribe) für Text **und** Audio.
+- [x] Nach Merge: Checkboxen abhaken; diese Tabelle (EC-07-Zeile) auf „Code umgesetzt“ / ggf. **Resolved**-Datum in der Änderungshistorie.
 
 ---
 
@@ -418,7 +418,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 | 2026-04-30 | **EC-03:** auf **`deferred`** gesetzt; Detailplan und Checkliste nach `docs/future-work/segmentation-ec-03-live-text-segment-index-dedup-invariant.md` verschoben. |
 | 2026-04-30 | **EC-05:** Plan vollständig im **EC-05-Abschnitt** (Abwägung + Umsetzung + Checkliste); aus `sub-06-cleanup-contract-parity.md` (ehem. §2c) hierher verlagert, wie EC-02/EC-04. |
 | 2026-05-01 | **EC-06:** Audit abgeschlossen; `manual` und `auto` erzeugen grundsätzlich Final-Segmente, aber Event-Metadaten (`reason/source/createdAtMs`) sind wegen Annotation-after-emit nicht zuverlässig. EC-06 auf **`must-fix` / `accepted`** gesetzt, konkrete Umsetzung und Testmatrix im Abschnitt ergänzt. |
-| 2026-05-01 | **EC-07:** Frühere **`acceptable-deviation` / `draft`**-Entscheidung verworfen. Stattdessen **`must-fix` / `accepted`**: öffentliche Parität durch **`subscribeLiveTextBufferEvents`** (Thin-Wrapper um bestehende Registry), einheitliche Zwei-Ebenen-Doku (Create + optional Subscribe) für Text und Audio; Umsetzungsplan und Checkliste im EC-07-Abschnitt. |
+| 2026-05-01 | **EC-07 (Umsetzung):** `subscribeLiveTextBufferEvents` in `textbuffer/index.ts` implementiert und dokumentiert. Zwei-Ebenen-Story (Create vs Subscribe) in die Dokumentation für Text- und Audio-Buffer aufgenommen. Tests für Subscribe-Lifecycle ergänzt. |
 | 2026-05-01 | **EC-08:** Frühere „keine Umbenennung / Glossar“-Entscheidung verworfen. **`must-fix` / `accepted`**: Cold/Clean Cut — **`pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended`**; **`pipelineLiveSegmentAppended`** unverändert; Umsetzungsplan und Checkliste im EC-08-Abschnitt. |
 | 2026-05-01 | **EC-08 (Umsetzung):** Umbenennung in iOS, Android, TS, Tests und Doku abgeschlossen. `rg` verifiziert (0 Treffer im Produktcode); Jest-Tests `segment-events.test.ts` erfolgreich. |
 | 2026-05-01 | **EC-01 (Umsetzung):** Umbenennung von `liveBufferId` zu `segmentBufferId` für `pipelineLiveSegmentAppended` und `pipelineLiveSegmentError` in iOS, Android, TS, Tests und Doku abgeschlossen. |
@@ -436,7 +436,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 4. [x] **EC-04:** Native Wire immer `reason` / `source` / `createdAtMs` (Variante A oder B laut Abschnitt EC-04) + Matrix-Tests + kurzer Doku-Absatz; danach EC-04-Follow-up-Checkboxen abhaken.
 5. [x] **EC-05:** Umsetzung gemäß Abschnitt EC-05 (Kotlin-Rekursion + Tests); Checkboxen dort abhaken.
 6. [x] **EC-06:** Finalize-Metadaten vor Event-Emit absichern, `continuous_frames`-Entscheidung treffen, Manual/Auto-Testmatrix ergänzen.
-7. **EC-07:** `subscribeLiveTextBufferEvents` implementieren, exportieren, Jest + öffentliche Doku (Zwei-Ebenen-Story mit Audio); Checkliste im EC-07-Abschnitt abhaken.
+7. [x] **EC-07:** `subscribeLiveTextBufferEvents` implementieren, exportieren, Jest + öffentliche Doku (Zwei-Ebenen-Story mit Audio); Checkliste im EC-07-Abschnitt abhaken.
 8. [x] **EC-08:** Wire- und TS-Umbenennung **`pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended`** (Android, iOS, TS, Tests, Doku); `rg pipelineLiveTextSegment` = 0 im Produktcode; Checkliste im EC-08-Abschnitt abhaken.
 9. Für jedes übrige `must-fix`: Ticket + Tests + Doku-Anpassung.
 10. Nach Umsetzung: diese Datei aktualisieren (Klassifikation, Status, ggf. „Resolved“-Datum).

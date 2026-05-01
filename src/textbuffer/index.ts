@@ -677,6 +677,23 @@ export async function createLiveTextBuffer(
 }
 
 /**
+ * Subscribe to events for an existing live text buffer.
+ * Use this to attach listeners after creation, or to attach multiple listeners to the same buffer.
+ * Returns a function to unsubscribe only the listeners provided in this call.
+ *
+ * @param liveBufferId The live text buffer to subscribe to.
+ * @param callbacks The callback functions to invoke when events occur.
+ * @returns A function to remove these specific event listeners.
+ */
+export function subscribeLiveTextBufferEvents(
+  liveBufferId: LiveTextBufferIdSource,
+  callbacks: LiveTextBufferCallbacks
+): () => void {
+  const id = resolveLiveTextBufferId(liveBufferId);
+  return registerLiveTextCallbacks(id, callbacks);
+}
+
+/**
  * Create a live text buffer seeded from an offline text buffer (for UI streaming / editing).
  */
 export async function createLiveTextBufferFromOffline(

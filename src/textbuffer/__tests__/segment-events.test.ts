@@ -55,6 +55,7 @@ import {
   appendLiveTextSegment,
   createLiveTextBuffer,
   finalizeLiveTextBuffer,
+  subscribeLiveTextBufferEvents,
 } from '../index';
 
 describe('textbuffer segment event wiring', () => {
@@ -179,5 +180,121 @@ describe('textbuffer segment event wiring', () => {
     });
 
     ref.unsubscribeEvents();
+  });
+
+  it('subscribeLiveTextBufferEvents works after creation without initial callbacks', async () => {
+    const uniqueBufferId = 'txt_live_22222222-2222-2222-2222-222222222222';
+    mockNative.createLiveTextBuffer.mockResolvedValueOnce({
+      bufferId: uniqueBufferId,
+      state: 'recording',
+    });
+    const onSegment = jest.fn();
+    const ref = await createLiveTextBuffer(); // No initial callbacks
+
+    const unsubscribe = subscribeLiveTextBufferEvents(ref.bufferId, {
+      onSegment,
+    });
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'hello via subscribe',
+      segmentIndex: 1,
+      totalSegments: 1,
+    });
+
+    expect(onSegment).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'ignored after unsubscribe',
+      segmentIndex: 2,
+      totalSegments: 2,
+    });
+
+    expect(onSegment).toHaveBeenCalledTimes(1); // Still 1
+  });
+
+  it('supports multiple subscriptions and targeted unsubscriptions', async () => {
+    const uniqueBufferId = 'txt_live_33333333-3333-3333-3333-333333333333';
+    mockNative.createLiveTextBuffer.mockResolvedValueOnce({
+      bufferId: uniqueBufferId,
+      state: 'recording',
+    });
+    const cb1 = jest.fn();
+    const cb2 = jest.fn();
+
+    const ref = await createLiveTextBuffer();
+
+    const unsub1 = subscribeLiveTextBufferEvents(ref.bufferId, {
+      onSegment: cb1,
+    });
+    const unsub2 = subscribeLiveTextBufferEvents(ref.bufferId, {
+      onSegment: cb2,
+    });
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'event 1',
+      segmentIndex: 1,
+      totalSegments: 1,
+    });
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledTimes(1);
+
+    unsub1(); // Only cb1 should stop
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'event 2',
+      segmentIndex: 2,
+      totalSegments: 2,
+    });
+
+    expect(cb1).toHaveBeenCalledTimes(1);
+    expect(cb2).toHaveBeenCalledTimes(2);
+
+    unsub2();
+  });
+
+  it('combines create callbacks and subscribe callbacks cleanly', async () => {
+    const uniqueBufferId = 'txt_live_44444444-4444-4444-4444-444444444444';
+    mockNative.createLiveTextBuffer.mockResolvedValueOnce({
+      bufferId: uniqueBufferId,
+      state: 'recording',
+    });
+    const createCb = jest.fn();
+    const subCb = jest.fn();
+
+    const ref = await createLiveTextBuffer({ onSegment: createCb });
+    const unsub = subscribeLiveTextBufferEvents(ref.bufferId, {
+      onSegment: subCb,
+    });
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'event 1',
+      segmentIndex: 1,
+      totalSegments: 1,
+    });
+
+    expect(createCb).toHaveBeenCalledTimes(1);
+    expect(subCb).toHaveBeenCalledTimes(1);
+
+    ref.unsubscribeEvents(); // Only removes createCb
+
+    emitEvent('pipelineLiveTextSegmentAppended', {
+      liveBufferId: uniqueBufferId,
+      text: 'event 2',
+      segmentIndex: 2,
+      totalSegments: 2,
+    });
+
+    expect(createCb).toHaveBeenCalledTimes(1);
+    expect(subCb).toHaveBeenCalledTimes(2);
+
+    unsub();
   });
 });
