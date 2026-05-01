@@ -105,6 +105,7 @@ class LiveSegmentEntry(
     var segmentIndex = -1
     var checkpointSnapshot = ""
     var appendedRecord: SegmentRecord? = null
+    var totalSegmentsInBuffer = 0
     synchronized(segmentLock) {
       if (state == State.FINISHED) {
         throw SegmentPipelineException(
@@ -133,6 +134,7 @@ class LiveSegmentEntry(
         evictedCount++
       }
       totalSegmentsWritten.incrementAndGet()
+      totalSegmentsInBuffer = segments.size
     }
     val appendRecord = appendedRecord
       ?: throw SegmentPipelineException(SegmentErrorCodes.INTERNAL_ERROR, "Missing appended segment record")
@@ -146,7 +148,12 @@ class LiveSegmentEntry(
       if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {
         lastSegmentEventEmitAtMs = now
         try {
-          SegmentBufferEventBridge.emitSegmentAppended?.invoke(bufferId, appendRecord, segmentIndex)
+          SegmentBufferEventBridge.emitSegmentAppended?.invoke(
+            bufferId,
+            appendRecord,
+            segmentIndex,
+            totalSegmentsInBuffer,
+          )
         } catch (_: Exception) {
         }
       }

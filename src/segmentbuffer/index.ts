@@ -477,6 +477,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
         liveBufferId?: string;
         segmentId?: string;
         segmentIndex?: number;
+        totalSegments?: number;
         sourceAudioBufferId?: string;
         kind?: string;
         startSample?: number;
@@ -494,13 +495,18 @@ function ensureLiveSegmentEventSubscriptions(): void {
           raw.kind ?? 'speech',
           'event.kind'
         );
+        const segmentIndexTrunc =
+          typeof raw.segmentIndex === 'number'
+            ? Math.trunc(raw.segmentIndex)
+            : 0;
         const eventBase = {
           liveBufferId,
+          totalSegments:
+            typeof raw.totalSegments === 'number'
+              ? Math.trunc(raw.totalSegments)
+              : Math.max(1, segmentIndexTrunc + 1),
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
-          segmentIndex:
-            typeof raw.segmentIndex === 'number'
-              ? Math.trunc(raw.segmentIndex)
-              : 0,
+          segmentIndex: segmentIndexTrunc,
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId

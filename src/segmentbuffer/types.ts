@@ -201,6 +201,7 @@ export type OfflineSegmentBufferFromLiveMode =
 
 interface LiveSegmentBufferSegmentAppendedEventBase {
   liveBufferId: string;
+  totalSegments: number;
   segmentId: string;
   segmentIndex: number;
   sourceAudioBufferId: string;

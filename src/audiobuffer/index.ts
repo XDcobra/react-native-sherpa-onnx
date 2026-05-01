@@ -280,6 +280,7 @@ function ensureLiveEventSubscriptions(): void {
         sourceAudioBufferId?: string;
         segmentId?: string;
         segmentIndex?: number;
+        totalSegments?: number;
         startSample?: number;
         endSample?: number;
         sampleRate?: number;
@@ -357,10 +358,15 @@ function ensureLiveEventSubscriptions(): void {
             : {}),
         };
 
+        const totalSegments =
+          typeof rawEvent.totalSegments === 'number'
+            ? Math.trunc(rawEvent.totalSegments)
+            : Math.max(1, segmentIndex + 1);
+
         const event: LiveAudioBufferSegmentEvent = {
           bufferId: sourceAudioBufferId,
           segment,
-          totalSegments: segmentIndex + 1,
+          totalSegments,
         };
 
         for (const cb of callbacks) {

@@ -198,7 +198,8 @@ struct SegLiveEntry {
   std::function<void(
     const std::string &liveBufferId,
     const SegRecord &rec,
-    int segmentIndex)>
+    int segmentIndex,
+    int totalSegments)>
     segmentAppendedEmitter;
 
   std::mutex lock;
@@ -611,7 +612,8 @@ static void seg_notify_segment_appended(
     return;
   }
   entry->lastSegmentEmitWallMs = now;
-  entry->segmentAppendedEmitter(entry->bufferId, seg, segmentIndex);
+  const int totalSegCount = static_cast<int>(entry->segments.size());
+  entry->segmentAppendedEmitter(entry->bufferId, seg, segmentIndex, totalSegCount);
 }
 } // namespace
 
@@ -1585,7 +1587,8 @@ bool seg_engine_peek_annotation(
       entry->segmentAppendedEmitter = [weakModule](
         const std::string &liveId,
         const SegRecord &rec,
-        int segIdx
+        int segIdx,
+        int totalSegments
       ) {
         SherpaOnnx *module = weakModule;
         if (!module) return;
@@ -1593,6 +1596,7 @@ bool seg_engine_peek_annotation(
         body[@"liveBufferId"] = [NSString stringWithUTF8String:liveId.c_str()] ?: @"";
         body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()] ?: @"";
         body[@"segmentIndex"] = @(segIdx);
+        body[@"totalSegments"] = @(totalSegments);
         body[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:rec.sourceAudioBufferId.c_str()] ?: @"";
         body[@"startSample"] = @(rec.startSample);
         body[@"endSample"] = @(rec.endSample);
@@ -2063,7 +2067,8 @@ bool seg_engine_peek_annotation(
     entry->segmentAppendedEmitter = [weakModule](
       const std::string &bufId,
       const SegRecord &rec,
-      int segIdx
+      int segIdx,
+      int totalSegments
     ) {
       SherpaOnnx *m = weakModule;
       if (!m) {
@@ -2073,6 +2078,7 @@ bool seg_engine_peek_annotation(
       body[@"liveBufferId"] = [NSString stringWithUTF8String:bufId.c_str()];
       body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()];
       body[@"segmentIndex"] = @(segIdx);
+      body[@"totalSegments"] = @(totalSegments);
       body[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:rec.sourceAudioBufferId.c_str()];
       body[@"startSample"] = @(rec.startSample);
       body[@"endSample"] = @(rec.endSample);

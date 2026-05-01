@@ -118,6 +118,7 @@ describe('audiobuffer segment event wiring', () => {
       sourceAudioBufferId: liveBufferId,
       segmentId: 'seg_1',
       segmentIndex: 0,
+      totalSegments: 1,
       startSample: 0,
       endSample: 16000,
       sampleRate: 16000,
