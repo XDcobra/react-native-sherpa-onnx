@@ -93,7 +93,7 @@ export const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   optionList: {
-    gap: 10,
+    gap: 16,
   },
   optionCard: {
     backgroundColor: '#FFF',
@@ -130,6 +130,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    marginBottom: 12,
   },
   policyLabel: {
     flex: 1,
@@ -255,7 +256,8 @@ export const styles = StyleSheet.create({
     lineHeight: 18,
   },
   modelButtons: {
-    gap: 10,
+    gap: 12,
+    marginBottom: 20,
   },
   modelSelectButton: {
     borderRadius: 8,

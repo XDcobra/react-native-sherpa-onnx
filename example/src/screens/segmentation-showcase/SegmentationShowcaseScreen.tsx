@@ -18,12 +18,12 @@ import {
   listAssetModels,
   listModelsAtPath,
   type ModelPathConfig,
+  type SpeechSegment,
+  type TextSegment,
 } from 'react-native-sherpa-onnx';
 import {
   segmentOfflineBuffer,
   getSegments,
-  type SpeechSegment,
-  type TextSegment,
 } from 'react-native-sherpa-onnx/segment';
 import {
   createOfflineTextBufferFromText,
@@ -75,6 +75,9 @@ type TextSegmentationState = {
   segments: TextSegment[];
   maxLengthChars: number;
   sentenceBoundary: boolean;
+  useCustomSentenceBoundaryChars: boolean;
+  /** Pipe-separated delimiter strings (`\\n` → newline). Used when useCustomSentenceBoundaryChars. */
+  sentenceBoundaryCharsInput: string;
   selectedPunctuationModelId: string | null;
   initializedPunctuationModelId: string | null;
   initializedPunctuationInstanceId: string | null;
@@ -89,6 +92,9 @@ type AudioSegmentationState = {
   minSegmentMs: number;
   maxSegmentMs: number;
   hangoverMs: number;
+  vadThreshold: number;
+  vadMinSpeechMs: number;
+  vadMinSilenceMs: number;
   selectedVadModelId: string | null;
   initializedVadModelId: string | null;
   initializedVadModelPath: string | null;
@@ -100,6 +106,13 @@ const EXAMPLE_TEXT =
 const PAD_PACK_NAME = 'sherpa_models';
 const RECOMMENDED_VAD_MODEL_IDS =
   RECOMMENDED_MODEL_IDS[ModelCategory.Vad] ?? [];
+
+function parseSentenceBoundaryCharsInput(raw: string): string[] {
+  return raw
+    .split('|')
+    .map((part) => part.trim().replace(/\\n/g, '\n'))
+    .filter((s) => s.length > 0);
+}
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -274,6 +287,8 @@ export default function SegmentationShowcaseScreen() {
     segments: [],
     maxLengthChars: 100,
     sentenceBoundary: true,
+    useCustomSentenceBoundaryChars: false,
+    sentenceBoundaryCharsInput: '. | ! | ? | ; | : | \\n',
     selectedPunctuationModelId: null,
     initializedPunctuationModelId: null,
     initializedPunctuationInstanceId: null,
@@ -288,6 +303,9 @@ export default function SegmentationShowcaseScreen() {
     minSegmentMs: 1000,
     maxSegmentMs: 30000,
     hangoverMs: 300,
+    vadThreshold: 0.5,
+    vadMinSpeechMs: 250,
+    vadMinSilenceMs: 250,
     selectedVadModelId: null,
     initializedVadModelId: null,
     initializedVadModelPath: null,
@@ -714,6 +732,15 @@ export default function SegmentationShowcaseScreen() {
       );
       textBufferRef.current = textBuffer.bufferId;
 
+      const customDelims =
+        textState.sentenceBoundary && textState.useCustomSentenceBoundaryChars
+          ? parseSentenceBoundaryCharsInput(
+              textState.sentenceBoundaryCharsInput
+            )
+          : [];
+      const delimiterPolicy =
+        customDelims.length > 0 ? { sentenceBoundaryChars: customDelims } : {};
+
       await segmentOfflineBuffer(
         textBuffer,
         textState.evaluator === 'text_synthetic_auto'
@@ -721,11 +748,15 @@ export default function SegmentationShowcaseScreen() {
               evaluator: 'text_synthetic_auto',
               sentenceBoundary: textState.sentenceBoundary,
               maxLengthChars: textState.maxLengthChars,
+              ...delimiterPolicy,
             }
           : {
               evaluator: 'text_punctuation_assisted',
               punctuationInstanceId:
                 textState.initializedPunctuationInstanceId ?? undefined,
+              sentenceBoundary: textState.sentenceBoundary,
+              maxLengthChars: textState.maxLengthChars,
+              ...delimiterPolicy,
             }
       );
 
@@ -750,6 +781,8 @@ export default function SegmentationShowcaseScreen() {
     textState.maxLengthChars,
     textState.selectedPunctuationModelId,
     textState.sentenceBoundary,
+    textState.sentenceBoundaryCharsInput,
+    textState.useCustomSentenceBoundaryChars,
   ]);
 
   const handleSelectAudioFile = useCallback(async () => {
@@ -824,6 +857,11 @@ export default function SegmentationShowcaseScreen() {
           : {
               evaluator: 'speech_vad_model',
               modelPath: resolveVadModelPath(audioState.selectedVadModelId!),
+              vadThreshold: audioState.vadThreshold,
+              vadMinSpeechMs: audioState.vadMinSpeechMs,
+              vadMinSilenceMs: audioState.vadMinSilenceMs,
+              minSegmentMs: audioState.minSegmentMs,
+              maxSegmentMs: audioState.maxSegmentMs,
             }
       );
 
@@ -855,6 +893,9 @@ export default function SegmentationShowcaseScreen() {
     audioState.minSegmentMs,
     audioState.selectedVadModelId,
     audioState.silenceThresholdMs,
+    audioState.vadMinSilenceMs,
+    audioState.vadMinSpeechMs,
+    audioState.vadThreshold,
     resolveVadModelPath,
   ]);
 
@@ -1023,39 +1064,85 @@ export default function SegmentationShowcaseScreen() {
               </View>
             </View>
 
-            {textState.evaluator === 'text_synthetic_auto' ? (
-              <View>
-                <Text style={styles.sectionTitle}>Segmentation Policy</Text>
-                <View style={styles.policyControl}>
-                  <Text style={styles.policyLabel}>Max Length (chars):</Text>
-                  <TextInput
-                    style={styles.policyInput}
-                    keyboardType="number-pad"
-                    value={String(textState.maxLengthChars)}
-                    onChangeText={(text) => {
-                      const num = parseInt(text, 10);
-                      if (!isNaN(num) && num > 0) {
+            <View>
+              <Text style={styles.sectionTitle}>Segmentation Policy</Text>
+              <Text style={styles.sectionDescription}>
+                Both text evaluators use sentence boundaries and max length
+                after splitting rules apply (punctuation-assisted runs
+                punctuation first).
+              </Text>
+              <View style={styles.policyControl}>
+                <Text style={styles.policyLabel}>Max Length (chars):</Text>
+                <TextInput
+                  style={styles.policyInput}
+                  keyboardType="number-pad"
+                  value={String(textState.maxLengthChars)}
+                  onChangeText={(text) => {
+                    const num = parseInt(text, 10);
+                    if (!isNaN(num) && num > 0) {
+                      setTextState((prev) => ({
+                        ...prev,
+                        maxLengthChars: num,
+                      }));
+                    }
+                  }}
+                  editable={!loading}
+                />
+              </View>
+              <View style={styles.policyControl}>
+                <Text style={styles.policyLabel}>Sentence Boundary:</Text>
+                <Switch
+                  value={textState.sentenceBoundary}
+                  onValueChange={(sentenceBoundary) =>
+                    setTextState((prev) => ({ ...prev, sentenceBoundary }))
+                  }
+                  disabled={loading}
+                />
+              </View>
+              {textState.sentenceBoundary && (
+                <>
+                  <View style={styles.policyControl}>
+                    <Text style={styles.policyLabel}>
+                      Custom boundary strings:
+                    </Text>
+                    <Switch
+                      value={textState.useCustomSentenceBoundaryChars}
+                      onValueChange={(useCustomSentenceBoundaryChars) =>
                         setTextState((prev) => ({
                           ...prev,
-                          maxLengthChars: num,
-                        }));
+                          useCustomSentenceBoundaryChars,
+                        }))
                       }
-                    }}
-                    editable={!loading}
-                  />
-                </View>
-                <View style={styles.policyControl}>
-                  <Text style={styles.policyLabel}>Sentence Boundary:</Text>
-                  <Switch
-                    value={textState.sentenceBoundary}
-                    onValueChange={(sentenceBoundary) =>
-                      setTextState((prev) => ({ ...prev, sentenceBoundary }))
-                    }
-                    disabled={loading}
-                  />
-                </View>
-              </View>
-            ) : (
+                      disabled={loading}
+                    />
+                  </View>
+                  {textState.useCustomSentenceBoundaryChars && (
+                    <>
+                      <Text style={styles.sectionDescription}>
+                        Pipe-separated delimiter strings. Type \n in the field
+                        for a newline character.
+                      </Text>
+                      <TextInput
+                        style={styles.textInput}
+                        multiline
+                        placeholder=". | ! | ? | \n"
+                        placeholderTextColor="#999"
+                        value={textState.sentenceBoundaryCharsInput}
+                        onChangeText={(sentenceBoundaryCharsInput) =>
+                          setTextState((prev) => ({
+                            ...prev,
+                            sentenceBoundaryCharsInput,
+                          }))
+                        }
+                        editable={!loading}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </View>
+
+            {textState.evaluator === 'text_punctuation_assisted' && (
               <View>
                 <Text style={styles.sectionTitle}>Punctuation Instance</Text>
                 <Text style={styles.sectionDescription}>
@@ -1536,6 +1623,109 @@ export default function SegmentationShowcaseScreen() {
                     <Text style={styles.statusText}>{vadStatus}</Text>
                   </View>
                 )}
+
+                <Text style={styles.sectionTitle}>VAD segmentation policy</Text>
+                <Text style={styles.sectionDescription}>
+                  Threshold and min durations map to the VAD runtime; min/max
+                  segment constrain emitted spans (max also caps max speech
+                  duration in the VAD runtime).
+                </Text>
+                <View style={styles.policyControl}>
+                  <Text style={styles.policyLabel}>VAD score threshold:</Text>
+                  <TextInput
+                    style={styles.policyInput}
+                    keyboardType="decimal-pad"
+                    value={String(audioState.vadThreshold)}
+                    onChangeText={(text) => {
+                      const num = parseFloat(text);
+                      if (!isNaN(num)) {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          vadThreshold: num,
+                        }));
+                      }
+                    }}
+                    editable={!loading}
+                  />
+                </View>
+                <View style={styles.policyControl}>
+                  <Text style={styles.policyLabel}>
+                    Min speech duration (ms):
+                  </Text>
+                  <TextInput
+                    style={styles.policyInput}
+                    keyboardType="number-pad"
+                    value={String(audioState.vadMinSpeechMs)}
+                    onChangeText={(text) => {
+                      const num = parseInt(text, 10);
+                      if (!isNaN(num) && num >= 0) {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          vadMinSpeechMs: num,
+                        }));
+                      }
+                    }}
+                    editable={!loading}
+                  />
+                </View>
+                <View style={styles.policyControl}>
+                  <Text style={styles.policyLabel}>
+                    Min silence duration (ms):
+                  </Text>
+                  <TextInput
+                    style={styles.policyInput}
+                    keyboardType="number-pad"
+                    value={String(audioState.vadMinSilenceMs)}
+                    onChangeText={(text) => {
+                      const num = parseInt(text, 10);
+                      if (!isNaN(num) && num >= 0) {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          vadMinSilenceMs: num,
+                        }));
+                      }
+                    }}
+                    editable={!loading}
+                  />
+                </View>
+                <View style={styles.policyControl}>
+                  <Text style={styles.policyLabel}>Min segment (ms):</Text>
+                  <TextInput
+                    style={styles.policyInput}
+                    keyboardType="number-pad"
+                    value={String(audioState.minSegmentMs)}
+                    onChangeText={(text) => {
+                      const num = parseInt(text, 10);
+                      if (!isNaN(num) && num >= 100) {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          minSegmentMs: num,
+                        }));
+                      }
+                    }}
+                    editable={!loading}
+                  />
+                </View>
+                <View style={styles.policyControl}>
+                  <Text style={styles.policyLabel}>
+                    Max segment / max speech (ms):
+                  </Text>
+                  <TextInput
+                    style={styles.policyInput}
+                    keyboardType="number-pad"
+                    value={String(audioState.maxSegmentMs)}
+                    onChangeText={(text) => {
+                      const num = parseInt(text, 10);
+                      if (!isNaN(num) && num > 0) {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          maxSegmentMs: num,
+                        }));
+                      }
+                    }}
+                    editable={!loading}
+                  />
+                </View>
               </View>
             )}
 

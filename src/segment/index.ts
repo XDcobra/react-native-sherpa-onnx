@@ -65,11 +65,56 @@ import { toSegmentReason, toSegmentSource } from './utils';
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
+const MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 64;
+const MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 32;
+
+function normalizeSentenceBoundaryCharsForNative(
+  raw: unknown
+): string[] | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must be an array of strings when provided'
+    );
+  }
+  if (raw.length > MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must have at most ${MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES} entries`
+    );
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must contain only strings'
+      );
+    }
+    if (item.length === 0) {
+      continue;
+    }
+    if (item.length > MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN) {
+      throw new Error(
+        `SEGMENT_INVALID_ARGUMENT: each sentenceBoundaryChars entry must be at most ${MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN} characters`
+      );
+    }
+    out.push(item);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 async function segmentationPolicyForNative(
   policy: SegmentationPolicy
 ): Promise<Object> {
-  const { modelPath: modelPathConfig, ...rest } = policy;
+  const { modelPath: modelPathConfig, sentenceBoundaryChars, ...rest } = policy;
   const out: Record<string, unknown> = { ...rest };
+  const normalized = normalizeSentenceBoundaryCharsForNative(
+    sentenceBoundaryChars
+  );
+  if (normalized !== undefined) {
+    out.sentenceBoundaryChars = normalized;
+  }
   if (modelPathConfig != null) {
     out.modelPath = await resolveModelPath(modelPathConfig);
   }
@@ -1100,10 +1145,9 @@ export async function releaseSegmentLinkMap(
 }
 
 export type {
-  Segment,
-  SegmentDomain,
-  TextSegment,
-  SpeechSegment,
-} from './segment';
-
-export { isTextSegment, isSpeechSegment } from './segment';
+  SegmentationConfig,
+  SegmentationEngineInfo,
+  SegmentationEngineRef,
+  SegmentationEvaluator,
+  SegmentationPolicy,
+} from './engine-types';

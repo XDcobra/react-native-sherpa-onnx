@@ -11,6 +11,13 @@ export interface SegmentationPolicy {
   evaluator: SegmentationEvaluator;
   maxLengthChars?: number;
   sentenceBoundary?: boolean;
+  /**
+   * When set (non-empty), replaces the built-in sentence-boundary delimiter set for
+   * `text_synthetic_auto` and `text_punctuation_assisted`. Each entry is one delimiter
+   * string (often one character; multi-character sequences such as `…` or `\r\n` are allowed).
+   * Omit or leave unset to use SDK defaults (Latin/CJK/Arabic/Devanagari punctuation + newline).
+   */
+  sentenceBoundaryChars?: string[];
   languageHints?: string[];
   silenceThresholdMs?: number;
   energyThresholdDb?: number;
