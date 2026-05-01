@@ -4,7 +4,7 @@ On-device batch transcription with a **pipeline-first** API:
 
 - **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — file-backed or in-memory PCM.
 - **Output:** offline pipeline text buffer ([`textbuffer`](textbuffer.md)) — STT writes the hypothesis and optional token/timestamp metadata into a buffer you allocate (`createEmptyOfflineTextBuffer`).
-- **Engine:** `createSTT` exposes **`transcribe(audio, textOut)`** (plus `setConfig` / `destroy`). There are **no** JS-side `getSttResult*` methods or `resultId`-based lazy getters anymore; all transcript payload access goes through **textbuffer** slice APIs.
+- **Engine:** `createSTT` exposes **`transcribe(audio, textOut)`** (plus `setConfig` / `destroy`). There are **no** JS-side `getSttResult*` methods or `resultId`-based lazy getters anymore; all transcript payload access goes through **textbuffer** slice APIs. `transcribe` writes directly into the output buffer and returns a `SttTranscribeResult` with orchestration stats (segments, time).
 
 Import path: `react-native-sherpa-onnx/stt`
 
@@ -245,7 +245,7 @@ Writes recognition output into the given **offline text buffer**. Resolves when 
 transcribe(
   audio: OfflineAudioBufferRef | OfflineBufferHandle | string,
   textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string
-): Promise<void>;
+): Promise<SttTranscribeResult>;
 ```
 
 ```ts
@@ -325,8 +325,6 @@ import type {
   SttErrorCodeValue,
 } from 'react-native-sherpa-onnx/stt';
 ```
-
-`SttTranscribeRef` remains in TypeScript types only as a **deprecated** shape for migration notes; **`transcribe` no longer returns it**. Prefer **`OfflineTextBufferRef`** + **`getPipelineTextBufferInfo`**.
 
 For buffer/ref unions (`OfflineAudioBufferIdSource`, `OfflineTextBufferIdSource`, …), import from **`audiobuffer`** / **`textbuffer`** as needed.
 

@@ -18,8 +18,6 @@
 
 So the **concrete “ASR output”** for the linker is **not a separate new buffer type**: it is the **hypothesis `OfflineTextBuffer`** filled by STT, plus the **discrete token/timestamp slices** (native-backed, large arrays not copied until read).
 
-`SttTranscribeRef` in `src/stt/types.ts` is **deprecated** in favor of the text-buffer pipeline — the linker should depend on **buffer + slice getters**, not a legacy result handle.
-
 **Not all STT models fill `timestamps`:** sherpa-onnx `OfflineRecognizerResult` passes through whatever the loaded model provides; `timestampCount` may be **zero**. That is model- and config-dependent (e.g. Whisper `enableTokenTimestamps` in `SttWhisperModelOptions`).
 
 ### ASR-mediated: mandatory token timestamps & deterministic errors

@@ -114,7 +114,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Live capture API | ✅ **Supported** | [Pipeline buffers (`audiobuffer`)](./docs/audiobuffer.md) ([live](./docs/audiobuffer-streaming.md)) · [Pipeline Audio Session](./docs/audio-session.md) | Native microphone → live audio buffer; optional JS chunks for streaming STT. Global route/session policy for mic + PCM to set input/output device manually. |
 | Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
 | Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
-| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Standalone API: **`alignTextToAudio`** (`react-native-sherpa-onnx/alignment`). |
+| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Canonical API: **`createAlignment`** + **`engine.alignTextToAudio`**. |
 | Speech Enhancement | ✅ **Supported** | [Overview](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md), [Streaming](./docs/enhancement-streaming.md) | Batch offline buffers; streaming via native live-buffer pipeline only (`createStreamingEnhancement` → `enhance`). |
 | Build-in Audio Player | ✅ **Supported** | [PCM Player](./docs/pcm-player.md) | Play any generated speech (offline/streaming) directly by using the built in pcm player. Easy use and higher performance. |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
@@ -123,10 +123,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Punctuation | ❌ Not yet supported | [Punctuation](./docs/punctuation.md) | Scheduled for release 1.1.0 |
-| VAD (Voice Activity Detection) | ❌ Not yet supported | [VAD](./docs/vad.md) | Scheduled for release 1.2.0 |
-| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.3.0 |
-| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.4.0 |
+| Punctuation | ✅ **Supported** | [Punctuation](./docs/punctuation.md) | Offline and streaming punctuation models. |
+| VAD (Voice Activity Detection) | ✅ **Supported** | [VAD (streaming)](./docs/vad-streaming.md) | Pipeline-first streaming API (`createStreamingVAD`); import `react-native-sherpa-onnx/vad`. Models: e.g. Silero VAD, Ten VAD — see doc. |
+| Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.1.0 |
+| Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.2.0 |
 
 ## SDK pipeline logic
 
@@ -280,10 +280,10 @@ For accurate alignment model setup and detection, see [Alignment / subtitles](./
 - [Pipeline Audio Session](./docs/audio-session.md) – Global audio session policy and route preference for mic + PCM
 - [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
 - [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
-- [Alignment / subtitles](./docs/alignment.md) – `alignTextToAudio`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
+- [Alignment / subtitles](./docs/alignment.md) – `createAlignment`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
 - [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
-- [Voice Activity Detection (VAD)](./docs/vad.md)
+- [Voice Activity Detection (VAD)](./docs/vad-streaming.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Speech enhancement](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - [Source Separation](./docs/separation.md)
