@@ -53,9 +53,11 @@ For each sub-plan requirement:
 
 ### 2) Deferred Parity Items
 
+**Tracking (Findings & Entscheidungen):** [sub-06-02-event-contract-parity-tracking.md](./sub-06-02-event-contract-parity-tracking.md)
+
 Track and resolve planned deferrals, including:
-- optional sync-JSI host API fast path for `setPartial` / `appendPartial` (while keeping TurboModule parity)
-- any remaining event-contract mismatch (`onSegment`, finalize semantics, payload shape)
+- optional sync-JSI host API fast path for `setPartial` / `appendPartial` (while keeping TurboModule parity) — **Detailkandidaten und Ist-Stand: Workstream 2b** unten
+- event-contract / Wire-Themen (**EC-01ff.**) — im Tracking-Dokument abgearbeitet; **kein** Ersatz für 2b
 - any remaining unified-read edge cases (live/offline parity)
 
 ### 2b) JSI-Fast-Path Candidates (general)
@@ -63,20 +65,42 @@ Track and resolve planned deferrals, including:
 Evaluate high-frequency APIs for potential migration from Promise-based TurboModule calls
 to synchronous JSI host calls (where beneficial and safe).
 
-Prioritized candidate classes:
+#### Ist-Stand (Re-Audit, Code — keine Text/Segment-JSI)
 
-- **P0 (hot write path):**
-  - `setPartial()`
-  - `appendPartial()`
-  - `commitSegment()`
-- **P1 (authoritative read path):**
-  - `getSegments()`
-  - `getSegmentCount()`
-- **P2 (high-frequency helper reads):**
-  - `getLiveTextBufferPartialSlice()`
-  - segment-buffer read/count helpers used in polling loops
+Synchrones JSI ist **bereits** nur für **Offline-/Live-Audio-Samples** angebunden (PCM / `ArrayBuffer`), **nicht** für Live-Text oder Segmentbuffer:
 
-Decision policy per candidate:
+| Ebene | Referenz |
+|-------|----------|
+| TS-Oberfläche | `src/audiobuffer/jsi.ts` — `getOfflineBufferSamples`, `createOfflineFromSamples`, `getLiveBufferSamples`, `appendSamplesToLive`; Installation über `installJSI()` → `global.__SherpaOnnxJSI` |
+| iOS | `ios/audiobuffer/SherpaOnnxJSI.cpp` / `SherpaOnnx+JSI.mm` (`installJSIBindings`) |
+| Android | `android/src/main/cpp/jni/audiobuffer/SherpaOnnxJSI.cpp` (+ Install-Bridge) |
+| Verhalten | `docs/internal/liveaudiobuffer-internal.md` (JSI-Fast-Path für Append/Slice) |
+
+**Folgerung:** Die frühere 2b-Kandidatenliste (Text/Segment) ist **weiterhin vollständig offen** — es sind **keine** neuen Implementierungen für `setPartial` / `getSegments` / … als JSI hinzugekommen; Audio-JSI war schon vorher da und ist **kein** 2b-Kandidat, sondern **bereits umgesetzter** Hot-Path (Abgrenzung unten).
+
+#### Priorisierte Kandidaten (2b) — Status: alles „offen“ (TurboModule / async)
+
+| Prio | Öffentliche / wirksame TS-API | Wesentliche TurboModule-/Spec-Methoden (`NativeSherpaOnnx`) | Bemerkung |
+|------|------------------------------|-------------------------------------------------------------|-----------|
+| **P0** | `setPartial()` | `setLiveTextBufferPartial` | Hot write — klassischer 2b-Anker |
+| **P0** | `appendPartial()` | `appendLiveTextBufferPartial` | Hot write |
+| **P0** | `commitSegment()` | **Orchestrierung:** u. a. `getLiveTextBufferPartialSlice`, `appendLiveTextSegment`, `setLiveTextBufferPartial`, `getPipelineAudioBufferInfo`, `appendLiveSegment`, `getLiveSegmentBufferSegmentCount`, `annotateSpeechSegment` (indirekt), … | Kein einzelner Native-Call — JSI-Evaluierung ggf. **pro Teilschritt** oder gebündelte Host-API |
+| **P1** | `getSegments()` | Über `src/segment/index.ts`: u. a. `getLiveTextBufferSegments`, `getOfflineTextBuffer…`, `getLiveSegmentBufferSegments`, `getPipelineSegmentBufferInfo`, … je nach Domain | Öffentliche API komponiert mehrere Reads |
+| **P1** | `getSegmentCount()` | u. a. `getLiveTextBufferSegmentCount`, Offline-Zähler-Pfade, `getLiveSegmentBufferSegmentCount`, `getPipelineSegmentBufferInfo` | Wie P1 |
+| **P2** | `getLiveTextBufferPartialSlice()` (exportiert in `textbuffer` + genutzt in `commitSegment`) | `getLiveTextBufferPartialSlice` | Hohe Frequenz in UI/Debug und im Commit-Pfad |
+| **P2** | Segment-/Count-Reads in Poll-Loops | dieselben Native-Methoden wie P1, ggf. offline: `getOfflineTextBuffer…` / Segment-Buffer-Reads | Wie ursprünglich „helper reads“ |
+
+#### Gegenüber früherer Liste — ergänzt / präzisiert
+
+- **`appendLiveTextSegment`** explizit: zentral für Text-`commitSegment` und Engine-Pfade; gehorte nicht in der Kurzliste, ist aber ein natürlicher **P0/P1-Grenzfall** beim Bündeln von Schreib-/Commit-Operationen.
+- **Unterliegende Segment-Lese-APIs** (`getLiveTextBufferSegments`, `getLiveTextBufferSegmentCount`, `getLiveSegmentBufferSegments`, `getLiveSegmentBufferSegmentCount`, `getPipelineSegmentBufferInfo`, …) als messbare Einheiten nennen — `getSegments`/`getSegmentCount` sind nur die TS-Fassade.
+
+#### Abgrenzung
+
+- **Bereits JSI (nicht 2b-Aufgabe):** Live-/Offline-Audio Sample-Transport (`audiobuffer/jsi.ts`) — keine Doppel-Migration.
+- **Workstream 2 (EC-01ff.):** Event-Contract / Wire / Public Callbacks — **abgeschlossen** laut [sub-06-02-event-contract-parity-tracking.md](./sub-06-02-event-contract-parity-tracking.md); **ersetzt 2b nicht**.
+
+#### Decision policy per candidate
 
 1. Measure baseline (latency/jitter/calls-per-second) on Android + iOS.
 2. Migrate to sync-JSI only when measurable benefit exists or when contract hardening requires single-path execution.
@@ -84,11 +108,15 @@ Decision policy per candidate:
 
 ### 3) Legacy & Dead Code Removal
 
+**Ist-Audit (Befunde, Cold-Cut-kompatible Kandidaten):** [sub-06-03-legacy-dead-code-audit.md](./sub-06-03-legacy-dead-code-audit.md) (TS/README) · **Native Android/iOS (Legacy-Kommentare / Stichprobe):** [sub-06-04-native-android-ios-legacy-audit.md](./sub-06-04-native-android-ios-legacy-audit.md)
+
 - remove obsolete segment/metadata models replaced by canonical `Segment`/`SegmentLink`
 - remove old adapters and fallback code paths no longer reachable
 - collapse duplicated conversion/validation paths where canonical layer already exists
 
 ### 4) Test Completion
+
+**Ist-Abgleich (Jest vs. Minimum-Liste):** [sub-06-05-workstream-4-test-coverage-matrix.md](./sub-06-05-workstream-4-test-coverage-matrix.md)
 
 Minimum required coverage additions:
 - `setPartial`/`appendPartial` behavior

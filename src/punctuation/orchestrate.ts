@@ -6,6 +6,7 @@ import type {
   OfflineTextBufferRef,
 } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import { validateSegmentationConfig } from '../segment/validation';
 import type { OfflinePunctuateOptions } from './types';
 
 const DEFAULT_PUNCTUATION_SEGMENTATION_POLICY: SegmentationPolicy = {
@@ -19,28 +20,14 @@ export async function runOfflinePunctuationPipeline(
   instanceId: string,
   options: OfflinePunctuateOptions = {}
 ): Promise<OrchestrationResult<OfflineTextBufferRef>> {
-  const mode = options.segmentation?.mode ?? 'off';
-  const segmentation =
-    mode === 'off'
-      ? { mode: 'off' as const }
-      : {
-          mode,
-          policy:
-            options.segmentation?.policy ??
-            DEFAULT_PUNCTUATION_SEGMENTATION_POLICY,
-        };
-
-  if (segmentation.mode !== 'off') {
-    const evaluator = segmentation.policy.evaluator;
-    if (
-      evaluator !== 'text_synthetic_auto' &&
-      evaluator !== 'text_punctuation_assisted'
-    ) {
-      throw new Error(
-        `PUNCTUATION_INVALID_SEGMENTATION: offline punctuation requires a text segmentation evaluator; received ${evaluator}`
-      );
-    }
-  }
+  const segmentation = validateSegmentationConfig({
+    mode: options.segmentation?.mode,
+    policy: options.segmentation?.policy,
+    featureName: 'offline punctuation',
+    domain: 'text',
+    supportsManual: false,
+    defaultPolicy: DEFAULT_PUNCTUATION_SEGMENTATION_POLICY,
+  });
 
   return runOfflineTextPipeline(
     input,

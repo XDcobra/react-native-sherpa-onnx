@@ -474,9 +474,10 @@ function ensureLiveSegmentEventSubscriptions(): void {
     segmentAppendedSub = emitter.addListener(
       'pipelineLiveSegmentAppended',
       (raw: {
-        liveBufferId?: string;
+        segmentBufferId?: string;
         segmentId?: string;
         segmentIndex?: number;
+        totalSegments?: number;
         sourceAudioBufferId?: string;
         kind?: string;
         startSample?: number;
@@ -486,21 +487,26 @@ function ensureLiveSegmentEventSubscriptions(): void {
         confidence?: number;
         payload?: Record<string, unknown>;
       }) => {
-        const liveBufferId = raw?.liveBufferId;
-        if (!liveBufferId) return;
-        const cbs = segmentAppendedCallbacks.get(liveBufferId);
+        const segmentBufferId = raw?.segmentBufferId;
+        if (!segmentBufferId) return;
+        const cbs = segmentAppendedCallbacks.get(segmentBufferId);
         if (!cbs || cbs.size === 0) return;
         const eventKind = assertValidSegmentKind(
           raw.kind ?? 'speech',
           'event.kind'
         );
+        const segmentIndexTrunc =
+          typeof raw.segmentIndex === 'number'
+            ? Math.trunc(raw.segmentIndex)
+            : 0;
         const eventBase = {
-          liveBufferId,
+          segmentBufferId,
+          totalSegments:
+            typeof raw.totalSegments === 'number'
+              ? Math.trunc(raw.totalSegments)
+              : Math.max(1, segmentIndexTrunc + 1),
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
-          segmentIndex:
-            typeof raw.segmentIndex === 'number'
-              ? Math.trunc(raw.segmentIndex)
-              : 0,
+          segmentIndex: segmentIndexTrunc,
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId
@@ -555,13 +561,13 @@ function ensureLiveSegmentEventSubscriptions(): void {
   if (!segmentErrorSub) {
     segmentErrorSub = emitter.addListener(
       'pipelineLiveSegmentError',
-      (raw: { liveBufferId?: string; message?: string }) => {
-        const id = raw?.liveBufferId;
+      (raw: { segmentBufferId?: string; message?: string }) => {
+        const id = raw?.segmentBufferId;
         if (typeof id !== 'string' || id.length === 0) return;
         const cbs = segmentErrorCallbacks.get(id);
         if (!cbs || cbs.size === 0) return;
         const e: LiveSegmentBufferErrorEvent = {
-          liveBufferId: id,
+          segmentBufferId: id,
           message: raw?.message ?? 'Unknown live segment buffer error',
         };
         for (const cb of cbs) cb(e);
@@ -571,7 +577,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
 }
 
 function registerLiveSegmentBufferCallbacks(
-  liveBufferId: string,
+  segmentBufferId: string,
   callbacks: {
     onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
     onError?: (event: LiveSegmentBufferErrorEvent) => void;
@@ -579,35 +585,35 @@ function registerLiveSegmentBufferCallbacks(
 ): () => void {
   if (callbacks.onSegmentAppended) {
     ensureLiveSegmentEventSubscriptions();
-    let set = segmentAppendedCallbacks.get(liveBufferId);
+    let set = segmentAppendedCallbacks.get(segmentBufferId);
     if (!set) {
       set = new Set();
-      segmentAppendedCallbacks.set(liveBufferId, set);
+      segmentAppendedCallbacks.set(segmentBufferId, set);
     }
     set.add(callbacks.onSegmentAppended);
   }
   if (callbacks.onError) {
     ensureLiveSegmentEventSubscriptions();
-    let setE = segmentErrorCallbacks.get(liveBufferId);
+    let setE = segmentErrorCallbacks.get(segmentBufferId);
     if (!setE) {
       setE = new Set();
-      segmentErrorCallbacks.set(liveBufferId, setE);
+      segmentErrorCallbacks.set(segmentBufferId, setE);
     }
     setE.add(callbacks.onError);
   }
   return () => {
     if (callbacks.onSegmentAppended) {
-      const set = segmentAppendedCallbacks.get(liveBufferId);
+      const set = segmentAppendedCallbacks.get(segmentBufferId);
       if (set) {
         set.delete(callbacks.onSegmentAppended);
-        if (set.size === 0) segmentAppendedCallbacks.delete(liveBufferId);
+        if (set.size === 0) segmentAppendedCallbacks.delete(segmentBufferId);
       }
     }
     if (callbacks.onError) {
-      const setE = segmentErrorCallbacks.get(liveBufferId);
+      const setE = segmentErrorCallbacks.get(segmentBufferId);
       if (setE) {
         setE.delete(callbacks.onError);
-        if (setE.size === 0) segmentErrorCallbacks.delete(liveBufferId);
+        if (setE.size === 0) segmentErrorCallbacks.delete(segmentBufferId);
       }
     }
   };
@@ -643,12 +649,15 @@ export async function createLiveSegmentBuffer(
     segmentEventMinIntervalMs,
   });
 
-  const liveBufferId = raw.bufferId as string;
+  const segmentBufferId = raw.bufferId as string;
 
-  const unsubscribeEvents = registerLiveSegmentBufferCallbacks(liveBufferId, {
-    onSegmentAppended: options.onSegmentAppended,
-    onError: options.onError,
-  });
+  const unsubscribeEvents = registerLiveSegmentBufferCallbacks(
+    segmentBufferId,
+    {
+      onSegmentAppended: options.onSegmentAppended,
+      onError: options.onError,
+    }
+  );
 
   return {
     info: mapLiveInfo(raw),

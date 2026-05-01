@@ -88,7 +88,8 @@ static NSString *const kAlignmentErrAnchorOutOfRange = @"ALIGNMENT_ANCHOR_OUT_OF
 static NSString *const kAlignmentErrNativeUnknown = @"ALIGNMENT_NATIVE_UNKNOWN";
 static NSString *const kAlignmentErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kAlignmentOfflineOomMessage =
-    @"Not enough memory for offline alignment. Please use smaller chunks or a streaming-friendly pipeline.";
+    @"Not enough memory for offline alignment. Please use smaller chunks or a streaming-friendly pipeline. "
+    @"See docs/segmentation-engine.md for the segmentation engine.";
 static NSString *const kSegmentErrBufferNotFound = @"SEGMENT_BUFFER_NOT_FOUND";
 static NSString *const kSegmentErrBufferKindMismatch = @"SEGMENT_BUFFER_KIND_MISMATCH";
 static NSString *const kSegmentErrInvalidArgument = @"SEGMENT_INVALID_ARGUMENT";

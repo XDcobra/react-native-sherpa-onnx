@@ -1,5 +1,7 @@
 # Audio save (`react-native-sherpa-onnx/audio`)
 
+## Introduction
+
 This module saves audio buffers or source files to encoded output files.
 
 Input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
@@ -27,7 +29,7 @@ Key behavior:
 - WAV uses a direct native fast path; lossy formats use the shared encode pipeline.
 - Progress events are emitted on the `audioSaveProgress` channel with `decode`, `encode`, and `finalize` phases.
 
-## Examples
+## Quick start
 
 ### Offline buffer to MP3
 
@@ -199,6 +201,24 @@ Use this for STT-ready 16 kHz mono WAV output.
   - Opus: `low=24`, `medium=64`, `high=128`
 - `quality` and `bitrate` are ignored for `wav` and `flac`.
 
+## Types and constants
+
+```ts
+import {
+  saveAudioAsFile, // save audio buffer or file source to encoded file destination
+  saveAudioAsWav16k, // convenience shortcut for WAV 16 kHz conversion
+  AudioSaveErrorCode, // runtime constants for AUDIO_SAVE_* error handling
+} from 'react-native-sherpa-onnx/audio';
+
+import type {
+  AudioOutputFormat, // supported output codec/format union
+  AudioSaveInput, // input union: pipeline audio buffer id source or FileSource
+  SaveAudioOptions, // conversion options (sample rate, quality, bitrate, signal, progress)
+  AudioSaveProgressEvent, // progress payload emitted during save operations
+  AudioSaveErrorCodeValue, // string union of AUDIO_SAVE_* codes
+} from 'react-native-sherpa-onnx/audio';
+```
+
 ## Error codes
 
 Promise rejections use `AUDIO_SAVE_*` codes:
@@ -232,3 +252,38 @@ Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable compar
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
 - [fileio.md](fileio.md)
 - [disable-ffmpeg.md](disable-ffmpeg.md)
+
+## Use case examples
+
+<details>
+<summary>Normalize user-uploaded media to STT-friendly WAV 16 kHz output</summary>
+
+```ts
+const wavRef = await saveAudioAsWav16k(
+  { kind: 'fs', path: '/tmp/uploaded-video-audio.m4a' },
+  { kind: 'fs', path: '/tmp/stt-input.wav' }
+);
+
+console.log(wavRef);
+```
+
+</details>
+
+<details>
+<summary>Export finalized live recording to compressed Opus with progress UI</summary>
+
+```ts
+const exported = await saveAudioAsFile(
+  liveBuffer,
+  { kind: 'fs', path: '/tmp/recording.opus' },
+  'opus',
+  {
+    quality: 'medium',
+    onProgress: (event) => console.log(event.phase, event.percent),
+  }
+);
+
+console.log(exported);
+```
+
+</details>

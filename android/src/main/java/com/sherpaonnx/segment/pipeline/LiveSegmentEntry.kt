@@ -73,6 +73,9 @@ class LiveSegmentEntry(
     durationMs: Int?,
     confidence: Double?,
     payloadJson: String?,
+    annotationReason: String? = null,
+    annotationSource: String? = null,
+    annotationCreatedAtMs: Long? = null,
   ): Pair<String, Int> {
     val normalizedKind = kind.trim().ifEmpty { "speech" }
     if (!ALLOWED_KINDS.contains(normalizedKind)) {
@@ -105,6 +108,7 @@ class LiveSegmentEntry(
     var segmentIndex = -1
     var checkpointSnapshot = ""
     var appendedRecord: SegmentRecord? = null
+    var totalSegmentsInBuffer = 0
     synchronized(segmentLock) {
       if (state == State.FINISHED) {
         throw SegmentPipelineException(
@@ -133,6 +137,7 @@ class LiveSegmentEntry(
         evictedCount++
       }
       totalSegmentsWritten.incrementAndGet()
+      totalSegmentsInBuffer = segments.size
     }
     val appendRecord = appendedRecord
       ?: throw SegmentPipelineException(SegmentErrorCodes.INTERNAL_ERROR, "Missing appended segment record")
@@ -141,12 +146,30 @@ class LiveSegmentEntry(
       appendRecord = appendRecord,
       checkpointPayload = checkpointSnapshot
     )
+
+    if (annotationReason != null && annotationSource != null) {
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.recordSegmentAnnotation(
+        segmentId = segmentId,
+        annotation = com.sherpaonnx.segment.engine.SegmentAnnotationSnapshot(
+          reason = annotationReason,
+          source = annotationSource,
+          createdAtMs = annotationCreatedAtMs ?: System.currentTimeMillis(),
+          segmentIndex = segmentIndex,
+        )
+      )
+    }
+
     if (emitSegmentAppendedEvents) {
       val now = System.currentTimeMillis()
       if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {
         lastSegmentEventEmitAtMs = now
         try {
-          SegmentBufferEventBridge.emitSegmentAppended?.invoke(bufferId, appendRecord, segmentIndex)
+          SegmentBufferEventBridge.emitSegmentAppended?.invoke(
+            bufferId,
+            appendRecord,
+            segmentIndex,
+            totalSegmentsInBuffer,
+          )
         } catch (_: Exception) {
         }
       }

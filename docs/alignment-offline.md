@@ -301,6 +301,35 @@ function assertAlignmentGranularityForMode(
 ): void;
 ```
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Transcript input | `OfflineTextBuffer` (`txt_off_*`) | Required text source for all alignment modes. |
+| Audio input | `OfflineAudioBuffer` (`off_*`) | Required waveform source for all alignment modes. |
+| VAD anchor path | `OfflineSegmentBuffer` (`seg_off_*`) | Needed for `mode: 'vad'` and anchor-based accurate auto modes. |
+| ASR hypothesis timestamps | `OfflineTextBuffer` (`txt_off_*`) | Required for `accurate_auto_asr` mapping strategy. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Alignment output | `OfflineSegmentBuffer` (`seg_off_*`) | `segmentOut` must be a pre-created offline segment buffer. |
+| Subtitle export | Segment rows from `alignment` payloads | Convert segment timings to SRT/VTT at app layer. |
+| Timeline post-processing | `SegmentLinkMap` (optional) | Use link metadata for richer composition graphs. |
+
+```mermaid
+flowchart LR
+  A[OfflineTextBuffer] --> C[createAlignment().alignTextToAudio]
+  B[OfflineAudioBuffer] --> C
+  C --> D[OfflineSegmentBuffer alignment segments]
+  D --> E[Subtitle or timestamp export]
+```
+
+More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feature-pipelines.md#alignment-offline-patterns).
+
 ## Core types
 
 | Type | Description |
@@ -334,7 +363,69 @@ function assertAlignmentGranularityForMode(
 | `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
 | `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on two consecutive anchors |
 | `ALIGNMENT_NATIVE_UNKNOWN` | native bridge returned unknown error shape |
-| `OFFLINE_OOM` | not enough memory for offline alignment |
+| `OFFLINE_OOM` | Not enough memory for offline alignment; native message suggests smaller chunks / streaming-friendly pipelines and points to [segmentation-engine.md](./segmentation-engine.md). |
+
+## Use case examples
+
+<details>
+<summary>Segmented accurate alignment with anchor mapping (`chunked_forced_ctc`)</summary>
+
+Use alignment `mode: 'accurate'` with segmentation `mode: 'auto'` and anchor segments to avoid one giant forced-alignment pass on long files.
+
+```ts
+import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createEmptyOfflineSegmentBuffer,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/audio.wav' });
+const transcript = await createOfflineTextBufferFromText('long transcript text ...');
+const vadAnchors = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+const alignedOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+
+const vad = await createStreamingVAD({
+  modelPath: { type: 'file', path: '/path/to/vad-model' },
+  modelType: 'auto',
+  sampleRate: 16000,
+});
+
+try {
+  await vad.process({ audioIn: audio, segmentOut: vadAnchors, options: { chunkSize: 512 } });
+
+  const alignment = createAlignment();
+  await alignment.alignTextToAudio(transcript, audio, alignedOut, {
+    mode: 'accurate',
+    granularity: 'word',
+    modelPath: { type: 'file', path: '/path/to/wav2vec2-alignment-model' },
+    segmentation: {
+      mode: 'auto',
+      anchorSegmentBuffer: vadAnchors,
+      mappingStrategy: 'chunked_forced_ctc',
+    },
+  });
+  await alignment.destroy();
+} finally {
+  await vad.destroy();
+  await releasePipelineTextBuffer(transcript);
+  await releasePipelineSegmentBuffer(vadAnchors);
+  await releasePipelineSegmentBuffer(alignedOut);
+  await releasePipelineAudioBuffer(audio);
+}
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for segmentation behavior and [memory-and-models.md](memory-and-models.md) for OOM planning.
+
+</details>
 
 ## FAQ
 

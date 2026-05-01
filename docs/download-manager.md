@@ -1,5 +1,7 @@
 # Download Manager
 
+## Introduction
+
 Unified model download and extraction API for public SDK usage.
 
 **Import path:** `react-native-sherpa-onnx/download`
@@ -23,7 +25,7 @@ Use **`ModelMeta.id`** from **`listModels(category)`** after **`refreshModels(ca
 | `Qnn` | [`asr-models-qnn-binary`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary) |
 | `Alignment` | [`alignment-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models) |
 
-## Quick Start
+## Quick start
 
 ### 1) One call: ensure model is ready
 
@@ -148,7 +150,7 @@ configureBackgroundDownloader({
 });
 ```
 
-## API Reference
+## API reference
 
 Each function below includes a one-line TypeScript signature (exported names match `react-native-sherpa-onnx/download`). Parameter names follow the implementation (`id` is the model id string).
 
@@ -536,7 +538,66 @@ Returns SDK storage base path.
 const basePath = await getStorageBasePath();
 ```
 
-## Types
+## Types and constants
+
+```ts
+import {
+  ModelCategory, // model family enum used by all download APIs
+  ensureModel, // high-level model ready flow (download + extract + resume)
+  listModels, // read cached registry list
+  refreshModels, // refresh remote model registry cache
+  getModelById, // read one model from cache
+  getModelsCacheStatus, // inspect cache metadata source/timestamp
+  clearModelsCache, // clear cached model list for one category
+  downloadModel, // start model download pipeline
+  pauseDownload, // pause in-progress download
+  resumeDownload, // resume paused/incomplete download
+  getIncompleteDownloads, // list paused/incomplete downloads
+  deleteIncompleteDownload, // remove partial download artifacts
+  extractModel, // start extraction from existing archive
+  pauseExtraction, // pause in-progress extraction
+  resumeExtraction, // resume paused/incomplete extraction
+  getIncompleteExtractions, // list paused/incomplete extractions
+  deleteIncompleteExtraction, // remove partial extraction artifacts
+  isModelDownloaded, // check local model readiness
+  getModelPath, // get resolved local model path
+  listDownloadedModels, // list installed models in one category
+  listDownloadedModelsWithMetadata, // list installed models + manifest metadata
+  deleteModel, // delete installed model artifacts
+  updateModelLastUsed, // update LRU timestamp metadata
+  cleanupLeastRecentlyUsed, // delete least-recently-used models by policy
+  purgeAll, // global cleanup across categories
+  getProtectedKeys, // read protected keys for purge exclusions
+  onProgress, // subscribe to per-model progress events
+  onModelsListUpdated, // subscribe to registry update events
+  configureBackgroundDownloader, // configure background downloader behavior
+  checkDiskSpace, // validate free disk space with safety buffer
+  getStorageBasePath, // get SDK storage root path
+  PauseError, // explicit pause exception class
+  isPauseError, // type guard for PauseError
+  isActiveExtractionPhase, // extraction-phase helper
+} from 'react-native-sherpa-onnx/download';
+
+import type {
+  ModelMeta, // model registry entry
+  Progress, // bytes/phase/percent progress payload
+  ProgressPhase, // phase union for progress pipeline
+  EnsureModelOptions, // ensureModel options
+  EnsureModelResult, // ensureModel result payload
+  DownloadOptions, // download options (ensure + maxRetries)
+  DownloadResult, // download/extract success payload
+  DownloadState, // incomplete download state payload
+  ExtractOptions, // extraction options
+  ExtractionState, // incomplete extraction state payload
+  ModelWithMetadata, // installed model + manifest metadata
+  CacheStatus, // registry cache metadata
+  ChecksumMismatchInfo, // checksum mismatch callback payload
+  DownloadProgressListener, // callback signature for onProgress
+  ModelsListUpdatedListener, // callback signature for onModelsListUpdated
+  ValidationResult, // disk space validation result shape
+  BackgroundDownloaderSetConfigOptions, // downloader config type
+} from 'react-native-sherpa-onnx/download';
+```
 
 ### Core Types
 
@@ -574,6 +635,19 @@ const basePath = await getStorageBasePath();
 | `PauseError` | Raised when operation is explicitly paused |
 | `AbortError` | Raised when operation is canceled via `AbortSignal` |
 
+## Error codes
+
+This module primarily surfaces typed errors and domain errors from dependent layers.
+
+| Error type/code | Meaning |
+| --- | --- |
+| `PauseError` | Operation was explicitly paused via `pauseDownload` or `pauseExtraction` |
+| `AbortError` | Operation was cancelled via `AbortSignal` |
+| `FILEIO_*` | Source/destination/path resolution failures from file I/O layer |
+| `ARCHIVE_*` / extraction failure message | Native extraction/decompression failure |
+
+When handling failures in app code, branch on `isPauseError(error)` first, then treat abort and extraction/file errors separately.
+
 ## Troubleshooting
 
 | Symptom | Likely Cause | Action |
@@ -584,4 +658,47 @@ const basePath = await getStorageBasePath();
 | `AbortError` from extraction | Canceled by `AbortSignal` (not a pause) | Partial output may be removed; retry `extractModel(...)` or `ensureModel(...)` |
 | `PauseError` from extraction | `pauseExtraction` while unpacking | Call `resumeExtraction(...)` or `ensureModel(...)`; archive + `.extraction-state-*.json` are kept |
 | Empty model list | No cache + release fetch failed | Check network and retry `refreshModels(...)` |
+
+## Use case examples
+
+<details>
+<summary>Warm up mandatory models during app bootstrap</summary>
+
+```ts
+await refreshModels(ModelCategory.Stt, { forceRefresh: true });
+
+const stt = await ensureModel(ModelCategory.Stt, 'sherpa-onnx-whisper-tiny', {
+  onProgress: (p) => console.log('[stt]', p.phase, p.percent),
+});
+
+const vad = await ensureModel(ModelCategory.Vad, 'silero_vad', {
+  onProgress: (p) => console.log('[vad]', p.phase, p.percent),
+});
+
+console.log(stt.localPath, vad.localPath);
+```
+
+</details>
+
+<details>
+<summary>Pause and resume long download from background-safe UI controls</summary>
+
+```ts
+const run = downloadModel(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+
+await pauseDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+
+try {
+  await run;
+} catch (error) {
+  if (!isPauseError(error)) {
+    throw error;
+  }
+}
+
+const done = await resumeDownload(ModelCategory.Tts, 'vits-piper-en_US-lessac-medium');
+console.log(done.localPath);
+```
+
+</details>
 

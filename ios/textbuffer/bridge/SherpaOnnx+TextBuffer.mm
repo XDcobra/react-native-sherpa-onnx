@@ -203,7 +203,7 @@ static void txt_emit_live_text_segment_event(
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        [module sendEventWithName:@"pipelineLiveTextSegment" body:body];
+        [module sendEventWithName:@"pipelineLiveTextSegmentAppended" body:body];
     });
 }
 

@@ -34,6 +34,7 @@ import {
 } from '../audiobuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { addSegmentLink, createSegmentLinkMap } from '../segment';
+import { validateSegmentationConfig } from '../segment/validation';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
@@ -251,18 +252,21 @@ export async function createTTS(
       const textInId = resolvePipelineTextBufferId(textIn);
       const audioOutId = resolvePipelineAudioBufferId(audioOut);
 
-      const segmentationMode = opts?.segmentation?.mode ?? 'off';
-      if (segmentationMode === 'manual') {
-        throw new Error(
-          'SEGMENTATION_POLICY_INVALID: offline TTS does not support segmentation.mode=manual'
-        );
-      }
-      if (segmentationMode === 'off' && opts?.segmentation?.policy != null) {
-        throw new Error(
-          "SEGMENTATION_POLICY_INVALID: offline TTS ignores segmentation.policy when segmentation.mode='off'; use mode='auto'"
-        );
-      }
-      if (segmentationMode === 'off') {
+      const segmentation = validateSegmentationConfig({
+        mode: opts?.segmentation?.mode,
+        policy: opts?.segmentation?.policy,
+        featureName: 'offline TTS',
+        domain: 'text',
+        supportsManual: false,
+        defaultPolicy: {
+          evaluator: 'text_synthetic_auto',
+          sentenceBoundary: true,
+          maxLengthChars: 500,
+        },
+        errorPrefix: 'SEGMENTATION_POLICY_INVALID',
+      });
+
+      if (segmentation.mode === 'off') {
         await SherpaOnnx.synthesizeTts(
           instanceId,
           textInId,

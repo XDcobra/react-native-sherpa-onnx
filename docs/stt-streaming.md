@@ -1,5 +1,7 @@
 # Streaming Speech-to-Text (STT)
 
+## Introduction
+
 Low-latency online recognition in pipeline mode.
 
 Import path: `react-native-sherpa-onnx/stt`
@@ -161,7 +163,7 @@ const engine = await createStreamingSTT({
 | --- | --- |
 | Input format | Float PCM `[-1, 1]` at buffer sample rate |
 | Live microphone | [audiobuffer-streaming.md](audiobuffer-streaming.md): `startMicToLiveAudioBuffer` / `stopMicToLiveAudioBuffer` |
-| Text output | [textbuffer.md](textbuffer.md): partial slice + segment log getters |
+| Text output | [textbuffer-streaming.md](textbuffer-streaming.md): partial slice + segment log getters |
 | Sample rate | Live audio buffer sample rate must match STT model sample rate |
 | Lifecycle | Stop pipeline, destroy engine, and release both buffers |
 
@@ -329,7 +331,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
 
 **Text output**
 
@@ -344,7 +346,34 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 ```
 
-See [textbuffer.md](textbuffer.md).
+See [textbuffer-streaming.md](textbuffer-streaming.md).
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Microphone capture | `LiveAudioBuffer` (`live_*`) | Use `startMicToLiveAudioBuffer(...)` for real-time input. |
+| File ingest to live path | `LiveAudioBuffer` (`live_*`) | Stream long files incrementally to avoid large one-shot decode peaks. |
+| Streaming enhancement | `LiveAudioBuffer` (`live_*`) | Optional denoise stage before online STT. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Live transcript UI | `LiveTextBuffer` (`txt_live_*`) | Read partial and committed segments while pipeline runs. |
+| Streaming punctuation | `LiveTextBuffer` (`txt_live_*`) | Add punctuation before downstream use. |
+| Streaming TTS input | `LiveTextBuffer` (`txt_live_*`) | Feed committed text into `createStreamingTTS()`. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B[createStreamingSTT().transcribe]
+  B --> C[LiveTextBuffer]
+  C --> D[UI or streaming punctuation or streaming TTS]
+```
+
+More end-to-end patterns: [feature-pipelines.md#stt-streaming-patterns](feature-pipelines.md#stt-streaming-patterns).
 
 ## Types and constants
 
@@ -366,7 +395,7 @@ import type {
 } from 'react-native-sherpa-onnx/stt';
 ```
 
-## Error quick table
+## Error codes
 Typical `SttErrorCode` values from the Streaming STT layer (exact strings match native):
 
 | Code | Typical reason |
@@ -379,10 +408,99 @@ Typical `SttErrorCode` values from the Streaming STT layer (exact strings match 
 | `STT_INVALID_ARGUMENT` | Model/options mismatch or unsupported setup |
 | `STT_INTERNAL_ERROR` | Unexpected native failure |
 
+## Use case examples
+
+<details>
+<summary>Live microphone transcription with partial text updates</summary>
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createStreamingSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-zipformer' },
+  modelType: 'zipformer2_ctc',
+  enableEndpoint: true,
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1, windowSeconds: 120 });
+const textOut = await createLiveTextBuffer({ windowMaxChars: 65536, maxSegments: 2048 });
+const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+await startMicToLiveAudioBuffer(audioIn);
+const tick = setInterval(async () => {
+  const partial = await getLiveTextBufferPartialSlice(textOut, 0, 4096);
+  const count = await getLiveTextBufferSegmentCount(textOut);
+  const committed =
+    count > 0
+      ? (await getLiveTextBufferSegments(textOut, 0, count)).map((s) => s.text).join(' ')
+      : '';
+  console.log([committed, partial].filter(Boolean).join(' ').trim());
+}, 150);
+
+await stopMicToLiveAudioBuffer();
+clearInterval(tick);
+await pipeline.flush();
+await pipeline.stop();
+await engine.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Streaming STT with explicit VAD segmentation boundaries (dual-pipeline)</summary>
+
+Feed both STT and VAD pipelines the same `LiveAudioBuffer`. VAD is the explicit segmentation stage and provides speech boundaries in real time while STT produces a live text output from the same stream.
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const vad = await createStreamingVAD({ modelPath: { type: 'asset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
+const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+
+const vadPipeline = await vad.process({ audioIn, segmentOut, options: { chunkSize: 512 } });
+const sttPipeline = await stt.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+// ... feed audio into audioIn ...
+
+await vadPipeline.flush();
+await sttPipeline.flush();
+await vadPipeline.stop();
+await sttPipeline.stop();
+await vad.destroy();
+await stt.destroy();
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
 ## See also
 
 - [Offline STT](stt-offline.md)
-- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
-- [Pipeline text buffers (`textbuffer`)](textbuffer.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
+- [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)

@@ -68,44 +68,36 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
-    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { liveId, rec, segIdx ->
+    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { segmentBufferId, rec, segIdx, totalSeg ->
       try {
         val eventEmitter = reactApplicationContext
           .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         val annotation = com.sherpaonnx.segment.engine.SegmentationEngineRegistry
           .peekSegmentAnnotation(rec.id)
         val m = com.facebook.react.bridge.Arguments.createMap()
-        m.putString("liveBufferId", liveId)
+        m.putString("segmentBufferId", segmentBufferId)
         m.putString("segmentId", rec.id)
         m.putInt("segmentIndex", segIdx)
+        m.putInt("totalSegments", totalSeg)
         m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)
         m.putInt("startSample", rec.startSample)
         m.putInt("endSample", rec.endSample)
         m.putInt("sampleRate", rec.sampleRate)
         m.putInt("durationMs", rec.durationMs)
-        annotation?.let {
-          m.putString("reason", it.reason)
-          m.putString("source", it.source)
-          m.putDouble("createdAtMs", it.createdAtMs.toDouble())
+        if (annotation != null) {
+          m.putString("reason", annotation.reason)
+          m.putString("source", annotation.source)
+          m.putDouble("createdAtMs", annotation.createdAtMs.toDouble())
+        } else {
+          m.putString("reason", "manual_commit")
+          m.putString("source", "manual")
+          m.putDouble("createdAtMs", System.currentTimeMillis().toDouble())
         }
         rec.confidence?.let { m.putDouble("confidence", it) }
         if (!rec.payloadJson.isNullOrEmpty()) {
           try {
             val jo = org.json.JSONObject(rec.payloadJson)
-            val p = com.facebook.react.bridge.Arguments.createMap()
-            val keys = jo.keys()
-            while (keys.hasNext()) {
-              val k = keys.next()
-              if (!jo.isNull(k)) {
-                when (val v = jo.get(k)) {
-                  is String -> p.putString(k, v)
-                  is Int -> p.putInt(k, v)
-                  is Long -> p.putDouble(k, v.toDouble())
-                  is Double -> p.putDouble(k, v)
-                  is Boolean -> p.putBoolean(k, v)
-                }
-              }
-            }
+            val p = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(jo)
             m.putMap("payload", p)
           } catch (_: Exception) {
           }
@@ -249,7 +241,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      eventEmitter.emit("pipelineLiveTextSegment", payload)
+      eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
     } catch (_: Exception) {
       // JS bridge may be unavailable during teardown.
     }
@@ -2967,24 +2959,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     record.payloadJson?.let { payloadJson ->
       try {
         val json = JSONObject(payloadJson)
-        val payload = Arguments.createMap()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-          val key = keys.next()
-          if (json.isNull(key)) {
-            payload.putNull(key)
-            continue
-          }
-          when (val value = json.get(key)) {
-            is String -> payload.putString(key, value)
-            is Int -> payload.putInt(key, value)
-            is Long -> payload.putDouble(key, value.toDouble())
-            is Float -> payload.putDouble(key, value.toDouble())
-            is Double -> payload.putDouble(key, value)
-            is Boolean -> payload.putBoolean(key, value)
-            else -> payload.putString(key, value.toString())
-          }
-        }
+        val payload = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
         out.putMap("payload", payload)
       } catch (_: Exception) {
       }
@@ -3103,12 +3078,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
     val source = payload.getString("source")?.trim() ?: ""
     val allowedKeys = when (source) {
-      "vad" -> setOf("source", "engine", "decision", "score")
-      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
-      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      "vad" -> setOf("source", "engine", "decision", "score", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts"
+        "speech payload.source must be one of vad, stt, tts, manual"
       )
     }
 
@@ -3185,7 +3161,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         sampleRate = sampleRate.toInt(),
         durationMs = durationMs?.toInt(),
         confidence = confidence,
-        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() }
+        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() },
+        annotationReason = if (payload != null && payload.hasKey("__annotationReason")) payload.getString("__annotationReason") else null,
+        annotationSource = if (payload != null && payload.hasKey("__annotationSource")) payload.getString("__annotationSource") else null,
+        annotationCreatedAtMs = if (payload != null && payload.hasKey("__annotationCreatedAtMs") && !payload.isNull("__annotationCreatedAtMs")) payload.getDouble("__annotationCreatedAtMs").toLong() else null
       )
       val out = Arguments.createMap()
       out.putString("segmentId", result.first)
@@ -3352,24 +3331,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     link.metaJson?.let { rawMeta ->
       try {
         val json = JSONObject(rawMeta)
-        val meta = Arguments.createMap()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-          val key = keys.next()
-          if (json.isNull(key)) {
-            meta.putNull(key)
-            continue
-          }
-          when (val value = json.get(key)) {
-            is String -> meta.putString(key, value)
-            is Int -> meta.putInt(key, value)
-            is Long -> meta.putDouble(key, value.toDouble())
-            is Float -> meta.putDouble(key, value.toDouble())
-            is Double -> meta.putDouble(key, value)
-            is Boolean -> meta.putBoolean(key, value)
-            else -> meta.putString(key, value.toString())
-          }
-        }
+        val meta = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
         out.putMap("meta", meta)
       } catch (_: Exception) {
         // Ignore malformed meta JSON.

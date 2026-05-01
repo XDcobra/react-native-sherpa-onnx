@@ -18,12 +18,13 @@ import {
   registerLiveTextSegmentation,
   releaseSegmentationStateForBuffer,
 } from '../segment/runtime-state';
-import type {
-  SegmentReason,
-  SegmentSource,
-  TextSegment,
-} from '../segment/segment';
+import type { TextSegment } from '../segment/segment';
 import { PipelineTextErrorCode } from './types';
+import {
+  toSegmentReason,
+  toSegmentSource,
+  inferSegmentReasonFromSource,
+} from '../segment/utils';
 import type {
   OfflineTextBufferInfo,
   OfflineTextBufferRef,
@@ -169,30 +170,6 @@ let textSegmentSubscription: NativeSubscription | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
-}
-
-function inferSegmentReasonFromSource(source: string): SegmentReason {
-  if (source === 'stt_stream') return 'endpoint';
-  return 'manual_commit';
-}
-
-function toSegmentSource(raw: unknown, fallback: SegmentSource): SegmentSource {
-  return raw === 'segmentation_engine' || raw === 'manual' || raw === 'external'
-    ? raw
-    : fallback;
-}
-
-function toSegmentReason(raw: unknown, fallback: SegmentReason): SegmentReason {
-  return raw === 'endpoint' ||
-    raw === 'punctuation' ||
-    raw === 'length_limit' ||
-    raw === 'vad_boundary' ||
-    raw === 'energy_silence' ||
-    raw === 'manual_commit' ||
-    raw === 'finalize' ||
-    raw === 'policy_checkpoint'
-    ? raw
-    : fallback;
 }
 
 function toPublicTextMeta(
@@ -406,7 +383,7 @@ function ensureLiveTextEventSubscriptions(): void {
 
   if (!textSegmentSubscription) {
     textSegmentSubscription = emitter.addListener(
-      'pipelineLiveTextSegment',
+      'pipelineLiveTextSegmentAppended',
       (rawEvent: {
         liveBufferId?: string;
         bufferId?: string;
@@ -674,6 +651,23 @@ export async function createLiveTextBuffer(
     bufferId: liveBufferId as LiveTextBufferHandleRecording,
     unsubscribeEvents,
   };
+}
+
+/**
+ * Subscribe to events for an existing live text buffer.
+ * Use this to attach listeners after creation, or to attach multiple listeners to the same buffer.
+ * Returns a function to unsubscribe only the listeners provided in this call.
+ *
+ * @param liveBufferId The live text buffer to subscribe to.
+ * @param callbacks The callback functions to invoke when events occur.
+ * @returns A function to remove these specific event listeners.
+ */
+export function subscribeLiveTextBufferEvents(
+  liveBufferId: LiveTextBufferIdSource,
+  callbacks: LiveTextBufferCallbacks
+): () => void {
+  const id = resolveLiveTextBufferId(liveBufferId);
+  return registerLiveTextCallbacks(id, callbacks);
 }
 
 /**

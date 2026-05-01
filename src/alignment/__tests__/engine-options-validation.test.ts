@@ -161,4 +161,22 @@ describe('AlignmentEngine options validation', () => {
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_NOT_IMPLEMENTED' });
   });
+
+  it('rejects segmentation.mode=manual with SEGMENTATION_POLICY_INVALID', async () => {
+    const engine = createAlignment();
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'accurate',
+        modelPath: { type: 'file', path: '/tmp/model' },
+        granularity: 'word',
+        segmentation: {
+          mode: 'manual',
+        } as any,
+      })
+    ).rejects.toThrow(
+      'SEGMENTATION_POLICY_INVALID: alignment does not support segmentation.mode=manual'
+    );
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
 });

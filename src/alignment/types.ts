@@ -44,6 +44,9 @@ export type AlignmentAccurateSegmentationConfig =
       mode: 'off';
     }
   | {
+      mode: 'manual';
+    }
+  | {
       mode: 'auto';
       anchorSegmentBuffer: OfflineSegmentBufferIdSource;
       mappingStrategy: 'asr_mediated';

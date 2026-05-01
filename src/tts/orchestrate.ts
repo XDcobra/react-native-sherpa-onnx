@@ -3,6 +3,7 @@ import { runOfflineTextToAudioPipeline } from '../pipeline/offlineOrchestrator';
 import type { TextToAudioOrchestrationResult } from '../pipeline/offlineOrchestrator';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import { validateSegmentationConfig } from '../segment/validation';
 import { toNativeSynthesisOptions } from './ttsNativeBridge';
 import type { TtsSynthesisOptions } from './types';
 
@@ -17,45 +18,14 @@ export async function runOfflineTtsPipeline(
   instanceId: string,
   options: TtsSynthesisOptions = {}
 ): Promise<TextToAudioOrchestrationResult> {
-  const mode = options.segmentation?.mode ?? 'off';
-  if (mode === 'manual') {
-    throw new Error(
-      'SEGMENTATION_POLICY_INVALID: offline TTS does not support segmentation.mode=manual'
-    );
-  }
-  if (mode === 'off' && options.segmentation?.policy != null) {
-    throw new Error(
-      "SEGMENTATION_POLICY_INVALID: offline TTS ignores segmentation.policy when segmentation.mode='off'; use mode='auto'"
-    );
-  }
-  const segmentation =
-    mode === 'off'
-      ? { mode: 'off' as const }
-      : {
-          mode,
-          policy:
-            options.segmentation?.policy ?? DEFAULT_TTS_SEGMENTATION_POLICY,
-        };
-
-  if (segmentation.mode !== 'off') {
-    const evaluator = segmentation.policy.evaluator;
-    if (
-      evaluator !== 'text_synthetic_auto' &&
-      evaluator !== 'text_punctuation_assisted'
-    ) {
-      throw new Error(
-        `SEGMENTATION_POLICY_INVALID: offline TTS requires a text segmentation evaluator; received ${evaluator}`
-      );
-    }
-    if (
-      evaluator === 'text_punctuation_assisted' &&
-      !segmentation.policy.punctuationInstanceId
-    ) {
-      throw new Error(
-        'SEGMENTATION_POLICY_INVALID: text_punctuation_assisted requires policy.punctuationInstanceId'
-      );
-    }
-  }
+  const segmentation = validateSegmentationConfig({
+    mode: options.segmentation?.mode,
+    policy: options.segmentation?.policy,
+    featureName: 'offline TTS',
+    domain: 'text',
+    supportsManual: false,
+    defaultPolicy: DEFAULT_TTS_SEGMENTATION_POLICY,
+  });
 
   const sampleRate = await SherpaOnnx.getTtsSampleRate(instanceId);
 

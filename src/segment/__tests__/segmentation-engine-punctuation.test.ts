@@ -25,6 +25,17 @@ jest.mock('react-native', () => {
   };
 });
 
+jest.mock('../../utils', () => ({
+  resolveModelPath: jest.fn(async (c: { path: string }) => c.path),
+}));
+
+jest.mock('../../audiobuffer', () => ({
+  getPipelineAudioBufferInfo: jest.fn(),
+  resolvePipelineAudioBufferId: jest.fn((value: any) =>
+    typeof value === 'string' ? value : value?.bufferId ?? String(value)
+  ),
+}));
+
 jest.mock('../../textbuffer', () => ({
   appendLiveTextSegment: jest.fn(),
   getOfflineTextBufferTextSlice: jest.fn(),
@@ -32,12 +43,9 @@ jest.mock('../../textbuffer', () => ({
   getLiveTextBufferSegmentCount: jest.fn(),
   getLiveTextBufferSegments: jest.fn(),
   getPipelineTextBufferInfo: jest.fn(),
-  resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
-}));
-
-jest.mock('../../audiobuffer', () => ({
-  getPipelineAudioBufferInfo: jest.fn(),
-  resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
+  resolvePipelineTextBufferId: jest.fn((value: any) =>
+    typeof value === 'string' ? value : value?.bufferId ?? String(value)
+  ),
 }));
 
 jest.mock('../../segmentbuffer', () => ({

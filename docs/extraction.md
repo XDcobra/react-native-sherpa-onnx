@@ -1,6 +1,28 @@
 # Extraction API (Compressed Archives)
 
+## Introduction
+
 The `react-native-sherpa-onnx/extraction` subpath provides a unified API to **list** and **extract** compressed model archives (`.tar.zst` and `.tar.bz2`). After extraction to a target directory (e.g. `DocumentDirectoryPath/models`), use `listModelsAtPath` and `autoModelPath` from the main package to discover and use the extracted models.
+
+---
+
+## Quick start
+
+```ts
+import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+
+const archives = await getBundledArchives('sherpa_models');
+if (archives?.length) {
+  for (const archive of archives) {
+    await extractArchive(archive, `${DocumentDirectoryPath}/models`, {
+      onProgress: (event) => console.log(archive.modelId, event.percent),
+    });
+  }
+}
+```
+
+Use this path when model archives are shipped via Android PAD or copied to a known directory and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
 
 ---
 
@@ -70,7 +92,7 @@ For **APK_ASSETS**, the pack’s `src/main/assets/models/` content is merged int
 
 ---
 
-## API Reference
+## API reference
 
 Import from the extraction subpath:
 
@@ -175,6 +197,23 @@ type ExtractProgressEvent = {
   percent: number;       // 0–100
   entryIndex?: number;   // 0-based archive entry (when native provides it)
 };
+```
+
+## Types and constants
+
+```ts
+import {
+  getBundledArchives, // list compressed archives delivered by Android PAD packs
+  listBundledArchives, // list compressed archives in any filesystem directory
+  extractArchive, // extract one archive descriptor into target directory
+} from 'react-native-sherpa-onnx/extraction';
+
+import type {
+  BundledArchive, // archive descriptor (modelId, path, format, source type)
+  ExtractArchiveOptions, // extraction options (force/progress/cancel/notification)
+  ExtractResult, // extraction result payload
+  ExtractProgressEvent, // progress event payload
+} from 'react-native-sherpa-onnx/extraction';
 ```
 
 ---
@@ -307,4 +346,42 @@ if (sttModel) {
 - [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `autoModelPath`
 - [Download manager](download-manager.md) — downloading models from the network
 - [STT](stt-offline.md) — Speech-to-Text API
-- [TTS](tts.md) — Text-to-Speech API
+- [TTS](tts-offline.md) — Text-to-Speech API
+
+## Error codes
+
+Extraction errors can surface as plain `Error` values from native decode/extract pipelines and as `AbortError` when `AbortSignal` cancels the operation. File/source resolution failures can also propagate `FILEIO_*` style failures from underlying path handling.
+
+## Use case examples
+
+<details>
+<summary>Extract downloaded archives then discover model folders for runtime selection</summary>
+
+```ts
+const archives = await listBundledArchives(`${DocumentDirectoryPath}/downloads`);
+for (const archive of archives) {
+  await extractArchive(archive, `${DocumentDirectoryPath}/models`, { force: false });
+}
+
+const models = await listModelsAtPath(`${DocumentDirectoryPath}/models`, true);
+console.log(models);
+```
+
+</details>
+
+<details>
+<summary>Cancel one extraction without stopping other parallel archive jobs</summary>
+
+```ts
+const controller = new AbortController();
+
+const p = extractArchive(archive, targetDir, {
+  signal: controller.signal,
+  onProgress: (event) => console.log(event.percent),
+});
+
+controller.abort();
+await p;
+```
+
+</details>

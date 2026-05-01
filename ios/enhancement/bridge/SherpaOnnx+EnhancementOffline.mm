@@ -14,7 +14,9 @@
 
 static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
 static NSString *const kOfflineEnhancementOomMessage =
-    @"Not enough memory for offline enhancement. Please use a streaming mode for large inputs.";
+    @"Not enough memory for offline enhancement. Please use a streaming mode for large inputs. "
+    @"Alternatively, use the segmentation engine to process smaller segments with offline models "
+    @"(see docs/segmentation-engine.md).";
 
 - (void)enhanceOfflineAudioBuffers:(NSString *)instanceId
                    audioInBufferId:(NSString *)audioInBufferId

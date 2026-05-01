@@ -114,14 +114,18 @@ describe('audiobuffer segment event wiring', () => {
     });
 
     emitEvent('pipelineLiveSegmentAppended', {
-      liveBufferId: 'seg_live_11111111-1111-1111-1111-111111111111',
+      segmentBufferId: 'seg_live_11111111-1111-1111-1111-111111111111',
       sourceAudioBufferId: liveBufferId,
       segmentId: 'seg_1',
       segmentIndex: 0,
+      totalSegments: 1,
       startSample: 0,
       endSample: 16000,
       sampleRate: 16000,
       durationMs: 1000,
+      reason: 'endpoint',
+      source: 'segmentation_engine',
+      createdAtMs: 123456789,
     });
 
     expect(onSegment).toHaveBeenCalledTimes(1);
@@ -133,6 +137,9 @@ describe('audiobuffer segment event wiring', () => {
         segmentId: 'seg_1',
         startOffset: 0,
         endOffset: 16000,
+        reason: 'endpoint',
+        source: 'segmentation_engine',
+        createdAtMs: 123456789,
       },
     });
 
@@ -158,10 +165,56 @@ describe('audiobuffer segment event wiring', () => {
       16000,
       2000,
       undefined,
-      undefined
+      expect.objectContaining({
+        source: 'manual',
+        __annotationReason: 'finalize',
+        __annotationSource: 'manual',
+        __annotationCreatedAtMs: expect.any(Number),
+      })
     );
     expect(mockNative.finalizeLiveAudioBuffer).toHaveBeenCalledWith(
       liveBufferId
     );
+  });
+
+  it('correctly maps nested payloads in segment appended events', async () => {
+    const onSegment = jest.fn();
+
+    const ref = await createEmptyLiveAudioBuffer({
+      sampleRate: 16000,
+      channelCount: 1,
+      segmentation: { mode: 'manual' },
+      onSegment,
+    });
+
+    const nestedPayload = {
+      nested: {
+        field: 'value',
+        list: [1, 2, { deep: true }],
+      },
+    };
+
+    emitEvent('pipelineLiveSegmentAppended', {
+      segmentBufferId: 'seg_live_11111111-1111-1111-1111-111111111111',
+      sourceAudioBufferId: liveBufferId,
+      segmentId: 'seg_payload_test',
+      segmentIndex: 1,
+      totalSegments: 2,
+      startSample: 16000,
+      endSample: 32000,
+      sampleRate: 16000,
+      durationMs: 1000,
+      reason: 'punctuation',
+      source: 'segmentation_engine',
+      createdAtMs: 987654321,
+      payload: nestedPayload,
+    });
+
+    expect(onSegment).toHaveBeenCalledTimes(1);
+    expect(onSegment.mock.calls[0][0].segment.meta.payload).toEqual(
+      nestedPayload
+    );
+
+    ref.unsubscribeEvents();
   });
 });

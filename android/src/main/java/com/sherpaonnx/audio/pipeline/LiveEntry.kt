@@ -498,7 +498,7 @@ class LiveEntry(
       val cursor = CursorHandle(
         cursorId = id,
         // When spool is active, start from absolute 0 so cursor can read all data.
-        // Without spool, start from oldest sample in the ring (legacy behavior).
+        // Ring-only: start at the oldest sample still retained in the ring.
         absoluteReadPos = if (hasActiveSpool) {
           0L
         } else if (totalSamplesWritten > windowCapacity) {
@@ -593,7 +593,7 @@ class LiveEntry(
     // No spool or read failed — fall back to ring with snap-forward
     // If cursor was truly behind ring AND spool didn't help, this is a lag error
     // when the buffer has (or had) a spool. For ring-only buffers (no spool ever),
-    // snap-forward is the legacy behavior.
+    // snap the read position forward to the ring window (recoverable lag).
     if (spoolReader != null) {
       throw CursorLagExceededException(
         "AUDIO_CURSOR_LAG_EXCEEDED: Cursor at position $readPos has fallen behind retained data (oldest in ring: $oldestInRing). " +
@@ -672,7 +672,7 @@ enum class RetentionMode {
   SESSION,
   /** Spool retains up to N seconds. */
   MAX_SECONDS,
-  /** Explicit persistence path (replaces legacy persistencePath). */
+  /** Explicit on-disk persistence path. */
   PATH,
   /** No spool; ring-only. */
   NONE,

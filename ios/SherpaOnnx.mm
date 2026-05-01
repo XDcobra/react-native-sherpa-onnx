@@ -83,7 +83,7 @@ extern "C" void slm_release_all_link_maps(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegment", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
 }
 
 - (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config

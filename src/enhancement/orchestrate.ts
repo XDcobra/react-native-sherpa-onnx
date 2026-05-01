@@ -6,6 +6,7 @@ import type {
   OfflineAudioBufferRef,
 } from '../audiobuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import { validateSegmentationConfig } from '../segment/validation';
 import type { EnhanceOptions } from './types';
 
 const DEFAULT_ENHANCEMENT_SEGMENTATION_POLICY: SegmentationPolicy = {
@@ -22,16 +23,14 @@ export async function runOfflineEnhancementPipeline(
   instanceId: string,
   options: EnhanceOptions = {}
 ): Promise<OrchestrationResult<OfflineAudioBufferRef>> {
-  const mode = options.segmentation?.mode ?? 'off';
-  const segmentation =
-    mode === 'off'
-      ? { mode: 'off' as const }
-      : {
-          mode,
-          policy:
-            options.segmentation?.policy ??
-            DEFAULT_ENHANCEMENT_SEGMENTATION_POLICY,
-        };
+  const segmentation = validateSegmentationConfig({
+    mode: options.segmentation?.mode,
+    policy: options.segmentation?.policy,
+    featureName: 'offline enhancement',
+    domain: 'speech',
+    supportsManual: false,
+    defaultPolicy: DEFAULT_ENHANCEMENT_SEGMENTATION_POLICY,
+  });
 
   return runOfflineAudioPipeline(
     input,

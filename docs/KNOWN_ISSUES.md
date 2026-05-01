@@ -40,7 +40,7 @@ Short, SDK-facing notes so we do not lose track and others can find them quickly
 
 **Full analysis** (diagnostics, what was ruled out, appendices including minor upstream guard notes):
 
---> **[Pocket TTS – investigation notes](./github-issue-pocket-tts-eos-frame-zero.md)**
+--> **[Pocket TTS – investigation notes](#pocket-tts-voice-cloning-fragile-eos-and-cross-platform-drift)**
 
 **Upstream:** [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — broader discussion may include **EOS thresholding**, tests, and cross-platform determinism.
 

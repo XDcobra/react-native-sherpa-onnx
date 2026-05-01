@@ -39,7 +39,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 
 ---
 
-## Quick Start
+## Quick start
 
 ```typescript
 import {
@@ -68,7 +68,7 @@ const stt = await createSTT({
 
 ---
 
-## API Reference
+## API reference
 
 ### Path Helpers
 
@@ -413,11 +413,11 @@ if (!detection.success) {
 
 ---
 
-## See Also
+## See also
 
 - [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
 - [STT](stt-offline.md) — Speech-to-Text API
-- [TTS](tts.md) — Text-to-Speech API
+- [TTS](tts-offline.md) — Text-to-Speech API
 - [Download Manager](download-manager.md) — Download models in-app
 - [Execution Providers](execution-providers.md) — QNN, NNAPI, XNNPACK, Core ML
 - [Issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) — When TTS init fails due to long `data_dir` path (phontab /usr/share error)

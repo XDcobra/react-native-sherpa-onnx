@@ -35,7 +35,9 @@ static NSString *const kSttErrAlreadyPopulated = @"TEXT_ALREADY_POPULATED";
 static NSString *const kSttErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kSttErrInternalError = @"STT_INTERNAL_ERROR";
 static NSString *const kSttOfflineOomMessage =
-    @"Not enough memory for offline speech-to-text. Please use a streaming mode for large inputs.";
+    @"Not enough memory for offline speech-to-text. Please use a streaming mode for large inputs. "
+    @"Alternatively, use the segmentation engine to process smaller segments with offline models "
+    @"(see docs/segmentation-engine.md).";
 
 // ==================== Instance State ====================
 struct SttInstanceState {

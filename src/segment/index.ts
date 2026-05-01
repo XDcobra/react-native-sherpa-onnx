@@ -60,6 +60,7 @@ import type {
   SegmentationPolicy,
 } from './engine-types';
 import { resolveModelPath } from '../utils';
+import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -226,30 +227,6 @@ function assertSegmentIndexInRange(
   }
 }
 
-function toSegmentSource(raw: unknown): SegmentSource {
-  return raw === 'segmentation_engine' || raw === 'manual' || raw === 'external'
-    ? raw
-    : 'manual';
-}
-
-function toSegmentReason(raw: unknown): SegmentReason {
-  return raw === 'endpoint' ||
-    raw === 'punctuation' ||
-    raw === 'length_limit' ||
-    raw === 'vad_boundary' ||
-    raw === 'energy_silence' ||
-    raw === 'manual_commit' ||
-    raw === 'finalize' ||
-    raw === 'policy_checkpoint'
-    ? raw
-    : 'manual_commit';
-}
-
-function inferReasonFromLegacySource(source: string): SegmentReason {
-  if (source === 'stt_stream') return 'endpoint';
-  return 'manual_commit';
-}
-
 function normalizeLinkType(raw: unknown): SegmentLinkType {
   if (
     raw === 'alignment' ||
@@ -337,6 +314,9 @@ async function readTextSegments(
   assertSegmentIndexInRange(startIndex, count);
 
   const endExclusive = Math.min(count, startIndex + maxCount);
+  // Contract: native/JS producers that commit live text segments must set
+  // meta.__segmentReason (and related __segment* keys). Missing reason →
+  // toSegmentReason(undefined) → 'manual_commit' (no inference from item.source).
   const raw = await getLiveTextBufferSegments(
     liveTextBufferId,
     0,
@@ -371,9 +351,7 @@ async function readTextSegments(
         domain: 'text',
         startOffset: offset,
         endOffset: offset + utf16Length,
-        reason: toSegmentReason(
-          reasonRaw ?? inferReasonFromLegacySource(item.source)
-        ),
+        reason: toSegmentReason(reasonRaw),
         source: toSegmentSource(
           sourceRaw ??
             (item.source === 'append' ? 'manual' : 'segmentation_engine')

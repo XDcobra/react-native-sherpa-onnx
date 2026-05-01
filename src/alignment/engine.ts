@@ -80,6 +80,11 @@ function validateAccurateOptions(options: Record<string, unknown>): void {
   if (segmentation.mode === 'off') {
     return;
   }
+  if (segmentation.mode === 'manual') {
+    throw new Error(
+      'SEGMENTATION_POLICY_INVALID: alignment does not support segmentation.mode=manual'
+    );
+  }
   if (segmentation.mode !== 'auto') {
     throw createAlignmentError(
       'ALIGNMENT_OPTIONS_INVALID',
@@ -182,6 +187,12 @@ function validateAlignTextToAudioOptions(
 
   if (mode === 'proportional') {
     if (options.segmentation != null) {
+      const segMode = (options.segmentation as any).mode;
+      if (segMode === 'manual') {
+        throw new Error(
+          'SEGMENTATION_POLICY_INVALID: alignment does not support segmentation.mode=manual'
+        );
+      }
       throw createAlignmentError(
         'ALIGNMENT_OPTIONS_INVALID',
         'mode=proportional does not accept segmentation.'
@@ -192,6 +203,12 @@ function validateAlignTextToAudioOptions(
 
   if (mode === 'estimated') {
     if (options.segmentation != null) {
+      const segMode = (options.segmentation as any).mode;
+      if (segMode === 'manual') {
+        throw new Error(
+          'SEGMENTATION_POLICY_INVALID: alignment does not support segmentation.mode=manual'
+        );
+      }
       throw createAlignmentError(
         'ALIGNMENT_OPTIONS_INVALID',
         'mode=estimated does not accept segmentation.'

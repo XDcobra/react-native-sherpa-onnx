@@ -1,5 +1,7 @@
 # Pipeline Audio Session Coordination
 
+## Introduction
+
 Global audio session and route coordination for mic capture + PCM playback.
 
 Import from `react-native-sherpa-onnx/audio`.
@@ -13,7 +15,7 @@ Microphone capture and playback can run at the same time. Instead of configuring
 
 This makes behavior deterministic when mic and playback overlap.
 
-## Quick Start
+## Quick start
 
 ```ts
 import {
@@ -52,7 +54,7 @@ console.log(state.profile, state.currentOutputDeviceId);
 await clearPipelineAudioRoutePreference();
 ```
 
-## API
+## API reference
 
 ### `configurePipelineAudioSession(config)`
 
@@ -140,7 +142,27 @@ State fields:
 - `preferred*`: configured preference
 - `current*`: effective routed device (may differ from preferred)
 
-## Error code quick table
+## Types and constants
+
+```ts
+import {
+  configurePipelineAudioSession, // configure session-level coordinator policy
+  setPipelineAudioRoutePreference, // set preferred input/output devices globally
+  clearPipelineAudioRoutePreference, // clear preferred device overrides
+  getPipelineAudioSessionState, // read current effective session snapshot
+  listAvailableInputDevices, // enumerate microphone/input devices
+  listAvailableOutputDevices, // enumerate playback/output devices
+} from 'react-native-sherpa-onnx/audio';
+
+import type {
+  PipelineAudioSessionConfig, // session config shape (keepActiveWhenIdle)
+  PipelineAudioRoutePreference, // preferred input/output device ids
+  PipelineAudioSessionState, // current profile/owner/device snapshot
+  PipelineAudioDeviceInfo, // device descriptor returned by list APIs
+} from 'react-native-sherpa-onnx/audio';
+```
+
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -148,3 +170,40 @@ State fields:
 | `AUDIO_SESSION_ROUTE_ERROR` | Route preference failed (device unavailable or not selectable) |
 | `AUDIO_SESSION_STATE_ERROR` | Session state snapshot could not be read |
 | `AUDIO_SESSION_INVALID_ARGUMENT` | Invalid route/config argument passed to the session API |
+
+Other `AUDIO_*` errors may still surface from dependent mic/playback operations outside this coordinator API.
+
+## Use case examples
+
+<details>
+<summary>Prefer Bluetooth output while keeping built-in mic as input</summary>
+
+```ts
+const [inputs, outputs] = await Promise.all([
+  listAvailableInputDevices(),
+  listAvailableOutputDevices(),
+]);
+
+const input = inputs.find((d) => d.kind === 'built_in_mic' && d.canSelect);
+const output = outputs.find((d) => d.kind === 'bluetooth' && d.canSelect);
+
+await setPipelineAudioRoutePreference({
+  inputDeviceId: input?.id ?? null,
+  outputDeviceId: output?.id ?? null,
+});
+```
+
+</details>
+
+<details>
+<summary>Reset coordinator preferences after a temporary recording session</summary>
+
+```ts
+await configurePipelineAudioSession({ keepActiveWhenIdle: false });
+// ... run recording + playback workflow ...
+await clearPipelineAudioRoutePreference();
+const state = await getPipelineAudioSessionState();
+console.log(state.preferredInputDeviceId, state.preferredOutputDeviceId);
+```
+
+</details>
