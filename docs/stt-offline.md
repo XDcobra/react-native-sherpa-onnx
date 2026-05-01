@@ -1,5 +1,7 @@
 # Offline Speech-to-Text (STT)
 
+## Introduction
+
 On-device batch transcription with a **pipeline-first** API:
 
 - **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — file-backed or in-memory PCM.
@@ -306,6 +308,65 @@ import {
 
 See [textbuffer.md](textbuffer.md).
 
+## Segmentation
+
+Most STT models in this SDK are **offline-only** — they have no streaming variant and process the entire input buffer at once. On mobile devices with limited RAM, transcribing long audio files can exhaust available memory (**OOM**). The segmentation engine splits the offline audio buffer into **smaller chunks** and runs the STT model repeatedly on each one, bounding peak RAM at the cost of a small quality tradeoff at segment boundaries.
+
+Supported modes for offline STT:
+
+- `'off'` (default) — no segmentation; the whole buffer is processed in one pass.
+- `'auto'` — the engine splits the audio using the configured policy.
+
+> `'manual'` mode is not supported for offline STT.
+
+Default policy evaluator: **`speech_energy_silence`** — detects silence/low-energy boundaries to find natural split points.
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createSTT({
+  modelPath: { type: 'file', path: '/path/to/whisper' },
+  modelType: 'whisper',
+  numThreads: 2,
+});
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/long-audio.wav' });
+const textOut = await createEmptyOfflineTextBuffer();
+try {
+  const result = await engine.transcribe(audio, textOut, {
+    segmentation: {
+      mode: 'auto',
+      // policy defaults to { evaluator: 'speech_energy_silence' } — override if needed
+    },
+    errorRecovery: 'skip',       // skip a failed segment and continue
+    maxRetriesPerSegment: 2,     // retry before applying errorRecovery
+  });
+  console.log(result.totalSegments, result.completedSegments, result.skippedSegments);
+  const info = await getPipelineTextBufferInfo(textOut);
+  const text = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
+  console.log(text);
+} finally {
+  await releasePipelineAudioBuffer(audio);
+  await releasePipelineTextBuffer(textOut);
+}
+await engine.destroy();
+```
+
+The `SttTranscribeResult` returned by `transcribe` includes:
+
+- `totalSegments` — number of segments the engine processed.
+- `completedSegments` — segments that produced valid output.
+- `skippedSegments` — count of segments skipped due to errors (when `errorRecovery: 'skip'`).
+- `processingTimeMs` — wall-clock time for the full transcription.
+
+See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
+
 ## Types and constants
 
 ```ts
@@ -328,7 +389,7 @@ import type {
 
 For buffer/ref unions (`OfflineAudioBufferIdSource`, `OfflineTextBufferIdSource`, …), import from **`audiobuffer`** / **`textbuffer`** as needed.
 
-## Error code quick table
+## Error codes
 
 Typical `SttErrorCode` values from the STT layer (exact strings match native):
 
@@ -340,11 +401,93 @@ Typical `SttErrorCode` values from the STT layer (exact strings match native):
 | `STT_BUFFER_NOT_FOUND` | Invalid or released **audio** buffer id |
 | `STT_BUFFER_KIND_MISMATCH` | Wrong buffer kind passed to transcribe |
 | `STT_BUFFER_EMPTY` | Empty or unusable audio buffer |
-| `OFFLINE_OOM` | Not enough memory for offline processing. Use streaming STT for large audio inputs. |
+| `OFFLINE_OOM` | Not enough memory for offline processing. Prefer streaming STT for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 | `TEXT_BUFFER_NOT_FOUND` | Invalid or released **text** buffer id |
 | `TEXT_ALREADY_POPULATED` | `textOut` already filled; use a new empty buffer |
 
 Text slice / validation errors (e.g. invalid UTF-16 range) are reported via the **textbuffer** pipeline; see **`PipelineTextErrorCode`** in [`src/textbuffer/types.ts`](../src/textbuffer/types.ts).
+
+## Use case examples
+
+<details>
+<summary>Transcribe a file with auto-detected model type</summary>
+
+```ts
+import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
+import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const modelDir = '/path/to/model';
+const det = await detectSttModel({ kind: 'fs', path: modelDir });
+if (!det.success) throw new Error(det.error ?? 'Detection failed');
+
+const engine = await createSTT({
+  modelPath: { type: 'file', path: modelDir },
+  modelType: det.modelType ?? 'auto',
+});
+
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/audio.wav' });
+const textOut = await createEmptyOfflineTextBuffer();
+try {
+  await engine.transcribe(audio, textOut);
+  const info = await getPipelineTextBufferInfo(textOut);
+  const text = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
+  console.log(text);
+} finally {
+  await releasePipelineAudioBuffer(audio);
+  await releasePipelineTextBuffer(textOut);
+}
+await engine.destroy();
+```
+
+</details>
+
+<details>
+<summary>Transcribe a long audio file with segmentation (OOM mitigation)</summary>
+
+Run the offline STT model repeatedly over bounded audio chunks instead of one monolithic pass — reduces peak RAM at the cost of a small quality tradeoff at segment boundary points.
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createSTT({
+  modelPath: { type: 'file', path: '/path/to/whisper' },
+  modelType: 'whisper',
+  numThreads: 2,
+});
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/long-interview.wav' });
+const textOut = await createEmptyOfflineTextBuffer();
+try {
+  const result = await engine.transcribe(audio, textOut, {
+    segmentation: { mode: 'auto' }, // default policy: speech_energy_silence
+    errorRecovery: 'skip',
+    maxRetriesPerSegment: 2,
+  });
+  console.log(`${result.completedSegments}/${result.totalSegments} segments completed`);
+  const info = await getPipelineTextBufferInfo(textOut);
+  console.log(await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length));
+} finally {
+  await releasePipelineAudioBuffer(audio);
+  await releasePipelineTextBuffer(textOut);
+}
+await engine.destroy();
+```
+
+Quality may degrade slightly at segment boundaries. See [segmentation-engine.md](segmentation-engine.md) for policy tuning.
+
+</details>
 
 ## See also
 

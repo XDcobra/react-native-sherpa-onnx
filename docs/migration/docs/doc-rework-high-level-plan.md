@@ -45,7 +45,7 @@
 Suggested order (adjust if dependencies dictate):
 
 1. **`stt-offline.md` / `stt-streaming.md`**
-2. **`tts-offline.md` / `tts-streaming.md`** (+ incremental/streaming variant if kept separate, e.g. `tts-streaming-incremental.md`, or merged under clear H3s—decide once per file size)
+2. **`tts-offline.md` / `tts-streaming.md`**
 3. **`vad-streaming.md`** (and offline usage notes if applicable within the same or sibling file per rule)
 
 **Exit criteria:** Quick starts runnable against current exports; API sections cross-checked; segmentation subsection where supported.
@@ -141,3 +141,4 @@ flowchart LR
 | Date | Change |
 |------|--------|
 | (created) | Initial high-level phases |
+| 2026-05-01 | Phase 3 TTS line item lists `tts-offline.md` / `tts-streaming.md` only |

@@ -1,5 +1,7 @@
 # Voice Activity Detection (streaming)
 
+## Introduction
+
 On-device streaming VAD with a pipeline-first API:
 
 - **Input:** live or offline pipeline audio buffer (`audiobuffer`)
@@ -314,7 +316,7 @@ import type {
 - `scoreThreshold` is the model score/probability cut-off used for speech/non-speech decisions
 - `neg_threshold` is intentionally not exposed in this JS SDK contract
 
-## Error quick table
+## Error codes
 
 Typical VAD-native error codes and reasons:
 
@@ -336,6 +338,97 @@ Typical VAD-native error codes and reasons:
 - Early abort path: `await pipeline.stop()`
 - Do not call `pipeline.flush()` after finalize (redundant and race-prone)
 - Treat `VAD_PIPELINE_NOT_FOUND` as a real terminal-state signal, not as success
+
+## Use case examples
+
+<details>
+<summary>VAD with custom silence thresholds for noisy environments</summary>
+
+Increase `minSilenceDurationMs` and lower `scoreThreshold` to avoid premature segment cuts in noisy audio.
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import { createEmptyLiveAudioBuffer, finalizeLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveSegmentBuffer, getLiveSegmentBufferSegmentCount, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const segmentOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  spooling: { mode: 'on' },
+  onSegmentAppended: (e) => console.log('segment', e.segmentId, `${e.durationMs}ms`),
+});
+
+const vad = await createStreamingVAD({
+  modelPath: { type: 'file', path: '/path/to/silero-vad' },
+  modelType: 'silero_vad',
+  sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: {
+      scoreThreshold: 0.4,          // lower = more sensitive
+      minSpeechDurationMs: 300,
+      minSilenceDurationMs: 600,    // longer silence needed to end segment
+      maxSpeechDurationMs: 10000,
+      windowSize: 512,
+    },
+  },
+});
+
+const pipeline = await vad.process({
+  audioIn,
+  segmentOut,
+  options: { chunkSize: 512, autoFlushOnInputEnded: true },
+});
+pipeline.onSpeechStateChanged = (e) => console.log('speech:', e.isSpeechDetected);
+
+// Feed mic audio into audioIn; graceful teardown:
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+const count = await getLiveSegmentBufferSegmentCount(segmentOut);
+console.log(`Detected ${count} speech segments`);
+await vad.destroy();
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>VAD gating for downstream streaming STT (dual-pipeline)</summary>
+
+Feed both VAD and STT pipelines the same `LiveAudioBuffer`. VAD provides segment metadata while STT produces live text from the same audio stream.
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const vad = await createStreamingVAD({ modelPath: { type: 'asset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
+const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+
+const vadPipeline = await vad.process({ audioIn, segmentOut, options: { chunkSize: 512 } });
+const sttPipeline = await stt.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+// ... feed audio into audioIn ...
+
+await vadPipeline.flush();
+await sttPipeline.flush();
+await vadPipeline.stop();
+await sttPipeline.stop();
+await vad.destroy();
+await stt.destroy();
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
 
 ## See also
 

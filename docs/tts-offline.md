@@ -1,5 +1,7 @@
 # Offline Text-to-Speech (TTS)
 
+## Introduction
+
 On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as an `OfflineTextBuffer`, audio comes out in an `OfflineAudioBuffer`. The engine is **instance-based** — create with `createTTS()`, call `destroy()` when done.
 
 **For streaming synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md). **For incremental streaming sessions:** see [tts-streaming-incremental.md](tts-streaming-incremental.md).
@@ -320,6 +322,48 @@ await releasePipelineAudioBuffer(audioBuf); // frees native audio buffer
 await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 ```
 
+## Segmentation
+
+TTS models in this SDK are **offline-only** — there is no acoustic streaming at the character level. Generating audio from very long texts in a single call can exhaust device RAM (**OOM**). The segmentation engine splits the text buffer into **smaller chunks**, synthesizes each chunk with the offline engine, and stitches the resulting PCM into the output audio buffer in order — bounding peak RAM at the cost of a small quality tradeoff at segment boundaries.
+
+Supported modes for offline TTS:
+
+- `'off'` (default) — no segmentation; the entire text is synthesized in one pass.
+- `'auto'` — the engine segments the text using the configured policy.
+
+> `'manual'` mode is not supported for offline TTS.
+
+Default policy evaluator: **`text_synthetic_auto`** — splits on sentence boundaries, with a `maxLengthChars` cap of 500 characters.
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+
+const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/vits' }, modelType: 'vits' });
+const sr = await tts.getSampleRate();
+
+const textBuf = await createOfflineTextBufferFromText(longText); // multiple sentences
+const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+try {
+  const result = await tts.synthesize(textBuf, audioBuf, {
+    segmentation: {
+      mode: 'auto',
+      // policy defaults to { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 }
+    },
+    errorRecovery: 'skip',
+    onProgress: (p) => console.log(`segment ${p.completedSegments}/${p.totalSegments}`),
+  });
+  console.log(result.status, result.totalSegments, result.completedSegments);
+} finally {
+  await releasePipelineTextBuffer(textBuf);
+  await releasePipelineAudioBuffer(audioBuf);
+}
+await tts.destroy();
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
+
 ## Types
 
 ### Core TTS types (`react-native-sherpa-onnx/tts`)
@@ -332,7 +376,7 @@ await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone?, segmentation?, errorRecovery?, maxRetriesPerSegment?, retryExhaustedFallback?, abortSignal?, onProgress?, overlapChars?, textSkipPlaceholder?, linkMap? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set; `segmentation` fields: `mode?` and `policy?` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
 | `TtsVoiceCloneZipvoice` | `{ kind: 'zipvoice'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText: string }` |
 | `TtsVoiceClonePocket` | `{ kind: 'pocket'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText?: string }` |
@@ -361,7 +405,7 @@ await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 | `OfflineTextBufferHandle` | Branded string `txt_off_*` |
 | `PipelineAudioBufferInfo` | Union of offline + live info |
 
-## Error code reference
+## Error codes
 
 | Code | Thrown by | Cause |
 | --- | --- | --- |
@@ -375,7 +419,7 @@ await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 | `TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND` | `synthesize` (voice clone) | `referenceAudioBufferId` not in registry — released before synthesis |
 | `TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH` | `synthesize` (voice clone) | Reference buffer is not an offline audio buffer |
 | `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed, or voice clone on unsupported model type, or empty audio result |
-| `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis. Prefer streaming TTS for large inputs. |
+| `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis. Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 ## Troubleshooting
 
@@ -390,10 +434,105 @@ await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 | Init throws with `modelOptions` | `modelType: 'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
 | Methods throw after `destroy` | Engine already released | Create a new engine via `createTTS()` |
 
+## Use case examples
+
+<details>
+<summary>Synthesize and save to WAV (standard flow)</summary>
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+
+const tts = await createTTS({
+  modelPath: { type: 'file', path: '/path/to/kokoro' },
+  modelType: 'kokoro',
+  numThreads: 2,
+});
+const sr = await tts.getSampleRate();
+
+const textBuf = await createOfflineTextBufferFromText('Good morning, how can I help you today?');
+const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+try {
+  await tts.synthesize(textBuf, audioBuf, { sid: 0, speed: 1.0 });
+  await saveAudioAsFile(audioBuf, { kind: 'fs', path: '/output/speech.wav' }, 'wav');
+} finally {
+  await releasePipelineTextBuffer(textBuf);
+  await releasePipelineAudioBuffer(audioBuf);
+}
+await tts.destroy();
+```
+
+</details>
+
+<details>
+<summary>Synthesize a long document with segmentation (OOM mitigation)</summary>
+
+Split a large text buffer into sentence-level chunks and synthesize each with the offline engine, keeping peak RAM bounded. Quality may degrade slightly at segment boundaries.
+
+```ts
+const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/vits' }, modelType: 'vits' });
+const sr = await tts.getSampleRate();
+
+const longText = '...'; // several hundred words
+const textBuf = await createOfflineTextBufferFromText(longText);
+const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+try {
+  const result = await tts.synthesize(textBuf, audioBuf, {
+    segmentation: { mode: 'auto' }, // default policy: text_synthetic_auto, maxLengthChars: 500
+    errorRecovery: 'skip',
+    onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+  });
+  console.log(result.status, result.totalSegments);
+  await saveAudioAsFile(audioBuf, { kind: 'fs', path: '/output/long.wav' }, 'wav');
+} finally {
+  await releasePipelineTextBuffer(textBuf);
+  await releasePipelineAudioBuffer(audioBuf);
+}
+await tts.destroy();
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for policy tuning.
+
+</details>
+
+<details>
+<summary>Voice cloning with Pocket model</summary>
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createEmptyOfflineAudioBuffer,
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/pocket' }, modelType: 'pocket' });
+const sr = await tts.getSampleRate();
+
+const refAudio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/reference.wav' });
+const textBuf = await createOfflineTextBufferFromText('Cloning this voice for the demo.');
+const audioBuf = await createEmptyOfflineAudioBuffer(sr);
+try {
+  await tts.synthesize(textBuf, audioBuf, {
+    voiceClone: { kind: 'pocket', referenceAudio: refAudio },
+  });
+} finally {
+  await releasePipelineAudioBuffer(refAudio);
+  await releasePipelineTextBuffer(textBuf);
+  await releasePipelineAudioBuffer(audioBuf);
+}
+await tts.destroy();
+```
+
+</details>
+
 ## See also
 
 - [tts-streaming.md](tts-streaming.md) — incremental synthesis, PCM player, `generateSpeechStream`
-- [alignment.md](alignment.md) — `alignTextToAudio`, subtitle timing, alignment models
+- [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, subtitle timing, alignment models
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
 - [model-languages.md](model-languages.md) — language hint helpers and `detectTtsModel(...).languages`

@@ -19,7 +19,7 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 </div>
 
 > **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**  
-> This project started as a side hobby project. After seeing the value it provides and that many people already use it, I decided to rebuild it with a more professional foundation. Because of that, I had to redesign the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK with significantly better performance and speed, plus a cleaner, more consistent, and easier public API. For an overview of all breaking changes and the migration path, read [docs/migration.md](docs/migration.md).
+> This project started as a side hobby project. After seeing the value it provides and that many people already use it, I decided to rebuild it with a more professional foundation. Because of that, I had to redesign the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK with significantly better performance and speed, plus a cleaner, more consistent, and easier public API. For an overview of all breaking changes and the migration path, read [docs/migration/](docs/migration/).
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
@@ -86,9 +86,10 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Platform Support Status](#platform-support-status)
 - [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
+- [Memory and models](#memory-and-models)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
-- [Breaking changes (upgrading to 1.0.0)](docs/migration.md)
+- [Breaking changes (upgrading to 1.0.0)](docs/migration/)
   - [Instance-based API (TTS + STT)](#instance-based-api-tts--stt)
   - [Speech-to-Text (STT)](#speech-to-text-stt)
   - [Text-to-Speech (TTS)](#text-to-speech-tts)
@@ -111,11 +112,11 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 |---------|--------|------|-------|
 | Offline Speech-to-Text | ✅ **Supported** | [STT](./docs/stt-offline.md) | No internet required; multiple model types (Zipformer, Paraformer, Whisper, Qwen3 ASR, Cohere Transcribe, etc.). See [Supported Model Types](#supported-model-types). |
 | Online (streaming) Speech-to-Text | ✅ **Supported** | [Streaming STT](./docs/stt-streaming.md) | Real-time recognition from microphone or stream; partial results, endpoint detection. Use streaming-capable models (e.g. transducer, paraformer). |
-| Live capture API | ✅ **Supported** | [Pipeline buffers (`audiobuffer`)](./docs/audiobuffer.md) ([live](./docs/audiobuffer-streaming.md)) · [Pipeline Audio Session](./docs/audio-session.md) | Native microphone → live audio buffer; optional JS chunks for streaming STT. Global route/session policy for mic + PCM to set input/output device manually. |
-| Text-to-Speech | ✅ **Supported** | [TTS](./docs/tts.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
+| Live capture API | ✅ **Supported** | [Offline audio buffer](./docs/audiobuffer-offline.md) · [Live audio buffer](./docs/audiobuffer-streaming.md) · [Pipeline Audio Session](./docs/audio-session.md) | Native microphone → live audio buffer; optional JS chunks for streaming STT. Global route/session policy for mic + PCM to set input/output device manually. |
+| Text-to-Speech | ✅ **Supported** | [TTS (offline)](./docs/tts-offline.md) | Multiple model types (VITS, Matcha, Kokoro, etc.). See [Supported Model Types](#supported-model-types). |
 | Streaming Text-to-Speech | ✅ **Supported** | [Streaming TTS](./docs/tts-streaming.md) | Incremental speech generation for low time-to-first-byte and playback while generating. |
-| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment](./docs/alignment.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Canonical API: **`createAlignment`** + **`engine.alignTextToAudio`**. |
-| Speech Enhancement | ✅ **Supported** | [Overview](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md), [Streaming](./docs/enhancement-streaming.md) | Batch offline buffers; streaming via native live-buffer pipeline only (`createStreamingEnhancement` → `enhance`). |
+| TTS Alignment / Timestamps | ✅ **Supported** | [Alignment (offline)](./docs/alignment-offline.md) | **`proportional`**, **`estimated`** (chunk timeline), and **`accurate`** (wav2vec2 CTC). Canonical API: **`createAlignment`** + **`engine.alignTextToAudio`**. |
+| Speech Enhancement | ✅ **Supported** | [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md) | Batch offline buffers; streaming via native live-buffer pipeline only (`createStreamingEnhancement` → `enhance`). |
 | Build-in Audio Player | ✅ **Supported** | [PCM Player](./docs/pcm-player.md) | Play any generated speech (offline/streaming) directly by using the built in pcm player. Easy use and higher performance. |
 | Execution providers (CPU, NNAPI, XNNPACK, Core ML, QNN) | ✅ **Supported** | [Execution providers](./docs/execution-providers.md) | CPU default; optional accelerators per platform. |
 | Flexible model loading | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Asset models, file system models, or auto-detection. |
@@ -123,7 +124,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 | Automatic Model type detection | ✅ **Supported** | [Model detection](./docs/model-setup.md#model-detection) | `detectSttModel()` and `detectTtsModel()` for a path. |
 | Model quantization | ✅ **Supported** | [Model setup](./docs/model-setup.md) | Automatic detection and preference for quantized (int8) models. |
 | TypeScript | ✅ **Supported** | — | Full type definitions included. |
-| Punctuation | ✅ **Supported** | [Punctuation](./docs/punctuation.md) | Offline and streaming punctuation models. |
+| Punctuation | ✅ **Supported** | [Punctuation (offline)](./docs/punctuation-offline.md) | Offline punctuation models. |
 | VAD (Voice Activity Detection) | ✅ **Supported** | [VAD (streaming)](./docs/vad-streaming.md) | Pipeline-first streaming API (`createStreamingVAD`); import `react-native-sherpa-onnx/vad`. Models: e.g. Silero VAD, Ten VAD — see doc. |
 | Speaker Diarization | ❌ Not yet supported | [Diarization](./docs/diarization.md) | Scheduled for release 1.1.0 |
 | Source Separation | ❌ Not yet supported | [Separation](./docs/separation.md) | Scheduled for release 1.2.0 |
@@ -252,7 +253,7 @@ Speech enhancement improves noisy or degraded speech using ONNX models from the 
 | **GTCRN**    | `'gtcrn'`         | Lightweight speech enhancement (e.g. `gtcrn_simple.onnx`).                  | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 | **DPDFNet**  | `'dpdfnet'`       | Deep speech enhancement variants (e.g. `dpdfnet2.onnx`, `dpdfnet4.onnx`, `dpdfnet8.onnx`, `dpdfnet_baseline.onnx`, `dpdfnet2_48khz_hr.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models) |
 
-APIs and initialization: [Speech enhancement overview](./docs/speech-enhancement.md), [offline batch](./docs/enhancement-offline.md), [streaming (live buffers)](./docs/enhancement-streaming.md).
+APIs and initialization: [offline batch](./docs/enhancement-offline.md), [streaming (live buffers)](./docs/enhancement-streaming.md).
 
 </details>
 
@@ -267,25 +268,42 @@ Alignment uses timing modes with different model requirements:
 | `estimated` | No | n/a | n/a |
 | `accurate` | Yes | wav2vec2 forced-alignment ONNX | [Download](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models) |
 
-For accurate alignment model setup and detection, see [Alignment / subtitles](./docs/alignment.md) and [Model setup](./docs/model-setup.md).
+For accurate alignment model setup and detection, see [Alignment (offline)](./docs/alignment-offline.md) and [Model setup](./docs/model-setup.md).
 
 </details>
+
+## Memory and models
+
+Every active engine keeps its model weights resident in native memory for its entire lifetime. Plan ahead to avoid OOM crashes:
+
+- ONNX weights are mapped into native (C++) heap — they count against your process limit, not the JS heap.
+- Peak RAM during inference is typically **1.2–1.5× the model weight size** due to activation tensors.
+- **Prefer int8/quantized models** — the SDK selects them automatically when `modelType: 'auto'` (default).
+- Multiple concurrent engines (e.g. STT + TTS + enhancement) multiply the base memory cost.
+- **Release engines and buffers promptly** — call `engine.release()` after each job or session.
+- On devices with ≤ 2 GB RAM: avoid Whisper large, Kokoro, and alignment simultaneously.
+- **Offline-only models:** many high-quality sherpa-onnx bundles have **no streaming** counterpart. Large offline jobs (long audio, big buffers) spike peak memory → **OOM** on phones. The SDK **segmentation engine** lets you run the **same offline model** on **smaller chunks** so peak RAM stays bounded; quality may **trade off slightly** versus one giant offline pass. Details: [Memory and models — Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation), [Segmentation engine](./docs/segmentation-engine.md).
+
+→ Full planning guide: [docs/memory-and-models.md](./docs/memory-and-models.md)
 
 ## Documentation
 
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
-- [Speech-to-Text (STT)](./docs/stt-offline.md) – Offline transcription (file or samples)
-- [Streaming (Online) Speech-to-Text](./docs/stt-streaming.md) – Real-time recognition, partial results, endpoint detection
-- [Pipeline audio buffers (`audiobuffer`)](./docs/audiobuffer.md) – Overview; [offline](./docs/audiobuffer-offline.md), [live / streaming](./docs/audiobuffer-streaming.md)
+- [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning, **offline-only models vs segmentation / chunking**
+- [Segmentation engine](./docs/segmentation-engine.md) – segment boundaries, links, modes; **OOM mitigation** when using offline models on constrained devices
+- **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
+- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- **Punctuation:** [Offline](./docs/punctuation-offline.md)
+- [Voice Activity Detection (VAD)](./docs/vad-streaming.md)
+- [Alignment / subtitles (offline)](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`, `generateSpeechWithTimestamps()`
+- **Pipeline audio buffers:** [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
+- **Pipeline text buffers:** [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
+- **Pipeline segment buffers:** [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
 - [Pipeline Audio Session](./docs/audio-session.md) – Global audio session policy and route preference for mic + PCM
 - [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
-- [Text-to-Speech (TTS)](./docs/tts.md) – Offline and streaming generation
-- [Alignment / subtitles](./docs/alignment.md) – `createAlignment`, `proportional` / `estimated` / `accurate`, alignment model download, `generateSpeechWithTimestamps()`
-- [Streaming Text-to-Speech](./docs/tts-streaming.md) – Incremental TTS (createStreamingTTS)
-- [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md) – Checking and using acceleration backends
-- [Voice Activity Detection (VAD)](./docs/vad-streaming.md)
+- [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md)
 - [Speaker Diarization](./docs/diarization.md)
-- [Speech enhancement](./docs/speech-enhancement.md) — [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
 - [Model Download Manager](./docs/download-manager.md)

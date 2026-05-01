@@ -1,5 +1,7 @@
 # Streaming Speech-to-Text (STT)
 
+## Introduction
+
 Low-latency online recognition in pipeline mode.
 
 Import path: `react-native-sherpa-onnx/stt`
@@ -366,7 +368,7 @@ import type {
 } from 'react-native-sherpa-onnx/stt';
 ```
 
-## Error quick table
+## Error codes
 Typical `SttErrorCode` values from the Streaming STT layer (exact strings match native):
 
 | Code | Typical reason |
@@ -378,6 +380,95 @@ Typical `SttErrorCode` values from the Streaming STT layer (exact strings match 
 | `PIPELINE_NOT_FOUND` | Invalid/stopped pipeline handle id |
 | `STT_INVALID_ARGUMENT` | Model/options mismatch or unsupported setup |
 | `STT_INTERNAL_ERROR` | Unexpected native failure |
+
+## Use case examples
+
+<details>
+<summary>Live microphone transcription with partial text updates</summary>
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createStreamingSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-zipformer' },
+  modelType: 'zipformer2_ctc',
+  enableEndpoint: true,
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1, windowSeconds: 120 });
+const textOut = await createLiveTextBuffer({ windowMaxChars: 65536, maxSegments: 2048 });
+const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+await startMicToLiveAudioBuffer(audioIn);
+const tick = setInterval(async () => {
+  const partial = await getLiveTextBufferPartialSlice(textOut, 0, 4096);
+  const count = await getLiveTextBufferSegmentCount(textOut);
+  const committed =
+    count > 0
+      ? (await getLiveTextBufferSegments(textOut, 0, count)).map((s) => s.text).join(' ')
+      : '';
+  console.log([committed, partial].filter(Boolean).join(' ').trim());
+}, 150);
+
+await stopMicToLiveAudioBuffer();
+clearInterval(tick);
+await pipeline.flush();
+await pipeline.stop();
+await engine.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Streaming STT as second stage after VAD (dual-pipeline)</summary>
+
+Feed both STT and VAD pipelines the same `LiveAudioBuffer`. VAD provides speech segment boundaries in real time while STT produces a live text output from the same stream.
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const vad = await createStreamingVAD({ modelPath: { type: 'asset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
+const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+
+const vadPipeline = await vad.process({ audioIn, segmentOut, options: { chunkSize: 512 } });
+const sttPipeline = await stt.transcribe(audioIn, textOut, { chunkSize: 3200 });
+
+// ... feed audio into audioIn ...
+
+await vadPipeline.flush();
+await sttPipeline.flush();
+await vadPipeline.stop();
+await sttPipeline.stop();
+await vad.destroy();
+await stt.destroy();
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
 
 ## See also
 

@@ -1,5 +1,7 @@
 # Streaming Text-to-Speech (TTS)
 
+## Introduction
+
 Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
 **For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Streaming TTS (Incremental)](tts-streaming-incremental.md). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
@@ -357,6 +359,52 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 
 For incremental-only types (`IncrementalStreamingTtsEngine`, `IncrementalStreamController`, `SegmentationPolicy`, `QueuePolicy`, etc.), see [Streaming TTS (Incremental)](tts-streaming-incremental.md#types).
 
+## Segmentation
+
+The streaming TTS engine can use the segmentation engine to split text before synthesis. Unlike offline TTS, streaming TTS supports all three modes because the pipeline worker can apply segment boundaries within the committed text without restarting the engine.
+
+| Mode | Behavior |
+|------|----------|
+| `'off'` (default) | Each committed `LiveTextBuffer` segment is synthesized as-is |
+| `'manual'` | Segmentation is driven externally; the engine pauses at explicit boundaries |
+| `'auto'` | The engine uses the policy to decide where to split within committed text |
+
+Default policy evaluator: **`text_synthetic_auto`**.
+
+```ts
+import {
+  createStreamingTTS,
+  createLiveTextBuffer,
+  createEmptyLiveAudioBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+} from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({
+  modelPath: { type: 'file', path: '/path/to/model' },
+  modelType: 'kokoro',
+});
+const sampleRate = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer();
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate, channelCount: 1 });
+
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  sid: 0,
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to { evaluator: 'text_synthetic_auto' }
+  },
+});
+
+await appendLiveTextSegment(textIn, 'A long paragraph that will be split automatically into sentence-sized chunks.');
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.stop();
+await tts.destroy();
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference and [memory-and-models.md](memory-and-models.md) for memory planning.
+
 ## Error codes
 
 | Code | Meaning |
@@ -388,12 +436,80 @@ For incremental-only types (`IncrementalStreamingTtsEngine`, `IncrementalStreamC
 
 If you call the **`NativeSherpaOnnx`** TurboModule directly: `startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options?)` starts the native worker. Pipeline control methods (`stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`) take a `pipelineId`. Prefer the factory APIs in this document unless you manage native instances yourself.
 
+## Use case examples
+
+<details>
+<summary>Basic streaming synthesis with PCM output</summary>
+
+```ts
+import {
+  createStreamingTTS,
+  createLiveTextBuffer,
+  createEmptyLiveAudioBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+  finalizeLiveAudioBuffer,
+} from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({
+  modelPath: { type: 'file', path: '/path/to/vits' },
+  modelType: 'vits',
+});
+const sr = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer();
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await tts.synthesize(textIn, audioOut, { sid: 0, speed: 1.0 });
+
+await appendLiveTextSegment(textIn, 'Hello, this is the first sentence.');
+await appendLiveTextSegment(textIn, 'And this is the second.');
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await finalizeLiveAudioBuffer(audioOut);
+await pipeline.stop();
+await tts.destroy();
+```
+
+</details>
+
+<details>
+<summary>Multi-speaker streaming synthesis with per-segment speaker override</summary>
+
+Pass `meta.sid` per segment to override the pipeline-level speaker ID without stopping the pipeline.
+
+```ts
+import {
+  createStreamingTTS,
+  createLiveTextBuffer,
+  createEmptyLiveAudioBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+} from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/multi-speaker' }, modelType: 'vits' });
+const sr = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer();
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await tts.synthesize(textIn, audioOut, { sid: 0 }); // pipeline-level default
+
+// Override speaker per segment via meta:
+await appendLiveTextSegment(textIn, 'Hello from speaker zero.', undefined, undefined, { sid: 0 });
+await appendLiveTextSegment(textIn, 'Hi there from speaker one.', undefined, undefined, { sid: 1 });
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.stop();
+await tts.destroy();
+```
+
+</details>
+
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
 - [tts-streaming-incremental.md](tts-streaming-incremental.md) — incremental/session-based streaming TTS
 - [pcm-player.md](pcm-player.md) — standalone PCM player
-- [alignment.md](alignment.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
+- [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
 - [migration.md](migration.md) — breaking changes history

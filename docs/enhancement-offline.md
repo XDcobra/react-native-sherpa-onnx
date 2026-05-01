@@ -285,7 +285,7 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `ENHANCEMENT_BUFFER_KIND_MISMATCH` | A non-offline buffer was passed to offline `enhance(...)`. |
 | `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty before calling `enhance(...)`. |
-| `OFFLINE_OOM` | Not enough memory for offline enhancement. Use streaming enhancement for large audio inputs. |
+| `OFFLINE_OOM` | Not enough memory for offline enhancement. Use streaming enhancement for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md](enhancement-streaming.md).
 

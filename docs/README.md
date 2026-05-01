@@ -1,0 +1,130 @@
+# react-native-sherpa-onnx — Documentation Index
+
+> For installation and a feature overview, start at the [root README](../README.md).
+
+This index maps every user-facing guide to its canonical file. Internal and migration docs live in separate sub-folders and are **not** listed here.
+
+---
+
+## Planning
+
+| Guide | Description |
+|-------|-------------|
+| [memory-and-models.md](./memory-and-models.md) | OOM awareness, model sizing, concurrent engine budgets, buffer planning |
+| [model-setup.md](./model-setup.md) | Bundled assets, Play Asset Delivery (PAD), model discovery APIs, troubleshooting |
+| [model-languages.md](./model-languages.md) | Language codes and model language support |
+| [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
+
+---
+
+## Speech-to-Text (STT)
+
+| Guide | Description |
+|-------|-------------|
+| [stt-offline.md](./stt-offline.md) | Offline (batch) transcription — file or raw samples |
+| [stt-streaming.md](./stt-streaming.md) | Real-time streaming recognition — partial results, endpoint detection |
+
+---
+
+## Text-to-Speech (TTS)
+
+| Guide | Description |
+|-------|-------------|
+| [tts-offline.md](./tts-offline.md) | Offline (batch) speech generation |
+| [tts-streaming.md](./tts-streaming.md) | Incremental streaming TTS — low latency, playback while generating |
+
+---
+
+## Voice Activity Detection (VAD)
+
+| Guide | Description |
+|-------|-------------|
+| [vad-streaming.md](./vad-streaming.md) | Streaming VAD — `createStreamingVAD`, Silero / Ten VAD models |
+
+---
+
+## Speech Enhancement
+
+| Guide | Description |
+|-------|-------------|
+| [enhancement-offline.md](./enhancement-offline.md) | Offline batch enhancement |
+| [enhancement-streaming.md](./enhancement-streaming.md) | Live streaming enhancement (native buffer pipeline) |
+
+---
+
+## Punctuation
+
+| Guide | Description |
+|-------|-------------|
+| [punctuation-offline.md](./punctuation-offline.md) | Offline punctuation restoration |
+
+---
+
+## Alignment / Timestamps
+
+| Guide | Description |
+|-------|-------------|
+| [alignment-offline.md](./alignment-offline.md) | `createAlignment` — `proportional`, `estimated`, `accurate` modes; `generateSpeechWithTimestamps()` |
+
+> Streaming alignment is not yet available. `alignment-offline.md` is the sole alignment surface.
+
+---
+
+## Segmentation (cross-feature)
+
+| Guide | Description |
+|-------|-------------|
+| [segmentation-engine.md](./segmentation-engine.md) | Engine, `SegmentLink`, `SegmentLinkMap`, modes, lifecycle — canonical cross-feature reference |
+
+---
+
+## Pipeline Buffers
+
+| Guide | Description |
+|-------|-------------|
+| [audiobuffer-offline.md](./audiobuffer-offline.md) | Offline audio buffer — append, file-load, read slices |
+| [audiobuffer-streaming.md](./audiobuffer-streaming.md) | Live audio buffer — mic capture, ring buffer, streaming |
+| [textbuffer-offline.md](./textbuffer-offline.md) | Offline text buffer — segment writing and reading |
+| [textbuffer-streaming.md](./textbuffer-streaming.md) | Live text buffer — streaming segment production/consumption |
+| [segmentbuffer-offline.md](./segmentbuffer-offline.md) | Offline segment buffer — segment links, maps |
+| [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
+
+---
+
+## Audio I/O
+
+| Guide | Description |
+|-------|-------------|
+| [audio-session.md](./audio-session.md) | Global audio session policy and route preference (mic + PCM) |
+| [pcm-player.md](./pcm-player.md) | Built-in PCM player — play pipeline buffer output |
+| [audio-conversion.md](./audio-conversion.md) | Audio format conversion utilities |
+
+---
+
+## File I/O & Model Management
+
+| Guide | Description |
+|-------|-------------|
+| [fileio.md](./fileio.md) | `copyFile`, `saveText`, `shareFile` — file-based I/O |
+| [extraction.md](./extraction.md) | Archive extraction API (PAD, zip, tar) |
+| [download-manager.md](./download-manager.md) | Runtime model download, background downloads (iOS/Android) |
+| [hotwords.md](./hotwords.md) | Hotword / boosted-phrase configuration |
+
+---
+
+## Feature Flags & Builds
+
+| Guide | Description |
+|-------|-------------|
+| [disable-ffmpeg.md](./disable-ffmpeg.md) | Exclude FFmpeg from the build |
+| [disable-libarchive.md](./disable-libarchive.md) | Exclude libarchive from the build |
+
+---
+
+## Advanced / Roadmap
+
+| Guide | Description |
+|-------|-------------|
+| [diarization.md](./diarization.md) | Speaker diarization (planned, not yet available) |
+| [separation.md](./separation.md) | Source separation (planned, not yet available) |
+| [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) | SDK-facing known issues (e.g. Pocket TTS, platform drift) |

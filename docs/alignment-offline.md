@@ -334,7 +334,7 @@ function assertAlignmentGranularityForMode(
 | `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
 | `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on two consecutive anchors |
 | `ALIGNMENT_NATIVE_UNKNOWN` | native bridge returned unknown error shape |
-| `OFFLINE_OOM` | not enough memory for offline alignment |
+| `OFFLINE_OOM` | Not enough memory for offline alignment; native message suggests smaller chunks / streaming-friendly pipelines and points to [segmentation-engine.md](./segmentation-engine.md). |
 
 ## FAQ
 
