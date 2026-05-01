@@ -357,13 +357,18 @@ export async function createSTT(
 
           await SherpaOnnx.populateOfflineTextBufferIfEmpty(
             textOutBufferId,
-            finalText
+            finalText,
+            {}
           );
         } finally {
           await releasePipelineTextBuffer(outputBuffer.bufferId);
         }
       } else {
-        await SherpaOnnx.populateOfflineTextBufferIfEmpty(textOutBufferId, '');
+        await SherpaOnnx.populateOfflineTextBufferIfEmpty(
+          textOutBufferId,
+          '',
+          {}
+        );
       }
 
       let runningOffset = 0;

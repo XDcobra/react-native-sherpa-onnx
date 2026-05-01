@@ -1098,3 +1098,12 @@ export async function releaseSegmentLinkMap(
   const linkMapId = typeof linkMap === 'string' ? linkMap : linkMap.linkMapId;
   await getNative().releaseSegmentLinkMap(linkMapId);
 }
+
+export type {
+  Segment,
+  SegmentDomain,
+  TextSegment,
+  SpeechSegment,
+} from './segment';
+
+export { isTextSegment, isSpeechSegment } from './segment';

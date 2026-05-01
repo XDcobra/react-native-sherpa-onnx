@@ -90,7 +90,7 @@ export async function createOfflinePunctuation(
                 info.utf16Length
               )
             : '';
-        await SherpaOnnx.populateOfflineTextBufferIfEmpty(outId, finalText);
+        await SherpaOnnx.populateOfflineTextBufferIfEmpty(outId, finalText, {});
         await releasePipelineTextBuffer(result.outputBuffer).catch(
           () => undefined
         );
@@ -131,7 +131,8 @@ export async function createOfflinePunctuation(
         const input = await createEmptyOfflineTextBuffer();
         await SherpaOnnx.populateOfflineTextBufferIfEmpty(
           input.bufferId,
-          plain
+          plain,
+          {}
         );
         try {
           return await punctuateOffline(input, outId, options);

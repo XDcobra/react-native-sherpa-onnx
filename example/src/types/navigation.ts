@@ -10,6 +10,7 @@ export type RootStackParamList = {
   GenerateTimestamp: undefined;
   DownloadShowcase: undefined;
   VAD: undefined;
+  SegmentationShowcase: undefined;
   Diarization: undefined;
   Enhancement: undefined;
   EnhancementStreaming: undefined;
@@ -28,6 +29,7 @@ export type FeatureId =
   | 'generate_timestamp'
   | 'download_showcase'
   | 'vad'
+  | 'segmentation_showcase'
   | 'diarization'
   | 'enhancement'
   | 'enhancement_streaming'
