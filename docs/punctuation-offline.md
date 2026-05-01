@@ -1,8 +1,10 @@
 # Punctuation (offline)
 
-**CT-Transformer** batch punctuation: **Input** = populated [offline text buffer](textbuffer-offline.md) (`lang` pass-through, not from the model). **Output** = empty buffer, one write; v1 leaves tokens/timestamps/etc. empty. **Return value** in JS: `{ processingTimeMs }` only — read text via buffer APIs. Engine: `createOfflinePunctuation` → `punctuate` / `punctuateString`.
+## Introduction
 
-`react-native-sherpa-onnx/punctuation` — loads **offline CT** only; online CNN is out of scope here ([`detectPunctuationModel`](#model-detection) for family checks). `txt_off_*` only, not live buffers. See [offlinetextbuffer-internal.md](internal/offlinetextbuffer-internal.md) for invariants.
+**CT-Transformer** batch punctuation: **Input** = populated [offline text buffer](textbuffer-offline.md) (`lang` pass-through, not from the model). **Output** = empty buffer, one write; v1 leaves tokens/timestamps/etc. empty. **Return value** in JS always includes `processingTimeMs`; when segmentation is enabled it also includes orchestration fields (`status`, segment counters, optional failed/skipped segment details). Engine: `createOfflinePunctuation` → `punctuate` / `punctuateString`.
+
+`react-native-sherpa-onnx/punctuation` — loads **offline CT** only; online CNN is out of scope here ([`detectPunctuationModel`](#model-detection) for family checks). `txt_off_*` only, not live buffers. For online pipelines, see [punctuation-streaming.md](punctuation-streaming.md).
 
 ---
 
@@ -250,9 +252,57 @@ import {
 
 See [textbuffer — offline](textbuffer-offline.md) and [textbuffer — streaming](textbuffer-streaming.md) for the live side of the pipeline.
 
----
+## Segmentation
 
-## Types
+Offline punctuation runs CT-Transformer in batch mode. For very large texts, a single pass can increase memory pressure on constrained devices. Segmentation splits text into bounded chunks, runs punctuation chunk-by-chunk, then merges output order-preservingly. This reduces peak memory, with a possible small quality tradeoff around chunk boundaries.
+
+Supported modes for offline punctuation:
+
+- `'off'` (default): process full input text in one pass.
+- `'auto'`: split text by policy and punctuate each segment.
+
+`'manual'` is not supported for offline punctuation.
+
+Default policy evaluator: `text_synthetic_auto` (`sentenceBoundary: true`, `maxLengthChars: 500`).
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+import {
+  createOfflineTextBufferFromText,
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const punct = await createOfflinePunctuation({
+  modelPath: { type: 'file', path: '/path/to/punctuation-ct' },
+  modelType: 'auto',
+});
+
+const textIn = await createOfflineTextBufferFromText(longPlainText, { lang: 'en' });
+const textOut = await createEmptyOfflineTextBuffer();
+
+try {
+  const result = await punct.punctuate(textIn, textOut, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+    maxRetriesPerSegment: 2,
+  });
+  console.log(result.processingTimeMs, result.completedSegments, result.totalSegments);
+
+  const info = await getPipelineTextBufferInfo(textOut);
+  console.log(await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length));
+} finally {
+  await releasePipelineTextBuffer(textIn);
+  await releasePipelineTextBuffer(textOut);
+  await punct.destroy();
+}
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for shared segmentation behavior and [memory-and-models.md](memory-and-models.md) for memory tradeoffs.
+
+## Types and constants
 
 ```ts
 import type { ModelPathConfig } from 'react-native-sherpa-onnx';
@@ -295,8 +345,60 @@ Typical **promise rejection `code`** strings (Android / iOS native). User-visibl
 - [Text buffers — offline](textbuffer-offline.md)
 - [STT offline](stt-offline.md) (typical **source** of plain `textIn`)
 - [TTS offline](tts-offline.md) (consumes punctuated + `lang` pass-through)
-- [Alignment](alignment.md)
+- [Punctuation (streaming)](punctuation-streaming.md)
+- [Alignment](alignment-offline.md)
 - [Model setup](model-setup.md)
 - [Download manager](download-manager.md)
 - [Execution providers](execution-providers.md)
 - [Speech enhancement (offline)](enhancement-offline.md) (analogous buffer-based offline pattern for audio)
+
+## Use case examples
+
+<details>
+<summary>Punctuate STT output before TTS</summary>
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+import {
+  createOfflineTextBufferFromText,
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createOfflinePunctuation({
+  modelPath: { type: 'file', path: '/path/to/punctuation-ct' },
+  modelType: 'auto',
+});
+
+const plain = await createOfflineTextBufferFromText('hello world how are you today', { lang: 'en' });
+const punctuated = await createEmptyOfflineTextBuffer();
+
+try {
+  await engine.punctuate(plain, punctuated);
+  const info = await getPipelineTextBufferInfo(punctuated);
+  console.log(await getOfflineTextBufferTextSlice(punctuated, 0, info.utf16Length));
+} finally {
+  await releasePipelineTextBuffer(plain);
+  await releasePipelineTextBuffer(punctuated);
+  await engine.destroy();
+}
+```
+
+</details>
+
+<details>
+<summary>Punctuate long text with segmented offline processing</summary>
+
+```ts
+const result = await engine.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
+});
+
+console.log(result.status, result.completedSegments, result.totalSegments);
+```
+
+</details>

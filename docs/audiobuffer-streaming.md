@@ -1,5 +1,7 @@
 # Pipeline audio buffers — live / streaming (`audiobuffer`)
 
+## Introduction
+
 **Live** native audio buffers: rolling window, optional spool, mic and **append** producers, and hooks used by **streaming** STT, enhancement pipelines, and waveform UI.
 
 **Import path:** `react-native-sherpa-onnx/audiobuffer`
@@ -56,7 +58,9 @@ Without spool, APIs working on live reads/snapshots are window-bounded by design
 
 ---
 
-## Quick start: live mic + streaming STT (pipeline path)
+## Quick start
+
+### Live mic + streaming STT (pipeline path)
 
 ```typescript
 // Mic → live ring buffer → native streaming STT worker → live text buffer.
@@ -431,9 +435,55 @@ function appendOfflineToLiveAudioBuffer(
 await appendOfflineToLiveAudioBuffer(live, offline);
 ```
 
+## Segmentation
+
+Live audio buffers can attach segmentation behavior at creation time through `CreateEmptyLiveAudioBufferOptions.segmentation`.
+
+- `off`: no segmentation attachment.
+- `manual`: segment boundaries are controlled externally.
+- `auto`: attach segmentation engine with a speech policy (default evaluator: `speech_energy_silence`).
+
+This is useful when a long-running live session should expose deterministic chunk boundaries to downstream consumers while keeping PCM in native memory.
+
+```ts
+const live = await createEmptyLiveAudioBuffer({
+  sampleRate: 16000,
+  channelCount: 1,
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 },
+  },
+});
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for the shared policy model and [memory-and-models.md](memory-and-models.md) for memory/OOM planning.
+
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  LiveAudioBufferRef, // live buffer ref with info + recording handle
+  LiveAudioBufferInfo, // metadata for live ring/spool buffer
+  LiveAudioBufferIdSource, // ref/handle/id accepted by live APIs
+  LiveAudioBufferRecordingSource, // recording-only source accepted by append/finalize APIs
+  CreateEmptyLiveAudioBufferOptions, // options for createEmptyLiveAudioBuffer
+  LiveAudioBufferFramesAppendedEvent, // producer-agnostic append event payload
+  LiveAudioBufferErrorEvent, // error event payload for live buffer
+  FileIngestHandle, // controls active file ingest into live buffer
+  FileIngestOptions, // options for ingestFileToLiveAudioBuffer
+  PipelineAudioBufferInfo, // offline/live metadata union for info APIs
+  PipelineAudioErrorCodeValue, // string union of audio error codes
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+import {
+  PipelineAudioErrorCode, // runtime constants for code-based error handling
+  subscribeLiveAudioBufferEvents, // attach additional listeners beyond create-time callbacks
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -469,3 +519,42 @@ The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`
 - [Streaming STT](stt-streaming.md)
 - [Offline STT / buffers](stt-offline.md)
 - [PCM Player & `pcm-stream` import](pcm-stream.md)
+
+## Use case examples
+
+<details>
+<summary>Live ingest from file into streaming STT pipeline</summary>
+
+```ts
+const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const stt = await createStreamingSTT({
+  modelPath: { type: 'asset', path: 'models/streaming-stt' },
+  modelType: 'auto',
+});
+
+const pipeline = await stt.transcribe(live, textOut, { chunkSize: 3200 });
+const ingest = await ingestFileToLiveAudioBuffer(
+  live,
+  { kind: 'fs', path: '/tmp/session.wav' },
+  { targetSampleRateHz: 16000, autoFinalize: true }
+);
+
+await ingest.done;
+await pipeline.flush();
+await pipeline.stop();
+```
+
+</details>
+
+<details>
+<summary>Append offline clip into live buffer for downstream consumers</summary>
+
+```ts
+const offline = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/clip.wav' });
+const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+await appendOfflineToLiveAudioBuffer(live, offline);
+await finalizeLiveAudioBuffer(live);
+```
+
+</details>

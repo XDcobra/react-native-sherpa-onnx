@@ -1,16 +1,18 @@
 # Speech enhancement (offline)
 
+## Introduction
+
 On-device batch speech denoising with a **pipeline-first** API:
 
 - **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — populated noisy PCM (file-backed or in-memory).
 - **Output:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — empty buffer at the denoiser sample rate (`createEmptyOfflineAudioBuffer`); **`enhance`** writes denoised PCM once.
-- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut)`** (plus `getSampleRate` / `destroy`). There is **no** JS-side API that returns denoised samples; read the result from **`audioOut`** through buffer info and conversion helpers.
+- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut, options?)`** (plus `getSampleRate` / `destroy`). `enhance` returns an `EnhancementResult` (`status`, segment counters, timing) while denoised PCM is read from **`audioOut`**.
 
 Import path: `react-native-sherpa-onnx/enhancement`
 
 For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`enhance`**), see [Speech enhancement (streaming)](enhancement-streaming.md).
 
-For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
+For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
 ## Models and paths
 
@@ -176,8 +178,9 @@ const enhancement = await createEnhancement({
 ```ts
 enhance(
   audioIn: OfflineAudioBufferIdSource,
-  audioOut: OfflineAudioBufferIdSource
-): Promise<void>;
+  audioOut: OfflineAudioBufferIdSource,
+  options?: EnhanceOptions
+): Promise<EnhancementResult>;
 ```
 
 ```ts
@@ -198,7 +201,7 @@ await enhancement.enhance(audioIn, audioOut);
 
 - **`audioIn`:** populated **`OfflineAudioBuffer`** (file-backed or RAM); must be **mono** at a rate the denoiser accepts.
 - **`audioOut`:** **empty** offline buffer with **`sampleRate`** matching the denoiser's rate (from **`getSampleRate()`**).
-- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
+- **Returns:** `EnhancementResult` with orchestration status and segment counters. Read PCM via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
 
 ---
 
@@ -253,6 +256,52 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
 
+## Segmentation
+
+Enhancement models in this SDK are primarily **offline-first**. Running enhancement on very large offline buffers can exceed memory limits on mobile devices (**OOM**). Segmentation mitigates this by splitting input audio into bounded chunks, running the offline denoiser per chunk, then assembling output in order. This lowers peak RAM, with a small quality tradeoff around segment boundaries.
+
+Supported modes for offline enhancement:
+
+- `'off'` (default): one full pass over the input buffer.
+- `'auto'`: split input by segmentation policy and process chunk by chunk.
+
+`'manual'` is not supported for offline enhancement.
+
+Default policy evaluator: `speech_energy_silence`.
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const engine = await createEnhancement({
+  modelPath: { type: 'file', path: '/path/to/enhancement-model' },
+  modelType: 'auto',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/long-input.wav' });
+const sampleRate = await engine.getSampleRate();
+const outBuf = await createEmptyOfflineAudioBuffer(sampleRate);
+
+try {
+  const result = await engine.enhance(inBuf, outBuf, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+    maxRetriesPerSegment: 2,
+  });
+  console.log(result.status, result.completedSegments, result.totalSegments);
+} finally {
+  await releasePipelineAudioBuffer(inBuf);
+  await releasePipelineAudioBuffer(outBuf);
+  await engine.destroy();
+}
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for policy details and [memory-and-models.md](memory-and-models.md) for RAM planning.
+
 ## Types and constants
 
 ```ts
@@ -300,3 +349,57 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 - [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
+
+## Use case examples
+
+<details>
+<summary>Denoise a long recording with segmented offline processing</summary>
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+
+const engine = await createEnhancement({
+  modelPath: { type: 'file', path: '/path/to/gtcrn' },
+  modelType: 'gtcrn',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/noisy-long.wav' });
+const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
+
+try {
+  await engine.enhance(inBuf, outBuf, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+  });
+  await saveAudioAsFile(outBuf, { kind: 'fs', path: '/path/to/clean.wav' }, 'wav');
+} finally {
+  await releasePipelineAudioBuffer(inBuf);
+  await releasePipelineAudioBuffer(outBuf);
+  await engine.destroy();
+}
+```
+
+</details>
+
+<details>
+<summary>Single-pass enhancement for short clips</summary>
+
+```ts
+const engine = await createEnhancement({
+  modelPath: { type: 'file', path: '/path/to/model' },
+  modelType: 'auto',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/short.wav' });
+const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
+
+await engine.enhance(inBuf, outBuf, { segmentation: { mode: 'off' } });
+```
+
+</details>

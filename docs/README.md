@@ -57,6 +57,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [punctuation-offline.md](./punctuation-offline.md) | Offline punctuation restoration |
+| [punctuation-streaming.md](./punctuation-streaming.md) | Streaming punctuation pipeline (`createStreamingPunctuation`) |
 
 ---
 

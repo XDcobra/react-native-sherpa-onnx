@@ -1,5 +1,7 @@
 # Pipeline audio buffers — offline (`audiobuffer`)
 
+## Introduction
+
 **Immutable offline clips** (full PCM on the native side): file-backed or in-memory. Used as input/output for **batch** STT, TTS, alignment, and enhancement.
 
 **Import path:** `react-native-sherpa-onnx/audiobuffer`
@@ -36,6 +38,45 @@ When this buffer is used in a playback or mic+playback pipeline, choose input/ou
 - `installJSI`, `isJSIAvailable`
 
 Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline create helpers return **`OfflineAudioBufferRef`** (`info` + `OfflineBufferHandle`). Buffer parameters use **`OfflineAudioBufferIdSource`** or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
+
+---
+
+## Quick start
+
+```ts
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  createOfflineAudioBufferFromSamples,
+  getPipelineAudioBufferInfo,
+  getOfflineAudioBufferSamplesSlice,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+// 1) Decode once on native side (optional resample/downmix during decode).
+const fromFile = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/input.wav' },
+  { targetSampleRateHz: 16000, forceMono: true }
+);
+
+// 2) Prepare an empty output buffer for batch producers (for example TTS output).
+const output = await createEmptyOfflineAudioBuffer(16000);
+
+// 3) Read a small slice for UI/debug without copying full PCM into JS.
+const head = getOfflineAudioBufferSamplesSlice(fromFile, 0, 320);
+console.log(head.length);
+
+// 4) Inspect metadata and release when done.
+const info = await getPipelineAudioBufferInfo(fromFile);
+console.log(info.kind, info.sampleRate, info.durationMs);
+
+const fromSamples = createOfflineAudioBufferFromSamples(new Float32Array([0.1, 0.2, 0.3]), 16000);
+await releasePipelineAudioBuffer(fromFile);
+await releasePipelineAudioBuffer(fromSamples);
+await releasePipelineAudioBuffer(output);
+```
+
+The common pattern is: create/decode once, pass refs/ids to batch feature APIs, then release buffers explicitly.
 
 ---
 
@@ -196,9 +237,30 @@ function createOfflineAudioBufferFromLive(
 const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
 ```
 
+## Types and constants
+
+```ts
+import type {
+  OfflineAudioBufferRef, // created offline buffer ref { info, bufferId }
+  OfflineAudioBufferInfo, // metadata for immutable offline PCM buffer
+  OfflineAudioBufferIdSource, // ref/handle/id accepted by offline APIs
+  PipelineAudioBufferInfo, // discriminated union for offline/live info
+  PipelineAudioBufferIdSource, // ref/info/handle/id accepted by shared APIs
+  OfflineFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  AudioDecodeOptions, // decode options for createOfflineAudioBufferFromFile
+  DecodeProgressEvent, // progress payload during decode
+  PipelineAudioErrorCodeValue, // string union of audio error codes
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+import {
+  PipelineAudioErrorCode, // runtime constants for error-code checks
+  isJSIAvailable, // check whether JSI path is available
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
 ---
 
-## Error code quick table
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -224,3 +286,34 @@ const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpoo
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
 - [Offline STT](stt-offline.md)
 - [PCM Player & `pcm-stream` import](pcm-stream.md)
+
+## Use case examples
+
+<details>
+<summary>Decode large audio once and reuse across multiple offline engines</summary>
+
+```ts
+const audio = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/meeting.wav' },
+  { targetSampleRateHz: 16000, forceMono: true }
+);
+
+// Reuse `audio` for multiple offline passes (STT, alignment, enhancement, etc.).
+// Release once all consumers are finished.
+await releasePipelineAudioBuffer(audio);
+```
+
+</details>
+
+<details>
+<summary>Snapshot a finalized live session into an offline buffer</summary>
+
+```ts
+// `live` is a finalized live audio buffer from a long recording session.
+const snapshot = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
+const info = await getPipelineAudioBufferInfo(snapshot);
+console.log(info.durationMs, info.sampleRate);
+await releasePipelineAudioBuffer(snapshot);
+```
+
+</details>

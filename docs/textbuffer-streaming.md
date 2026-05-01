@@ -1,5 +1,7 @@
 # Pipeline text buffers — live / streaming (`textbuffer`)
 
+## Introduction
+
 **Live native text buffers** for incremental pipelines with partial text, committed segments, and optional spool-backed full history.
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
@@ -20,7 +22,9 @@ When you need full-history guarantees beyond the active window, enable spooling 
 
 ---
 
-## Quick start: Streaming STT -> LiveTextBuffer
+## Quick start
+
+### Streaming STT -> LiveTextBuffer
 
 ```ts
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
@@ -230,23 +234,20 @@ function getLiveTextBufferPartialSlice(
 const partial = await getLiveTextBufferPartialSlice(live, 0, 256);
 ```
 
-#### `appendLiveTextSegment(liveBuffer, text, options?)`
+#### `appendLiveTextSegment(liveBuffer, text, tokens?, timestamps?, meta?)`
 
 ```ts
 function appendLiveTextSegment(
   liveBuffer: LiveTextBufferRecordingSource,
   text: string,
-  options?: {
-    source?: 'stt_stream' | 'append' | 'replace' | 'mixed' | 'unknown';
-    tokens?: string[];
-    timestamps?: number[];
-    meta?: Record<string, unknown>;
-  }
+  tokens?: string[],
+  timestamps?: number[],
+  meta?: Record<string, unknown>
 ): Promise<{ segmentIndex: number }>;
 ```
 
 ```ts
-await appendLiveTextSegment(live, 'hello world', { source: 'append' });
+await appendLiveTextSegment(live, 'hello world', ['h', 'e', 'l', 'l', 'o']);
 ```
 
 #### `getLiveTextBufferSegments(liveBuffer, startIndex, maxCount)`
@@ -255,7 +256,11 @@ await appendLiveTextSegment(live, 'hello world', { source: 'append' });
 function getLiveTextBufferSegments(
   liveBuffer: LiveTextBufferIdSource,
   startIndex: number,
-  maxCount: number
+  maxCount: number,
+  options?: {
+    includeTokens?: boolean;
+    includeTimestamps?: boolean;
+  }
 ): Promise<LiveTextSegment[]>;
 ```
 
@@ -294,9 +299,55 @@ Strict mode semantics:
 - `windowSnapshot`: current in-memory live window
 - `fullIfSpooled`: full text from spool only; rejects with `TEXT_SPOOL_*` errors when unavailable
 
+## Segmentation
+
+Live text buffers support built-in segmentation configuration through `CreateLiveTextBufferOptions.segmentation`.
+
+- `off`: no segmentation attachment.
+- `manual` (default): boundary management is external.
+- `auto`: segmentation engine auto-attaches with text policy (default evaluator: `text_synthetic_auto`).
+
+Use this when streaming text should be segmented at consistent boundaries before downstream consumers (for example streaming TTS) process segments.
+
+```ts
+const live = await createLiveTextBuffer({
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 },
+  },
+});
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for full segmentation semantics and [memory-and-models.md](memory-and-models.md) for memory/OOM context.
+
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  LiveTextBufferRef, // live text buffer ref with info + recording handle
+  LiveTextBufferInfo, // live buffer metadata including spool status
+  LiveTextBufferIdSource, // ref/handle/id accepted by live text APIs
+  LiveTextBufferRecordingSource, // recording-only source for append/finalize
+  LiveTextSegment, // committed segment shape from live segment log
+  LiveTextBufferPartialEvent, // partial event payload for streaming updates
+  LiveTextBufferErrorEvent, // error event payload for live buffer
+  CreateLiveTextBufferOptions, // options for createLiveTextBuffer
+  OfflineTextBufferFromLiveMode, // conversion mode from live to offline
+  PipelineTextBufferInfo, // offline/live metadata union
+  PipelineTextErrorCodeValue, // string union of textbuffer error codes
+} from 'react-native-sherpa-onnx/textbuffer';
+
+import {
+  PipelineTextErrorCode, // runtime constants for code-based error handling
+  subscribeLiveTextBufferEvents, // attach additional listeners after buffer creation
+  TEXT_DEFAULT_SLICE_COUNT, // default safe slice count for reads
+  TEXT_MAX_SLICE_COUNT, // maximum safe slice count for reads
+} from 'react-native-sherpa-onnx/textbuffer';
+```
+
+## Error codes
 
 The following codes are the relevant runtime outcomes for live/streaming text-buffer operations in this document (`create`, `append`, `finalize`, `slice`, `createOfflineFromLive`, `release`).
 
@@ -322,3 +373,41 @@ The following codes are the relevant runtime outcomes for live/streaming text-bu
 - [Pipeline text buffers — offline](textbuffer-offline.md)
 - [Streaming STT](stt-streaming.md)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
+
+## Use case examples
+
+<details>
+<summary>Event-driven partial rendering with endpoint-triggered segment reads</summary>
+
+```ts
+let last = 0;
+const liveText = await createLiveTextBuffer({
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
+  onPartial: async (event) => {
+    console.log('[partial]', event.partialText);
+    if (!event.isEndpoint) return;
+
+    const total = await getLiveTextBufferSegmentCount(liveText);
+    if (total <= last) return;
+    const fresh = await getLiveTextBufferSegments(liveText, last, total - last);
+    fresh.forEach((s) => console.log('[segment]', s.text));
+    last = total;
+  },
+});
+```
+
+</details>
+
+<details>
+<summary>Convert finished live session to strict full-history offline snapshot</summary>
+
+```ts
+await finalizeLiveTextBuffer(liveText);
+const offline = await createOfflineTextBufferFromLive(liveText, 'fullIfSpooled');
+const info = await getPipelineTextBufferInfo(offline);
+const text = await getOfflineTextBufferTextSlice(offline, 0, info.utf16Length);
+console.log(text);
+await releasePipelineTextBuffer(offline);
+```
+
+</details>

@@ -1,5 +1,7 @@
 # Speech enhancement (streaming)
 
+## Introduction
+
 On-device streaming speech denoising with a **pipeline-first** API:
 
 - **Input:** live pipeline audio buffer ([`audiobuffer` — live / streaming](audiobuffer-streaming.md)) — ring/spool buffer the denoiser **drains** (mic, append, or upstream native pipeline).
@@ -10,7 +12,7 @@ Import path: `react-native-sherpa-onnx/enhancement`
 
 For **offline batch** enhancement (`OfflineAudioBuffer` → `OfflineAudioBuffer`), see [Speech enhancement (offline)](enhancement-offline.md).
 
-For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
+For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
 ## Models and paths
 
@@ -167,8 +169,9 @@ Creates the native online denoiser instance. Use **`denoiser.enhance`** with **`
 
 ```ts
 enhance(
-  inputBuffer: LiveAudioBufferIdSource,
-  outputBuffer: LiveAudioBufferIdSource
+  inputBufferId: string,
+  outputBufferId: string,
+  options?: StreamingEnhancementEnhanceOptions
 ): Promise<EnhancementPipelineHandle>;
 ```
 
@@ -187,7 +190,7 @@ Starts a native background thread that:
 - The input buffer's `sampleRate` must match the model's sample rate.
 
 ```ts
-const pipeline = await denoiser.enhance(inputBuf, outputBuf);
+const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
 ```
 
 ---
@@ -308,6 +311,45 @@ import {
 
 See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
 
+## Segmentation
+
+Streaming enhancement can attach a segmentation engine to the **input live audio buffer** before the pipeline starts. This is useful when you want deterministic checkpoints or manual boundary control while still processing through one streaming pipeline.
+
+Supported modes for streaming enhancement:
+
+- `'off'` (default): stream continuously without segmentation attachment.
+- `'manual'`: segmentation boundaries are controlled externally.
+- `'auto'`: segmentation engine attaches automatically to the input buffer.
+
+Current streaming evaluator support is limited to `continuous_frames` (default policy: `checkpointIntervalMs: 1000`).
+
+```ts
+import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+
+const denoiser = await createStreamingEnhancement({
+  modelPath: { type: 'file', path: '/path/to/model' },
+  modelType: 'auto',
+});
+
+const sr = await denoiser.getSampleRate();
+const inputBuf = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+const outputBuf = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
+  },
+});
+
+await pipeline.flush();
+await pipeline.stop();
+await denoiser.destroy();
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for the shared model and [memory-and-models.md](memory-and-models.md) for peak-memory planning.
+
 ## Types and constants
 
 ```ts
@@ -368,4 +410,59 @@ Typical **promise rejection `code`** strings from the native layer (offline + st
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
+
+## Use case examples
+
+<details>
+<summary>Real-time denoise and feed output into downstream STT</summary>
+
+```ts
+import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const denoiser = await createStreamingEnhancement({ modelPath: { type: 'asset', path: 'models/enhancement' }, modelType: 'auto' });
+const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+
+const sr = await denoiser.getSampleRate();
+const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+const cleanOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+
+const enhPipeline = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
+const sttPipeline = await stt.transcribe(cleanOut, textOut, { chunkSize: 3200 });
+
+// ... feed mic frames into noisyIn ...
+
+await enhPipeline.flush();
+await sttPipeline.flush();
+await enhPipeline.stop();
+await sttPipeline.stop();
+
+await stt.destroy();
+await denoiser.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(cleanOut);
+await releasePipelineAudioBuffer(noisyIn);
+```
+
+</details>
+
+<details>
+<summary>Enable segmented streaming checkpoints for long sessions</summary>
+
+```ts
+const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
+  },
+});
+
+const status = await pipeline.getStatus();
+console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
+```
+
+</details>
 
