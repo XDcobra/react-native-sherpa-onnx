@@ -151,7 +151,7 @@ describe('textbuffer segment event wiring', () => {
     const onSegment = jest.fn();
     const ref = await createLiveTextBuffer({ onSegment });
 
-    emitEvent('pipelineLiveTextSegment', {
+    emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId,
       text: 'worker commit',
       textTruncated: true,

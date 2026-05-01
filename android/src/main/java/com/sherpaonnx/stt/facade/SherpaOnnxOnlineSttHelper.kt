@@ -90,7 +90,7 @@ internal class SherpaOnnxOnlineSttHelper(
 
       context
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("pipelineLiveTextSegment", payload)
+        .emit("pipelineLiveTextSegmentAppended", payload)
     } catch (_: Exception) {
       // JS bridge might already be shutting down.
     }

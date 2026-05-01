@@ -406,7 +406,7 @@ function ensureLiveTextEventSubscriptions(): void {
 
   if (!textSegmentSubscription) {
     textSegmentSubscription = emitter.addListener(
-      'pipelineLiveTextSegment',
+      'pipelineLiveTextSegmentAppended',
       (rawEvent: {
         liveBufferId?: string;
         bufferId?: string;

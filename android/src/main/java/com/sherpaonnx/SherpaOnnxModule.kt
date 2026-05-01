@@ -250,7 +250,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      eventEmitter.emit("pipelineLiveTextSegment", payload)
+      eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
     } catch (_: Exception) {
       // JS bridge may be unavailable during teardown.
     }
