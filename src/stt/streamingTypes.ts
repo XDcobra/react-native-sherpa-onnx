@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';

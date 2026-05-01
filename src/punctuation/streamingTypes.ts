@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';

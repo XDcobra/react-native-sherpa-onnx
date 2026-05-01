@@ -27,7 +27,7 @@ import type {
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import { resolveModelPath } from '../utils';
 import {
   expandTtsInitializeOptions,

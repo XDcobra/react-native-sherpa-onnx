@@ -395,6 +395,8 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 
 ### Core TTS types (`react-native-sherpa-onnx/tts`)
 
+`ModelPathConfig` (used in `createTTS` / init options) is imported from **`react-native-sherpa-onnx/fileio`**, not from the TTS entry.
+
 | Type | Description |
 | --- | --- |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |

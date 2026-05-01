@@ -33,7 +33,7 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   listDownloadedModels,
   ModelCategory,

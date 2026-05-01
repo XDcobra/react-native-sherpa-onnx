@@ -1,24 +1,6 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
-
-/** Unified shape for all acceleration backends (QNN, NNAPI, XNNPACK, Core ML). */
-export type AccelerationSupport = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInit: boolean;
-};
-
-/** Result from unified archive extraction (path or asset stream). */
-export type ExtractArchiveResult = {
-  success: boolean;
-  /** True when extraction stopped due to cancel (resume with skipEntries = lastEntryIndex + 1). */
-  paused: boolean;
-  lastEntryIndex: number;
-  lastEntryPath: string;
-  bytesExtracted: number;
-  path?: string;
-  sha256?: string;
-  reason?: string;
-};
+import type { AccelerationSupport } from './provider';
+import type { ExtractArchiveResult } from './extraction/types';
 
 export interface Spec extends TurboModule {
   /**

@@ -20,9 +20,9 @@ import {
   autoModelPath,
   getAssetPackPath,
   listAssetModels,
-  resolveModelPath,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+  resolveModelPath,
+} from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,

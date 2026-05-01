@@ -331,7 +331,7 @@ More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](fe
 ## Types and constants
 
 ```ts
-import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import type {
   OfflinePunctuateResult,
   OfflinePunctuationEngine,

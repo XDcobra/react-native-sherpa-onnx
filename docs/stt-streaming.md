@@ -22,7 +22,7 @@ There is no per-chunk stream object in the JS API anymore.
 
 ## Models and paths
 
-- `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `ModelPathConfig` (type from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }`
 - Streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
 - If your model is offline-only (for example Whisper), use [Offline STT](stt-offline.md)
 - Model setup details: [model-setup.md](model-setup.md)

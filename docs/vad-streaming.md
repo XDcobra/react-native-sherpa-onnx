@@ -13,7 +13,7 @@ Import path: `react-native-sherpa-onnx/vad`
 
 ## Models and paths
 
-- `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `ModelPathConfig` (type from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }`
 - Model detection without engine init: `detectVadModel(...)`
 - Supported model families: `silero_vad`, `ten_vad`
 

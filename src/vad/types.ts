@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import type { VadDetectModelResult } from '../types/modelDetect';
 import type {
   LiveAudioBufferIdSource,

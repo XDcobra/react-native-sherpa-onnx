@@ -11,10 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import {
-  listAssetModels,
-  type ModelPathConfig,
-} from 'react-native-sherpa-onnx';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromFile,

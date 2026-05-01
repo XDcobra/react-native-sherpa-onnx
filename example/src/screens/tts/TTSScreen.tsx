@@ -57,7 +57,7 @@ import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import {
   getAssetModelPath,
   getFileModelPath,

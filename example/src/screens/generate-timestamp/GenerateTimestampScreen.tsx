@@ -21,7 +21,7 @@ import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
   createAlignment,
@@ -61,7 +61,7 @@ import {
   onModelsListUpdated,
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,

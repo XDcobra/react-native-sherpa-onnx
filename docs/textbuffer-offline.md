@@ -110,6 +110,25 @@ const out = await createEmptyOfflineTextBuffer();
 console.log(out.info.kind, out.bufferId);
 ```
 
+#### `createOfflineTextBufferFromText(text, options?)`
+
+Creates an **immutable** offline buffer already populated with `text` (e.g. offline TTS input or [`segmentOfflineBuffer`](segmentation-engine.md) on text). `text` must not be empty.
+
+```ts
+function createOfflineTextBufferFromText(
+  text: string,
+  options?: { lang?: string; emotion?: string; event?: string }
+): Promise<OfflineTextBufferRef>;
+```
+
+```ts
+import { createOfflineTextBufferFromText } from 'react-native-sherpa-onnx/textbuffer';
+
+const buf = await createOfflineTextBufferFromText('Hello world.', {
+  lang: 'en',
+});
+```
+
 ### Offline buffer getters
 
 #### `getOfflineTextBufferTextSlice(buffer, startUtf16, maxUtf16)`

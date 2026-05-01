@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 
 export type SegmentationEvaluator =
   | 'text_synthetic_auto'

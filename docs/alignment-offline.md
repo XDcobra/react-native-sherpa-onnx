@@ -77,7 +77,7 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 
 // 0) App-level model configuration: all are ModelPathConfig.
 const ALIGNMENT_MODEL: ModelPathConfig = {

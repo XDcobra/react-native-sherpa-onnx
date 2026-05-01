@@ -46,7 +46,7 @@ Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* s
 
 ## Models & paths
 
-- **`ModelPathConfig`** (from `react-native-sherpa-onnx`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
+- **`ModelPathConfig`** (from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
 - **`detectTtsModel()`** below accepts a `FileSource` and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
@@ -155,7 +155,7 @@ For progressive/tokenized text input (chat/LLM typing), use [Incremental text fe
 
 | Topic | Requirement |
 | --- | --- |
-| Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
+| Execution providers | Optional `provider` on init; check availability via `react-native-sherpa-onnx/provider` (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
 | Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md) |
 | Multi-instance | Each `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 | One pipeline per engine | `synthesize()` rejects with `TTS_PIPELINE_ALREADY_RUNNING` if a pipeline is already active on the same engine |
@@ -345,7 +345,7 @@ More end-to-end patterns: [feature-pipelines.md#tts-streaming-patterns](feature-
 
 ## Types
 
-Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
+Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx/fileio`.
 
 ### Detection & model path
 

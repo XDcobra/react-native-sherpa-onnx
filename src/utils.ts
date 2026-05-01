@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { ModelPathConfig } from './types';
+import type { ModelPathConfig } from './fileio/types';
 import SherpaOnnx from './NativeSherpaOnnx';
 import { resolveActualModelDir } from './download/validation';
 
@@ -136,7 +136,7 @@ export async function resolveModelPath(
  *
  * @example
  * ```typescript
- * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+ * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx/utils';
  *
  * // Get all model folders
  * const models = await listAssetModels();

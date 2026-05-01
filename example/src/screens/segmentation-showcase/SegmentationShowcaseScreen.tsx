@@ -13,17 +13,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
-  type ModelPathConfig,
+} from 'react-native-sherpa-onnx/utils';
+import {
+  getSegments,
+  segmentOfflineBuffer,
   type SpeechSegment,
   type TextSegment,
-} from 'react-native-sherpa-onnx';
-import {
-  segmentOfflineBuffer,
-  getSegments,
 } from 'react-native-sherpa-onnx/segment';
 import {
   createOfflineTextBufferFromText,

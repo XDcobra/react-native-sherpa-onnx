@@ -48,7 +48,7 @@ JS (TS)
     index.ts             → AlignmentEngine factory + engine methods (only)
     engine.ts            → AlignmentEngine class (new)
     alignTextToAudio.ts  → internal worker (no public export)
-    types.ts             → option/result types (modelPath: ModelPathConfig)
+    fileio/types         → `ModelPathConfig`; alignment `types.ts` → option/result types
     linker/              → Path 3 TypeScript bindings (calls native, packs LinkerResultV0)
       types.ts
       linker.ts

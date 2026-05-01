@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferRef,

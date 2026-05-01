@@ -16,7 +16,7 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 ## Models and paths
 
-- **`ModelPathConfig`:** `{ type: 'asset' | 'file' | 'auto', path: string }` (from `react-native-sherpa-onnx`, same as STT/TTS).
+- **`ModelPathConfig`:** `{ type: 'asset' | 'file' | 'auto', path: string }` (from `react-native-sherpa-onnx/fileio`, same as STT/TTS).
 - In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
 - Model detection without loading the denoiser: **`detectEnhancementModel(...)`** (same rules as offline; see [Model detection](enhancement-offline.md#model-detection) on the offline page for the full rule list).
 - File expectations per family: [model-setup.md](model-setup.md) where applicable.

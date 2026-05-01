@@ -24,7 +24,7 @@ import type {
   SttRuntimeConfig,
 } from './types';
 import { validateSegmentationConfig } from '../segment/validation';
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 import type { FileSource } from '../fileio/types';
 import { resolveModelPath } from '../utils';
 import { resolveFileSourceForDetect } from '../detect';

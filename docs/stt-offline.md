@@ -14,7 +14,7 @@ For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
 ## Models and paths
 
-- `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `ModelPathConfig` (type from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }`
 - In-app model downloads: [download-manager.md](download-manager.md) with category `ModelCategory.Stt`
 - Model detection without engine init: `detectSttModel(...)`
 - Model setup and expected files: [model-setup.md](model-setup.md)
@@ -412,6 +412,8 @@ import type {
   SttModelOptions,
   SttErrorCodeValue,
 } from 'react-native-sherpa-onnx/stt';
+
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 ```
 
 For buffer/ref unions (`OfflineAudioBufferIdSource`, `OfflineTextBufferIdSource`, …), import from **`audiobuffer`** / **`textbuffer`** as needed.

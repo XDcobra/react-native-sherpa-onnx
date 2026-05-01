@@ -15,7 +15,7 @@
  * ```
  */
 
-import type { ModelPathConfig } from '../types';
+import type { ModelPathConfig } from '../fileio/types';
 
 /**
  * Diarization initialization options (placeholder)

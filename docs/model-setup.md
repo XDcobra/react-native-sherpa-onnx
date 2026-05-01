@@ -2,7 +2,7 @@
 
 Discover, resolve, and validate model paths across bundled assets, Play Asset Delivery (PAD), and downloaded models.
 
-**Import path:** `react-native-sherpa-onnx`
+**Import paths:** path helpers (`assetModelPath`, `resolveModelPath`, …) live in `react-native-sherpa-onnx/utils`. The **`ModelPathConfig`** type is exported from **`react-native-sherpa-onnx/fileio`**.
 
 ---
 
@@ -46,7 +46,7 @@ import {
   assetModelPath,
   listAssetModels,
   resolveModelPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import { detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 // 1) Discover bundled models
@@ -247,7 +247,7 @@ Detection is a **cheap preflight**: no recognizer / TTS engine allocation, faste
 **STT — return shape, options, and matching `createSTT`:**
 
 ```typescript
-import { assetModelPath } from 'react-native-sherpa-onnx';
+import { assetModelPath } from 'react-native-sherpa-onnx/utils';
 import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 const modelPath = assetModelPath('models/my-pack');
@@ -315,12 +315,12 @@ Combining multiple sources:
 
 ```typescript
 import {
-  listAssetModels,
-  getAssetPackPath,
-  listModelsAtPath,
-  fileModelPath,
   assetModelPath,
-} from 'react-native-sherpa-onnx';
+  fileModelPath,
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx/utils';
 import { getLocalModelPathByCategory, listDownloadedModelsByCategory, ModelCategory } from 'react-native-sherpa-onnx/download';
 
 // Bundled
@@ -341,7 +341,7 @@ const downloaded = await listDownloadedModelsByCategory(ModelCategory.Stt);
 ### Auto-detect and init the first available STT model
 
 ```typescript
-import { listAssetModels, assetModelPath } from 'react-native-sherpa-onnx';
+import { assetModelPath, listAssetModels } from 'react-native-sherpa-onnx/utils';
 import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 const models = await listAssetModels();

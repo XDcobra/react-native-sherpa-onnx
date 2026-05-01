@@ -1151,3 +1151,35 @@ export type {
   SegmentationEvaluator,
   SegmentationPolicy,
 } from './engine-types';
+
+export type { SegmentationMode } from './runtime-state';
+
+export type {
+  Segment,
+  SegmentBase,
+  SegmentDomain,
+  SegmentReason,
+  SegmentSource,
+  SpeechSegment,
+  SpeechSegmentVadInfo,
+  TextSegment,
+} from './segment';
+export { isSpeechSegment, isTextSegment } from './segment';
+
+export type {
+  SegmentLink,
+  SegmentLinkMapInfo,
+  SegmentLinkMapRef,
+  SegmentLinkType,
+} from './segment-link';
+
+export type { ValidateSegmentationOptions } from './validation';
+export { validateSegmentationConfig } from './validation';
+
+export {
+  segmentFromJson,
+  segmentLinkFromJson,
+  segmentLinkToJson,
+  segmentToJson,
+} from './segment-serialization';
+export { validateSegment, validateSegmentLink } from './segment-validation';

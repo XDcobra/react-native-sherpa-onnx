@@ -17,9 +17,9 @@ import {
   autoModelPath,
   getAssetPackPath,
   listAssetModels,
-  resolveModelPath,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+  resolveModelPath,
+} from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   DocumentDirectoryPath,

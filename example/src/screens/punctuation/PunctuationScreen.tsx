@@ -17,12 +17,12 @@ import {
   onModelsListUpdated,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import {
-  listAssetModels,
   getAssetPackPath,
+  listAssetModels,
   listModelsAtPath,
-  type ModelPathConfig,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import {
   createEmptyOfflineTextBuffer,
   createOfflineTextBufferFromText,

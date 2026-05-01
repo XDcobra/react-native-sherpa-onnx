@@ -75,7 +75,7 @@ import {
   createEmptyOfflineSegmentBuffer,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 
 // --- App constants: ModelPathConfig (same shape as STT / VAD / punctuation) ---
 const ALIGNMENT_MODEL: ModelPathConfig = {

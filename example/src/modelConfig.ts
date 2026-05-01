@@ -6,14 +6,14 @@
  * available models dynamically instead of hardcoding model names.
  */
 
+import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import {
   autoModelPath,
   assetModelPath,
   fileModelPath,
   getDefaultModelPath,
   resolveModelPath,
-  type ModelPathConfig,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
