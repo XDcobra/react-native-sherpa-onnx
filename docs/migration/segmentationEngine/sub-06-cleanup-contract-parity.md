@@ -53,9 +53,11 @@ For each sub-plan requirement:
 
 ### 2) Deferred Parity Items
 
+**Tracking (Findings & Entscheidungen):** [sub-06-02-event-contract-parity-tracking.md](./sub-06-02-event-contract-parity-tracking.md)
+
 Track and resolve planned deferrals, including:
 - optional sync-JSI host API fast path for `setPartial` / `appendPartial` (while keeping TurboModule parity)
-- any remaining event-contract mismatch (`onSegment`, finalize semantics, payload shape)
+- any remaining event-contract mismatch (`onSegment`, finalize semantics, payload shape) — konkretisiert als **EC-01ff.** im [Tracking](./sub-06-02-event-contract-parity-tracking.md)
 - any remaining unified-read edge cases (live/offline parity)
 
 ### 2b) JSI-Fast-Path Candidates (general)
