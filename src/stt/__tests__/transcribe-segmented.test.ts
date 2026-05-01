@@ -154,7 +154,8 @@ describe('stt segmented transcribe', () => {
 
     expect(mockNative.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_11111111-1111-1111-1111-111111111111',
-      'hi there'
+      'hi there',
+      {}
     );
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith('txt_tmp');
     expect(createSegmentLinkMap).toHaveBeenCalled();

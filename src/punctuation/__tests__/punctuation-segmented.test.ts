@@ -154,7 +154,8 @@ describe('offline punctuation segmentation', () => {
     );
     expect(native.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_22222222-2222-2222-2222-222222222222',
-      'hello world yes'
+      'hello world yes',
+      {}
     );
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith(
       expect.objectContaining({ bufferId: 'txt_tmp' })
@@ -189,7 +190,8 @@ describe('offline punctuation segmentation', () => {
     expect(createEmptyOfflineTextBuffer).toHaveBeenCalled();
     expect(native.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_temp',
-      'hello world'
+      'hello world',
+      {}
     );
     expect(runOfflineTextPipeline).toHaveBeenCalled();
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith(
