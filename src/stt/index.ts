@@ -443,7 +443,6 @@ export type {
   SttModelOptions,
   SttQwen3AsrModelOptions,
   SttCohereTranscribeModelOptions,
-  SttTranscribeRef,
   SttTranscribeOptions,
   SttTranscribeResult,
   SttSegmentationConfig,

@@ -297,25 +297,6 @@ export interface STTInitializeOptions {
   modelOptions?: SttModelOptions;
 }
 
-/**
- * Metadata-only reference to a native STT result (by-reference).
- * Large arrays (tokens, timestamps, durations) stay native until fetched via discrete getters.
- * @deprecated Replaced by TextBuffer pipeline. Use createEmptyOfflineTextBuffer() + transcribe(audio, textOut).
- */
-export interface SttTranscribeRef {
-  success: boolean;
-  resultId?: number;
-  sampleRate?: number;
-  textLength?: number;
-  tokenCount?: number;
-  timestampCount?: number;
-  durationCount?: number;
-  hasLang?: boolean;
-  hasEmotion?: boolean;
-  hasEvent?: boolean;
-  error?: string;
-}
-
 // ========== STT error codes ==========
 
 export const SttErrorCode = {

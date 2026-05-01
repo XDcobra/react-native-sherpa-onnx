@@ -60,6 +60,7 @@ import type {
   SegmentationPolicy,
 } from './engine-types';
 import { resolveModelPath } from '../utils';
+import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -224,25 +225,6 @@ function assertSegmentIndexInRange(
       `SEGMENT_INDEX_OUT_OF_RANGE: startIndex ${startIndex} is outside segment count ${totalCount}`
     );
   }
-}
-
-function toSegmentSource(raw: unknown): SegmentSource {
-  return raw === 'segmentation_engine' || raw === 'manual' || raw === 'external'
-    ? raw
-    : 'manual';
-}
-
-function toSegmentReason(raw: unknown): SegmentReason {
-  return raw === 'endpoint' ||
-    raw === 'punctuation' ||
-    raw === 'length_limit' ||
-    raw === 'vad_boundary' ||
-    raw === 'energy_silence' ||
-    raw === 'manual_commit' ||
-    raw === 'finalize' ||
-    raw === 'policy_checkpoint'
-    ? raw
-    : 'manual_commit';
 }
 
 function normalizeLinkType(raw: unknown): SegmentLinkType {

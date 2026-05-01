@@ -533,7 +533,7 @@ struct PaLiveEntry {
     std::lock_guard<std::mutex> cLock(cursorMutex);
     int id = nextCursorId++;
     // When spool is active, start from absolute 0 so cursor can read all data.
-    // Without spool, start from oldest sample in the ring (legacy behavior).
+    // Ring-only: start at the oldest sample still retained in the ring.
     int64_t startPos = hasActiveSpool ? 0
       : ((totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0);
     cursors[id] = { id, startPos };
@@ -592,7 +592,7 @@ struct PaLiveEntry {
           throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
         }
       } else {
-        // Ring-only buffer: snap forward (legacy behavior)
+        // Ring-only: snap read position forward to the oldest ring sample
         std::lock_guard<std::mutex> lock(ringMutex);
         int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
         int available = (int)std::max((int64_t)0, totalSamplesWritten - oldestInRingLocked);
@@ -653,7 +653,7 @@ struct PaLiveEntry {
       throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
     }
 
-    // Ring-only: snap forward (legacy)
+    // Ring-only: snap forward to ring window (peek; no advance)
     {
       std::lock_guard<std::mutex> lock(ringMutex);
       int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
