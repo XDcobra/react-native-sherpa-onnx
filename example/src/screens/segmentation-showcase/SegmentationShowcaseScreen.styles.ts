@@ -74,6 +74,12 @@ export const styles = StyleSheet.create({
     color: '#222',
     marginBottom: 8,
   },
+  sectionDescription: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+    marginBottom: 10,
+  },
   textInput: {
     backgroundColor: '#FFF',
     borderRadius: 8,
@@ -85,6 +91,35 @@ export const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
     minHeight: 120,
     textAlignVertical: 'top',
+  },
+  optionList: {
+    gap: 10,
+  },
+  optionCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  optionCardActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E3F2FD',
+  },
+  optionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#222',
+    marginBottom: 4,
+  },
+  optionTitleActive: {
+    color: '#007AFF',
+  },
+  optionDescription: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 17,
   },
   policyControl: {
     flexDirection: 'row',
@@ -126,6 +161,9 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
+  },
+  secondaryButton: {
+    backgroundColor: '#1F7AE0',
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -180,6 +218,108 @@ export const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#666',
+  },
+  warningContainer: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+  },
+  warningText: {
+    fontSize: 13,
+    color: '#795548',
+    lineHeight: 18,
+  },
+  infoCard: {
+    marginTop: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    backgroundColor: '#EAF4FF',
+    padding: 12,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#245A8D',
+    lineHeight: 18,
+  },
+  modelButtons: {
+    gap: 10,
+  },
+  modelSelectButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1D1D6',
+    backgroundColor: '#F9F9FB',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  modelSelectButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E3F2FD',
+  },
+  modelSelectButtonInitialized: {
+    borderColor: '#34C759',
+  },
+  modelHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  modelSelectButtonTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1C1E',
+  },
+  modelSelectButtonTitleActive: {
+    color: '#007AFF',
+  },
+  modelSelectButtonId: {
+    fontSize: 12,
+    color: '#6D6D72',
+  },
+  recommendedBadge: {
+    borderRadius: 999,
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  recommendedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2E7D32',
+    textTransform: 'uppercase',
+  },
+  statusCard: {
+    marginTop: 12,
+    borderRadius: 8,
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+  },
+  statusTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1B5E20',
+    marginBottom: 4,
+  },
+  statusText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#1B5E20',
   },
   timelineContainer: {
     marginBottom: 12,
