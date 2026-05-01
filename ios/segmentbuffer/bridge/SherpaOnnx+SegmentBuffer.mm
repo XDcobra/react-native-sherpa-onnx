@@ -1610,6 +1610,10 @@ bool seg_engine_peek_annotation(
           body[@"reason"] = [NSString stringWithUTF8String:annReason.c_str()] ?: @"manual_commit";
           body[@"source"] = [NSString stringWithUTF8String:annSource.c_str()] ?: @"manual";
           body[@"createdAtMs"] = @(annCreatedAtMs);
+        } else {
+          body[@"reason"] = @"manual_commit";
+          body[@"source"] = @"manual";
+          body[@"createdAtMs"] = @((int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0));
         }
         if (rec.hasConfidence) body[@"confidence"] = @(rec.confidence);
         if (!rec.payloadJson.empty()) {
@@ -2092,6 +2096,10 @@ bool seg_engine_peek_annotation(
         body[@"reason"] = [NSString stringWithUTF8String:annReason.c_str()] ?: @"manual_commit";
         body[@"source"] = [NSString stringWithUTF8String:annSource.c_str()] ?: @"manual";
         body[@"createdAtMs"] = @(annCreatedAtMs);
+      } else {
+        body[@"reason"] = @"manual_commit";
+        body[@"source"] = @"manual";
+        body[@"createdAtMs"] = @((int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0));
       }
       if (rec.hasConfidence) {
         body[@"confidence"] = @(rec.confidence);

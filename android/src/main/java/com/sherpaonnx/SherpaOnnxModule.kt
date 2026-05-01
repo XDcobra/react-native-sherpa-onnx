@@ -84,10 +84,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         m.putInt("endSample", rec.endSample)
         m.putInt("sampleRate", rec.sampleRate)
         m.putInt("durationMs", rec.durationMs)
-        annotation?.let {
-          m.putString("reason", it.reason)
-          m.putString("source", it.source)
-          m.putDouble("createdAtMs", it.createdAtMs.toDouble())
+        if (annotation != null) {
+          m.putString("reason", annotation.reason)
+          m.putString("source", annotation.source)
+          m.putDouble("createdAtMs", annotation.createdAtMs.toDouble())
+        } else {
+          m.putString("reason", "manual_commit")
+          m.putString("source", "manual")
+          m.putDouble("createdAtMs", System.currentTimeMillis().toDouble())
         }
         rec.confidence?.let { m.putDouble("confidence", it) }
         if (!rec.payloadJson.isNullOrEmpty()) {

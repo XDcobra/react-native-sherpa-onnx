@@ -123,6 +123,9 @@ describe('audiobuffer segment event wiring', () => {
       endSample: 16000,
       sampleRate: 16000,
       durationMs: 1000,
+      reason: 'endpoint',
+      source: 'segmentation_engine',
+      createdAtMs: 123456789,
     });
 
     expect(onSegment).toHaveBeenCalledTimes(1);
@@ -134,6 +137,9 @@ describe('audiobuffer segment event wiring', () => {
         segmentId: 'seg_1',
         startOffset: 0,
         endOffset: 16000,
+        reason: 'endpoint',
+        source: 'segmentation_engine',
+        createdAtMs: 123456789,
       },
     });
 

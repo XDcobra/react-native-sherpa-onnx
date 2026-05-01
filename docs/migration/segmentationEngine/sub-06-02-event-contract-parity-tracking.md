@@ -32,7 +32,7 @@
 | EC-01 | Wire + TS: `liveBufferId` in `pipelineLiveSegmentAppended` / öffentliche Segment-Events | `must-fix` (Major Cut, siehe Entscheidung) | **Code umgesetzt** (2026-05-01) |
 | EC-02 | `totalSegments` im Wire `pipelineLiveSegmentAppended` (autoritativ Native) + TS | `must-fix` | `accepted` (Code umgesetzt, siehe unten) |
 | EC-03 | Text-Segment-Events: Dedup über `segmentIndex` in TS | `deferred` (siehe [future-work](../../future-work/segmentation-ec-03-live-text-segment-index-dedup-invariant.md)) | `deferred` |
-| EC-04 | `reason` / `source` / `createdAtMs` bei Speech-Segmenten (`pipelineLiveSegmentAppended`) | `must-fix` | `accepted` (Umsetzungsplan unten; Code offen) |
+| EC-04 | `reason` / `source` / `createdAtMs` bei Speech-Segmenten (`pipelineLiveSegmentAppended`) | `must-fix` | **Code umgesetzt** (2026-05-01) |
 | EC-05 | `payload`-Shape: Android nur flache JSON-Typen vs. iOS volle Deserialisierung | `must-fix` | `accepted` (Plan unten; Code offen) |
 | EC-06 | Finalize: Audio `manual` vs. `auto` / Plattform-Parität / `reason: 'finalize'` | `must-fix` | `accepted` (Audit + Plan unten; Code offen) |
 | EC-07 | Öffentliche Callback-API: Parität Text ↔ Audio (`subscribeLiveTextBufferEvents`) | `must-fix` | `accepted` (Umsetzungsplan unten; Code offen) |
@@ -166,7 +166,7 @@ Plattform- oder pfadabhängig **leicht andere** sichtbare `Segment.reason` / `Se
 3. **Tests:** Matrix **Pfad × Plattform** mit festen Erwartungen (siehe Umsetzungstabelle); fehlende Fälle = Bug, kein Nachjustieren der Erwartung ohne Doku-Update.
 
 **Klassifikation:** `must-fix` (öffentlicher Segment-Contract).  
-**Entscheidungs-Status:** `accepted` (Umsetzung noch ausstehend — nur Planung in diesem Dokument).
+**Entscheidungs-Status:** **Code umgesetzt** (2026-05-01)
 
 ### Umsetzung (konkret — noch **nicht** im Code umgesetzt)
 
@@ -189,11 +189,11 @@ Zwei zulässige Varianten (eine wählen und durchziehen; **nicht** mischen ohne 
 
 ### Follow-up (Checkliste)
 
-- [ ] Variante **A** oder **B** festlegen (Team-Notiz in diesem Dokument ergänzen).
-- [ ] Native Android + iOS anpassen (siehe Tabelle).
-- [ ] Matrix-Tests ergänzen / bestehende Segment-Event-Tests erweitern.
-- [ ] `sub-01` oder User-Doku: ein Absatz Wire-Contract `pipelineLiveSegmentAppended` (Speech).
-- [ ] Nach Merge: Checkboxen abhaken und ggf. „Resolved“-Datum in Änderungshistorie.
+- [x] Variante **A** oder **B** festlegen (Team-Notiz in diesem Dokument ergänzen): **Variante A** wurde gewählt (Fallback auf `manual_commit`/`manual`/`System.currentTimeMillis()` im Event-Emitter).
+- [x] Native Android + iOS anpassen (siehe Tabelle).
+- [x] Matrix-Tests ergänzen / bestehende Segment-Event-Tests erweitern.
+- [x] `sub-01` oder User-Doku: ein Absatz Wire-Contract `pipelineLiveSegmentAppended` (Speech).
+- [x] Nach Merge: Checkboxen abhaken und ggf. „Resolved“-Datum in Änderungshistorie.
 
 ---
 
@@ -422,6 +422,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 | 2026-05-01 | **EC-08:** Frühere „keine Umbenennung / Glossar“-Entscheidung verworfen. **`must-fix` / `accepted`**: Cold/Clean Cut — **`pipelineLiveTextSegment` → `pipelineLiveTextSegmentAppended`**; **`pipelineLiveSegmentAppended`** unverändert; Umsetzungsplan und Checkliste im EC-08-Abschnitt. |
 | 2026-05-01 | **EC-08 (Umsetzung):** Umbenennung in iOS, Android, TS, Tests und Doku abgeschlossen. `rg` verifiziert (0 Treffer im Produktcode); Jest-Tests `segment-events.test.ts` erfolgreich. |
 | 2026-05-01 | **EC-01 (Umsetzung):** Umbenennung von `liveBufferId` zu `segmentBufferId` für `pipelineLiveSegmentAppended` und `pipelineLiveSegmentError` in iOS, Android, TS, Tests und Doku abgeschlossen. |
+| 2026-05-01 | **EC-04 (Umsetzung):** Variante A (Emit-Defaults) für Speech-Segmente (`reason`, `source`, `createdAtMs`) in iOS, Android und TS-Tests umgesetzt. |
 
 ---
 
@@ -430,7 +431,7 @@ Support/Debug und Doku-Redundanz; vor Release noch ohne externes SDK-Breaking �
 1. Maintainer-Review: jedes `draft` → `accepted` oder revidiert.
 2. [x] **EC-01:** Implementierung gemäß Checkliste im Abschnitt EC-01 (Native → TS-Typen → `segmentbuffer`-Modul → Tests → Doku); danach die Checkboxen dort abhaken und ggf. „Resolved“-Datum ergänzen.
 3. **EC-02:** Umsetzung siehe Abschnitt EC-02 (Code umgesetzt); verbleibende Mocks per `rg pipelineLiveSegmentAppended` prüfen.
-4. **EC-04:** Native Wire immer `reason` / `source` / `createdAtMs` (Variante A oder B laut Abschnitt EC-04) + Matrix-Tests + kurzer Doku-Absatz; danach EC-04-Follow-up-Checkboxen abhaken.
+4. [x] **EC-04:** Native Wire immer `reason` / `source` / `createdAtMs` (Variante A oder B laut Abschnitt EC-04) + Matrix-Tests + kurzer Doku-Absatz; danach EC-04-Follow-up-Checkboxen abhaken.
 5. **EC-05:** Umsetzung gemäß Abschnitt EC-05 (Kotlin-Rekursion + Tests); Checkboxen dort abhaken.
 6. **EC-06:** Finalize-Metadaten vor Event-Emit absichern, `continuous_frames`-Entscheidung treffen, Manual/Auto-Testmatrix ergänzen.
 7. **EC-07:** `subscribeLiveTextBufferEvents` implementieren, exportieren, Jest + öffentliche Doku (Zwei-Ebenen-Story mit Audio); Checkliste im EC-07-Abschnitt abhaken.
