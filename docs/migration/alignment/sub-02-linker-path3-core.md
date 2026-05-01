@@ -33,7 +33,7 @@ Implement the **reusable transcript↔audio linker** that powers `asrMediated`. 
 
 - No linker module exists (TS, Kotlin, or C++).
 - ASR pipeline already produces hypotheses with token timestamps when configured (`stt_produced` SegmentLink path lives in `src/stt/__tests__/transcribe-segmented.test.ts`).
-- Anchors today are produced via `segmentOfflineBuffer({ policy: { evaluator: 'speech_*', modelPath } })`.
+- Anchors today are produced via `segmentOfflineBuffer({ policy: { evaluator: 'speech_vad_model', modelPath: <FileSource> } })` (JS **`detectVadModel`** on `modelPath`).
 
 ---
 

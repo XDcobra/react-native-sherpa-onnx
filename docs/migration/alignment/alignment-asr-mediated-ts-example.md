@@ -37,7 +37,7 @@ Callers retain full choice of **other** alignment strategies; only this mode is 
 
 ### Speech **anchors** (VAD / SegmentationEngine)
 
-- `segmentOfflineBuffer(offlineAudioBuffer, policy)` with `policy.evaluator: 'speech_vad_model'` (and `policy.modelPath` as **`ModelPathConfig`**, same as STT/VAD, plus thresholds as needed) returns a **`SegmentBufferRef`** whose `segmentBufferId` is a `seg_off_*` buffer with **`speech`** segments and sample ranges. See `src/segment/index.ts` (`segmentOfflineBuffer`). JS resolves `modelPath` before the native bridge.
+- `segmentOfflineBuffer(offlineAudioBuffer, policy)` with `policy.evaluator: 'speech_vad_model'` (and `policy.modelPath` as **`FileSource`**, plus thresholds as needed) returns a **`SegmentBufferRef`** whose `segmentBufferId` is a `seg_off_*` buffer with **`speech`** segments and sample ranges. See `src/segment/index.ts` (`segmentOfflineBuffer`). JS runs **`detectVadModel`** on `modelPath` (same pipeline as **`createStreamingVAD`**) before the native bridge.
 
 ### Alignment entry point (target public SDK)
 
@@ -56,7 +56,7 @@ Callers retain full choice of **other** alignment strategies; only this mode is 
 
 The example below shows the **intended public shape**: **`accurate` + ASR-mediated** consumes **R**, **H**, and anchors; the **linker** runs inside alignment on those inputs. Field names are **proposed**; adjust to the final `AlignTextToAudioOptions` discriminated union.
 
-**Prerequisites:** STT and alignment CTC models on disk; VAD model directory or `.onnx` path for `speech_vad_model` (resolved like other features).
+**Prerequisites:** STT and alignment CTC models on disk; VAD bundle locatable from a **`FileSource`** for `speech_vad_model` (same **`detectVadModel`** rules as streaming VAD).
 
 ```typescript
 import { createAlignment } from 'react-native-sherpa-onnx/alignment';
@@ -75,9 +75,10 @@ import {
   createEmptyOfflineSegmentBuffer,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource, ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 
-// --- App constants: ModelPathConfig (same shape as STT / VAD / punctuation) ---
+// --- App constants: alignment + STT use ModelPathConfig; speech_vad segmentation uses FileSource ---
+
 const ALIGNMENT_MODEL: ModelPathConfig = {
   type: 'file',
   path: '/var/mobile/.../wav2vec2-alignment-dir-or-onnx',
@@ -86,9 +87,9 @@ const STT_MODEL: ModelPathConfig = {
   type: 'file',
   path: '/var/mobile/.../sherpa-stt',
 };
-const VAD_MODEL: ModelPathConfig = {
-  type: 'file',
-  path: '/var/mobile/.../silero-vad', // directory or path to .onnx
+const VAD_MODEL: FileSource = {
+  kind: 'fs',
+  path: '/var/mobile/.../silero-vad', // model dir or .onnx — detectVadModel finds the bundle
 };
 
 async function runAccurateAsrMediatedExample() {
@@ -189,3 +190,4 @@ If the linker is **also** a first-class export (subtitles / karaoke), callers mi
 | 2026-04-30 | Initial; timestamps + `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`; **caller-only** `hypothesisTextBuffer` (no internal STT in alignment) |
 | 2026-04-30 | Example uses **`createAlignment` + `alignment.alignTextToAudio` + `destroy`** per `alignment-public-modes-plan.md` |
 | 2026-04-30 | **`modelPath: ModelPathConfig`** for accurate alignment + **`SegmentationPolicy.modelPath`** for `speech_vad_model` (STT/VAD naming) |
+| 2026-05-01 | **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`**; JS **`detectVadModel`** before native (accurate alignment `modelPath` unchanged: **`ModelPathConfig`**) |

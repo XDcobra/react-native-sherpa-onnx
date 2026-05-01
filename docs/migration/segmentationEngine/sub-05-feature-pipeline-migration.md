@@ -51,7 +51,7 @@ Define per-feature migration plans to adopt the shared Segmentation Engine. Each
 ### Phase 2 Progress (Current)
 
 - Completed: Streaming STT endpoint commits now carry Segment Contract metadata (`reason: 'endpoint'`, `source: 'segmentation_engine'`, created-at timestamp) on Android and iOS.
-- Completed: `speech_vad_model` now uses a real VAD runtime path for live segmentation (no silent fallback to energy evaluator when selected).
+- Completed: `speech_vad_model` now uses a real VAD runtime path for live segmentation (no silent fallback to energy evaluator when selected). Policy **`modelPath`** is **`FileSource`**; JS runs **`detectVadModel`** before native (parity with **`createStreamingVAD`**); native receives the resolved `.onnx` file path and explicit **`modelType`** (`silero_vad` / `ten_vad`).
 - Completed: Offline `speech_vad_model` segmentation runs chunked over offline audio slices (no full-buffer preload requirement).
 - Completed: `stt.transcribe(audio, textOut, options)` supports segmented offline mode and returns structured orchestration result (`status`, counts, skips, timing, optional `linkMap`).
 - Completed: Segmented offline STT writes `stt_produced` links for each `(speechSegment, textSegment)` pair.

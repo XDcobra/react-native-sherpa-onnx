@@ -37,7 +37,7 @@ Policies are **domain-specific**: only **text** evaluators go on text buffers; o
 | `text_synthetic_auto` | Text | Offline + live (text) | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
 | `text_punctuation_assisted` | Text | Offline + live (text); needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
 | `speech_energy_silence` | Speech | Offline + live (speech) | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
-| `speech_vad_model` | Speech | Offline + live (speech); needs `policy.modelPath` | Spans from VAD ONNX (`modelPath`, `vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, …). |
+| `speech_vad_model` | Speech | Offline + live (speech); needs `policy.modelPath` (**`FileSource`**) | Spans from VAD ONNX. JS runs **`detectVadModel`** on `modelPath` (same plumbing as **`createStreamingVAD`** / `detectVadModel`), then native uses the resolved `.onnx` file + `modelType` (`vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, …). |
 | `continuous_frames` | Speech | **Live speech only** (offline → `POLICY_INVALID_FOR_OFFLINE`) | Frame checkpoints (`checkpointIntervalMs`). |
 
 ### Text `sentenceBoundary` delimiters
@@ -174,14 +174,14 @@ function segmentOfflineBuffer(
 ```ts
 const ref = await segmentOfflineBuffer(offlineAudioBuffer, {
   evaluator: 'speech_vad_model',
-  modelPath: { type: 'file', path: '/models/silero_vad.onnx' },
+  modelPath: { kind: 'fs', path: '/models/sherpa-onnx-silero-vad' },
   vadThreshold: 0.5,
   vadMinSpeechMs: 250,
   vadMinSilenceMs: 200,
 });
 ```
 
-Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` is required and resolved before native calls.
+Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` (**`FileSource`**) is required; JS resolves it with **`detectVadModel`** and forwards a concrete `.onnx` path plus `modelType` to native (no directory heuristics on the native side).
 
 ### Live text helpers
 

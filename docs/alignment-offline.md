@@ -77,9 +77,10 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource, ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 
-// 0) App-level model configuration: all are ModelPathConfig.
+// 0) App-level model configuration: alignment + STT use ModelPathConfig;
+//    speech_vad_model segmentation policy uses FileSource (detectVadModel).
 const ALIGNMENT_MODEL: ModelPathConfig = {
   type: 'file',
   path: '/abs/path/to/wav2vec2-alignment-model',
@@ -88,9 +89,9 @@ const STT_MODEL: ModelPathConfig = {
   type: 'file',
   path: '/abs/path/to/stt-model',
 };
-const VAD_MODEL: ModelPathConfig = {
-  type: 'file',
-  path: '/abs/path/to/vad-model',
+const VAD_MODEL: FileSource = {
+  kind: 'fs',
+  path: '/abs/path/to/vad-model-dir-or-onnx',
 };
 
 const engine = createAlignment();

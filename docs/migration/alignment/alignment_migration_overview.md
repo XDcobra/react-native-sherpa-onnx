@@ -38,7 +38,7 @@ Alle Dateien liegen unter `docs/migration/alignment/`:
 - **`engine.alignTextToAudio(textIn, audioIn, segmentOut, options)`**
 - **`engine.destroy()`**
 - **Removed (hard cut):** freestanding `alignTextToAudio(...)` export
-- **Naming:** `modelPath: ModelPathConfig` for accurate alignment and `SegmentationPolicy` (no `alignmentModelPath`, no `vadModelId`)
+- **Naming:** `modelPath: ModelPathConfig` for accurate alignment STT/TTS-style bundles; **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`** (resolved via **`detectVadModel`**). No `alignmentModelPath`, no `vadModelId`.
 
 ### Native / JS boundaries
 

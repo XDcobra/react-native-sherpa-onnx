@@ -205,7 +205,7 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 
 **Row 4a — `accurate` + ASR-mediated (`mappingStrategy: 'asr_mediated'`)**
 
-Caller must run `transcribe(audioIn, asrHypothesisOut, …)` **before** this call; `anchorRef` comes from e.g. `segmentOfflineBuffer(audioIn, { evaluator: 'speech_vad_model', … })`.
+Caller must run `transcribe(audioIn, asrHypothesisOut, …)` **before** this call; `anchorRef` comes from e.g. `segmentOfflineBuffer(audioIn, { evaluator: 'speech_vad_model', modelPath: { kind: 'fs', path: '…' } /* FileSource */, … })` (JS **`detectVadModel`** on `modelPath`).
 
 ```typescript
 await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
