@@ -4,7 +4,7 @@
 
 On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as an `OfflineTextBuffer`, audio comes out in an `OfflineAudioBuffer`. The engine is **instance-based** — create with `createTTS()`, call `destroy()` when done.
 
-**For streaming synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md). **For incremental streaming sessions:** see [tts-streaming-incremental.md](tts-streaming-incremental.md).
+**For streaming synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md). **For incremental streaming sessions:** see [tts-streaming.md#4-incremental-text-feeding](tts-streaming.md#4-incremental-text-feeding).
 
 **Import paths:**
 ```ts
@@ -14,7 +14,7 @@ import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
-## Quick Start
+## Quick start
 
 All buffer parameters accept refs directly. Prefer refs over raw string ids. If you pass raw ids, malformed values are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
 
@@ -140,7 +140,7 @@ try {
 | Multi-instance | Each `createTTS()` has a unique `instanceId`; do not use after `destroy()` |
 | Voice cloning | Zipvoice and Pocket only; requires `OfflineAudioBuffer` as reference (not raw samples) |
 
-## API Reference
+## API reference
 
 ### `detectTtsModel(source, options?)`
 
@@ -364,6 +364,33 @@ await tts.destroy();
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| App-authored script | `OfflineTextBuffer` (`txt_off_*`) | Typical source via `createOfflineTextBufferFromText(...)`. |
+| Offline STT output | `OfflineTextBuffer` (`txt_off_*`) | Common speech-to-speech and narration workflows. |
+| Offline punctuation output | `OfflineTextBuffer` (`txt_off_*`) | Improves readability/prosody before synthesis. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Synthesized output | `OfflineAudioBuffer` (`off_*`) | `audioOut` must be empty and sample-rate matched to the model. |
+| Audio save/export | `saveAudioAsFile(...)` | Persist WAV/MP3/Opus after synthesis. |
+| Offline STT/alignment loopback | `OfflineAudioBuffer` (`off_*`) | Optional QA/transcript verification loop. |
+
+```mermaid
+flowchart LR
+  A[OfflineTextBuffer] --> B[createTTS().synthesize]
+  B --> C[OfflineAudioBuffer]
+  C --> D[Playback or saveAudioAsFile]
+```
+
+More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pipelines.md#tts-offline-patterns).
+
 ## Types
 
 ### Core TTS types (`react-native-sherpa-onnx/tts`)
@@ -536,5 +563,5 @@ await tts.destroy();
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
 - [model-languages.md](model-languages.md) — language hint helpers and `detectTtsModel(...).languages`
-- [migration.md](migration.md) — breaking changes history
+- [README — Breaking changes](../README.md#breaking-changes-upgrading-to-100)
 

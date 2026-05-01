@@ -5,7 +5,7 @@
 On-device batch transcription with a **pipeline-first** API:
 
 - **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — file-backed or in-memory PCM.
-- **Output:** offline pipeline text buffer ([`textbuffer`](textbuffer.md)) — STT writes the hypothesis and optional token/timestamp metadata into a buffer you allocate (`createEmptyOfflineTextBuffer`).
+- **Output:** offline pipeline text buffer ([`textbuffer` — offline](textbuffer-offline.md)) — STT writes the hypothesis and optional token/timestamp metadata into a buffer you allocate (`createEmptyOfflineTextBuffer`).
 - **Engine:** `createSTT` exposes **`transcribe(audio, textOut)`** (plus `setConfig` / `destroy`). There are **no** JS-side `getSttResult*` methods or `resultId`-based lazy getters anymore; all transcript payload access goes through **textbuffer** slice APIs. `transcribe` writes directly into the output buffer and returns a `SttTranscribeResult` with orchestration stats (segments, time).
 
 Import path: `react-native-sherpa-onnx/stt`
@@ -175,7 +175,7 @@ try {
 await engine.destroy();
 ```
 
-`transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string** for the first argument; the same idea applies to **`textOut`** (`OfflineTextBufferRef` | handle | string). Prefer passing **refs** so call sites stay typed (see [audiobuffer — offline](audiobuffer-offline.md) / [textbuffer](textbuffer.md)). Raw strings are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`. Timestamps, durations, lang, emotion, and other dimensions use the matching **`getOfflineTextBuffer*`** helpers; see [textbuffer.md](textbuffer.md).
+`transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string** for the first argument; the same idea applies to **`textOut`** (`OfflineTextBufferRef` | handle | string). Prefer passing **refs** so call sites stay typed (see [audiobuffer — offline](audiobuffer-offline.md) / [textbuffer — offline](textbuffer-offline.md)). Raw strings are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`. Timestamps, durations, lang, emotion, and other dimensions use the matching **`getOfflineTextBuffer*`** helpers; see [textbuffer-offline.md](textbuffer-offline.md).
 
 ## Data model and lifetime
 
@@ -204,7 +204,7 @@ Use **`getPipelineTextBufferInfo(textOut)`** to obtain `utf16Length`, `tokenCoun
 
 ## API reference
 
-Signatures below are exported from **`react-native-sherpa-onnx/stt`**. Reading transcript data is documented under **`react-native-sherpa-onnx/textbuffer`** ([textbuffer.md](textbuffer.md)).
+Signatures below are exported from **`react-native-sherpa-onnx/stt`**. Reading transcript data is documented under **`react-native-sherpa-onnx/textbuffer`** ([textbuffer-offline.md](textbuffer-offline.md)).
 
 ### Detection and factory
 
@@ -287,7 +287,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
 
 **Text output**
 
@@ -306,7 +306,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 ```
 
-See [textbuffer.md](textbuffer.md).
+See [textbuffer-offline.md](textbuffer-offline.md).
 
 ## Segmentation
 
@@ -366,6 +366,33 @@ The `SttTranscribeResult` returned by `transcribe` includes:
 - `processingTimeMs` — wall-clock time for the full transcription.
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| File decode path | `OfflineAudioBuffer` (`off_*`) | Typical batch source via `createOfflineAudioBufferFromFile(...)`. |
+| Sample ingestion path | `OfflineAudioBuffer` (`off_*`) | Use `createOfflineAudioBufferFromSamples(...)` for app-owned PCM. |
+| Offline enhancement | `OfflineAudioBuffer` (`off_*`) | Common denoise-before-STT chain for noisy recordings. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Transcript storage | `OfflineTextBuffer` (`txt_off_*`) | `textOut` must be empty before `transcribe(...)`. |
+| Offline punctuation | `OfflineTextBuffer` (`txt_off_*`) | Normalize punctuation before voice or subtitle pipelines. |
+| Offline TTS or alignment | `OfflineTextBuffer` (`txt_off_*`) | Reuse transcript in synthesis or timestamp generation flows. |
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer] --> B[createSTT().transcribe]
+  B --> C[OfflineTextBuffer]
+  C --> D[Offline punctuation or offline TTS or alignment]
+```
+
+More end-to-end patterns: [feature-pipelines.md#stt-offline-patterns](feature-pipelines.md#stt-offline-patterns).
 
 ## Types and constants
 
@@ -492,10 +519,10 @@ Quality may degrade slightly at segment boundaries. See [segmentation-engine.md]
 ## See also
 
 - [Streaming STT](stt-streaming.md)
-- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
-- [Pipeline text buffers (`textbuffer`)](textbuffer.md)
-- [TextBuffer pipeline spec (migration)](migration/textbuffer/textbuffer-pipeline-spec.md)
-- [Alignment](alignment.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
+- [Pipeline text buffers — offline](textbuffer-offline.md)
+- [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
+- [Alignment](alignment-offline.md)
 - [Hotwords](hotwords.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)

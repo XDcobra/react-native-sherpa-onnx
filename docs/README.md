@@ -11,6 +11,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [memory-and-models.md](./memory-and-models.md) | OOM awareness, model sizing, concurrent engine budgets, buffer planning |
+| [feature-pipelines.md](./feature-pipelines.md) | Named end-to-end pipeline recipes across offline/streaming features |
 | [model-setup.md](./model-setup.md) | Bundled assets, Play Asset Delivery (PAD), model discovery APIs, troubleshooting |
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |

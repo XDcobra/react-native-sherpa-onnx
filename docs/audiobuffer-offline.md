@@ -6,7 +6,7 @@
 
 **Import path:** `react-native-sherpa-onnx/audiobuffer`
 
-For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). Overview of both buffer kinds: [Pipeline audio buffers — overview](audiobuffer.md).
+For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For live/ring-buffer workflows, see [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md).
 
 ---
 
@@ -282,10 +282,10 @@ import {
 
 ## See also
 
-- [Pipeline audio buffers — overview](audiobuffer.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
 - [Offline STT](stt-offline.md)
-- [PCM Player & `pcm-stream` import](pcm-stream.md)
+- [PCM Player (`react-native-sherpa-onnx/pcm`)](pcm-player.md)
 
 ## Use case examples
 

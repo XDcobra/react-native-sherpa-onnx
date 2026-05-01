@@ -4,7 +4,7 @@
 
 Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
-**For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Streaming TTS (Incremental)](tts-streaming-incremental.md). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment.md](alignment.md).
+**For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Incremental text feeding](#4-incremental-text-feeding). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -30,7 +30,7 @@ LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ 
 
 ## Choosing a streaming API (decision matrix)
 
-Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text → wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. [Incremental TTS](tts-streaming-incremental.md) is the same engine underneath; it adds **automatic segmentation**, **queues**, and **session** semantics for *continuous* text input.
+Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text -> wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. Incremental TTS is the same engine underneath; it adds automatic segmentation, queues, and session semantics for continuous text input.
 
 | Criterion | Prefer **`createStreamingTTS` + `synthesize()`** | Prefer **`createIncrementalStreamingTTS`** |
 |-----------|---------------------------------------------------|--------------------------------------------|
@@ -42,7 +42,7 @@ Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* s
 | You want the **smallest surface** (buffers + pipeline only) | Yes | No |
 | You want **session lifecycle** events (idle, draining, errors) and **metrics** | Build on top | Built-in |
 
-**Rule of thumb:** if you are comfortable **owning segment boundaries** and writing to a `LiveTextBuffer`, use **`createStreamingTTS`**. If text is **open-ended or token-sized** and you want **automatic boundaries and backpressure**, use **`createIncrementalStreamingTTS`** (it wraps `StreamingTtsEngine`) and follow [Streaming TTS (Incremental)](tts-streaming-incremental.md).
+**Rule of thumb:** if you are comfortable **owning segment boundaries** and writing to a `LiveTextBuffer`, use **`createStreamingTTS`**. If text is **open-ended or token-sized** and you want automatic boundaries and backpressure, use **`createIncrementalStreamingTTS`** (it wraps `StreamingTtsEngine`) and follow [Incremental text feeding](#4-incremental-text-feeding).
 
 ## Models & paths
 
@@ -50,7 +50,7 @@ Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* s
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
 - **`detectTtsModel()`** below accepts a `FileSource` and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
-## Quick Start
+## Quick start
 
 ### 1) Direct pipeline control (`synthesize`)
 
@@ -149,19 +149,19 @@ const pipeline = await tts.synthesize(textIn, audioOut, {
 
 ### 4) Incremental text feeding
 
-For progressive/tokenized text input (chat/LLM typing), use [Streaming TTS (Incremental)](tts-streaming-incremental.md).
+For progressive/tokenized text input (chat/LLM typing), use [Incremental text feeding](#4-incremental-text-feeding).
 
 ## Setup (iOS & Android)
 
 | Topic | Requirement |
 | --- | --- |
 | Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
-| Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment.md](alignment.md) |
+| Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md) |
 | Multi-instance | Each `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 | One pipeline per engine | `synthesize()` rejects with `TTS_PIPELINE_ALREADY_RUNNING` if a pipeline is already active on the same engine |
 | Sample rate match | `audioOut.sampleRate` must equal the TTS model's output sample rate (strict — no hidden resampling) |
 
-## API Reference
+## API reference
 
 ## Detection
 
@@ -210,7 +210,7 @@ Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline
 const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
 ```
 
-For `createIncrementalStreamingTTS(options)`, see [Streaming TTS (Incremental)](tts-streaming-incremental.md#api-reference).
+For `createIncrementalStreamingTTS(options)`, see [API reference](#api-reference).
 
 ## Streaming engine (`StreamingTtsEngine`)
 
@@ -316,6 +316,33 @@ Readonly string — the TTS engine instance driving this pipeline.
 | `speed` | `number` | `1.0` | Speed multiplier (overridable per-segment via `meta.speed`) |
 | `voiceClone` | `TtsVoiceClone` | — | Voice cloning config; set once for the entire pipeline |
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| App text commits | `LiveTextBuffer` (`txt_live_*`) | Append segments progressively for low-latency speech start. |
+| Streaming STT output | `LiveTextBuffer` (`txt_live_*`) | Real-time speech-to-speech pattern with committed segments. |
+| Streaming punctuation output | `LiveTextBuffer` (`txt_live_*`) | Improves readability before speech generation. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Live synthesized audio | `LiveAudioBuffer` (`live_*`) | Primary streaming output for real-time playback. |
+| PCM playback | `PcmPlayer` | Play while synthesis is still running. |
+| Finalized audio artifact | finalize/convert to `OfflineAudioBuffer` | Optional post-run export/save path. |
+
+```mermaid
+flowchart LR
+  A[LiveTextBuffer] --> B[createStreamingTTS().synthesize]
+  B --> C[LiveAudioBuffer]
+  C --> D[PCM playback or finalize for export]
+```
+
+More end-to-end patterns: [feature-pipelines.md#tts-streaming-patterns](feature-pipelines.md#tts-streaming-patterns).
+
 ## Types
 
 Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
@@ -357,7 +384,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 | `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
 | `TTSModelInfo` | `{ sampleRate, numSpeakers }` |
 
-For incremental-only types (`IncrementalStreamingTtsEngine`, `IncrementalStreamController`, `SegmentationPolicy`, `QueuePolicy`, etc.), see [Streaming TTS (Incremental)](tts-streaming-incremental.md#types).
+For incremental-only types (`IncrementalStreamingTtsEngine`, `IncrementalStreamController`, `SegmentationPolicy`, `QueuePolicy`, etc.), see [Types](#types).
 
 ## Segmentation
 
@@ -504,12 +531,52 @@ await tts.destroy();
 
 </details>
 
+<details>
+<summary>Streaming TTS with auto segmentation for long text feeds</summary>
+
+Use segmentation mode `auto` to split long committed text into bounded chunks while the pipeline remains active.
+
+```ts
+import {
+  createStreamingTTS,
+  createLiveTextBuffer,
+  createEmptyLiveAudioBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+} from 'react-native-sherpa-onnx/tts';
+
+const tts = await createStreamingTTS({
+  modelPath: { type: 'file', path: '/path/to/kokoro' },
+  modelType: 'kokoro',
+});
+
+const sr = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer({ maxSegments: 4096 });
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  sid: 0,
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 },
+  },
+});
+
+await appendLiveTextSegment(textIn, veryLongParagraph);
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.stop();
+await tts.destroy();
+```
+
+</details>
+
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
-- [tts-streaming-incremental.md](tts-streaming-incremental.md) — incremental/session-based streaming TTS
+- [Incremental text feeding](#4-incremental-text-feeding) — incremental/session-based streaming TTS
 - [pcm-player.md](pcm-player.md) — standalone PCM player
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
-- [migration.md](migration.md) — breaking changes history
+- [README — Breaking changes](../README.md#breaking-changes-upgrading-to-100)

@@ -302,6 +302,32 @@ try {
 
 See [segmentation-engine.md](segmentation-engine.md) for shared segmentation behavior and [memory-and-models.md](memory-and-models.md) for memory tradeoffs.
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| App text input | `OfflineTextBuffer` (`txt_off_*`) | Plain text source via `createOfflineTextBufferFromText(...)`. |
+| Offline STT output | `OfflineTextBuffer` (`txt_off_*`) | Typical punctuation-restoration path for transcripts. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Punctuated batch output | `OfflineTextBuffer` (`txt_off_*`) | `textOut` must be empty before `punctuate(...)`. |
+| Offline TTS | `OfflineTextBuffer` (`txt_off_*`) | Improves speech quality/readability. |
+| Offline alignment | `OfflineTextBuffer` (`txt_off_*`) | Better sentence/word boundaries for subtitle generation. |
+
+```mermaid
+flowchart LR
+  A[OfflineTextBuffer plain] --> B[createOfflinePunctuation().punctuate]
+  B --> C[OfflineTextBuffer punctuated]
+  C --> D[Offline TTS or alignment]
+```
+
+More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](feature-pipelines.md#punctuation-offline-patterns).
+
 ## Types and constants
 
 ```ts

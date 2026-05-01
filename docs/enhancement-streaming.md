@@ -296,7 +296,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
 
 **Audio output**
 
@@ -309,7 +309,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [overview](audiobuffer.md).
+See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
 
 ## Segmentation
 
@@ -349,6 +349,32 @@ await denoiser.destroy();
 ```
 
 See [segmentation-engine.md](segmentation-engine.md) for the shared model and [memory-and-models.md](memory-and-models.md) for peak-memory planning.
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Mic/file live ingestion | `LiveAudioBuffer` (`live_*`) | Input live buffer remains in recording state while pipeline runs. |
+| Pre-existing live chain | `LiveAudioBuffer` (`live_*`) | Can receive audio from upstream live append or ingest handles. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Clean live output | `LiveAudioBuffer` (`live_*`) | Output remains consumable while enhancement is active. |
+| Streaming STT | `LiveAudioBuffer` (`live_*`) | Common denoise-first streaming transcription chain. |
+| Live playback/finalize | `PcmPlayer` or finalize to offline buffer | Optional playback/export path after pipeline run. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer noisy] --> B[createStreamingEnhancement().enhance]
+  B --> C[LiveAudioBuffer clean]
+  C --> D[Streaming STT or live playback]
+```
+
+More end-to-end patterns: [feature-pipelines.md#enhancement-streaming-patterns](feature-pipelines.md#enhancement-streaming-patterns).
 
 ## Types and constants
 
@@ -406,8 +432,8 @@ Typical **promise rejection `code`** strings from the native layer (offline + st
 ## See also
 
 - [Speech enhancement (offline)](enhancement-offline.md)
-- [Speech enhancement (overview)](speech-enhancement.md)
-- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
+- [Speech enhancement (offline)](enhancement-offline.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
 

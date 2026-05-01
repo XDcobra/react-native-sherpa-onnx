@@ -241,7 +241,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
 
 **Audio output**
 
@@ -254,7 +254,7 @@ import {
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
-See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
 
 ## Segmentation
 
@@ -302,6 +302,33 @@ try {
 
 See [segmentation-engine.md](segmentation-engine.md) for policy details and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| File decode path | `OfflineAudioBuffer` (`off_*`) | Typical input via `createOfflineAudioBufferFromFile(...)`. |
+| Sample ingestion path | `OfflineAudioBuffer` (`off_*`) | Use `createOfflineAudioBufferFromSamples(...)` for app-owned PCM. |
+| Segmented offline source | `OfflineAudioBuffer` (`off_*`) | Use `segmentation.mode: 'auto'` for large files. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Clean batch output | `OfflineAudioBuffer` (`off_*`) | `audioOut` must be empty before `enhance(...)`. |
+| Offline STT | `OfflineAudioBuffer` (`off_*`) | Common denoise-before-transcribe workflow. |
+| File export | `saveAudioAsFile(...)` | Persist enhanced audio for external use. |
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer noisy] --> B[createEnhancement().enhance]
+  B --> C[OfflineAudioBuffer clean]
+  C --> D[Offline STT or saveAudioAsFile]
+```
+
+More end-to-end patterns: [feature-pipelines.md#enhancement-offline-patterns](feature-pipelines.md#enhancement-offline-patterns).
+
 ## Types and constants
 
 ```ts
@@ -343,10 +370,10 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 ## See also
 
 - [Speech enhancement (streaming / live)](enhancement-streaming.md)
-- [Speech enhancement (overview)](speech-enhancement.md)
+- [Speech enhancement (streaming)](enhancement-streaming.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [TTS offline](tts-offline.md)
-- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
 

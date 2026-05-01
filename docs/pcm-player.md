@@ -1,10 +1,12 @@
 # PCM Player (Pipeline Audio Buffers)
 
+## Introduction
+
 Play mono float audio from pipeline buffers (offline or live) via native audio backends.
 
 Import from `react-native-sherpa-onnx/pcm`.
 
-## Quick Start
+## Quick start
 
 ### Offline buffer (file -> buffer -> player)
 
@@ -74,7 +76,7 @@ appendSamplesToLiveAudioBuffer(live, myFloat32Chunk2, 22050);
 await finalizeLiveAudioBuffer(live);
 ```
 
-## API Reference
+## API reference
 
 ### `createPcmPlayer(audioBuffer, options?)`
 
@@ -188,7 +190,7 @@ await player.destroy();
 - `onEnded` fires after `finalizeLiveAudioBuffer(...)` and true EOF is reached.
 - `restart()` seeks to oldest currently available retained sample.
 
-## Error Codes
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -198,6 +200,21 @@ await player.destroy();
 | `PCM_PLAYER_BUFFER_NOT_FOUND` | Referenced audio buffer id does not exist |
 | `PCM_PLAYER_BUFFER_INCOMPATIBLE_STATE` | Buffer state cannot be used for requested player operation |
 | `OFFLINE_OOM` | Not enough memory for offline playback buffering. Use a streaming playback path for large audio inputs; for other large offline workloads, see the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
+
+Other error codes may surface from dependent audio/session layers when playback pipelines are composed with additional modules.
+
+## Types and constants
+
+```ts
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'; // create pipeline-buffer based PCM player
+
+import type {
+  PcmPlayer, // player handle with pause/resume/seek/restart/destroy
+  PcmPlayerOptions, // create options (volume, onEnded)
+  PcmPlayerAudioBuffer, // accepted audio-buffer id source for player input
+  PcmPlayerEndedEvent, // onEnded callback payload
+} from 'react-native-sherpa-onnx/pcm';
+```
 
 ## Architecture Notes
 
@@ -209,9 +226,71 @@ PCM player reads directly from native pipeline buffers; PCM sample data is not m
 | EOS signaling | Drain + playback-head completion | Scheduled-buffer completion callbacks |
 | Live playback | Cursor-based ring-buffer draining | Cursor-based ring-buffer draining |
 
-## See Also
+## See also
 
-- [Pipeline Audio Buffers — Overview](audiobuffer.md)
 - [Offline Audio Buffers](audiobuffer-offline.md)
 - [Live / Streaming Audio Buffers](audiobuffer-streaming.md)
-- [Migration guide](migration.md)
+- [Pipeline Audio Session Coordination](audio-session.md)
+
+## Use case examples
+
+<details>
+<summary>Seek forward and backward on an OfflineAudioBuffer</summary>
+
+```ts
+const player = await createPcmPlayer(offlineAudioOut, { volume: 1.0 });
+
+// Jump forward to preview a later section.
+await player.seekToMs(8000);
+await player.resume();
+
+// Move backward from current position.
+const currentPosMs = await player.getPlaybackPositionMs();
+const backTargetMs = Math.max(0, currentPosMs - 3000);
+await player.seekToMs(backTargetMs);
+
+// Jump forward again.
+await player.seekToMs(backTargetMs + 5000);
+
+await player.pause();
+await player.destroy();
+```
+
+</details>
+
+<details>
+<summary>Seek forward and backward on a LiveAudioBuffer</summary>
+
+```ts
+import {
+  createEmptyLiveAudioBuffer,
+  appendSamplesToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+const live = await createEmptyLiveAudioBuffer({ sampleRate: 22050 });
+appendSamplesToLiveAudioBuffer(live, chunkA, 22050);
+appendSamplesToLiveAudioBuffer(live, chunkB, 22050);
+
+const player = await createPcmPlayer(live, {
+  onEnded: (e) => console.log('ended', e.playerId, e.bufferId),
+});
+
+await player.resume();
+
+// Seek forward inside the currently retained live window.
+const posNow = await player.getPlaybackPositionMs();
+await player.seekToMs(posNow + 1000);
+
+// Seek backward inside the currently retained live window.
+const posAfterForward = await player.getPlaybackPositionMs();
+await player.seekToMs(Math.max(0, posAfterForward - 1500));
+
+// After source finalization, playback can drain to true EOF and emit onEnded.
+await finalizeLiveAudioBuffer(live);
+```
+
+Note: live seek targets must remain inside the currently retained ring window. If the target falls outside that range, native rejects with `PCM_PLAYER_SEEK_OUT_OF_RANGE`.
+
+</details>

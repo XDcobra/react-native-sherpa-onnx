@@ -4,9 +4,6 @@
 
 On-device streaming punctuation with a pipeline-first API:
 
-- Input: live text buffer (`txt_live_*`) that receives plain text segments.
-- Output: live text buffer (`txt_live_*`) where punctuated segments are committed by the native pipeline.
-- Engine: `createStreamingPunctuation` exposes `punctuate(textIn, textOut, options?)` and `destroy()`.
 - Pipeline handle: `PunctuationPipelineHandle` provides `stop`, `flush`, `reset`, and `getStatus`.
 
 Import path: `react-native-sherpa-onnx/punctuation`
@@ -23,7 +20,6 @@ For batch punctuation with offline text buffers, see [punctuation-offline.md](pu
 ## Model detection
 
 Use `detectPunctuationModel` as preflight before initialization:
-
 - `modelType: 'auto'` may detect either offline `ct_transformer` or online `cnn_bilstm`.
 - Streaming initialization requires `modelType === 'cnn_bilstm'` with `isStreaming === true`.
 
@@ -219,6 +215,32 @@ const pipeline = await engine.punctuate(textIn, textOut, {
 ```
 
 See [segmentation-engine.md](segmentation-engine.md) for full policy/lifecycle semantics.
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| App text commits | `LiveTextBuffer` (`txt_live_*`) | Incremental input segments for online punctuation. |
+| Streaming STT output | `LiveTextBuffer` (`txt_live_*`) | Common chain: STT first, punctuation second. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Punctuated live output | `LiveTextBuffer` (`txt_live_*`) | Produced while pipeline is running. |
+| Streaming TTS | `LiveTextBuffer` (`txt_live_*`) | Feed punctuated segments directly into streaming synthesis. |
+| Transcript UI/export | `LiveTextBuffer` (`txt_live_*`) | Render committed punctuated segments in near real time. |
+
+```mermaid
+flowchart LR
+  A[LiveTextBuffer plain] --> B[createStreamingPunctuation().punctuate]
+  B --> C[LiveTextBuffer punctuated]
+  C --> D[Streaming TTS or transcript UI]
+```
+
+More end-to-end patterns: [feature-pipelines.md#punctuation-streaming-patterns](feature-pipelines.md#punctuation-streaming-patterns).
 
 ## Types and constants
 

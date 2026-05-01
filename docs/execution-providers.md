@@ -41,7 +41,7 @@ All `get*Support()` methods return the same `AccelerationSupport` shape. Use `pr
 
 ---
 
-## Quick Start
+## Quick start
 
 ```typescript
 import {
@@ -78,7 +78,7 @@ const stt = await createSTT({
 
 ---
 
-## API Reference
+## API reference
 
 ### `AccelerationSupport`
 
@@ -308,9 +308,9 @@ console.log('Available EPs:', providers);
 
 ---
 
-## See Also
+## See also
 
 - [STT](stt-offline.md) — `provider` option in `createSTT()`
-- [TTS](tts.md) — `provider` option in `createTTS()`
+- [TTS](tts-offline.md) — `provider` option in `createTTS()`
 - [Download Manager](download-manager.md) — QNN model category
 - [Model Setup](model-setup.md) — Model discovery and paths

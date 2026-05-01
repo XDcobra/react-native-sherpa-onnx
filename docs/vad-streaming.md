@@ -281,6 +281,33 @@ reset(): Promise<void>;
 getStatus(): Promise<VADPipelineStatus>;
 ```
 
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Mic or file ingest | `LiveAudioBuffer` (`live_*`) | Primary live source for streaming VAD. |
+| Offline file batch source | `OfflineAudioBuffer` (`off_*`) | Used for offline VAD runs through the same engine surface. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Speech event stream | `LiveSegmentBuffer` (`seg_live_*`) | Emits speech boundaries and metadata in real time. |
+| Batch segment output | `OfflineSegmentBuffer` (`seg_off_*`) | Output for post-processing/timestamp workflows. |
+| Parallel streaming STT | Shared `LiveAudioBuffer` + `LiveTextBuffer` | Common dual-run setup for boundaries + transcript. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B[createStreamingVAD().process]
+  B --> C[LiveSegmentBuffer]
+  A --> D[createStreamingSTT().transcribe]
+  D --> E[LiveTextBuffer]
+```
+
+More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-pipelines.md#vad-streaming-patterns).
+
 ## Types and constants
 
 ```ts
@@ -430,9 +457,66 @@ await releasePipelineAudioBuffer(audioIn);
 
 </details>
 
+<details>
+<summary>Use VAD segmentation output as anchors for alignment mode `vad`</summary>
+
+Run VAD first to produce speech segments, then pass that segment buffer into alignment `mode: 'vad'`.
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineTextBufferFromText,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createEmptyOfflineSegmentBuffer,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const vad = await createStreamingVAD({
+  modelPath: { type: 'file', path: '/path/to/vad-model' },
+  modelType: 'auto',
+  sampleRate: 16000,
+});
+
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/audio.wav' });
+const vadSegments = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+const transcript = await createOfflineTextBufferFromText('hello world from vad anchored alignment');
+const alignedOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+
+try {
+  await vad.process({
+    audioIn: audio,
+    segmentOut: vadSegments,
+    options: { chunkSize: 512 },
+  });
+
+  const alignment = createAlignment();
+  await alignment.alignTextToAudio(transcript, audio, alignedOut, {
+    mode: 'vad',
+    granularity: 'word',
+    segmentation: { source: 'vad', segmentBuffer: vadSegments },
+  });
+  await alignment.destroy();
+} finally {
+  await vad.destroy();
+  await releasePipelineTextBuffer(transcript);
+  await releasePipelineSegmentBuffer(vadSegments);
+  await releasePipelineSegmentBuffer(alignedOut);
+  await releasePipelineAudioBuffer(audio);
+}
+```
+
+</details>
+
 ## See also
 
 - [Streaming STT](stt-streaming.md)
 - [Offline STT](stt-offline.md)
-- [Pipeline audio buffers — streaming](audiobuffer-streaming.md) · [overview](audiobuffer.md)
-- [Pipeline segment buffers](segmentbuffer.md)
+- [Pipeline audio buffers — streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
+- [Pipeline segment buffers — live / streaming](segmentbuffer-streaming.md)
