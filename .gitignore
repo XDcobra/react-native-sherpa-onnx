@@ -55,6 +55,7 @@ android-codegen-out/
 .perplexity/
 .qwen/
 .sora/
+.agents/
 .x/
 
 # CMake build artifacts
