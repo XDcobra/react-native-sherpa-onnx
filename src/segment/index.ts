@@ -59,6 +59,7 @@ import type {
   SegmentationEngineRef,
   SegmentationPolicy,
 } from './engine-types';
+import { detectVadModel } from '../vad/engine';
 import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
@@ -146,7 +147,6 @@ async function segmentationPolicyForNative(
         'SEGMENT_INVALID_ARGUMENT: speech_vad_model requires policy.modelPath'
       );
     }
-    const { detectVadModel } = await import('../vad/engine');
     const detect = await detectVadModel(fileSource, { modelType: 'auto' });
     const onnxPath = detect.paths?.model?.trim();
     if (
@@ -340,7 +340,7 @@ function normalizeLinkType(raw: unknown): SegmentLinkType {
   ) {
     return raw;
   }
-  throw new Error(`SEGMENT_LINK_INVALID: invalid linkType \"${String(raw)}\"`);
+  throw new Error(`SEGMENT_LINK_INVALID: invalid linkType "${String(raw)}"`);
 }
 
 function sanitizeLink(raw: {
