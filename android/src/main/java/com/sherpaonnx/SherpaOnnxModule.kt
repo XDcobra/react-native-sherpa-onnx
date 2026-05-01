@@ -2913,6 +2913,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     policy.putString("evaluator", info.policy.evaluator)
     policy.putInt("maxLengthChars", info.policy.maxLengthChars)
     policy.putBoolean("sentenceBoundary", info.policy.sentenceBoundary)
+    info.policy.sentenceBoundaryChars?.takeIf { it.isNotEmpty() }?.let { chars ->
+      val arr = Arguments.createArray()
+      for (s in chars) {
+        arr.pushString(s)
+      }
+      policy.putArray("sentenceBoundaryChars", arr)
+    }
     policy.putInt("silenceThresholdMs", info.policy.silenceThresholdMs)
     policy.putDouble("energyThresholdDb", info.policy.energyThresholdDb)
     policy.putInt("minSegmentMs", info.policy.minSegmentMs)

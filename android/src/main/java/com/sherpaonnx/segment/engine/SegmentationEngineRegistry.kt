@@ -21,6 +21,65 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 import org.json.JSONObject
 
+private const val MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 64
+private const val MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 32
+
+/**
+ * Default sentence / clause boundaries for offline + live text segmentation: Latin, newline,
+ * full-width CJK punctuation, Arabic question mark, Devanagari danda — aligned with iOS
+ * `seg_text_sentence_boundary_charset`. Replaced entirely when `policy.sentenceBoundaryChars` is set.
+ */
+private val DEFAULT_SENTENCE_BOUNDARY_DELIMITERS: List<String> =
+  listOf(
+    ".",
+    "!",
+    "?",
+    ";",
+    ":",
+    "\n",
+    "\u3002",
+    "\uFF01",
+    "\uFF1F",
+    "\uFF61",
+    "\u061F",
+    "\u0964",
+    "\u0965",
+  )
+
+private fun resolveSentenceBoundaryDelimiters(
+  policy: SegmentationEnginePolicy,
+): List<String> {
+  val custom = policy.sentenceBoundaryChars
+  return if (!custom.isNullOrEmpty()) custom else DEFAULT_SENTENCE_BOUNDARY_DELIMITERS
+}
+
+/** Earliest end-exclusive index where `text[0..i)` ends with a delimiter (offline forward scan). */
+private fun firstDelimiterEndExclusive(text: String, delimiters: List<String>): Int {
+  if (text.isEmpty()) return -1
+  for (i in 1..text.length) {
+    val slice = text.substring(0, i)
+    for (d in delimiters) {
+      if (d.isNotEmpty() && slice.endsWith(d)) {
+        return i
+      }
+    }
+  }
+  return -1
+}
+
+/** Latest end-exclusive index where `text[0..i)` ends with a delimiter (live: commit at last boundary). */
+private fun lastDelimiterEndExclusive(text: String, delimiters: List<String>): Int {
+  for (i in text.length downTo 1) {
+    val slice = text.substring(0, i)
+    for (d in delimiters) {
+      if (d.isNotEmpty() && slice.endsWith(d)) {
+        return i
+      }
+    }
+  }
+  return -1
+}
+
 enum class EngineState {
   ACTIVE,
   DETACHED,
@@ -36,6 +95,8 @@ data class SegmentationEnginePolicy(
   val evaluator: String,
   val maxLengthChars: Int = 500,
   val sentenceBoundary: Boolean = true,
+  /** When non-null and non-empty, replaces [DEFAULT_SENTENCE_BOUNDARY_DELIMITERS] entirely. */
+  val sentenceBoundaryChars: List<String>? = null,
   val silenceThresholdMs: Int = 500,
   val energyThresholdDb: Double = -40.0,
   val minSegmentMs: Int = 1000,
@@ -156,6 +217,8 @@ private class TextSyntheticAutoEngine(
 ) {
   override val segmentBufferId: String? = null
 
+  private val boundaryDelimiters: List<String> = resolveSentenceBoundaryDelimiters(policy)
+
   private fun commitIfNeeded(entry: LiveTextEntry, reason: String): Boolean {
     if (currentState != EngineState.ACTIVE) return false
 
@@ -166,10 +229,9 @@ private class TextSyntheticAutoEngine(
     var commitReason = reason
 
     if (policy.sentenceBoundary) {
-      val boundaryChars = charArrayOf('.', '!', '?', ';', ':', '\n')
-      val boundaryIndex = partial.indexOfLast { ch -> boundaryChars.contains(ch) }
-      if (boundaryIndex >= 0) {
-        commitLength = boundaryIndex + 1
+      val endExclusive = lastDelimiterEndExclusive(partial, boundaryDelimiters)
+      if (endExclusive >= 0) {
+        commitLength = endExclusive
         commitReason = "punctuation"
       }
     }
@@ -254,6 +316,8 @@ private class TextPunctuationAssistedEngine(
 ) {
   override val segmentBufferId: String? = null
 
+  private val boundaryDelimiters: List<String> = resolveSentenceBoundaryDelimiters(policy)
+
   private fun commitIfNeeded(entry: LiveTextEntry, reason: String): Boolean {
     if (currentState != EngineState.ACTIVE) return false
     val partial = entry.currentText
@@ -266,13 +330,17 @@ private class TextPunctuationAssistedEngine(
       )
 
     val punctuated = resolvePunctuatedTextOrThrow(instanceId, partial)
-    val boundaryChars = charArrayOf('.', '!', '?', ';', ':', '\n')
-    val boundaryIndex = punctuated.indexOfLast { ch -> boundaryChars.contains(ch) }
+    val endExclusive =
+      if (policy.sentenceBoundary) {
+        lastDelimiterEndExclusive(punctuated, boundaryDelimiters)
+      } else {
+        -1
+      }
 
     var commitLength = 0
     var commitReason = reason
-    if (policy.sentenceBoundary && boundaryIndex >= 0) {
-      commitLength = minOf(partial.length, boundaryIndex + 1)
+    if (policy.sentenceBoundary && endExclusive >= 0) {
+      commitLength = minOf(partial.length, endExclusive)
       commitReason = "punctuation"
     }
 
@@ -812,6 +880,43 @@ private fun readString(
   return if (trimmed.isEmpty()) null else trimmed
 }
 
+private fun readSentenceBoundaryChars(
+  map: Map<String, Any?>,
+): List<String>? {
+  val raw = map["sentenceBoundaryChars"] ?: return null
+  val list = raw as? List<*>
+    ?: throw SegmentationEngineException(
+      code = "POLICY_INVALID",
+      message = "sentenceBoundaryChars must be an array of strings",
+    )
+  val out = ArrayList<String>()
+  for (item in list) {
+    val s = item as? String
+      ?: throw SegmentationEngineException(
+        code = "POLICY_INVALID",
+        message = "sentenceBoundaryChars must only contain strings",
+      )
+    if (s.isEmpty()) continue
+    if (s.length > MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN) {
+      throw SegmentationEngineException(
+        code = "POLICY_INVALID",
+        message =
+          "sentenceBoundaryChars entries must be at most $MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN characters",
+      )
+    }
+    out.add(s)
+  }
+  if (out.isEmpty()) return null
+  if (out.size > MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES) {
+    throw SegmentationEngineException(
+      code = "POLICY_INVALID",
+      message =
+        "sentenceBoundaryChars must have at most $MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES entries",
+    )
+  }
+  return out
+}
+
 private fun parsePolicy(
   domain: EngineDomain,
   rawPolicy: Map<String, Any?>,
@@ -856,6 +961,7 @@ private fun parsePolicy(
     evaluator = evaluator,
     maxLengthChars = readInt(rawPolicy, "maxLengthChars", 500).coerceAtLeast(1),
     sentenceBoundary = readBoolean(rawPolicy, "sentenceBoundary", true),
+    sentenceBoundaryChars = readSentenceBoundaryChars(rawPolicy),
     silenceThresholdMs = readInt(rawPolicy, "silenceThresholdMs", 500).coerceAtLeast(50),
     energyThresholdDb = readDouble(rawPolicy, "energyThresholdDb", -40.0),
     minSegmentMs = minSegmentMs,
@@ -1150,14 +1256,15 @@ object SegmentationEngineRegistry {
         }
         var index = 0
         val records = ArrayList<Map<String, Any?>>()
+        val offlineDelimiters = resolveSentenceBoundaryDelimiters(policy)
         while (index < text.length) {
           val remaining = text.substring(index)
           var split = -1
           var foundBoundary = false
           if (policy.sentenceBoundary) {
-            val local = remaining.indexOfFirst { it == '.' || it == '!' || it == '?' || it == '\n' }
-            if (local >= 0) {
-              split = local + 1
+            val end = firstDelimiterEndExclusive(remaining, offlineDelimiters)
+            if (end >= 0) {
+              split = end
               foundBoundary = true
             }
           }
