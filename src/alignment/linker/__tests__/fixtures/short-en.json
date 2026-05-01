@@ -1,0 +1,25 @@
+{
+  "referenceText": "hello world this works",
+  "hypothesisTokens": ["hello", "world", "this", "works"],
+  "hypothesisTimestampsSec": [0, 0.3, 0.7, 1.25, 1.7],
+  "anchors": [
+    {
+      "id": "seg_a",
+      "kind": "speech",
+      "sourceAudioBufferId": "off_audio",
+      "startSample": 0,
+      "endSample": 14400,
+      "sampleRate": 16000,
+      "durationMs": 900
+    },
+    {
+      "id": "seg_b",
+      "kind": "speech",
+      "sourceAudioBufferId": "off_audio",
+      "startSample": 14400,
+      "endSample": 32000,
+      "sampleRate": 16000,
+      "durationMs": 1100
+    }
+  ]
+}

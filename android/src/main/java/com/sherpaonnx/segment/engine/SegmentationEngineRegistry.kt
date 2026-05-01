@@ -43,7 +43,8 @@ data class SegmentationEnginePolicy(
   val hangoverMs: Int = 300,
   val checkpointIntervalMs: Int = 0,
   val punctuationInstanceId: String? = null,
-  val vadModelId: String? = null,
+  /** Resolved filesystem path to VAD model file or directory (from JS `resolveModelPath`). */
+  val modelPath: String? = null,
   val vadThreshold: Double? = null,
   val vadMinSpeechMs: Int? = null,
   val vadMinSilenceMs: Int? = null,
@@ -497,12 +498,12 @@ private fun inferVadModelType(modelPath: String): String {
   return if (lower.contains("ten")) "ten_vad" else "silero_vad"
 }
 
-private fun resolveVadModelPath(modelId: String): String {
-  val raw = modelId.trim()
+private fun resolveVadModelPath(rawPath: String): String {
+  val raw = rawPath.trim()
   if (raw.isEmpty()) {
     throw SegmentationEngineException(
       code = "POLICY_MODEL_UNAVAILABLE",
-      message = "speech_vad_model requires non-empty vadModelId",
+      message = "speech_vad_model requires non-empty policy.modelPath",
     )
   }
 
@@ -527,7 +528,7 @@ private fun resolveVadModelPath(modelId: String): String {
 
   throw SegmentationEngineException(
     code = "POLICY_MODEL_UNAVAILABLE",
-    message = "speech_vad_model model not found for vadModelId: $modelId",
+    message = "speech_vad_model model not found for modelPath: $rawPath",
   )
 }
 
@@ -535,13 +536,13 @@ private fun resolveVadRuntime(
   policy: SegmentationEnginePolicy,
   sampleRate: Int,
 ): Pair<VadRuntime, VadRuntimeOptions> {
-  val modelId = policy.vadModelId
+  val pathRaw = policy.modelPath
     ?: throw SegmentationEngineException(
       code = "POLICY_MODEL_UNAVAILABLE",
-      message = "speech_vad_model requires policy.vadModelId",
+      message = "speech_vad_model requires policy.modelPath",
     )
 
-  val modelPath = resolveVadModelPath(modelId)
+  val modelPath = resolveVadModelPath(pathRaw)
   val modelType = inferVadModelType(modelPath)
   val baseRuntimeOptions = defaultRuntimeOptions(modelType)
   val overridden = withRuntimeOverrides(
@@ -877,7 +878,7 @@ private fun parsePolicy(
     checkpointIntervalMs =
       readInt(rawPolicy, "checkpointIntervalMs", 0).coerceAtLeast(0),
     punctuationInstanceId = readString(rawPolicy, "punctuationInstanceId"),
-    vadModelId = readString(rawPolicy, "vadModelId"),
+    modelPath = readString(rawPolicy, "modelPath"),
     vadThreshold = (rawPolicy["vadThreshold"] as? Number)?.toDouble(),
     vadMinSpeechMs = (rawPolicy["vadMinSpeechMs"] as? Number)?.toInt(),
     vadMinSilenceMs = (rawPolicy["vadMinSilenceMs"] as? Number)?.toInt(),

@@ -778,6 +778,12 @@ export interface Spec extends TurboModule {
     sourceAudioBufferId?: string;
   }>;
 
+  populateOfflineSegmentBufferIfEmpty(
+    targetBufferId: string,
+    liveBufferId: string,
+    mode?: string
+  ): Promise<void>;
+
   getPipelineSegmentBufferInfo(bufferId: string): Promise<{
     bufferId: string;
     kind: string;
@@ -1114,6 +1120,58 @@ export interface Spec extends TurboModule {
     warningCode?: string;
     vadAnchorCount?: number;
     minAnchorsApplied?: number;
+  }>;
+
+  /**
+   * Accurate alignment on a single PCM slice.
+   * Used by `asr_mediated` to align each linker-assigned anchor slice.
+   */
+  alignAccurateFromPcm(
+    modelPath: string,
+    text: string,
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
+    sampleRate: number,
+    granularity: 'sentence' | 'word' | 'character',
+    language?: string
+  ): Promise<{
+    subtitles: Array<{
+      text: string;
+      start: number;
+      end: number;
+    }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Forced CTC alignment on a single PCM slice + text window.
+   * Used by `chunked_forced_ctc` to advance a cursor across anchors.
+   */
+  alignAccurateForcedCtcFromPcm(
+    modelPath: string,
+    windowText: string,
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
+    sampleRate: number,
+    granularity: 'sentence' | 'word',
+    language?: string
+  ): Promise<{
+    tokens: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+    }>;
+    consumedTokenCount: number;
+    diagnostics?: {
+      ctcBlankRatio?: number;
+      framesProcessed?: number;
+    };
   }>;
 
   detectAlignmentModel(

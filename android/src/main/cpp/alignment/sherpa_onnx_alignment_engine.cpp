@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cwctype>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -1015,7 +1016,7 @@ AlignmentResult AlignAccurateFromPcm(
   AssertGranularity("aligned", granularity);
 
   if (model_path.empty()) {
-    throw std::runtime_error("alignmentModelPath is required for accurate mode");
+    throw std::runtime_error("modelPath is required for accurate mode");
   }
   if (text.empty()) {
     throw std::runtime_error("text is required");
@@ -1074,6 +1075,55 @@ AlignmentResult AlignAccurateFromFile(
       samples.size(),
       sample_rate,
       granularity);
+}
+
+ForcedCtcResult AlignAccurateForcedCtcFromPcm(
+    const std::string& model_path,
+    const std::string& window_text,
+    const float* samples,
+    size_t sample_count,
+    int32_t sample_rate,
+    const std::string& granularity,
+    const std::string& /*language*/) {
+  if (window_text.empty()) {
+    throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: windowText is required");
+  }
+
+  const AlignmentResult aligned = AlignAccurateFromPcm(
+      model_path,
+      window_text,
+      samples,
+      sample_count,
+      sample_rate,
+      granularity);
+
+  ForcedCtcResult out;
+  out.diagnostics.frames_processed =
+      static_cast<int32_t>(std::min<size_t>(
+        sample_count,
+        static_cast<size_t>(std::numeric_limits<int32_t>::max())));
+
+  out.tokens.reserve(aligned.subtitles.size());
+  for (const auto& item : aligned.subtitles) {
+    ForcedCtcToken token;
+    token.text = item.text;
+    token.start_ms = std::max(0.0, item.start_s * 1000.0);
+    token.end_ms = std::max(token.start_ms, item.end_s * 1000.0);
+    if (!token.text.empty()) {
+      out.tokens.push_back(std::move(token));
+    }
+  }
+
+  const std::vector<std::string> units = IsWordGranularity(granularity)
+      ? SplitTextIntoWords(window_text)
+      : SplitTextIntoSentences(window_text);
+
+  out.consumed_token_count = static_cast<int32_t>(std::min<size_t>(
+      out.tokens.size(),
+      units.size()));
+
+  out.diagnostics.ctc_blank_ratio = out.tokens.empty() ? 1.0 : 0.0;
+  return out;
 }
 
 }  // namespace alignment

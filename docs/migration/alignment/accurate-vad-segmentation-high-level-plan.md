@@ -1,5 +1,17 @@
 # Alignment `accurate + vad` High-Level Plan (Cold Cut)
 
+> [!WARNING]
+> Superseded migration content.
+>
+> This document is superseded by:
+> - `docs/migration/alignment/alignment_migration_overview.md`
+> - `docs/migration/alignment/sub-01-public-api-contract.md`
+> - `docs/migration/alignment/sub-02-linker-path3-core.md`
+> - `docs/migration/alignment/sub-03-accurate-strategy-a-integration.md`
+> - `docs/migration/alignment/sub-04-accurate-strategy-b-integration.md`
+>
+> Keep this file only for historical context where it still contains unique buffer/anchor notes.
+
 ## Goal
 
 Implement `mode: 'accurate'` + `segmentation.source: 'vad'` as a first-class, public SDK path in a hard/cold cut manner:
@@ -218,7 +230,7 @@ Tasks:
 
 - Remove current JS hard-reject for `accurate + vad`.
 - Enforce strict requirements for this combo:
-  - `alignmentModelPath` required
+  - `modelPath` (`ModelPathConfig`) required
   - `segmentation.source === 'vad'` required
   - segmentation buffer id must resolve as offline segment buffer
 - Build native options for constrained accurate run (e.g. segmentation identifiers / strategy flags).

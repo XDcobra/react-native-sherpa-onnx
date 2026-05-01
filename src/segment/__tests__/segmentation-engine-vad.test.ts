@@ -44,6 +44,10 @@ jest.mock('../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
 }));
 
+jest.mock('../../utils', () => ({
+  resolveModelPath: jest.fn(async (c: { path: string }) => c.path),
+}));
+
 jest.mock('../../segmentbuffer', () => ({
   appendLiveSegment: jest.fn(),
   createEmptyOfflineSegmentBuffer: jest.fn(),
@@ -74,7 +78,7 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
 
   const vadPolicy = {
     evaluator: 'speech_vad_model' as const,
-    vadModelId: '/models/vad/silero_vad.onnx',
+    modelPath: { type: 'file' as const, path: '/models/vad/silero_vad.onnx' },
     vadThreshold: 0.48,
     vadMinSpeechMs: 120,
     vadMinSilenceMs: 300,
@@ -126,7 +130,7 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
       'speech',
       expect.objectContaining({
         evaluator: 'speech_vad_model',
-        vadModelId: '/models/vad/silero_vad.onnx',
+        modelPath: '/models/vad/silero_vad.onnx',
         vadThreshold: 0.48,
       })
     );

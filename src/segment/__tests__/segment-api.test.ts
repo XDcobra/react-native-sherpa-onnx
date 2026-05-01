@@ -1,3 +1,7 @@
+jest.mock('../../utils', () => ({
+  resolveModelPath: jest.fn(async (c: { path: string }) => c.path),
+}));
+
 jest.mock('react-native', () => {
   const mockNative = {
     setLiveTextBufferPartial: jest.fn(),

@@ -46,6 +46,25 @@ std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options) {
   return out;
 }
 
+std::vector<float> ParseFloatSamples(NSArray *samples) {
+  if (![samples isKindOfClass:[NSArray class]]) {
+    throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: samples must be an array of numbers.");
+  }
+
+  NSArray *arr = (NSArray *)samples;
+  std::vector<float> out;
+  out.reserve(arr.count);
+  for (id value in arr) {
+    if (![value isKindOfClass:[NSNumber class]]) {
+      out.push_back(0.0f);
+      continue;
+    }
+    double x = [(NSNumber *)value doubleValue];
+    out.push_back(std::isfinite(x) ? static_cast<float>(x) : 0.0f);
+  }
+  return out;
+}
+
 int32_t ParseEstimatedSampleRate(
     NSDictionary *options,
     int32_t fallbackSampleRate) {
@@ -74,16 +93,61 @@ int32_t ParseEstimatedSampleRate(
 }
 
 std::string ParseAlignmentModelPath(NSDictionary *options) {
-  NSString *path = [options[@"alignmentModelPath"] isKindOfClass:[NSString class]]
-      ? options[@"alignmentModelPath"]
+  NSString *path = [options[@"modelPath"] isKindOfClass:[NSString class]]
+      ? options[@"modelPath"]
       : nil;
   NSString *trimmed = path != nil
       ? [path stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
       : @"";
   if (trimmed == nil || trimmed.length == 0) {
-    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.");
+    throw std::runtime_error("ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.");
   }
   return std::string([trimmed UTF8String]);
+}
+
+PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm) {
+  if (pcm == nil) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice descriptor is required.");
+  }
+
+  NSString *audioBufferId = [pcm[@"audioBufferId"] isKindOfClass:[NSString class]]
+      ? pcm[@"audioBufferId"]
+      : nil;
+  NSString *trimmedId = audioBufferId != nil
+      ? [audioBufferId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmedId.length == 0) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId is required.");
+  }
+
+  id startRaw = pcm[@"startSample"];
+  id countRaw = pcm[@"sampleCount"];
+  if (![startRaw isKindOfClass:[NSNumber class]] || ![countRaw isKindOfClass:[NSNumber class]]) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount are required.");
+  }
+
+  const double startValue = [(NSNumber *)startRaw doubleValue];
+  const double countValue = [(NSNumber *)countRaw doubleValue];
+  if (!std::isfinite(startValue) || !std::isfinite(countValue)) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount must be finite numbers.");
+  }
+
+  const int32_t startSample = static_cast<int32_t>(startValue);
+  const int32_t sampleCount = static_cast<int32_t>(countValue);
+  if (startValue != static_cast<double>(startSample) ||
+      countValue != static_cast<double>(sampleCount)) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.startSample and pcm.sampleCount must be integers.");
+  }
+
+  if (startSample < 0 || sampleCount <= 0) {
+    throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice must be within offline buffer bounds.");
+  }
+
+  return PcmSliceDescriptor{
+      std::string([trimmedId UTF8String]),
+      startSample,
+      sampleCount,
+  };
 }
 
 std::string ParseSegmentationBufferId(NSDictionary *options) {

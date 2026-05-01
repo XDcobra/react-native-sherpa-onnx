@@ -382,6 +382,21 @@ function mapPipelineInfo(raw: {
   return mapOfflineInfo(raw);
 }
 
+function normalizeOfflineFromLiveMode(
+  mode: OfflineSegmentBufferFromLiveMode
+): OfflineSegmentBufferFromLiveMode {
+  if (mode === 'fullIfSpooled' || mode === 'windowSnapshot') {
+    return mode;
+  }
+  throw new Error(
+    `${
+      PipelineSegmentErrorCode.INVALID_ARGUMENT
+    }: mode must be 'fullIfSpooled' or 'windowSnapshot'; received "${String(
+      mode
+    )}".`
+  );
+}
+
 export function resolveOfflineSegmentBufferId(
   source: OfflineSegmentBufferIdSource
 ): string {
@@ -706,11 +721,30 @@ export async function createOfflineSegmentBufferFromLive(
   mode: OfflineSegmentBufferFromLiveMode = 'fullIfSpooled'
 ): Promise<OfflineSegmentBufferRef> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
-  const raw = await getNative().createOfflineSegmentBufferFromLive(id, mode);
+  const normalizedMode = normalizeOfflineFromLiveMode(mode);
+  const raw = await getNative().createOfflineSegmentBufferFromLive(
+    id,
+    normalizedMode
+  );
   return {
     info: mapOfflineInfo(raw),
     bufferId: raw.bufferId as OfflineSegmentBufferRef['bufferId'],
   };
+}
+
+export async function populateOfflineSegmentBufferIfEmpty(
+  targetBuffer: OfflineSegmentBufferIdSource,
+  liveBuffer: LiveSegmentBufferIdSource,
+  mode: OfflineSegmentBufferFromLiveMode = 'fullIfSpooled'
+): Promise<void> {
+  const targetId = resolveOfflineSegmentBufferId(targetBuffer);
+  const liveId = resolveLiveSegmentBufferId(liveBuffer);
+  const normalizedMode = normalizeOfflineFromLiveMode(mode);
+  await getNative().populateOfflineSegmentBufferIfEmpty(
+    targetId,
+    liveId,
+    normalizedMode
+  );
 }
 
 export async function getPipelineSegmentBufferInfo(

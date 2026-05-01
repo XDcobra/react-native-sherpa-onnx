@@ -725,7 +725,8 @@ struct SegEnginePolicy {
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
   std::string punctuationInstanceId;
-  std::string vadModelId;
+  /** Resolved filesystem path (from JS); used for speech_vad_model. */
+  std::string modelPath;
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
   int vadMinSilenceMs = 250;
@@ -866,17 +867,17 @@ static bool seg_init_vad_runtime(
     return false;
   }
 
-  const std::string modelPath = seg_resolve_vad_model_path(engine->policy.vadModelId);
-  if (modelPath.empty()) {
+  const std::string resolvedVadPath = seg_resolve_vad_model_path(engine->policy.modelPath);
+  if (resolvedVadPath.empty()) {
     if (errorOut) {
-      *errorOut = "speech_vad_model model not found for vadModelId: " + engine->policy.vadModelId;
+      *errorOut = "speech_vad_model model not found for modelPath: " + engine->policy.modelPath;
     }
     return false;
   }
 
   VadRuntimeConfig cfg;
-  cfg.modelType = seg_vad_model_type_from_path(modelPath);
-  cfg.modelPath = modelPath;
+  cfg.modelType = seg_vad_model_type_from_path(resolvedVadPath);
+  cfg.modelPath = resolvedVadPath;
   cfg.sampleRate = std::max(1, sampleRate);
   cfg.numThreads = 1;
   cfg.provider = "cpu";
@@ -1311,7 +1312,16 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   if ([p[@"hangoverMs"] respondsToSelector:@selector(intValue)]) out.hangoverMs = std::max(0, [p[@"hangoverMs"] intValue]);
   if ([p[@"checkpointIntervalMs"] respondsToSelector:@selector(intValue)]) out.checkpointIntervalMs = std::max(0, [p[@"checkpointIntervalMs"] intValue]);
   if ([p[@"punctuationInstanceId"] isKindOfClass:[NSString class]]) out.punctuationInstanceId = [p[@"punctuationInstanceId"] UTF8String] ?: "";
-  if ([p[@"vadModelId"] isKindOfClass:[NSString class]]) out.vadModelId = [p[@"vadModelId"] UTF8String] ?: "";
+  id rawModelPath = p[@"modelPath"];
+  if ([rawModelPath isKindOfClass:[NSString class]]) {
+    out.modelPath = [rawModelPath UTF8String] ?: "";
+  } else if ([rawModelPath isKindOfClass:[NSDictionary class]]) {
+    NSDictionary *mp = (NSDictionary *)rawModelPath;
+    id pathVal = mp[@"path"];
+    if ([pathVal isKindOfClass:[NSString class]]) {
+      out.modelPath = [pathVal UTF8String] ?: "";
+    }
+  }
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
   if ([p[@"vadMinSilenceMs"] respondsToSelector:@selector(intValue)]) out.vadMinSilenceMs = std::max(1, [p[@"vadMinSilenceMs"] intValue]);
@@ -1319,7 +1329,7 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
 }
 
 static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
-  return @{
+  NSMutableDictionary *md = [@{
     @"evaluator": [NSString stringWithUTF8String:p.evaluator.c_str()] ?: @"",
     @"maxLengthChars": @(p.maxLengthChars),
     @"sentenceBoundary": @(p.sentenceBoundary),
@@ -1330,11 +1340,17 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"hangoverMs": @(p.hangoverMs),
     @"checkpointIntervalMs": @(p.checkpointIntervalMs),
     @"punctuationInstanceId": [NSString stringWithUTF8String:p.punctuationInstanceId.c_str()] ?: @"",
-    @"vadModelId": [NSString stringWithUTF8String:p.vadModelId.c_str()] ?: @"",
     @"vadThreshold": @(p.vadThreshold),
     @"vadMinSpeechMs": @(p.vadMinSpeechMs),
     @"vadMinSilenceMs": @(p.vadMinSilenceMs),
-  };
+  } mutableCopy];
+  if (!p.modelPath.empty()) {
+    md[@"modelPath"] = @{
+      @"type": @"file",
+      @"path": [NSString stringWithUTF8String:p.modelPath.c_str()] ?: @"",
+    };
+  }
+  return md;
 }
 
 static NSDictionary *seg_engine_info_to_dict(const std::shared_ptr<SegEngine> &engine) {
@@ -2290,12 +2306,14 @@ bool seg_engine_peek_annotation(
       reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
       return;
     }
-    auto off = std::make_shared<SegOfflineEntry>();
-    off->bufferId = seg_new_id("seg_off");
-    off->segments = records;
-    off->sourceAudioBufferId = live->sourceAudioBufferId;
+
+    std::shared_ptr<SegOfflineEntry> off;
     {
       std::lock_guard<std::mutex> lock(g_seg_mutex);
+      off = std::make_shared<SegOfflineEntry>();
+      off->bufferId = seg_new_id("seg_off");
+      off->segments = records;
+      off->sourceAudioBufferId = live->sourceAudioBufferId;
       g_seg_offline[off->bufferId] = off;
     }
     NSMutableDictionary *out = [@{
@@ -2306,6 +2324,68 @@ bool seg_engine_peek_annotation(
     } mutableCopy];
     if (!off->sourceAudioBufferId.empty()) out[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:off->sourceAudioBufferId.c_str()];
     resolve(out);
+  } catch (const std::exception &e) {
+    NSString *msg = [NSString stringWithUTF8String:e.what()];
+    NSString *code = @"SEGMENT_INTERNAL_ERROR";
+    NSRange idx = [msg rangeOfString:@":"];
+    if (idx.location != NSNotFound) {
+      code = [msg substringToIndex:idx.location];
+      msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    reject(code, msg, nil);
+  }
+#else
+  reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
+#endif
+}
+
+- (void)populateOfflineSegmentBufferIfEmpty:(NSString *)targetBufferId
+                                liveBufferId:(NSString *)liveBufferId
+                                        mode:(NSString *)mode
+                                     resolve:(RCTPromiseResolveBlock)resolve
+                                      reject:(RCTPromiseRejectBlock)reject
+{
+#ifdef __cplusplus
+  std::shared_ptr<SegLiveEntry> live;
+  std::shared_ptr<SegOfflineEntry> off;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_mutex);
+    auto liveIt = g_seg_live.find(liveBufferId.UTF8String);
+    if (liveIt == g_seg_live.end()) {
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
+      return;
+    }
+    live = liveIt->second;
+    auto offIt = g_seg_offline.find(targetBufferId.UTF8String);
+    if (offIt == g_seg_offline.end()) {
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", targetBufferId], nil);
+      return;
+    }
+    off = offIt->second;
+    if (!off->segments.empty()) {
+      reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
+      return;
+    }
+  }
+
+  try {
+    std::vector<SegRecord> records;
+    if ([mode isEqualToString:@"windowSnapshot"]) records = live->snapshotWindow();
+    else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) records = live->snapshotFullIfSpooled();
+    else {
+      reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(g_seg_mutex);
+      if (!off->segments.empty()) {
+        reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
+        return;
+      }
+      off->segments = records;
+    }
+    resolve(nil);
   } catch (const std::exception &e) {
     NSString *msg = [NSString stringWithUTF8String:e.what()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";

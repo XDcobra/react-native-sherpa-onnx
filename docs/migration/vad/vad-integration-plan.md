@@ -73,12 +73,12 @@ Rationale:
 1. `mode: 'vad'`
    - Requires `segmentBuffer`
    - `segmentBuffer` is offline-only (`seg_off_*`) in current offline alignment API
-   - Must not require `alignmentModelPath`
+   - Must not require alignment `modelPath`
    - Produces segment-anchored subtitle timing without wav2vec2 forced alignment
    - Intended for robust speech-boundary-aware timing when no alignment model is available
 
 2. `mode: 'accurate'` + `segmentation.source: 'vad'`
-   - Requires `alignmentModelPath` and `segmentBuffer`
+   - Requires accurate `modelPath` (`ModelPathConfig`) and `segmentBuffer`
    - Uses VAD boundaries as constraints/anchors
    - Uses wav2vec2 alignment for intra-segment fine timing
    - Intended as highest-quality subtitle mode

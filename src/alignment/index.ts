@@ -11,10 +11,8 @@ import {
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 
-export {
-  alignTextToAudio,
-  assertAlignmentGranularityForMode,
-} from './alignTextToAudio';
+export { createAlignment } from './engine';
+export type { AlignmentEngine, AlignmentEngineOptions } from './engine';
 
 export type {
   AlignTextToAudioFn,
@@ -24,11 +22,17 @@ export type {
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioOptionsVad,
   AlignTextToAudioWriteResult,
+  AlignmentAccurateSegmentationConfig,
+  AlignmentAsrConfig,
   AlignmentVadSegmentationConfig,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
+  AlignmentErrorCode,
   AlignmentGranularity,
+  AlignmentMappingStrategy,
   AlignmentModelType,
+  AlignmentWarning,
+  AlignmentWarningCode,
   AlignmentTimestamp,
   AlignmentTimingMode,
 } from './types';

@@ -1,5 +1,7 @@
+import type { ModelPathConfig } from '../types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 
 export interface AlignmentTimestamp {
@@ -31,6 +33,29 @@ export interface AlignmentVadSegmentationConfig {
   minAnchors?: number;
 }
 
+export type AlignmentMappingStrategy = 'asr_mediated' | 'chunked_forced_ctc';
+
+export interface AlignmentAsrConfig {
+  hypothesisTextBuffer: OfflineTextBufferIdSource;
+}
+
+export type AlignmentAccurateSegmentationConfig =
+  | {
+      mode: 'off';
+    }
+  | {
+      mode: 'auto';
+      anchorSegmentBuffer: OfflineSegmentBufferIdSource;
+      mappingStrategy: 'asr_mediated';
+      asr: AlignmentAsrConfig;
+    }
+  | {
+      mode: 'auto';
+      anchorSegmentBuffer: OfflineSegmentBufferIdSource;
+      mappingStrategy: 'chunked_forced_ctc';
+      asr?: never;
+    };
+
 export type AlignmentTimingMode =
   | 'proportional'
   | 'estimated'
@@ -41,9 +66,22 @@ export type AlignmentTimingMode =
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
+  linkMap?: SegmentLinkMapRef;
   warningCode?: string;
+  warnings?: AlignmentWarning[];
   vadAnchorCount?: number;
   minAnchorsApplied?: number;
+}
+
+export type AlignmentWarningCode =
+  | 'ALIGNMENT_PARTIAL_COVERAGE'
+  | 'ALIGNMENT_LOW_CONFIDENCE_UNIT_PRESENT'
+  | 'ALIGNMENT_ANCHOR_NO_PROGRESS'
+  | 'ALIGNMENT_RESIDUAL_TOKENS_REMAINING';
+
+export interface AlignmentWarning {
+  code: AlignmentWarningCode;
+  message: string;
 }
 
 /** Proportional: duration × text-weight only; no external chunks, no alignment model. */
@@ -67,17 +105,23 @@ export type AlignTextToAudioOptionsEstimated = {
 export type AlignTextToAudioOptionsAccurate =
   | {
       mode: 'accurate';
-      alignmentModelPath: string;
+      /** Same shape as STT/VAD `modelPath`; resolved before the native bridge. */
+      modelPath: ModelPathConfig;
       granularity?: AlignmentGranularity;
       language?: string;
-      segmentation?: never;
+      segmentation?: {
+        mode: 'off';
+      };
     }
   | {
       mode: 'accurate';
-      alignmentModelPath: string;
+      modelPath: ModelPathConfig;
       granularity?: 'sentence' | 'word';
       language?: string;
-      segmentation: AlignmentVadSegmentationConfig;
+      segmentation: Extract<
+        AlignmentAccurateSegmentationConfig,
+        { mode: 'auto' }
+      >;
     };
 
 /** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
@@ -100,3 +144,22 @@ export type AlignTextToAudioFn = (
   segmentOut: OfflineSegmentBufferIdSource,
   options: AlignTextToAudioOptions
 ) => Promise<AlignTextToAudioWriteResult>;
+
+export type AlignmentErrorCode =
+  | 'OFFLINE_OOM'
+  | 'ALIGNMENT_OPTIONS_INVALID'
+  | 'ALIGNMENT_MODEL_PATH_INVALID'
+  | 'ALIGNMENT_MODEL_LOAD_FAILED'
+  | 'ALIGNMENT_GRANULARITY_INVALID'
+  | 'ALIGNMENT_ASR_HYPOTHESIS_MISSING'
+  | 'ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS'
+  | 'ALIGNMENT_LINKER_INPUT_INVALID'
+  | 'ALIGNMENT_LINKER_NO_MAPPING'
+  | 'ALIGNMENT_LINKER_FAILED'
+  | 'ALIGNMENT_ANCHOR_OUT_OF_RANGE'
+  | 'ALIGNMENT_NATIVE_ACCURATE_FAILED'
+  | 'ALIGNMENT_NATIVE_UNKNOWN'
+  | 'ALIGNMENT_FORCED_CTC_FAILED'
+  | 'ALIGNMENT_FORCED_CTC_STUCK'
+  | 'ALIGNMENT_NOT_IMPLEMENTED'
+  | 'ALIGNMENT_ENGINE_DESTROYED';

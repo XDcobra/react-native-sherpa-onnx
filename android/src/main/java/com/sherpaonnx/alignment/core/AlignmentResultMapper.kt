@@ -57,6 +57,41 @@ internal object AlignmentResultMapper {
     return out
   }
 
+  @Suppress("UNCHECKED_CAST")
+  fun forcedCtcResultToWritable(raw: HashMap<String, Any>): WritableMap {
+    val out = Arguments.createMap()
+
+    val tokens = raw["tokens"] as? ArrayList<HashMap<String, Any>> ?: arrayListOf()
+    val tokenArray = Arguments.createArray()
+    for (token in tokens) {
+      val map = Arguments.createMap()
+      map.putString("text", token["text"] as? String ?: "")
+      map.putDouble("startMs", (token["startMs"] as? Double) ?: 0.0)
+      map.putDouble("endMs", (token["endMs"] as? Double) ?: 0.0)
+      tokenArray.pushMap(map)
+    }
+    out.putArray("tokens", tokenArray)
+
+    val consumed = (raw["consumedTokenCount"] as? Number)?.toInt() ?: 0
+    out.putInt("consumedTokenCount", consumed)
+
+    val diagnostics = raw["diagnostics"] as? HashMap<String, Any>
+    if (diagnostics != null) {
+      val diagMap = Arguments.createMap()
+      val blankRatio = (diagnostics["ctcBlankRatio"] as? Number)?.toDouble()
+      val framesProcessed = (diagnostics["framesProcessed"] as? Number)?.toDouble()
+      if (blankRatio != null && blankRatio.isFinite()) {
+        diagMap.putDouble("ctcBlankRatio", blankRatio)
+      }
+      if (framesProcessed != null && framesProcessed.isFinite()) {
+        diagMap.putDouble("framesProcessed", framesProcessed)
+      }
+      out.putMap("diagnostics", diagMap)
+    }
+
+    return out
+  }
+
   private fun alignmentItemsToWritableArray(items: List<AlignmentSubtitleItem>): WritableArray {
     val array = Arguments.createArray()
     for (item in items) {

@@ -79,11 +79,38 @@ object SegmentPipelineRegistry {
         "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
       )
     }
+
     val id = newId("seg_off")
     val entry = OfflineSegmentEntry(id, live.sourceAudioBufferId)
     entry.populate(records)
     offlineMap[id] = entry
     return entry
+  }
+
+  fun populateOfflineFromLiveIfEmpty(
+    targetOfflineId: String,
+    liveBufferId: String,
+    mode: String = "fullIfSpooled",
+  ) {
+    val live = getLive(liveBufferId) ?: throw SegmentPipelineException(
+      SegmentErrorCodes.BUFFER_NOT_FOUND,
+      "Live segment buffer not found: $liveBufferId"
+    )
+    val target = getOffline(targetOfflineId) ?: throw SegmentPipelineException(
+      SegmentErrorCodes.BUFFER_NOT_FOUND,
+      "Offline segment buffer not found: $targetOfflineId"
+    )
+
+    val records = when (mode) {
+      "windowSnapshot" -> live.snapshotWindow()
+      "fullIfSpooled" -> live.snapshotFullIfSpooled()
+      else -> throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_ARGUMENT,
+        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
+      )
+    }
+
+    target.populate(records)
   }
 
   fun getOffline(bufferId: String): OfflineSegmentEntry? = offlineMap[bufferId]
