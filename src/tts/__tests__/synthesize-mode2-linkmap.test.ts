@@ -25,12 +25,16 @@ jest.mock('../../model-languages', () => ({
 }));
 
 jest.mock('../../audiobuffer', () => ({
-  resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
+  resolvePipelineAudioBufferId: jest.fn((value: any) =>
+    typeof value === 'string' ? value : value?.bufferId ?? String(value)
+  ),
   releasePipelineAudioBuffer: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../textbuffer', () => ({
-  resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
+  resolvePipelineTextBufferId: jest.fn((value: any) =>
+    typeof value === 'string' ? value : value?.bufferId ?? String(value)
+  ),
 }));
 
 jest.mock('../../segment', () => ({
