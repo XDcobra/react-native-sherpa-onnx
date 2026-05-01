@@ -67,13 +67,15 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
   }
   NSSet<NSString *> *allowed = nil;
   if ([source isEqualToString:@"vad"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"engine", @"decision", @"score"]];
+    allowed = [NSSet setWithArray:@[@"source", @"engine", @"decision", @"score", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"stt"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal"]];
+    allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"tts"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk"]];
+    allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
+  } else if ([source isEqualToString:@"manual"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, manual";
     return false;
   }
 
@@ -637,6 +639,9 @@ bool seg_live_append_segment(
   bool hasConfidence,
   double confidence,
   const std::string &payloadJson,
+  const std::string &annotationReason,
+  const std::string &annotationSource,
+  int64_t annotationCreatedAtMs,
   std::string *segmentId,
   int *segmentIndex,
   std::string *error
@@ -691,6 +696,15 @@ bool seg_live_append_segment(
     }
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
+
+    if (!annotationReason.empty() && !annotationSource.empty()) {
+      SegAnnotationSnapshot ann;
+      ann.reason = annotationReason;
+      ann.source = annotationSource;
+      ann.createdAtMs = annotationCreatedAtMs > 0 ? annotationCreatedAtMs : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+      ann.segmentIndex = idx;
+      seg_record_annotation_for_segment(seg.id, ann);
+    }
 
     seg_notify_segment_appended(entry, seg, idx);
 
@@ -998,6 +1012,9 @@ static bool seg_append_speech_segment(
     false,
     0.0,
     payloadJson,
+    reason,
+    "segmentation_engine",
+    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
@@ -1006,7 +1023,6 @@ static bool seg_append_speech_segment(
     return false;
   }
 
-  seg_record_annotation_for_engine(engine, segmentId, reason, segmentIndex);
   engine->totalSegmentsCommitted += 1;
   engine->lastSegmentId = segmentId;
   engine->segmentStartSample = endSampleExclusive;
@@ -1057,6 +1073,9 @@ static bool seg_append_speech_segment_range(
     false,
     0.0,
     payloadJson,
+    reason,
+    "segmentation_engine",
+    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
@@ -1065,7 +1084,6 @@ static bool seg_append_speech_segment_range(
     return false;
   }
 
-  seg_record_annotation_for_engine(engine, segmentId, reason, segmentIndex);
   engine->totalSegmentsCommitted += 1;
   engine->lastSegmentId = segmentId;
   return true;
@@ -1291,8 +1309,7 @@ static void seg_engine_flush_audio(const std::shared_ptr<SegEngine> &engine) {
   auto live = pa_get_live_entry(engine->attachedBufferId);
   if (!live) return;
   if (live->totalSamplesWritten > engine->segmentStartSample) {
-    const char *reason =
-      engine->policy.evaluator == "continuous_frames" ? "policy_checkpoint" : "finalize";
+    const char *reason = "finalize";
     seg_append_speech_segment(engine, live->totalSamplesWritten, reason, 0.0);
   }
 }
@@ -2246,6 +2263,24 @@ bool seg_engine_peek_annotation(
     }
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
+
+    if ([payload isKindOfClass:[NSDictionary class]]) {
+      NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
+      NSString *annSource = [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"] : nil;
+      if (annReason.length > 0 && annSource.length > 0) {
+        SegAnnotationSnapshot ann;
+        ann.reason = annReason.UTF8String;
+        ann.source = annSource.UTF8String;
+        if ([payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]) {
+          ann.createdAtMs = ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue;
+        } else {
+          ann.createdAtMs = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+        }
+        ann.segmentIndex = segmentIndex;
+        seg_record_annotation_for_segment(seg.id, ann);
+      }
+    }
+
     seg_notify_segment_appended(entry, seg, segmentIndex);
     resolve(@{ @"segmentId": [NSString stringWithUTF8String:seg.id.c_str()], @"segmentIndex": @(segmentIndex) });
   } catch (const std::exception &e) {

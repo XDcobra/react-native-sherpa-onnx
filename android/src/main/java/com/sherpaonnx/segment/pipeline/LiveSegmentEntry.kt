@@ -73,6 +73,9 @@ class LiveSegmentEntry(
     durationMs: Int?,
     confidence: Double?,
     payloadJson: String?,
+    annotationReason: String? = null,
+    annotationSource: String? = null,
+    annotationCreatedAtMs: Long? = null,
   ): Pair<String, Int> {
     val normalizedKind = kind.trim().ifEmpty { "speech" }
     if (!ALLOWED_KINDS.contains(normalizedKind)) {
@@ -143,6 +146,19 @@ class LiveSegmentEntry(
       appendRecord = appendRecord,
       checkpointPayload = checkpointSnapshot
     )
+
+    if (annotationReason != null && annotationSource != null) {
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.recordSegmentAnnotation(
+        segmentId = segmentId,
+        annotation = com.sherpaonnx.segment.engine.SegmentAnnotationSnapshot(
+          reason = annotationReason,
+          source = annotationSource,
+          createdAtMs = annotationCreatedAtMs ?: System.currentTimeMillis(),
+          segmentIndex = segmentIndex,
+        )
+      )
+    }
+
     if (emitSegmentAppendedEvents) {
       val now = System.currentTimeMillis()
       if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {

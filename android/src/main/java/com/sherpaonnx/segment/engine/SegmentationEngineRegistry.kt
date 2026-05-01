@@ -364,7 +364,7 @@ private class SpeechEnergySilenceEngine(
       payload.put("score", score)
     }
 
-    val (segmentId, segmentIndex) = segEntry.appendSegment(
+    val (segmentId, _) = segEntry.appendSegment(
       kind = "speech",
       sourceAudioBufferId = attachedBufferId,
       startSample = segmentStartSample.toInt(),
@@ -373,16 +373,9 @@ private class SpeechEnergySilenceEngine(
       durationMs = durationMs,
       confidence = null,
       payloadJson = payload.toString(),
-    )
-
-    SegmentationEngineRegistry.recordSegmentAnnotation(
-      segmentId = segmentId,
-      annotation = SegmentAnnotationSnapshot(
-        reason = reason,
-        source = source,
-        createdAtMs = nowMs(),
-        segmentIndex = segmentIndex,
-      )
+      annotationReason = reason,
+      annotationSource = source,
+      annotationCreatedAtMs = nowMs(),
     )
 
     totalSegmentsCommitted += 1
@@ -474,7 +467,7 @@ private class SpeechEnergySilenceEngine(
       if (endSampleExclusive > segmentStartSample) {
         appendSegment(
           endSampleExclusive = endSampleExclusive,
-          reason = "policy_checkpoint",
+          reason = "finalize",
           source = "segmentation_engine",
           score = null,
         )
@@ -646,7 +639,7 @@ private class SpeechVadModelEngine(
       payload.put("score", score)
     }
 
-    val (segmentId, segmentIndex) = segEntry.appendSegment(
+    val (segmentId, _) = segEntry.appendSegment(
       kind = "speech",
       sourceAudioBufferId = attachedBufferId,
       startSample = segmentStartSample.toInt(),
@@ -655,16 +648,9 @@ private class SpeechVadModelEngine(
       durationMs = durationMs.toInt(),
       confidence = null,
       payloadJson = payload.toString(),
-    )
-
-    SegmentationEngineRegistry.recordSegmentAnnotation(
-      segmentId = segmentId,
-      annotation = SegmentAnnotationSnapshot(
-        reason = reason,
-        source = "segmentation_engine",
-        createdAtMs = nowMs(),
-        segmentIndex = segmentIndex,
-      )
+      annotationReason = reason,
+      annotationSource = "segmentation_engine",
+      annotationCreatedAtMs = nowMs(),
     )
 
     totalSegmentsCommitted += 1

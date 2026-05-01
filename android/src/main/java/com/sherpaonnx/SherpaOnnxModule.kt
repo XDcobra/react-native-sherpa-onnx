@@ -3078,12 +3078,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
     val source = payload.getString("source")?.trim() ?: ""
     val allowedKeys = when (source) {
-      "vad" -> setOf("source", "engine", "decision", "score")
-      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
-      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      "vad" -> setOf("source", "engine", "decision", "score", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts"
+        "speech payload.source must be one of vad, stt, tts, manual"
       )
     }
 
@@ -3160,7 +3161,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         sampleRate = sampleRate.toInt(),
         durationMs = durationMs?.toInt(),
         confidence = confidence,
-        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() }
+        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() },
+        annotationReason = if (payload != null && payload.hasKey("__annotationReason")) payload.getString("__annotationReason") else null,
+        annotationSource = if (payload != null && payload.hasKey("__annotationSource")) payload.getString("__annotationSource") else null,
+        annotationCreatedAtMs = if (payload != null && payload.hasKey("__annotationCreatedAtMs") && !payload.isNull("__annotationCreatedAtMs")) payload.getDouble("__annotationCreatedAtMs").toLong() else null
       )
       val out = Arguments.createMap()
       out.putString("segmentId", result.first)

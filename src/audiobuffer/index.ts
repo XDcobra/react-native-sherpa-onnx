@@ -509,7 +509,7 @@ async function commitFinalizeSegmentIfNeeded(
   }
 
   const durationMs = ((endSample - startSample) / info.sampleRate) * 1000;
-  const appendResult = await getNative().appendLiveSegment(
+  await getNative().appendLiveSegment(
     segmentBufferId,
     'speech',
     liveBufferId,
@@ -518,21 +518,12 @@ async function commitFinalizeSegmentIfNeeded(
     info.sampleRate,
     durationMs,
     undefined,
-    undefined
-  );
-
-  const totalSegments = await getNative().getLiveSegmentBufferSegmentCount(
-    segmentBufferId
-  );
-  annotateSpeechSegment(
-    appendResult.segmentId,
     {
-      reason: 'finalize',
       source: 'manual',
-      createdAtMs: Date.now(),
-      segmentIndex: Math.max(0, totalSegments - 1),
-    },
-    liveBufferId
+      __annotationReason: 'finalize',
+      __annotationSource: 'manual',
+      __annotationCreatedAtMs: Date.now(),
+    }
   );
   advanceAudioCommitStart(liveBufferId, endSample);
 }

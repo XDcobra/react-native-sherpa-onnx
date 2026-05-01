@@ -165,7 +165,12 @@ describe('audiobuffer segment event wiring', () => {
       16000,
       2000,
       undefined,
-      undefined
+      expect.objectContaining({
+        source: 'manual',
+        __annotationReason: 'finalize',
+        __annotationSource: 'manual',
+        __annotationCreatedAtMs: expect.any(Number),
+      })
     );
     expect(mockNative.finalizeLiveAudioBuffer).toHaveBeenCalledWith(
       liveBufferId
