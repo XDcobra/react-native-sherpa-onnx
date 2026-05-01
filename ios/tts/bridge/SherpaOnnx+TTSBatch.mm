@@ -20,7 +20,9 @@
 
 static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
 static NSString *const kOfflineTtsOomMessage =
-    @"Not enough memory for offline text-to-speech. Please use a streaming mode for large inputs.";
+    @"Not enough memory for offline text-to-speech. Please use a streaming mode for large inputs. "
+    @"Alternatively, use the segmentation engine to process smaller segments with offline models "
+    @"(see docs/segmentation-engine.md).";
 
 - (void)so_synthesizeTts:(NSString *)instanceId
          textInBufferId:(NSString *)textInBufferId
