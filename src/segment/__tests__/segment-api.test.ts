@@ -354,4 +354,29 @@ describe('segment api offline integration', () => {
       createdAtMs: 12345,
     });
   });
+
+  it('live text: stt_stream without __segmentReason in meta maps to manual_commit (contract: producers set meta)', async () => {
+    mockTextbuffer.getLiveTextBufferSegmentCount.mockResolvedValue(1);
+    mockTextbuffer.getLiveTextBufferSegments.mockResolvedValue([
+      {
+        text: 'orphan',
+        source: 'stt_stream',
+        segmentIndex: 0,
+        meta: {},
+      },
+    ]);
+
+    const segments = await getSegments(
+      'txt_live_11111111-1111-1111-1111-111111111111',
+      0,
+      10
+    );
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      domain: 'text',
+      reason: 'manual_commit',
+      text: 'orphan',
+    });
+  });
 });
