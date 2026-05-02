@@ -1667,7 +1667,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       destination = destination,
       mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
       overwrite = true,
-      createParentDirectories = false,
+      // e.g. app base "documents" → files/docs/ — mkdir so fopen in native encoder succeeds
+      createParentDirectories = true,
     )
 
     val outputPath: String
@@ -1730,7 +1731,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       samples.size.toLong() / channelCount,
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1772,7 +1773,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalFrames.toLong(),
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1865,7 +1866,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelFlagAddr
       )
       encodeSessionCreated = true
-      if (encodeSessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+      if (encodeSessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
       val chunkFrames = 4096
       var offset = 0
@@ -4328,6 +4329,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalFramesEstimate: Long,
       cancelFlagPtr: Long
     ): Long
+
+    @JvmStatic
+    private external fun nativeEncodeSessionLastCreateError(): String
+
+    @JvmStatic
+    internal fun encodeSessionCreateFailureMessage(): String {
+      val detail = nativeEncodeSessionLastCreateError().trim()
+      return if (detail.isNotEmpty()) "AUDIO_SAVE_ENCODE_ERROR: $detail"
+      else "AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session"
+    }
 
     @JvmStatic
     private external fun nativeEncodeSessionFeedChunk(

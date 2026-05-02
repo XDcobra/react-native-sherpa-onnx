@@ -10,6 +10,9 @@
 
 #include "AudioEncodeSession.h"
 
+/** Last error from AudioEncodeSession::create (for diagnostics when create returns 0). */
+static thread_local std::string g_lastEncodeSessionCreateError;
+
 #define LOG_TAG "AudioEncodeJNI"
 #include <android/log.h>
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -34,14 +37,18 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionCreate(
     jlong totalFramesEstimate,
     jlong cancelFlagPtr)
 {
+    g_lastEncodeSessionCreateError.clear();
+
     if (!outputPath || !format) {
         LOGE("nativeEncodeSessionCreate: null outputPath or format");
+        g_lastEncodeSessionCreateError = "null outputPath or format";
         return 0;
     }
 
     const char* outPathC = env->GetStringUTFChars(outputPath, nullptr);
     const char* fmtC = env->GetStringUTFChars(format, nullptr);
     if (!outPathC || !fmtC) {
+        g_lastEncodeSessionCreateError = "GetStringUTFChars failed";
         if (outPathC) env->ReleaseStringUTFChars(outputPath, outPathC);
         if (fmtC) env->ReleaseStringUTFChars(format, fmtC);
         return 0;
@@ -71,11 +78,20 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionCreate(
     env->ReleaseStringUTFChars(format, fmtC);
 
     if (!session) {
+        g_lastEncodeSessionCreateError = errorOut;
         LOGE("nativeEncodeSessionCreate failed: %s", errorOut.c_str());
         return 0;
     }
 
     return reinterpret_cast<jlong>(session.release());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionLastCreateError(
+    JNIEnv* env,
+    jclass /* clazz */)
+{
+    return env->NewStringUTF(g_lastEncodeSessionCreateError.c_str());
 }
 
 /**
