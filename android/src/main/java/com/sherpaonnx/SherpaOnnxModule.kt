@@ -1074,6 +1074,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             ?: reactApplicationContext.cacheDir
           val tmpF32 = java.io.File(dir, "pa_off_decode_${java.util.UUID.randomUUID()}.f32")
 
+          val progressCallback = object {
+            @Suppress("unused")
+            fun onProgress(
+              framesDecoded: Long,
+              totalEstimate: Long,
+              percent: Int,
+              sourceSr: Int,
+              sourceCh: Int,
+            ) {
+              emitDecodeProgress(
+                operationId,
+                framesDecoded,
+                totalEstimate,
+                percent,
+                sourceSr,
+                sourceCh,
+              )
+            }
+          }
+
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToMmapFile(
             sourcePath,
@@ -1082,7 +1102,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             forceMono,
             8192,
             cancelFlagAddr,
-            tmpF32.absolutePath
+            tmpF32.absolutePath,
+            progressCallback,
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
           cancelChecker.interrupt()
@@ -4343,7 +4364,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       forceMono: Boolean,
       chunkSize: Int,
       cancelFlagPtr: Long,
-      outputPath: String
+      outputPath: String,
+      progressCallback: Any?,
     ): HashMap<String, Any>?
 
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */

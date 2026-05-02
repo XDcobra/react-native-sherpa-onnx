@@ -1088,6 +1088,280 @@ static bool pa_populate_offline_from_source_if_empty(
   }
 }
 
+// ---- Offline: decode file (parity with Android decodeFileToOfflineBuffer + decodeProgress) ----
+- (void)decodeFileToOfflineBuffer:(NSDictionary *)source
+               targetSampleRateHz:(double)targetSampleRateHz
+                        forceMono:(BOOL)forceMono
+                      operationId:(NSString *)operationId
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+  if (!source || [source count] == 0) {
+    reject(kPAErrInvalidArgument, @"source is required", nil);
+    return;
+  }
+  if (!operationId || [operationId length] == 0) {
+    reject(kPAErrInvalidArgument, @"operationId is required", nil);
+    return;
+  }
+
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  {
+    std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+    g_pa_decodeCancelFlags[opId] = cancelFlag;
+  }
+
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+  if (!readHandle) {
+    {
+      std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+      g_pa_decodeCancelFlags.erase(opId);
+    }
+    reject(errCode ?: kPAErrFileNotFound, errMsg ?: @"Failed to resolve audio source", nil);
+    return;
+  }
+
+  NSString *sourcePath = nil;
+  NSString *tmpPath = nil;
+  if (readHandle.isFilePath) {
+    sourcePath = readHandle.filePath;
+  } else {
+    tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+               [NSString stringWithFormat:@"fileio_buf_%@", [[NSUUID UUID] UUIDString]]];
+    NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+    [out open];
+    [readHandle.stream open];
+    uint8_t buf[65536];
+    NSInteger bytesRead;
+    while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+      [out write:buf maxLength:bytesRead];
+    }
+    [out close];
+    sourcePath = tmpPath;
+  }
+
+  __weak SherpaOnnx *weakSelf = self;
+  std::string path = [sourcePath UTF8String];
+  NSString *tmpPathCleanup = tmpPath;
+  int targetRate = (int)targetSampleRateHz;
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    @autoreleasepool {
+      NSString *outF32 = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"pa_off_decode_%@.f32", [[NSUUID UUID] UUIDString]]];
+      std::string outPathStr = [outF32 UTF8String];
+      FILE *outFile = fopen(outPathStr.c_str(), "wb");
+      if (!outFile) {
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        {
+          std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"DECODE_INTERNAL_ERROR", @"Cannot open temp file for decoded PCM", nil);
+        });
+        return;
+      }
+
+      int64_t totalSamplesWritten = 0;
+      bool writeError = false;
+      auto onChunk = [&](const float *samples, int count) {
+        if (writeError || cancelFlag->load()) return;
+        size_t w = fwrite(samples, sizeof(float), (size_t)count, outFile);
+        if ((int)w != count) {
+          writeError = true;
+        } else {
+          totalSamplesWritten += count;
+        }
+      };
+
+      int srcSampleRate = 0;
+      int srcChannels = 0;
+      auto onStreamInfo = [&srcSampleRate, &srcChannels](int sr, int ch) {
+        srcSampleRate = sr;
+        srcChannels = ch;
+      };
+
+      auto onProgress = [weakSelf, operationId, &srcSampleRate, &srcChannels](
+          int64_t framesDecoded, int64_t totalEstimate, int percent) {
+        SherpaOnnx *strongSelf = weakSelf;
+        if (!strongSelf) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [strongSelf sendEventWithName:@"decodeProgress" body:@{
+            @"operationId": operationId,
+            @"framesDecoded": @((double)framesDecoded),
+            @"totalFramesEstimate": @((double)totalEstimate),
+            @"percent": @(percent),
+            @"sourceSampleRate": @(srcSampleRate),
+            @"sourceChannels": @(srcChannels),
+          }];
+        });
+      };
+
+      try {
+        sherpa::AudioDecodeConfig config;
+        config.targetSampleRate = targetRate;
+        config.forceMono = forceMono;
+        config.chunkSize = 8192;
+
+        auto result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, onStreamInfo, *cancelFlag);
+        fclose(outFile);
+        outFile = NULL;
+
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+
+        if (writeError) {
+          unlink(outPathStr.c_str());
+          {
+            std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+            g_pa_decodeCancelFlags.erase(opId);
+          }
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(@"DECODE_INTERNAL_ERROR", @"Write error while decoding audio", nil);
+          });
+          return;
+        }
+
+        int numSamples = (int)totalSamplesWritten;
+        int srcSr = result.sourceSampleRate > 0 ? result.sourceSampleRate : srcSampleRate;
+        int outSampleRate = targetRate > 0 ? targetRate : (srcSr > 0 ? srcSr : 16000);
+        if (outSampleRate <= 0) {
+          outSampleRate = 16000;
+        }
+
+        if (numSamples <= 0) {
+          unlink(outPathStr.c_str());
+          {
+            std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+            g_pa_decodeCancelFlags.erase(opId);
+          }
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(@"DECODE_EMPTY", @"No samples decoded", nil);
+          });
+          return;
+        }
+
+        long rawSize = (long)numSamples * 4L;
+        long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
+        std::string bufferId = pa_generateId("off");
+
+        std::shared_ptr<PaOfflineEntry> entry = std::make_shared<PaOfflineEntry>();
+        entry->bufferId = bufferId;
+        entry->sampleRate = outSampleRate;
+        entry->channelCount = 1;
+
+        if (rawSize >= threshold) {
+          auto region = PaMmapRegion::mapFile(outPathStr, 0, true);
+          if (!region) {
+            unlink(outPathStr.c_str());
+            {
+              std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+              g_pa_decodeCancelFlags.erase(opId);
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+              reject(kPAErrInternalError, @"Failed to mmap decoded audio", nil);
+            });
+            return;
+          }
+          entry->mmapRegion = std::move(region);
+        } else {
+          std::vector<float> samples((size_t)numSamples);
+          FILE *rf = fopen(outPathStr.c_str(), "rb");
+          if (!rf) {
+            unlink(outPathStr.c_str());
+            {
+              std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+              g_pa_decodeCancelFlags.erase(opId);
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+              reject(kPAErrInternalError, @"Failed to read decoded audio", nil);
+            });
+            return;
+          }
+          size_t nread = fread(samples.data(), sizeof(float), (size_t)numSamples, rf);
+          fclose(rf);
+          unlink(outPathStr.c_str());
+          if (nread != (size_t)numSamples) {
+            {
+              std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+              g_pa_decodeCancelFlags.erase(opId);
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+              reject(kPAErrInternalError, @"Short read of decoded audio", nil);
+            });
+            return;
+          }
+          entry->samples = std::move(samples);
+        }
+
+        {
+          std::lock_guard<std::mutex> lock(g_pa_mutex);
+          g_pa_offline[bufferId] = entry;
+        }
+        {
+          std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+
+        NSDictionary *dict = entry->toDict();
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(dict);
+        });
+      } catch (const std::runtime_error &e) {
+        if (outFile) {
+          fclose(outFile);
+        }
+        unlink(outPathStr.c_str());
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        {
+          std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"DECODE_INTERNAL_ERROR";
+        if (msg.find("DECODE_") == 0) {
+          auto colonPos = msg.find(':');
+          if (colonPos != std::string::npos) {
+            nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
+          }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        if (outFile) {
+          fclose(outFile);
+        }
+        unlink(outPathStr.c_str());
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        {
+          std::lock_guard<std::mutex> lk(g_pa_decodeCancelMutex);
+          g_pa_decodeCancelFlags.erase(opId);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"DECODE_INTERNAL_ERROR", @"Unknown error during file decode", nil);
+        });
+      }
+    }
+  });
+}
+
 // ---- Offline: from live ----
 - (void)createOfflineAudioBufferFromLive:(NSString *)liveBufferId
                                     mode:(NSString *)mode
