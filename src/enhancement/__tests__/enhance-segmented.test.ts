@@ -105,7 +105,8 @@ describe('enhancement segmented offline API', () => {
     );
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_output',
-      'off_orchestrated'
+      'off_orchestrated',
+      undefined
     );
     expect(releasePipelineAudioBuffer).toHaveBeenCalledWith('off_orchestrated');
   });
@@ -139,7 +140,8 @@ describe('enhancement segmented offline API', () => {
     expect(result.failedSegment?.segmentId).toBe('speech_1');
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_output',
-      'off_partial'
+      'off_partial',
+      undefined
     );
   });
 

@@ -311,7 +311,8 @@ export async function createTTS(
         try {
           await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
             audioOutId,
-            orchestrated.outputBuffer.bufferId
+            orchestrated.outputBuffer.bufferId,
+            undefined
           );
         } finally {
           await releasePipelineAudioBuffer(

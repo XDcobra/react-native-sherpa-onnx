@@ -40,6 +40,11 @@ import {
 } from 'react-native-sherpa-onnx/download';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
+import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
@@ -115,10 +120,7 @@ async function createStreamingSessionEngine(options: {
       const pipeline = await ttsEngine.synthesize(
         textBuffer.bufferId,
         audioOutId,
-        {
-          ...(pipelineOptions ?? {}),
-          segmentation: { mode: 'auto' },
-        }
+        pipelineOptions ?? {}
       );
       activePipeline = pipeline;
 
@@ -149,7 +151,7 @@ async function createStreamingSessionEngine(options: {
   };
 }
 
-export default function TTSStreamingScreen() {
+export default function StreamingTTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -174,6 +176,14 @@ export default function TTSStreamingScreen() {
     numSamples: number;
   } | null>(null);
   const [isResultPlaying, setIsResultPlaying] = useState(false);
+  const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'auto',
+    policy: {
+      evaluator: 'text_synthetic_auto',
+      maxLengthChars: 320,
+      sentenceBoundary: true,
+    },
+  });
 
   const engineRef = useRef<StreamingSessionEngine | null>(null);
   const controllerRef = useRef<StreamingSessionController | null>(null);
@@ -394,9 +404,11 @@ export default function TTSStreamingScreen() {
       });
       playerRef.current = player;
 
+      const seg = buildSegmentationOption(segConfig);
       const controller = await engine.startSession(audioBuffer.bufferId, {
         sid: Number.parseInt(speakerId, 10) || 0,
         speed: Number.parseFloat(speed) || 1.0,
+        ...(seg ? { segmentation: seg } : {}),
       });
       controllerRef.current = controller;
 
@@ -422,6 +434,7 @@ export default function TTSStreamingScreen() {
     inputText,
     releaseResultBuffer,
     resolveModelPath,
+    segConfig,
     selectedModelFolder,
     speakerId,
     speed,
@@ -640,6 +653,20 @@ export default function TTSStreamingScreen() {
             placeholder="Enter a long prompt to stream through TTS..."
             multiline
             style={styles.textInput}
+          />
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Segmentation</Text>
+          <Text style={[styles.mutedText, { marginBottom: 10 }]}>
+            Off or Manual: text is fed as you type (debounced). Auto: attaches
+            the text segmentation engine per policy.
+          </Text>
+          <SegmentationPolicyControls
+            variant="text-streaming"
+            value={segConfig}
+            onChange={setSegConfig}
+            disabled={streamingState !== 'idle'}
           />
         </View>
 

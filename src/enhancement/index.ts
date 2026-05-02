@@ -154,7 +154,8 @@ export async function createEnhancement(
         try {
           await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
             outId,
-            outputBuffer.bufferId
+            outputBuffer.bufferId,
+            undefined
           );
         } finally {
           // Source may already be consumed by populate; release is best-effort cleanup.

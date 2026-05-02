@@ -116,7 +116,8 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     );
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_out',
-      'off_staging'
+      'off_staging',
+      undefined
     );
     expect(releasePipelineAudioBuffer).toHaveBeenCalledWith('off_staging');
     expect(result).toMatchObject({

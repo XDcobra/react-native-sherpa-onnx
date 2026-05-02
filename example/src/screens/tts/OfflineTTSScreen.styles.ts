@@ -154,6 +154,16 @@ export const styles = StyleSheet.create({
     color: '#000000',
     marginBottom: 8,
   },
+  /** Single-line numeric / short option fields (Synthesis options). */
+  synthesisOptionInput: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#000000',
+    marginBottom: 16,
+  },
   textInput: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
@@ -180,8 +190,10 @@ export const styles = StyleSheet.create({
     color: '#000000',
   },
   referenceTextInput: {
-    minHeight: 48,
+    minHeight: 100,
     marginBottom: 12,
+    textAlignVertical: 'top',
+    paddingTop: 12,
   },
   optionsBlock: {
     marginBottom: 8,

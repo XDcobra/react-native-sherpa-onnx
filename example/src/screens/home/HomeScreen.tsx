@@ -50,8 +50,8 @@ const FEATURES: HomeFeature[] = [
   {
     id: 'tts',
     sectionTitle: 'Sprachsynthese',
-    title: 'Text-to-Speech',
-    description: 'Generate speech from text',
+    title: 'Text-to-Speech (Offline)',
+    description: 'Batch synthesis from text (one-shot or segmented)',
     icon: 'volume-high',
     screen: 'TTS',
     implemented: true,

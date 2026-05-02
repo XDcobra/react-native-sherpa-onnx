@@ -38,12 +38,12 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen streams long audio through LiveAudioBuffer and LiveTextBuffer so transcription can start immediately without building a large offline decode buffer. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
   TTS: {
-    title: 'Text-to-Speech demo',
-    body: 'This screen shows batch and streaming TTS flows. It is useful for inspecting synthesis setup, generation modes, and how audio is produced for playback or export.',
+    title: 'Text-to-Speech (offline)',
+    body: 'This screen runs batch TTS: one-shot or segmented offline synthesis, buffer-to-buffer output, save/share, and voice-cloning options where the model supports them. Incremental streaming synthesis lives on the Text-to-Speech (Streaming) screen.',
   },
   TTSStreaming: {
     title: 'Text-to-Speech streaming demo',
-    body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+    body: 'This screen uses incremental TTS with live text and audio buffers so playback can start before the full prompt is finished. Configure text segmentation (off/manual/auto) here. For chunked offline synthesis, use Text-to-Speech (Offline).',
   },
   Punctuation: {
     title: 'Offline punctuation',

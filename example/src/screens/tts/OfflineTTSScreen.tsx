@@ -12,39 +12,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   createTTS,
-  createStreamingTTS,
   detectTtsModel,
   type TTSModelType,
   type TtsSynthesisOptions,
   type TtsSynthesisResult,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
-  type TtsPipelineHandle,
-  type TtsPipelineOptions,
 } from 'react-native-sherpa-onnx/tts';
 import { copyFile, shareFile } from 'react-native-sherpa-onnx/fileio';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import type {
-  TtsEngine,
-  StreamingTtsEngine,
-} from 'react-native-sherpa-onnx/tts';
+import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyOfflineAudioBuffer,
   createOfflineAudioBufferFromFile,
-  createEmptyLiveAudioBuffer,
-  createOfflineAudioBufferFromLive,
-  finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import type {
-  OfflineAudioBufferRef,
-  LiveAudioBufferRef,
-} from 'react-native-sherpa-onnx/audiobuffer';
+import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createOfflineTextBufferFromText,
-  createLiveTextBuffer,
-  appendLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
@@ -74,7 +60,7 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { styles } from './TTSScreen.styles';
+import { styles } from './OfflineTTSScreen.styles';
 import {
   saveAudioAsFile,
   setPipelineAudioRoutePreference,
@@ -93,10 +79,11 @@ import {
 } from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
-/**
- * Generated audio results from either batch or streaming TTS.
- * Both now produce an OfflineAudioBuffer (buffer-to-buffer pipeline).
- */
+
+/** Readable placeholder on gray `synthesisOptionInput` / `textInput` backgrounds. */
+const INPUT_PLACEHOLDER_COLOR = '#8E8E93';
+
+/** Generated audio from offline (batch) TTS — OfflineAudioBuffer pipeline. */
 type GeneratedResult = {
   kind: 'buffer';
   bufferId: string;
@@ -111,7 +98,7 @@ type ReferenceAudioState = {
   ownedTempPath: string | null;
 };
 
-export default function TTSScreen() {
+export default function OfflineTTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
@@ -139,12 +126,7 @@ export default function TTSScreen() {
     GeneratedResult[]
   >([]);
   const [generating, setGenerating] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [streamProgress, setStreamProgress] = useState<number | null>(null);
-  const [streamSampleCount, setStreamSampleCount] = useState(0);
   const [offlineSegConfig, setOfflineSegConfig] =
-    useState<SegmentationControlConfig>({ mode: 'off' });
-  const [streamingSegConfig, setStreamingSegConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [lastSynthesisResult, setLastSynthesisResult] =
     useState<TtsSynthesisResult | null>(null);
@@ -192,13 +174,6 @@ export default function TTSScreen() {
   const currentModelFolderRef = useRef<string | null>(null);
   const pcmPlayerRef = useRef<PcmPlayer | null>(null);
   const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
-  const streamingTtsEngineRef = useRef<StreamingTtsEngine | null>(null);
-  const streamPipelineRef = useRef<TtsPipelineHandle | null>(null);
-  const streamTextBufferIdRef = useRef<string | null>(null);
-  const streamAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
-  const streamLastTextRef = useRef('');
-  const streamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const streamInitialScheduleRef = useRef(false);
   const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offlineAudioBuffersRef = useRef<GeneratedResult[]>([]);
 
@@ -434,34 +409,13 @@ export default function TTSScreen() {
     offlineAudioBuffersRef.current = offlineAudioBuffers;
   }, [offlineAudioBuffers]);
 
-  // On unmount: stop saved-audio playback and streaming engine; do NOT destroy the batch TTS engine (it stays in cache)
+  // On unmount: stop saved-audio playback; do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
       const pcmPlayer = pcmPlayerRef.current;
       if (pcmPlayer) {
         pcmPlayerRef.current = null;
         pcmPlayer.destroy().catch(() => {});
-      }
-      const pipeline = streamPipelineRef.current;
-      if (pipeline) {
-        pipeline.stop().catch(() => {});
-        streamPipelineRef.current = null;
-      }
-      const textBufferId = streamTextBufferIdRef.current;
-      if (textBufferId) {
-        releasePipelineTextBuffer(textBufferId).catch(() => {});
-        streamTextBufferIdRef.current = null;
-      }
-      const audioBuffer = streamAudioBufferRef.current;
-      if (audioBuffer) {
-        audioBuffer.unsubscribeEvents();
-        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
-        streamAudioBufferRef.current = null;
-      }
-      const streamingEngine = streamingTtsEngineRef.current;
-      if (streamingEngine) {
-        streamingEngine.destroy().catch(() => {});
-        streamingTtsEngineRef.current = null;
       }
       const refAudio = referenceAudioRef.current;
       referenceAudioRef.current = null;
@@ -478,67 +432,6 @@ export default function TTSScreen() {
       }
     };
   }, []);
-
-  const resetStreamingState = useCallback(
-    (options?: { resetScheduleRef?: boolean }) => {
-      const pipeline = streamPipelineRef.current;
-      if (pipeline) {
-        pipeline.stop().catch(() => {});
-        streamPipelineRef.current = null;
-      }
-      const textBufferId = streamTextBufferIdRef.current;
-      if (textBufferId) {
-        releasePipelineTextBuffer(textBufferId).catch(() => {});
-        streamTextBufferIdRef.current = null;
-      }
-      const audioBuffer = streamAudioBufferRef.current;
-      if (audioBuffer) {
-        audioBuffer.unsubscribeEvents();
-        releasePipelineAudioBuffer(audioBuffer.bufferId).catch(() => {});
-        streamAudioBufferRef.current = null;
-      }
-      const streamingEngine = streamingTtsEngineRef.current;
-      if (streamingEngine) {
-        streamingEngine.destroy().catch(() => {});
-        streamingTtsEngineRef.current = null;
-      }
-      streamLastTextRef.current = '';
-      if (options?.resetScheduleRef !== false) {
-        streamInitialScheduleRef.current = false;
-      }
-      if (streamDebounceRef.current) {
-        clearTimeout(streamDebounceRef.current);
-        streamDebounceRef.current = null;
-      }
-      setStreamSampleCount(0);
-      setStreamProgress(null);
-      setStreaming(false);
-    },
-    []
-  );
-
-  const getPipelineOptions = useCallback((): TtsPipelineOptions => {
-    const sid = parseInt(speakerId, 10);
-    const speedValue = parseFloat(speed);
-    if (isNaN(sid) || sid < 0) {
-      throw new Error('Invalid speaker ID (must be ≥ 0)');
-    }
-    const numSpeakers = modelInfo?.numSpeakers ?? 0;
-    if (numSpeakers > 0 && sid >= numSpeakers) {
-      throw new Error(
-        `Speaker ID must be between 0 and ${
-          numSpeakers - 1
-        } (model has ${numSpeakers} speaker${numSpeakers === 1 ? '' : 's'})`
-      );
-    }
-    if (isNaN(speedValue) || speedValue <= 0) {
-      throw new Error('Invalid speed value');
-    }
-    const opts: TtsPipelineOptions = { sid, speed: speedValue };
-    // silenceScale, numSteps, and extra are not supported on TtsPipelineOptions in the streaming pipeline API.
-    // Set them at engine init time via modelOptions if needed.
-    return opts;
-  }, [speakerId, speed, modelInfo?.numSpeakers]);
 
   const handlePickReferenceWav = useCallback(async () => {
     setError(null);
@@ -605,46 +498,6 @@ export default function TTSScreen() {
     }
   }, [releaseReferenceAudio]);
 
-  const enqueueStreamingText = useCallback((text: string) => {
-    const lastText = streamLastTextRef.current;
-    if (!text.startsWith(lastText)) {
-      streamLastTextRef.current = text;
-      return;
-    }
-    const delta = text.slice(lastText.length);
-    if (!delta.trim()) return;
-    streamLastTextRef.current = text;
-
-    const textBufferId = streamTextBufferIdRef.current;
-    if (!textBufferId) return;
-
-    appendLiveTextSegment(textBufferId, delta).catch((err) => {
-      console.warn('appendLiveTextSegment failed:', err);
-    });
-  }, []);
-
-  // Streaming + segmentation auto: debounced delta commits while typing.
-  // Otherwise (off/manual): only explicit commits — skip auto-append to avoid duplicating segments.
-  useEffect(() => {
-    if (!streaming || streamingSegConfig.mode !== 'auto') {
-      if (streamDebounceRef.current) {
-        clearTimeout(streamDebounceRef.current);
-        streamDebounceRef.current = null;
-      }
-      return;
-    }
-    if (streamDebounceRef.current) clearTimeout(streamDebounceRef.current);
-    streamDebounceRef.current = setTimeout(() => {
-      enqueueStreamingText(inputText);
-    }, 400);
-    return () => {
-      if (streamDebounceRef.current) {
-        clearTimeout(streamDebounceRef.current);
-        streamDebounceRef.current = null;
-      }
-    };
-  }, [streaming, streamingSegConfig.mode, inputText, enqueueStreamingText]);
-
   const loadAvailableModels = async () => {
     setLoadingModels(true);
     setError(null);
@@ -671,7 +524,7 @@ export default function TTSScreen() {
           resolvedPadPath = padPath;
         }
       } catch (e) {
-        console.warn('TTSScreen: PAD/listModelsAtPath failed', e);
+        console.warn('OfflineTTSScreen: PAD/listModelsAtPath failed', e);
         padFolders = [];
       }
       setPadModelsPath(resolvedPadPath);
@@ -695,7 +548,7 @@ export default function TTSScreen() {
         );
       }
     } catch (err) {
-      console.error('TTSScreen: Failed to load models:', err);
+      console.error('OfflineTTSScreen: Failed to load models:', err);
       setError('Failed to load available models');
       setAvailableModels([]);
     } finally {
@@ -736,9 +589,6 @@ export default function TTSScreen() {
     setExtraOptions('');
     setReferenceText('');
     await clearReferenceAudio();
-    if (streaming) {
-      resetStreamingState();
-    }
     stopTtsSavedAudioPlayback();
 
     try {
@@ -904,9 +754,6 @@ export default function TTSScreen() {
     setSavedAudioPath(null);
     setSavedAudioBufferId(null);
     setLastSynthesisResult(null);
-    if (streaming) {
-      resetStreamingState();
-    }
     stopTtsSavedAudioPlayback();
 
     const engine = ttsEngineRef.current;
@@ -1030,206 +877,6 @@ export default function TTSScreen() {
       setError(errorMessage);
     } finally {
       setGenerating(false);
-    }
-  };
-
-  const handleStartStreaming = async () => {
-    if (streamInitialScheduleRef.current) {
-      return;
-    }
-    streamInitialScheduleRef.current = true;
-
-    if (!currentModelFolder) {
-      setError('Please initialize a model first');
-      streamInitialScheduleRef.current = false;
-      return;
-    }
-
-    if (!selectedModelType) {
-      setError('Please select a model type first');
-      streamInitialScheduleRef.current = false;
-      return;
-    }
-
-    if (!inputText.trim()) {
-      setError('Please enter text to synthesize');
-      streamInitialScheduleRef.current = false;
-      return;
-    }
-
-    if (Platform.OS === 'android') {
-      const hasValidRef =
-        referenceAudio != null &&
-        referenceAudio.numSamples > 0 &&
-        referenceAudio.sampleRate > 0;
-      if (selectedModelType === 'zipvoice' && hasValidRef) {
-        setError(
-          'Android: Zipvoice voice cloning is not supported in streaming mode. Use batch Generate.'
-        );
-        streamInitialScheduleRef.current = false;
-        return;
-      }
-      if (selectedModelType === 'pocket' && !hasValidRef) {
-        setError(
-          'Android: Pocket streaming requires a reference WAV (16-bit PCM, mono recommended).'
-        );
-        streamInitialScheduleRef.current = false;
-        return;
-      }
-    }
-
-    if (streaming) {
-      streamInitialScheduleRef.current = false;
-      return;
-    }
-
-    setError(null);
-    setGeneratedAudio(null);
-    setSavedAudioPath(null);
-    setSavedAudioBufferId(null);
-    resetStreamingState({ resetScheduleRef: false });
-    // Do NOT set streaming=true here: the useEffect debounce could run before refs are set.
-    // Set streaming only after the pipeline is started.
-    stopTtsSavedAudioPlayback();
-
-    const modelPath = resolveTtsModelPath(currentModelFolder);
-
-    try {
-      let streamingEngine: StreamingTtsEngine;
-      try {
-        streamingEngine = await createStreamingTTS({
-          modelPath,
-          numThreads: TTS_NUM_THREADS,
-          debug: false,
-        });
-      } catch (initErr) {
-        console.warn(
-          'createStreamingTTS failed, retrying with fewer threads',
-          initErr
-        );
-        streamingEngine = await createStreamingTTS({
-          modelPath,
-          numThreads: 1,
-          debug: false,
-        });
-      }
-
-      streamingTtsEngineRef.current = streamingEngine;
-
-      // Create a live audio buffer for streaming output
-      const sr = modelInfo?.sampleRate ?? 16000;
-      const liveAudioBuf = await createEmptyLiveAudioBuffer({
-        sampleRate: sr,
-        channelCount: 1,
-        streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
-        onFramesAppended: (event) => {
-          setStreamSampleCount((prev) => prev + event.frameCount);
-        },
-      });
-      streamAudioBufferRef.current = liveAudioBuf;
-      // Create a live text buffer and commit the initial text
-      const liveTextBuf = await createLiveTextBuffer({
-        streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
-      });
-      streamTextBufferIdRef.current = liveTextBuf.bufferId;
-
-      // Append the initial text as a segment
-      await appendLiveTextSegment(liveTextBuf.bufferId, inputText.trim());
-      streamLastTextRef.current = inputText.trim();
-
-      // Build pipeline options
-      let pipelineOpts: TtsPipelineOptions | undefined;
-      try {
-        pipelineOpts = getPipelineOptions();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        setError(msg);
-        resetStreamingState();
-        streamInitialScheduleRef.current = false;
-        return;
-      }
-
-      // Start the TTS pipeline
-      const pipelineConfig: TtsPipelineOptions = {
-        ...(pipelineOpts ?? {}),
-        segmentation: buildSegmentationOption(streamingSegConfig),
-      };
-
-      const pipelineHandle = await streamingEngine.synthesize(
-        liveTextBuf.bufferId,
-        liveAudioBuf.bufferId,
-        pipelineConfig
-      );
-      streamPipelineRef.current = pipelineHandle;
-
-      setStreaming(true);
-      setStreamProgress(0);
-      setStreamSampleCount(0);
-    } catch (err) {
-      streamInitialScheduleRef.current = false;
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMessage);
-      setStreamProgress(null);
-      setStreaming(false);
-      resetStreamingState();
-    }
-  };
-
-  const handleManualStreamingCommit = useCallback(async () => {
-    const textBufferId = streamTextBufferIdRef.current;
-    const trimmed = inputText.trim();
-    if (!textBufferId || trimmed.length === 0) {
-      return;
-    }
-    const lastCommitted = streamLastTextRef.current;
-    let segmentText: string;
-    if (trimmed.startsWith(lastCommitted)) {
-      segmentText = trimmed.slice(lastCommitted.length);
-    } else {
-      segmentText = trimmed;
-    }
-    if (!segmentText.trim()) {
-      return;
-    }
-    await appendLiveTextSegment(textBufferId, segmentText);
-    streamLastTextRef.current = trimmed;
-  }, [inputText]);
-
-  const handleCancelStreaming = async () => {
-    if (!streaming) {
-      return;
-    }
-    try {
-      const pipeline = streamPipelineRef.current;
-      if (pipeline) {
-        await pipeline.stop();
-      }
-    } catch (err) {
-      console.warn('Failed to cancel streaming:', err);
-    } finally {
-      // Convert live audio buffer to an offline buffer for save/playback
-      const audioBuffer = streamAudioBufferRef.current;
-      if (audioBuffer) {
-        try {
-          audioBuffer.unsubscribeEvents();
-          await finalizeLiveAudioBuffer(audioBuffer.bufferId);
-          const offlineBuf = await createOfflineAudioBufferFromLive(
-            audioBuffer.bufferId
-          );
-          const info = await getPipelineAudioBufferInfo(offlineBuf.bufferId);
-          if (info.numSamples && info.numSamples > 0) {
-            appendOfflineAudioBuffer({
-              kind: 'buffer',
-              bufferId: offlineBuf.bufferId,
-              sampleRate: info.sampleRate,
-              numSamples: info.numSamples,
-            });
-          }
-        } catch {
-          // ignore — buffer may have been released
-        }
-      }
-      resetStreamingState();
     }
   };
 
@@ -1445,9 +1092,6 @@ export default function TTSScreen() {
 
   const handleFree = async () => {
     try {
-      if (streaming) {
-        resetStreamingState();
-      }
       stopTtsSavedAudioPlayback();
       const engine = ttsEngineRef.current;
       if (engine) {
@@ -1507,9 +1151,10 @@ export default function TTSScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Ionicons name="volume-high" size={48} style={styles.icon} />
-            <Text style={styles.title}>Text-to-Speech Demo</Text>
+            <Text style={styles.title}>Text-to-Speech (Offline)</Text>
             <Text style={styles.subtitle}>
-              Generate speech from text using offline TTS models
+              Batch synthesis from text — use &quot;Text-to-Speech
+              (Streaming)&quot; for live incremental TTS
             </Text>
           </View>
 
@@ -1686,37 +1331,41 @@ export default function TTSScreen() {
               <Text style={styles.sectionTitle}>Synthesis options</Text>
               <Text style={styles.sectionDescription}>
                 Speaker / speed apply to all models. Noise &amp; length scales
-                use updateParams (VITS, Matcha, Kokoro, Kitten). On Android,
-                streaming with reference audio is Pocket-only; Zipvoice cloning
-                uses batch Generate.
+                use updateParams (VITS, Matcha, Kokoro, Kitten). Voice cloning
+                (Pocket / Zipvoice) is supported here via batch Generate; use
+                the streaming TTS screen only for incremental synthesis without
+                cloning.
               </Text>
 
               <Text style={styles.inputLabel}>Speaker ID:</Text>
               <TextInput
-                style={styles.textInput}
+                style={styles.synthesisOptionInput}
                 value={speakerId}
                 onChangeText={setSpeakerId}
                 keyboardType="number-pad"
                 placeholder="0"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
               />
               <Text style={styles.inputLabel}>Speed:</Text>
               <TextInput
-                style={styles.textInput}
+                style={styles.synthesisOptionInput}
                 value={speed}
                 onChangeText={setSpeed}
                 keyboardType="decimal-pad"
                 placeholder="1.0"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
               />
 
               {showNoiseScale && (
                 <>
                   <Text style={styles.inputLabel}>Noise scale (optional):</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={styles.synthesisOptionInput}
                     value={noiseScale}
                     onChangeText={setNoiseScale}
                     keyboardType="decimal-pad"
                     placeholder="default"
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                   />
                 </>
               )}
@@ -1726,11 +1375,12 @@ export default function TTSScreen() {
                     Noise scale W / duration (optional):
                   </Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={styles.synthesisOptionInput}
                     value={noiseScaleW}
                     onChangeText={setNoiseScaleW}
                     keyboardType="decimal-pad"
                     placeholder="default"
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                   />
                 </>
               )}
@@ -1740,33 +1390,36 @@ export default function TTSScreen() {
                     Length scale (optional):
                   </Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={styles.synthesisOptionInput}
                     value={lengthScale}
                     onChangeText={setLengthScale}
                     keyboardType="decimal-pad"
                     placeholder="1.0"
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                   />
                 </>
               )}
 
               <Text style={styles.inputLabel}>Silence scale (optional):</Text>
               <TextInput
-                style={styles.textInput}
+                style={styles.synthesisOptionInput}
                 value={silenceScale}
                 onChangeText={setSilenceScale}
                 keyboardType="decimal-pad"
                 placeholder="—"
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
               />
 
               {showNumSteps && (
                 <>
                   <Text style={styles.inputLabel}>Num steps (optional):</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={styles.synthesisOptionInput}
                     value={numSteps}
                     onChangeText={setNumSteps}
                     keyboardType="number-pad"
                     placeholder="—"
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                   />
                 </>
               )}
@@ -1777,10 +1430,11 @@ export default function TTSScreen() {
                     Extra (Pocket): key:value pairs, comma-separated
                   </Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={styles.synthesisOptionInput}
                     value={extraOptions}
                     onChangeText={setExtraOptions}
                     placeholder="temperature:0.8, chunk_size:64"
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                   />
                 </>
               )}
@@ -1794,7 +1448,10 @@ export default function TTSScreen() {
                   </Text>
                   <Text style={styles.inputLabel}>Reference transcript:</Text>
                   <TextInput
-                    style={styles.textInput}
+                    style={[
+                      styles.synthesisOptionInput,
+                      styles.referenceTextInput,
+                    ]}
                     value={referenceText}
                     onChangeText={setReferenceText}
                     placeholder={
@@ -1802,6 +1459,7 @@ export default function TTSScreen() {
                         ? 'Required if using reference WAV…'
                         : 'Optional…'
                     }
+                    placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                     multiline
                   />
                   <Text style={styles.inputLabel}>Reference WAV:</Text>
@@ -1846,7 +1504,7 @@ export default function TTSScreen() {
                 devices={outputDevices}
                 selectedDeviceId={selectedOutputDeviceId}
                 onSelectDeviceId={setSelectedOutputDeviceId}
-                disabled={generating || streaming}
+                disabled={generating}
               />
 
               <Text style={styles.inputLabel}>Text to Synthesize:</Text>
@@ -1855,30 +1513,21 @@ export default function TTSScreen() {
                 value={inputText}
                 onChangeText={setInputText}
                 placeholder="Enter text to synthesize..."
+                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
                 multiline
                 numberOfLines={3}
               />
 
               <Text style={styles.sectionDescription}>
-                Offline: use Segmentation controls below (Off = one-shot; Auto =
-                chunked synthesis per policy).
+                Segmentation: Off = one-shot; Auto = chunked synthesis per
+                policy. For live text streaming and manual segment commits, use
+                the Text-to-Speech (Streaming) screen.
               </Text>
               <SegmentationPolicyControls
                 variant="text-offline"
                 value={offlineSegConfig}
                 onChange={setOfflineSegConfig}
-                disabled={generating || streaming}
-              />
-
-              <Text style={[styles.sectionDescription, { marginTop: 12 }]}>
-                Streaming: Off/Manual = caller-committed segments; Auto =
-                segmentation engine (debounced text commits while typing).
-              </Text>
-              <SegmentationPolicyControls
-                variant="text-streaming"
-                value={streamingSegConfig}
-                onChange={setStreamingSegConfig}
-                disabled={generating || streaming}
+                disabled={generating}
               />
 
               <View style={styles.generateActionsSpacer} />
@@ -1896,54 +1545,6 @@ export default function TTSScreen() {
                   <Text style={styles.generateButtonText}>Generate Speech</Text>
                 )}
               </TouchableOpacity>
-
-              <View style={styles.streamControls}>
-                <TouchableOpacity
-                  style={[
-                    styles.streamButton,
-                    streaming && styles.buttonDisabled,
-                  ]}
-                  onPress={handleStartStreaming}
-                  disabled={streaming}
-                >
-                  <Text style={styles.generateButtonText}>Start Streaming</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.cancelStreamButton,
-                    !streaming && styles.buttonDisabled,
-                  ]}
-                  onPress={handleCancelStreaming}
-                  disabled={!streaming}
-                >
-                  <Text style={styles.generateButtonText}>Stop Streaming</Text>
-                </TouchableOpacity>
-              </View>
-
-              {streaming && (
-                <>
-                  <Text style={styles.streamInfoText}>
-                    Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
-                    {streamSampleCount} samples)
-                  </Text>
-                  {streamingSegConfig.mode !== 'auto' && (
-                    <TouchableOpacity
-                      style={styles.streamButton}
-                      onPress={() => {
-                        handleManualStreamingCommit().catch(() => {});
-                      }}
-                    >
-                      <Text style={styles.generateButtonText}>
-                        Manual commit segment (Mode 3)
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  <Text style={styles.streamInfoText}>
-                    Further input in the text field will be read aloud
-                    automatically (live mode).
-                  </Text>
-                </>
-              )}
 
               {lastSynthesisResult && (
                 <View style={styles.resultContainer}>

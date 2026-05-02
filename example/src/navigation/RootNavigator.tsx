@@ -3,9 +3,9 @@ import type { RootStackParamList } from '../types/navigation';
 
 import HomeScreen from '../screens/home/HomeScreen';
 import STTScreen from '../screens/stt/STTScreen';
-import TTSScreen from '../screens/tts/TTSScreen';
+import OfflineTTSScreen from '../screens/tts/OfflineTTSScreen';
 import STTStreamingScreen from '../screens/stt-streaming/STTStreamingScreen';
-import TTSStreamingScreen from '../screens/tts-streaming/TTSStreamingScreen';
+import StreamingTTSScreen from '../screens/tts-streaming/StreamingTTSScreen';
 import PunctuationScreen from '../screens/punctuation/PunctuationScreen';
 import PunctuationStreamingScreen from '../screens/punctuation-streaming/PunctuationStreamingScreen';
 import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcaseScreen';
@@ -58,14 +58,14 @@ export default function RootNavigator() {
       />
       <Stack.Screen
         name="TTS"
-        component={TTSScreen}
+        component={OfflineTTSScreen}
         options={{
-          title: 'Text-to-Speech',
+          title: 'Text-to-Speech (Offline)',
         }}
       />
       <Stack.Screen
         name="TTSStreaming"
-        component={TTSStreamingScreen}
+        component={StreamingTTSScreen}
         options={{
           title: 'Text-to-Speech (Streaming)',
         }}

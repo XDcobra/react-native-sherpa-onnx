@@ -14,10 +14,37 @@
  * the API call options.segmentation field (all variants share the same { mode, policy? } shape).
  */
 
-import { useState, useCallback } from 'react';
-import { Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  ActivityIndicator,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type { SegmentationPolicy } from 'react-native-sherpa-onnx/segment';
+import {
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
+import {
+  createOfflinePunctuation,
+  type OfflinePunctuationEngine,
+} from 'react-native-sherpa-onnx/punctuation';
+import { detectVadModel } from 'react-native-sherpa-onnx/vad';
+import { getModelDisplayName, toDetectSource } from '../modelConfig';
+import {
+  getPunctuationModelPathConfig,
+  loadPunctuationModelCatalog,
+  type PunctuationCatalogSnapshot,
+} from '../utils/punctuationModelCatalog';
+import {
+  getVadModelPathConfig,
+  loadVadModelCatalog,
+  type VadCatalogSnapshot,
+} from '../utils/vadModelCatalog';
 import { segStyles as s } from './SegmentationPolicyControls.styles';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +129,27 @@ function defaultPolicy(variant: SegmentationVariant): SegmentationPolicy {
   return { evaluator };
 }
 
+/** Placeholder when the field is empty: shows the effective native default. */
+function ph(defaultValue: number | string): string {
+  return `default: ${defaultValue}`;
+}
+
+/** Native `SegEnginePolicy` defaults (iOS SherpaOnnx+SegmentBuffer.mm) when a numeric is omitted. */
+const SEG_NUM_DEFAULTS = {
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1000,
+  maxSegmentMs: 30000,
+  vadThreshold: 0.5,
+  vadMinSpeechMs: 250,
+  vadMinSilenceMs: 250,
+  checkpointIntervalMs: 0,
+} as const;
+
+const TEXT_MAX_LENGTH_DEFAULT_CHARS = 320;
+
+const PUNC_NUM_THREADS = 2;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Numeric field helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +206,416 @@ type PolicyFieldsProps = {
   onPolicyChange: (p: SegmentationPolicy) => void;
 };
 
+type VadPolicyFieldsProps = {
+  policy: SegmentationPolicy;
+  disabled: boolean;
+  onPolicyChange: (p: SegmentationPolicy) => void;
+};
+
+type PunctuationPolicyFieldsProps = {
+  policy: SegmentationPolicy;
+  disabled: boolean;
+  onPolicyChange: (p: SegmentationPolicy) => void;
+};
+
+function PunctuationPolicyFields({
+  policy,
+  disabled,
+  onPolicyChange,
+}: PunctuationPolicyFieldsProps) {
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
+
+  const engineRef = useRef<OfflinePunctuationEngine | null>(null);
+
+  const [snapshot, setSnapshot] = useState<PunctuationCatalogSnapshot | null>(
+    null
+  );
+  const [loadingPunc, setLoadingPunc] = useState(false);
+  const [selectedPuncModelId, setSelectedPuncModelId] = useState<string | null>(
+    null
+  );
+  const [initError, setInitError] = useState<string | null>(null);
+  const [puncStatusLine, setPuncStatusLine] = useState<string | null>(null);
+
+  const refreshCatalog = useCallback(async () => {
+    setLoadingPunc(true);
+    setInitError(null);
+    try {
+      const snap = await loadPunctuationModelCatalog();
+      setSnapshot(snap);
+      setSelectedPuncModelId((prev) => {
+        if (snap.entries.length === 0) {
+          return null;
+        }
+        if (prev && snap.entries.some((e) => e.id === prev)) {
+          return prev;
+        }
+        return snap.entries[0]!.id;
+      });
+    } catch (e) {
+      setInitError(e instanceof Error ? e.message : String(e));
+      setSnapshot(null);
+    } finally {
+      setLoadingPunc(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCatalog().catch(() => {});
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    const unsub = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Punctuation) {
+        return;
+      }
+      refreshCatalog().catch(() => {});
+    });
+    return unsub;
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    return () => {
+      const eng = engineRef.current;
+      engineRef.current = null;
+      if (eng) {
+        eng.destroy().catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!snapshot || !selectedPuncModelId || snapshot.entries.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setInitError(null);
+      setPuncStatusLine(null);
+      try {
+        const prevEng = engineRef.current;
+        engineRef.current = null;
+        if (prevEng) {
+          await prevEng.destroy().catch(() => {});
+        }
+        if (cancelled) {
+          return;
+        }
+        const cfg = getPunctuationModelPathConfig(selectedPuncModelId, {
+          padModelIds: snapshot.padPunctuationModelIds,
+          padModelsPath: snapshot.padModelsPath,
+          bundledFolders: snapshot.bundledPunctuationFolders,
+          downloadedIds: new Set(snapshot.downloadedPunctuationIds),
+        });
+        const eng = await createOfflinePunctuation({
+          modelPath: cfg,
+          modelType: 'auto',
+          numThreads: PUNC_NUM_THREADS,
+          provider: 'cpu',
+          debug: false,
+        });
+        if (cancelled) {
+          await eng.destroy().catch(() => {});
+          return;
+        }
+        engineRef.current = eng;
+        onPolicyChange({
+          ...policyRef.current,
+          punctuationInstanceId: eng.instanceId,
+        });
+        setPuncStatusLine(
+          `policy.punctuationInstanceId = ${
+            eng.instanceId
+          } (${getModelDisplayName(selectedPuncModelId)})`
+        );
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setInitError(msg);
+          const base = { ...policyRef.current };
+          delete base.punctuationInstanceId;
+          onPolicyChange(base);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot, selectedPuncModelId, onPolicyChange]);
+
+  const update = useCallback(
+    (patch: Partial<SegmentationPolicy>) =>
+      onPolicyChange({ ...policy, ...patch }),
+    [policy, onPolicyChange]
+  );
+
+  return (
+    <>
+      <Text style={[s.noteText, { marginBottom: 6 }]}>
+        Select an offline CT-Transformer punctuation model. The example app
+        calls{' '}
+        <Text style={{ fontWeight: '600' }}>createOfflinePunctuation</Text> and
+        sets{' '}
+        <Text style={{ fontWeight: '600' }}>policy.punctuationInstanceId</Text>.
+      </Text>
+
+      {loadingPunc ? (
+        <View style={s.vadLoadingRow}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={s.noteText}>Loading punctuation models…</Text>
+        </View>
+      ) : !snapshot || snapshot.entries.length === 0 ? (
+        <View style={s.vadWarningBox}>
+          <Text style={s.vadWarningText}>
+            No offline CT-Transformer punctuation models found. Add one under
+            assets/models, PAD, documents/models, or downloads (category:
+            punctuation).
+          </Text>
+        </View>
+      ) : (
+        <View style={s.vadModelScroll}>
+          {snapshot.entries.map((entry) => {
+            const active = selectedPuncModelId === entry.id;
+            return (
+              <TouchableOpacity
+                key={entry.id}
+                style={[
+                  s.vadModelChip,
+                  active && s.vadModelChipActive,
+                  disabled && s.evaluatorChipDisabled,
+                ]}
+                onPress={() => {
+                  setSelectedPuncModelId(entry.id);
+                  setInitError(null);
+                }}
+                disabled={disabled}
+              >
+                <Text style={s.vadModelChipTitle}>{entry.label}</Text>
+                <Text style={s.vadModelChipId} numberOfLines={1}>
+                  {entry.id}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {initError ? <Text style={s.vadErrorText}>{initError}</Text> : null}
+      {puncStatusLine && !initError ? (
+        <Text style={s.vadOkText}>{puncStatusLine}</Text>
+      ) : null}
+
+      <NumericField
+        label="Max length (chars)"
+        value={policy.maxLengthChars}
+        placeholder={ph(TEXT_MAX_LENGTH_DEFAULT_CHARS)}
+        disabled={disabled}
+        onChange={(v) => update({ maxLengthChars: v })}
+      />
+      <View style={s.checkboxRow}>
+        <Text style={s.checkboxLabel}>Sentence boundary</Text>
+        <Switch
+          value={policy.sentenceBoundary ?? false}
+          onValueChange={(v) => update({ sentenceBoundary: v })}
+          disabled={disabled}
+        />
+      </View>
+    </>
+  );
+}
+
+function VadPolicyFields({
+  policy,
+  disabled,
+  onPolicyChange,
+}: VadPolicyFieldsProps) {
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
+
+  const [snapshot, setSnapshot] = useState<VadCatalogSnapshot | null>(null);
+  const [loadingVad, setLoadingVad] = useState(false);
+  const [selectedVadModelId, setSelectedVadModelId] = useState<string | null>(
+    null
+  );
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [vadStatusLine, setVadStatusLine] = useState<string | null>(null);
+
+  const refreshCatalog = useCallback(async () => {
+    setLoadingVad(true);
+    setDetectError(null);
+    try {
+      const snap = await loadVadModelCatalog();
+      setSnapshot(snap);
+      setSelectedVadModelId((prev) => {
+        if (snap.entries.length === 0) {
+          return null;
+        }
+        if (prev && snap.entries.some((e) => e.id === prev)) {
+          return prev;
+        }
+        return snap.entries[0]!.id;
+      });
+    } catch (e) {
+      setDetectError(e instanceof Error ? e.message : String(e));
+      setSnapshot(null);
+    } finally {
+      setLoadingVad(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCatalog().catch(() => {});
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    const unsub = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Vad) {
+        return;
+      }
+      refreshCatalog().catch(() => {});
+    });
+    return unsub;
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    if (!snapshot || !selectedVadModelId || snapshot.entries.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDetectError(null);
+      setVadStatusLine(null);
+      try {
+        const cfg = getVadModelPathConfig(selectedVadModelId, {
+          padModelIds: snapshot.padVadModelIds,
+          padModelsPath: snapshot.padModelsPath,
+          bundledFolders: snapshot.bundledVadFolders,
+          downloadedIds: new Set(snapshot.downloadedVadIds),
+        });
+        const fileSource = await toDetectSource(cfg);
+        const det = await detectVadModel(fileSource, { modelType: 'auto' });
+        if (cancelled) {
+          return;
+        }
+        if (!det.success || !det.modelType) {
+          setDetectError(det.error ?? 'VAD model detection failed.');
+          return;
+        }
+        if (det.modelType !== 'silero_vad' && det.modelType !== 'ten_vad') {
+          setDetectError(`Unsupported VAD model type: ${det.modelType}`);
+          return;
+        }
+        onPolicyChange({
+          ...policyRef.current,
+          modelPath: fileSource,
+        });
+        setVadStatusLine(
+          `policy.modelPath set · detected: ${
+            det.modelType
+          } (${getModelDisplayName(selectedVadModelId)})`
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setDetectError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot, selectedVadModelId, onPolicyChange]);
+
+  const update = useCallback(
+    (patch: Partial<SegmentationPolicy>) =>
+      onPolicyChange({ ...policy, ...patch }),
+    [policy, onPolicyChange]
+  );
+
+  return (
+    <>
+      <Text style={[s.noteText, { marginBottom: 6 }]}>
+        Choose a VAD bundle; the example app runs the same detect path as
+        streaming VAD and sets{' '}
+        <Text style={{ fontWeight: '600' }}>policy.modelPath</Text>{' '}
+        (FileSource).
+      </Text>
+
+      {loadingVad ? (
+        <View style={s.vadLoadingRow}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={s.noteText}>Loading VAD models…</Text>
+        </View>
+      ) : !snapshot || snapshot.entries.length === 0 ? (
+        <View style={s.vadWarningBox}>
+          <Text style={s.vadWarningText}>
+            No VAD models found. Add one under assets/models, PAD,
+            documents/models, or downloads (category: vad).
+          </Text>
+        </View>
+      ) : (
+        <View style={s.vadModelScroll}>
+          {snapshot.entries.map((entry) => {
+            const active = selectedVadModelId === entry.id;
+            return (
+              <TouchableOpacity
+                key={entry.id}
+                style={[
+                  s.vadModelChip,
+                  active && s.vadModelChipActive,
+                  disabled && s.evaluatorChipDisabled,
+                ]}
+                onPress={() => {
+                  setSelectedVadModelId(entry.id);
+                  setDetectError(null);
+                }}
+                disabled={disabled}
+              >
+                <Text style={s.vadModelChipTitle}>{entry.label}</Text>
+                <Text style={s.vadModelChipId} numberOfLines={1}>
+                  {entry.id}
+                </Text>
+                {entry.recommended ? (
+                  <View style={s.vadRecommendedBadge}>
+                    <Text style={s.vadRecommendedBadgeText}>Recommended</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {detectError ? <Text style={s.vadErrorText}>{detectError}</Text> : null}
+      {vadStatusLine && !detectError ? (
+        <Text style={s.vadOkText}>{vadStatusLine}</Text>
+      ) : null}
+
+      <NumericField
+        label="VAD threshold"
+        value={policy.vadThreshold}
+        placeholder={ph(SEG_NUM_DEFAULTS.vadThreshold)}
+        disabled={disabled}
+        onChange={(v) => update({ vadThreshold: v })}
+      />
+      <NumericField
+        label="Min speech (ms)"
+        value={policy.vadMinSpeechMs}
+        placeholder={ph(SEG_NUM_DEFAULTS.vadMinSpeechMs)}
+        disabled={disabled}
+        onChange={(v) => update({ vadMinSpeechMs: v })}
+      />
+      <NumericField
+        label="Min silence (ms)"
+        value={policy.vadMinSilenceMs}
+        placeholder={ph(SEG_NUM_DEFAULTS.vadMinSilenceMs)}
+        disabled={disabled}
+        onChange={(v) => update({ vadMinSilenceMs: v })}
+      />
+    </>
+  );
+}
+
 function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
@@ -175,28 +633,28 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
           <NumericField
             label="Silence threshold (ms)"
             value={policy.silenceThresholdMs}
-            placeholder="default"
+            placeholder={ph(SEG_NUM_DEFAULTS.silenceThresholdMs)}
             disabled={disabled}
             onChange={(v) => update({ silenceThresholdMs: v })}
           />
           <NumericField
             label="Energy threshold (dB)"
             value={policy.energyThresholdDb}
-            placeholder="default"
+            placeholder={ph(SEG_NUM_DEFAULTS.energyThresholdDb)}
             disabled={disabled}
             onChange={(v) => update({ energyThresholdDb: v })}
           />
           <NumericField
             label="Min segment (ms)"
             value={policy.minSegmentMs}
-            placeholder="default"
+            placeholder={ph(SEG_NUM_DEFAULTS.minSegmentMs)}
             disabled={disabled}
             onChange={(v) => update({ minSegmentMs: v })}
           />
           <NumericField
             label="Max segment (ms)"
             value={policy.maxSegmentMs}
-            placeholder="default"
+            placeholder={ph(SEG_NUM_DEFAULTS.maxSegmentMs)}
             disabled={disabled}
             onChange={(v) => update({ maxSegmentMs: v })}
           />
@@ -205,33 +663,11 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
 
       {/* ── speech_vad_model ── */}
       {evaluator === 'speech_vad_model' && (
-        <>
-          <Text style={s.noteText}>
-            Requires modelPath — set programmatically via detectVadModel or
-            hardcode a FileSource before calling transcribe/enhance.
-          </Text>
-          <NumericField
-            label="VAD threshold"
-            value={policy.vadThreshold}
-            placeholder="default"
-            disabled={disabled}
-            onChange={(v) => update({ vadThreshold: v })}
-          />
-          <NumericField
-            label="Min speech (ms)"
-            value={policy.vadMinSpeechMs}
-            placeholder="default"
-            disabled={disabled}
-            onChange={(v) => update({ vadMinSpeechMs: v })}
-          />
-          <NumericField
-            label="Min silence (ms)"
-            value={policy.vadMinSilenceMs}
-            placeholder="default"
-            disabled={disabled}
-            onChange={(v) => update({ vadMinSilenceMs: v })}
-          />
-        </>
+        <VadPolicyFields
+          policy={policy}
+          disabled={disabled}
+          onPolicyChange={onPolicyChange}
+        />
       )}
 
       {/* ── continuous_frames ── */}
@@ -239,7 +675,7 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
         <NumericField
           label="Checkpoint interval (ms)"
           value={policy.checkpointIntervalMs}
-          placeholder="default"
+          placeholder={ph(SEG_NUM_DEFAULTS.checkpointIntervalMs)}
           disabled={disabled}
           onChange={(v) => update({ checkpointIntervalMs: v })}
         />
@@ -251,7 +687,7 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
           <NumericField
             label="Max length (chars)"
             value={policy.maxLengthChars}
-            placeholder="320"
+            placeholder={ph(TEXT_MAX_LENGTH_DEFAULT_CHARS)}
             disabled={disabled}
             onChange={(v) => update({ maxLengthChars: v })}
           />
@@ -268,27 +704,11 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
 
       {/* ── text_punctuation_assisted ── */}
       {evaluator === 'text_punctuation_assisted' && (
-        <>
-          <NumericField
-            label="Max length (chars)"
-            value={policy.maxLengthChars}
-            placeholder="320"
-            disabled={disabled}
-            onChange={(v) => update({ maxLengthChars: v })}
-          />
-          <View style={s.checkboxRow}>
-            <Text style={s.checkboxLabel}>Sentence boundary</Text>
-            <Switch
-              value={policy.sentenceBoundary ?? false}
-              onValueChange={(v) => update({ sentenceBoundary: v })}
-              disabled={disabled}
-            />
-          </View>
-          <Text style={s.noteText}>
-            Requires punctuationInstanceId to be set when a Punctuation engine
-            is active.
-          </Text>
-        </>
+        <PunctuationPolicyFields
+          policy={policy}
+          disabled={disabled}
+          onPolicyChange={onPolicyChange}
+        />
       )}
     </View>
   );
