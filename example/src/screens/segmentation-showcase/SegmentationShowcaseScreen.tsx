@@ -88,11 +88,13 @@ type AudioSegmentationState = {
   audioFile: { uri: string; name: string } | null;
   segments: SpeechSegment[];
   silenceThresholdMs: number;
-  energyThresholdDb: number;
+  /** Raw text for decimal-pad input (allows ".", "-0.", etc. while typing). */
+  energyThresholdDb: string;
   minSegmentMs: number;
   maxSegmentMs: number;
   hangoverMs: number;
-  vadThreshold: number;
+  /** Raw text for decimal-pad input. */
+  vadThreshold: string;
   vadMinSpeechMs: number;
   vadMinSilenceMs: number;
   selectedVadModelId: string | null;
@@ -114,6 +116,12 @@ function parseSentenceBoundaryCharsInput(raw: string): string[] {
     .split('|')
     .map((part) => part.trim().replace(/\\n/g, '\n'))
     .filter((s) => s.length > 0);
+}
+
+/** Parse at run time; invalid / empty uses fallback. */
+function parseOptionalFloat(raw: string, fallback: number): number {
+  const n = parseFloat(raw.trim());
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function normalizeErrorMessage(error: unknown): string {
@@ -301,11 +309,11 @@ export default function SegmentationShowcaseScreen() {
     audioFile: null,
     segments: [],
     silenceThresholdMs: 500,
-    energyThresholdDb: -40,
+    energyThresholdDb: '-40',
     minSegmentMs: 1000,
     maxSegmentMs: 30000,
     hangoverMs: 300,
-    vadThreshold: 0.5,
+    vadThreshold: '0.5',
     vadMinSpeechMs: 250,
     vadMinSilenceMs: 250,
     selectedVadModelId: null,
@@ -853,13 +861,16 @@ export default function SegmentationShowcaseScreen() {
       const audioBuffer = await createOfflineAudioBufferFromFile(fileSource);
       audioBufferRef.current = audioBuffer.bufferId;
 
+      const energyDb = parseOptionalFloat(audioState.energyThresholdDb, -40);
+      const vadTh = parseOptionalFloat(audioState.vadThreshold, 0.5);
+
       await segmentOfflineBuffer(
         audioBuffer,
         audioState.evaluator === 'speech_energy_silence'
           ? {
               evaluator: 'speech_energy_silence',
               silenceThresholdMs: audioState.silenceThresholdMs,
-              energyThresholdDb: audioState.energyThresholdDb,
+              energyThresholdDb: energyDb,
               minSegmentMs: audioState.minSegmentMs,
               maxSegmentMs: audioState.maxSegmentMs,
               hangoverMs: audioState.hangoverMs,
@@ -867,7 +878,7 @@ export default function SegmentationShowcaseScreen() {
           : {
               evaluator: 'speech_vad_model',
               modelPath: audioState.initializedVadFileSource!,
-              vadThreshold: audioState.vadThreshold,
+              vadThreshold: vadTh,
               vadMinSpeechMs: audioState.vadMinSpeechMs,
               vadMinSilenceMs: audioState.vadMinSilenceMs,
               minSegmentMs: audioState.minSegmentMs,
@@ -1087,8 +1098,12 @@ export default function SegmentationShowcaseScreen() {
                   keyboardType="number-pad"
                   value={String(textState.maxLengthChars)}
                   onChangeText={(text) => {
+                    if (text.trim() === '') {
+                      setTextState((prev) => ({ ...prev, maxLengthChars: 0 }));
+                      return;
+                    }
                     const num = parseInt(text, 10);
-                    if (!isNaN(num) && num > 0) {
+                    if (!Number.isNaN(num)) {
                       setTextState((prev) => ({
                         ...prev,
                         maxLengthChars: num,
@@ -1437,8 +1452,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.silenceThresholdMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          silenceThresholdMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           silenceThresholdMs: num,
@@ -1453,16 +1475,13 @@ export default function SegmentationShowcaseScreen() {
                   <TextInput
                     style={styles.policyInput}
                     keyboardType="decimal-pad"
-                    value={String(audioState.energyThresholdDb)}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text);
-                      if (!isNaN(num)) {
-                        setAudioState((prev) => ({
-                          ...prev,
-                          energyThresholdDb: num,
-                        }));
-                      }
-                    }}
+                    value={audioState.energyThresholdDb}
+                    onChangeText={(text) =>
+                      setAudioState((prev) => ({
+                        ...prev,
+                        energyThresholdDb: text,
+                      }))
+                    }
                     editable={!loading}
                   />
                 </View>
@@ -1473,8 +1492,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.minSegmentMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          minSegmentMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           minSegmentMs: num,
@@ -1491,8 +1517,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.maxSegmentMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          maxSegmentMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num > 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           maxSegmentMs: num,
@@ -1509,8 +1542,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.hangoverMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          hangoverMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           hangoverMs: num,
@@ -1645,16 +1685,13 @@ export default function SegmentationShowcaseScreen() {
                   <TextInput
                     style={styles.policyInput}
                     keyboardType="decimal-pad"
-                    value={String(audioState.vadThreshold)}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text);
-                      if (!isNaN(num)) {
-                        setAudioState((prev) => ({
-                          ...prev,
-                          vadThreshold: num,
-                        }));
-                      }
-                    }}
+                    value={audioState.vadThreshold}
+                    onChangeText={(text) =>
+                      setAudioState((prev) => ({
+                        ...prev,
+                        vadThreshold: text,
+                      }))
+                    }
                     editable={!loading}
                   />
                 </View>
@@ -1667,8 +1704,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.vadMinSpeechMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          vadMinSpeechMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           vadMinSpeechMs: num,
@@ -1687,8 +1731,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.vadMinSilenceMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          vadMinSilenceMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           vadMinSilenceMs: num,
@@ -1705,8 +1756,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.minSegmentMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          minSegmentMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num >= 100) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           minSegmentMs: num,
@@ -1725,8 +1783,15 @@ export default function SegmentationShowcaseScreen() {
                     keyboardType="number-pad"
                     value={String(audioState.maxSegmentMs)}
                     onChangeText={(text) => {
+                      if (text.trim() === '') {
+                        setAudioState((prev) => ({
+                          ...prev,
+                          maxSegmentMs: 0,
+                        }));
+                        return;
+                      }
                       const num = parseInt(text, 10);
-                      if (!isNaN(num) && num > 0) {
+                      if (!Number.isNaN(num)) {
                         setAudioState((prev) => ({
                           ...prev,
                           maxSegmentMs: num,

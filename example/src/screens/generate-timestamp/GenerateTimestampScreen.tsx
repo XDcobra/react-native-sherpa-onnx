@@ -1197,6 +1197,9 @@ export default function GenerateTimestampScreen() {
           modelPath: sttModelPath!,
           modelType: 'auto',
           numThreads: 2,
+          modelOptions: {
+            whisper: { enableTokenTimestamps: true },
+          },
         });
         await stt.transcribe(audioBuffer, hypothesisBuffer, {
           segmentation: { mode: 'off' },
