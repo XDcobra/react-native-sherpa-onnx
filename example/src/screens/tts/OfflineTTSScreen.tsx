@@ -7,7 +7,6 @@ import {
   ScrollView,
   TextInput,
   Alert,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -53,8 +52,6 @@ import {
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   DocumentDirectoryPath,
-  DownloadDirectoryPath,
-  mkdir,
   unlink,
   exists,
 } from '@dr.pogodin/react-native-fs';
@@ -65,6 +62,11 @@ import {
   saveAudioAsFile,
   setPipelineAudioRoutePreference,
 } from 'react-native-sherpa-onnx/audio';
+import {
+  formatResolvedLocation,
+  isDirectoryPickCanceled,
+  saveAudioToUserPickedFolder,
+} from '../../utils/saveAudioToUserFolder';
 import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
 import {
   fetchOutputDevices,
@@ -880,48 +882,6 @@ export default function OfflineTTSScreen() {
     }
   };
 
-  const pickSaveDirectory = async () => {
-    let directoryPath: string | null = null;
-    let directoryUri: string | null = null;
-
-    try {
-      const picked = await DocumentPicker.pickDirectory();
-      if (picked?.uri) {
-        if (picked.uri.startsWith('file://')) {
-          directoryPath = decodeURI(picked.uri.replace('file://', ''));
-        } else if (picked.uri.startsWith('content://')) {
-          directoryUri = picked.uri;
-        }
-      }
-    } catch (pickerErr) {
-      const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
-      if (!isCancel) {
-        console.warn('Directory picker error:', pickerErr);
-      }
-    }
-
-    return { directoryPath, directoryUri };
-  };
-
-  const getFallbackDirectory = () => {
-    if (Platform.OS === 'android' && DownloadDirectoryPath) {
-      return DownloadDirectoryPath;
-    }
-    return DocumentDirectoryPath;
-  };
-
-  const showFallbackNotice = () => {
-    Alert.alert(
-      'Notice',
-      'The selected storage location cannot be written to directly. The file will be saved in a default directory.'
-    );
-  };
-
-  /** Save a GeneratedResult to a WAV file path. */
-  const saveResultToWav = async (audio: GeneratedResult, path: string) => {
-    await saveAudioAsFile(audio.bufferId, { kind: 'fs', path }, 'wav');
-  };
-
   const saveAudioWithData = async (audio: GeneratedResult) => {
     if (!audio.numSamples) {
       Alert.alert('Error', 'No audio to save.');
@@ -932,34 +892,20 @@ export default function OfflineTTSScreen() {
     setError(null);
 
     try {
-      const timestamp = Date.now();
-      const filename = `tts_${timestamp}.wav`;
-
-      const { directoryPath, directoryUri } = await pickSaveDirectory();
-
-      if (directoryUri) {
-        // Android SAF: save to app cache, then inform user
-        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
-        await saveResultToWav(audio, tmpPath);
-        setSavedAudioPath(tmpPath);
-        setSavedAudioBufferId(audio.bufferId);
-        Alert.alert('Success', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
+      const filename = `tts_${Date.now()}.wav`;
+      const resolved = await saveAudioToUserPickedFolder(
+        audio.bufferId,
+        filename,
+        'wav'
+      );
+      const display = formatResolvedLocation(resolved);
+      setSavedAudioPath(display);
+      setSavedAudioBufferId(audio.bufferId);
+      Alert.alert('Success', `Audio saved to:\n${display}`);
+    } catch (err) {
+      if (isDirectoryPickCanceled(err)) {
         return;
       }
-
-      const targetDirectory = directoryPath ?? getFallbackDirectory();
-      if (!directoryPath) {
-        showFallbackNotice();
-      }
-
-      await mkdir(targetDirectory);
-      const filePath = `${targetDirectory}/${filename}`;
-      await saveResultToWav(audio, filePath);
-      setSavedAudioPath(filePath);
-      setSavedAudioBufferId(audio.bufferId);
-
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
-    } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(`Failed to save audio: ${errorMessage}`);
@@ -977,7 +923,7 @@ export default function OfflineTTSScreen() {
     await saveAudioWithData(generatedAudio);
   };
 
-  // Temporary save helper used by quick-save UI
+  /** Quick-save into app documents via SDK `FileDestination` (`app` base). */
   const handleSaveTemporary = async () => {
     if (!generatedAudio) {
       Alert.alert('Error', 'No audio to save. Generate speech first.');
@@ -988,17 +934,16 @@ export default function OfflineTTSScreen() {
     setError(null);
 
     try {
-      const timestamp = Date.now();
-      const directoryPath = DocumentDirectoryPath;
-      await mkdir(directoryPath);
-
-      const filename = `tts_${timestamp}.wav`;
-      const filePath = `${directoryPath}/${filename}`;
-      await saveResultToWav(generatedAudio, filePath);
-      setSavedAudioPath(filePath);
+      const filename = `tts_${Date.now()}.wav`;
+      const resolved = await saveAudioAsFile(
+        generatedAudio.bufferId,
+        { kind: 'app', base: 'documents', path: filename },
+        'wav'
+      );
+      const display = formatResolvedLocation(resolved);
+      setSavedAudioPath(display);
       setSavedAudioBufferId(generatedAudio.bufferId);
-
-      Alert.alert('Success', `Audio saved to:\n${getDisplayPath(filePath)}`);
+      Alert.alert('Success', `Audio saved to:\n${display}`);
     } catch (err) {
       console.error('Save audio error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';

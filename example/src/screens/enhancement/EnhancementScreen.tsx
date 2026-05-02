@@ -6,22 +6,16 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
-  Platform,
   StyleSheet,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
 import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
-import {
-  DocumentDirectoryPath,
-  DownloadDirectoryPath,
-  mkdir,
-} from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -39,6 +33,11 @@ import {
   getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import {
+  formatResolvedLocation,
+  isDirectoryPickCanceled,
+  saveAudioToUserPickedFolder,
+} from '../../utils/saveAudioToUserFolder';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -134,50 +133,11 @@ export default function EnhancementScreen() {
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
-  const getDisplayPath = (path: string) => {
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
-  };
-
   const stopActivePlayback = async () => {
     if (!pcmPlaybackRef.current) return;
     const activePlayback = pcmPlaybackRef.current;
     pcmPlaybackRef.current = null;
     await stopPcmFilePlayback(activePlayback);
-  };
-
-  const pickSaveDirectory = async (): Promise<{
-    directoryPath: string | null;
-    directoryUri: string | null;
-  }> => {
-    let directoryPath: string | null = null;
-    let directoryUri: string | null = null;
-    try {
-      const picked = await DocumentPicker.pickDirectory();
-      if (picked?.uri) {
-        if (picked.uri.startsWith('file://')) {
-          directoryPath = decodeURI(picked.uri.replace('file://', ''));
-        } else if (picked.uri.startsWith('content://')) {
-          directoryUri = picked.uri;
-        }
-      }
-    } catch (pickerErr) {
-      const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
-      if (!isCancel) {
-        console.warn('EnhancementScreen: directory picker error', pickerErr);
-      }
-    }
-    return { directoryPath, directoryUri };
-  };
-
-  const getFallbackDirectory = () => {
-    if (Platform.OS === 'android' && DownloadDirectoryPath) {
-      return DownloadDirectoryPath;
-    }
-    return DocumentDirectoryPath;
   };
 
   const handleSaveEnhanced = async () => {
@@ -187,38 +147,18 @@ export default function EnhancementScreen() {
     }
     setSaving(true);
     try {
-      const timestamp = Date.now();
-      const filename = `sherpa_enhanced_${timestamp}.wav`;
-      const { directoryPath, directoryUri } = await pickSaveDirectory();
-
-      const saveBufferToPath = async (path: string) => {
-        await saveAudioAsFile(
-          lastEnhancedAudio.outputBufferId,
-          { kind: 'fs', path },
-          'wav'
-        );
-      };
-
-      if (directoryUri) {
-        // Android SAF: save to cache then copy
-        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
-        await saveBufferToPath(tmpPath);
-        Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
+      const filename = `sherpa_enhanced_${Date.now()}.wav`;
+      const resolved = await saveAudioToUserPickedFolder(
+        lastEnhancedAudio.outputBufferId,
+        filename,
+        'wav'
+      );
+      const display = formatResolvedLocation(resolved);
+      Alert.alert('Saved', `Audio saved to:\n${display}`);
+    } catch (err) {
+      if (isDirectoryPickCanceled(err)) {
         return;
       }
-
-      const targetDirectory = directoryPath ?? getFallbackDirectory();
-      if (!directoryPath) {
-        Alert.alert(
-          'Notice',
-          'No folder was selected. Saving to the app default directory.'
-        );
-      }
-      await mkdir(targetDirectory);
-      const filePath = `${targetDirectory}/${filename}`;
-      await saveBufferToPath(filePath);
-      Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
-    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       Alert.alert('Save failed', msg);
     } finally {
