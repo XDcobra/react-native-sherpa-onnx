@@ -391,12 +391,19 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jobject chunkCbGlobal = env->NewGlobalRef(jChunkCallback);
     jobject progressCbGlobal = jProgressCallback ? env->NewGlobalRef(jProgressCallback) : nullptr;
 
-    auto onChunk = [env, chunkCbGlobal, onChunkMethod](const float* samples, int count) {
+    auto onChunk = [env, chunkCbGlobal, onChunkMethod, &cancelFlag](const float* samples, int count) {
         jfloatArray arr = env->NewFloatArray(count);
-        if (arr) {
-            env->SetFloatArrayRegion(arr, 0, count, samples);
-            env->CallVoidMethod(chunkCbGlobal, onChunkMethod, arr, (jint)count);
-            env->DeleteLocalRef(arr);
+        if (!arr) {
+            return;
+        }
+        env->SetFloatArrayRegion(arr, 0, count, samples);
+        env->CallVoidMethod(chunkCbGlobal, onChunkMethod, arr, (jint)count);
+        env->DeleteLocalRef(arr);
+        // If Java threw (e.g. live buffer finalized mid-ingest), clear pending exception
+        // before the next JNI call — otherwise CheckJNI aborts. Stop decode via cancelFlag.
+        if (env->ExceptionCheck()) {
+            cancelFlag.store(true);
+            env->ExceptionClear();
         }
     };
 
@@ -409,11 +416,15 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
             srcSampleRate = sr;
             srcChannels = ch;
         };
-        onProgress = [env, progressCbGlobal, onProgressMethod, &srcSampleRate, &srcChannels](
-            int64_t framesDecoded, int64_t totalEstimate, int percent) {
+        onProgress = [env, progressCbGlobal, onProgressMethod, &srcSampleRate, &srcChannels,
+                      &cancelFlag](int64_t framesDecoded, int64_t totalEstimate, int percent) {
             env->CallVoidMethod(progressCbGlobal, onProgressMethod,
                 (jlong)framesDecoded, (jlong)totalEstimate, (jint)percent,
                 (jint)srcSampleRate, (jint)srcChannels);
+            if (env->ExceptionCheck()) {
+                cancelFlag.store(true);
+                env->ExceptionClear();
+            }
         };
     }
 

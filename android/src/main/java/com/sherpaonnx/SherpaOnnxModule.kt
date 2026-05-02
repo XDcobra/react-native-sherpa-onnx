@@ -1252,20 +1252,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
             if (cancelFlag.get()) return
-            when (
-              liveEntry.tryAppendSamples(
-                samples,
-                liveEntry.sampleRate,
-                com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
-                backpressure = useBackpressure
-              )
-            ) {
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
-                status.framesIngested += frameCount
+            try {
+              when (
+                liveEntry.tryAppendSamples(
+                  samples,
+                  liveEntry.sampleRate,
+                  com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                  backpressure = useBackpressure
+                )
+              ) {
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
+                  status.framesIngested += frameCount
+                }
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                  cancelFlag.set(true)
+                }
               }
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-                cancelFlag.set(true)
-              }
+            } catch (_: Throwable) {
+              // Listener/spool/segmentation hooks must not crash native decode thread / JNI.
+              cancelFlag.set(true)
             }
           }
         }
