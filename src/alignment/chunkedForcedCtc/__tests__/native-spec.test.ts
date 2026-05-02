@@ -1,6 +1,7 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn(),
     alignAccurateForcedCtcFromPcm: jest.fn(),
   },
 }));

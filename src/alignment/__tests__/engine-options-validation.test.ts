@@ -1,6 +1,10 @@
 jest.mock('../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/tmp/alignment-model/model.onnx' },
+    }),
     alignOfflineTextToAudio: jest.fn().mockResolvedValue({
       outputSegmentBufferId: 'seg_out',
       segmentsWritten: 1,

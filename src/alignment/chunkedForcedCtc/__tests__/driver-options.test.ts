@@ -1,12 +1,16 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/resolved/alignment.onnx' },
+    }),
     alignAccurateForcedCtcFromPcm: jest.fn(),
   },
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment.onnx'),
+  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({

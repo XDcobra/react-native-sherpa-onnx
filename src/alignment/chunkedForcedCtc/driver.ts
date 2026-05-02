@@ -362,7 +362,26 @@ export async function runAccurateChunkedForcedCtc(
     getPipelineSegmentBufferInfo(anchorSegmentBufferId),
     getPipelineSegmentBufferInfo(segmentOutBufferId),
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
-    resolveModelPath(input.modelPath),
+    (async () => {
+      const dir = (await resolveModelPath(input.modelPath)).trim();
+      if (!dir) {
+        throw createChunkedForcedCtcError(
+          'ALIGNMENT_MODEL_LOAD_FAILED',
+          'resolveModelPath returned empty for alignment modelPath.'
+        );
+      }
+      const det = await SherpaOnnx.detectAlignmentModel(dir, 'auto');
+      const onnx =
+        typeof det.paths?.model === 'string' ? det.paths.model.trim() : '';
+      if (!det.success || !onnx) {
+        const msg =
+          typeof det.error === 'string' && det.error.trim().length > 0
+            ? det.error.trim()
+            : 'Alignment model detection failed: no ONNX path.';
+        throw createChunkedForcedCtcError('ALIGNMENT_MODEL_LOAD_FAILED', msg);
+      }
+      return onnx;
+    })(),
   ]);
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);
