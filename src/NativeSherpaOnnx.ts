@@ -798,6 +798,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;
@@ -816,6 +819,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;

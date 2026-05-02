@@ -373,6 +373,10 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#00897B',
   },
+  /** Extra spacing when “Show more” follows a segment list. */
+  showMoreSegmentsButton: {
+    marginTop: 12,
+  },
   segmentMeta: {
     fontSize: 11,
     color: '#999',

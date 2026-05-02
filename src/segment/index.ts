@@ -573,15 +573,9 @@ async function readSpeechSegmentsFromSegmentBuffer(
   return raw
     .filter((segment) => segment.kind === 'speech')
     .map((segment, idx) => {
-      const nativeReason = toSegmentReason(
-        (segment as unknown as { reason?: string }).reason
-      );
-      const nativeSource = toSegmentSource(
-        (segment as unknown as { source?: string }).source
-      );
-      const nativeCreatedAtMsRaw = (
-        segment as unknown as { createdAtMs?: number }
-      ).createdAtMs;
+      const nativeReason = toSegmentReason(segment.reason);
+      const nativeSource = toSegmentSource(segment.source);
+      const nativeCreatedAtMsRaw = segment.createdAtMs;
       const annotation = getSpeechSegmentAnnotation(segment.id);
       return {
         segmentId: segment.id,

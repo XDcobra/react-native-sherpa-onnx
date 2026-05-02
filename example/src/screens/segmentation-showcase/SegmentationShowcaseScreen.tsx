@@ -20,6 +20,7 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
 import {
+  getSegmentCount,
   getSegments,
   segmentOfflineBuffer,
   type SpeechSegment,
@@ -57,6 +58,10 @@ import {
 } from '../../modelConfig';
 import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  getColorForSegmentReason,
+  SEGMENT_REASON_BADGE_LABEL_COLOR,
+} from './segmentReasonColors';
 import { styles } from './SegmentationShowcaseScreen.styles';
 
 type Mode = 'text' | 'audio';
@@ -73,6 +78,8 @@ type TextSegmentationState = {
   evaluator: TextEvaluator;
   inputText: string;
   segments: TextSegment[];
+  /** From `getSegmentCount` after the last run; drives “Show more” paging. */
+  totalSegmentCount: number | null;
   maxLengthChars: number;
   sentenceBoundary: boolean;
   useCustomSentenceBoundaryChars: boolean;
@@ -87,6 +94,8 @@ type AudioSegmentationState = {
   evaluator: AudioEvaluator;
   audioFile: { uri: string; name: string } | null;
   segments: SpeechSegment[];
+  /** From `getSegmentCount` after the last run; drives “Show more” paging. */
+  totalSegmentCount: number | null;
   silenceThresholdMs: number;
   /** Raw text for decimal-pad input (allows ".", "-0.", etc. while typing). */
   energyThresholdDb: string;
@@ -107,6 +116,8 @@ type AudioSegmentationState = {
 
 const EXAMPLE_TEXT =
   'Hello world. This is a longer example text that will be segmented. The segmentation engine cuts text at sentence boundaries and respects length limits. You can adjust parameters to see how segments change.';
+const SEGMENT_PAGE_SIZE = 128;
+
 const PAD_PACK_NAME = 'sherpa_models';
 const RECOMMENDED_VAD_MODEL_IDS =
   RECOMMENDED_MODEL_IDS[ModelCategory.Vad] ?? [];
@@ -291,10 +302,13 @@ export default function SegmentationShowcaseScreen() {
   const [downloadedVadIds, setDownloadedVadIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
 
+  const [loadingMoreSegments, setLoadingMoreSegments] = useState(false);
+
   const [textState, setTextState] = useState<TextSegmentationState>({
     evaluator: 'text_synthetic_auto',
     inputText: EXAMPLE_TEXT,
     segments: [],
+    totalSegmentCount: null,
     maxLengthChars: 100,
     sentenceBoundary: true,
     useCustomSentenceBoundaryChars: false,
@@ -308,6 +322,7 @@ export default function SegmentationShowcaseScreen() {
     evaluator: 'speech_energy_silence',
     audioFile: null,
     segments: [],
+    totalSegmentCount: null,
     silenceThresholdMs: 500,
     energyThresholdDb: '-40',
     minSegmentMs: 1000,
@@ -778,8 +793,13 @@ export default function SegmentationShowcaseScreen() {
             }
       );
 
-      const segments = (await getSegments(textBuffer, 0, 128)) as TextSegment[];
-      setTextState((prev) => ({ ...prev, segments }));
+      const segments = (await getSegments(
+        textBuffer,
+        0,
+        SEGMENT_PAGE_SIZE
+      )) as TextSegment[];
+      const totalSegmentCount = await getSegmentCount(textBuffer);
+      setTextState((prev) => ({ ...prev, segments, totalSegmentCount }));
     } catch (err) {
       setError(`Text segmentation failed: ${normalizeErrorMessage(err)}`);
       if (textBufferRef.current) {
@@ -889,9 +909,10 @@ export default function SegmentationShowcaseScreen() {
       const segments = (await getSegments(
         audioBuffer,
         0,
-        128
+        SEGMENT_PAGE_SIZE
       )) as SpeechSegment[];
-      setAudioState((prev) => ({ ...prev, segments }));
+      const totalSegmentCount = await getSegmentCount(audioBuffer);
+      setAudioState((prev) => ({ ...prev, segments, totalSegmentCount }));
     } catch (err) {
       setError(`Audio segmentation failed: ${normalizeErrorMessage(err)}`);
       if (audioBufferRef.current) {
@@ -917,6 +938,66 @@ export default function SegmentationShowcaseScreen() {
     audioState.vadMinSilenceMs,
     audioState.vadMinSpeechMs,
     audioState.vadThreshold,
+  ]);
+
+  const handleLoadMoreTextSegments = useCallback(async () => {
+    const bufferId = textBufferRef.current;
+    if (!bufferId || loadingMoreSegments) return;
+    const start = textState.segments.length;
+    const total = textState.totalSegmentCount;
+    if (total == null || start >= total) return;
+
+    setLoadingMoreSegments(true);
+    setError(null);
+    try {
+      const more = (await getSegments(
+        bufferId,
+        start,
+        SEGMENT_PAGE_SIZE
+      )) as TextSegment[];
+      setTextState((prev) => ({
+        ...prev,
+        segments: [...prev.segments, ...more],
+      }));
+    } catch (err) {
+      setError(`Load more segments failed: ${normalizeErrorMessage(err)}`);
+    } finally {
+      setLoadingMoreSegments(false);
+    }
+  }, [
+    loadingMoreSegments,
+    textState.segments.length,
+    textState.totalSegmentCount,
+  ]);
+
+  const handleLoadMoreAudioSegments = useCallback(async () => {
+    const bufferId = audioBufferRef.current;
+    if (!bufferId || loadingMoreSegments) return;
+    const start = audioState.segments.length;
+    const total = audioState.totalSegmentCount;
+    if (total == null || start >= total) return;
+
+    setLoadingMoreSegments(true);
+    setError(null);
+    try {
+      const more = (await getSegments(
+        bufferId,
+        start,
+        SEGMENT_PAGE_SIZE
+      )) as SpeechSegment[];
+      setAudioState((prev) => ({
+        ...prev,
+        segments: [...prev.segments, ...more],
+      }));
+    } catch (err) {
+      setError(`Load more segments failed: ${normalizeErrorMessage(err)}`);
+    } finally {
+      setLoadingMoreSegments(false);
+    }
+  }, [
+    loadingMoreSegments,
+    audioState.segments.length,
+    audioState.totalSegmentCount,
   ]);
 
   const canRunTextSegmentation =
@@ -1301,29 +1382,75 @@ export default function SegmentationShowcaseScreen() {
             {textState.segments.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>
-                  Segments ({textState.segments.length})
+                  Segments ({textState.segments.length}
+                  {textState.totalSegmentCount != null &&
+                  textState.totalSegmentCount > textState.segments.length
+                    ? ` of ${textState.totalSegmentCount}`
+                    : ''}
+                  )
                 </Text>
                 <FlatList
                   data={textState.segments}
                   scrollEnabled={false}
-                  renderItem={({ item, index }) => (
-                    <View key={item.segmentId} style={styles.segmentCard}>
-                      <View style={styles.segmentHeader}>
-                        <Text style={styles.segmentIndex}>#{index + 1}</Text>
-                        <View style={styles.reasonBadge}>
-                          <Text style={styles.reasonBadgeText}>
-                            {item.reason}
+                  renderItem={({ item, index }) => {
+                    const reasonColor = getColorForSegmentReason(item.reason);
+                    return (
+                      <View key={item.segmentId} style={styles.segmentCard}>
+                        <View style={styles.segmentHeader}>
+                          <Text style={styles.segmentIndex}>#{index + 1}</Text>
+                          <View
+                            style={[
+                              styles.reasonBadge,
+                              { backgroundColor: reasonColor },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.reasonBadgeText,
+                                { color: SEGMENT_REASON_BADGE_LABEL_COLOR },
+                              ]}
+                            >
+                              {item.reason}
+                            </Text>
+                          </View>
+                          <Text style={styles.segmentMeta}>
+                            {item.utf16Length} chars
                           </Text>
                         </View>
-                        <Text style={styles.segmentMeta}>
-                          {item.utf16Length} chars
-                        </Text>
+                        <Text style={styles.segmentText}>{item.text}</Text>
                       </View>
-                      <Text style={styles.segmentText}>{item.text}</Text>
-                    </View>
-                  )}
+                    );
+                  }}
                   keyExtractor={(item) => item.segmentId}
                 />
+                {textState.totalSegmentCount != null &&
+                  textState.segments.length < textState.totalSegmentCount && (
+                    <Pressable
+                      style={[
+                        styles.button,
+                        styles.secondaryButton,
+                        styles.showMoreSegmentsButton,
+                        (loading || loadingMoreSegments) &&
+                          styles.buttonDisabled,
+                      ]}
+                      onPress={handleLoadMoreTextSegments}
+                      disabled={loading || loadingMoreSegments}
+                    >
+                      {loadingMoreSegments ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.buttonText}>
+                          Show more (
+                          {Math.min(
+                            SEGMENT_PAGE_SIZE,
+                            textState.totalSegmentCount -
+                              textState.segments.length
+                          )}{' '}
+                          more)
+                        </Text>
+                      )}
+                    </Pressable>
+                  )}
               </>
             )}
           </View>
@@ -1830,7 +1957,12 @@ export default function SegmentationShowcaseScreen() {
             {audioState.segments.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>
-                  Timeline ({audioState.segments.length} segments)
+                  Timeline ({audioState.segments.length}
+                  {audioState.totalSegmentCount != null &&
+                  audioState.totalSegmentCount > audioState.segments.length
+                    ? ` of ${audioState.totalSegmentCount}`
+                    : ''}{' '}
+                  segments)
                 </Text>
                 <View style={styles.timelineContainer}>
                   <View style={styles.timeline}>
@@ -1843,16 +1975,7 @@ export default function SegmentationShowcaseScreen() {
                         totalDuration > 0
                           ? (segment.durationMs / totalDuration) * 100
                           : 0;
-                      const colors = [
-                        '#FF6B6B',
-                        '#4ECDC4',
-                        '#45B7D1',
-                        '#FFA07A',
-                        '#98D8C8',
-                        '#F7DC6F',
-                      ];
-                      const color =
-                        colors[segment.segmentIndex % colors.length];
+                      const color = getColorForSegmentReason(segment.reason);
 
                       return (
                         <View
@@ -1871,33 +1994,74 @@ export default function SegmentationShowcaseScreen() {
                 <FlatList
                   data={audioState.segments}
                   scrollEnabled={false}
-                  renderItem={({ item, index }) => (
-                    <View key={item.segmentId} style={styles.segmentCard}>
-                      <View style={styles.segmentHeader}>
-                        <Text style={styles.segmentIndex}>#{index + 1}</Text>
-                        <View style={styles.reasonBadge}>
-                          <Text style={styles.reasonBadgeText}>
-                            {item.reason}
+                  renderItem={({ item, index }) => {
+                    const reasonColor = getColorForSegmentReason(item.reason);
+                    return (
+                      <View key={item.segmentId} style={styles.segmentCard}>
+                        <View style={styles.segmentHeader}>
+                          <Text style={styles.segmentIndex}>#{index + 1}</Text>
+                          <View
+                            style={[
+                              styles.reasonBadge,
+                              { backgroundColor: reasonColor },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.reasonBadgeText,
+                                { color: SEGMENT_REASON_BADGE_LABEL_COLOR },
+                              ]}
+                            >
+                              {item.reason}
+                            </Text>
+                          </View>
+                          <Text style={styles.segmentMeta}>
+                            {item.durationMs}ms
                           </Text>
                         </View>
-                        <Text style={styles.segmentMeta}>
-                          {item.durationMs}ms
-                        </Text>
+                        {item.energy !== undefined && (
+                          <Text style={styles.segmentDetail}>
+                            Energy: {item.energy.toFixed(2)} dB
+                          </Text>
+                        )}
+                        {item.vadInfo && (
+                          <Text style={styles.segmentDetail}>
+                            VAD: {item.vadInfo.decision || 'unknown'}
+                          </Text>
+                        )}
                       </View>
-                      {item.energy !== undefined && (
-                        <Text style={styles.segmentDetail}>
-                          Energy: {item.energy.toFixed(2)} dB
-                        </Text>
-                      )}
-                      {item.vadInfo && (
-                        <Text style={styles.segmentDetail}>
-                          VAD: {item.vadInfo.decision || 'unknown'}
-                        </Text>
-                      )}
-                    </View>
-                  )}
+                    );
+                  }}
                   keyExtractor={(item) => item.segmentId}
                 />
+                {audioState.totalSegmentCount != null &&
+                  audioState.segments.length < audioState.totalSegmentCount && (
+                    <Pressable
+                      style={[
+                        styles.button,
+                        styles.secondaryButton,
+                        styles.showMoreSegmentsButton,
+                        (loading || loadingMoreSegments) &&
+                          styles.buttonDisabled,
+                      ]}
+                      onPress={handleLoadMoreAudioSegments}
+                      disabled={loading || loadingMoreSegments}
+                    >
+                      {loadingMoreSegments ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.buttonText}>
+                          Show more (
+                          {Math.min(
+                            SEGMENT_PAGE_SIZE,
+                            audioState.totalSegmentCount -
+                              audioState.segments.length
+                          )}{' '}
+                          more)
+                        </Text>
+                      )}
+                    </Pressable>
+                  )}
               </>
             )}
           </View>

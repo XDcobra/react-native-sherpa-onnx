@@ -86,6 +86,10 @@ interface SegmentMetaBase {
   sampleRate: number;
   durationMs: number;
   confidence?: number;
+  /** Segmentation annotation from native (e.g. vad_boundary, energy_silence, finalize). */
+  reason?: string;
+  source?: string;
+  createdAtMs?: number;
 }
 
 export interface SpeechSegmentMeta extends SegmentMetaBase {

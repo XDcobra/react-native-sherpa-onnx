@@ -271,6 +271,8 @@ const items = await getSegments(segRef, 0, 64);
 
 Reads text or speech segments from the resolved source. Throws `SEGMENT_INDEX_OUT_OF_RANGE` on invalid windows.
 
+**`reason` / `source` / `createdAtMs`:** Segments produced by engines (for example offline `segmentOfflineBuffer` with `speech_vad_model`, or streaming VAD writing into a pipeline segment buffer) carry the native annotation on each row — typically `vad_boundary`, `length_limit` when a max-duration policy splits a span, or `finalize` at end-of-input. **`manual_commit` applies to explicit `commitSegment(...)` calls only.** Optional `source` and `createdAtMs` are included when the bridge provides them.
+
 #### `getSegmentCount(buffer)`
 
 ```ts
