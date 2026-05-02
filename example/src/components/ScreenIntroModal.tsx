@@ -57,6 +57,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'End-to-end pipeline showcase',
     body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',
   },
+  FileIO: {
+    title: 'File I/O sandbox',
+    body: 'Use this screen to experiment with FileDestination kinds, audio source selection, and document-picker flows in isolation from other features.',
+  },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',
     body: 'This screen demonstrates how audio and text are aligned into timestamps. It is useful for understanding the subtitle and alignment APIs before exporting results.',

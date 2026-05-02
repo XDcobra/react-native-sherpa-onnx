@@ -16,6 +16,7 @@ export type RootStackParamList = {
   EnhancementStreaming: undefined;
   Separation: undefined;
   Settings: undefined;
+  FileIO: undefined;
 };
 
 export type FeatureId =
@@ -33,7 +34,8 @@ export type FeatureId =
   | 'diarization'
   | 'enhancement'
   | 'enhancement_streaming'
-  | 'separation';
+  | 'separation'
+  | 'fileio';
 
 export interface Feature {
   id: FeatureId;

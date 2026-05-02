@@ -87,6 +87,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'fileio',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'File I/O',
+    description:
+      'Isolate FileDestination and AudioOutputFormat / saveAudioAsFile behavior',
+    icon: 'folder-open-outline',
+    screen: 'FileIO',
+    implemented: true,
+  },
+  {
     id: 'generate_timestamp',
     sectionTitle: 'Alignment & Untertitel',
     title: 'Alignment (Subtitles/Timestamps)',

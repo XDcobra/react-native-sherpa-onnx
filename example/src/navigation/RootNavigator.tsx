@@ -18,6 +18,7 @@ import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import FileIOScreen from '../screens/fileio/FileIOScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -152,6 +153,13 @@ export default function RootNavigator() {
         component={SettingsScreen}
         options={{
           title: 'Settings',
+        }}
+      />
+      <Stack.Screen
+        name="FileIO"
+        component={FileIOScreen}
+        options={{
+          title: 'File I/O',
         }}
       />
     </Stack.Navigator>
