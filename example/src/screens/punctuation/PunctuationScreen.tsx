@@ -48,6 +48,11 @@ import {
 import { styles } from '../stt/STTScreen.styles';
 import { puncStyles } from './PunctuationScreen.styles';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_INPUT =
@@ -120,7 +125,8 @@ export default function PunctuationScreen() {
   const [lastSegmentStatus, setLastSegmentStatus] = useState<string | null>(
     null
   );
-  const [segmentedOffline, setSegmentedOffline] = useState(false);
+  const [offlineSegConfig, setOfflineSegConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
   const [engineReady, setEngineReady] = useState(false);
 
   const engineRef = useRef<OfflinePunctuationEngine | null>(null);
@@ -317,20 +323,11 @@ export default function PunctuationScreen() {
       textOutRef.current = textOut;
 
       const result = await engine.punctuate(textIn, textOut, {
-        segmentation: segmentedOffline
-          ? {
-              mode: 'auto',
-              policy: {
-                evaluator: 'text_synthetic_auto',
-                sentenceBoundary: true,
-                maxLengthChars: 320,
-              },
-            }
-          : { mode: 'off' },
+        segmentation: buildSegmentationOption(offlineSegConfig),
         errorRecovery: 'retry',
         maxRetriesPerSegment: 1,
         retryExhaustedFallback: 'skip',
-        overlapChars: segmentedOffline ? 24 : 0,
+        overlapChars: offlineSegConfig.mode !== 'off' ? 24 : 0,
         textSkipPlaceholder: '',
       });
       const { processingTimeMs } = result;
@@ -528,21 +525,12 @@ export default function PunctuationScreen() {
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>4) Run (buffer → buffer)</Text>
-              <View style={puncStyles.debugRow}>
-                <Text style={puncStyles.smallLabel}>
-                  segmented offline for long text{' '}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setSegmentedOffline((v) => !v)}
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name={segmentedOffline ? 'checkbox' : 'square-outline'}
-                    size={24}
-                    color={segmentedOffline ? '#007AFF' : '#8E8E93'}
-                  />
-                </TouchableOpacity>
-              </View>
+              <SegmentationPolicyControls
+                variant="text-offline"
+                value={offlineSegConfig}
+                onChange={setOfflineSegConfig}
+                disabled={punctuateBusy || !engineReady}
+              />
               <TouchableOpacity
                 style={[
                   styles.button,

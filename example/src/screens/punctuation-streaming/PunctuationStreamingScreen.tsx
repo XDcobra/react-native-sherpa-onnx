@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
@@ -44,6 +43,11 @@ import {
 } from '../../modelConfig';
 import { styles } from '../stt/STTScreen.styles';
 import { puncStyles } from '../punctuation/PunctuationScreen.styles';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_STREAMING_TEXT =
@@ -99,7 +103,15 @@ export default function PunctuationStreamingScreen() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [inputText, setInputText] = useState(DEFAULT_STREAMING_TEXT);
-  const [segmentationAuto, setSegmentationAuto] = useState(true);
+  const [streamingSegConfig, setStreamingSegConfig] =
+    useState<SegmentationControlConfig>({
+      mode: 'auto',
+      policy: {
+        evaluator: 'text_punctuation_assisted',
+        sentenceBoundary: true,
+        maxLengthChars: 500,
+      },
+    });
   const [busy, setBusy] = useState(false);
   const [outputText, setOutputText] = useState('');
   const [statusText, setStatusText] = useState<string | null>(null);
@@ -263,7 +275,7 @@ export default function PunctuationStreamingScreen() {
       outputRef.current = output;
 
       const handle = await engine.punctuate(input, output, {
-        segmentation: segmentationAuto ? { mode: 'auto' } : { mode: 'off' },
+        segmentation: buildSegmentationOption(streamingSegConfig),
       });
       handleRef.current = handle;
 
@@ -373,20 +385,12 @@ export default function PunctuationStreamingScreen() {
                 onChangeText={setInputText}
                 editable={!busy}
               />
-              <View style={puncStyles.debugRow}>
-                <Text style={puncStyles.smallLabel}>attach segmentation </Text>
-                <TouchableOpacity
-                  onPress={() => setSegmentationAuto((v) => !v)}
-                  accessibilityRole="button"
-                  disabled={busy}
-                >
-                  <Ionicons
-                    name={segmentationAuto ? 'checkbox' : 'square-outline'}
-                    size={24}
-                    color={segmentationAuto ? '#007AFF' : '#8E8E93'}
-                  />
-                </TouchableOpacity>
-              </View>
+              <SegmentationPolicyControls
+                variant="text-streaming"
+                value={streamingSegConfig}
+                onChange={setStreamingSegConfig}
+                disabled={busy}
+              />
             </View>
 
             <View style={styles.section}>

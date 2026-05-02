@@ -211,12 +211,6 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     color: '#667085',
   },
-  warningText: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#B42318',
-    lineHeight: 18,
-  },
   choiceList: {
     gap: 10,
   },

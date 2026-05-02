@@ -8,7 +8,6 @@ import {
   Alert,
   Platform,
   StyleSheet,
-  Switch,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -70,6 +69,11 @@ import {
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -161,7 +165,8 @@ export default function EnhancementStreamingScreen() {
     string | null
   >(null);
   const [enhancing, setEnhancing] = useState(false);
-  const [attachContinuousFrames, setAttachContinuousFrames] = useState(false);
+  const [segStreamingConfig, setSegStreamingConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
   const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
@@ -877,17 +882,9 @@ export default function EnhancementStreamingScreen() {
       const pipeline = await engine.enhance(
         inputLive.bufferId,
         outputLive.bufferId,
-        attachContinuousFrames
-          ? {
-              segmentation: {
-                mode: 'auto',
-                policy: {
-                  evaluator: 'continuous_frames',
-                  checkpointIntervalMs: 1000,
-                },
-              },
-            }
-          : undefined
+        segStreamingConfig.mode === 'off'
+          ? undefined
+          : { segmentation: buildSegmentationOption(segStreamingConfig) }
       );
       pipelineRef.current = pipeline;
       setInputBufferBuildStatus(
@@ -947,11 +944,13 @@ export default function EnhancementStreamingScreen() {
 
       pipelineRef.current = null;
 
-      const checkpointCount = attachContinuousFrames
-        ? (
-            await getSegments(inputLive.bufferId, 0, 100000).catch(() => [])
-          ).filter((segment) => segment.reason === 'policy_checkpoint').length
-        : 0;
+      const checkpointCount =
+        segStreamingConfig.mode !== 'off' &&
+        segStreamingConfig.policy?.evaluator === 'continuous_frames'
+          ? (
+              await getSegments(inputLive.bufferId, 0, 100000).catch(() => [])
+            ).filter((segment) => segment.reason === 'policy_checkpoint').length
+          : 0;
 
       setInputBufferBuildProgress(100);
       setInputBufferBuildStatus('Finalizing output...');
@@ -1256,16 +1255,12 @@ export default function EnhancementStreamingScreen() {
             )}
 
             {engineReady && (
-              <View style={localStyles.optionRow}>
-                <Text style={localStyles.optionLabel}>
-                  Continuous checkpoints
-                </Text>
-                <Switch
-                  value={attachContinuousFrames}
-                  onValueChange={setAttachContinuousFrames}
-                  disabled={enhancing || loading || preparingInputBuffer}
-                />
-              </View>
+              <SegmentationPolicyControls
+                variant="speech-streaming"
+                value={segStreamingConfig}
+                onChange={setSegStreamingConfig}
+                disabled={enhancing || loading || preparingInputBuffer}
+              />
             )}
 
             {engineReady &&

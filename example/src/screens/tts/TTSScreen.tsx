@@ -86,6 +86,11 @@ import {
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
 /**
@@ -137,8 +142,10 @@ export default function TTSScreen() {
   const [streaming, setStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState<number | null>(null);
   const [streamSampleCount, setStreamSampleCount] = useState(0);
-  const [offlineSegmentedMode, setOfflineSegmentedMode] = useState(false);
-  const [streamingSegmentedMode, setStreamingSegmentedMode] = useState(false);
+  const [offlineSegConfig, setOfflineSegConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
+  const [streamingSegConfig, setStreamingSegConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
   const [lastSynthesisResult, setLastSynthesisResult] =
     useState<TtsSynthesisResult | null>(null);
   const [modelInfo, setModelInfo] = useState<{
@@ -616,10 +623,10 @@ export default function TTSScreen() {
     });
   }, []);
 
-  // Mode 4 (streaming + segmentation auto): debounced delta commits while typing.
-  // Mode 3 (streaming manual): only explicit commits — skip auto-append to avoid duplicating manual segments.
+  // Streaming + segmentation auto: debounced delta commits while typing.
+  // Otherwise (off/manual): only explicit commits — skip auto-append to avoid duplicating segments.
   useEffect(() => {
-    if (!streaming || !streamingSegmentedMode) {
+    if (!streaming || streamingSegConfig.mode !== 'auto') {
       if (streamDebounceRef.current) {
         clearTimeout(streamDebounceRef.current);
         streamDebounceRef.current = null;
@@ -636,7 +643,7 @@ export default function TTSScreen() {
         streamDebounceRef.current = null;
       }
     };
-  }, [streaming, streamingSegmentedMode, inputText, enqueueStreamingText]);
+  }, [streaming, streamingSegConfig.mode, inputText, enqueueStreamingText]);
 
   const loadAvailableModels = async () => {
     setLoadingModels(true);
@@ -941,9 +948,7 @@ export default function TTSScreen() {
         if (Object.keys(ex).length > 0) options.extra = ex;
       }
 
-      if (offlineSegmentedMode) {
-        options.segmentation = { mode: 'auto' };
-      }
+      options.segmentation = buildSegmentationOption(offlineSegConfig);
 
       // Voice clone: create buffer from raw reference samples
       let refAudioBuf: OfflineAudioBufferRef | undefined;
@@ -1147,9 +1152,7 @@ export default function TTSScreen() {
       // Start the TTS pipeline
       const pipelineConfig: TtsPipelineOptions = {
         ...(pipelineOpts ?? {}),
-        ...(streamingSegmentedMode
-          ? { segmentation: { mode: 'auto' as const } }
-          : { segmentation: { mode: 'off' as const } }),
+        segmentation: buildSegmentationOption(streamingSegConfig),
       };
 
       const pipelineHandle = await streamingEngine.synthesize(
@@ -1857,65 +1860,26 @@ export default function TTSScreen() {
               />
 
               <Text style={styles.sectionDescription}>
-                Offline mode:{' '}
-                {offlineSegmentedMode
-                  ? 'Mode 2 (segmented offline)'
-                  : 'Mode 1 (one-shot offline)'}
+                Offline: use Segmentation controls below (Off = one-shot; Auto =
+                chunked synthesis per policy).
               </Text>
-              <Text style={styles.sectionDescription}>
-                Streaming mode:{' '}
-                {streamingSegmentedMode
-                  ? 'Mode 4 (live + segmentation engine attach)'
-                  : 'Mode 3 (live + caller-committed segments)'}
+              <SegmentationPolicyControls
+                variant="text-offline"
+                value={offlineSegConfig}
+                onChange={setOfflineSegConfig}
+                disabled={generating || streaming}
+              />
+
+              <Text style={[styles.sectionDescription, { marginTop: 12 }]}>
+                Streaming: Off/Manual = caller-committed segments; Auto =
+                segmentation engine (debounced text commits while typing).
               </Text>
-
-              <View style={styles.streamControls}>
-                <TouchableOpacity
-                  style={[
-                    styles.streamButton,
-                    offlineSegmentedMode && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setOfflineSegmentedMode(false)}
-                >
-                  <Text style={styles.generateButtonText}>
-                    Offline One-shot
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.cancelStreamButton,
-                    !offlineSegmentedMode && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setOfflineSegmentedMode(true)}
-                >
-                  <Text style={styles.generateButtonText}>
-                    Offline Segmented
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.streamControls}>
-                <TouchableOpacity
-                  style={[
-                    styles.streamButton,
-                    streamingSegmentedMode && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setStreamingSegmentedMode(false)}
-                >
-                  <Text style={styles.generateButtonText}>
-                    Streaming Manual
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.cancelStreamButton,
-                    !streamingSegmentedMode && styles.buttonDisabled,
-                  ]}
-                  onPress={() => setStreamingSegmentedMode(true)}
-                >
-                  <Text style={styles.generateButtonText}>Streaming Auto</Text>
-                </TouchableOpacity>
-              </View>
+              <SegmentationPolicyControls
+                variant="text-streaming"
+                value={streamingSegConfig}
+                onChange={setStreamingSegConfig}
+                disabled={generating || streaming}
+              />
 
               <View style={styles.generateActionsSpacer} />
               <TouchableOpacity
@@ -1962,7 +1926,7 @@ export default function TTSScreen() {
                     Streaming... {Math.round((streamProgress ?? 0) * 100)}% (
                     {streamSampleCount} samples)
                   </Text>
-                  {!streamingSegmentedMode && (
+                  {streamingSegConfig.mode !== 'auto' && (
                     <TouchableOpacity
                       style={styles.streamButton}
                       onPress={() => {

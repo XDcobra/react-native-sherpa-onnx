@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -14,15 +15,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { DocumentDirectoryPath, unlink } from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
-import { copyFile } from 'react-native-sherpa-onnx/fileio';
 import {
   createAlignment,
   detectAlignmentModel,
@@ -30,10 +29,6 @@ import {
   type AlignmentModelType,
   type AlignmentWarning,
 } from 'react-native-sherpa-onnx/alignment';
-import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineSegmentBuffer,
   getOfflineSegmentBufferSegments,
@@ -68,8 +63,14 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
+import { AUDIO_FILES } from '../../audioConfig';
 import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
 import { styles } from './GenerateTimestampScreen.styles';
 
 type UiMode =
@@ -254,19 +255,6 @@ function extractErrorCode(message: string): string | null {
   }
   const maybeCode = trimmed.slice(0, idx).trim();
   return maybeCode.length > 0 ? maybeCode : null;
-}
-
-function normalizeUriToPath(uri: string): string {
-  if (uri.startsWith('file://')) {
-    return decodeURI(uri.replace(/^file:\/\//, ''));
-  }
-  return uri;
-}
-
-function getFileNameFromUri(uri: string): string {
-  const withoutQuery = uri.split('?')[0] ?? uri;
-  const segments = withoutQuery.split('/');
-  return decodeURIComponent(segments[segments.length - 1] ?? 'audio.wav');
 }
 
 function getModelLabel(model: ModelMeta): string {
@@ -588,10 +576,9 @@ export default function GenerateTimestampScreen() {
   const [mode, setMode] = useState<UiMode>('proportional');
   const [granularity, setGranularity] =
     useState<AlignmentGranularity>('sentence');
-  const [selectedAudioUri, setSelectedAudioUri] = useState<string | null>(null);
-  const [selectedAudioName, setSelectedAudioName] = useState<string | null>(
-    null
-  );
+  const [preparedAudioBuffer, setPreparedAudioBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
+  const audioWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const [referenceTranscript, setReferenceTranscript] = useState(
     DEFAULT_REFERENCE_TEXT
   );
@@ -727,13 +714,6 @@ export default function GenerateTimestampScreen() {
       };
     }
   }, [estimatedSampleRateText, estimatedSegmentCountsText, mode]);
-
-  const shouldWarnNonWav = useMemo(() => {
-    if (!selectedAudioName) {
-      return false;
-    }
-    return !selectedAudioName.toLowerCase().endsWith('.wav');
-  }, [selectedAudioName]);
 
   const loadModelCatalogs = useCallback(async () => {
     setLoadingModelCatalogs(true);
@@ -872,7 +852,7 @@ export default function GenerateTimestampScreen() {
 
   const runBlockingIssues = useMemo(() => {
     const issues: string[] = [];
-    if (!selectedAudioUri) {
+    if (!preparedAudioBuffer) {
       issues.push('Select an audio file.');
     }
     if (!referenceTranscript.trim()) {
@@ -913,40 +893,10 @@ export default function GenerateTimestampScreen() {
     preparedVadModelId,
     referenceTranscript,
     selectedAlignmentModelId,
-    selectedAudioUri,
+    preparedAudioBuffer,
     selectedSttModelId,
     selectedVadModelId,
   ]);
-
-  const pickAudioFile = useCallback(async () => {
-    setError(null);
-    setErrorCode(null);
-    try {
-      const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
-      });
-      const file = Array.isArray(picked) ? picked[0] : picked;
-      const uri = file?.uri ?? (file as { fileUri?: string })?.fileUri ?? '';
-      if (!uri) {
-        setError('Could not resolve file URI from picker result.');
-        return;
-      }
-      setSelectedAudioUri(uri);
-      setSelectedAudioName(file?.name ?? getFileNameFromUri(uri));
-      setResult(null);
-    } catch (err: unknown) {
-      const cancelled =
-        (
-          DocumentPicker as { isCancel?: (value: unknown) => boolean }
-        ).isCancel?.(err) ?? false;
-      if (cancelled) {
-        return;
-      }
-      setError(
-        err instanceof Error ? err.message : 'Failed to pick audio file.'
-      );
-    }
-  }, []);
 
   const handlePrepareAlignmentModel = useCallback(async () => {
     if (!selectedAlignmentModelId) {
@@ -1116,43 +1066,20 @@ export default function GenerateTimestampScreen() {
 
     const alignment = createAlignment();
     let stt: Awaited<ReturnType<typeof createSTT>> | null = null;
-    let cleanupPath: string | null = null;
     let textBufferId: string | null = null;
-    let audioBufferId: string | null = null;
     let outputSegmentBufferId: string | null = null;
     let anchorSegmentBufferId: string | null = null;
     let hypothesisTextBufferId: string | null = null;
+    const audioBufferId = preparedAudioBuffer!.bufferId;
 
     try {
-      let audioPath = normalizeUriToPath(selectedAudioUri!);
-      if (selectedAudioUri!.startsWith('content://')) {
-        const safeName = (selectedAudioName ?? 'alignment-input.wav').replace(
-          /[^a-zA-Z0-9._-]/g,
-          '_'
-        );
-        const cacheName = `generate_timestamp_${Date.now()}_${safeName}`;
-        const copied = await copyFile(
-          { kind: 'contentUri', uri: selectedAudioUri! },
-          { kind: 'app', base: 'cache', path: cacheName }
-        );
-        audioPath =
-          copied.output.kind === 'fs' ? copied.output.path : audioPath;
-        cleanupPath = audioPath;
-      }
-
       const referenceBuffer = await createOfflineTextBufferFromText(
         referenceTranscript.trim()
       );
       textBufferId = referenceBuffer.bufferId;
 
-      const audioBuffer = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: audioPath,
-      });
-      audioBufferId = audioBuffer.bufferId;
-
       const outputBuffer = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: audioBuffer.bufferId,
+        sourceAudioBufferId: audioBufferId,
       });
       outputSegmentBufferId = outputBuffer.bufferId;
 
@@ -1183,7 +1110,7 @@ export default function GenerateTimestampScreen() {
       let anchorRef: Awaited<ReturnType<typeof segmentOfflineBuffer>> | null =
         null;
       if (activeMode.requiresVadModel) {
-        anchorRef = await segmentOfflineBuffer(audioBuffer, {
+        anchorRef = await segmentOfflineBuffer(audioBufferId, {
           evaluator: 'speech_vad_model',
           modelPath: vadModelPath!,
         });
@@ -1201,7 +1128,7 @@ export default function GenerateTimestampScreen() {
             whisper: { enableTokenTimestamps: true },
           },
         });
-        await stt.transcribe(audioBuffer, hypothesisBuffer, {
+        await stt.transcribe(audioBufferId, hypothesisBuffer, {
           segmentation: { mode: 'off' },
         });
       }
@@ -1212,7 +1139,7 @@ export default function GenerateTimestampScreen() {
         mode === 'proportional'
           ? await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'proportional',
@@ -1222,7 +1149,7 @@ export default function GenerateTimestampScreen() {
           : mode === 'estimated'
           ? await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'estimated',
@@ -1236,7 +1163,7 @@ export default function GenerateTimestampScreen() {
           : mode === 'accurate'
           ? await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'accurate',
@@ -1247,7 +1174,7 @@ export default function GenerateTimestampScreen() {
           : mode === 'vad'
           ? await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'vad',
@@ -1261,7 +1188,7 @@ export default function GenerateTimestampScreen() {
           : mode === 'asr_mediated'
           ? await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'accurate',
@@ -1279,7 +1206,7 @@ export default function GenerateTimestampScreen() {
             )
           : await alignment.alignTextToAudio(
               referenceBuffer,
-              audioBuffer,
+              audioBufferId,
               outputBuffer,
               {
                 mode: 'accurate',
@@ -1306,7 +1233,7 @@ export default function GenerateTimestampScreen() {
       setResult({
         mode,
         textInBufferId: referenceBuffer.bufferId,
-        audioInBufferId: audioBuffer.bufferId,
+        audioInBufferId: audioBufferId,
         outputSegmentBufferId: writeResult.outputSegmentBufferId,
         anchorSegmentBufferId: anchorSegmentBufferId ?? undefined,
         hypothesisTextBufferId: hypothesisTextBufferId ?? undefined,
@@ -1341,12 +1268,6 @@ export default function GenerateTimestampScreen() {
       if (textBufferId) {
         await releasePipelineTextBuffer(textBufferId).catch(() => {});
       }
-      if (audioBufferId) {
-        await releasePipelineAudioBuffer(audioBufferId).catch(() => {});
-      }
-      if (cleanupPath) {
-        await unlink(cleanupPath).catch(() => {});
-      }
       await alignment.destroy().catch(() => {});
       setRunning(false);
     }
@@ -1358,12 +1279,11 @@ export default function GenerateTimestampScreen() {
     granularity,
     mode,
     preparedAlignmentModelId,
+    preparedAudioBuffer,
     preparedSttModelId,
     preparedVadModelId,
     referenceTranscript,
     runBlockingIssues,
-    selectedAudioName,
-    selectedAudioUri,
     sttCatalog,
     vadCatalog,
   ]);
@@ -1439,31 +1359,25 @@ export default function GenerateTimestampScreen() {
                 color="#FF9800"
               />
               <Text style={styles.hintText}>
-                Recommended input format: WAV, mono, 16 kHz. The same offline
-                audio buffer is reused for anchors, STT, and final alignment.
+                Audio is loaded with createOfflineAudioBufferFromFile, which
+                decodes common formats (WAV, MP3, M4A, FLAC, …) and resamples as
+                needed. The same offline buffer is reused for anchors, STT, and
+                final alignment.
               </Text>
             </View>
-            <Pressable style={styles.button} onPress={pickAudioFile}>
-              <Text style={styles.buttonText}>Choose audio file</Text>
-            </Pressable>
-            {selectedAudioName ? (
-              <View style={styles.selectedFileCard}>
-                <Text style={styles.selectedFileLabel}>Selected file</Text>
-                <Text style={styles.selectedFileName}>{selectedAudioName}</Text>
-                {selectedAudioUri ? (
-                  <Text style={styles.selectedFileMeta}>
-                    {selectedAudioUri}
-                  </Text>
-                ) : null}
-                {shouldWarnNonWav ? (
-                  <Text style={styles.warningText}>
-                    This is not a .wav file. The pipeline still uses
-                    createOfflineAudioBufferFromFile, but WAV mono 16 kHz
-                    matches the documented happy path best.
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
+            <OfflineAudioBufferWidget
+              ref={audioWidgetRef}
+              audioFiles={AUDIO_FILES}
+              disabled={running}
+              onBufferReady={(info) => {
+                setPreparedAudioBuffer(info);
+                setResult(null);
+              }}
+              onBufferReleased={() => {
+                setPreparedAudioBuffer(null);
+                setResult(null);
+              }}
+            />
 
             <Text style={styles.inputLabel}>Reference transcript (R)</Text>
             <TextInput

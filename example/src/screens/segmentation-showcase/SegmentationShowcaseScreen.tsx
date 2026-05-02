@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import * as DocumentPicker from '@react-native-documents/picker';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import {
@@ -30,10 +29,7 @@ import {
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
+import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   createOfflinePunctuation,
@@ -56,8 +52,14 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
+import { AUDIO_FILES } from '../../audioConfig';
 import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
 import {
   getColorForSegmentReason,
   SEGMENT_REASON_BADGE_LABEL_COLOR,
@@ -148,17 +150,6 @@ function normalizeErrorMessage(error: unknown): string {
     }
   }
   return 'Unknown error';
-}
-
-function toFileSource(pathOrUri: string): FileSource {
-  const trimmed = pathOrUri.trim();
-  if (trimmed.startsWith('content://')) {
-    return { kind: 'contentUri', uri: trimmed };
-  }
-  if (trimmed.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(trimmed.replace(/^file:\/\//, '')) };
-  }
-  return { kind: 'fs', path: trimmed };
 }
 
 function isPunctuationNameCandidate(folder: string): boolean {
@@ -337,6 +328,9 @@ export default function SegmentationShowcaseScreen() {
     initializedVadFileSource: null,
     detectedVadModelType: null,
   });
+  const [preparedAudioBuffer, setPreparedAudioBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
+  const audioWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
   const textBufferRef = useRef<string | null>(null);
   const audioBufferRef = useRef<string | null>(null);
@@ -823,34 +817,8 @@ export default function SegmentationShowcaseScreen() {
     textState.useCustomSentenceBoundaryChars,
   ]);
 
-  const handleSelectAudioFile = useCallback(async () => {
-    try {
-      const result = await DocumentPicker.pick({
-        presentationStyle: 'pageSheet',
-      });
-
-      if (result && result.length > 0) {
-        const file = result[0];
-        if (file.uri) {
-          setError(null);
-          setAudioState((prev) => ({
-            ...prev,
-            audioFile: {
-              uri: file.uri,
-              name: file.name ?? 'audio',
-            },
-          }));
-        }
-      }
-    } catch (err) {
-      if (!String(err).includes('cancelled')) {
-        setError(`File picker error: ${normalizeErrorMessage(err)}`);
-      }
-    }
-  }, []);
-
   const handleRunAudioSegmentation = useCallback(async () => {
-    if (!audioState.audioFile) {
+    if (!preparedAudioBuffer) {
       setError('Please select an audio file');
       return;
     }
@@ -871,21 +839,14 @@ export default function SegmentationShowcaseScreen() {
     setError(null);
 
     try {
-      if (audioBufferRef.current) {
-        try {
-          await releasePipelineAudioBuffer(audioBufferRef.current);
-        } catch {}
-      }
-
-      const fileSource = toFileSource(audioState.audioFile.uri);
-      const audioBuffer = await createOfflineAudioBufferFromFile(fileSource);
-      audioBufferRef.current = audioBuffer.bufferId;
+      const audioBufferId = preparedAudioBuffer.bufferId;
+      audioBufferRef.current = audioBufferId;
 
       const energyDb = parseOptionalFloat(audioState.energyThresholdDb, -40);
       const vadTh = parseOptionalFloat(audioState.vadThreshold, 0.5);
 
       await segmentOfflineBuffer(
-        audioBuffer,
+        audioBufferId,
         audioState.evaluator === 'speech_energy_silence'
           ? {
               evaluator: 'speech_energy_silence',
@@ -907,25 +868,19 @@ export default function SegmentationShowcaseScreen() {
       );
 
       const segments = (await getSegments(
-        audioBuffer,
+        audioBufferId,
         0,
         SEGMENT_PAGE_SIZE
       )) as SpeechSegment[];
-      const totalSegmentCount = await getSegmentCount(audioBuffer);
+      const totalSegmentCount = await getSegmentCount(audioBufferId);
       setAudioState((prev) => ({ ...prev, segments, totalSegmentCount }));
     } catch (err) {
       setError(`Audio segmentation failed: ${normalizeErrorMessage(err)}`);
-      if (audioBufferRef.current) {
-        try {
-          await releasePipelineAudioBuffer(audioBufferRef.current);
-        } catch {}
-        audioBufferRef.current = null;
-      }
     } finally {
       setLoading(false);
     }
   }, [
-    audioState.audioFile,
+    preparedAudioBuffer,
     audioState.energyThresholdDb,
     audioState.evaluator,
     audioState.hangoverMs,
@@ -1011,7 +966,7 @@ export default function SegmentationShowcaseScreen() {
 
   const canRunAudioSegmentation =
     !loading &&
-    !!audioState.audioFile &&
+    !!preparedAudioBuffer &&
     (audioState.evaluator === 'speech_energy_silence' ||
       (!!audioState.selectedVadModelId &&
         !!audioState.initializedVadFileSource &&
@@ -1464,39 +1419,28 @@ export default function SegmentationShowcaseScreen() {
                 Offline audio segmentation can use energy-based silence
                 detection or a VAD model.
               </Text>
-              {audioState.audioFile ? (
-                <View style={styles.fileSelectedBox}>
-                  <Ionicons name="document-attach" size={20} color="#007AFF" />
-                  <View style={styles.fileInfo}>
-                    <Text style={styles.fileName}>
-                      {audioState.audioFile.name}
-                    </Text>
-                    <Text style={styles.fileUri} numberOfLines={1}>
-                      {audioState.audioFile.uri}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() =>
-                      setAudioState((prev) => ({ ...prev, audioFile: null }))
-                    }
-                  >
-                    <Ionicons name="close" size={20} color="#666" />
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable
-                  style={styles.filePickerButton}
-                  onPress={handleSelectAudioFile}
-                >
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={24}
-                    color="#007AFF"
-                    style={styles.filePickerIcon}
-                  />
-                  <Text style={styles.filePickerText}>Select Audio File</Text>
-                </Pressable>
-              )}
+              <OfflineAudioBufferWidget
+                ref={audioWidgetRef}
+                audioFiles={AUDIO_FILES}
+                disabled={loading}
+                onBufferReady={(info) => {
+                  setPreparedAudioBuffer(info);
+                  setAudioState((prev) => ({
+                    ...prev,
+                    segments: [],
+                    totalSegmentCount: null,
+                  }));
+                }}
+                onBufferReleased={() => {
+                  setPreparedAudioBuffer(null);
+                  audioBufferRef.current = null;
+                  setAudioState((prev) => ({
+                    ...prev,
+                    segments: [],
+                    totalSegmentCount: null,
+                  }));
+                }}
+              />
             </View>
 
             <View>

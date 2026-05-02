@@ -15,7 +15,6 @@ import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
 import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   createEmptyLiveAudioBuffer,
-  createOfflineAudioBufferFromFile,
   finalizeLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
@@ -23,7 +22,6 @@ import {
   stopMicToLiveAudioBuffer,
   type FileIngestHandle,
   type LiveAudioBufferRef,
-  type OfflineAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineSegmentBuffer,
@@ -55,11 +53,17 @@ import {
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
+import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
+import { AUDIO_FILES } from '../../audioConfig';
 
 type Mode = 'live' | 'offline';
 type LiveSource = 'file' | 'mic';
@@ -70,12 +74,6 @@ type TimelineEntry = {
   at: string;
   type: string;
   detail: string;
-};
-
-type PreparedOfflineInputBuffer = {
-  bufferId: string;
-  sourceLabel: string;
-  sourceUri: string;
 };
 
 const TIMELINE_LIMIT = 200;
@@ -132,19 +130,8 @@ export default function VADScreen() {
   const [selectedLiveFileName, setSelectedLiveFileName] = useState<
     string | null
   >(null);
-  const [selectedOfflineFileName, setSelectedOfflineFileName] = useState<
-    string | null
-  >(null);
   const [preparedOfflineInputBuffer, setPreparedOfflineInputBuffer] =
-    useState<PreparedOfflineInputBuffer | null>(null);
-  const [preparingOfflineInputBuffer, setPreparingOfflineInputBuffer] =
-    useState(false);
-  const [offlineInputBuildProgress, setOfflineInputBuildProgress] = useState<
-    number | null
-  >(null);
-  const [offlineInputBuildStatus, setOfflineInputBuildStatus] = useState<
-    string | null
-  >(null);
+    useState<OfflineAudioBufferInfo | null>(null);
   const [ingestProgress, setIngestProgress] = useState<number | null>(null);
   const [engineInstanceId, setEngineInstanceId] = useState<string | null>(null);
   const [pipelineId, setPipelineId] = useState<string | null>(null);
@@ -161,14 +148,13 @@ export default function VADScreen() {
   const livePipelineRef = useRef<VADPipelineHandle | null>(null);
   const liveAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const liveSegmentRef = useRef<LiveSegmentBufferRef | null>(null);
-  const offlineAudioRef = useRef<OfflineAudioBufferRef | null>(null);
+  const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const offlineSegmentRef = useRef<OfflineSegmentBufferRef | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timelineIdRef = useRef(0);
   const liveUsingMicRef = useRef(false);
   const cleanupLockRef = useRef(false);
-  const offlineInputRequestRef = useRef(0);
 
   const canStartLive =
     streamState === 'idle' &&
@@ -404,99 +390,7 @@ export default function VADScreen() {
       );
       await releasePipelineSegmentBuffer(seg).catch(() => {});
     }
-    const audio = offlineAudioRef.current;
-    offlineAudioRef.current = null;
-    if (audio) {
-      await releasePipelineAudioBuffer(audio).catch(() => {});
-    }
   }, []);
-
-  const clearPreparedOfflineInputBuffer = useCallback(async () => {
-    offlineInputRequestRef.current += 1;
-    setPreparingOfflineInputBuffer(false);
-    setOfflineInputBuildProgress(null);
-    setOfflineInputBuildStatus(null);
-    setPreparedOfflineInputBuffer(null);
-
-    const existing = offlineAudioRef.current;
-    offlineAudioRef.current = null;
-    if (existing) {
-      console.log(
-        `[VADScreen][offline][audio] clearPrepared.release: ${existing.bufferId}`
-      );
-      await releasePipelineAudioBuffer(existing).catch(() => {});
-    }
-  }, []);
-
-  const prepareOfflineInputBufferFromUri = useCallback(
-    async (uri: string, displayName: string) => {
-      const requestId = ++offlineInputRequestRef.current;
-      setPreparingOfflineInputBuffer(true);
-      setOfflineInputBuildProgress(0);
-      setOfflineInputBuildStatus(
-        `Decoding "${displayName}" into OfflineAudioBuffer...`
-      );
-      setPreparedOfflineInputBuffer(null);
-      setSummary(null);
-      setSegments([]);
-      setError(null);
-
-      try {
-        const existing = offlineAudioRef.current;
-        offlineAudioRef.current = null;
-        if (existing) {
-          console.log(
-            `[VADScreen][offline][audio] prepare.releaseExisting: ${existing.bufferId}`
-          );
-          await releasePipelineAudioBuffer(existing).catch(() => {});
-        }
-
-        const inputRef = await createOfflineAudioBufferFromFile(
-          toFileSource(uri),
-          {
-            onProgress: (event) => {
-              if (requestId !== offlineInputRequestRef.current) return;
-              const percent = Math.max(0, Math.min(100, event.percent ?? 0));
-              setOfflineInputBuildProgress(percent);
-              setOfflineInputBuildStatus(
-                `Decoding "${displayName}"... ${Math.round(percent)}%`
-              );
-            },
-          }
-        );
-
-        if (requestId !== offlineInputRequestRef.current) {
-          await releasePipelineAudioBuffer(inputRef).catch(() => {});
-          return;
-        }
-
-        offlineAudioRef.current = inputRef;
-        console.log(
-          `[VADScreen][offline][audio] prepare.created: ${inputRef.bufferId}`
-        );
-        setPreparedOfflineInputBuffer({
-          bufferId: inputRef.bufferId,
-          sourceLabel: displayName,
-          sourceUri: uri,
-        });
-        setOfflineInputBuildProgress(null);
-        setOfflineInputBuildStatus(null);
-        setStatus('Offline input prepared. Ready to run VAD.');
-      } catch (err) {
-        if (requestId !== offlineInputRequestRef.current) return;
-        const msg = normalizeErrorMessage(err);
-        setError(msg);
-        setOfflineInputBuildProgress(null);
-        setOfflineInputBuildStatus(null);
-        setStatus('Failed to prepare offline input buffer.');
-      } finally {
-        if (requestId === offlineInputRequestRef.current) {
-          setPreparingOfflineInputBuffer(false);
-        }
-      }
-    },
-    []
-  );
 
   const pickLiveFile = useCallback(async () => {
     try {
@@ -525,32 +419,6 @@ export default function VADScreen() {
       }
     }
   }, []);
-
-  const pickOfflineFile = useCallback(async () => {
-    try {
-      const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
-      });
-      const file = Array.isArray(picked) ? picked[0] : picked;
-      const uri =
-        file.uri ??
-        (file as any).fileCopyUri ??
-        (file as any).localUri ??
-        (file as any).nativeUri;
-      if (!uri) throw new Error('Could not resolve a file URI from picker.');
-      const displayName = file.name || uri.split('/').pop() || 'audio-file';
-      setSelectedOfflineFileName(displayName);
-      await prepareOfflineInputBufferFromUri(uri, displayName);
-    } catch (pickErr: any) {
-      const isCancel =
-        (DocumentPicker as any)?.isCancel?.(pickErr) ||
-        pickErr?.code === 'DOCUMENT_PICKER_CANCELED' ||
-        pickErr?.name === 'DocumentPickerCanceled';
-      if (!isCancel) {
-        Alert.alert('File pick error', normalizeErrorMessage(pickErr));
-      }
-    }
-  }, [prepareOfflineInputBufferFromUri]);
 
   const startLive = useCallback(async () => {
     if (!selectedModelFolder) return;
@@ -982,31 +850,29 @@ export default function VADScreen() {
   }, [logLiveLifecycle, pushTimeline, streamState, teardownLiveResources]);
 
   const runOffline = useCallback(async () => {
-    if (!selectedModelFolder || !preparedOfflineInputBuffer) return;
-    setBusyOffline(true);
+    if (!selectedModelFolder) {
+      setError('Select a VAD model first.');
+      return;
+    }
+    if (!preparedOfflineInputBuffer) {
+      setError('Prepare offline audio (example or file) first.');
+      return;
+    }
+
     setError(null);
     setSummary(null);
     setSegments([]);
-    setTimeline([]);
-    setPipelineStatus(null);
-    setIsSpeechDetected(false);
-    setStatus('Running offline VAD...');
-    pushTimeline('run.started', 'Preparing offline buffers and VAD engine.');
-    logOfflineLifecycle(
-      'run.start',
-      `audioIn=${preparedOfflineInputBuffer.bufferId}`
-    );
-    let createdSegment: OfflineSegmentBufferRef | null = null;
+    pushTimeline('run.started', 'Offline VAD on prepared buffer.');
+    logOfflineLifecycle('run.start', `model=${selectedModelFolder}`);
+
     let createdEngine: VADEngine | null = null;
+    let createdSegment: OfflineSegmentBufferRef | null = null;
+
+    setBusyOffline(true);
+
     try {
-      // Recreate output segment buffer every run to avoid reusing populated state.
       const existingSegment = offlineSegmentRef.current;
-      offlineSegmentRef.current = null;
       if (existingSegment) {
-        logOfflineLifecycle(
-          'segment.release.prev.start',
-          existingSegment.bufferId
-        );
         await releasePipelineSegmentBuffer(existingSegment);
         logOfflineLifecycle(
           'segment.release.prev.done',
@@ -1150,15 +1016,10 @@ export default function VADScreen() {
     return () => {
       (async () => {
         await teardownLiveResources(true);
-        await clearPreparedOfflineInputBuffer();
         await clearOfflineBuffers();
       })().catch(() => {});
     };
-  }, [
-    clearOfflineBuffers,
-    clearPreparedOfflineInputBuffer,
-    teardownLiveResources,
-  ]);
+  }, [clearOfflineBuffers, teardownLiveResources]);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -1443,74 +1304,33 @@ export default function VADScreen() {
         ) : (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Input / output setup (Offline)</Text>
-            {(preparingOfflineInputBuffer || offlineInputBuildStatus) && (
-              <View style={styles.errorBox}>
-                <Text style={styles.mutedText}>
-                  {offlineInputBuildStatus ?? 'Preparing OfflineAudioBuffer...'}
-                </Text>
-                {offlineInputBuildProgress != null ? (
-                  <Text style={styles.mutedText}>
-                    {Math.round(offlineInputBuildProgress)}%
-                  </Text>
-                ) : null}
-              </View>
-            )}
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                (busyOffline || preparingOfflineInputBuffer) &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={() => {
-                pickOfflineFile().catch(() => {});
+            <OfflineAudioBufferWidget
+              ref={offlineWidgetRef}
+              audioFiles={AUDIO_FILES}
+              disabled={busyOffline}
+              onBufferReady={(info) => {
+                setPreparedOfflineInputBuffer(info);
+                setSummary(null);
+                setSegments([]);
+                setError(null);
+                setStatus('Offline input prepared. Ready to run VAD.');
               }}
-              disabled={busyOffline || preparingOfflineInputBuffer}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Pick offline input file
-              </Text>
-            </Pressable>
-            {preparedOfflineInputBuffer ? (
-              <View style={styles.segmentRow}>
-                <Text style={styles.segmentTitle}>
-                  OfflineAudioBuffer ready
-                </Text>
-                <Text style={styles.segmentMeta}>
-                  {preparedOfflineInputBuffer.sourceLabel}
-                </Text>
-                <Text style={styles.segmentMeta} selectable>
-                  {preparedOfflineInputBuffer.bufferId}
-                </Text>
-                <Pressable
-                  style={[
-                    styles.smallButton,
-                    busyOffline && styles.buttonDisabled,
-                  ]}
-                  disabled={busyOffline}
-                  onPress={() => {
-                    clearPreparedOfflineInputBuffer().catch(() => {});
-                    setSelectedOfflineFileName(null);
-                    setStatus('Offline input buffer removed.');
-                  }}
-                >
-                  <Text style={styles.smallButtonText}>Remove buffer</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Text style={styles.mutedText}>
-                {selectedOfflineFileName ?? 'No file selected'}
-              </Text>
-            )}
+              onBufferReleased={() => {
+                setPreparedOfflineInputBuffer(null);
+                setSummary(null);
+                setSegments([]);
+                setStatus('Offline input buffer removed.');
+              }}
+            />
             <Pressable
               style={[
                 styles.primaryButton,
-                (!canStartOffline || preparingOfflineInputBuffer) &&
-                  styles.buttonDisabled,
+                !canStartOffline && styles.buttonDisabled,
               ]}
               onPress={() => {
                 runOffline().catch(() => {});
               }}
-              disabled={!canStartOffline || preparingOfflineInputBuffer}
+              disabled={!canStartOffline}
             >
               <Text style={styles.primaryButtonText}>Run Offline VAD</Text>
             </Pressable>
