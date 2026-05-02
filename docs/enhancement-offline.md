@@ -14,6 +14,8 @@ For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`en
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
+If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offline buffer `sampleRate` from `getSampleRate()`) explicitly to the model rate.
+
 ## Models and paths
 
 - **`FileSource`:** `{ kind: 'fs' | 'app' | 'contentUri' | 'securityScoped' | 'pad', ... }` (from `react-native-sherpa-onnx`) — used by all detect functions.

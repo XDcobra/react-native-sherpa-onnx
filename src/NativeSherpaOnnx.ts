@@ -176,7 +176,8 @@ export interface Spec extends TurboModule {
    * Decode an audio file into an offline audio buffer.
    * Uses AudioDecodeSession (FFmpeg + WAV fast path).
    * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
-   * @param targetSampleRateHz - 0 = keep source rate
+   * @param targetSampleRateHz - 0 = keep source rate, >0 = force that rate.
+   *                             Public API passes 16000 when omitted.
    * @param forceMono - true = downmix to mono
    * @param operationId - For progress events + cancellation
    */
@@ -263,7 +264,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Create an empty live audio buffer with a rolling-window ring buffer.
-   * @param options.sampleRate - Sample rate in Hz.
+   * @param options.sampleRate - Sample rate in Hz. Public API defaults to 16000 when omitted.
    * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.retentionMode - Retention mode: 'auto' | 'session' | 'maxSeconds' | 'path' | 'none'.
    *                                  ('auto'/'maxSeconds' currently do not enforce trim yet.)
@@ -360,7 +361,10 @@ export interface Spec extends TurboModule {
 
   // ==================== File Ingest to Live Buffer ====================
 
-  /** Start streaming file decode into an existing live buffer. */
+  /** Start streaming file decode into an existing live buffer.
+   *  targetSampleRateHz: 0 = keep source rate, >0 = force that rate.
+   *  Public API passes 16000 when omitted.
+   */
   startFileIngestToLiveBuffer(
     liveBufferId: string,
     source: Object,

@@ -14,6 +14,8 @@ For **offline batch** enhancement (`OfflineAudioBuffer` → `OfflineAudioBuffer`
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
+If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or ingest decode target) explicitly to the model rate from `getSampleRate()`.
+
 ## Models and paths
 
 - **`ModelPathConfig`:** `{ type: 'asset' | 'file' | 'auto', path: string }` (from `react-native-sherpa-onnx/fileio`, same as STT/TTS).

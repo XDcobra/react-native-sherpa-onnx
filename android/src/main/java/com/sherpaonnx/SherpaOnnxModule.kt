@@ -1463,7 +1463,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun createEmptyLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
-      val sampleRate = options.getDouble("sampleRate").toInt()
+      val sampleRate =
+        if (options.hasKey("sampleRate") && !options.isNull("sampleRate")) {
+          options.getDouble("sampleRate").toInt()
+        } else {
+          16000
+        }
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
       val ringSeconds = if (options.hasKey("ringSeconds")) options.getDouble("ringSeconds") else 60.0
 

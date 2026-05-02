@@ -1269,7 +1269,7 @@ static bool pa_populate_offline_from_source_if_empty(
 {
   @try {
     int sr = (int)options.sampleRate();
-    if (sr <= 0) { reject(kPAErrInvalidArgument, @"sampleRate must be > 0", nil); return; }
+    if (sr <= 0) { sr = 16000; }
     int ch = options.channelCount().has_value() ? (int)options.channelCount().value() : 1;
     double ringSec = options.ringSeconds().has_value() ? options.ringSeconds().value() : 60.0;
     if (ringSec <= 0) { reject(kPAErrInvalidArgument, @"ringSeconds must be > 0", nil); return; }
