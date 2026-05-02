@@ -4,7 +4,7 @@
 
 Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
-**For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Incremental text feeding](#4-incremental-text-feeding). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md).
+**For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -27,22 +27,6 @@ Downstream consumers (enhancement pipeline, PCM player, STT pipeline, WAV export
 ```text
 LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ [Enhancement] ──→ LiveAudioBuffer₂ ──→ [Streaming STT]
 ```
-
-## Choosing a streaming API (decision matrix)
-
-Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text -> wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. Incremental TTS is the same engine underneath; it adds automatic segmentation, queues, and session semantics for continuous text input.
-
-| Criterion | Prefer **`createStreamingTTS` + `synthesize()`** | Prefer **`createIncrementalStreamingTTS`** |
-|-----------|---------------------------------------------------|--------------------------------------------|
-| You already emit **discrete, meaningful segments** (sentences, paragraphs, UI blocks) | Yes | No |
-| Text arrives as a **continuous stream** (e.g. LLM tokens, live captions) and you want the library to **cut segments** | No | Yes |
-| You need **segmentation policy** (punctuation, max chars, debounce, auto-commit timeout) | Roll your own before `appendLiveTextSegment` | Built-in (`SegmentationPolicy`) |
-| You need **queue behavior** (FIFO vs replace-tail vs latest-wins, overflow rules) | Roll your own | Built-in (`QueuePolicy`) |
-| You need **per-segment `meta`** (`sid`, `speed`) from your own pipeline | Straightforward via `appendLiveTextSegment(..., meta)` | Use segment events / policies; cloning is pipeline-wide |
-| You want the **smallest surface** (buffers + pipeline only) | Yes | No |
-| You want **session lifecycle** events (idle, draining, errors) and **metrics** | Build on top | Built-in |
-
-**Rule of thumb:** if you are comfortable **owning segment boundaries** and writing to a `LiveTextBuffer`, use **`createStreamingTTS`**. If text is **open-ended or token-sized** and you want automatic boundaries and backpressure, use **`createIncrementalStreamingTTS`** (it wraps `StreamingTtsEngine`) and follow [Incremental text feeding](#4-incremental-text-feeding).
 
 ## Models & paths
 
@@ -146,10 +130,6 @@ const pipeline = await tts.synthesize(textIn, audioOut, {
 ```
 
 **Note:** Zipvoice cloning requires `referenceText` and is **not** supported in streaming on Android. For Zipvoice voice cloning, use batch `generateSpeech` on the offline path — [tts-offline.md](tts-offline.md).
-
-### 4) Incremental text feeding
-
-For progressive/tokenized text input (chat/LLM typing), use [Incremental text feeding](#4-incremental-text-feeding).
 
 ## Setup (iOS & Android)
 
@@ -459,10 +439,6 @@ See [segmentation-engine.md](segmentation-engine.md) for the full segmentation r
 | Methods throw after `destroy` | Engine already released | Create a new engine |
 | Wrong or slow inference | Provider not built / unavailable | Check [execution-providers.md](execution-providers.md) and native logs |
 
-## Mapping to Native API
-
-If you call the **`NativeSherpaOnnx`** TurboModule directly: `startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options?)` starts the native worker. Pipeline control methods (`stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`) take a `pipelineId`. Prefer the factory APIs in this document unless you manage native instances yourself.
-
 ## Use case examples
 
 <details>
@@ -574,7 +550,6 @@ await tts.destroy();
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
-- [Incremental text feeding](#4-incremental-text-feeding) — incremental/session-based streaming TTS
 - [pcm-player.md](pcm-player.md) — standalone PCM player
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
 - [execution-providers.md](execution-providers.md) — ORT execution providers
