@@ -152,7 +152,6 @@ Open the system share sheet for the given file.
 import { copyFile, saveText, shareFile, FileIOErrorCode } from 'react-native-sherpa-onnx/fileio'; // runtime APIs + error code constants
 
 import type {
-  ModelPathConfig, // bundled / filesystem / auto-detect model directory (STT, TTS, VAD, …)
   FileSource, // unified input source descriptor
   FileDestination, // unified output destination descriptor
   AppBaseDir, // app-relative base folders for kind='app'

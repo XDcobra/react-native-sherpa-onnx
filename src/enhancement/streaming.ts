@@ -4,7 +4,7 @@ import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTy
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import type { EnhancementModelType } from './types';
 import type {
   EnhancementPipelineHandle,
@@ -67,7 +67,7 @@ export async function createStreamingEnhancement(
   options: StreamingEnhancementInitializeOptions
 ): Promise<StreamingEnhancementEngine> {
   const instanceId = `streaming_enhancement_${++streamingEnhancementInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
   const result = await SherpaOnnx.initializeOnlineEnhancement(
     instanceId,
     resolvedPath,

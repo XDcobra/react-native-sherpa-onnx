@@ -31,7 +31,8 @@ import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
-import { resolveModelPath } from '../../utils';
+import type { FileSource } from '../../fileio/types';
+import { resolveFileSourceForModelInit } from '../../detect';
 import { runLinker } from '../linker/linker';
 import type {
   AlignmentErrorCode,
@@ -399,7 +400,7 @@ interface RunAccurateAsrMediatedInput {
   segmentOut: OfflineSegmentBufferIdSource;
   anchorSegmentBuffer: OfflineSegmentBufferIdSource;
   hypothesisTextBuffer: OfflineTextBufferIdSource;
-  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelSource: FileSource;
   granularity?: 'sentence' | 'word';
   language?: string;
 }
@@ -433,11 +434,13 @@ export async function runAccurateAsrMediated(
     getPipelineSegmentBufferInfo(segmentOutBufferId),
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
     (async () => {
-      const dir = (await resolveModelPath(input.modelPath)).trim();
+      const dir = (
+        await resolveFileSourceForModelInit(input.modelSource)
+      ).trim();
       if (!dir) {
         throw createAsrMediatedError(
           'ALIGNMENT_MODEL_LOAD_FAILED',
-          'resolveModelPath returned empty for alignment modelPath.'
+          'resolveFileSourceForModelInit returned empty for alignment modelSource.'
         );
       }
       const det = await SherpaOnnx.detectAlignmentModel(dir, 'auto');

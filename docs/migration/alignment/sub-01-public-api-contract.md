@@ -13,7 +13,7 @@ Define and ship the **target public surface** of the alignment feature with no b
 
 - Introduce `AlignmentEngine` factory + class.
 - Move `alignTextToAudio` from a freestanding function to an engine method.
-- Lock option types around `modelPath: ModelPathConfig`.
+- Lock option types around `modelSource: FileSource`.
 - Define error/warning code catalog (consumed by all later sub-plans).
 - Keep rows 1, 2, 3, 5 byte-equivalent for callers migrating call sites.
 
@@ -32,7 +32,7 @@ Define and ship the **target public surface** of the alignment feature with no b
 
 - `src/alignment/index.ts` exports a freestanding `alignTextToAudio` and supporting types.
 - `src/alignment/alignTextToAudio.ts` builds native options and dispatches to `SherpaOnnx.alignOfflineTextToAudio`.
-- `src/alignment/types.ts` already uses `modelPath: ModelPathConfig` for `AlignTextToAudioOptionsAccurate`.
+- `src/alignment/types.ts` already uses `modelSource: FileSource` for `AlignTextToAudioOptionsAccurate`.
 - Native call site reads accurate-mode `modelPath` via `AlignmentOptionParsers.kt` / `AlignmentBridgeUtils.mm`.
 - No engine abstraction; no per-engine state lifecycle.
 - Public modes overview (`alignment-public-modes-plan.md`) enumerates target API and locked decisions.
@@ -93,7 +93,7 @@ export function createAlignment(
 
 - `AlignTextToAudioOptionsAccurate`
   - `mode: 'accurate'`
-  - `modelPath: ModelPathConfig` (required)
+  - `modelSource: FileSource` (required)
   - `granularity: 'sentence' | 'word' | 'character'` (character only when segmentation is off)
   - `language?: string`
   - `segmentation?:` `{ mode: 'off' }` | `{ mode: 'auto', anchorSegmentBuffer, mappingStrategy, asr? }` (auto enables row 4)
@@ -126,7 +126,7 @@ export function createAlignment(
 | `AlignTextToAudioOptionsAccurate.mappingStrategy` | Add | Strict enum |
 | `AlignTextToAudioOptionsAccurate.asr` | Add | Required only when strategy is `'asr_mediated'` |
 | `AlignTextToAudioOptionsAccurate.segmentation.mode` | Tighten to `'off' \| 'auto'` | No legacy values |
-| Caller-supplied `modelPath` | Already `ModelPathConfig` | Reaffirm; reject raw `string` shape with explicit error |
+| Caller-supplied `modelPath` | Already `FileSource` | Reaffirm; reject raw `string` shape with explicit error |
 
 ---
 
@@ -168,7 +168,7 @@ export function createAlignment(
 | Code | Layer | When |
 |------|-------|------|
 | `ALIGNMENT_OPTIONS_INVALID` | JS | Mode discriminator wrong / unknown enum |
-| `ALIGNMENT_MODEL_PATH_INVALID` | JS | Accurate mode without `modelPath: ModelPathConfig` |
+| `ALIGNMENT_MODEL_PATH_INVALID` | JS | Accurate mode without `modelSource: FileSource` |
 | `ALIGNMENT_GRANULARITY_INVALID` | JS | Granularity not allowed for selected mode |
 | `ALIGNMENT_ASR_HYPOTHESIS_MISSING` | JS | `asrMediated` without `asr.hypothesisTextBuffer` |
 | `ALIGNMENT_NOT_IMPLEMENTED` | JS | `asrMediated`/`chunkedForcedCtc` requested before sub-03/04 ship |
@@ -225,7 +225,7 @@ export function createAlignment(
 | Needs | From | Why |
 |-------|------|-----|
 | Locked option matrix | `alignment-public-modes-plan.md` | Source of truth |
-| ModelPathConfig | `src/fileio/types.ts` (re-exported from `react-native-sherpa-onnx/fileio`); `resolveModelPath` in `src/utils` | Already in use |
+| FileSource | `src/fileio/types.ts` (re-exported from `react-native-sherpa-onnx/fileio`); `resolveModelPath` in `src/utils` | Already in use |
 
 | Blocks | Reason |
 |--------|--------|

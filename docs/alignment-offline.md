@@ -77,16 +77,16 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-import type { FileSource, ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
-// 0) App-level model configuration: alignment + STT use ModelPathConfig;
+// 0) App-level model configuration: alignment + STT use FileSource;
 //    speech_vad_model segmentation policy uses FileSource (detectVadModel).
-const ALIGNMENT_MODEL: ModelPathConfig = {
-  type: 'file',
+const ALIGNMENT_MODEL: FileSource = {
+  kind: 'fs',
   path: '/abs/path/to/wav2vec2-alignment-model',
 };
-const STT_MODEL: ModelPathConfig = {
-  type: 'file',
+const STT_MODEL: FileSource = {
+  kind: 'fs',
   path: '/abs/path/to/stt-model',
 };
 const VAD_MODEL: FileSource = {
@@ -136,7 +136,7 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
-  modelPath: { type: 'file', path: '/abs/path/to/model.onnx' },
+  modelSource: { kind: 'fs', path: '/abs/path/to/model.onnx' },
 });
 ```
 
@@ -158,7 +158,7 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 
 ```ts
 const stt = await createSTT({
-  modelPath: STT_MODEL,
+  modelSource: STT_MODEL,
   modelType: 'auto',
 });
 
@@ -182,7 +182,7 @@ const segmentOut = await createEmptyOfflineSegmentBuffer({
 //    asr_mediated consumes these anchors via segmentation.anchorSegmentBuffer.
 const anchorRef = await segmentOfflineBuffer(audioBuf, {
   evaluator: 'speech_vad_model',
-  modelPath: VAD_MODEL,
+  modelSource: VAD_MODEL,
   vadMinSpeechMs: 200,
   vadMinSilenceMs: 500,
 });
@@ -202,7 +202,7 @@ await stt.transcribe(audioBuf, asrHypothesisOut, {
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
-  modelPath: ALIGNMENT_MODEL,
+  modelSource: ALIGNMENT_MODEL,
   segmentation: {
     mode: 'auto',
     anchorSegmentBuffer: anchorRef,
@@ -232,7 +232,7 @@ await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
-  modelPath: { type: 'file', path: '/abs/path/to/model.onnx' },
+  modelSource: { kind: 'fs', path: '/abs/path/to/model.onnx' },
   segmentation: {
     mode: 'auto',
     anchorSegmentBuffer: vadSegmentOut,
@@ -337,7 +337,7 @@ More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feat
 | --- | --- |
 | `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \\| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelPath: ModelPathConfig; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { mode: 'auto'; anchorSegmentBuffer: OfflineSegmentBufferIdSource; mappingStrategy: 'asr_mediated' \\| 'chunked_forced_ctc'; asr?: { hypothesisTextBuffer: OfflineTextBufferIdSource } } }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelSource: FileSource; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { mode: 'auto'; anchorSegmentBuffer: OfflineSegmentBufferIdSource; mappingStrategy: 'asr_mediated' \\| 'chunked_forced_ctc'; asr?: { hypothesisTextBuffer: OfflineTextBufferIdSource } } }` |
 | `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
 | `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number; linkMap?: SegmentLinkMapRef; warningCode?: string; warnings?: AlignmentWarning[] }` |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
@@ -358,7 +358,7 @@ More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feat
 | `SEGMENT_BUFFER_NOT_FOUND` | output segment buffer id not found |
 | `SEGMENT_BUFFER_KIND_MISMATCH` | expected `seg_off_*` output buffer |
 | `SEGMENT_INVALID_STATE` | output segment buffer already populated |
-| `ALIGNMENT_MODEL_MISSING` | accurate mode without `modelPath` |
+| `ALIGNMENT_MODEL_MISSING` | accurate mode without `modelSource` |
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
 | `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` | ASR-mediated strategy requires timestamped hypothesis tokens |
 | `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
@@ -395,7 +395,7 @@ const vadAnchors = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: 
 const alignedOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
 
 const vad = await createStreamingVAD({
-  modelPath: { type: 'file', path: '/path/to/vad-model' },
+  modelSource: { kind: 'fs', path: '/path/to/vad-model' },
   modelType: 'auto',
   sampleRate: 16000,
 });
@@ -407,7 +407,7 @@ try {
   await alignment.alignTextToAudio(transcript, audio, alignedOut, {
     mode: 'accurate',
     granularity: 'word',
-    modelPath: { type: 'file', path: '/path/to/wav2vec2-alignment-model' },
+    modelSource: { kind: 'fs', path: '/path/to/wav2vec2-alignment-model' },
     segmentation: {
       mode: 'auto',
       anchorSegmentBuffer: vadAnchors,

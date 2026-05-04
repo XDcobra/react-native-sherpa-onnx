@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
@@ -11,7 +11,7 @@ export type OnlinePunctuationModelType = Extract<
 
 export type StreamingPunctuationInitializeOptions = {
   /** OnlinePunctuation layout (CNN-BiLSTM + bpe.vocab). */
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
   modelType?: OnlinePunctuationModelType;
   numThreads?: number;
   provider?: string;

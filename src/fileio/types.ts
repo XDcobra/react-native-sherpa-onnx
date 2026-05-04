@@ -5,36 +5,6 @@
  * across Android (SAF, PAD) and iOS (local paths, security-scoped URLs).
  */
 
-// ========== Model bundle paths ==========
-
-/**
- * Model path configuration options (bundled assets, filesystem, or auto-detect).
- */
-export type ModelPathConfig =
-  | {
-      /**
-       * Path type: 'asset' — model is bundled in app assets.
-       * On iOS: bundle path (e.g. `"models/sherpa-onnx-model"`).
-       * On Android: asset path (e.g. `"models/sherpa-onnx-model"`).
-       */
-      type: 'asset';
-      path: string;
-    }
-  | {
-      /**
-       * Path type: 'file' — model is on the filesystem (absolute directory path).
-       */
-      type: 'file';
-      path: string;
-    }
-  | {
-      /**
-       * Path type: 'auto' — try asset first, then filesystem.
-       */
-      type: 'auto';
-      path: string;
-    };
-
 // ========== Location Types ==========
 
 /**

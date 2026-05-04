@@ -16,10 +16,11 @@ import {
   type TtsDetectModelResult,
   type DetectedModelEntry,
 } from '../types/modelDetect';
-import type { ModelPathConfig } from '../fileio/types';
 import type { FileSource } from '../fileio/types';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import {
+  resolveFileSourceForDetect,
+  resolveFileSourceForModelInit,
+} from '../detect';
 import {
   expandTtsInitializeOptions,
   expandTtsUpdateOptions,
@@ -134,7 +135,7 @@ export async function detectTtsModel(
 /**
  * Create a TTS engine instance. Call destroy() on the returned engine when done to free native resources.
  *
- * @param options - TTS initialization options or model path configuration
+ * @param options - TTS initialization options
  * @returns Promise resolving to a TtsEngine instance
  * @example
  * ```typescript
@@ -151,11 +152,11 @@ export async function detectTtsModel(
  * ```
  */
 export async function createTTS(
-  options: TTSInitializeOptions | ModelPathConfig
+  options: TTSInitializeOptions
 ): Promise<TtsEngine> {
   const instanceId = `tts_${++ttsInstanceCounter}`;
 
-  let modelPath: ModelPathConfig;
+  const modelSource = options.modelSource;
   let modelType: TTSModelType | undefined;
   let provider: string | undefined;
   let numThreads: number | undefined;
@@ -166,33 +167,19 @@ export async function createTTS(
   let maxNumSentences: number | undefined;
   let silenceScale: number | undefined;
 
-  if ('modelPath' in options) {
-    const expanded = expandTtsInitializeOptions(options);
-    modelPath = expanded.modelPath;
-    modelType = expanded.modelType;
-    provider = expanded.provider;
-    numThreads = expanded.numThreads;
-    debug = expanded.debug;
-    modelOptions = expanded.modelOptions;
-    ruleFsts = expanded.ruleFsts;
-    ruleFars = expanded.ruleFars;
-    maxNumSentences = expanded.maxNumSentences;
-    silenceScale = expanded.silenceScale;
-  } else {
-    modelPath = options;
-    modelType = undefined;
-    provider = undefined;
-    numThreads = undefined;
-    debug = undefined;
-    modelOptions = undefined;
-    ruleFsts = undefined;
-    ruleFars = undefined;
-    maxNumSentences = undefined;
-    silenceScale = undefined;
-  }
+  const expanded = expandTtsInitializeOptions(options);
+  modelType = expanded.modelType;
+  provider = expanded.provider;
+  numThreads = expanded.numThreads;
+  debug = expanded.debug;
+  modelOptions = expanded.modelOptions;
+  ruleFsts = expanded.ruleFsts;
+  ruleFars = expanded.ruleFars;
+  maxNumSentences = expanded.maxNumSentences;
+  silenceScale = expanded.silenceScale;
 
   const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
 
   const result = await SherpaOnnx.initializeTts(
     instanceId,

@@ -75,16 +75,16 @@ import {
   createEmptyOfflineSegmentBuffer,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
-import type { FileSource, ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
-// --- App constants: alignment + STT use ModelPathConfig; speech_vad segmentation uses FileSource ---
+// --- App constants: alignment + STT use FileSource; speech_vad segmentation uses FileSource ---
 
-const ALIGNMENT_MODEL: ModelPathConfig = {
-  type: 'file',
+const ALIGNMENT_MODEL: FileSource = {
+  kind: 'fs',
   path: '/var/mobile/.../wav2vec2-alignment-dir-or-onnx',
 };
-const STT_MODEL: ModelPathConfig = {
-  type: 'file',
+const STT_MODEL: FileSource = {
+  kind: 'fs',
   path: '/var/mobile/.../sherpa-stt',
 };
 const VAD_MODEL: FileSource = {
@@ -115,7 +115,7 @@ async function runAccurateAsrMediatedExample() {
   // 1) Speech anchors: SegmentationEngine offline pass (reusable across features)
   const anchorRef = await segmentOfflineBuffer(audioBuf, {
     evaluator: 'speech_vad_model',
-    modelPath: VAD_MODEL,
+    modelSource: VAD_MODEL,
     vadMinSpeechMs: 200,
     vadMinSilenceMs: 500,
   });
@@ -123,7 +123,7 @@ async function runAccurateAsrMediatedExample() {
 
   // 2) Hypothesis H: caller runs transcribe — model options, timestamps, segmented STT, etc. stay under caller control
   const stt = await createSTT({
-    modelPath: STT_MODEL,
+    modelSource: STT_MODEL,
     modelType: 'auto',
     // e.g. modelOptions: { whisper: { enableTokenTimestamps: true, ... } } when required for timestampCount > 0
   });
@@ -140,7 +140,7 @@ async function runAccurateAsrMediatedExample() {
       segmentOut,
       {
         mode: 'accurate',
-        modelPath: ALIGNMENT_MODEL,
+        modelSource: ALIGNMENT_MODEL,
         granularity: 'word',
         language: 'en',
         segmentation: {
@@ -189,5 +189,5 @@ If the linker is **also** a first-class export (subtitles / karaoke), callers mi
 |------|--------|
 | 2026-04-30 | Initial; timestamps + `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS`; **caller-only** `hypothesisTextBuffer` (no internal STT in alignment) |
 | 2026-04-30 | Example uses **`createAlignment` + `alignment.alignTextToAudio` + `destroy`** per `alignment-public-modes-plan.md` |
-| 2026-04-30 | **`modelPath: ModelPathConfig`** for accurate alignment + **`SegmentationPolicy.modelPath`** for `speech_vad_model` (STT/VAD naming) |
-| 2026-05-01 | **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`**; JS **`detectVadModel`** before native (accurate alignment `modelPath` unchanged: **`ModelPathConfig`**) |
+| 2026-04-30 | **`modelSource: FileSource`** for accurate alignment + **`SegmentationPolicy.modelPath`** for `speech_vad_model` (STT/VAD naming) |
+| 2026-05-01 | **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`**; JS **`detectVadModel`** before native (accurate alignment `modelPath` unchanged: **`FileSource`**) |

@@ -1,7 +1,7 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
-import { resolveModelPath } from '../utils';
 import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForModelInit } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
@@ -89,7 +89,7 @@ export async function createEnhancement(
   options: EnhancementInitializeOptions
 ): Promise<EnhancementEngine> {
   const instanceId = `enhancement_${++enhancementInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
   const init = await SherpaOnnx.initializeEnhancement(
     instanceId,
     resolvedPath,

@@ -143,7 +143,7 @@ describe('asrMediated/driver options', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_LINKER_INPUT_INVALID' });
@@ -166,7 +166,7 @@ describe('asrMediated/driver options', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_LINKER_NO_MAPPING' });
@@ -218,7 +218,7 @@ describe('asrMediated/driver options', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_NATIVE_ACCURATE_FAILED' });

@@ -131,7 +131,7 @@ describe('stt segmented transcribe', () => {
     });
 
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     const result = await stt.transcribe(
@@ -165,7 +165,7 @@ describe('stt segmented transcribe', () => {
 
   it('uses native single-shot path when segmentation mode is off', async () => {
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     const result = await stt.transcribe(
@@ -199,7 +199,7 @@ describe('stt segmented transcribe', () => {
     });
 
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     await expect(

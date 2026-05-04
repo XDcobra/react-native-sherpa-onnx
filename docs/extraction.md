@@ -316,7 +316,7 @@ if (sttModel) {
   const mp = fileModelPath(`${modelsDir}/${sttModel.folder}`);
   const detection = await detectSttModel(mp);
   if (detection.success) {
-    const stt = await createSTT({ modelPath: mp, modelType: 'auto' });
+    const stt = await createSTT({ modelSource: mp, modelType: 'auto' });
     // ready to transcribe
   }
 }

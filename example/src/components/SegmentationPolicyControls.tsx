@@ -309,7 +309,7 @@ function PunctuationPolicyFields({
           downloadedIds: new Set(snapshot.downloadedPunctuationIds),
         });
         const eng = await createOfflinePunctuation({
-          modelPath: cfg,
+          modelSource: cfg,
           modelType: 'auto',
           numThreads: PUNC_NUM_THREADS,
           provider: 'cpu',

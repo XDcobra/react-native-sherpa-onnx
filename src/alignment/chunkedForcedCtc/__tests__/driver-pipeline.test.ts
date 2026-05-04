@@ -144,7 +144,7 @@ describe('chunkedForcedCtc/driver pipeline', () => {
       audioIn: 'off_audio',
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
-      modelPath: { type: 'file', path: '/m' },
+      modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
     });
@@ -206,7 +206,7 @@ describe('chunkedForcedCtc/driver pipeline', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
         language: 'en',
       })

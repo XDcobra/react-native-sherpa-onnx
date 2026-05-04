@@ -143,7 +143,7 @@ describe('alignment/native bridge error mapping', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_MODEL_LOAD_FAILED' });
@@ -165,7 +165,7 @@ describe('alignment/native bridge error mapping', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'OFFLINE_OOM' });
@@ -185,7 +185,7 @@ describe('alignment/native bridge error mapping', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_NATIVE_UNKNOWN' });

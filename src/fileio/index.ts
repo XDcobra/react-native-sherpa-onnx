@@ -16,7 +16,6 @@ export type {
   FileSource,
   FileDestination,
   AppBaseDir,
-  ModelPathConfig,
   ResolvedFileRef,
   CopyFileOptions,
   CopyFileResult,

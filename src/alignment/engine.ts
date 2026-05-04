@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 import { runAlignTextToAudio } from './alignTextToAudio';
 import type {
   AlignTextToAudioFn,
@@ -25,16 +25,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null;
 }
 
-function isModelPathConfig(value: unknown): value is ModelPathConfig {
+function isFileSource(value: unknown): value is FileSource {
   if (!isRecord(value)) {
     return false;
   }
-  const type = value.type;
-  const path = value.path;
-  if (type !== 'asset' && type !== 'file' && type !== 'auto') {
-    return false;
+  const kind = value.kind;
+  if (kind === 'fs') {
+    return typeof value.path === 'string' && value.path.trim().length > 0;
   }
-  return typeof path === 'string' && path.trim().length > 0;
+  if (kind === 'app') {
+    return (
+      typeof value.base === 'string' &&
+      typeof value.path === 'string' &&
+      value.path.trim().length > 0
+    );
+  }
+  if (kind === 'contentUri' || kind === 'securityScoped') {
+    return typeof value.uri === 'string' && value.uri.trim().length > 0;
+  }
+  if (kind === 'pad') {
+    return (
+      typeof value.packName === 'string' &&
+      value.packName.trim().length > 0 &&
+      typeof value.path === 'string' &&
+      value.path.trim().length > 0
+    );
+  }
+  return false;
 }
 
 function validateGranularity(
@@ -59,10 +76,10 @@ function validateGranularity(
 }
 
 function validateAccurateOptions(options: Record<string, unknown>): void {
-  if (!isModelPathConfig(options.modelPath)) {
+  if (!isFileSource(options.modelSource)) {
     throw createAlignmentError(
       'ALIGNMENT_MODEL_PATH_INVALID',
-      'Accurate mode requires modelPath: ModelPathConfig (asset|file|auto).'
+      'Accurate mode requires modelSource: FileSource.'
     );
   }
 

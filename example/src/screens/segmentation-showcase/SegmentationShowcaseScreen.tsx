@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -30,7 +30,6 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   createOfflinePunctuation,
   detectPunctuationModel,
@@ -211,7 +210,7 @@ function prioritizeEntries(
 }
 
 async function folderIsOfflineCtTransformer(
-  modelPath: ModelPathConfig
+  modelPath: FileSource
 ): Promise<boolean> {
   try {
     const detection = await detectPunctuationModel(
@@ -231,7 +230,7 @@ function resolvePunctuationModelPathFromScan(
   downloadedIds: string[],
   padIds: string[],
   padBasePath: string | null
-): ModelPathConfig {
+): FileSource {
   if (downloadedIds.includes(modelId)) {
     return getFileModelPath(modelId, ModelCategory.Punctuation);
   }
@@ -249,7 +248,7 @@ function getVadModelPathConfig(
     bundledFolders: string[];
     downloadedIds: Set<string>;
   }
-): ModelPathConfig {
+): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath
       ? getFileModelPath(modelId, ModelCategory.Vad, ctx.padModelsPath)
@@ -337,7 +336,7 @@ export default function SegmentationShowcaseScreen() {
   const punctuationEngineRef = useRef<OfflinePunctuationEngine | null>(null);
 
   const resolvePunctuationModelPath = useCallback(
-    (modelId: string): ModelPathConfig => {
+    (modelId: string): FileSource => {
       if (downloadedPunctuationModelIds.includes(modelId)) {
         return getFileModelPath(modelId, ModelCategory.Punctuation);
       }
@@ -630,7 +629,7 @@ export default function SegmentationShowcaseScreen() {
       }
 
       const engine = await createOfflinePunctuation({
-        modelPath: resolvePunctuationModelPath(
+        modelSource: resolvePunctuationModelPath(
           textState.selectedPunctuationModelId
         ),
         modelType: 'auto',

@@ -302,7 +302,7 @@ export default function STTStreamingScreen() {
       }
 
       const engine = await createStreamingSTT({
-        modelPath,
+        modelSource: modelPath,
         modelType: 'auto',
         numThreads: 2,
       });

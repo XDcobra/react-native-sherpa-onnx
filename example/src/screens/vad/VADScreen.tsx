@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   createEmptyLiveAudioBuffer,
@@ -50,7 +50,6 @@ import {
   listDownloadedModels,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
@@ -218,7 +217,7 @@ export default function VADScreen() {
   );
 
   const detectResolvedModelType = useCallback(
-    async (modelPath: ModelPathConfig): Promise<VADModelType> => {
+    async (modelPath: FileSource): Promise<VADModelType> => {
       const detection = await detectVadModel(await toDetectSource(modelPath), {
         modelType: 'auto',
       });
@@ -537,7 +536,7 @@ export default function VADScreen() {
       logLiveLifecycle('segment.created', `bufferId=${liveSegment.bufferId}`);
 
       const engine = await createStreamingVAD({
-        modelPath,
+        modelSource: modelPath,
         modelType: resolvedModelType,
         sampleRate,
         runtimeOptions,
@@ -918,7 +917,7 @@ export default function VADScreen() {
       );
 
       const engine = await createStreamingVAD({
-        modelPath,
+        modelSource: modelPath,
         modelType: resolvedModelType,
         sampleRate,
         runtimeOptions,

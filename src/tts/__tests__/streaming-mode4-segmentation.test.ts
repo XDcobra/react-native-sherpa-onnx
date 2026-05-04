@@ -99,7 +99,7 @@ describe('streaming tts mode 4 (segmentation attach)', () => {
 
   it('attaches default text segmentation in auto mode and detaches on stop', async () => {
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const handle = await tts.synthesize('txt_live_in', 'live_out', {
@@ -123,7 +123,7 @@ describe('streaming tts mode 4 (segmentation attach)', () => {
 
   it('rejects non-text segmentation policy and missing punctuationInstanceId', async () => {
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     await expect(
@@ -162,7 +162,7 @@ describe('streaming tts mode 4 (segmentation attach)', () => {
     });
 
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     await expect(tts.synthesize('txt_off_in', 'live_out')).rejects.toThrow(

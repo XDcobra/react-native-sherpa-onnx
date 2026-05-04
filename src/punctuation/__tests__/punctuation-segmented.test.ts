@@ -77,7 +77,7 @@ describe('offline punctuation segmentation', () => {
 
   it('keeps one-shot as the default path', async () => {
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     const result = await punc.punctuate(
@@ -119,7 +119,7 @@ describe('offline punctuation segmentation', () => {
     });
 
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     const result = await punc.punctuate(
@@ -177,7 +177,7 @@ describe('offline punctuation segmentation', () => {
     });
 
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     await punc.punctuateString(

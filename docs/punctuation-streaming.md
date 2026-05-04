@@ -12,7 +12,7 @@ For batch punctuation with offline text buffers, see [punctuation-offline.md](pu
 
 ## Models and paths
 
-- `ModelPathConfig` (type from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - `FileSource` is used by `detectPunctuationModel(...)` for preflight checks.
 - Streaming punctuation requires an online-capable `cnn_bilstm` layout. Offline `ct_transformer` models are not valid for this API.
 - Download/catalog setup: [download-manager.md](download-manager.md), [model-setup.md](model-setup.md)
@@ -59,7 +59,7 @@ if (!det.success || det.modelType !== 'cnn_bilstm' || !det.isStreaming) {
 }
 
 const engine = await createStreamingPunctuation({
-  modelPath: { type: 'file', path: modelDir },
+  modelSource: { kind: 'fs', path: modelDir },
   modelType: 'auto',
   numThreads: 2,
   provider: 'cpu',
@@ -121,7 +121,7 @@ function createStreamingPunctuation(
 
 ```ts
 const engine = await createStreamingPunctuation({
-  modelPath: { type: 'file', path: '/path/to/punctuation-online-pack' },
+  modelSource: { kind: 'fs', path: '/path/to/punctuation-online-pack' },
   modelType: 'auto',
 });
 ```

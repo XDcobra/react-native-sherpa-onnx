@@ -71,7 +71,7 @@ if (Platform.OS === 'android') {
 
 // Pass to engine creation
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/my-stt-model' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/my-stt-model' },
   provider,
 });
 ```

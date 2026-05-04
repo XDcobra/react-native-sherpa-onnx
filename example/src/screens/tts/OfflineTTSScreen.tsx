@@ -601,7 +601,7 @@ export default function OfflineTTSScreen() {
         engine = await new Promise((resolve, reject) => {
           setTimeout(() => {
             createTTS({
-              modelPath,
+              modelSource: modelPath,
               numThreads: TTS_NUM_THREADS,
               debug: false,
             })
@@ -615,7 +615,7 @@ export default function OfflineTTSScreen() {
           initErr
         );
         engine = await createTTS({
-          modelPath,
+          modelSource: modelPath,
           numThreads: 1,
           debug: false,
         });

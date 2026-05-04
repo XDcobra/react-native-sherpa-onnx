@@ -38,7 +38,7 @@ Alle Dateien liegen unter `docs/migration/alignment/`:
 - **`engine.alignTextToAudio(textIn, audioIn, segmentOut, options)`**
 - **`engine.destroy()`**
 - **Removed (hard cut):** freestanding `alignTextToAudio(...)` export
-- **Naming:** `modelPath: ModelPathConfig` for accurate alignment STT/TTS-style bundles; **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`** (resolved via **`detectVadModel`**). No `alignmentModelPath`, no `vadModelId`.
+- **Naming:** `modelSource: FileSource` for accurate alignment STT/TTS-style bundles; **`SegmentationPolicy.modelPath`** for `speech_vad_model` is **`FileSource`** (resolved via **`detectVadModel`**). No `alignmentModelPath`, no `vadModelId`.
 
 ### Native / JS boundaries
 
@@ -48,7 +48,7 @@ JS (TS)
     index.ts             → AlignmentEngine factory + engine methods (only)
     engine.ts            → AlignmentEngine class (new)
     alignTextToAudio.ts  → internal worker (no public export)
-    fileio/types         → `ModelPathConfig`; alignment `types.ts` → option/result types
+    fileio/types         → `FileSource`; alignment `types.ts` → option/result types
     linker/              → Path 3 TypeScript bindings (calls native, packs LinkerResultV0)
       types.ts
       linker.ts
@@ -128,7 +128,7 @@ A phase is "Completed" when **all** of:
 
 ## Dokumentations-Update-Plan
 
-- `docs/alignment.md`: rewritten in P7 to match `AlignmentEngine` + ModelPathConfig + locked decisions.
+- `docs/alignment.md`: rewritten in P7 to match `AlignmentEngine` + FileSource + locked decisions.
 - `docs/migration/alignment/alignment-public-modes-plan.md`: continuously kept as source of truth for product surface.
 - `docs/migration/alignment/alignment-asr-mediated-ts-example.md`: align with final field names once implemented.
 - `accurate-vad-segmentation-high-level-plan.md`: marked superseded for mapping semantics; remaining buffer/anchor contract bits cross-link to new sub-plans.

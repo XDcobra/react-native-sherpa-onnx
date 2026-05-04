@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 import type { DetectedModelEntry } from '../types/modelDetect';
 import type {
   OfflineAudioBufferRef,
@@ -140,7 +140,7 @@ export type TTSInitializeOptionsBase = {
    * Path to the model directory.
    * Can be an asset path, file system path, or auto-detection path.
    */
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
 
   /**
    * Execution provider (e.g. `'cpu'`, `'coreml'`, `'xnnpack'`, `'nnapi'`, `'qnn'`).

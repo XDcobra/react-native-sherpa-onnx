@@ -50,6 +50,7 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -100,7 +101,7 @@ type StreamingSessionEngine = {
 };
 
 async function createStreamingSessionEngine(options: {
-  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelSource: FileSource;
   modelType: TTSModelType;
   numThreads: number;
   debug: boolean;
@@ -394,7 +395,7 @@ export default function StreamingTTSScreen() {
       }
 
       const engine = await createStreamingSessionEngine({
-        modelPath,
+        modelSource: modelPath,
         modelType: 'auto' as TTSModelType,
         numThreads: 2,
         debug: false,

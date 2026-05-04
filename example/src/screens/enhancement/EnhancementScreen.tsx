@@ -274,17 +274,17 @@ export default function EnhancementScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(modelFolder);
+      const modelSource = await toDetectSource(modelPath);
 
       const engine = await createEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: 'auto',
       });
 
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: 'auto' }
-      );
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: 'auto',
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         await engine.destroy();
         engineRef.current = null;
@@ -362,16 +362,16 @@ export default function EnhancementScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(folder);
+      const modelSource = await toDetectSource(modelPath);
 
       const engine = await createEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: kind,
       });
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: kind }
-      );
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: kind,
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         await engine.destroy();
         setErrorSource('init');

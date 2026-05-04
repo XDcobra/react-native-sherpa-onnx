@@ -10,18 +10,18 @@
  * // Future usage:
  * import { initializeDiarization, diarizeAudio } from 'react-native-sherpa-onnx/diarization';
  *
- * await initializeDiarization({ modelPath: { type: 'auto', path: 'models/diarization-model' } });
+ * await initializeDiarization({ modelSource: { kind: 'app', base: 'files', path: 'models/diarization-model' } });
  * const segments = await diarizeAudio('path/to/audio.wav');
  * ```
  */
 
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 
 /**
  * Diarization initialization options (placeholder)
  */
 export interface DiarizationInitializeOptions {
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
   // Additional diarization-specific options will be added here
 }
 

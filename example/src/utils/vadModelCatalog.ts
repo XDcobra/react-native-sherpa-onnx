@@ -13,7 +13,7 @@ import {
   ModelCategory,
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -89,7 +89,7 @@ function prioritizeEntries(
 }
 
 /**
- * Resolve a discovered folder id to the same ModelPathConfig shape used by detectVadModel.
+ * Resolve a discovered folder id to the same FileSource shape used by detectVadModel.
  */
 export function getVadModelPathConfig(
   modelId: string,
@@ -99,7 +99,7 @@ export function getVadModelPathConfig(
     bundledFolders: string[];
     downloadedIds: Set<string>;
   }
-): ModelPathConfig {
+): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath
       ? getFileModelPath(modelId, ModelCategory.Vad, ctx.padModelsPath)

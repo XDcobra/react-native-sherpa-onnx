@@ -118,7 +118,7 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
       mode: 'accurate',
       granularity: 'character',
       language: 'en',
-      modelPath: { type: 'file', path: '/models/alignment' },
+      modelSource: { kind: 'fs', path: '/models/alignment' },
     });
 
     expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
@@ -128,7 +128,7 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
       'accurate',
       'character',
       {
-        modelPath: '/resolved/alignment/model.onnx',
+        modelSource: '/resolved/alignment/model.onnx',
         language: 'en',
       }
     );

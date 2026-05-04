@@ -76,7 +76,7 @@ const liveText = await createLiveTextBuffer({
 });
 
 const stt = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/my-streaming-model' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/my-streaming-model' },
   modelType: 'transducer',
 });
 const pipeline = await stt.transcribe(liveAudio, liveText, { chunkSize: 3200 });

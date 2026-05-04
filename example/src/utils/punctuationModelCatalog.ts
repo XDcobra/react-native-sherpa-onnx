@@ -14,7 +14,7 @@ import {
   ModelCategory,
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { detectPunctuationModel } from 'react-native-sherpa-onnx/punctuation';
 import {
   getAssetModelPath,
@@ -59,7 +59,7 @@ function getModelLabel(meta: ModelMeta | undefined, id: string): string {
 }
 
 async function folderIsOfflineCtTransformer(
-  modelPath: ModelPathConfig
+  modelPath: FileSource
 ): Promise<boolean> {
   try {
     const d = await detectPunctuationModel(await toDetectSource(modelPath), {
@@ -72,7 +72,7 @@ async function folderIsOfflineCtTransformer(
 }
 
 /**
- * Resolve a discovered folder id to ModelPathConfig (matches PunctuationScreen).
+ * Resolve a discovered folder id to FileSource (matches PunctuationScreen).
  */
 export function getPunctuationModelPathConfig(
   modelId: string,
@@ -82,7 +82,7 @@ export function getPunctuationModelPathConfig(
     bundledFolders: string[];
     downloadedIds: Set<string>;
   }
-): ModelPathConfig {
+): FileSource {
   if (ctx.downloadedIds.has(modelId)) {
     return getFileModelPath(modelId, ModelCategory.Punctuation);
   }

@@ -296,7 +296,7 @@ export default function STTScreen() {
       const modelPath = resolveSttModelPath(modelFolder);
 
       const engine = await createSTT({
-        modelPath,
+        modelSource: modelPath,
         numThreads: STT_NUM_THREADS,
       });
 

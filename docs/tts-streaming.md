@@ -30,7 +30,7 @@ LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ 
 
 ## Models & paths
 
-- **`ModelPathConfig`** (from `react-native-sherpa-onnx/fileio`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
+- **`FileSource`** (from `react-native-sherpa-onnx/fileio`): `FileSource` — directory that contains the TTS model files.
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
 - **`detectTtsModel()`** below accepts a `FileSource` and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
@@ -51,14 +51,14 @@ import {
   finalizeLiveAudioBuffer,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+const modelPath = { kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' };
 const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
 if (!det.success || det.modelType !== 'vits') {
   throw new Error(det.error ?? 'Expected a VITS model for this example');
 }
 
 const tts = await createStreamingTTS({
-  modelPath,
+  modelSource: modelPath,
   modelType: det.modelType,
   numThreads: 2,
   modelOptions: {
@@ -181,13 +181,13 @@ if (!result.success) console.warn(result.error);
 ### `createStreamingTTS(options)`
 
 ```ts
-function createStreamingTTS(options: TTSInitializeOptions | ModelPathConfig): Promise<StreamingTtsEngine>;
+function createStreamingTTS(options: TTSInitializeOptions | FileSource): Promise<StreamingTtsEngine>;
 ```
 
 Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline.md#createttsoptions); call `destroy()` when finished.
 
 ```ts
-const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
+const tts = await createStreamingTTS({ modelSource: { kind: 'fs', path: '/path/to/model' } });
 ```
 
 For `createIncrementalStreamingTTS(options)`, see [API reference](#api-reference).
@@ -325,13 +325,13 @@ More end-to-end patterns: [feature-pipelines.md#tts-streaming-patterns](feature-
 
 ## Types
 
-Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx/fileio`.
+Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `FileSource` is imported from `react-native-sherpa-onnx/fileio`.
 
 ### Detection & model path
 
 | Type | Notes |
 | --- | --- |
-| `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto'; path: string }` |
+| `FileSource` | `FileSource` |
 | `FileSource` | `{ kind: 'fs' \| 'app' \| 'contentUri' \| 'securityScoped' \| 'pad', ... }` |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
@@ -347,7 +347,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 | Type | Notes |
 | --- | --- |
 | `TTSInitializeOptions` | `createStreamingTTS()` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
-| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
+| `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
 | `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
 | `TtsModelOptions` | Internal aggregate for native flattening; prefer init unions in app code |
@@ -388,7 +388,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/model' },
+  modelSource: { kind: 'fs', path: '/path/to/model' },
   modelType: 'kokoro',
 });
 const sampleRate = await tts.getSampleRate();
@@ -455,7 +455,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/vits' },
+  modelSource: { kind: 'fs', path: '/path/to/vits' },
   modelType: 'vits',
 });
 const sr = await tts.getSampleRate();
@@ -489,7 +489,7 @@ import {
   finalizeLiveTextBuffer,
 } from 'react-native-sherpa-onnx/tts';
 
-const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/multi-speaker' }, modelType: 'vits' });
+const tts = await createStreamingTTS({ modelSource: { kind: 'fs', path: '/path/to/multi-speaker' }, modelType: 'vits' });
 const sr = await tts.getSampleRate();
 const textIn = await createLiveTextBuffer();
 const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
@@ -522,7 +522,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/kokoro' },
+  modelSource: { kind: 'fs', path: '/path/to/kokoro' },
   modelType: 'kokoro',
 });
 

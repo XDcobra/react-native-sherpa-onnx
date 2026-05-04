@@ -31,7 +31,8 @@ import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
-import { resolveModelPath } from '../../utils';
+import type { FileSource } from '../../fileio/types';
+import { resolveFileSourceForModelInit } from '../../detect';
 import { addSegmentLink, createSegmentLinkMap } from '../../segment';
 import type {
   AlignmentErrorCode,
@@ -331,7 +332,7 @@ interface RunAccurateChunkedForcedCtcInput {
   audioIn: OfflineAudioBufferIdSource;
   segmentOut: OfflineSegmentBufferIdSource;
   anchorSegmentBuffer: OfflineSegmentBufferIdSource;
-  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelSource: FileSource;
   granularity?: 'sentence' | 'word';
   language?: string;
 }
@@ -363,11 +364,13 @@ export async function runAccurateChunkedForcedCtc(
     getPipelineSegmentBufferInfo(segmentOutBufferId),
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
     (async () => {
-      const dir = (await resolveModelPath(input.modelPath)).trim();
+      const dir = (
+        await resolveFileSourceForModelInit(input.modelSource)
+      ).trim();
       if (!dir) {
         throw createChunkedForcedCtcError(
           'ALIGNMENT_MODEL_LOAD_FAILED',
-          'resolveModelPath returned empty for alignment modelPath.'
+          'resolveFileSourceForModelInit returned empty for alignment modelSource.'
         );
       }
       const det = await SherpaOnnx.detectAlignmentModel(dir, 'auto');

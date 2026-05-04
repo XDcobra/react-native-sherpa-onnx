@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferRef,
@@ -51,8 +51,8 @@ export type OfflinePunctuateOptions = {
 export type OfflinePunctuationModelType = 'ct_transformer' | 'auto';
 
 export type OfflinePunctuationInitializeOptions = {
-  /** Same shape as `createEnhancement` / `resolveModelPath` (`type` + `path`), not `FileSource`. */
-  modelPath: ModelPathConfig;
+  /** Directory-backed model source used for punctuation initialization. */
+  modelSource: FileSource;
   /**
    * `'auto'` resolves **offline CT only** (same as `ct_transformer` for native detect).
    * Does not select online/CNN layout.

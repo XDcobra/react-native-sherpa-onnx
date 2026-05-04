@@ -17,7 +17,7 @@ import {
   onModelsListUpdated,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -69,7 +69,7 @@ function isPunctuationNameCandidate(folder: string): boolean {
 }
 
 async function folderIsOfflineCtTransformer(
-  modelPath: ModelPathConfig
+  modelPath: FileSource
 ): Promise<boolean> {
   try {
     const d = await detectPunctuationModel(await toDetectSource(modelPath), {
@@ -87,7 +87,7 @@ function resolvePunctuationModelPathFromScan(
   downloadedIds: string[],
   padFolders: string[],
   padBasePath: string | null
-): ModelPathConfig {
+): FileSource {
   if (downloadedIds.includes(modelFolder)) {
     return getFileModelPath(modelFolder, ModelCategory.Punctuation);
   }
@@ -134,7 +134,7 @@ export default function PunctuationScreen() {
   const textOutRef = useRef<OfflineTextBufferRef | null>(null);
 
   const resolvePunctuationModelPath = useCallback(
-    (modelFolder: string): ModelPathConfig => {
+    (modelFolder: string): FileSource => {
       if (downloadedModelIds.includes(modelFolder)) {
         return getFileModelPath(modelFolder, ModelCategory.Punctuation);
       }
@@ -274,7 +274,7 @@ export default function PunctuationScreen() {
       const modelPath = resolvePunctuationModelPath(selectedFolder);
       const nt = Math.max(1, parseInt(numThreads, 10) || 1);
       const eng = await createOfflinePunctuation({
-        modelPath,
+        modelSource: modelPath,
         modelType: modelTypeInit,
         numThreads: nt,
         provider: provider.trim() || 'cpu',

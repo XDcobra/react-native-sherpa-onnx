@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../fileio/types';
+import type { FileSource } from '../fileio/types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
@@ -108,8 +108,8 @@ export type AlignTextToAudioOptionsEstimated = {
 export type AlignTextToAudioOptionsAccurate =
   | {
       mode: 'accurate';
-      /** Same shape as STT/VAD `modelPath`; resolved before the native bridge. */
-      modelPath: ModelPathConfig;
+      /** FileSource for the alignment model; resolved before the native bridge. */
+      modelSource: FileSource;
       granularity?: AlignmentGranularity;
       language?: string;
       segmentation?: {
@@ -118,7 +118,7 @@ export type AlignTextToAudioOptionsAccurate =
     }
   | {
       mode: 'accurate';
-      modelPath: ModelPathConfig;
+      modelSource: FileSource;
       granularity?: 'sentence' | 'word';
       language?: string;
       segmentation: Extract<

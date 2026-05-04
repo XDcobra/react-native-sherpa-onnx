@@ -117,7 +117,7 @@ type StreamingSessionEngine = {
 };
 
 async function createStreamingSessionEngine(options: {
-  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelSource: FileSource;
   modelType: 'auto';
   numThreads: number;
   debug: boolean;
@@ -827,14 +827,14 @@ export default function PipelineShowcaseScreen() {
       }
 
       const sttEngine = await createStreamingSTT({
-        modelPath: sttModelPath,
+        modelSource: sttModelPath,
         modelType: 'auto',
         numThreads: 2,
       });
       sttEngineRef.current = sttEngine;
 
       const streamingTts = await createStreamingSessionEngine({
-        modelPath: ttsModelPath,
+        modelSource: ttsModelPath,
         modelType: 'auto',
         numThreads: 2,
         debug: false,

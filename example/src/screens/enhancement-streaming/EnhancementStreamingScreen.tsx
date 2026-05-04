@@ -12,11 +12,9 @@ import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
-  autoModelPath,
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
-  resolveModelPath,
 } from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
@@ -329,13 +327,16 @@ export default function EnhancementStreamingScreen() {
     }
 
     if (effectiveSelectedAudio) {
-      const audioPathConfig = autoModelPath(effectiveSelectedAudio.id);
-      const resolvedPath = await resolveModelPath(audioPathConfig);
+      const source: FileSource = {
+        kind: 'app',
+        base: 'files',
+        path: effectiveSelectedAudio.id,
+      };
       return {
-        source: { kind: 'fs', path: resolvedPath },
+        source,
         sourceType: 'example',
         sourceLabel: effectiveSelectedAudio.name,
-        sourcePathForPlayback: resolvedPath,
+        sourcePathForPlayback: effectiveSelectedAudio.id,
         selectedAudioId: effectiveSelectedAudio.id,
         customAudioPath: null,
         customAudioName: null,
@@ -515,11 +516,11 @@ export default function EnhancementStreamingScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(modelFolder);
+      const modelSource = await toDetectSource(modelPath);
 
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: 'auto' }
-      );
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: 'auto',
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         setErrorSource('init');
         setError('No enhancement models detected in the directory');
@@ -536,7 +537,7 @@ export default function EnhancementStreamingScreen() {
       }
 
       const engine = await createStreamingEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: 'auto',
       });
@@ -619,10 +620,10 @@ export default function EnhancementStreamingScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(currentModelFolder);
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: kind }
-      );
+      const modelSource = await toDetectSource(modelPath);
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: kind,
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         setErrorSource('init');
         setError('No enhancement models detected for the selected type');
@@ -637,7 +638,7 @@ export default function EnhancementStreamingScreen() {
       }
 
       const engine = await createStreamingEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: kind,
       });

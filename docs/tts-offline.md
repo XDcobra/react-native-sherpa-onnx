@@ -30,7 +30,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
-const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+const modelPath = { kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' };
 
 // Detect without loading the engine — cheap pre-check that gives you `modelType` and model info.
 const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
@@ -38,7 +38,7 @@ if (!det.success || det.modelType !== 'vits') throw new Error(det.error ?? 'Expe
 
 // Create engine. Explicit modelType required when you want modelOptions.
 const tts = await createTTS({
-  modelPath,
+  modelSource: modelPath,
   modelType: 'vits',
   numThreads: 2,
   modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
@@ -168,20 +168,20 @@ const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' 
 ### `createTTS(options)`
 
 ```ts
-function createTTS(options: TTSInitializeOptions | ModelPathConfig): Promise<TtsEngine>
+function createTTS(options: TTSInitializeOptions | FileSource): Promise<TtsEngine>
 ```
 
 ```ts
 // With explicit modelType (required for modelOptions):
 const tts = await createTTS({
-  modelPath: { type: 'file', path: '/models/vits-piper-en' },
+  modelSource: { kind: 'fs', path: '/models/vits-piper-en' },
   modelType: 'vits',
   numThreads: 2,
   modelOptions: { vits: { noiseScale: 0.667 } },
 });
 
 // With auto-detect (no modelOptions available):
-const tts = await createTTS({ type: 'asset', path: 'models/vits-piper-en' });
+const tts = await createTTS({ kind: 'app', base: 'files', path: 'models/vits-piper-en' });
 ```
 
 ### `tts.synthesize(textIn, audioOut, options?)`
@@ -340,7 +340,7 @@ import { createTTS } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
-const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/vits' }, modelType: 'vits' });
+const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/vits' }, modelType: 'vits' });
 const sr = await tts.getSampleRate();
 
 const textBuf = await createOfflineTextBufferFromText(longText); // multiple sentences
@@ -395,7 +395,7 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 
 ### Core TTS types (`react-native-sherpa-onnx/tts`)
 
-`ModelPathConfig` (used in `createTTS` / init options) is imported from **`react-native-sherpa-onnx/fileio`**, not from the TTS entry.
+`FileSource` (used in `createTTS` / init options) is imported from **`react-native-sherpa-onnx/fileio`**, not from the TTS entry.
 
 | Type | Description |
 | --- | --- |
@@ -403,7 +403,7 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 | `TTS_MODEL_TYPES` | Readonly runtime list |
 | `isTtsModelType` | Runtime guard |
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
-| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
+| `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
 | `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone?, segmentation?, errorRecovery?, maxRetriesPerSegment?, retryExhaustedFallback?, abortSignal?, onProgress?, overlapChars?, textSkipPlaceholder?, linkMap? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set; `segmentation` fields: `mode?` and `policy?` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
@@ -475,7 +475,7 @@ import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const tts = await createTTS({
-  modelPath: { type: 'file', path: '/path/to/kokoro' },
+  modelSource: { kind: 'fs', path: '/path/to/kokoro' },
   modelType: 'kokoro',
   numThreads: 2,
 });
@@ -501,7 +501,7 @@ await tts.destroy();
 Split a large text buffer into sentence-level chunks and synthesize each with the offline engine, keeping peak RAM bounded. Quality may degrade slightly at segment boundaries.
 
 ```ts
-const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/vits' }, modelType: 'vits' });
+const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/vits' }, modelType: 'vits' });
 const sr = await tts.getSampleRate();
 
 const longText = '...'; // several hundred words
@@ -538,7 +538,7 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 
-const tts = await createTTS({ modelPath: { type: 'file', path: '/path/to/pocket' }, modelType: 'pocket' });
+const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/pocket' }, modelType: 'pocket' });
 const sr = await tts.getSampleRate();
 
 const refAudio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/reference.wav' });

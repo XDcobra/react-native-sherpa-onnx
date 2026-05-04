@@ -27,8 +27,7 @@ import type {
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
-import type { ModelPathConfig } from '../fileio/types';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import {
   expandTtsInitializeOptions,
   flattenTtsModelOptionsForNative,
@@ -123,7 +122,7 @@ function createTtsPipelineHandle(
  * committed text segments and writes PCM samples to the output buffer.
  * Call `destroy()` when done to free native resources.
  *
- * @param options - TTS initialization options or model path configuration
+ * @param options - TTS initialization options
  * @returns Promise resolving to a StreamingTtsEngine instance
  * @example
  * ```typescript
@@ -139,11 +138,11 @@ function createTtsPipelineHandle(
  * ```
  */
 export async function createStreamingTTS(
-  options: TTSInitializeOptions | ModelPathConfig
+  options: TTSInitializeOptions
 ): Promise<StreamingTtsEngine> {
   const instanceId = `streaming_tts_${++streamingTtsInstanceCounter}`;
 
-  let modelPath: ModelPathConfig;
+  const modelSource = options.modelSource;
   let modelType: TTSModelType | undefined;
   let provider: string | undefined;
   let numThreads: number | undefined;
@@ -154,33 +153,19 @@ export async function createStreamingTTS(
   let maxNumSentences: number | undefined;
   let silenceScale: number | undefined;
 
-  if ('modelPath' in options) {
-    const expanded = expandTtsInitializeOptions(options);
-    modelPath = expanded.modelPath;
-    modelType = expanded.modelType;
-    provider = expanded.provider;
-    numThreads = expanded.numThreads;
-    debug = expanded.debug;
-    modelOptions = expanded.modelOptions;
-    ruleFsts = expanded.ruleFsts;
-    ruleFars = expanded.ruleFars;
-    maxNumSentences = expanded.maxNumSentences;
-    silenceScale = expanded.silenceScale;
-  } else {
-    modelPath = options;
-    modelType = undefined;
-    provider = undefined;
-    numThreads = undefined;
-    debug = undefined;
-    modelOptions = undefined;
-    ruleFsts = undefined;
-    ruleFars = undefined;
-    maxNumSentences = undefined;
-    silenceScale = undefined;
-  }
+  const expanded = expandTtsInitializeOptions(options);
+  modelType = expanded.modelType;
+  provider = expanded.provider;
+  numThreads = expanded.numThreads;
+  debug = expanded.debug;
+  modelOptions = expanded.modelOptions;
+  ruleFsts = expanded.ruleFsts;
+  ruleFars = expanded.ruleFars;
+  maxNumSentences = expanded.maxNumSentences;
+  silenceScale = expanded.silenceScale;
 
   const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
-  const resolvedPath = await resolveModelPath(modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
 
   const result = await SherpaOnnx.initializeTts(
     instanceId,

@@ -130,7 +130,7 @@ describe('alignment/native bridge slice calls', () => {
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
       hypothesisTextBuffer: 'txt_hyp',
-      modelPath: { type: 'file', path: '/m' },
+      modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
     });
@@ -159,7 +159,7 @@ describe('alignment/native bridge slice calls', () => {
       audioIn: 'off_audio',
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
-      modelPath: { type: 'file', path: '/m' },
+      modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
     });

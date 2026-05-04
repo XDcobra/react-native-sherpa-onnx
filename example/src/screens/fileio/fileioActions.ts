@@ -28,10 +28,7 @@ import {
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  autoModelPath,
-  resolveModelPath,
-} from 'react-native-sherpa-onnx/utils';
+
 import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import { TEST_AUDIO_FILES } from '../../audioConfig';
 
@@ -71,8 +68,11 @@ function isPickCanceled(err: unknown): boolean {
 }
 
 async function resolveBundledTestWavAsFileSource(): Promise<FileSource> {
-  const path = await resolveModelPath(autoModelPath(DEMO_SOURCE_RELATIVE_PATH));
-  return { kind: 'fs', path };
+  return {
+    kind: 'app',
+    base: 'files',
+    path: DEMO_SOURCE_RELATIVE_PATH,
+  };
 }
 
 function mimeTypeForWav(): string {

@@ -42,10 +42,7 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  autoModelPath,
-  resolveModelPath,
-} from 'react-native-sherpa-onnx/utils';
+
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import type { AudioFileInfo } from '../audioConfig';
@@ -356,11 +353,9 @@ export const OfflineAudioBufferWidget = forwardRef<
   const handleExamplePick = useCallback(
     async (audioFile: AudioFileInfo) => {
       try {
-        const pathConfig = autoModelPath(audioFile.id);
-        const resolved = await resolveModelPath(pathConfig);
-        await decodeSource(resolved, audioFile.name, {
+        await decodeSource(audioFile.id, audioFile.name, {
           kind: 'fs',
-          path: resolved,
+          path: audioFile.id,
         });
       } catch (err) {
         setDecodeError(err instanceof Error ? err.message : String(err));

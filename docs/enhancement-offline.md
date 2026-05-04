@@ -34,7 +34,7 @@ If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offli
 - Recursively finds `.onnx` under the resolved model directory (depth 4, same family as other detectors).
 - Filename / path contains `gtcrn` → candidate **`gtcrn`**; contains `dpdfnet` or `dpcrn` → candidate **`dpdfnet`**.
 - **`modelType: 'auto'`** (default): prefers **`gtcrn`** if both ONNX stacks are present, else **`dpdfnet`**.
-- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelPath.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
+- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelSource.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
 
 **`detectionSources`:** optional ordered trace (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`). **`nameOnly`** means no file list was scanned — see native `error` when `success` is false.
 
@@ -58,13 +58,13 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
-const modelPath = { type: 'file' as const, path: '/absolute/path/to/enhancement-model-dir' };
+const modelPath = { kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' };
 
 const det = await detectEnhancementModel({ kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' }, { modelType: 'auto' });
 if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 
 const enhancement = await createEnhancement({
-  modelPath,
+  modelSource: modelPath,
   modelType: (det.modelType as any) ?? 'auto',
   numThreads: 2,
   provider: 'cpu',
@@ -165,7 +165,7 @@ function createEnhancement(
 
 ```ts
 const enhancement = await createEnhancement({
-  modelPath: { type: 'file', path: '/absolute/path/to/model-dir' },
+  modelSource: { kind: 'fs', path: '/absolute/path/to/model-dir' },
   modelType: 'auto',
   numThreads: 1,
   provider: 'cpu',
@@ -280,7 +280,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 
 const engine = await createEnhancement({
-  modelPath: { type: 'file', path: '/path/to/enhancement-model' },
+  modelSource: { kind: 'fs', path: '/path/to/enhancement-model' },
   modelType: 'auto',
 });
 
@@ -394,7 +394,7 @@ import {
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const engine = await createEnhancement({
-  modelPath: { type: 'file', path: '/path/to/gtcrn' },
+  modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
   modelType: 'gtcrn',
 });
 
@@ -421,7 +421,7 @@ try {
 
 ```ts
 const engine = await createEnhancement({
-  modelPath: { type: 'file', path: '/path/to/model' },
+  modelSource: { kind: 'fs', path: '/path/to/model' },
   modelType: 'auto',
 });
 

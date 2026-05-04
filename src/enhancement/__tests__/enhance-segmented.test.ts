@@ -8,15 +8,12 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   },
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/enhancement'),
-}));
-
 jest.mock('../../detect', () => ({
   resolveFileSourceForDetect: jest.fn(async () => ({
     modelDir: '/models/enhancement',
     assetName: 'model.onnx',
   })),
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/enhancement'),
 }));
 
 jest.mock('../../model-languages', () => ({
@@ -59,7 +56,7 @@ describe('enhancement segmented offline API', () => {
 
   it('uses native single-shot path when segmentation is off', async () => {
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output');
@@ -90,7 +87,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {
@@ -128,7 +125,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {
@@ -161,7 +158,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {

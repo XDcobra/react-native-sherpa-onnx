@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,
@@ -61,10 +61,12 @@ async function buildNativeOptions(
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const modelDir = (await resolveModelPath(options.modelPath)).trim();
+    const modelDir = (
+      await resolveFileSourceForModelInit(options.modelSource)
+    ).trim();
     if (!modelDir) {
       throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.'
+        'ALIGNMENT_MODEL_MISSING: Provide options.modelSource for accurate alignment.'
       );
     }
     const det = await SherpaOnnx.detectAlignmentModel(modelDir, 'auto');
@@ -146,7 +148,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         segmentOut,
         anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
         hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
-        modelPath: options.modelPath,
+        modelSource: options.modelSource,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
         ...(typeof options.language === 'string'
           ? { language: options.language }
@@ -159,7 +161,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       audioIn,
       segmentOut,
       anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
-      modelPath: options.modelPath,
+      modelSource: options.modelSource,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
       ...(typeof options.language === 'string'
         ? { language: options.language }

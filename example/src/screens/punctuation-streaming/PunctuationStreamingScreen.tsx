@@ -15,7 +15,7 @@ import {
   onModelsListUpdated,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -64,7 +64,7 @@ function isPunctuationNameCandidate(folder: string): boolean {
 }
 
 async function folderIsStreamingCnnBilstm(
-  modelPath: ModelPathConfig
+  modelPath: FileSource
 ): Promise<boolean> {
   try {
     const d = await detectPunctuationModel(await toDetectSource(modelPath), {
@@ -81,7 +81,7 @@ function resolvePunctuationModelPathFromScan(
   downloadedIds: string[],
   padFolders: string[],
   padBasePath: string | null
-): ModelPathConfig {
+): FileSource {
   if (downloadedIds.includes(modelFolder)) {
     return getFileModelPath(modelFolder, ModelCategory.Punctuation);
   }
@@ -123,7 +123,7 @@ export default function PunctuationStreamingScreen() {
   const outputRef = useRef<LiveTextBufferRef | null>(null);
 
   const resolvePunctuationModelPath = useCallback(
-    (modelFolder: string): ModelPathConfig => {
+    (modelFolder: string): FileSource => {
       if (downloadedModelIds.includes(modelFolder)) {
         return getFileModelPath(modelFolder, ModelCategory.Punctuation);
       }
@@ -263,7 +263,7 @@ export default function PunctuationStreamingScreen() {
       await cleanup();
       const modelPath = resolvePunctuationModelPath(selectedFolder);
       const engine = await createStreamingPunctuation({
-        modelPath,
+        modelSource: modelPath,
         modelType: 'cnn_bilstm',
         provider: 'cpu',
       });

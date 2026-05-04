@@ -115,7 +115,7 @@ describe('tts mode 2 link map integration', () => {
 
   it('creates and populates link map when caller does not supply one', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {
@@ -150,7 +150,7 @@ describe('tts mode 2 link map integration', () => {
 
   it('reuses caller-supplied link map', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const supplied = { linkMapId: 'slm_supplied' };

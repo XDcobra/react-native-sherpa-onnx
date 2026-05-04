@@ -28,7 +28,7 @@ Finalize the migration:
 
 ## 3. Current State (Ist)
 
-- `docs/alignment.md` was updated for `modelPath: ModelPathConfig` but still describes a freestanding `alignTextToAudio` style.
+- `docs/alignment.md` was updated for `modelSource: FileSource` but still describes a freestanding `alignTextToAudio` style.
 - `example/src/screens/generate-timestamp/GenerateTimestampScreen.tsx` calls `alignTextToAudio` directly.
 - `accurate-vad-segmentation-high-level-plan.md` contains plan content that is now subsumed by the new sub-plans.
 
@@ -42,7 +42,7 @@ Sections (target outline):
 
 1. Overview (modes 1–5).
 2. Quickstart with `createAlignment` + `engine.alignTextToAudio`.
-3. Per-mode option tables with `modelPath: ModelPathConfig` examples.
+3. Per-mode option tables with `modelSource: FileSource` examples.
 4. `asrMediated` (`asr_mediated`) walkthrough — points to `alignment-asr-mediated-ts-example.md`.
 5. `chunkedForcedCtc` (`chunked_forced_ctc`) walkthrough.
 6. Result schema (`AlignTextToAudioWriteResult`) including warnings.
@@ -60,7 +60,7 @@ Sections (target outline):
 - Replace top-level `alignTextToAudio` import with `createAlignment`.
 - Lifecycle: create engine on mount, destroy on unmount.
 - Each mode demo (proportional, estimated, accurate one-shot, accurate auto `asrMediated`, accurate auto `chunkedForcedCtc`, vad) becomes a button.
-- Use `modelPath: { type: 'file', path: ... }`.
+- Use `modelSource: { kind: 'fs', path: ... }`.
 
 ### 4.3 Superseded docs
 

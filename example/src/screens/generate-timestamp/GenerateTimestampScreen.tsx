@@ -56,7 +56,7 @@ import {
   onModelsListUpdated,
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
-import type { ModelPathConfig } from 'react-native-sherpa-onnx/fileio';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -381,7 +381,7 @@ function resolveModelPathForCatalog(
   modelId: string,
   category: ModelCategory,
   catalog: ModelCatalog
-): ModelPathConfig {
+): FileSource {
   if (catalog.padIds.includes(modelId)) {
     return catalog.padPath
       ? getFileModelPath(modelId, category, catalog.padPath)
@@ -1121,7 +1121,7 @@ export default function GenerateTimestampScreen() {
         const hypothesisBuffer = await createEmptyOfflineTextBuffer();
         hypothesisTextBufferId = hypothesisBuffer.bufferId;
         stt = await createSTT({
-          modelPath: sttModelPath!,
+          modelSource: sttModelPath!,
           modelType: 'auto',
           numThreads: 2,
           modelOptions: {
@@ -1168,7 +1168,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity,
-                modelPath: alignmentModelPath!,
+                modelSource: alignmentModelPath!,
               }
             )
           : mode === 'vad'
@@ -1193,7 +1193,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity: textGranularity,
-                modelPath: alignmentModelPath!,
+                modelSource: alignmentModelPath!,
                 segmentation: {
                   mode: 'auto',
                   anchorSegmentBuffer: anchorSegmentBufferId!,
@@ -1211,7 +1211,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity: textGranularity,
-                modelPath: alignmentModelPath!,
+                modelSource: alignmentModelPath!,
                 segmentation: {
                   mode: 'auto',
                   anchorSegmentBuffer: anchorSegmentBufferId!,
@@ -1512,7 +1512,7 @@ export default function GenerateTimestampScreen() {
             <ModelPreparationCard
               stepLabel={stepLabels.vad!}
               title="Prepare VAD anchors"
-              description="Best-practice anchor generation: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelPath: FileSource }) — same detect path as streaming VAD. The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
+              description="Best-practice anchor generation: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelSource: FileSource }) — same detect path as streaming VAD. The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
               loading={loadingModelCatalogs}
               emptyMessage="No VAD models found. Add one under assets/models, PAD/documents/models, or downloads (category: vad)."
               models={vadCatalog.entries}

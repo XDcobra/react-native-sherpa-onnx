@@ -98,7 +98,7 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     });
 
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {
@@ -145,7 +145,7 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     });
 
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {

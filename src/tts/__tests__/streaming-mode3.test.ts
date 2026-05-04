@@ -95,7 +95,7 @@ describe('streaming tts mode 3 (no segmentation attach)', () => {
 
   it('starts pipeline directly when segmentation mode is off/default', async () => {
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const handle = await tts.synthesize('txt_live_in', 'live_out');
@@ -119,7 +119,7 @@ describe('streaming tts mode 3 (no segmentation attach)', () => {
 
   it('treats manual mode as no-attach path', async () => {
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const handle = await tts.synthesize('txt_live_in', 'live_out', {
@@ -134,7 +134,7 @@ describe('streaming tts mode 3 (no segmentation attach)', () => {
 
   it('rejects segmentation policy when mode is off or manual', async () => {
     const tts = await createStreamingTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     await expect(

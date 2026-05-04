@@ -120,7 +120,7 @@ describe('chunkedForcedCtc/driver stuck detection', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_STUCK' });

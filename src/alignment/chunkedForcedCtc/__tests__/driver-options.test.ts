@@ -129,7 +129,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_OPTIONS_INVALID' });
@@ -154,7 +154,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' });
@@ -176,7 +176,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_FAILED' });
