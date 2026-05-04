@@ -500,10 +500,10 @@ export async function runAccurateChunkedForcedCtc(
           'At least one anchor consumed zero tokens during chunkedForcedCtc forced CTC.'
         );
 
-        if (consecutiveNoProgress >= 2) {
+        if (consecutiveNoProgress >= 3) {
           throw createChunkedForcedCtcError(
             'ALIGNMENT_FORCED_CTC_STUCK',
-            'chunkedForcedCtc made no cursor progress for two consecutive anchors.'
+            'chunkedForcedCtc made no cursor progress for three consecutive anchors.'
           );
         }
 

@@ -187,8 +187,8 @@ static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy
     return @"sentenceBoundaryChars must be an array of strings";
   }
   NSArray *arr = (NSArray *)raw;
-  if (arr.count > 64) {
-    return @"sentenceBoundaryChars must have at most 64 entries";
+  if (arr.count > 128) {
+    return @"sentenceBoundaryChars must have at most 128 entries";
   }
   for (id o in arr) {
     if (![o isKindOfClass:[NSString class]]) {
@@ -198,8 +198,8 @@ static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy
     if (s.length == 0) {
       continue;
     }
-    if (s.length > 32) {
-      return @"sentenceBoundaryChars entries must be at most 32 characters";
+    if (s.length > 64) {
+      return @"sentenceBoundaryChars entries must be at most 64 characters";
     }
   }
   return nil;
@@ -332,7 +332,7 @@ struct SegLiveEntry {
   State state = RECORDING;
   std::string sourceAudioBufferId;
   std::vector<SegRecord> segments;
-  int maxSegments = 1000;
+  int maxSegments = 4096;
   int64_t evictedCount = 0;
   int64_t totalSegmentsWritten = 0;
 
@@ -886,14 +886,14 @@ enum class SegEngineState {
 
 struct SegEnginePolicy {
   std::string evaluator;
-  int maxLengthChars = 500;
+  int maxLengthChars = 2000;
   bool sentenceBoundary = true;
   /** Non-empty => replace built-in delimiter set (UTF-8 delimiter strings). */
   std::vector<std::string> sentenceBoundaryChars;
   int silenceThresholdMs = 500;
   double energyThresholdDb = -40.0;
   int minSegmentMs = 1000;
-  int maxSegmentMs = 30000;
+  int maxSegmentMs = 120000;
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
   std::string punctuationInstanceId;
@@ -1750,7 +1750,7 @@ bool seg_engine_peek_annotation(
       auto entry = std::make_shared<SegLiveEntry>();
       entry->bufferId = seg_new_id("seg_live");
       entry->sourceAudioBufferId = bid;
-      entry->maxSegments = 1000;
+      entry->maxSegments = 4096;
       entry->spoolingMode = SegLiveEntry::SPOOL_ON;
       NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
                        [NSString stringWithFormat:@"seg_spool_%@.json", [NSUUID UUID].UUIDString]];
@@ -2220,7 +2220,7 @@ bool seg_engine_peek_annotation(
     auto entry = std::make_shared<SegLiveEntry>();
     entry->bufferId = seg_new_id("seg_live");
     entry->sourceAudioBufferId = [opts[@"sourceAudioBufferId"] isKindOfClass:[NSString class]] ? [opts[@"sourceAudioBufferId"] UTF8String] : "";
-    entry->maxSegments = [opts[@"maxSegments"] respondsToSelector:@selector(intValue)] ? std::max(1, [opts[@"maxSegments"] intValue]) : 1000;
+    entry->maxSegments = [opts[@"maxSegments"] respondsToSelector:@selector(intValue)] ? std::max(1, [opts[@"maxSegments"] intValue]) : 4096;
     NSString *modeRaw = [opts[@"spoolingMode"] isKindOfClass:[NSString class]] ? opts[@"spoolingMode"] : @"on";
     if ([modeRaw isEqualToString:@"off"]) entry->spoolingMode = SegLiveEntry::SPOOL_OFF;
     else if ([modeRaw isEqualToString:@"auto"]) entry->spoolingMode = SegLiveEntry::SPOOL_AUTO;

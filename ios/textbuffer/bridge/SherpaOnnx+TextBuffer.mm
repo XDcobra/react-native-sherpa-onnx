@@ -540,7 +540,7 @@ static std::string txt_generateId(const char *prefix) {
 {
     try {
         int windowMaxChars = 65536;
-        int maxSegments = 1000;
+        int maxSegments = 4096;
         bool emitPartialEvents = false;
         int64_t partialEventMinIntervalMs = 0;
         TxtLiveEntry::SpoolingMode spoolingMode = TxtLiveEntry::SPOOL_ON;

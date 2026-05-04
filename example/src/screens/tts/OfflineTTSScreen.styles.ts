@@ -443,6 +443,22 @@ export const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
+  /** Full-width column for save picker + share (offline TTS generated audio). */
+  generatedAudioSaveWrap: {
+    marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  generatedAudioShareButton: {
+    alignSelf: 'stretch',
+    marginTop: 10,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5856D6',
+  },
   audioButton: {
     flexBasis: '30%',
     maxWidth: '32%',

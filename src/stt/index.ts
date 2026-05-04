@@ -282,7 +282,7 @@ export async function createSTT(
           silenceThresholdMs: 500,
           energyThresholdDb: -40,
           minSegmentMs: 1000,
-          maxSegmentMs: 30000,
+          maxSegmentMs: 120000,
           hangoverMs: 300,
         },
       });

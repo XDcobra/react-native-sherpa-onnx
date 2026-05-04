@@ -5,14 +5,16 @@ import type {
 } from './types';
 
 const WORD_WINDOW_MIN_UNITS = 3;
-const WORD_WINDOW_MAX_UNITS = 48;
+/** Upper bound on reference units per anchor window (duration estimate is primary; see resolveWindowUnitCount). */
+const WORD_WINDOW_MAX_UNITS = 2048;
 const WORD_TARGET_MS_PER_UNIT = 320;
 
 const SENTENCE_WINDOW_MIN_UNITS = 1;
-const SENTENCE_WINDOW_MAX_UNITS = 8;
+const SENTENCE_WINDOW_MAX_UNITS = 32;
 const SENTENCE_TARGET_MS_PER_UNIT = 1800;
 
-const WINDOW_SAFETY_OVERLAP_UNITS = 2;
+/** Extra reference units beyond duration estimate (word granularity only). */
+const WINDOW_SAFETY_OVERLAP_UNITS = 3;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));

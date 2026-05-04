@@ -58,15 +58,9 @@ import {
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './OfflineTTSScreen.styles';
-import {
-  saveAudioAsFile,
-  setPipelineAudioRoutePreference,
-} from 'react-native-sherpa-onnx/audio';
-import {
-  formatResolvedLocation,
-  isDirectoryPickCanceled,
-  saveAudioToUserPickedFolder,
-} from '../../utils/saveAudioToUserFolder';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
+import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
 import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
 import {
   fetchOutputDevices,
@@ -140,7 +134,6 @@ export default function OfflineTTSScreen() {
   const [savedAudioBufferId, setSavedAudioBufferId] = useState<string | null>(
     null
   );
-  const [saving, setSaving] = useState(false);
   const [playingBufferId, setPlayingBufferId] = useState<string | null>(null);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
@@ -882,76 +875,11 @@ export default function OfflineTTSScreen() {
     }
   };
 
-  const saveAudioWithData = async (audio: GeneratedResult) => {
-    if (!audio.numSamples) {
-      Alert.alert('Error', 'No audio to save.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const filename = `tts_${Date.now()}.wav`;
-      const resolved = await saveAudioToUserPickedFolder(
-        audio.bufferId,
-        filename,
-        'wav'
-      );
-      const display = formatResolvedLocation(resolved);
-      setSavedAudioPath(display);
-      setSavedAudioBufferId(audio.bufferId);
-      Alert.alert('Success', `Audio saved to:\n${display}`);
-    } catch (err) {
-      if (isDirectoryPickCanceled(err)) {
-        return;
-      }
-      console.error('Save audio error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Failed to save audio: ${errorMessage}`);
-      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveAudio = async () => {
-    if (!generatedAudio) {
-      Alert.alert('Error', 'No audio to save. Generate speech first.');
-      return;
-    }
-    await saveAudioWithData(generatedAudio);
-  };
-
-  /** Quick-save into app documents via SDK `FileDestination` (`app` base). */
-  const handleSaveTemporary = async () => {
-    if (!generatedAudio) {
-      Alert.alert('Error', 'No audio to save. Generate speech first.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const filename = `tts_${Date.now()}.wav`;
-      const resolved = await saveAudioAsFile(
-        generatedAudio.bufferId,
-        { kind: 'app', base: 'documents', path: filename },
-        'wav'
-      );
-      const display = formatResolvedLocation(resolved);
-      setSavedAudioPath(display);
-      setSavedAudioBufferId(generatedAudio.bufferId);
-      Alert.alert('Success', `Audio saved to:\n${display}`);
-    } catch (err) {
-      console.error('Save audio error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setError(`Failed to save audio: ${errorMessage}`);
-      Alert.alert('Error', `Failed to save audio: ${errorMessage}`);
-    } finally {
-      setSaving(false);
-    }
+  const handleSaveAudioComplete = (audio: GeneratedResult) => (result: any) => {
+    const display = formatResolvedLocation(result);
+    setSavedAudioPath(display);
+    setSavedAudioBufferId(audio.bufferId);
+    Alert.alert('Success', `Audio saved to:\n${display}`);
   };
 
   const handleToggleOfflineBufferPlayback = useCallback(
@@ -1528,59 +1456,24 @@ export default function OfflineTTSScreen() {
                 </Text>
               </View>
 
-              {/* Audio Controls */}
-              <View style={styles.audioControls}>
-                <TouchableOpacity
-                  style={[
-                    styles.audioButton,
-                    styles.saveButton,
-                    saving && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSaveTemporary}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="save-outline"
-                        size={16}
-                        color="#fff"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.audioButtonText}>Save temporary</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.audioButton,
-                    styles.saveButton,
-                    saving && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSaveAudio}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="folder-outline"
-                        size={16}
-                        color="#fff"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.audioButtonText}>Save to Folder</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
+              {/* Audio Controls — save only via shared destination picker */}
+              <View style={styles.generatedAudioSaveWrap}>
+                {generatedAudio && generatedAudio.numSamples > 0 && (
+                  <AudioSaveDestinationPicker
+                    audioInput={generatedAudio.bufferId}
+                    filename={`tts_${Date.now()}.wav`}
+                    format="wav"
+                    defaultDestinationKind="app"
+                    onSaveComplete={handleSaveAudioComplete(generatedAudio)}
+                    onError={(error) => {
+                      Alert.alert('Save failed', error.message);
+                    }}
+                  />
+                )}
 
                 {savedAudioPath && (
                   <TouchableOpacity
-                    style={[styles.audioButton, styles.shareButton]}
+                    style={styles.generatedAudioShareButton}
                     onPress={handleShareAudio}
                   >
                     <View style={styles.rowAlignCenter}>

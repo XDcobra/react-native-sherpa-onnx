@@ -767,7 +767,7 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
   const raw = await getNative().getOfflineSegmentBufferSegments(

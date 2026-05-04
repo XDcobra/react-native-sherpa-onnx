@@ -21,8 +21,8 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 import org.json.JSONObject
 
-private const val MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 64
-private const val MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 32
+private const val MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 128
+private const val MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 64
 
 /**
  * Default sentence / clause boundaries for offline + live text segmentation: Latin, newline,
@@ -93,14 +93,14 @@ enum class EngineDomain {
 
 data class SegmentationEnginePolicy(
   val evaluator: String,
-  val maxLengthChars: Int = 500,
+  val maxLengthChars: Int = 2000,
   val sentenceBoundary: Boolean = true,
   /** When non-null and non-empty, replaces [DEFAULT_SENTENCE_BOUNDARY_DELIMITERS] entirely. */
   val sentenceBoundaryChars: List<String>? = null,
   val silenceThresholdMs: Int = 500,
   val energyThresholdDb: Double = -40.0,
   val minSegmentMs: Int = 1000,
-  val maxSegmentMs: Int = 30000,
+  val maxSegmentMs: Int = 120000,
   val hangoverMs: Int = 300,
   val checkpointIntervalMs: Int = 0,
   val punctuationInstanceId: String? = null,
@@ -940,13 +940,13 @@ private fun parsePolicy(
   }
 
   val minSegmentMs = readInt(rawPolicy, "minSegmentMs", 1000).coerceAtLeast(100)
-  val maxSegmentMs = readInt(rawPolicy, "maxSegmentMs", 30000)
+  val maxSegmentMs = readInt(rawPolicy, "maxSegmentMs", 120000)
     .coerceAtLeast(200)
     .coerceAtLeast(minSegmentMs)
 
   return SegmentationEnginePolicy(
     evaluator = evaluator,
-    maxLengthChars = readInt(rawPolicy, "maxLengthChars", 500).coerceAtLeast(1),
+    maxLengthChars = readInt(rawPolicy, "maxLengthChars", 2000).coerceAtLeast(1),
     sentenceBoundary = readBoolean(rawPolicy, "sentenceBoundary", true),
     sentenceBoundaryChars = readSentenceBoundaryChars(rawPolicy),
     silenceThresholdMs = readInt(rawPolicy, "silenceThresholdMs", 500).coerceAtLeast(50),
@@ -1062,7 +1062,7 @@ object SegmentationEngineRegistry {
 
         val segmentEntry = SegmentPipelineRegistry.createLive(
           sourceAudioBufferId = bufferId,
-          maxSegments = 1000,
+          maxSegments = 4096,
           spoolingModeRaw = "on",
           spoolingPath = null,
           spoolingTemporary = null,

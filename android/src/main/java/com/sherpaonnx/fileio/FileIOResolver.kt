@@ -17,11 +17,6 @@ import java.io.OutputStream
  */
 internal class FileIOResolver(private val context: ReactApplicationContext) {
 
-  enum class WriteMode {
-    SEQUENTIAL,
-    SEEKABLE,
-  }
-
   /** Resolved read handle. Caller must close. */
   sealed class ReadHandle : Closeable {
     /** Local file — can be passed to APIs that require a path. */
@@ -49,15 +44,6 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     /** Local file path. */
     class FilePath(val file: File) : WriteHandle() {
       override fun close() {}
-    }
-
-    /** Seekable file descriptor path (e.g. /proc/self/fd/<n>). */
-    class FileDescriptor(
-      val pfd: ParcelFileDescriptor,
-      val fdPath: String,
-      val resultUri: Uri,
-    ) : WriteHandle() {
-      override fun close() = pfd.close()
     }
 
     /** SAF output stream — for streaming writes. */
@@ -162,7 +148,6 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
 
   fun resolveDestination(
     destination: ReadableMap,
-    mode: WriteMode = WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
   ): WriteHandle {
@@ -204,35 +189,16 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         val uri = Uri.parse(uriStr)
         val resolver = context.contentResolver
 
-        if (mode == WriteMode.SEEKABLE) {
-          val pfd = try {
-            resolver.openFileDescriptor(uri, "rw")
-          } catch (_: Exception) {
-            null
-          }
-
-          if (pfd != null) {
-            WriteHandle.FileDescriptor(
-              pfd = pfd,
-              fdPath = "/proc/self/fd/${pfd.fd}",
-              resultUri = uri,
-            )
-          } else {
-            val outputStream = try {
-              resolver.openOutputStream(uri, "w")
-            } catch (e: SecurityException) {
-              throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
-            WriteHandle.Stream(outputStream, uri)
-          }
-        } else {
-          val outputStream = try {
-            resolver.openOutputStream(uri, "w")
-          } catch (e: SecurityException) {
-            throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
-          WriteHandle.Stream(outputStream, uri)
-        }
+        // Always use OutputStream for content:// document targets (same strategy as contentTree).
+        // Do not use openFileDescriptor(rw) for seekable audio encode: native encoders fopen("/proc/self/fd/…")
+        // is unreliable for many provider-backed URIs. SherpaOnnxModule resolves Stream destinations to a
+        // cache temp file for encode, then copies bytes into this stream.
+        val outputStream = try {
+          resolver.openOutputStream(uri, "w")
+        } catch (e: SecurityException) {
+          throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
+        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
+        WriteHandle.Stream(outputStream, uri)
       }
 
       "contentTree" -> {
@@ -253,9 +219,7 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Failed to create document in tree: ${e.message}", e)
         }
 
-        // Documents created under a SAF tree URI: prefer OutputStream. Native WAV encode uses fopen()
-        // on /proc/self/fd/* when we return FileDescriptor; that often fails for provider-backed fds.
-        // SherpaOnnxModule writes to a temp file then copies when the handle is Stream.
+        // SAF tree document: always OutputStream. Audio encode uses a temp file then copies (see SherpaOnnxModule).
         val outputStream = try {
           resolver.openOutputStream(docUri, "w")
         } catch (e: Exception) {

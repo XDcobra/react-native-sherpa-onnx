@@ -362,7 +362,7 @@ More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feat
 | `ALIGNMENT_CHUNKS_MISSING` | estimated mode without `segmentSampleCounts` |
 | `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` | ASR-mediated strategy requires timestamped hypothesis tokens |
 | `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
-| `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on two consecutive anchors |
+| `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on three consecutive anchors |
 | `ALIGNMENT_NATIVE_UNKNOWN` | native bridge returned unknown error shape |
 | `OFFLINE_OOM` | Not enough memory for offline alignment; native message suggests smaller chunks / streaming-friendly pipelines and points to [segmentation-engine.md](./segmentation-engine.md). |
 

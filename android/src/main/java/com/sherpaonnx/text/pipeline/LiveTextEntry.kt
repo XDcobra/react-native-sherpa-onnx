@@ -65,7 +65,7 @@ enum class TextSpoolingMode {
 class LiveTextEntry(
   val bufferId: String,
   val windowMaxChars: Int = 65536,
-  val maxSegments: Int = 1000,
+  val maxSegments: Int = 4096,
   val emitPartialEvents: Boolean = false,
   val partialEventMinIntervalMs: Long = 0,
   private val spoolingMode: TextSpoolingMode = TextSpoolingMode.ON,

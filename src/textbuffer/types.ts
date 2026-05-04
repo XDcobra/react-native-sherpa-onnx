@@ -258,7 +258,7 @@ export interface LiveTextBufferSegmentEvent {
 export interface CreateLiveTextBufferOptions {
   /** Max held UTF-16 characters for partial history (ring). Default: native/SDK. */
   windowMaxChars?: number;
-  /** Max committed segments retained in the live segment log. Default: 1000. */
+  /** Max committed segments retained in the live segment log. Default: 4096. */
   maxSegments?: number;
   /** Optional spooling config (default is native `mode: "on"`). */
   spooling?: TextBufferSpoolingOptions;
@@ -306,5 +306,5 @@ export type PipelineTextErrorCodeValue =
 
 // ========== Slice Constants ==========
 
-export const TEXT_DEFAULT_SLICE_COUNT = 1024;
+export const TEXT_DEFAULT_SLICE_COUNT = 4096;
 export const TEXT_MAX_SLICE_COUNT = 16384;

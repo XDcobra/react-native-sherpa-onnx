@@ -32,12 +32,8 @@ import {
   releasePipelineAudioBuffer,
   getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
-import {
-  formatResolvedLocation,
-  isDirectoryPickCanceled,
-  saveAudioToUserPickedFolder,
-} from '../../utils/saveAudioToUserFolder';
+import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -46,11 +42,8 @@ import {
 } from '../../modelConfig';
 import { AUDIO_FILES } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import {
-  startPcmFilePlayback,
-  stopPcmFilePlayback,
-  type ActivePcmFilePlayback,
-} from '../../utils/audioFilePcmPlayback';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
@@ -88,6 +81,18 @@ const localStyles = StyleSheet.create({
   playDisabled: {
     opacity: 0.45,
   },
+  playRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    alignItems: 'stretch',
+  },
+  playHalf: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
 });
 
 export default function EnhancementScreen() {
@@ -120,50 +125,32 @@ export default function EnhancementScreen() {
     mode: 'off',
   });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
-  const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
     outputBufferId: string;
     sampleRate: number;
     numSamples: number;
   } | null>(null);
-
-  const [saving, setSaving] = useState(false);
+  const [activePlaybackKind, setActivePlaybackKind] = useState<
+    'original' | 'enhanced' | null
+  >(null);
 
   const engineRef = useRef<EnhancementEngine | null>(null);
-  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const originalInputPlayerRef = useRef<PcmPlayer | null>(null);
+  const enhancedOutputPlayerRef = useRef<PcmPlayer | null>(null);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
   const stopActivePlayback = async () => {
-    if (!pcmPlaybackRef.current) return;
-    const activePlayback = pcmPlaybackRef.current;
-    pcmPlaybackRef.current = null;
-    await stopPcmFilePlayback(activePlayback);
-  };
-
-  const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.outputBufferId) {
-      Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
-      return;
+    const original = originalInputPlayerRef.current;
+    originalInputPlayerRef.current = null;
+    if (original) {
+      await original.destroy().catch(() => {});
     }
-    setSaving(true);
-    try {
-      const filename = `sherpa_enhanced_${Date.now()}.wav`;
-      const resolved = await saveAudioToUserPickedFolder(
-        lastEnhancedAudio.outputBufferId,
-        filename,
-        'wav'
-      );
-      const display = formatResolvedLocation(resolved);
-      Alert.alert('Saved', `Audio saved to:\n${display}`);
-    } catch (err) {
-      if (isDirectoryPickCanceled(err)) {
-        return;
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      Alert.alert('Save failed', msg);
-    } finally {
-      setSaving(false);
+    const enhanced = enhancedOutputPlayerRef.current;
+    enhancedOutputPlayerRef.current = null;
+    if (enhanced) {
+      await enhanced.destroy().catch(() => {});
     }
+    setActivePlaybackKind(null);
   };
 
   useEffect(() => {
@@ -182,9 +169,15 @@ export default function EnhancementScreen() {
 
   useEffect(() => {
     return () => {
-      if (pcmPlaybackRef.current) {
-        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
-        pcmPlaybackRef.current = null;
+      const o = originalInputPlayerRef.current;
+      originalInputPlayerRef.current = null;
+      if (o) {
+        o.destroy().catch(() => {});
+      }
+      const p = enhancedOutputPlayerRef.current;
+      enhancedOutputPlayerRef.current = null;
+      if (p) {
+        p.destroy().catch(() => {});
       }
     };
   }, []);
@@ -330,7 +323,6 @@ export default function EnhancementScreen() {
       );
 
       setEnhanceResult(null);
-      setOutputWavPath(null);
       setLastEnhancedAudio(null);
     } catch (err) {
       console.error('Enhancement init error:', err);
@@ -417,8 +409,8 @@ export default function EnhancementScreen() {
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastEnhancedAudio(null);
+    await stopActivePlayback();
 
     try {
       const engine = engineRef.current;
@@ -457,20 +449,13 @@ export default function EnhancementScreen() {
         const n = outInfo.numSamples ?? 0;
         const outSr = outInfo.sampleRate ?? sr;
         const sec = outSr > 0 ? (n / outSr).toFixed(2) : '?';
-        const outPath = `${DocumentDirectoryPath}/sherpa_enhanced_${Date.now()}.wav`;
-        await saveAudioAsFile(
-          outputBuf.bufferId,
-          { kind: 'fs', path: outPath },
-          'wav'
-        );
-        setOutputWavPath(outPath);
         setLastEnhancedAudio({
           outputBufferId: outputBuf.bufferId as string,
           sampleRate: outSr,
           numSamples: n,
         });
         setEnhanceResult(
-          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nApp copy: ${outPath}`
+          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nUse “Save to” below to export a file.`
         );
       } catch (enhanceErr) {
         // Release output buffer on error (input buffer remains cached for retries)
@@ -522,24 +507,62 @@ export default function EnhancementScreen() {
     await offlineWidgetRef.current?.clear();
     setPreparedInputBuffer(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastEnhancedAudio(null);
     setError(null);
     setErrorSource(null);
     await stopActivePlayback();
   };
 
-  const playPath = async (path: string | null) => {
-    if (!path) return;
+  const togglePlayOriginalOutput = async () => {
+    const bufferId = preparedInputBuffer?.bufferId;
+    if (!bufferId) return;
+    if (originalInputPlayerRef.current) {
+      await stopActivePlayback();
+      return;
+    }
     try {
       await stopActivePlayback();
-      let nextPlayback: ActivePcmFilePlayback | null = null;
-      nextPlayback = await startPcmFilePlayback(path, () => {
-        if (pcmPlaybackRef.current === nextPlayback) {
-          pcmPlaybackRef.current = null;
-        }
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: null,
+      }).catch(() => {});
+      const player = await createPcmPlayer(bufferId, {
+        onEnded: () => {
+          if (originalInputPlayerRef.current === player) {
+            originalInputPlayerRef.current = null;
+          }
+          setActivePlaybackKind(null);
+        },
       });
-      pcmPlaybackRef.current = nextPlayback;
+      originalInputPlayerRef.current = player;
+      setActivePlaybackKind('original');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
+    }
+  };
+
+  const togglePlayEnhancedOutput = async () => {
+    const bufferId = lastEnhancedAudio?.outputBufferId;
+    if (!bufferId) return;
+    if (enhancedOutputPlayerRef.current) {
+      await stopActivePlayback();
+      return;
+    }
+    try {
+      await stopActivePlayback();
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: null,
+      }).catch(() => {});
+      const player = await createPcmPlayer(bufferId, {
+        onEnded: () => {
+          if (enhancedOutputPlayerRef.current === player) {
+            enhancedOutputPlayerRef.current = null;
+          }
+          setActivePlaybackKind(null);
+        },
+      });
+      enhancedOutputPlayerRef.current = player;
+      setActivePlaybackKind('enhanced');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -721,8 +744,8 @@ export default function EnhancementScreen() {
               {showKindPicker ? '3. Enhance audio' : '2. Enhance audio'}
             </Text>
             <Text style={styles.hint}>
-              WAV input (example clips or a file from disk). Output is float32
-              WAV under the app documents directory.
+              WAV input (example clips or a file from disk). Enhanced audio
+              stays in an offline buffer until you save or play it below.
             </Text>
 
             {!engineReady && (
@@ -744,9 +767,9 @@ export default function EnhancementScreen() {
                   setErrorSource(null);
                 }}
                 onBufferReleased={() => {
+                  stopActivePlayback().catch(() => {});
                   setPreparedInputBuffer(null);
                   setEnhanceResult(null);
-                  setOutputWavPath(null);
                   setLastEnhancedAudio(null);
                 }}
               />
@@ -783,50 +806,72 @@ export default function EnhancementScreen() {
                 <Text style={styles.resultText} selectable>
                   {enhanceResult}
                 </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.playButton,
-                    !outputWavPath && localStyles.playDisabled,
-                  ]}
-                  onPress={() => playPath(outputWavPath)}
-                  disabled={!outputWavPath}
-                >
-                  <View style={styles.rowAlignCenter}>
-                    <Ionicons name="play" size={16} style={styles.iconInline} />
-                    <Text style={styles.playButtonText}>
-                      Play enhanced WAV file
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-                <Text style={styles.hint}>
-                  Use the audio widget above to play the input buffer; this
-                  button plays the saved enhanced file path.
-                </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryButton,
-                    styles.mt12,
-                    (saving || !lastEnhancedAudio) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSaveEnhanced}
-                  disabled={saving || !lastEnhancedAudio}
-                >
-                  {saving ? (
-                    <ActivityIndicator color="#666" />
-                  ) : (
-                    <View style={styles.rowCenter}>
+                <View style={localStyles.playRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.playButton,
+                      localStyles.playHalf,
+                      !preparedInputBuffer && localStyles.playDisabled,
+                    ]}
+                    onPress={() => togglePlayOriginalOutput()}
+                    disabled={!preparedInputBuffer}
+                  >
+                    <View style={styles.rowAlignCenter}>
                       <Ionicons
-                        name="save-outline"
-                        size={18}
-                        color="#666"
+                        name={
+                          activePlaybackKind === 'original' ? 'stop' : 'play'
+                        }
+                        size={16}
                         style={styles.iconInline}
                       />
-                      <Text style={styles.secondaryButtonText}>
-                        Save enhanced WAV to…
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'original'
+                          ? 'Stop'
+                          : 'Original'}
                       </Text>
                     </View>
-                  )}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.playButton,
+                      localStyles.playHalf,
+                      !lastEnhancedAudio && localStyles.playDisabled,
+                    ]}
+                    onPress={() => togglePlayEnhancedOutput()}
+                    disabled={!lastEnhancedAudio}
+                  >
+                    <View style={styles.rowAlignCenter}>
+                      <Ionicons
+                        name={
+                          activePlaybackKind === 'enhanced' ? 'stop' : 'play'
+                        }
+                        size={16}
+                        style={styles.iconInline}
+                      />
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'enhanced'
+                          ? 'Stop'
+                          : 'Enhanced'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                {lastEnhancedAudio && (
+                  <View style={styles.mt12}>
+                    <AudioSaveDestinationPicker
+                      audioInput={lastEnhancedAudio.outputBufferId}
+                      filename={`sherpa_enhanced_${Date.now()}.wav`}
+                      format="wav"
+                      onSaveComplete={(result) => {
+                        const location = formatResolvedLocation(result);
+                        Alert.alert('Saved', `Audio saved to:\n${location}`);
+                      }}
+                      onError={(error) => {
+                        Alert.alert('Save failed', error.message);
+                      }}
+                    />
+                  </View>
+                )}
               </View>
             )}
 

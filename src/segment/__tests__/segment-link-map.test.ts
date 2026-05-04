@@ -164,7 +164,7 @@ jest.mock('react-native', () => {
     ),
 
     getAllSegmentLinks: jest.fn(
-      async (linkMapId: string, startIndex = 0, maxCount = 1024) => {
+      async (linkMapId: string, startIndex = 0, maxCount = 4096) => {
         const store = requireStore(linkMapId);
         const from = Math.max(0, Math.trunc(startIndex));
         const count = Math.max(0, Math.trunc(maxCount));

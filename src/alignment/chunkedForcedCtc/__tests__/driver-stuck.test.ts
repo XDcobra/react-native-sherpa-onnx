@@ -60,7 +60,7 @@ jest.mock('../../../segmentbuffer', () => ({
       bufferId: 'seg_anchor',
       kind: 'offlineSegmentBuffer',
       state: 'immutable',
-      segmentCount: 2,
+      segmentCount: 3,
     });
   }),
   getOfflineSegmentBufferSegments: jest.fn().mockResolvedValue([
@@ -79,6 +79,15 @@ jest.mock('../../../segmentbuffer', () => ({
       sourceAudioBufferId: 'off_audio',
       startSample: 1600,
       endSample: 3200,
+      sampleRate: 16000,
+      durationMs: 100,
+    },
+    {
+      id: 'seg_anchor_2',
+      kind: 'speech',
+      sourceAudioBufferId: 'off_audio',
+      startSample: 3200,
+      endSample: 4800,
       sampleRate: 16000,
       durationMs: 100,
     },
@@ -104,7 +113,7 @@ jest.mock('../../../segment', () => ({
 import { runAccurateChunkedForcedCtc } from '../driver';
 
 describe('chunkedForcedCtc/driver stuck detection', () => {
-  test('throws ALIGNMENT_FORCED_CTC_STUCK after two consecutive no-progress anchors', async () => {
+  test('throws ALIGNMENT_FORCED_CTC_STUCK after three consecutive no-progress anchors', async () => {
     await expect(
       runAccurateChunkedForcedCtc({
         textIn: 'txt_ref',

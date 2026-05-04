@@ -1667,11 +1667,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    * `saveFileAsAudioFile` on Android only:
    *
    * - **fs**, **app**: [FileIOResolver.WriteHandle.FilePath] → encoder writes that path directly (**no** app temp).
-   * - **contentUri**: [FileIOResolver.WriteHandle.FileDescriptor] if `openFileDescriptor(rw)` succeeds → encoder
-   *   uses `/proc/self/fd/…` (**no** `fileio_save_*` temp). If PFD fails → [WriteHandle.Stream] → encode to
-   *   `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**uses** temp).
-   * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`; FD+fopen is unreliable) → **always**
-   *   temp + copy (same as contentUri stream fallback).
+   * - **contentUri**: always [WriteHandle.Stream] (`openOutputStream` only; FD+fopen on provider URIs is unreliable)
+   *   → encode to `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**same** path as contentTree).
+   * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`) → **always** temp + copy.
    *
    * **Cleanup:** On success or controlled failure, [saveAudioBufferToFile] / [saveFileAsAudioFile] `finally` calls
    * [cleanupSaveDestination] (closes handles, deletes `tmpFile`) and catch blocks call [cleanupOutputFile] on the
@@ -1683,7 +1681,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     fileIOHelper.sweepStaleFileioScratchFiles()
     val writeHandle = fileIOHelper.resolveDestination(
       destination = destination,
-      mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
       overwrite = true,
       // e.g. app base "documents" → files/docs/ — mkdir so fopen in native encoder succeeds
       createParentDirectories = true,
@@ -1699,11 +1696,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputPath = handle.file.absolutePath
         outputKind = "fs"
         resolvedOutputPath = handle.file.absolutePath
-      }
-      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
-        outputPath = handle.fdPath
-        outputKind = "contentUri"
-        resolvedOutputPath = handle.resultUri.toString()
       }
       is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
         val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_save_${java.util.UUID.randomUUID()}.$fmt")
@@ -2330,7 +2322,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
       val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
-      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
+      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 4096
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
@@ -3049,7 +3041,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         if (options.hasKey("maxSegments") && !options.isNull("maxSegments")) {
           options.getDouble("maxSegments").toInt()
         } else {
-          1000
+          4096
         }
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
         options.getString("spoolingMode")

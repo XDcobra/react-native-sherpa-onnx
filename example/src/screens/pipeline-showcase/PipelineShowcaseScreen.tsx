@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -10,11 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
-import {
-  DocumentDirectoryPath,
-  DownloadDirectoryPath,
-  mkdir,
-} from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
   listAssetModels,
@@ -59,9 +54,10 @@ import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   listAvailableInputDevices,
   listAvailableOutputDevices,
-  saveAudioAsFile,
   setPipelineAudioRoutePreference,
 } from 'react-native-sherpa-onnx/audio';
+import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -317,7 +313,6 @@ export default function PipelineShowcaseScreen() {
 
   const [savedOutput, setSavedOutput] = useState<SavedOutputInfo | null>(null);
   const [savedPath, setSavedPath] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
   const sttEngineRef = useRef<LiveSttEngine | null>(null);
   const streamingTtsEngineRef = useRef<StreamingSessionEngine | null>(null);
@@ -1105,81 +1100,6 @@ export default function PipelineShowcaseScreen() {
     syncSttSegmentsToTts,
   ]);
 
-  const handleSaveWav = useCallback(async () => {
-    const output = finalizedOutputBufferRef.current;
-    if (!output || !savedOutput) {
-      Alert.alert(
-        'Nothing to save',
-        'Run Finalize + Save mode and stop the session first.'
-      );
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const filename = `pipeline_showcase_${Date.now()}.wav`;
-
-      let selectedDirectoryPath: string | null = null;
-      let selectedTreeUri: string | null = null;
-      try {
-        const picked = await DocumentPicker.pickDirectory();
-        const uri = picked?.uri ?? null;
-        if (uri?.startsWith('file://')) {
-          selectedDirectoryPath = decodeURI(uri.replace('file://', ''));
-        } else if (uri?.startsWith('content://')) {
-          selectedTreeUri = uri;
-        }
-      } catch (pickErr) {
-        const isCancel = (
-          DocumentPicker as { isCancel?: (e: unknown) => boolean }
-        ).isCancel?.(pickErr);
-        if (!isCancel) {
-          console.warn('Directory picker failed:', pickErr);
-        }
-      }
-
-      if (selectedTreeUri) {
-        const resolved = await saveAudioAsFile(
-          output.bufferId,
-          {
-            kind: 'contentTree',
-            treeUri: selectedTreeUri,
-            filename,
-            mimeType: 'audio/wav',
-          },
-          'wav'
-        );
-        const resolvedPath =
-          resolved.kind === 'fs' ? resolved.path : resolved.uri;
-        setSavedPath(resolvedPath);
-        Alert.alert('Saved', `WAV exported to:\n${resolvedPath}`);
-        return;
-      }
-
-      const fallbackDir =
-        Platform.OS === 'android' && DownloadDirectoryPath
-          ? DownloadDirectoryPath
-          : DocumentDirectoryPath;
-      const targetDir = selectedDirectoryPath ?? fallbackDir;
-      await mkdir(targetDir);
-
-      const targetPath = `${targetDir}/${filename}`;
-      const resolved = await saveAudioAsFile(
-        output.bufferId,
-        { kind: 'fs', path: targetPath },
-        'wav'
-      );
-      const resolvedPath =
-        resolved.kind === 'fs' ? resolved.path : resolved.uri;
-      setSavedPath(resolvedPath);
-      Alert.alert('Saved', `WAV exported to:\n${resolvedPath}`);
-    } catch (saveErr) {
-      Alert.alert('Save failed', normalizeErrorMessage(saveErr));
-    } finally {
-      setSaving(false);
-    }
-  }, [savedOutput]);
-
   const canStart =
     !isRunning &&
     !isStarting &&
@@ -1486,22 +1406,21 @@ export default function PipelineShowcaseScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                styles.actionButtonMuted,
-                (savedOutput == null || isRunning || saving) &&
-                  styles.actionButtonDisabled,
-              ]}
-              disabled={savedOutput == null || isRunning || saving}
-              onPress={handleSaveWav}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.actionButtonText}>Save WAV</Text>
-              )}
-            </TouchableOpacity>
+            {savedOutput && finalizedOutputBufferRef.current && (
+              <AudioSaveDestinationPicker
+                audioInput={finalizedOutputBufferRef.current.bufferId}
+                filename={`pipeline_showcase_${Date.now()}.wav`}
+                format="wav"
+                onSaveComplete={(result) => {
+                  const location = formatResolvedLocation(result);
+                  setSavedPath(location);
+                  Alert.alert('Saved', `WAV exported to:\n${location}`);
+                }}
+                onError={(error) => {
+                  Alert.alert('Save failed', error.message);
+                }}
+              />
+            )}
 
             <Text style={styles.statusText}>{statusText}</Text>
             {error && <Text style={styles.errorText}>{error}</Text>}

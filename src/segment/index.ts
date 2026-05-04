@@ -65,8 +65,8 @@ import { toSegmentReason, toSegmentSource } from './utils';
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
-const MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 64;
-const MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 32;
+const MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 128;
+const MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 64;
 
 function normalizeSentenceBoundaryCharsForNative(
   raw: unknown
@@ -186,7 +186,7 @@ const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
 const DEFAULT_TEXT_POLICY: SegmentationPolicy = {
   evaluator: 'text_synthetic_auto',
   sentenceBoundary: true,
-  maxLengthChars: 500,
+  maxLengthChars: 2000,
 };
 
 const DEFAULT_SPEECH_POLICY: SegmentationPolicy = {
@@ -194,7 +194,7 @@ const DEFAULT_SPEECH_POLICY: SegmentationPolicy = {
   silenceThresholdMs: 500,
   energyThresholdDb: -40,
   minSegmentMs: 1000,
-  maxSegmentMs: 30000,
+  maxSegmentMs: 120000,
   hangoverMs: 300,
 };
 
@@ -408,7 +408,7 @@ function toPublicTextSegmentMeta(
 async function readTextSegments(
   liveTextBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<TextSegment[]> {
   const count = await getLiveTextBufferSegmentCount(liveTextBufferId);
   if (count <= 0 || maxCount === 0) return [];
@@ -485,7 +485,7 @@ async function readTextSegments(
 async function readOfflineTextSegments(
   offlineTextBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<TextSegment[]> {
   const info = await getPipelineTextBufferInfo(offlineTextBufferId);
   if (info.kind !== 'offlineTextBuffer') {
@@ -554,7 +554,7 @@ async function readSpeechSegmentsFromSegmentBuffer(
   segmentBufferId: string,
   parentBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SpeechSegment[]> {
   const totalCount = segmentBufferId.startsWith('seg_live_')
     ? await getLiveSegmentBufferSegmentCount(segmentBufferId)
@@ -992,7 +992,7 @@ export async function getSegmentBuffer(
 export async function getSegments(
   buffer: SegmentBufferSource,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<Segment[]> {
   const window = normalizeReadWindow(startIndex, maxCount);
   const segBuffer = await getSegmentBuffer(buffer);
@@ -1152,7 +1152,7 @@ export async function getTextSegmentsForSpeech(
 export async function getAllSegmentLinks(
   linkMap: SegmentLinkMapRef | string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SegmentLink[]> {
   const linkMapId = typeof linkMap === 'string' ? linkMap : linkMap.linkMapId;
   const out = await getNative().getAllSegmentLinks(

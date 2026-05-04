@@ -11,7 +11,6 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.OutputStream
 
 /**
@@ -36,7 +35,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
       val readHandle = resolver.resolveSource(source)
       val writeHandle = resolver.resolveDestination(
         destination = destination,
-        mode = FileIOResolver.WriteMode.SEQUENTIAL,
         overwrite = overwrite,
         createParentDirectories = createParentDirectories,
       )
@@ -97,13 +95,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
                 bytesCopied = copyFromReadHandleToOutput(output)
               }
             }
-            is FileIOResolver.WriteHandle.FileDescriptor -> {
-              outputKind = "contentUri"
-              outputPath = wh.resultUri.toString()
-              FileOutputStream(wh.pfd.fileDescriptor).use { output ->
-                bytesCopied = copyFromReadHandleToOutput(output)
-              }
-            }
             is FileIOResolver.WriteHandle.Stream -> {
               outputKind = "contentUri"
               outputPath = wh.resultUri.toString()
@@ -139,7 +130,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     try {
       val writeHandle = resolver.resolveDestination(
         destination = destination,
-        mode = FileIOResolver.WriteMode.SEQUENTIAL,
         overwrite = overwrite,
         createParentDirectories = false,
       )
@@ -153,14 +143,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
             outputKind = "fs"
             outputPath = wh.file.absolutePath
             wh.file.writeBytes(bytes)
-          }
-          is FileIOResolver.WriteHandle.FileDescriptor -> {
-            outputKind = "contentUri"
-            outputPath = wh.resultUri.toString()
-            FileOutputStream(wh.pfd.fileDescriptor).use { out ->
-              out.write(bytes)
-              out.flush()
-            }
           }
           is FileIOResolver.WriteHandle.Stream -> {
             outputKind = "contentUri"
@@ -263,10 +245,10 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
    */
   fun resolveDestination(
     destination: ReadableMap,
-    mode: FileIOResolver.WriteMode = FileIOResolver.WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
-  ): FileIOResolver.WriteHandle = resolver.resolveDestination(destination, mode, overwrite, createParentDirectories)
+  ): FileIOResolver.WriteHandle =
+    resolver.resolveDestination(destination, overwrite, createParentDirectories)
 
   /**
    * Resolve a FileSource to a ReadHandle.

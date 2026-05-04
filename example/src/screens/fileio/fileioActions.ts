@@ -32,7 +32,7 @@ import {
   autoModelPath,
   resolveModelPath,
 } from 'react-native-sherpa-onnx/utils';
-import { formatResolvedLocation } from '../../utils/saveAudioToUserFolder';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import { TEST_AUDIO_FILES } from '../../audioConfig';
 
 /** Matches the “Audio source” cards on {@link FileIOScreen}. */

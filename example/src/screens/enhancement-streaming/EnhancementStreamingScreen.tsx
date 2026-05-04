@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
-  Platform,
   StyleSheet,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
@@ -20,11 +19,7 @@ import {
   resolveModelPath,
 } from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  DocumentDirectoryPath,
-  DownloadDirectoryPath,
-  mkdir,
-} from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -47,7 +42,10 @@ import {
   type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import { getSegments } from 'react-native-sherpa-onnx/segment';
 import {
   getAssetModelPath,
@@ -168,15 +166,16 @@ export default function EnhancementStreamingScreen() {
   const [segStreamingConfig, setSegStreamingConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
-  const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
     outputBufferId: string;
     sampleRate: number;
     numSamples: number;
   } | null>(null);
+  const [activePlaybackKind, setActivePlaybackKind] = useState<
+    'original' | 'enhanced' | null
+  >(null);
 
-  const [saving, setSaving] = useState(false);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
     string | null
@@ -184,24 +183,24 @@ export default function EnhancementStreamingScreen() {
 
   const engineRef = useRef<StreamingEnhancementEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const enhancedOutputPlayerRef = useRef<PcmPlayer | null>(null);
   const fileIngestRef = useRef<FileIngestHandle | null>(null);
   const outputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const pipelineRef = useRef<EnhancementPipelineHandle | null>(null);
   const finalizedOutputBufferIdRef = useRef<string | null>(null);
 
-  const getDisplayPath = (path: string) => {
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
-  };
-
   const stopActivePlayback = async () => {
-    if (!pcmPlaybackRef.current) return;
-    const activePlayback = pcmPlaybackRef.current;
-    pcmPlaybackRef.current = null;
-    await stopPcmFilePlayback(activePlayback);
+    const enhanced = enhancedOutputPlayerRef.current;
+    enhancedOutputPlayerRef.current = null;
+    if (enhanced) {
+      await enhanced.destroy().catch(() => {});
+    }
+    if (pcmPlaybackRef.current) {
+      const activePlayback = pcmPlaybackRef.current;
+      pcmPlaybackRef.current = null;
+      await stopPcmFilePlayback(activePlayback);
+    }
+    setActivePlaybackKind(null);
   };
 
   const refreshOutputDevices = async () => {
@@ -219,7 +218,6 @@ export default function EnhancementStreamingScreen() {
       await releasePipelineAudioBuffer(existingOutputBufferId).catch(() => {});
     }
     setLastEnhancedAudio(null);
-    setOutputWavPath(null);
     setEnhanceResult(null);
   };
 
@@ -347,86 +345,6 @@ export default function EnhancementStreamingScreen() {
     throw new Error('Select example audio or a local WAV file');
   };
 
-  const pickSaveDirectory = async (): Promise<{
-    directoryPath: string | null;
-    directoryUri: string | null;
-  }> => {
-    let directoryPath: string | null = null;
-    let directoryUri: string | null = null;
-    try {
-      const picked = await DocumentPicker.pickDirectory();
-      if (picked?.uri) {
-        if (picked.uri.startsWith('file://')) {
-          directoryPath = decodeURI(picked.uri.replace('file://', ''));
-        } else if (picked.uri.startsWith('content://')) {
-          directoryUri = picked.uri;
-        }
-      }
-    } catch (pickerErr) {
-      const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
-      if (!isCancel) {
-        console.warn(
-          'EnhancementStreamingScreen: directory picker error',
-          pickerErr
-        );
-      }
-    }
-    return { directoryPath, directoryUri };
-  };
-
-  const getFallbackDirectory = () => {
-    if (Platform.OS === 'android' && DownloadDirectoryPath) {
-      return DownloadDirectoryPath;
-    }
-    return DocumentDirectoryPath;
-  };
-
-  const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.outputBufferId) {
-      Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const timestamp = Date.now();
-      const filename = `sherpa_streaming_enhanced_${timestamp}.wav`;
-      const { directoryPath, directoryUri } = await pickSaveDirectory();
-
-      const saveBufferToPath = async (path: string) => {
-        await saveAudioAsFile(
-          lastEnhancedAudio.outputBufferId,
-          { kind: 'fs', path },
-          'wav'
-        );
-      };
-
-      if (directoryUri) {
-        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
-        await saveBufferToPath(tmpPath);
-        Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
-        return;
-      }
-
-      const targetDirectory = directoryPath ?? getFallbackDirectory();
-      if (!directoryPath) {
-        Alert.alert(
-          'Notice',
-          'No folder was selected. Saving to the app default directory.'
-        );
-      }
-      await mkdir(targetDirectory);
-      const filePath = `${targetDirectory}/${filename}`;
-      await saveBufferToPath(filePath);
-      Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      Alert.alert('Save failed', msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   useEffect(() => {
     loadAvailableModels();
     refreshOutputDevices().catch(() => {
@@ -446,6 +364,11 @@ export default function EnhancementStreamingScreen() {
 
   useEffect(() => {
     return () => {
+      const ep = enhancedOutputPlayerRef.current;
+      enhancedOutputPlayerRef.current = null;
+      if (ep) {
+        ep.destroy().catch(() => {});
+      }
       if (pcmPlaybackRef.current) {
         stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
         pcmPlaybackRef.current = null;
@@ -655,7 +578,6 @@ export default function EnhancementStreamingScreen() {
       setCustomAudioName(null);
 
       setEnhanceResult(null);
-      setOutputWavPath(null);
       setLastInputPath(null);
       await clearFinalizedOutput();
     } catch (err) {
@@ -786,8 +708,12 @@ export default function EnhancementStreamingScreen() {
     }
   };
 
-  const playPath = async (path: string | null) => {
+  const playPath = async (
+    path: string | null,
+    options?: { bindResultOriginalUi?: boolean }
+  ) => {
     if (!path) return;
+    const bindResult = options?.bindResultOriginalUi === true;
     try {
       await stopActivePlayback();
       let nextPlayback: ActivePcmFilePlayback | null = null;
@@ -797,12 +723,55 @@ export default function EnhancementStreamingScreen() {
           if (pcmPlaybackRef.current === nextPlayback) {
             pcmPlaybackRef.current = null;
           }
+          if (bindResult) {
+            setActivePlaybackKind(null);
+          }
         },
         {
           outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
       );
       pcmPlaybackRef.current = nextPlayback;
+      if (bindResult) {
+        setActivePlaybackKind('original');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
+    }
+  };
+
+  const togglePlayOriginalPath = async () => {
+    if (!lastInputPath) return;
+    if (pcmPlaybackRef.current) {
+      await stopActivePlayback();
+      return;
+    }
+    await playPath(lastInputPath, { bindResultOriginalUi: true });
+  };
+
+  const togglePlayEnhancedOutput = async () => {
+    const bufferId = lastEnhancedAudio?.outputBufferId;
+    if (!bufferId) return;
+    if (enhancedOutputPlayerRef.current) {
+      await stopActivePlayback();
+      return;
+    }
+    try {
+      await stopActivePlayback();
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: selectedOutputDeviceId ?? null,
+      }).catch(() => {});
+      const player = await createPcmPlayer(bufferId, {
+        onEnded: () => {
+          if (enhancedOutputPlayerRef.current === player) {
+            enhancedOutputPlayerRef.current = null;
+          }
+          setActivePlaybackKind(null);
+        },
+      });
+      enhancedOutputPlayerRef.current = player;
+      setActivePlaybackKind('enhanced');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -834,7 +803,6 @@ export default function EnhancementStreamingScreen() {
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastInputPath(null);
     setInputBufferBuildProgress(0);
     setInputBufferBuildStatus('Preparing streaming pipeline...');
@@ -969,23 +937,15 @@ export default function EnhancementStreamingScreen() {
       const durationSeconds =
         outputSampleRate > 0 ? (numSamples / outputSampleRate).toFixed(2) : '?';
 
-      const outputPath = `${DocumentDirectoryPath}/sherpa_streaming_enhanced_${Date.now()}.wav`;
-      await saveAudioAsFile(
-        offlineOutput.bufferId,
-        { kind: 'fs', path: outputPath },
-        'wav'
-      );
-
       finalizedOutputBufferIdRef.current = offlineOutput.bufferId;
       setLastEnhancedAudio({
         outputBufferId: offlineOutput.bufferId,
         sampleRate: outputSampleRate,
         numSamples,
       });
-      setOutputWavPath(outputPath);
       setLastInputPath(selectedInput.sourcePathForPlayback);
       setEnhanceResult(
-        `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
+        `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nUse “Save to” below to export a file.`
       );
       producedOfflineBufferId = null;
       setInputBufferBuildProgress(null);
@@ -1050,7 +1010,6 @@ export default function EnhancementStreamingScreen() {
     setCustomAudioPath(null);
     setCustomAudioName(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastInputPath(null);
   };
 
@@ -1391,10 +1350,8 @@ export default function EnhancementStreamingScreen() {
                       setAudioSourceType(null);
                       setSelectedAudio(null);
                       clearPreparedInputBuffer().catch(() => {});
-                      setEnhanceResult(null);
-                      setOutputWavPath(null);
+                      clearFinalizedOutput().catch(() => {});
                       setLastInputPath(null);
-                      setLastEnhancedAudio(null);
                     }}
                     disabled={preparingInputBuffer}
                   >
@@ -1464,10 +1421,8 @@ export default function EnhancementStreamingScreen() {
                       setCustomAudioPath(null);
                       setCustomAudioName(null);
                       clearPreparedInputBuffer().catch(() => {});
-                      setEnhanceResult(null);
-                      setOutputWavPath(null);
+                      clearFinalizedOutput().catch(() => {});
                       setLastInputPath(null);
-                      setLastEnhancedAudio(null);
                     }}
                     disabled={preparingInputBuffer}
                   >
@@ -1492,62 +1447,66 @@ export default function EnhancementStreamingScreen() {
                       localStyles.playHalf,
                       !lastInputPath && localStyles.playDisabled,
                     ]}
-                    onPress={() => playPath(lastInputPath)}
+                    onPress={() => togglePlayOriginalPath()}
                     disabled={!lastInputPath}
                   >
                     <View style={styles.rowAlignCenter}>
                       <Ionicons
-                        name="play"
+                        name={
+                          activePlaybackKind === 'original' ? 'stop' : 'play'
+                        }
                         size={16}
                         style={styles.iconInline}
                       />
-                      <Text style={styles.playButtonText}>Original</Text>
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'original'
+                          ? 'Stop'
+                          : 'Original'}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
                       styles.playButton,
                       localStyles.playHalf,
-                      !outputWavPath && localStyles.playDisabled,
+                      !lastEnhancedAudio && localStyles.playDisabled,
                     ]}
-                    onPress={() => playPath(outputWavPath)}
-                    disabled={!outputWavPath}
+                    onPress={() => togglePlayEnhancedOutput()}
+                    disabled={!lastEnhancedAudio}
                   >
                     <View style={styles.rowAlignCenter}>
                       <Ionicons
-                        name="play"
+                        name={
+                          activePlaybackKind === 'enhanced' ? 'stop' : 'play'
+                        }
                         size={16}
                         style={styles.iconInline}
                       />
-                      <Text style={styles.playButtonText}>Enhanced</Text>
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'enhanced'
+                          ? 'Stop'
+                          : 'Enhanced'}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryButton,
-                    styles.mt12,
-                    (saving || !lastEnhancedAudio) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSaveEnhanced}
-                  disabled={saving || !lastEnhancedAudio}
-                >
-                  {saving ? (
-                    <ActivityIndicator color="#666" />
-                  ) : (
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="save-outline"
-                        size={18}
-                        color="#666"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.secondaryButtonText}>
-                        Save enhanced WAV to...
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
+                {lastEnhancedAudio && (
+                  <View style={styles.mt12}>
+                    <AudioSaveDestinationPicker
+                      defaultDestinationKind="app"
+                      audioInput={lastEnhancedAudio.outputBufferId}
+                      filename={`sherpa_streaming_enhanced_${Date.now()}.wav`}
+                      format="wav"
+                      onSaveComplete={(result) => {
+                        const location = formatResolvedLocation(result);
+                        Alert.alert('Saved', `Audio saved to:\n${location}`);
+                      }}
+                      onError={(error) => {
+                        Alert.alert('Save failed', error.message);
+                      }}
+                    />
+                  </View>
+                )}
               </View>
             )}
 
