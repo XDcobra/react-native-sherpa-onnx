@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +16,7 @@ import {
   type AudioSourceChoice,
   openFileioDocumentPicker,
   runFileioCopy,
+  type FileioCopyResult,
 } from './fileioActions';
 
 /** Every discriminant of {@link FileDestination} supported by the SDK. */
@@ -41,11 +44,22 @@ const FILE_DESTINATION_OPTIONS: {
   },
 ];
 
+function presentCopyOutcome(result: FileioCopyResult) {
+  if (result.status === 'canceled') return;
+  if (result.status === 'success') {
+    Alert.alert('Copy complete', result.detail);
+    return;
+  }
+  Alert.alert('Copy failed', result.message);
+}
+
 /** Sandbox for isolating FileDestination / saveAudioAsFile behavior. */
 export default function FileIOScreen() {
   const [kind, setKind] = useState<FileDestination['kind']>('fs');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [audioSource, setAudioSource] = useState<AudioSourceChoice>('example');
+  const [audioSource, setAudioSource] =
+    useState<AudioSourceChoice>('liveAudioBuffer');
+  const [copyBusy, setCopyBusy] = useState(false);
 
   const selected = FILE_DESTINATION_OPTIONS.find((o) => o.kind === kind)!;
 
@@ -75,52 +89,83 @@ export default function FileIOScreen() {
           <Pressable
             style={[
               styles.sourceCard,
-              audioSource === 'example' && styles.sourceCardActive,
+              audioSource === 'liveAudioBuffer' && styles.sourceCardActive,
             ]}
-            onPress={() => setAudioSource('example')}
+            onPress={() => setAudioSource('liveAudioBuffer')}
             accessibilityRole="button"
-            accessibilityState={{ selected: audioSource === 'example' }}
+            accessibilityState={{ selected: audioSource === 'liveAudioBuffer' }}
           >
             <Ionicons
-              name="musical-notes-outline"
+              name="pulse-outline"
               size={24}
-              color={audioSource === 'example' ? '#007AFF' : '#8E8E93'}
+              color={audioSource === 'liveAudioBuffer' ? '#007AFF' : '#8E8E93'}
             />
             <Text
               style={[
                 styles.sourceCardTitle,
-                audioSource === 'example' && styles.sourceCardTitleActive,
+                audioSource === 'liveAudioBuffer' &&
+                  styles.sourceCardTitleActive,
               ]}
             >
-              Example audio
+              LiveAudioBuffer
             </Text>
-            <Text style={styles.sourceCardHint}>Bundled / demo sample</Text>
+            <Text style={styles.sourceCardHint}>
+              Pipeline live buffer (live_*)
+            </Text>
           </Pressable>
           <Pressable
             style={[
               styles.sourceCard,
-              audioSource === 'audioBuffer' && styles.sourceCardActive,
+              audioSource === 'offlineAudioBuffer' && styles.sourceCardActive,
             ]}
-            onPress={() => setAudioSource('audioBuffer')}
+            onPress={() => setAudioSource('offlineAudioBuffer')}
             accessibilityRole="button"
-            accessibilityState={{ selected: audioSource === 'audioBuffer' }}
+            accessibilityState={{
+              selected: audioSource === 'offlineAudioBuffer',
+            }}
           >
             <Ionicons
               name="layers-outline"
               size={24}
-              color={audioSource === 'audioBuffer' ? '#007AFF' : '#8E8E93'}
+              color={
+                audioSource === 'offlineAudioBuffer' ? '#007AFF' : '#8E8E93'
+              }
             />
             <Text
               style={[
                 styles.sourceCardTitle,
-                audioSource === 'audioBuffer' && styles.sourceCardTitleActive,
+                audioSource === 'offlineAudioBuffer' &&
+                  styles.sourceCardTitleActive,
               ]}
             >
-              AudioBuffer
+              OfflineAudioBuffer
             </Text>
-            <Text style={styles.sourceCardHint}>
-              Automatically created example audio buffer
+            <Text style={styles.sourceCardHint}>Frozen PCM buffer (off_*)</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.sourceCard,
+              audioSource === 'assetAudioFile' && styles.sourceCardActive,
+            ]}
+            onPress={() => setAudioSource('assetAudioFile')}
+            accessibilityRole="button"
+            accessibilityState={{ selected: audioSource === 'assetAudioFile' }}
+          >
+            <Ionicons
+              name="cube-outline"
+              size={24}
+              color={audioSource === 'assetAudioFile' ? '#007AFF' : '#8E8E93'}
+            />
+            <Text
+              style={[
+                styles.sourceCardTitle,
+                audioSource === 'assetAudioFile' &&
+                  styles.sourceCardTitleActive,
+              ]}
+            >
+              Asset Audio File
             </Text>
+            <Text style={styles.sourceCardHint}>App bundle asset path</Text>
           </Pressable>
         </View>
       </View>
@@ -183,19 +228,36 @@ export default function FileIOScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.copyButton,
-            pressed && styles.copyButtonPressed,
+            (pressed || copyBusy) && styles.copyButtonPressed,
+            copyBusy && styles.copyButtonDisabled,
           ]}
+          disabled={copyBusy}
           onPress={() => {
+            setCopyBusy(true);
             runFileioCopy({
               destinationKind: kind,
               audioSource,
-            }).catch(() => {});
+            })
+              .then(presentCopyOutcome)
+              .catch((e: unknown) => {
+                Alert.alert(
+                  'Copy failed',
+                  e instanceof Error ? e.message : String(e)
+                );
+              })
+              .finally(() => setCopyBusy(false));
           }}
           accessibilityRole="button"
           accessibilityLabel="Copy"
         >
-          <Ionicons name="copy-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.copyButtonText}>Copy</Text>
+          {copyBusy ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Ionicons name="copy-outline" size={20} color="#FFFFFF" />
+          )}
+          <Text style={styles.copyButtonText}>
+            {copyBusy ? 'Copying…' : 'Copy'}
+          </Text>
         </Pressable>
         <Pressable
           style={({ pressed }) => [
@@ -272,15 +334,18 @@ const styles = StyleSheet.create({
   },
   sourceCardsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   sourceCard: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 100,
     minHeight: 100,
     backgroundColor: '#F2F2F7',
     borderRadius: 10,
     paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderWidth: 2,
     borderColor: 'transparent',
     alignItems: 'center',
@@ -292,7 +357,7 @@ const styles = StyleSheet.create({
   },
   sourceCardTitle: {
     marginTop: 8,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
     color: '#3A3A3C',
     textAlign: 'center',
@@ -380,6 +445,9 @@ const styles = StyleSheet.create({
   },
   copyButtonPressed: {
     opacity: 0.85,
+  },
+  copyButtonDisabled: {
+    opacity: 0.55,
   },
   copyButtonText: {
     fontSize: 17,
