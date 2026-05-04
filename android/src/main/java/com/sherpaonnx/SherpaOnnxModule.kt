@@ -1662,6 +1662,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val tmpFile: File?
   )
 
+  /**
+   * Maps [FileDestination] → native encoder output path. Temp file usage for `saveAudioBufferToFile` /
+   * `saveFileAsAudioFile` on Android only:
+   *
+   * - **fs**, **app**: [FileIOResolver.WriteHandle.FilePath] → encoder writes that path directly (**no** app temp).
+   * - **contentUri**: [FileIOResolver.WriteHandle.FileDescriptor] if `openFileDescriptor(rw)` succeeds → encoder
+   *   uses `/proc/self/fd/…` (**no** `fileio_save_*` temp). If PFD fails → [WriteHandle.Stream] → encode to
+   *   `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**uses** temp).
+   * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`; FD+fopen is unreliable) → **always**
+   *   temp + copy (same as contentUri stream fallback).
+   */
   private fun resolveDestinationForSave(destination: ReadableMap, fmt: String): ResolvedDestination {
     val writeHandle = fileIOHelper.resolveDestination(
       destination = destination,

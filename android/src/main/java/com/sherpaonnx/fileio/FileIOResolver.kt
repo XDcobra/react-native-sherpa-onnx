@@ -253,35 +253,15 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Failed to create document in tree: ${e.message}", e)
         }
 
-        if (mode == WriteMode.SEEKABLE) {
-          val pfd = try {
-            resolver.openFileDescriptor(docUri, "rw")
-          } catch (_: Exception) {
-            null
-          }
-
-          if (pfd != null) {
-            WriteHandle.FileDescriptor(
-              pfd = pfd,
-              fdPath = "/proc/self/fd/${pfd.fd}",
-              resultUri = docUri,
-            )
-          } else {
-            val outputStream = try {
-              resolver.openOutputStream(docUri, "w")
-            } catch (e: Exception) {
-              throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
-            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
-            WriteHandle.Stream(outputStream, docUri)
-          }
-        } else {
-          val outputStream = try {
-            resolver.openOutputStream(docUri, "w")
-          } catch (e: Exception) {
-            throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
-          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
-          WriteHandle.Stream(outputStream, docUri)
-        }
+        // Documents created under a SAF tree URI: prefer OutputStream. Native WAV encode uses fopen()
+        // on /proc/self/fd/* when we return FileDescriptor; that often fails for provider-backed fds.
+        // SherpaOnnxModule writes to a temp file then copies when the handle is Stream.
+        val outputStream = try {
+          resolver.openOutputStream(docUri, "w")
+        } catch (e: Exception) {
+          throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
+        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
+        WriteHandle.Stream(outputStream, docUri)
       }
 
       "securityScoped" -> throw FileIOException(

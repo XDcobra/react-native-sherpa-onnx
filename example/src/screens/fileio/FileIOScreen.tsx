@@ -110,7 +110,7 @@ export default function FileIOScreen() {
               LiveAudioBuffer
             </Text>
             <Text style={styles.sourceCardHint}>
-              Pipeline live buffer (live_*)
+              Finalized live buffer (live_*)
             </Text>
           </Pressable>
           <Pressable
