@@ -1672,8 +1672,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    *   `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**uses** temp).
    * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`; FD+fopen is unreliable) → **always**
    *   temp + copy (same as contentUri stream fallback).
+   *
+   * **Cleanup:** On success or controlled failure, [saveAudioBufferToFile] / [saveFileAsAudioFile] `finally` calls
+   * [cleanupSaveDestination] (closes handles, deletes `tmpFile`) and catch blocks call [cleanupOutputFile] on the
+   * encoder path when it pointed at a temp file. If the **process dies** (crash, `kill -9`), that code does not run;
+   * [fileIOHelper.sweepStaleFileioScratchFiles] is invoked here before each resolve to drop **old** scratch files
+   * (default max age 1 hour) so orphans do not accumulate forever.
    */
   private fun resolveDestinationForSave(destination: ReadableMap, fmt: String): ResolvedDestination {
+    fileIOHelper.sweepStaleFileioScratchFiles()
     val writeHandle = fileIOHelper.resolveDestination(
       destination = destination,
       mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
