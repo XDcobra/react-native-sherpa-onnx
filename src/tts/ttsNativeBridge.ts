@@ -1,4 +1,3 @@
-import type { ModelPathConfig } from '../types';
 import type {
   TTSInitializeOptions,
   TTSModelType,
@@ -109,7 +108,7 @@ function modelOptionsBagFromInit(
 }
 
 export type ExpandedTtsInitFields = {
-  modelPath: ModelPathConfig;
+  modelSource: TTSInitializeOptions['modelSource'];
   modelType: TTSModelType | undefined;
   provider: string | undefined;
   numThreads: number | undefined;
@@ -125,7 +124,7 @@ export function expandTtsInitializeOptions(
   options: TTSInitializeOptions
 ): ExpandedTtsInitFields {
   return {
-    modelPath: options.modelPath,
+    modelSource: options.modelSource,
     modelType: options.modelType,
     provider:
       options.provider !== undefined ? String(options.provider) : undefined,

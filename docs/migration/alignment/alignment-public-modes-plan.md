@@ -49,7 +49,7 @@ Alignment is exposed like other features (**create engine → call methods → d
 
 | API | Role |
 |-----|------|
-| **`createAlignment(options?)`** | Returns an **`AlignmentEngine`** instance. **`options`** may include defaults reused across calls (e.g. optional **default** `modelPath` as **`ModelPathConfig`**, `language`, debug). **`options`** may be **empty** / minimal when everything is passed per call — exact shape is implementation-defined. |
+| **`createAlignment(options?)`** | Returns an **`AlignmentEngine`** instance. **`options`** may include defaults reused across calls (e.g. optional **default** `modelPath` as **`FileSource`**, `language`, debug). **`options`** may be **empty** / minimal when everything is passed per call — exact shape is implementation-defined. |
 | **`engine.destroy()`** | Releases native/state held by the engine (symmetric to `createSTT().destroy()` / `createTTS`). Safe to no-op on JS-only wrappers until native caches alignment models. |
 
 ### Instance methods (buffer-first contract unchanged)
@@ -124,10 +124,10 @@ Field names (`anchorSegmentBuffer`, `mappingStrategy`, nested `segmentation`) ar
 <td><strong>3</strong></td>
 <td><code>accurate</code></td>
 <td><strong>Off</strong> / absent (<code>segmentation.mode</code> omitted or <code>off</code>)</td>
-<td><strong>Yes</strong> (<code>modelPath: ModelPathConfig</code> required)</td>
+<td><strong>Yes</strong> (<code>modelSource: FileSource</code> required)</td>
 <td><strong>Single full-buffer CTC</strong> — one <code>AlignAccurateFromPcm</code> over entire offline PCM</td>
 <td>Best quality when file fits practical memory/time limits; <code>sentence</code> | <code>word</code> | <code>character</code>.</td>
-<td><code>{ mode: 'accurate', modelPath: ModelPathConfig, granularity?: 'sentence' | 'word' | 'character', language?: string }</code> — no <code>segmentation</code>, or <code>segmentation: { mode: 'off' }</code> once types define it</td>
+<td><code>{ mode: 'accurate', modelSource: FileSource, granularity?: 'sentence' | 'word' | 'character', language?: string }</code> — no <code>segmentation</code>, or <code>segmentation: { mode: 'off' }</code> once types define it</td>
 </tr>
 <tr>
 <td><strong>4a</strong></td>
@@ -197,7 +197,7 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 ```typescript
 await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
   mode: 'accurate',
-  modelPath: { type: 'file', path: '/path/to/wav2vec2-alignment' }, // ModelPathConfig (STT/VAD shape)
+  modelPath: { kind: 'fs', path: '/path/to/wav2vec2-alignment' }, // FileSource (STT/VAD shape)
   granularity: 'word', // or 'sentence' | 'character'
   language: 'en',
 });
@@ -205,12 +205,12 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 
 **Row 4a — `accurate` + ASR-mediated (`mappingStrategy: 'asr_mediated'`)**
 
-Caller must run `transcribe(audioIn, asrHypothesisOut, …)` **before** this call; `anchorRef` comes from e.g. `segmentOfflineBuffer(audioIn, { evaluator: 'speech_vad_model', … })`.
+Caller must run `transcribe(audioIn, asrHypothesisOut, …)` **before** this call; `anchorRef` comes from e.g. `segmentOfflineBuffer(audioIn, { evaluator: 'speech_vad_model', modelPath: { kind: 'fs', path: '…' } /* FileSource */, … })` (JS **`detectVadModel`** on `modelPath`).
 
 ```typescript
 await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
   mode: 'accurate',
-  modelPath: { type: 'file', path: '/path/to/wav2vec2-alignment' },
+  modelPath: { kind: 'fs', path: '/path/to/wav2vec2-alignment' },
   granularity: 'word',
   language: 'en',
   segmentation: {
@@ -229,7 +229,7 @@ await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
 ```typescript
 await engine.alignTextToAudio(textIn, audioIn, segmentOut, {
   mode: 'accurate',
-  modelPath: { type: 'file', path: '/path/to/wav2vec2-alignment' },
+  modelPath: { kind: 'fs', path: '/path/to/wav2vec2-alignment' },
   granularity: 'word',
   language: 'en',
   segmentation: {
@@ -456,5 +456,5 @@ type LinkerResultV0 = {
 | 2026-04-30 | Public API: **`AlignmentEngine`** via **`createAlignment`**, **`engine.alignTextToAudio`**, **`destroy`**; **remove** freestanding **`alignTextToAudio`** |
 | 2026-04-30 | Public modes table: column **Target `options` sketch** + subsection **expanded TypeScript** per row |
 | 2026-04-30 | Public modes table: HTML + `<colgroup>` so column **#** stays narrow |
-| 2026-04-30 | Accurate alignment + engine defaults: **`modelPath: ModelPathConfig`** (STT/VAD shape), not `alignmentModelPath: string` |
+| 2026-04-30 | Accurate alignment + engine defaults: **`modelSource: FileSource`** (STT/VAD shape), not `alignmentModelPath: string` |
 | 2026-04-30 | Pre-implementation decisions locked: **no silent fallbacks**, **hard cut now**, **tests without E2E**, **OOM passthrough**, and **Path 3 rich linker model (`link-map + confidence`)** with v0 schema |

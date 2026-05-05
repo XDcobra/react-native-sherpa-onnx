@@ -12,8 +12,8 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   },
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/enhancement'),
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/enhancement'),
 }));
 
 jest.mock('../../audiobuffer', () => ({
@@ -65,7 +65,7 @@ describe('streaming enhancement continuous_frames attach', () => {
 
   it('attaches continuous_frames policy before starting enhancement pipeline', async () => {
     const enhancement = await createStreamingEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const handle = await enhancement.enhance('live_input', 'live_output', {
@@ -100,7 +100,7 @@ describe('streaming enhancement continuous_frames attach', () => {
 
   it('uses continuous_frames default policy when segmentation mode is enabled without policy', async () => {
     const enhancement = await createStreamingEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     await enhancement.enhance('live_input', 'live_output', {
@@ -117,7 +117,7 @@ describe('streaming enhancement continuous_frames attach', () => {
 
   it('rejects non-continuous streaming segmentation policies without starting native pipeline', async () => {
     const enhancement = await createStreamingEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     await expect(

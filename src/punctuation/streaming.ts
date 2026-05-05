@@ -7,7 +7,7 @@ import {
   getPipelineTextBufferInfo,
   resolvePipelineTextBufferId,
 } from '../textbuffer';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import { createOnlinePunctuationConfig } from './detect';
 import type {
   PunctuationPipelineHandle,
@@ -69,7 +69,7 @@ export async function createStreamingPunctuation(
   options: StreamingPunctuationInitializeOptions
 ): Promise<StreamingPunctuationEngine> {
   const instanceId = `punc_on_${++streamingPunctuationInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
   await createOnlinePunctuationConfig(resolvedPath, {
     modelType: options.modelType ?? 'auto',
   });

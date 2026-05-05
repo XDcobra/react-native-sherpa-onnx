@@ -767,7 +767,7 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
   const raw = await getNative().getOfflineSegmentBufferSegments(
@@ -786,6 +786,16 @@ export async function getOfflineSegmentBufferSegments(
       sampleRate: segment.sampleRate,
       durationMs: segment.durationMs,
       ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+      ...(typeof segment.reason === 'string' && segment.reason.length > 0
+        ? { reason: segment.reason }
+        : {}),
+      ...(typeof segment.source === 'string' && segment.source.length > 0
+        ? { source: segment.source }
+        : {}),
+      ...(typeof segment.createdAtMs === 'number' &&
+      Number.isFinite(segment.createdAtMs)
+        ? { createdAtMs: Math.trunc(segment.createdAtMs) }
+        : {}),
     };
     if (kind === 'alignment') {
       const payload =
@@ -830,6 +840,16 @@ export async function getLiveSegmentBufferSegments(
       sampleRate: segment.sampleRate,
       durationMs: segment.durationMs,
       ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+      ...(typeof segment.reason === 'string' && segment.reason.length > 0
+        ? { reason: segment.reason }
+        : {}),
+      ...(typeof segment.source === 'string' && segment.source.length > 0
+        ? { source: segment.source }
+        : {}),
+      ...(typeof segment.createdAtMs === 'number' &&
+      Number.isFinite(segment.createdAtMs)
+        ? { createdAtMs: Math.trunc(segment.createdAtMs) }
+        : {}),
     };
     if (kind === 'alignment') {
       const payload =

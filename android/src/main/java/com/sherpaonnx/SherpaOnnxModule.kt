@@ -1074,6 +1074,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             ?: reactApplicationContext.cacheDir
           val tmpF32 = java.io.File(dir, "pa_off_decode_${java.util.UUID.randomUUID()}.f32")
 
+          val progressCallback = object {
+            @Suppress("unused")
+            fun onProgress(
+              framesDecoded: Long,
+              totalEstimate: Long,
+              percent: Int,
+              sourceSr: Int,
+              sourceCh: Int,
+            ) {
+              emitDecodeProgress(
+                operationId,
+                framesDecoded,
+                totalEstimate,
+                percent,
+                sourceSr,
+                sourceCh,
+              )
+            }
+          }
+
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToMmapFile(
             sourcePath,
@@ -1082,7 +1102,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             forceMono,
             8192,
             cancelFlagAddr,
-            tmpF32.absolutePath
+            tmpF32.absolutePath,
+            progressCallback,
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
           cancelChecker.interrupt()
@@ -1252,20 +1273,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
             if (cancelFlag.get()) return
-            when (
-              liveEntry.tryAppendSamples(
-                samples,
-                liveEntry.sampleRate,
-                com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
-                backpressure = useBackpressure
-              )
-            ) {
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
-                status.framesIngested += frameCount
+            try {
+              when (
+                liveEntry.tryAppendSamples(
+                  samples,
+                  liveEntry.sampleRate,
+                  com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                  backpressure = useBackpressure
+                )
+              ) {
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
+                  status.framesIngested += frameCount
+                }
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                  cancelFlag.set(true)
+                }
               }
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-                cancelFlag.set(true)
-              }
+            } catch (_: Throwable) {
+              // Listener/spool/segmentation hooks must not crash native decode thread / JNI.
+              cancelFlag.set(true)
             }
           }
         }
@@ -1458,7 +1484,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun createEmptyLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
-      val sampleRate = options.getDouble("sampleRate").toInt()
+      val sampleRate =
+        if (options.hasKey("sampleRate") && !options.isNull("sampleRate")) {
+          options.getDouble("sampleRate").toInt()
+        } else {
+          16000
+        }
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
       val ringSeconds = if (options.hasKey("ringSeconds")) options.getDouble("ringSeconds") else 60.0
 
@@ -1631,12 +1662,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val tmpFile: File?
   )
 
+  /**
+   * Maps [FileDestination] → native encoder output path. Temp file usage for `saveAudioBufferToFile` /
+   * `saveFileAsAudioFile` on Android only:
+   *
+   * - **fs**, **app**: [FileIOResolver.WriteHandle.FilePath] → encoder writes that path directly (**no** app temp).
+   * - **contentUri**: always [WriteHandle.Stream] (`openOutputStream` only; FD+fopen on provider URIs is unreliable)
+   *   → encode to `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**same** path as contentTree).
+   * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`) → **always** temp + copy.
+   *
+   * **Cleanup:** On success or controlled failure, [saveAudioBufferToFile] / [saveFileAsAudioFile] `finally` calls
+   * [cleanupSaveDestination] (closes handles, deletes `tmpFile`) and catch blocks call [cleanupOutputFile] on the
+   * encoder path when it pointed at a temp file. If the **process dies** (crash, `kill -9`), that code does not run;
+   * [fileIOHelper.sweepStaleFileioScratchFiles] is invoked here before each resolve to drop **old** scratch files
+   * (default max age 1 hour) so orphans do not accumulate forever.
+   */
   private fun resolveDestinationForSave(destination: ReadableMap, fmt: String): ResolvedDestination {
+    fileIOHelper.sweepStaleFileioScratchFiles()
     val writeHandle = fileIOHelper.resolveDestination(
       destination = destination,
-      mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
       overwrite = true,
-      createParentDirectories = false,
+      // e.g. app base "documents" → files/docs/ — mkdir so fopen in native encoder succeeds
+      createParentDirectories = true,
     )
 
     val outputPath: String
@@ -1649,11 +1696,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputPath = handle.file.absolutePath
         outputKind = "fs"
         resolvedOutputPath = handle.file.absolutePath
-      }
-      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
-        outputPath = handle.fdPath
-        outputKind = "contentUri"
-        resolvedOutputPath = handle.resultUri.toString()
       }
       is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
         val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_save_${java.util.UUID.randomUUID()}.$fmt")
@@ -1699,7 +1741,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       samples.size.toLong() / channelCount,
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1741,7 +1783,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalFrames.toLong(),
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1834,7 +1876,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelFlagAddr
       )
       encodeSessionCreated = true
-      if (encodeSessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+      if (encodeSessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
       val chunkFrames = 4096
       var offset = 0
@@ -2280,7 +2322,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
       val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
-      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
+      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 4096
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
@@ -2913,16 +2955,23 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     policy.putString("evaluator", info.policy.evaluator)
     policy.putInt("maxLengthChars", info.policy.maxLengthChars)
     policy.putBoolean("sentenceBoundary", info.policy.sentenceBoundary)
+    info.policy.sentenceBoundaryChars?.takeIf { it.isNotEmpty() }?.let { chars ->
+      val arr = Arguments.createArray()
+      for (s in chars) {
+        arr.pushString(s)
+      }
+      policy.putArray("sentenceBoundaryChars", arr)
+    }
     policy.putInt("silenceThresholdMs", info.policy.silenceThresholdMs)
     policy.putDouble("energyThresholdDb", info.policy.energyThresholdDb)
     policy.putInt("minSegmentMs", info.policy.minSegmentMs)
     policy.putInt("maxSegmentMs", info.policy.maxSegmentMs)
     policy.putInt("hangoverMs", info.policy.hangoverMs)
     policy.putInt("checkpointIntervalMs", info.policy.checkpointIntervalMs)
-    info.policy.modelPath?.let { resolvedPath ->
+    info.policy.modelPath?.let { onnxPath ->
       val modelPathMap = Arguments.createMap()
-      modelPathMap.putString("type", "file")
-      modelPathMap.putString("path", resolvedPath)
+      modelPathMap.putString("kind", "fs")
+      modelPathMap.putString("path", onnxPath)
       policy.putMap("modelPath", modelPathMap)
     }
     info.policy.vadThreshold?.let { policy.putDouble("vadThreshold", it) }
@@ -2992,7 +3041,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         if (options.hasKey("maxSegments") && !options.isNull("maxSegments")) {
           options.getDouble("maxSegments").toInt()
         } else {
-          1000
+          4096
         }
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
         options.getString("spoolingMode")
@@ -4292,6 +4341,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): Long
 
     @JvmStatic
+    private external fun nativeEncodeSessionLastCreateError(): String
+
+    @JvmStatic
+    internal fun encodeSessionCreateFailureMessage(): String {
+      val detail = nativeEncodeSessionLastCreateError().trim()
+      return if (detail.isNotEmpty()) "AUDIO_SAVE_ENCODE_ERROR: $detail"
+      else "AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session"
+    }
+
+    @JvmStatic
     private external fun nativeEncodeSessionFeedChunk(
       sessionPtr: Long, samples: FloatArray, frameCount: Int
     ): String
@@ -4326,7 +4385,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       forceMono: Boolean,
       chunkSize: Int,
       cancelFlagPtr: Long,
-      outputPath: String
+      outputPath: String,
+      progressCallback: Any?,
     ): HashMap<String, Any>?
 
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */

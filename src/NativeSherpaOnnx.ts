@@ -1,24 +1,6 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
-
-/** Unified shape for all acceleration backends (QNN, NNAPI, XNNPACK, Core ML). */
-export type AccelerationSupport = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInit: boolean;
-};
-
-/** Result from unified archive extraction (path or asset stream). */
-export type ExtractArchiveResult = {
-  success: boolean;
-  /** True when extraction stopped due to cancel (resume with skipEntries = lastEntryIndex + 1). */
-  paused: boolean;
-  lastEntryIndex: number;
-  lastEntryPath: string;
-  bytesExtracted: number;
-  path?: string;
-  sha256?: string;
-  reason?: string;
-};
+import type { AccelerationSupport } from './provider';
+import type { ExtractArchiveResult } from './extraction/types';
 
 export interface Spec extends TurboModule {
   /**
@@ -194,7 +176,8 @@ export interface Spec extends TurboModule {
    * Decode an audio file into an offline audio buffer.
    * Uses AudioDecodeSession (FFmpeg + WAV fast path).
    * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
-   * @param targetSampleRateHz - 0 = keep source rate
+   * @param targetSampleRateHz - 0 = keep source rate, >0 = force that rate.
+   *                             Public API passes 16000 when omitted.
    * @param forceMono - true = downmix to mono
    * @param operationId - For progress events + cancellation
    */
@@ -281,7 +264,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Create an empty live audio buffer with a rolling-window ring buffer.
-   * @param options.sampleRate - Sample rate in Hz.
+   * @param options.sampleRate - Sample rate in Hz. Public API defaults to 16000 when omitted.
    * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.retentionMode - Retention mode: 'auto' | 'session' | 'maxSeconds' | 'path' | 'none'.
    *                                  ('auto'/'maxSeconds' currently do not enforce trim yet.)
@@ -378,7 +361,10 @@ export interface Spec extends TurboModule {
 
   // ==================== File Ingest to Live Buffer ====================
 
-  /** Start streaming file decode into an existing live buffer. */
+  /** Start streaming file decode into an existing live buffer.
+   *  targetSampleRateHz: 0 = keep source rate, >0 = force that rate.
+   *  Public API passes 16000 when omitted.
+   */
   startFileIngestToLiveBuffer(
     liveBufferId: string,
     source: Object,
@@ -812,6 +798,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;
@@ -830,6 +819,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;

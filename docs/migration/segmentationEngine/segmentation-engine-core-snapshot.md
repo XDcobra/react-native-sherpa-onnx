@@ -107,6 +107,8 @@ sequenceDiagram
 ### 3.1 Typen (`src/segment/engine-types.ts`)
 
 ```typescript
+// `FileSource` — see `react-native-sherpa-onnx/fileio`
+
 export type SegmentationEvaluator =
   | 'text_synthetic_auto'
   | 'text_punctuation_assisted'
@@ -125,7 +127,7 @@ export interface SegmentationPolicy {
   maxSegmentMs?: number;
   hangoverMs?: number;
   checkpointIntervalMs?: number;
-  modelPath?: ModelPathConfig; // `speech_vad_model` — same shape as STT/VAD; JS resolves before native
+  modelPath?: FileSource; // `speech_vad_model` — JS `detectVadModel` (same as streaming VAD); native gets `.onnx` + modelType
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;

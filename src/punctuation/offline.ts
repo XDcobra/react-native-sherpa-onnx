@@ -1,5 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import {
   createEmptyOfflineTextBuffer,
   getOfflineTextBufferTextSlice,
@@ -30,7 +30,7 @@ export async function createOfflinePunctuation(
   options: OfflinePunctuationInitializeOptions
 ): Promise<OfflinePunctuationEngine> {
   const instanceId = `punc_off_${++offlinePunctInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
   const modelType = options.modelType ?? 'auto';
 
   const init = await SherpaOnnx.initializeOfflinePunctuation(
@@ -90,7 +90,7 @@ export async function createOfflinePunctuation(
                 info.utf16Length
               )
             : '';
-        await SherpaOnnx.populateOfflineTextBufferIfEmpty(outId, finalText);
+        await SherpaOnnx.populateOfflineTextBufferIfEmpty(outId, finalText, {});
         await releasePipelineTextBuffer(result.outputBuffer).catch(
           () => undefined
         );
@@ -131,7 +131,8 @@ export async function createOfflinePunctuation(
         const input = await createEmptyOfflineTextBuffer();
         await SherpaOnnx.populateOfflineTextBufferIfEmpty(
           input.bufferId,
-          plain
+          plain,
+          {}
         );
         try {
           return await punctuateOffline(input, outId, options);

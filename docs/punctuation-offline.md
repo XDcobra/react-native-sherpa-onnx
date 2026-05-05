@@ -10,7 +10,7 @@
 
 ## Models and paths
 
-**`ModelPathConfig`** (`{ type: 'file' | 'asset' | 'auto', path }` — same as `createEnhancement` / `resolveModelPath`) for **`createOfflinePunctuation`**. **`FileSource`** for **`detectPunctuationModel`**. See [download-manager.md](download-manager.md), [model-setup.md](model-setup.md). **Init** always re-runs **ct_transformer** detect (no CNN fallback) — online-only trees **fail** init.
+**`FileSource`** (`{ kind: 'fs' | 'app' | 'pad', path, ... }`) for **`createOfflinePunctuation`**. **`FileSource`** for **`detectPunctuationModel`**. See [download-manager.md](download-manager.md), [model-setup.md](model-setup.md). **Init** always re-runs **ct_transformer** detect (no CNN fallback) — online-only trees **fail** init.
 
 ## Model detection
 
@@ -38,9 +38,9 @@ import {
   type OfflineTextBufferInfo,
 } from 'react-native-sherpa-onnx/textbuffer';
 
-// Same directory, two path shapes: FileSource for detect, ModelPathConfig for init/resolveModelPath.
+// Same directory, two path shapes: FileSource for detect, FileSource for init/resolveModelPath.
 const modelDirFs = { kind: 'fs' as const, path: '/absolute/path/to/sherpa-onnx-punct-ct-en' };
-const modelPath = { type: 'file' as const, path: '/absolute/path/to/sherpa-onnx-punct-ct-en' };
+const modelPath = { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' };
 
 // Pre-flight: ensure the pack looks like a punctuation model and note ct vs cnn.
 const det = await detectPunctuationModel(modelDirFs, { modelType: 'auto' });
@@ -51,7 +51,7 @@ if (!det.success) {
 // Load the native OfflinePunctuation (ct_transformer only inside native).
 // resolveModelPath turns FileSource into an absolute path the native side can open.
 const punct = await createOfflinePunctuation({
-  modelPath,
+  modelSource: modelPath,
   modelType: 'auto', // native init uses ct_transformer — never picks CNN for this engine
   numThreads: 2,
   provider: 'cpu',
@@ -159,7 +159,7 @@ function createOfflinePunctuation(
 ```ts
 // OfflinePunctuationInitializeOptions (see src/punctuation/types.ts)
 type OfflinePunctuationInitializeOptions = {
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
   modelType?: 'ct_transformer' | 'auto';
   numThreads?: number;
   provider?: string;
@@ -169,7 +169,7 @@ type OfflinePunctuationInitializeOptions = {
 
 ```ts
 const engine = await createOfflinePunctuation({
-  modelPath: { type: 'file', path: '/abs/path/to/ct-punctuation-model' },
+  modelSource: { kind: 'fs', path: '/abs/path/to/ct-punctuation-model' },
   modelType: 'auto',
   numThreads: 1,
   provider: 'cpu',
@@ -276,7 +276,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const punct = await createOfflinePunctuation({
-  modelPath: { type: 'file', path: '/path/to/punctuation-ct' },
+  modelSource: { kind: 'fs', path: '/path/to/punctuation-ct' },
   modelType: 'auto',
 });
 
@@ -331,7 +331,7 @@ More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](fe
 ## Types and constants
 
 ```ts
-import type { ModelPathConfig } from 'react-native-sherpa-onnx';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type {
   OfflinePunctuateResult,
   OfflinePunctuationEngine,
@@ -394,7 +394,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createOfflinePunctuation({
-  modelPath: { type: 'file', path: '/path/to/punctuation-ct' },
+  modelSource: { kind: 'fs', path: '/path/to/punctuation-ct' },
   modelType: 'auto',
 });
 

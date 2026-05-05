@@ -8,6 +8,8 @@
 
 For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For live/ring-buffer workflows, see [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md).
 
+Practical default policy: buffers are `16000` Hz unless you explicitly choose a different rate (`targetSampleRateHz: 0` to keep source/native rate, or `targetSampleRateHz > 0` for an explicit target).
+
 ---
 
 ## Concepts
@@ -152,18 +154,22 @@ The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolu
 
 Options:
 
-- `targetSampleRateHz`: resample during decode; omit or use `0` to keep the source rate
+- `targetSampleRateHz`: decode target rate semantics:
+  - omit / `undefined` → `16000` Hz
+  - `0` → keep source rate
+  - `> 0` → resample to that exact rate
 - `forceMono`: downmix during decode; default `true`
 - `onProgress`: receives `DecodeProgressEvent`
 - `signal`: aborts decode and rejects with `DECODE_CANCELLED`
 
-#### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
+#### `createOfflineAudioBufferFromSamples(samples, inputSampleRateHz, channelCountOrOptions?, options?)`
 
 ```ts
 function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
-  sampleRate: number,
-  channelCount?: number
+  inputSampleRateHz: number,
+  channelCountOrOptions?: number | { targetSampleRateHz?: number },
+  options?: { targetSampleRateHz?: number }
 ): OfflineAudioBufferRef;
 ```
 
@@ -171,11 +177,18 @@ function createOfflineAudioBufferFromSamples(
 const offline = createOfflineAudioBufferFromSamples(
   new Float32Array([0.1, 0.2, 0.3]),
   16000,
-  1
+  1,
+  { targetSampleRateHz: 0 }
 );
 ```
 
 This path is synchronous and uses JSI (`ArrayBuffer`/`Float32Array`) for bulk sample transport.
+
+`targetSampleRateHz` semantics for samples import:
+
+- omit / `undefined` → `16000` Hz
+- `0` → keep `inputSampleRateHz`
+- `> 0` → resample to that exact rate before writing to the offline buffer
 
 #### `createEmptyOfflineAudioBuffer(sampleRate, channelCount?)`
 

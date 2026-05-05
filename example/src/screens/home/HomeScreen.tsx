@@ -1,7 +1,7 @@
 import {
   View,
   Text,
-  FlatList,
+  SectionList,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
@@ -13,10 +13,25 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList, Feature } from '../../types/navigation';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
-const FEATURES: Feature[] = [
+type HomeFeature = Feature & { sectionTitle: string };
+
+const SECTION_ORDER = [
+  'Download & Models',
+  'Speech Recognition',
+  'Speech Synthesis',
+  'Pipelines & Demos',
+  'Alignment & Subtitles',
+  'Speech Enhancement',
+  'Voice Activity',
+  'Punctuation',
+  'Speakers & Separation',
+] as const;
+
+const FEATURES: HomeFeature[] = [
   {
     id: 'download_showcase',
-    title: 'Downloadmanager',
+    sectionTitle: 'Download & Models',
+    title: 'Download Manager',
     description:
       'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
     icon: 'cloud-download-outline',
@@ -25,6 +40,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'stt',
+    sectionTitle: 'Speech Recognition',
     title: 'Speech-to-Text',
     description: 'Convert speech to text using offline models',
     icon: 'mic',
@@ -33,14 +49,16 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'tts',
-    title: 'Text-to-Speech',
-    description: 'Generate speech from text',
+    sectionTitle: 'Speech Synthesis',
+    title: 'Text-to-Speech (Offline)',
+    description: 'Batch synthesis from text (one-shot or segmented)',
     icon: 'volume-high',
     screen: 'TTS',
     implemented: true,
   },
   {
     id: 'stt_streaming',
+    sectionTitle: 'Speech Recognition',
     title: 'Speech-to-Text (Streaming)',
     description:
       'Stream long audio files through LiveAudioBuffer and LiveTextBuffer to avoid offline decode OOM',
@@ -50,6 +68,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'tts_streaming',
+    sectionTitle: 'Speech Synthesis',
     title: 'Text-to-Speech (Streaming)',
     description:
       'Use incremental TTS to start synthesis before the full prompt is built offline',
@@ -58,16 +77,38 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
-    id: 'pipeline_showcase',
-    title: 'Pipeline Showcase',
+    id: 'offline_pipeline_showcase',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Offline Pipeline',
     description:
-      'Mic/File -> Streaming STT -> Incremental TTS -> PCM playback with live metrics and finalize/save flow',
+      'Batch audio → STT → TTS pipeline with optional segmentation for memory-safe processing of long audio',
+    icon: 'layers-outline',
+    screen: 'OfflinePipelineShowcase',
+    implemented: true,
+  },
+  {
+    id: 'live_pipeline_showcase',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Live Pipeline',
+    description:
+      'Real-time Mic/File → Streaming STT → Streaming TTS → Playback with event-driven segment forwarding',
     icon: 'git-compare',
-    screen: 'PipelineShowcase',
+    screen: 'LivePipelineShowcase',
+    implemented: true,
+  },
+  {
+    id: 'fileio',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'File I/O',
+    description:
+      'Isolate FileDestination and AudioOutputFormat / saveAudioAsFile behavior',
+    icon: 'folder-open-outline',
+    screen: 'FileIO',
     implemented: true,
   },
   {
     id: 'generate_timestamp',
+    sectionTitle: 'Alignment & Subtitles',
     title: 'Alignment (Subtitles/Timestamps)',
     description:
       'Use the alignment API to generate subtitle/timestamp segments from audio + transcript',
@@ -77,6 +118,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'enhancement',
+    sectionTitle: 'Speech Enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality (offline)',
     icon: 'options',
@@ -85,6 +127,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'enhancement_streaming',
+    sectionTitle: 'Speech Enhancement',
     title: 'Speech Enhancement (Streaming)',
     description:
       'Stream files through live buffers to avoid offline OOM on very long audio',
@@ -94,6 +137,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'vad',
+    sectionTitle: 'Voice Activity',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
     icon: 'stats-chart',
@@ -101,7 +145,18 @@ const FEATURES: Feature[] = [
     implemented: true,
   },
   {
+    id: 'segmentation_showcase',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Segmentation Showcase',
+    description:
+      'Experiment with text and audio segmentation policies. Control segment boundaries with configurable parameters.',
+    icon: 'cut',
+    screen: 'SegmentationShowcase',
+    implemented: true,
+  },
+  {
     id: 'punctuation',
+    sectionTitle: 'Punctuation',
     title: 'Punctuation',
     description:
       'Offline CT-Transformer: plain text in, punctuated text out (buffers)',
@@ -111,6 +166,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'punctuation_streaming',
+    sectionTitle: 'Punctuation',
     title: 'Punctuation Streaming',
     description: 'Online CNN-BiLSTM over LiveTextBuffer in/out',
     icon: 'chatbubbles-outline',
@@ -119,6 +175,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'diarization',
+    sectionTitle: 'Speakers & Separation',
     title: 'Speaker Diarization',
     description: 'Identify who spoke when in audio',
     icon: 'people',
@@ -127,6 +184,7 @@ const FEATURES: Feature[] = [
   },
   {
     id: 'separation',
+    sectionTitle: 'Speakers & Separation',
     title: 'Source Separation',
     description: 'Separate voice from background music',
     icon: 'musical-notes',
@@ -135,12 +193,17 @@ const FEATURES: Feature[] = [
   },
 ];
 
+const FEATURE_SECTIONS = SECTION_ORDER.map((title) => ({
+  title,
+  data: FEATURES.filter((f) => f.sectionTitle === title),
+})).filter((s) => s.data.length > 0);
+
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Home'>;
 };
 
 export default function HomeScreen({ navigation }: Props) {
-  const renderFeatureCard = ({ item }: { item: Feature }) => (
+  const renderFeatureCard = ({ item }: { item: HomeFeature }) => (
     <TouchableOpacity
       style={[styles.card, !item.implemented && styles.cardDisabled]}
       onPress={() => navigation.navigate(item.screen)}
@@ -200,12 +263,16 @@ export default function HomeScreen({ navigation }: Props) {
         </Text>
       </View>
       <View style={styles.body}>
-        <FlatList
-          data={FEATURES}
+        <SectionList
+          sections={FEATURE_SECTIONS}
           renderItem={renderFeatureCard}
+          renderSectionHeader={({ section: { title } }) => (
+            <Text style={styles.sectionHeading}>{title}</Text>
+          )}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
         />
       </View>
       <ScreenIntroModal screenId="Home" />
@@ -257,8 +324,19 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
   listContent: {
-    padding: 16,
+    paddingTop: 8,
+    paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  sectionHeading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6D6D70',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 4,
   },
   card: {
     backgroundColor: '#FFFFFF',

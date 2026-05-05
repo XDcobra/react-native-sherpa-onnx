@@ -1,6 +1,10 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/resolved/alignment.onnx' },
+    }),
     alignAccurateFromPcm: jest.fn().mockResolvedValue({
       subtitles: [{ text: 'hello', start: 0.00125, end: 0.0075 }],
       timingMode: 'accurate',
@@ -9,7 +13,7 @@ jest.mock('../../../NativeSherpaOnnx', () => ({
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment.onnx'),
+  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({
@@ -137,7 +141,7 @@ describe('asrMediated/driver coverage', () => {
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
       hypothesisTextBuffer: 'txt_hyp',
-      modelPath: { type: 'file', path: '/m' },
+      modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
     });

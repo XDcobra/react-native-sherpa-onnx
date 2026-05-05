@@ -131,7 +131,7 @@ describe('stt segmented transcribe', () => {
     });
 
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     const result = await stt.transcribe(
@@ -142,7 +142,7 @@ describe('stt segmented transcribe', () => {
           mode: 'auto',
           policy: {
             evaluator: 'speech_vad_model',
-            modelPath: { type: 'file', path: '/models/vad/silero_vad.onnx' },
+            modelPath: { kind: 'fs', path: '/models/vad/silero_vad.onnx' },
           },
         },
       }
@@ -154,7 +154,8 @@ describe('stt segmented transcribe', () => {
 
     expect(mockNative.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_11111111-1111-1111-1111-111111111111',
-      'hi there'
+      'hi there',
+      {}
     );
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith('txt_tmp');
     expect(createSegmentLinkMap).toHaveBeenCalled();
@@ -164,7 +165,7 @@ describe('stt segmented transcribe', () => {
 
   it('uses native single-shot path when segmentation mode is off', async () => {
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     const result = await stt.transcribe(
@@ -198,7 +199,7 @@ describe('stt segmented transcribe', () => {
     });
 
     const stt = await createSTT({
-      modelPath: { type: 'file', path: '/models/stt' },
+      modelSource: { kind: 'fs', path: '/models/stt' },
     });
 
     await expect(

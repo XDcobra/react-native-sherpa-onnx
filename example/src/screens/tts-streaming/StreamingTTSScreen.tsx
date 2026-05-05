@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,7 +33,12 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import {
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx/utils';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -40,11 +46,19 @@ import {
 } from 'react-native-sherpa-onnx/download';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
+
+const PAD_PACK_NAME = 'sherpa_models';
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -87,7 +101,7 @@ type StreamingSessionEngine = {
 };
 
 async function createStreamingSessionEngine(options: {
-  modelPath: { type: 'asset' | 'file' | 'auto'; path: string };
+  modelSource: FileSource;
   modelType: TTSModelType;
   numThreads: number;
   debug: boolean;
@@ -115,10 +129,7 @@ async function createStreamingSessionEngine(options: {
       const pipeline = await ttsEngine.synthesize(
         textBuffer.bufferId,
         audioOutId,
-        {
-          ...(pipelineOptions ?? {}),
-          segmentation: { mode: 'auto' },
-        }
+        pipelineOptions ?? {}
       );
       activePipeline = pipeline;
 
@@ -149,8 +160,10 @@ async function createStreamingSessionEngine(options: {
   };
 }
 
-export default function TTSStreamingScreen() {
+export default function StreamingTTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [padModelIds, setPadModelIds] = useState<string[]>([]);
+  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
@@ -174,6 +187,14 @@ export default function TTSStreamingScreen() {
     numSamples: number;
   } | null>(null);
   const [isResultPlaying, setIsResultPlaying] = useState(false);
+  const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'auto',
+    policy: {
+      evaluator: 'text_synthetic_auto',
+      maxLengthChars: 320,
+      sentenceBoundary: true,
+    },
+  });
 
   const engineRef = useRef<StreamingSessionEngine | null>(null);
   const controllerRef = useRef<StreamingSessionController | null>(null);
@@ -195,60 +216,66 @@ export default function TTSStreamingScreen() {
 
   const resolveModelPath = useCallback(
     (modelFolder: string) => {
+      if (padModelIds.includes(modelFolder)) {
+        return padModelsPath
+          ? getFileModelPath(modelFolder, ModelCategory.Tts, padModelsPath)
+          : getFileModelPath(modelFolder, ModelCategory.Tts);
+      }
       if (downloadedModelIds.includes(modelFolder)) {
         return getFileModelPath(modelFolder, ModelCategory.Tts);
       }
       return getAssetModelPath(modelFolder);
     },
-    [downloadedModelIds]
+    [downloadedModelIds, padModelIds, padModelsPath]
   );
 
+  /** Same folder merge as OfflineTTSScreen (PAD + bundled assets + downloads). No detect filter. */
   const loadModels = useCallback(async () => {
     setLoadingModels(true);
     setError(null);
     try {
-      const [assets, downloaded] = await Promise.all([
-        listAssetModels(),
-        listDownloadedModels(ModelCategory.Tts),
-      ]);
-      const assetModels = assets
+      const assetModels = await listAssetModels();
+      const ttsFolders = assetModels
         .filter((model) => model.hint === 'tts')
         .map((model) => model.folder);
-      const downloadedIds = downloaded.map((model) => model.id);
+      const downloadedList = await listDownloadedModels(ModelCategory.Tts);
+      const downloadedIds = downloadedList.map((model) => model.id);
 
-      const candidateModels = Array.from(
-        new Set([...assetModels, ...downloadedIds])
-      );
-      const streamingModelsRaw = await Promise.all(
-        candidateModels.map(async (modelFolder) => {
-          try {
-            const modelPath = downloadedIds.includes(modelFolder)
-              ? getFileModelPath(modelFolder, ModelCategory.Tts)
-              : getAssetModelPath(modelFolder);
-            const detection = await detectTtsModel(
-              await toDetectSource(modelPath)
-            );
-            return detection.success && detection.isStreaming
-              ? modelFolder
-              : null;
-          } catch {
-            return null;
-          }
-        })
-      );
+      let padFolders: string[] = [];
+      let resolvedPadPath: string | null = null;
+      try {
+        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+        const fallbackPath = `${DocumentDirectoryPath}/models`;
+        const padPath = padPathFromNative ?? fallbackPath;
+        const padResults = await listModelsAtPath(padPath);
+        padFolders = (padResults || [])
+          .filter((m) => m.hint === 'tts')
+          .map((m) => m.folder);
+        if (padFolders.length > 0) {
+          resolvedPadPath = padPath;
+        }
+      } catch {
+        padFolders = [];
+      }
 
-      const available = streamingModelsRaw.filter(
-        (modelFolder): modelFolder is string => modelFolder != null
-      );
+      const combined = [
+        ...padFolders,
+        ...ttsFolders.filter((f) => !padFolders.includes(f)),
+        ...downloadedIds.filter(
+          (f) => !padFolders.includes(f) && !ttsFolders.includes(f)
+        ),
+      ];
 
-      setAvailableModels(available);
+      setPadModelsPath(resolvedPadPath);
+      setPadModelIds(padFolders);
+      setAvailableModels(combined);
       setDownloadedModelIds(downloadedIds);
       setSelectedModelFolder((prev) =>
-        prev && available.includes(prev) ? prev : available[0] ?? null
+        prev && combined.includes(prev) ? prev : combined[0] ?? null
       );
-      if (available.length === 0) {
+      if (combined.length === 0) {
         setStatus(
-          'No streaming TTS models found. Install/download a streaming model to use this screen.'
+          'No TTS models found. Add one under assets, PAD, or downloads (category: tts).'
         );
       }
     } catch (loadErr) {
@@ -302,21 +329,22 @@ export default function TTSStreamingScreen() {
 
       try {
         try {
+          // cancel() → pipeline.stop(); settles `pipeline.completed` (see StreamingPipelineHandle).
           await controllerRef.current?.cancel();
         } catch {
           // ignore teardown races
         }
         controllerRef.current = null;
 
-        if (!preserveAudioBuffer) {
-          try {
-            await playerRef.current?.destroy();
-          } catch {
-            // ignore teardown races
-          }
-          playerRef.current = null;
-          setIsResultPlaying(false);
+        // Always tear down the live-stream PCM player so after Stop the finalized
+        // buffer can be played back with a fresh player in the result section.
+        try {
+          await playerRef.current?.destroy();
+        } catch {
+          // ignore teardown races
         }
+        playerRef.current = null;
+        setIsResultPlaying(false);
 
         try {
           await engineRef.current?.destroy();
@@ -367,7 +395,7 @@ export default function TTSStreamingScreen() {
       }
 
       const engine = await createStreamingSessionEngine({
-        modelPath,
+        modelSource: modelPath,
         modelType: 'auto' as TTSModelType,
         numThreads: 2,
         debug: false,
@@ -387,16 +415,11 @@ export default function TTSStreamingScreen() {
       });
       audioBufferRef.current = audioBuffer;
 
-      const player = await createPcmPlayer(audioBuffer.bufferId, {
-        onEnded: () => {
-          setStatus('Playback reached the end of the streamed TTS output.');
-        },
-      });
-      playerRef.current = player;
-
+      const seg = buildSegmentationOption(segConfig);
       const controller = await engine.startSession(audioBuffer.bufferId, {
         sid: Number.parseInt(speakerId, 10) || 0,
         speed: Number.parseFloat(speed) || 1.0,
+        ...(seg ? { segmentation: seg } : {}),
       });
       controllerRef.current = controller;
 
@@ -412,6 +435,21 @@ export default function TTSStreamingScreen() {
       setStatus(
         'Streaming TTS is active. Add more text and press Stop when done.'
       );
+
+      const liveBufferId = audioBuffer.bufferId;
+      try {
+        const livePlayer = await createPcmPlayer(liveBufferId);
+        if (
+          audioBufferRef.current?.bufferId === liveBufferId &&
+          controllerRef.current === controller
+        ) {
+          playerRef.current = livePlayer;
+        } else {
+          await livePlayer.destroy().catch(() => {});
+        }
+      } catch {
+        // Live preview is optional; synthesis continues if PCM player fails.
+      }
     } catch (startErr) {
       setError(normalizeErrorMessage(startErr));
       setStreamingState('idle');
@@ -422,6 +460,7 @@ export default function TTSStreamingScreen() {
     inputText,
     releaseResultBuffer,
     resolveModelPath,
+    segConfig,
     selectedModelFolder,
     speakerId,
     speed,
@@ -429,38 +468,45 @@ export default function TTSStreamingScreen() {
   ]);
 
   const stopStreaming = useCallback(async () => {
-    if (streamingState === 'idle') {
+    if (streamingState !== 'running') {
       return;
     }
     setStreamingState('stopping');
     setStatus('Stopping streaming TTS...');
-    try {
-      const controller = controllerRef.current;
-      const audioBuffer = audioBufferRef.current;
-      if (controller && audioBuffer) {
-        if (deltaDebounceTimerRef.current) {
-          clearTimeout(deltaDebounceTimerRef.current);
-          deltaDebounceTimerRef.current = null;
-        }
-        if (pendingDeltaRef.current.length > 0) {
-          controller.pushText(pendingDeltaRef.current);
-          pendingDeltaRef.current = '';
-        }
-        await controller.flush();
-        await finalizeLiveAudioBuffer(audioBuffer.bufferId);
-        await controller.pipeline.completed;
 
-        const info = (await getPipelineAudioBufferInfo(
-          audioBuffer.bufferId
-        )) as LiveAudioBufferInfo;
-        const nextResult = {
-          bufferId: audioBuffer.bufferId,
-          sampleRate: info.sampleRate,
-          numSamples: info.numSamples,
-        };
-        currentResultBufferRef.current = nextResult;
-        setResultBuffer(nextResult);
+    const controller = controllerRef.current;
+    const audioBuffer = audioBufferRef.current;
+
+    try {
+      if (!audioBuffer) {
+        throw new Error('No live audio buffer (internal error).');
       }
+
+      if (deltaDebounceTimerRef.current) {
+        clearTimeout(deltaDebounceTimerRef.current);
+        deltaDebounceTimerRef.current = null;
+      }
+      if (controller && pendingDeltaRef.current.length > 0) {
+        controller.pushText(pendingDeltaRef.current);
+        pendingDeltaRef.current = '';
+      }
+      if (controller) {
+        await controller.flush();
+      }
+
+      await finalizeLiveAudioBuffer(audioBuffer.bufferId);
+
+      const info = (await getPipelineAudioBufferInfo(
+        audioBuffer.bufferId
+      )) as LiveAudioBufferInfo;
+      const nextResult = {
+        bufferId: audioBuffer.bufferId,
+        sampleRate: info.sampleRate,
+        numSamples: info.numSamples ?? 0,
+      };
+      currentResultBufferRef.current = nextResult;
+      setResultBuffer(nextResult);
+
       setStatus('Streaming TTS stopped. Result is ready for playback.');
     } catch (stopErr) {
       setError(normalizeErrorMessage(stopErr));
@@ -571,7 +617,10 @@ export default function TTSStreamingScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.headerRow}>
           <View style={styles.headerIconWrap}>
             <Ionicons name="volume-high-outline" size={20} color="#0F62FE" />
@@ -644,6 +693,20 @@ export default function TTSStreamingScreen() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>Segmentation</Text>
+          <Text style={[styles.mutedText, { marginBottom: 10 }]}>
+            Off or Manual: text is fed as you type (debounced). Auto: attaches
+            the text segmentation engine per policy.
+          </Text>
+          <SegmentationPolicyControls
+            variant="text-streaming"
+            value={segConfig}
+            onChange={setSegConfig}
+            disabled={streamingState !== 'idle'}
+          />
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Run</Text>
           <View style={styles.actionRow}>
             <Pressable
@@ -684,24 +747,71 @@ export default function TTSStreamingScreen() {
         </View>
 
         {resultBuffer && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Result playback</Text>
+          <View style={[styles.card, styles.resultCard]}>
+            <View style={styles.resultCardHeader}>
+              <Ionicons name="musical-notes" size={22} color="#0F62FE" />
+              <Text style={styles.resultTitle}>Stream result</Text>
+            </View>
             <Text style={styles.mutedText}>
-              {resultBuffer.sampleRate} Hz •{' '}
-              {resultBuffer.numSamples.toLocaleString()} samples
+              Finalized audio buffer after Stop — same pipeline buffer, ready
+              for PCM playback.
             </Text>
-            <View style={styles.actionRow}>
+            <View style={styles.resultStats}>
+              <Text style={styles.resultStatLine}>
+                {resultBuffer.sampleRate} Hz ·{' '}
+                {resultBuffer.numSamples.toLocaleString()} samples
+              </Text>
+              <Text style={styles.resultStatLine}>
+                Duration:{' '}
+                {resultBuffer.sampleRate > 0
+                  ? (resultBuffer.numSamples / resultBuffer.sampleRate).toFixed(
+                      2
+                    )
+                  : '—'}{' '}
+                s
+              </Text>
+              <Text style={styles.resultBufferId} numberOfLines={2} selectable>
+                Buffer: {resultBuffer.bufferId}
+              </Text>
+            </View>
+            <View style={styles.resultActions}>
               <Pressable
-                style={styles.primaryButton}
+                style={[
+                  styles.primaryButton,
+                  styles.resultPlayButton,
+                  isResultPlaying && styles.buttonDisabled,
+                ]}
                 onPress={() => {
+                  if (isResultPlaying) {
+                    return;
+                  }
                   handleToggleResultPlayback().catch((err) => {
                     setError(normalizeErrorMessage(err));
                   });
                 }}
+                disabled={isResultPlaying}
               >
-                <Text style={styles.primaryButtonText}>
-                  {isResultPlaying ? 'Stop' : 'Play'}
-                </Text>
+                <Ionicons name="play" size={18} color="#FFFFFF" />
+                <Text style={styles.primaryButtonText}>Play</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  styles.resultStopButton,
+                  !isResultPlaying && styles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  if (!isResultPlaying) {
+                    return;
+                  }
+                  handleToggleResultPlayback().catch((err) => {
+                    setError(normalizeErrorMessage(err));
+                  });
+                }}
+                disabled={!isResultPlaying}
+              >
+                <Ionicons name="stop" size={18} color="#111827" />
+                <Text style={styles.secondaryButtonText}>Stop playback</Text>
               </Pressable>
             </View>
           </View>
@@ -852,6 +962,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   secondaryButtonText: {
     color: '#111827',
@@ -864,5 +976,54 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#B42318',
     fontWeight: '600',
+  },
+  resultCard: {
+    borderWidth: 2,
+    borderColor: '#BFDBFE',
+    backgroundColor: '#F8FAFF',
+  },
+  resultCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  resultTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  resultStats: {
+    marginBottom: 14,
+    gap: 4,
+  },
+  resultStatLine: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  resultBufferId: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#6B7280',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+  },
+  resultActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'stretch',
+  },
+  resultPlayButton: {
+    flex: 1,
+    minWidth: 130,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  resultStopButton: {
+    flex: 1,
+    minWidth: 130,
   },
 });

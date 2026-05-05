@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
 class LiveSegmentEntry(
   val bufferId: String,
   val sourceAudioBufferId: String? = null,
-  private val maxSegments: Int = 1000,
+  private val maxSegments: Int = 4096,
   private val spoolingMode: SegmentSpoolingMode = SegmentSpoolingMode.ON,
   private val spoolPath: String? = null,
   private val spoolTemporary: Boolean = true,

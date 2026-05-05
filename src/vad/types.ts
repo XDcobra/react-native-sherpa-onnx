@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { VadDetectModelResult } from '../types/modelDetect';
 import type {
   LiveAudioBufferIdSource,
@@ -65,7 +65,7 @@ export type TenVadRuntimeOptions = {
 export type VADRuntimeOptions = SileroVadRuntimeOptions | TenVadRuntimeOptions;
 
 export type VADInitializeOptions = {
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
   modelType?: VADModelType | 'auto';
   sampleRate?: number;
   runtimeOptions?: VADRuntimeOptions;

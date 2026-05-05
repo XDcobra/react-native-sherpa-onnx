@@ -2,7 +2,7 @@
 
 Hardware acceleration support for ONNX Runtime: QNN (Qualcomm NPU), NNAPI, XNNPACK (Android), and Core ML (iOS).
 
-**Import path:** `react-native-sherpa-onnx`
+**Import path:** `react-native-sherpa-onnx/provider` (native checks below). For a one-shot native init smoke test, use `testSherpaInit` from `react-native-sherpa-onnx`.
 
 ---
 
@@ -50,7 +50,7 @@ import {
   getXnnpackSupport,
   getCoreMlSupport,
   getAvailableProviders,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/provider';
 import { Platform } from 'react-native';
 
 // Pick the best provider for this device
@@ -71,7 +71,7 @@ if (Platform.OS === 'android') {
 
 // Pass to engine creation
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/my-stt-model' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/my-stt-model' },
   provider,
 });
 ```
@@ -234,7 +234,7 @@ import {
   getNnapiSupport,
   getXnnpackSupport,
   getCoreMlSupport,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/provider';
 
 async function selectBestProvider(): Promise<string> {
   if (Platform.OS === 'ios') {
@@ -259,7 +259,7 @@ async function selectBestProvider(): Promise<string> {
 ### Check QNN SoC and show in UI
 
 ```typescript
-import { getDeviceQnnSoc, getQnnSupport } from 'react-native-sherpa-onnx';
+import { getDeviceQnnSoc, getQnnSupport } from 'react-native-sherpa-onnx/provider';
 
 const { soc, isSupported } = await getDeviceQnnSoc();
 
@@ -275,7 +275,7 @@ if (isSupported) {
 ### List all providers
 
 ```typescript
-import { getAvailableProviders } from 'react-native-sherpa-onnx';
+import { getAvailableProviders } from 'react-native-sherpa-onnx/provider';
 
 const providers = await getAvailableProviders();
 console.log('Available EPs:', providers);

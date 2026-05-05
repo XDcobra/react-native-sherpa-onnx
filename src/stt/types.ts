@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
@@ -194,9 +194,9 @@ export interface SttModelOptions {
  */
 export interface STTInitializeOptions {
   /**
-   * Model directory path configuration
+   * Model directory source configuration.
    */
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
 
   /**
    * Model quantization preference

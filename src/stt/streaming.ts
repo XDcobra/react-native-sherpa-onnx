@@ -1,5 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import type {
   OnlineSTTModelType,
   LiveSttEngine,
@@ -96,7 +96,7 @@ export async function createStreamingSTT(
   options: StreamingSttInitOptions
 ): Promise<LiveSttEngine> {
   const instanceId = `streaming_stt_${++streamingSttInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
 
   let effectiveModelType: OnlineSTTModelType;
   if (options.modelType === 'auto' || options.modelType === undefined) {

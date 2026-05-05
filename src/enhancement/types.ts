@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { EnhancementDetectModelResult } from '../types/modelDetect';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type {
@@ -26,7 +26,7 @@ export const ENHANCEMENT_MODEL_TYPES: readonly EnhancementModelType[] = [
 ] as const;
 
 export interface EnhancementInitializeOptions {
-  modelPath: ModelPathConfig;
+  modelSource: FileSource;
   modelType?: EnhancementModelType | 'auto';
   numThreads?: number;
   provider?: string;

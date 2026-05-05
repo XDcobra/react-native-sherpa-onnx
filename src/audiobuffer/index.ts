@@ -48,6 +48,7 @@ import type {
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferSegmentEvent,
   LiveAudioBufferErrorEvent,
+  OfflineFromSamplesOptions,
 } from './types';
 
 const getNative = (): Spec =>
@@ -57,6 +58,7 @@ const AUDIO_BUFFER_ID_PATTERN =
   /^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 let opIdCounter = 0;
+const DEFAULT_PIPELINE_SAMPLE_RATE_HZ = 16000;
 
 const DEFAULT_SPEECH_SEGMENTATION_POLICY = {
   evaluator: 'speech_energy_silence' as const,
@@ -146,6 +148,62 @@ function getFloat32ArrayBuffer(samples: Float32Array): ArrayBuffer {
   const copy = new Float32Array(samples.length);
   copy.set(samples);
   return copy.buffer;
+}
+
+function resolveTargetSampleRateHz(
+  targetSampleRateHz: number | undefined,
+  defaultValue: number
+): number {
+  return targetSampleRateHz === undefined ? defaultValue : targetSampleRateHz;
+}
+
+function resolveOfflineFromSamplesArgs(
+  channelCountOrOptions?: number | OfflineFromSamplesOptions,
+  options?: OfflineFromSamplesOptions
+): { channelCount: number; options: OfflineFromSamplesOptions | undefined } {
+  if (typeof channelCountOrOptions === 'number') {
+    return { channelCount: channelCountOrOptions, options };
+  }
+  return {
+    channelCount: 1,
+    options: channelCountOrOptions,
+  };
+}
+
+function resampleLinearFloat32Mono(
+  input: Float32Array,
+  inputRate: number,
+  outputRate: number
+): Float32Array {
+  if (!Number.isFinite(inputRate) || inputRate <= 0) {
+    throw new Error(
+      `${PipelineAudioErrorCode.INVALID_ARGUMENT}: inputSampleRateHz must be > 0.`
+    );
+  }
+  if (!Number.isFinite(outputRate) || outputRate <= 0) {
+    throw new Error(
+      `${PipelineAudioErrorCode.INVALID_ARGUMENT}: targetSampleRateHz must be > 0 when forcing resampling.`
+    );
+  }
+  if (inputRate === outputRate || input.length === 0) {
+    return input;
+  }
+
+  const ratio = outputRate / inputRate;
+  const outputLength = Math.max(1, Math.round(input.length * ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const pos = i / ratio;
+    const left = Math.floor(pos);
+    const right = Math.min(left + 1, input.length - 1);
+    const frac = pos - left;
+    const leftValue = input[left] ?? 0;
+    const rightValue = input[right] ?? leftValue;
+    output[i] = leftValue + (rightValue - leftValue) * frac;
+  }
+
+  return output;
 }
 
 type NativeSubscription = { remove: () => void };
@@ -542,6 +600,11 @@ async function commitFinalizeSegmentIfNeeded(
  * File source resolution uses the fileio resolver for all FileSource kinds.
  * Decode + resample + downmix happen in a single native pass (FFmpeg + SwrContext).
  *
+ * `options.targetSampleRateHz` semantics:
+ * - omitted / undefined -> defaults to 16000 Hz
+ * - 0 -> keep source sample rate
+ * - > 0 -> force that target sample rate
+ *
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
  * @param options - Decode options (sample rate, mono, cancellation, progress).
  * @returns Immutable offline buffer reference.
@@ -551,7 +614,10 @@ export async function createOfflineAudioBufferFromFile(
   options?: import('./types').AudioDecodeOptions
 ): Promise<OfflineAudioBufferRef> {
   const operationId = `decode_${Date.now()}_${++opIdCounter}`;
-  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
   const forceMono = options?.forceMono ?? true;
 
   let progressSubscription: NativeSubscription | null = null;
@@ -607,17 +673,53 @@ export async function createOfflineAudioBufferFromFile(
 
 /**
  * Create an offline audio buffer from Float32 PCM samples.
+ *
+ * `inputSampleRateHz` is the natural source rate of `samples`.
+ * `options.targetSampleRateHz` semantics:
+ * - omitted / undefined -> defaults to 16000 Hz
+ * - 0 -> keep `inputSampleRateHz`
+ * - > 0 -> resample to that target rate before writing to the buffer
  */
 export function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
-  sampleRate: number,
+  inputSampleRateHz: number,
   channelCount?: number
+): OfflineAudioBufferRef;
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
+  inputSampleRateHz: number,
+  options?: OfflineFromSamplesOptions
+): OfflineAudioBufferRef;
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
+  inputSampleRateHz: number,
+  channelCountOrOptions?: number | OfflineFromSamplesOptions,
+  options?: OfflineFromSamplesOptions
 ): OfflineAudioBufferRef {
+  const resolved = resolveOfflineFromSamplesArgs(
+    channelCountOrOptions,
+    options
+  );
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    resolved.options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
+  const outputSampleRateHz =
+    targetSampleRateHz > 0 ? targetSampleRateHz : inputSampleRateHz;
+  const outputSamples =
+    outputSampleRateHz === inputSampleRateHz
+      ? samples
+      : resampleLinearFloat32Mono(
+          samples,
+          inputSampleRateHz,
+          outputSampleRateHz
+        );
+
   const jsi = requireJSI();
   const json = jsi.createOfflineFromSamples(
-    getFloat32ArrayBuffer(samples),
-    sampleRate,
-    channelCount ?? 1
+    getFloat32ArrayBuffer(outputSamples),
+    outputSampleRateHz,
+    resolved.channelCount
   );
 
   let info: OfflineAudioBufferInfo;
@@ -687,6 +789,7 @@ export async function createEmptyOfflineAudioBuffer(
 
 /**
  * Create a live audio buffer with a rolling-window ring buffer.
+ * `options.sampleRate` defaults to 16000 Hz when omitted.
  */
 export async function createEmptyLiveAudioBuffer(
   options: CreateEmptyLiveAudioBufferOptions
@@ -737,7 +840,7 @@ export async function createEmptyLiveAudioBuffer(
   }
 
   const result = await getNative().createEmptyLiveAudioBuffer({
-    sampleRate: options.sampleRate,
+    sampleRate: options.sampleRate ?? DEFAULT_PIPELINE_SAMPLE_RATE_HZ,
     channelCount: options.channelCount,
     ringSeconds: options.ringSeconds,
     retentionMode,
@@ -958,6 +1061,8 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
  * @param liveBuffer - Live buffer in recording state.
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
  * @param options - Decode + ingest options.
+ * targetSampleRateHz semantics are the same as `createOfflineAudioBufferFromFile`:
+ * omitted -> 16000, 0 -> keep source, >0 -> force explicit target.
  * @returns Handle to monitor/cancel the ingest operation.
  */
 export async function ingestFileToLiveAudioBuffer(
@@ -967,7 +1072,10 @@ export async function ingestFileToLiveAudioBuffer(
 ): Promise<import('./types').FileIngestHandle> {
   const operationId = `ingest_${Date.now()}_${++opIdCounter}`;
   const liveBufferId = resolveLiveAudioBufferId(liveBuffer);
-  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
   const forceMono = options?.forceMono ?? true;
   const autoFinalize = options?.autoFinalize ?? false;
   const backpressure = options?.backpressure ?? 'block';
@@ -1104,6 +1212,7 @@ export type {
   AudioSegmentationConfig,
   PipelineAudioErrorCodeValue,
   AudioDecodeOptions,
+  OfflineFromSamplesOptions,
   DecodeProgressEvent,
   FileIngestHandle,
   FileIngestResult,

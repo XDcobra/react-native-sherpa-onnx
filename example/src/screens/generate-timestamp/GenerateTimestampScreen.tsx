@@ -1,34 +1,34 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { DocumentDirectoryPath, unlink } from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
-import { copyFile } from 'react-native-sherpa-onnx/fileio';
+} from 'react-native-sherpa-onnx/utils';
 import {
   createAlignment,
   detectAlignmentModel,
   type AlignmentGranularity,
   type AlignmentModelType,
+  type AlignmentWarning,
 } from 'react-native-sherpa-onnx/alignment';
-import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineSegmentBuffer,
   getOfflineSegmentBufferSegments,
@@ -36,13 +36,18 @@ import {
   type SegmentMeta,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import {
+  createEmptyOfflineTextBuffer,
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
+import { segmentOfflineBuffer } from 'react-native-sherpa-onnx/segment';
 import {
-  createStreamingVAD,
+  createSTT,
+  detectSttModel,
+  type STTModelType,
+} from 'react-native-sherpa-onnx/stt';
+import {
   detectVadModel,
-  type VADEngine,
   type VADModelType,
 } from 'react-native-sherpa-onnx/vad';
 import {
@@ -51,128 +56,188 @@ import {
   onModelsListUpdated,
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import { styles } from './GenerateTimestampScreen.styles';
+import { AUDIO_FILES } from '../../audioConfig';
+import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
+import { styles } from './GenerateTimestampScreen.styles';
 
-const PAD_PACK_NAME = 'sherpa_models';
+type UiMode =
+  | 'proportional'
+  | 'estimated'
+  | 'accurate'
+  | 'vad'
+  | 'asr_mediated'
+  | 'chunked_forced_ctc';
 
-/** Bundled wav2vec2 alignment folders are inferred as `unknown` by native listAssetModels (see STT/TTS hints). */
-function isAlignmentModelFolder(folder: string, hint: string): boolean {
-  if (hint === 'alignment') {
-    return true;
-  }
-  const n = folder.toLowerCase();
-  return n.includes('wav2vec');
-}
+type ModelEntry = {
+  id: string;
+  label: string;
+  recommended?: boolean;
+};
 
-function isVadModelFolder(folder: string, hint: string): boolean {
-  if (hint === 'vad') {
-    return true;
-  }
-  const n = folder.toLowerCase();
-  return n.includes('vad') || n.includes('silero') || n.includes('ten-vad');
-}
+type ModelCatalog = {
+  entries: ModelEntry[];
+  bundledIds: string[];
+  padIds: string[];
+  downloadedIds: string[];
+  padPath: string | null;
+};
 
-type AlignmentModelEntry = { id: string; label: string };
-type VadModelEntry = { id: string; label: string };
 type AlignmentSegmentView = Extract<SegmentMeta, { kind: 'alignment' }>;
+
 type DerivedSubtitleItem = {
   text: string;
   startSec: number;
   endSec: number;
 };
-type AlignmentPipelineResult = {
+
+type RunResult = {
+  mode: UiMode;
   textInBufferId: string;
   audioInBufferId: string;
-  segmentOutBufferId: string;
+  outputSegmentBufferId: string;
+  anchorSegmentBufferId?: string;
+  hypothesisTextBufferId?: string;
   segmentsWritten: number;
   writeDurationMs: number;
   warningCode?: string;
-  vadAnchorCount?: number;
-  minAnchorsApplied?: number;
-  vadSegmentationBufferId?: string;
+  warnings?: AlignmentWarning[];
   alignmentSegments: AlignmentSegmentView[];
-  errorCode?: string;
 };
 
-type DropdownType = 'mode' | 'granularity' | null;
-type ScreenSubtitleMode =
-  | 'proportional'
-  | 'estimated'
-  | 'accurate'
-  | 'accurate_auto_asr'
-  | 'accurate_auto_forced'
-  | 'vad';
-
-type ModeOption = {
-  value: ScreenSubtitleMode;
-  label: string;
+type ModeConfig = {
+  value: UiMode;
+  title: string;
   description: string;
+  apiMode: 'proportional' | 'estimated' | 'accurate' | 'vad';
+  allowedGranularities: AlignmentGranularity[];
+  granularityHint: string;
+  requiresAlignmentModel: boolean;
+  requiresVadModel: boolean;
+  requiresSttModel: boolean;
+  requiresEstimatedChunks: boolean;
+  runButtonLabel: string;
 };
 
-type GranularityOption = {
-  value: AlignmentGranularity;
-  label: string;
-  description: string;
+const PAD_PACK_NAME = 'sherpa_models';
+const DEFAULT_REFERENCE_TEXT =
+  'This is the reference transcript that should be aligned to the selected audio.';
+const DEFAULT_ESTIMATED_SAMPLE_RATE = '16000';
+const DEFAULT_ESTIMATED_COUNTS = '3200, 4000, 2800';
+const EMPTY_MODEL_CATALOG: ModelCatalog = {
+  entries: [],
+  bundledIds: [],
+  padIds: [],
+  downloadedIds: [],
+  padPath: null,
 };
-
-const MODE_OPTIONS: ModeOption[] = [
+const MODE_CONFIGS: ModeConfig[] = [
   {
     value: 'proportional',
-    label: 'proportional',
-    description: 'Spread duration by text weight (no alignment model)',
+    title: 'proportional',
+    description:
+      'Splits the reference text by granularity and distributes timing by text weight over the full audio duration. No models and no anchors.',
+    apiMode: 'proportional',
+    allowedGranularities: ['sentence', 'word'],
+    granularityHint: 'Only sentence and word are valid for proportional mode.',
+    requiresAlignmentModel: false,
+    requiresVadModel: false,
+    requiresSttModel: false,
+    requiresEstimatedChunks: false,
+    runButtonLabel: 'Run proportional alignment',
   },
   {
     value: 'estimated',
-    label: 'estimated',
-    description: 'Use caller-provided chunk timeline (no alignment model)',
+    title: 'estimated',
+    description:
+      'Uses caller-provided chunk sample counts plus sampleRate to assign estimated timestamps. No acoustic alignment model is involved.',
+    apiMode: 'estimated',
+    allowedGranularities: ['sentence', 'word'],
+    granularityHint:
+      'Estimated mode only supports sentence and word granularity, plus explicit chunk sample counts.',
+    requiresAlignmentModel: false,
+    requiresVadModel: false,
+    requiresSttModel: false,
+    requiresEstimatedChunks: true,
+    runButtonLabel: 'Run estimated alignment',
   },
   {
     value: 'accurate',
-    label: 'accurate',
-    description: 'CTC forced alignment (wav2vec2; requires model)',
-  },
-  {
-    value: 'accurate_auto_asr',
-    label: 'accurate + auto (asrMediated / asr_mediated)',
+    title: 'accurate',
     description:
-      'Anchor-constrained accurate alignment via ASR-mediated linker (requires anchors + hypothesis buffer)',
-  },
-  {
-    value: 'accurate_auto_forced',
-    label: 'accurate + auto (chunkedForcedCtc / chunked_forced_ctc)',
-    description: 'Anchor-constrained accurate alignment via forced CTC cursor',
+      'Runs plain wav2vec2 CTC forced alignment over the full offline waveform and reference transcript.',
+    apiMode: 'accurate',
+    allowedGranularities: ['sentence', 'word', 'character'],
+    granularityHint:
+      'Character granularity is only valid in plain accurate mode without segmentation auto.',
+    requiresAlignmentModel: true,
+    requiresVadModel: false,
+    requiresSttModel: false,
+    requiresEstimatedChunks: false,
+    runButtonLabel: 'Run accurate alignment',
   },
   {
     value: 'vad',
-    label: 'vad',
-    description: 'Use VAD speech segments from an offline segment buffer',
+    title: 'vad',
+    description:
+      'Creates offline speech anchors with speech_vad_model and maps text units monotonically onto those anchors. No wav2vec2 model is used.',
+    apiMode: 'vad',
+    allowedGranularities: ['sentence', 'word'],
+    granularityHint:
+      'VAD mode only supports sentence and word. Character is rejected by the native API.',
+    requiresAlignmentModel: false,
+    requiresVadModel: true,
+    requiresSttModel: false,
+    requiresEstimatedChunks: false,
+    runButtonLabel: 'Run VAD alignment',
+  },
+  {
+    value: 'asr_mediated',
+    title: 'accurate + asr_mediated',
+    description:
+      'Anchor-constrained accurate alignment with speech anchors plus a timestamped ASR hypothesis buffer H. Missing token timestamps fail with ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS and do not fall back.',
+    apiMode: 'accurate',
+    allowedGranularities: ['sentence', 'word'],
+    granularityHint:
+      'Anchor-based accurate modes support sentence and word only. Character is disabled.',
+    requiresAlignmentModel: true,
+    requiresVadModel: true,
+    requiresSttModel: true,
+    requiresEstimatedChunks: false,
+    runButtonLabel: 'Run accurate alignment (asr_mediated)',
+  },
+  {
+    value: 'chunked_forced_ctc',
+    title: 'accurate + chunked_forced_ctc',
+    description:
+      'Anchor-constrained accurate alignment with deterministic chunked forced CTC cursor progression. Uses speech anchors, but no ASR hypothesis buffer.',
+    apiMode: 'accurate',
+    allowedGranularities: ['sentence', 'word'],
+    granularityHint:
+      'Anchor-based accurate modes support sentence and word only. Character is disabled.',
+    requiresAlignmentModel: true,
+    requiresVadModel: true,
+    requiresSttModel: false,
+    requiresEstimatedChunks: false,
+    runButtonLabel: 'Run accurate alignment (chunked_forced_ctc)',
   },
 ];
-
-const ALL_GRANULARITY_OPTIONS: GranularityOption[] = [
-  {
-    value: 'sentence',
-    label: 'sentence',
-    description: 'Generate one subtitle item per sentence',
-  },
-  {
-    value: 'word',
-    label: 'word',
-    description: 'Generate one subtitle item per word',
-  },
-  {
-    value: 'character',
-    label: 'character',
-    description:
-      'Generate one subtitle item per character (accurate mode only)',
-  },
+const ALL_GRANULARITIES: AlignmentGranularity[] = [
+  'sentence',
+  'word',
+  'character',
 ];
 
 function formatMs(ms: number): string {
@@ -192,19 +257,6 @@ function extractErrorCode(message: string): string | null {
   return maybeCode.length > 0 ? maybeCode : null;
 }
 
-function normalizeUriToPath(uri: string): string {
-  if (uri.startsWith('file://')) {
-    return decodeURI(uri.replace(/^file:\/\//, ''));
-  }
-  return uri;
-}
-
-function getFileNameFromUri(uri: string): string {
-  const withoutQuery = uri.split('?')[0] ?? uri;
-  const segments = withoutQuery.split('/');
-  return decodeURIComponent(segments[segments.length - 1] ?? 'audio.wav');
-}
-
 function getModelLabel(model: ModelMeta): string {
   const title = model.displayName?.trim();
   if (title && title.length > 0) {
@@ -213,459 +265,712 @@ function getModelLabel(model: ModelMeta): string {
   return getModelDisplayName(model.id);
 }
 
-function getAlignmentModelPathConfig(
+function isAlignmentModelFolder(folder: string, hint: string): boolean {
+  if (hint === 'alignment') {
+    return true;
+  }
+  return folder.toLowerCase().includes('wav2vec');
+}
+
+function isVadModelFolder(folder: string, hint: string): boolean {
+  if (hint === 'vad') {
+    return true;
+  }
+  const normalized = folder.toLowerCase();
+  return (
+    normalized.includes('vad') ||
+    normalized.includes('silero') ||
+    normalized.includes('ten-vad')
+  );
+}
+
+function isSttModelFolder(_: string, hint: string): boolean {
+  return hint === 'stt';
+}
+
+function prioritizeEntries(
+  entries: ModelEntry[],
+  recommendedIds: string[] = []
+): ModelEntry[] {
+  const uniqueEntries = Array.from(
+    new Map(entries.map((entry) => [entry.id, entry])).values()
+  );
+  const recommendedSet = new Set(recommendedIds);
+  const recommended: ModelEntry[] = [];
+  const remaining: ModelEntry[] = [];
+
+  for (const entry of uniqueEntries) {
+    if (recommendedSet.has(entry.id)) {
+      recommended.push({ ...entry, recommended: true });
+      continue;
+    }
+    remaining.push(entry);
+  }
+
+  recommended.sort(
+    (left, right) =>
+      recommendedIds.indexOf(left.id) - recommendedIds.indexOf(right.id)
+  );
+  remaining.sort((left, right) => left.label.localeCompare(right.label));
+
+  return [...recommended, ...remaining];
+}
+
+function buildModelCatalog(params: {
+  category: ModelCategory;
+  assetModels: Array<{ folder: string; hint: string }>;
+  padModels: Array<{ folder: string; hint: string }>;
+  downloadedModels: ModelMeta[];
+  filter: (folder: string, hint: string) => boolean;
+  recommendedIds?: string[];
+  padPath: string | null;
+}): ModelCatalog {
+  const {
+    assetModels,
+    padModels,
+    downloadedModels,
+    filter,
+    recommendedIds,
+    padPath,
+  } = params;
+  const bundledIds = assetModels
+    .filter((model) => filter(model.folder, model.hint))
+    .map((model) => model.folder);
+  const padIds = padModels
+    .filter((model) => filter(model.folder, model.hint))
+    .map((model) => model.folder);
+  const downloadedIds = downloadedModels.map((model) => model.id);
+  const metaById = new Map(
+    downloadedModels.map((model) => [model.id, model] as const)
+  );
+  const mergedIds: string[] = [];
+  const pushId = (id: string) => {
+    if (!mergedIds.includes(id)) {
+      mergedIds.push(id);
+    }
+  };
+  for (const id of padIds) {
+    pushId(id);
+  }
+  for (const id of bundledIds) {
+    pushId(id);
+  }
+  for (const id of downloadedIds) {
+    pushId(id);
+  }
+
+  return {
+    entries: prioritizeEntries(
+      mergedIds.map((id) => {
+        const meta = metaById.get(id);
+        return {
+          id,
+          label: meta ? getModelLabel(meta) : getModelDisplayName(id),
+        };
+      }),
+      recommendedIds
+    ),
+    bundledIds,
+    padIds,
+    downloadedIds,
+    padPath,
+  };
+}
+
+function resolveModelPathForCatalog(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
+  category: ModelCategory,
+  catalog: ModelCatalog
+): FileSource {
+  if (catalog.padIds.includes(modelId)) {
+    return catalog.padPath
+      ? getFileModelPath(modelId, category, catalog.padPath)
+      : getFileModelPath(modelId, category);
   }
-) {
-  if (ctx.padModelIds.includes(modelId)) {
-    return ctx.padModelsPath
-      ? getFileModelPath(modelId, ModelCategory.Alignment, ctx.padModelsPath)
-      : getFileModelPath(modelId, ModelCategory.Alignment);
+  if (catalog.downloadedIds.includes(modelId)) {
+    return getFileModelPath(modelId, category);
   }
-  if (ctx.downloadedIds.has(modelId)) {
-    return getFileModelPath(modelId, ModelCategory.Alignment);
-  }
-  if (ctx.bundledFolders.includes(modelId)) {
+  if (catalog.bundledIds.includes(modelId)) {
     return getAssetModelPath(modelId);
   }
   return getAssetModelPath(modelId);
 }
 
-function getVadModelPathConfig(
-  modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
+function parseEstimatedTimeline(
+  sampleRateText: string,
+  countsText: string
+): { sampleRate: number; segmentSampleCounts: number[] } {
+  const sampleRate = parseInt(sampleRateText.trim(), 10);
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+    throw new Error('Estimated mode requires a positive sample rate.');
   }
-) {
-  if (ctx.padModelIds.includes(modelId)) {
-    return ctx.padModelsPath
-      ? getFileModelPath(modelId, ModelCategory.Vad, ctx.padModelsPath)
-      : getFileModelPath(modelId, ModelCategory.Vad);
+
+  const segmentSampleCounts = countsText
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => parseInt(value, 10));
+
+  if (segmentSampleCounts.length === 0) {
+    throw new Error(
+      'Estimated mode requires at least one segmentSampleCounts value.'
+    );
   }
-  if (ctx.downloadedIds.has(modelId)) {
-    return getFileModelPath(modelId, ModelCategory.Vad);
+  if (
+    segmentSampleCounts.some((value) => !Number.isFinite(value) || value <= 0)
+  ) {
+    throw new Error('Estimated segmentSampleCounts must be positive integers.');
   }
-  if (ctx.bundledFolders.includes(modelId)) {
-    return getAssetModelPath(modelId);
+
+  return { sampleRate, segmentSampleCounts };
+}
+
+function getGranularityDisabledReason(
+  mode: UiMode,
+  granularity: AlignmentGranularity
+): string | null {
+  const config = MODE_CONFIGS.find((item) => item.value === mode)!;
+  if (config.allowedGranularities.includes(granularity)) {
+    return null;
   }
-  return getAssetModelPath(modelId);
+  if (granularity === 'character') {
+    if (mode === 'vad') {
+      return 'Character is rejected for vad mode.';
+    }
+    if (mode === 'estimated' || mode === 'proportional') {
+      return 'Character is only supported by plain accurate mode.';
+    }
+    return 'Character is disabled when segmentation auto is active.';
+  }
+  return config.granularityHint;
+}
+
+function SectionCard(props: {
+  stepLabel: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.stepBadge}>
+          <Text style={styles.stepBadgeText}>{props.stepLabel}</Text>
+        </View>
+        <Text style={styles.sectionTitle}>{props.title}</Text>
+        {props.description ? (
+          <Text style={styles.sectionDescription}>{props.description}</Text>
+        ) : null}
+      </View>
+      {props.children}
+    </View>
+  );
+}
+
+function ModelPreparationCard(props: {
+  stepLabel: string;
+  title: string;
+  description: string;
+  loading: boolean;
+  emptyMessage: string;
+  models: ModelEntry[];
+  selectedId: string | null;
+  preparedId: string | null;
+  preparing: boolean;
+  prepareLabel: string;
+  preparedSummary: string | null;
+  onSelect: (id: string) => void;
+  onPrepare: () => void;
+}) {
+  return (
+    <SectionCard
+      stepLabel={props.stepLabel}
+      title={props.title}
+      description={props.description}
+    >
+      {props.preparedId ? (
+        <View style={styles.currentModelContainer}>
+          <Text style={styles.currentModelText}>
+            Ready: {getModelDisplayName(props.preparedId)}
+          </Text>
+          {props.preparedSummary ? (
+            <Text style={styles.currentModelMetaText}>
+              {props.preparedSummary}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {props.loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={styles.loadingText}>Loading available models...</Text>
+        </View>
+      ) : props.models.length === 0 ? (
+        <View style={styles.warningContainer}>
+          <Text style={styles.warningBannerText}>{props.emptyMessage}</Text>
+        </View>
+      ) : (
+        <View style={styles.modelButtons}>
+          {props.models.map((model) => {
+            const isSelected = props.selectedId === model.id;
+            const isPrepared = props.preparedId === model.id;
+            return (
+              <Pressable
+                key={model.id}
+                style={[
+                  styles.modelSelectButton,
+                  isSelected && styles.modelSelectButtonActive,
+                  isPrepared && styles.modelSelectButtonInitialized,
+                ]}
+                onPress={() => props.onSelect(model.id)}
+                disabled={props.preparing}
+              >
+                <View style={styles.modelHeaderRow}>
+                  <Text
+                    style={[
+                      styles.modelSelectButtonTitle,
+                      isSelected && styles.modelSelectButtonTitleActive,
+                    ]}
+                  >
+                    {model.label}
+                  </Text>
+                  {model.recommended ? (
+                    <View style={styles.recommendedBadge}>
+                      <Text style={styles.recommendedBadgeText}>
+                        Recommended
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.modelSelectButtonId}>{model.id}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
+      <Pressable
+        style={[
+          styles.button,
+          styles.applyButton,
+          (props.preparing || !props.selectedId || props.models.length === 0) &&
+            styles.buttonDisabled,
+        ]}
+        onPress={props.onPrepare}
+        disabled={
+          props.preparing || !props.selectedId || props.models.length === 0
+        }
+      >
+        {props.preparing ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.buttonText}>{props.prepareLabel}</Text>
+        )}
+      </Pressable>
+    </SectionCard>
+  );
 }
 
 export default function GenerateTimestampScreen() {
-  const [availableModels, setAvailableModels] = useState<AlignmentModelEntry[]>(
-    []
+  const [mode, setMode] = useState<UiMode>('proportional');
+  const [granularity, setGranularity] =
+    useState<AlignmentGranularity>('sentence');
+  const [preparedAudioBuffer, setPreparedAudioBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
+  const audioWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
+  const [referenceTranscript, setReferenceTranscript] = useState(
+    DEFAULT_REFERENCE_TEXT
   );
-  const [availableVadModels, setAvailableVadModels] = useState<VadModelEntry[]>(
-    []
+  const [estimatedSampleRateText, setEstimatedSampleRateText] = useState(
+    DEFAULT_ESTIMATED_SAMPLE_RATE
   );
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [padVadModelIds, setPadVadModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [bundledAlignmentFolders, setBundledAlignmentFolders] = useState<
-    string[]
-  >([]);
-  const [bundledVadFolders, setBundledVadFolders] = useState<string[]>([]);
-  const [downloadedAlignmentIds, setDownloadedAlignmentIds] = useState<
-    string[]
-  >([]);
-  const [downloadedVadIds, setDownloadedVadIds] = useState<string[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [estimatedSegmentCountsText, setEstimatedSegmentCountsText] = useState(
+    DEFAULT_ESTIMATED_COUNTS
+  );
+  const [loadingModelCatalogs, setLoadingModelCatalogs] = useState(false);
+  const [alignmentCatalog, setAlignmentCatalog] =
+    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+  const [vadCatalog, setVadCatalog] =
+    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+  const [sttCatalog, setSttCatalog] =
+    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
+
+  const [selectedAlignmentModelId, setSelectedAlignmentModelId] = useState<
+    string | null
+  >(null);
+  const [preparedAlignmentModelId, setPreparedAlignmentModelId] = useState<
+    string | null
+  >(null);
+  const [preparedAlignmentModelPath, setPreparedAlignmentModelPath] = useState<
+    string | null
+  >(null);
+  const [preparedAlignmentModelType, setPreparedAlignmentModelType] = useState<
+    AlignmentModelType | string | null
+  >(null);
+  const [preparingAlignmentModel, setPreparingAlignmentModel] = useState(false);
+  const [alignmentPrepareSummary, setAlignmentPrepareSummary] = useState<
+    string | null
+  >(null);
+
   const [selectedVadModelId, setSelectedVadModelId] = useState<string | null>(
     null
   );
-  const [initializedModelId, setInitializedModelId] = useState<string | null>(
+  const [preparedVadModelId, setPreparedVadModelId] = useState<string | null>(
     null
   );
-  const [initializedModelPath, setInitializedModelPath] = useState<
+  const [preparedVadModelPath, setPreparedVadModelPath] = useState<
     string | null
   >(null);
-  const [detectedModelType, setDetectedModelType] = useState<string | null>(
-    null
-  );
-  const [initializingModel, setInitializingModel] = useState(false);
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [initializedVadModelId, setInitializedVadModelId] = useState<
-    string | null
-  >(null);
-  const [initializedVadModelPath, setInitializedVadModelPath] = useState<
-    string | null
-  >(null);
-  const [detectedVadModelType, setDetectedVadModelType] =
+  const [preparedVadModelType, setPreparedVadModelType] =
     useState<VADModelType | null>(null);
-  const [initializingVadModel, setInitializingVadModel] = useState(false);
-  const [vadInitResult, setVadInitResult] = useState<string | null>(null);
-
-  const [selectedAudioUri, setSelectedAudioUri] = useState<string | null>(null);
-  const [selectedAudioName, setSelectedAudioName] = useState<string | null>(
+  const [preparingVadModel, setPreparingVadModel] = useState(false);
+  const [vadPrepareSummary, setVadPrepareSummary] = useState<string | null>(
     null
   );
-  const [transcriptText, setTranscriptText] = useState<string>('');
-  const [mode, setMode] = useState<ScreenSubtitleMode>('proportional');
-  const [granularity, setGranularity] =
-    useState<AlignmentGranularity>('sentence');
-  const [openDropdown, setOpenDropdown] = useState<DropdownType>(null);
+
+  const [selectedSttModelId, setSelectedSttModelId] = useState<string | null>(
+    null
+  );
+  const [preparedSttModelId, setPreparedSttModelId] = useState<string | null>(
+    null
+  );
+  const [preparedSttModelType, setPreparedSttModelType] = useState<
+    STTModelType | string | null
+  >(null);
+  const [preparingSttModel, setPreparingSttModel] = useState(false);
+  const [sttPrepareSummary, setSttPrepareSummary] = useState<string | null>(
+    null
+  );
 
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [errorSource, setErrorSource] = useState<'init' | 'generate' | null>(
-    null
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [result, setResult] = useState<RunResult | null>(null);
+  const [segmentsExpanded, setSegmentsExpanded] = useState(true);
+  const [subtitlesExpanded, setSubtitlesExpanded] = useState(true);
+
+  const activeMode = useMemo<ModeConfig>(
+    () => MODE_CONFIGS.find((item) => item.value === mode)!,
+    [mode]
   );
-  const [result, setResult] = useState<AlignmentPipelineResult | null>(null);
-  const [segmentsResultExpanded, setSegmentsResultExpanded] = useState(true);
-  const [subtitlesResultExpanded, setSubtitlesResultExpanded] = useState(true);
+
+  const stepLabels = useMemo(() => {
+    let nextStep = 1;
+    return {
+      mode: `Step ${nextStep++}`,
+      inputs: `Step ${nextStep++}`,
+      granularity: `Step ${nextStep++}`,
+      estimated: activeMode.requiresEstimatedChunks
+        ? `Step ${nextStep++}`
+        : null,
+      alignment: activeMode.requiresAlignmentModel
+        ? `Step ${nextStep++}`
+        : null,
+      vad: activeMode.requiresVadModel ? `Step ${nextStep++}` : null,
+      stt: activeMode.requiresSttModel ? `Step ${nextStep++}` : null,
+      run: `Step ${nextStep++}`,
+      result: `Step ${nextStep++}`,
+    };
+  }, [activeMode]);
 
   const derivedSubtitles = useMemo<DerivedSubtitleItem[]>(() => {
     if (!result) {
       return [];
     }
     return result.alignmentSegments
-      .map((segment) => {
-        const sampleRate = segment.sampleRate > 0 ? segment.sampleRate : 1;
-        return {
-          text: String(segment.payload?.text ?? '').trim(),
-          startSec: segment.startSample / sampleRate,
-          endSec: segment.endSample / sampleRate,
-        };
-      })
+      .map((segment) => ({
+        text: String(segment.payload?.text ?? '').trim(),
+        startSec: segment.startSample / Math.max(1, segment.sampleRate),
+        endSec: segment.endSample / Math.max(1, segment.sampleRate),
+      }))
       .filter((item) => item.text.length > 0 && item.endSec >= item.startSec);
   }, [result]);
 
-  const loadAvailableModels = useCallback(async () => {
-    setLoadingModels(true);
+  const estimatedTimeline = useMemo(() => {
+    if (mode !== 'estimated') {
+      return {
+        sampleRate: null,
+        counts: [] as number[],
+        error: null as string | null,
+      };
+    }
     try {
-      const assetModels = await listAssetModels();
-      const bundledFolders = assetModels
-        .filter((m) => isAlignmentModelFolder(m.folder, m.hint))
-        .map((m) => m.folder);
-      const bundledVadFolders = assetModels
-        .filter((m) => isVadModelFolder(m.folder, m.hint))
-        .map((m) => m.folder);
+      const parsed = parseEstimatedTimeline(
+        estimatedSampleRateText,
+        estimatedSegmentCountsText
+      );
+      return {
+        sampleRate: parsed.sampleRate,
+        counts: parsed.segmentSampleCounts,
+        error: null,
+      };
+    } catch (err) {
+      return {
+        sampleRate: null,
+        counts: [] as number[],
+        error:
+          err instanceof Error ? err.message : 'Invalid estimated timeline.',
+      };
+    }
+  }, [estimatedSampleRateText, estimatedSegmentCountsText, mode]);
 
-      let padFolders: string[] = [];
-      let padVadFolders: string[] = [];
+  const loadModelCatalogs = useCallback(async () => {
+    setLoadingModelCatalogs(true);
+    try {
+      const [assetModels, downloadedAlignment, downloadedVad, downloadedStt] =
+        await Promise.all([
+          listAssetModels(),
+          listDownloadedModels(ModelCategory.Alignment),
+          listDownloadedModels(ModelCategory.Vad),
+          listDownloadedModels(ModelCategory.Stt),
+        ]);
+
+      let padModels: Array<{ folder: string; hint: string }> = [];
       let resolvedPadPath: string | null = null;
       try {
         const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
         const fallbackPath = `${DocumentDirectoryPath}/models`;
         const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => isAlignmentModelFolder(m.folder, m.hint))
-          .map((m) => m.folder);
-        padVadFolders = (padResults || [])
-          .filter((m) => isVadModelFolder(m.folder, m.hint))
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
+        padModels = await listModelsAtPath(padPath);
+        if (padModels.length > 0) {
           resolvedPadPath = padPath;
-          console.log(
-            'GenerateTimestampScreen: PAD/filesystem alignment models:',
-            padFolders,
-            'at',
-            padPath
-          );
         }
-      } catch (e) {
-        console.warn('GenerateTimestampScreen: PAD/listModelsAtPath failed', e);
-        padFolders = [];
-      }
-      setPadModelsPath(resolvedPadPath);
-      setPadModelIds(padFolders);
-      setPadVadModelIds(padVadFolders);
-      setBundledAlignmentFolders(bundledFolders);
-      setBundledVadFolders(bundledVadFolders);
-
-      const downloaded = await listDownloadedModels(ModelCategory.Alignment);
-      const downloadedIds = new Set(downloaded.map((d) => d.id));
-      setDownloadedAlignmentIds([...downloadedIds]);
-      const downloadedVad = await listDownloadedModels(ModelCategory.Vad);
-      const downloadedVadIdsSet = new Set(downloadedVad.map((d) => d.id));
-      setDownloadedVadIds([...downloadedVadIdsSet]);
-
-      const combinedIds: string[] = [];
-      const pushId = (id: string) => {
-        if (!combinedIds.includes(id)) {
-          combinedIds.push(id);
-        }
-      };
-      for (const id of padFolders) {
-        pushId(id);
-      }
-      for (const id of bundledFolders) {
-        pushId(id);
-      }
-      for (const d of downloaded) {
-        pushId(d.id);
+      } catch {
+        padModels = [];
       }
 
-      const metaById = new Map(downloaded.map((m) => [m.id, m] as const));
-      const entries: AlignmentModelEntry[] = combinedIds.map((id) => {
-        const meta = metaById.get(id);
-        return {
-          id,
-          label: meta ? getModelLabel(meta) : getModelDisplayName(id),
-        };
+      const nextAlignmentCatalog = buildModelCatalog({
+        category: ModelCategory.Alignment,
+        assetModels,
+        padModels,
+        downloadedModels: downloadedAlignment,
+        filter: isAlignmentModelFolder,
+        padPath: resolvedPadPath,
+      });
+      const nextVadCatalog = buildModelCatalog({
+        category: ModelCategory.Vad,
+        assetModels,
+        padModels,
+        downloadedModels: downloadedVad,
+        filter: isVadModelFolder,
+        recommendedIds: RECOMMENDED_MODEL_IDS[ModelCategory.Vad],
+        padPath: resolvedPadPath,
+      });
+      const nextSttCatalog = buildModelCatalog({
+        category: ModelCategory.Stt,
+        assetModels,
+        padModels,
+        downloadedModels: downloadedStt,
+        filter: isSttModelFolder,
+        recommendedIds: RECOMMENDED_MODEL_IDS[ModelCategory.Stt],
+        padPath: resolvedPadPath,
       });
 
-      setAvailableModels(entries);
-      const combinedVadIds: string[] = [];
-      const pushVadId = (id: string) => {
-        if (!combinedVadIds.includes(id)) {
-          combinedVadIds.push(id);
-        }
-      };
-      for (const id of padVadFolders) {
-        pushVadId(id);
-      }
-      for (const id of bundledVadFolders) {
-        pushVadId(id);
-      }
-      for (const d of downloadedVad) {
-        pushVadId(d.id);
-      }
-      const vadMetaById = new Map(downloadedVad.map((m) => [m.id, m] as const));
-      const vadEntries: VadModelEntry[] = combinedVadIds.map((id) => {
-        const meta = vadMetaById.get(id);
-        return {
-          id,
-          label: meta ? getModelLabel(meta) : getModelDisplayName(id),
-        };
-      });
-      setAvailableVadModels(vadEntries);
+      setAlignmentCatalog(nextAlignmentCatalog);
+      setVadCatalog(nextVadCatalog);
+      setSttCatalog(nextSttCatalog);
 
-      const ids = new Set(combinedIds);
-      setSelectedModelId((prev) => {
-        if (prev && ids.has(prev)) {
-          return prev;
-        }
-        return combinedIds[0] ?? null;
-      });
+      const alignmentIds = new Set(
+        nextAlignmentCatalog.entries.map((entry) => entry.id)
+      );
+      const vadIds = new Set(nextVadCatalog.entries.map((entry) => entry.id));
+      const sttIds = new Set(nextSttCatalog.entries.map((entry) => entry.id));
 
-      if (initializedModelId && !ids.has(initializedModelId)) {
-        setInitializedModelId(null);
-        setInitializedModelPath(null);
-        setDetectedModelType(null);
-        setInitResult(null);
+      setSelectedAlignmentModelId((prev) =>
+        prev && alignmentIds.has(prev)
+          ? prev
+          : nextAlignmentCatalog.entries[0]?.id ?? null
+      );
+      setSelectedVadModelId((prev) =>
+        prev && vadIds.has(prev) ? prev : nextVadCatalog.entries[0]?.id ?? null
+      );
+      setSelectedSttModelId((prev) =>
+        prev && sttIds.has(prev) ? prev : nextSttCatalog.entries[0]?.id ?? null
+      );
+
+      if (
+        preparedAlignmentModelId &&
+        !alignmentIds.has(preparedAlignmentModelId)
+      ) {
+        setPreparedAlignmentModelId(null);
+        setPreparedAlignmentModelPath(null);
+        setPreparedAlignmentModelType(null);
+        setAlignmentPrepareSummary(null);
       }
-      const vadIds = new Set(combinedVadIds);
-      setSelectedVadModelId((prev) => {
-        if (prev && vadIds.has(prev)) {
-          return prev;
-        }
-        return combinedVadIds[0] ?? null;
-      });
-      if (initializedVadModelId && !vadIds.has(initializedVadModelId)) {
-        setInitializedVadModelId(null);
-        setInitializedVadModelPath(null);
-        setDetectedVadModelType(null);
-        setVadInitResult(null);
+      if (preparedVadModelId && !vadIds.has(preparedVadModelId)) {
+        setPreparedVadModelId(null);
+        setPreparedVadModelPath(null);
+        setPreparedVadModelType(null);
+        setVadPrepareSummary(null);
+      }
+      if (preparedSttModelId && !sttIds.has(preparedSttModelId)) {
+        setPreparedSttModelId(null);
+        setPreparedSttModelType(null);
+        setSttPrepareSummary(null);
       }
     } catch (err) {
       console.error(
-        'GenerateTimestampScreen: Failed to load alignment models',
+        'GenerateTimestampScreen: failed to load model catalogs',
         err
       );
-      setAvailableModels([]);
-      setPadModelIds([]);
-      setPadVadModelIds([]);
-      setPadModelsPath(null);
-      setBundledAlignmentFolders([]);
-      setBundledVadFolders([]);
-      setDownloadedAlignmentIds([]);
-      setDownloadedVadIds([]);
-      setSelectedModelId(null);
+      setAlignmentCatalog(EMPTY_MODEL_CATALOG);
+      setVadCatalog(EMPTY_MODEL_CATALOG);
+      setSttCatalog(EMPTY_MODEL_CATALOG);
+      setSelectedAlignmentModelId(null);
       setSelectedVadModelId(null);
-      setAvailableVadModels([]);
+      setSelectedSttModelId(null);
     } finally {
-      setLoadingModels(false);
+      setLoadingModelCatalogs(false);
     }
-  }, [initializedModelId, initializedVadModelId]);
+  }, [preparedAlignmentModelId, preparedSttModelId, preparedVadModelId]);
 
   useEffect(() => {
-    loadAvailableModels().catch(() => {
-      // ignore initial loading errors
-    });
-  }, [loadAvailableModels]);
+    loadModelCatalogs().catch(() => {});
+  }, [loadModelCatalogs]);
 
   useEffect(() => {
     const unsubscribe = onModelsListUpdated((category) => {
       if (
         category !== ModelCategory.Alignment &&
-        category !== ModelCategory.Vad
+        category !== ModelCategory.Vad &&
+        category !== ModelCategory.Stt
       ) {
         return;
       }
-      loadAvailableModels().catch(() => {
-        // ignore refresh errors
-      });
+      loadModelCatalogs().catch(() => {});
     });
 
     return unsubscribe;
-  }, [loadAvailableModels]);
-
-  const selectedMode = useMemo(
-    () =>
-      MODE_OPTIONS.find((option) => option.value === mode) ?? {
-        value: 'proportional',
-        label: 'proportional',
-        description: 'Proportional timing',
-      },
-    [mode]
-  );
-
-  const selectedGranularity = useMemo(
-    () =>
-      ALL_GRANULARITY_OPTIONS.find(
-        (option) => option.value === granularity
-      ) ?? {
-        value: 'sentence',
-        label: 'sentence',
-        description: 'Generate one subtitle item per sentence',
-      },
-    [granularity]
-  );
-
-  const granularityOptions = useMemo(
-    () =>
-      mode === 'accurate'
-        ? ALL_GRANULARITY_OPTIONS
-        : ALL_GRANULARITY_OPTIONS.filter(
-            (option) => option.value !== 'character'
-          ),
-    [mode]
-  );
-
-  const shouldWarnNonWav = useMemo(() => {
-    if (!selectedAudioName) {
-      return false;
-    }
-    return !selectedAudioName.toLowerCase().endsWith('.wav');
-  }, [selectedAudioName]);
+  }, [loadModelCatalogs]);
 
   useEffect(() => {
-    const isValid = granularityOptions.some(
-      (option) => option.value === granularity
-    );
-    if (!isValid) {
-      setGranularity('sentence');
+    if (!activeMode.allowedGranularities.includes(granularity)) {
+      setGranularity(activeMode.allowedGranularities[0] ?? 'sentence');
     }
-  }, [granularity, granularityOptions]);
+  }, [activeMode, granularity]);
 
-  const pickAudioFile = async () => {
-    setError(null);
-    setErrorSource(null);
-    try {
-      const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
-      });
-      const file = Array.isArray(picked) ? picked[0] : picked;
-      const uri = file?.uri ?? (file as { fileUri?: string })?.fileUri ?? '';
-      if (!uri) {
-        setErrorSource('generate');
-        setError('Could not resolve file URI from picker result.');
-        return;
-      }
-
-      setSelectedAudioUri(uri);
-      setSelectedAudioName(file?.name ?? getFileNameFromUri(uri));
-      setResult(null);
-    } catch (err: unknown) {
-      const cancelled =
-        (
-          DocumentPicker as { isCancel?: (value: unknown) => boolean }
-        ).isCancel?.(err) ?? false;
-      if (cancelled) {
-        return;
-      }
-      setError(
-        err instanceof Error ? err.message : 'Failed to pick audio file'
-      );
-      setErrorSource('generate');
+  const runBlockingIssues = useMemo(() => {
+    const issues: string[] = [];
+    if (!preparedAudioBuffer) {
+      issues.push('Select an audio file.');
     }
-  };
+    if (!referenceTranscript.trim()) {
+      issues.push('Enter a reference transcript.');
+    }
+    if (!activeMode.allowedGranularities.includes(granularity)) {
+      issues.push(activeMode.granularityHint);
+    }
+    if (activeMode.requiresEstimatedChunks && estimatedTimeline.error) {
+      issues.push(estimatedTimeline.error);
+    }
+    if (
+      activeMode.requiresAlignmentModel &&
+      (!selectedAlignmentModelId ||
+        preparedAlignmentModelId !== selectedAlignmentModelId)
+    ) {
+      issues.push('Prepare the selected alignment model with Use model.');
+    }
+    if (
+      activeMode.requiresVadModel &&
+      (!selectedVadModelId || preparedVadModelId !== selectedVadModelId)
+    ) {
+      issues.push('Prepare the selected VAD model with Use model.');
+    }
+    if (
+      activeMode.requiresSttModel &&
+      (!selectedSttModelId || preparedSttModelId !== selectedSttModelId)
+    ) {
+      issues.push('Prepare the selected STT model with Use model.');
+    }
+    return issues;
+  }, [
+    activeMode,
+    estimatedTimeline.error,
+    granularity,
+    preparedAlignmentModelId,
+    preparedSttModelId,
+    preparedVadModelId,
+    referenceTranscript,
+    selectedAlignmentModelId,
+    preparedAudioBuffer,
+    selectedSttModelId,
+    selectedVadModelId,
+  ]);
 
-  const handleInitializeModel = async () => {
-    if (!selectedModelId) {
-      setErrorSource('init');
-      setError('Please select a subtitle model first.');
+  const handlePrepareAlignmentModel = useCallback(async () => {
+    if (!selectedAlignmentModelId) {
+      setError('Select an alignment model first.');
       return;
     }
 
+    setPreparingAlignmentModel(true);
     setError(null);
-    setErrorSource(null);
-    setInitializingModel(true);
-    setInitResult(null);
+    setErrorCode(null);
+    setAlignmentPrepareSummary(null);
 
     try {
       const detection = await detectAlignmentModel(
         await toDetectSource(
-          getAlignmentModelPathConfig(selectedModelId, {
-            padModelIds,
-            padModelsPath,
-            bundledFolders: bundledAlignmentFolders,
-            downloadedIds: new Set(downloadedAlignmentIds),
-          })
+          resolveModelPathForCatalog(
+            selectedAlignmentModelId,
+            ModelCategory.Alignment,
+            alignmentCatalog
+          )
         ),
         { modelType: 'auto' as AlignmentModelType }
       );
-
       const modelPath = detection.paths?.model?.trim();
       if (!detection.success || !modelPath) {
         throw new Error(
           detection.error ||
-            'Alignment model detection failed: no model.onnx path found.'
+            'Alignment model detection failed: no model path found.'
         );
       }
 
-      setInitializedModelId(selectedModelId);
-      setInitializedModelPath(modelPath);
-      setDetectedModelType(
+      setPreparedAlignmentModelId(selectedAlignmentModelId);
+      setPreparedAlignmentModelPath(modelPath);
+      setPreparedAlignmentModelType(
         detection.modelType ?? detection.detectedModels[0]?.type ?? null
       );
-      setInitResult(
-        `Initialized: ${getModelDisplayName(
-          selectedModelId
-        )}\nModel file: ${modelPath}`
+      setAlignmentPrepareSummary(
+        `${getModelDisplayName(selectedAlignmentModelId)}\nmodel: ${modelPath}`
       );
       setResult(null);
     } catch (err) {
-      setErrorSource('init');
-      setError(
-        err instanceof Error ? err.message : 'Failed to initialize model'
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Failed to prepare alignment model.';
+      setError(message);
+      setErrorCode(extractErrorCode(message));
     } finally {
-      setInitializingModel(false);
+      setPreparingAlignmentModel(false);
     }
-  };
+  }, [alignmentCatalog, selectedAlignmentModelId]);
 
-  const handleInitializeVadModel = async () => {
+  const handlePrepareVadModel = useCallback(async () => {
     if (!selectedVadModelId) {
-      setErrorSource('init');
-      setError('Please select a VAD model first.');
+      setError('Select a VAD model first.');
       return;
     }
+
+    setPreparingVadModel(true);
     setError(null);
-    setErrorSource(null);
-    setInitializingVadModel(true);
-    setVadInitResult(null);
+    setErrorCode(null);
+    setVadPrepareSummary(null);
+
     try {
-      const vadConfig = getVadModelPathConfig(selectedVadModelId, {
-        padModelIds: padVadModelIds,
-        padModelsPath,
-        bundledFolders: bundledVadFolders,
-        downloadedIds: new Set(downloadedVadIds),
-      });
-      const detection = await detectVadModel(await toDetectSource(vadConfig), {
-        modelType: 'auto',
-      });
+      const detection = await detectVadModel(
+        await toDetectSource(
+          resolveModelPathForCatalog(
+            selectedVadModelId,
+            ModelCategory.Vad,
+            vadCatalog
+          )
+        ),
+        { modelType: 'auto' }
+      );
       const modelPath = detection.paths?.model?.trim();
       const modelType = detection.modelType;
       if (!detection.success || !modelPath || !modelType) {
@@ -676,240 +981,247 @@ export default function GenerateTimestampScreen() {
       if (modelType !== 'silero_vad' && modelType !== 'ten_vad') {
         throw new Error(`Unsupported detected VAD model type: ${modelType}`);
       }
-      setInitializedVadModelId(selectedVadModelId);
-      setInitializedVadModelPath(modelPath);
-      setDetectedVadModelType(modelType);
-      setVadInitResult(
-        `Initialized VAD: ${getModelDisplayName(
+
+      setPreparedVadModelId(selectedVadModelId);
+      setPreparedVadModelPath(modelPath);
+      setPreparedVadModelType(modelType);
+      setVadPrepareSummary(
+        `${getModelDisplayName(
           selectedVadModelId
-        )}\nModel file: ${modelPath}\nType: ${modelType}`
+        )}\nmodel: ${modelPath}\ntype: ${modelType}`
       );
       setResult(null);
     } catch (err) {
-      setErrorSource('init');
-      setError(
-        err instanceof Error ? err.message : 'Failed to initialize VAD model'
-      );
+      const message =
+        err instanceof Error ? err.message : 'Failed to prepare VAD model.';
+      setError(message);
+      setErrorCode(extractErrorCode(message));
     } finally {
-      setInitializingVadModel(false);
+      setPreparingVadModel(false);
     }
-  };
+  }, [selectedVadModelId, vadCatalog]);
 
-  const handleGenerateTimestamps = async () => {
-    if (
-      (mode === 'accurate' ||
-        mode === 'accurate_auto_asr' ||
-        mode === 'accurate_auto_forced') &&
-      !initializedModelPath
-    ) {
-      setErrorSource('generate');
-      setError('Please initialize a subtitle model first.');
+  const handlePrepareSttModel = useCallback(async () => {
+    if (!selectedSttModelId) {
+      setError('Select an STT model first.');
       return;
     }
-    if (
-      (mode === 'vad' ||
-        mode === 'accurate_auto_asr' ||
-        mode === 'accurate_auto_forced') &&
-      !initializedVadModelPath
-    ) {
-      setErrorSource('generate');
-      setError('Please initialize a VAD model first.');
-      return;
-    }
-    if (
-      (mode === 'vad' ||
-        mode === 'accurate_auto_asr' ||
-        mode === 'accurate_auto_forced') &&
-      !initializedVadModelId
-    ) {
-      setErrorSource('generate');
-      setError(
-        'Initialized VAD model metadata is missing; reinitialize VAD model.'
+
+    setPreparingSttModel(true);
+    setError(null);
+    setErrorCode(null);
+    setSttPrepareSummary(null);
+
+    try {
+      const detection = await detectSttModel(
+        await toDetectSource(
+          resolveModelPathForCatalog(
+            selectedSttModelId,
+            ModelCategory.Stt,
+            sttCatalog
+          )
+        ),
+        { modelType: 'auto' }
       );
-      return;
+      if (!detection.success || detection.detectedModels.length === 0) {
+        throw new Error(
+          detection.error ||
+            'STT model detection failed: no compatible models found.'
+        );
+      }
+      const detectedType =
+        detection.modelType ?? detection.detectedModels[0]?.type ?? null;
+      setPreparedSttModelId(selectedSttModelId);
+      setPreparedSttModelType(detectedType);
+      setSttPrepareSummary(
+        `${getModelDisplayName(selectedSttModelId)}\ndetected: ${
+          detectedType ?? 'unknown'
+        }\nstreaming: ${detection.isStreaming ? 'yes' : 'no'}`
+      );
+      setResult(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to prepare STT model.';
+      setError(message);
+      setErrorCode(extractErrorCode(message));
+    } finally {
+      setPreparingSttModel(false);
     }
-    if (!selectedAudioUri) {
-      setErrorSource('generate');
-      setError('Please choose an audio file first.');
-      return;
-    }
+  }, [selectedSttModelId, sttCatalog]);
 
-    const text = transcriptText.trim();
-    if (!text) {
-      setErrorSource('generate');
-      setError('Please enter transcript text.');
+  const handleRunAlignment = useCallback(async () => {
+    if (runBlockingIssues.length > 0) {
+      setError(
+        runBlockingIssues[0] ??
+          'Resolve the remaining pipeline requirements first.'
+      );
+      setErrorCode(null);
       return;
     }
 
     setRunning(true);
     setError(null);
-    setErrorSource(null);
+    setErrorCode(null);
     setResult(null);
 
     const alignment = createAlignment();
-    let cleanupPath: string | null = null;
+    let stt: Awaited<ReturnType<typeof createSTT>> | null = null;
     let textBufferId: string | null = null;
-    let audioBufferId: string | null = null;
-    let segmentOutBufferId: string | null = null;
-    let vadSegmentationBufferId: string | null = null;
-    let vadEngine: VADEngine | null = null;
+    let outputSegmentBufferId: string | null = null;
+    let anchorSegmentBufferId: string | null = null;
+    let hypothesisTextBufferId: string | null = null;
+    const audioBufferId = preparedAudioBuffer!.bufferId;
+
     try {
-      let audioPath = normalizeUriToPath(selectedAudioUri);
-      if (selectedAudioUri.startsWith('content://')) {
-        const cacheName = `timestamp_input_${Date.now()}.wav`;
-        const result = await copyFile(
-          { kind: 'contentUri', uri: selectedAudioUri },
-          { kind: 'app', base: 'cache', path: cacheName }
-        );
-        audioPath =
-          result.output.kind === 'fs' ? result.output.path : audioPath;
-        cleanupPath = audioPath;
+      const referenceBuffer = await createOfflineTextBufferFromText(
+        referenceTranscript.trim()
+      );
+      textBufferId = referenceBuffer.bufferId;
+
+      const outputBuffer = await createEmptyOfflineSegmentBuffer({
+        sourceAudioBufferId: audioBufferId,
+      });
+      outputSegmentBufferId = outputBuffer.bufferId;
+
+      const alignmentModelPath = activeMode.requiresAlignmentModel
+        ? resolveModelPathForCatalog(
+            preparedAlignmentModelId!,
+            ModelCategory.Alignment,
+            alignmentCatalog
+          )
+        : null;
+      const vadModelPath = activeMode.requiresVadModel
+        ? await toDetectSource(
+            resolveModelPathForCatalog(
+              preparedVadModelId!,
+              ModelCategory.Vad,
+              vadCatalog
+            )
+          )
+        : null;
+      const sttModelPath = activeMode.requiresSttModel
+        ? resolveModelPathForCatalog(
+            preparedSttModelId!,
+            ModelCategory.Stt,
+            sttCatalog
+          )
+        : null;
+
+      let anchorRef: Awaited<ReturnType<typeof segmentOfflineBuffer>> | null =
+        null;
+      if (activeMode.requiresVadModel) {
+        anchorRef = await segmentOfflineBuffer(audioBufferId, {
+          evaluator: 'speech_vad_model',
+          modelPath: vadModelPath!,
+        });
+        anchorSegmentBufferId = anchorRef.segmentBufferId;
       }
 
-      const proportionalGranularity: 'sentence' | 'word' =
-        granularity === 'character' ? 'sentence' : granularity;
+      if (activeMode.requiresSttModel) {
+        const hypothesisBuffer = await createEmptyOfflineTextBuffer();
+        hypothesisTextBufferId = hypothesisBuffer.bufferId;
+        stt = await createSTT({
+          modelSource: sttModelPath!,
+          modelType: 'auto',
+          numThreads: 2,
+          modelOptions: {
+            whisper: { enableTokenTimestamps: true },
+          },
+        });
+        await stt.transcribe(audioBufferId, hypothesisBuffer, {
+          segmentation: { mode: 'off' },
+        });
+      }
 
-      const textBuffer = await createOfflineTextBufferFromText(text);
-      textBufferId = textBuffer.bufferId;
-
-      const audioBuffer = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path: audioPath,
-      });
-      audioBufferId = audioBuffer.bufferId;
-
-      const segmentOut = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: audioBuffer.bufferId,
-      });
-      segmentOutBufferId = segmentOut.bufferId;
       const writeStartedAt = Date.now();
+      const textGranularity = granularity as 'sentence' | 'word';
       const writeResult =
-        mode === 'accurate'
+        mode === 'proportional'
           ? await alignment.alignTextToAudio(
-              textBuffer,
-              audioBuffer,
-              segmentOut,
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
               {
-                mode: 'accurate',
-                granularity,
-                modelPath: { type: 'file', path: initializedModelPath! },
+                mode: 'proportional',
+                granularity: textGranularity,
               }
             )
           : mode === 'estimated'
           ? await alignment.alignTextToAudio(
-              textBuffer,
-              audioBuffer,
-              segmentOut,
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
               {
                 mode: 'estimated',
-                granularity: proportionalGranularity,
+                granularity: textGranularity,
                 chunks: {
-                  sampleRate: 16000,
-                  segmentSampleCounts: [3200, 4000, 2800],
+                  sampleRate: estimatedTimeline.sampleRate!,
+                  segmentSampleCounts: estimatedTimeline.counts,
                 },
               }
             )
-          : mode === 'vad' ||
-            mode === 'accurate_auto_asr' ||
-            mode === 'accurate_auto_forced'
-          ? await (async () => {
-              const vadConfig = getVadModelPathConfig(initializedVadModelId!, {
-                padModelIds: padVadModelIds,
-                padModelsPath,
-                bundledFolders: bundledVadFolders,
-                downloadedIds: new Set(downloadedVadIds),
-              });
-              vadEngine = await createStreamingVAD({
-                modelPath: vadConfig,
-                modelType: detectedVadModelType ?? 'auto',
-                sampleRate: 16000,
-              });
-              const vadSegmentOut = await createEmptyOfflineSegmentBuffer({
-                sourceAudioBufferId: audioBuffer.bufferId,
-              });
-              vadSegmentationBufferId = vadSegmentOut.bufferId;
-              await vadEngine.process({
-                audioIn: audioBuffer,
-                segmentOut: vadSegmentOut,
-                options: {
-                  chunkSize: 512,
-                  sourceTag: 'generate-timestamp-vad',
-                },
-              });
-              if (mode === 'accurate_auto_asr') {
-                const asrHypothesisOut = await createOfflineTextBufferFromText(
-                  transcriptText
-                );
-                try {
-                  return alignment.alignTextToAudio(
-                    textBuffer,
-                    audioBuffer,
-                    segmentOut,
-                    {
-                      mode: 'accurate',
-                      granularity: proportionalGranularity,
-                      modelPath: { type: 'file', path: initializedModelPath! },
-                      segmentation: {
-                        mode: 'auto',
-                        anchorSegmentBuffer: vadSegmentOut,
-                        mappingStrategy: 'asr_mediated',
-                        asr: {
-                          hypothesisTextBuffer: asrHypothesisOut,
-                        },
-                      },
-                    }
-                  );
-                } finally {
-                  await releasePipelineTextBuffer(asrHypothesisOut).catch(
-                    () => {
-                      // ignore cleanup errors
-                    }
-                  );
-                }
-              }
-              if (mode === 'accurate_auto_forced') {
-                return alignment.alignTextToAudio(
-                  textBuffer,
-                  audioBuffer,
-                  segmentOut,
-                  {
-                    mode: 'accurate',
-                    granularity: proportionalGranularity,
-                    modelPath: { type: 'file', path: initializedModelPath! },
-                    segmentation: {
-                      mode: 'auto',
-                      anchorSegmentBuffer: vadSegmentOut,
-                      mappingStrategy: 'chunked_forced_ctc',
-                    },
-                  }
-                );
-              }
-              return alignment.alignTextToAudio(
-                textBuffer,
-                audioBuffer,
-                segmentOut,
-                {
-                  mode: 'vad',
-                  granularity: proportionalGranularity,
-                  segmentation: {
-                    source: 'vad',
-                    segmentBuffer: vadSegmentOut,
-                  },
-                }
-              );
-            })()
-          : await alignment.alignTextToAudio(
-              textBuffer,
-              audioBuffer,
-              segmentOut,
+          : mode === 'accurate'
+          ? await alignment.alignTextToAudio(
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
               {
-                mode: 'proportional',
-                granularity: proportionalGranularity,
+                mode: 'accurate',
+                granularity,
+                modelSource: alignmentModelPath!,
+              }
+            )
+          : mode === 'vad'
+          ? await alignment.alignTextToAudio(
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
+              {
+                mode: 'vad',
+                granularity: textGranularity,
+                segmentation: {
+                  source: 'vad',
+                  segmentBuffer: anchorSegmentBufferId!,
+                },
+              }
+            )
+          : mode === 'asr_mediated'
+          ? await alignment.alignTextToAudio(
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
+              {
+                mode: 'accurate',
+                granularity: textGranularity,
+                modelSource: alignmentModelPath!,
+                segmentation: {
+                  mode: 'auto',
+                  anchorSegmentBuffer: anchorSegmentBufferId!,
+                  mappingStrategy: 'asr_mediated',
+                  asr: {
+                    hypothesisTextBuffer: hypothesisTextBufferId!,
+                  },
+                },
+              }
+            )
+          : await alignment.alignTextToAudio(
+              referenceBuffer,
+              audioBufferId,
+              outputBuffer,
+              {
+                mode: 'accurate',
+                granularity: textGranularity,
+                modelSource: alignmentModelPath!,
+                segmentation: {
+                  mode: 'auto',
+                  anchorSegmentBuffer: anchorSegmentBufferId!,
+                  mappingStrategy: 'chunked_forced_ctc',
+                },
               }
             );
       const writeDurationMs = Date.now() - writeStartedAt;
       const segments = await getOfflineSegmentBufferSegments(
-        segmentOut,
+        outputBuffer,
         0,
         4096
       );
@@ -917,71 +1229,64 @@ export default function GenerateTimestampScreen() {
         (segment): segment is AlignmentSegmentView =>
           segment.kind === 'alignment'
       );
+
       setResult({
-        textInBufferId: textBuffer.bufferId,
-        audioInBufferId: audioBuffer.bufferId,
-        segmentOutBufferId: writeResult.outputSegmentBufferId,
+        mode,
+        textInBufferId: referenceBuffer.bufferId,
+        audioInBufferId: audioBufferId,
+        outputSegmentBufferId: writeResult.outputSegmentBufferId,
+        anchorSegmentBufferId: anchorSegmentBufferId ?? undefined,
+        hypothesisTextBufferId: hypothesisTextBufferId ?? undefined,
         segmentsWritten: writeResult.segmentsWritten,
         writeDurationMs,
         warningCode: writeResult.warningCode,
-        vadAnchorCount: writeResult.vadAnchorCount,
-        minAnchorsApplied: writeResult.minAnchorsApplied,
-        vadSegmentationBufferId: vadSegmentationBufferId ?? undefined,
+        warnings: writeResult.warnings,
         alignmentSegments,
       });
-      await releasePipelineSegmentBuffer(segmentOut.bufferId).catch(() => {
-        // ignore cleanup errors
-      });
-      segmentOutBufferId = null;
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to generate timestamps';
+        err instanceof Error
+          ? err.message
+          : 'Failed to run offline alignment pipeline.';
       setError(message);
-      setErrorSource('generate');
-      setResult((prev) =>
-        prev
-          ? { ...prev, errorCode: extractErrorCode(message) ?? undefined }
-          : null
-      );
+      setErrorCode(extractErrorCode(message));
     } finally {
-      if (textBufferId) {
-        await releasePipelineTextBuffer(textBufferId).catch(() => {
-          // ignore cleanup errors
-        });
+      await stt?.destroy().catch(() => {});
+      if (hypothesisTextBufferId) {
+        await releasePipelineTextBuffer(hypothesisTextBufferId).catch(() => {});
       }
-      if (audioBufferId) {
-        await releasePipelineAudioBuffer(audioBufferId).catch(() => {
-          // ignore cleanup errors
-        });
-      }
-      if (cleanupPath) {
-        unlink(cleanupPath).catch(() => {
-          // ignore cleanup errors
-        });
-      }
-      if (segmentOutBufferId) {
-        await releasePipelineSegmentBuffer(segmentOutBufferId).catch(() => {
-          // ignore cleanup errors
-        });
-      }
-      if (vadSegmentationBufferId) {
-        await releasePipelineSegmentBuffer(vadSegmentationBufferId).catch(
-          () => {
-            // ignore cleanup errors
-          }
+      if (anchorSegmentBufferId) {
+        await releasePipelineSegmentBuffer(anchorSegmentBufferId).catch(
+          () => {}
         );
       }
-      await (vadEngine as VADEngine | null)?.destroy?.().catch(() => {
-        // ignore cleanup errors
-      });
-      await alignment.destroy().catch(() => {
-        // ignore cleanup errors
-      });
+      if (outputSegmentBufferId) {
+        await releasePipelineSegmentBuffer(outputSegmentBufferId).catch(
+          () => {}
+        );
+      }
+      if (textBufferId) {
+        await releasePipelineTextBuffer(textBufferId).catch(() => {});
+      }
+      await alignment.destroy().catch(() => {});
       setRunning(false);
     }
-  };
-
-  const closeDropdown = () => setOpenDropdown(null);
+  }, [
+    activeMode,
+    alignmentCatalog,
+    estimatedTimeline.counts,
+    estimatedTimeline.sampleRate,
+    granularity,
+    mode,
+    preparedAlignmentModelId,
+    preparedAudioBuffer,
+    preparedSttModelId,
+    preparedVadModelId,
+    referenceTranscript,
+    runBlockingIssues,
+    sttCatalog,
+    vadCatalog,
+  ]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -992,119 +1297,61 @@ export default function GenerateTimestampScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>1. Initialize Model</Text>
-            <Text style={styles.sectionDescription}>
-              Select an alignment model from bundled assets (assets/models/),
-              Play Asset Delivery, app documents, or downloads, then validate
-              with autodetect before generation.
-            </Text>
-
-            {(selectedModelId || initializedModelId) && (
-              <View style={styles.currentModelContainer}>
-                <Text style={styles.currentModelText}>
-                  {initializedModelId
-                    ? `Initialized: ${getModelDisplayName(initializedModelId)}`
-                    : `Selected: ${
-                        selectedModelId
-                          ? getModelDisplayName(selectedModelId)
-                          : ''
-                      }`}
-                </Text>
-                {detectedModelType && initializedModelId && (
-                  <Text style={styles.currentModelMetaText}>
-                    Detected type: {detectedModelType}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            {loadingModels ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>
-                  Loading alignment models...
-                </Text>
-              </View>
-            ) : availableModels.length === 0 ? (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningBannerText}>
-                  No alignment models found. Add a wav2vec2 model under
-                  assets/models/, use PAD or documents/models, or download one
-                  (category: alignment).
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.modelButtons}>
-                {availableModels.map((model) => {
-                  const isSelected = selectedModelId === model.id;
-                  const isInitialized = initializedModelId === model.id;
-                  return (
-                    <TouchableOpacity
-                      key={model.id}
+          <SectionCard
+            stepLabel={stepLabels.mode}
+            title="Choose offline alignment mode"
+            description="Each mode below maps 1:1 to a documented public alignment path. There are no silent fallbacks between modes."
+          >
+            <View style={styles.modeGrid}>
+              {MODE_CONFIGS.map((item) => {
+                const isSelected = item.value === mode;
+                return (
+                  <Pressable
+                    key={item.value}
+                    style={[
+                      styles.modeCard,
+                      isSelected && styles.modeCardActive,
+                    ]}
+                    onPress={() => {
+                      setMode(item.value);
+                      setError(null);
+                      setErrorCode(null);
+                      setResult(null);
+                    }}
+                  >
+                    <Text
                       style={[
-                        styles.modelSelectButton,
-                        isSelected && styles.modelSelectButtonActive,
-                        isInitialized && styles.modelSelectButtonInitialized,
-                        initializingModel && styles.buttonDisabled,
+                        styles.modeCardTitle,
+                        isSelected && styles.modeCardTitleActive,
                       ]}
-                      onPress={() => setSelectedModelId(model.id)}
-                      disabled={initializingModel}
                     >
-                      <Text
-                        style={[
-                          styles.modelSelectButtonTitle,
-                          isSelected && styles.modelSelectButtonTitleActive,
-                        ]}
-                      >
-                        {model.label}
-                      </Text>
-                      <Text style={styles.modelSelectButtonId}>{model.id}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+                      {item.title}
+                    </Text>
+                    <Text style={styles.modeCardDescription}>
+                      {item.description}
+                    </Text>
+                    <View style={styles.modeMetaRow}>
+                      {item.allowedGranularities.map((value) => (
+                        <View
+                          key={`${item.value}-${value}`}
+                          style={styles.metaPill}
+                        >
+                          <Text style={styles.metaPillText}>{value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </SectionCard>
 
-            <TouchableOpacity
-              style={[
-                styles.button,
-                styles.applyButton,
-                initializingModel && styles.buttonDisabled,
-              ]}
-              onPress={handleInitializeModel}
-              disabled={
-                initializingModel ||
-                !selectedModelId ||
-                availableModels.length === 0
-              }
-            >
-              {initializingModel ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>Use model</Text>
-              )}
-            </TouchableOpacity>
-
-            {initResult && !(error && errorSource === 'init') && (
-              <View style={styles.initResultCard}>
-                <Text style={styles.initResultText}>{initResult}</Text>
-              </View>
-            )}
-
-            {error && errorSource === 'init' && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Select Audio File</Text>
-            <Text style={styles.sectionDescription}>
-              Choose the audio file for timestamp generation.
-            </Text>
-
+          <SectionCard
+            stepLabel={stepLabels.inputs}
+            title="Provide shared inputs"
+            description="All public alignment modes consume the same offline audio base plus a reference transcript R. In asr_mediated, this reference remains separate from the ASR hypothesis buffer H."
+          >
+            <Text style={styles.inputLabel}>Audio file</Text>
             <View style={styles.hintCard}>
               <Ionicons
                 name="information-circle-outline"
@@ -1112,206 +1359,297 @@ export default function GenerateTimestampScreen() {
                 color="#FF9800"
               />
               <Text style={styles.hintText}>
-                Recommended input format: WAV, mono, 16 kHz.
+                Audio is loaded with createOfflineAudioBufferFromFile, which
+                decodes common formats (WAV, MP3, M4A, FLAC, …) and resamples as
+                needed. The same offline buffer is reused for anchors, STT, and
+                final alignment.
               </Text>
             </View>
+            <OfflineAudioBufferWidget
+              ref={audioWidgetRef}
+              audioFiles={AUDIO_FILES}
+              disabled={running}
+              onBufferReady={(info) => {
+                setPreparedAudioBuffer(info);
+                setResult(null);
+              }}
+              onBufferReleased={() => {
+                setPreparedAudioBuffer(null);
+                setResult(null);
+              }}
+            />
 
-            <TouchableOpacity style={styles.button} onPress={pickAudioFile}>
-              <Text style={styles.buttonText}>Choose Audio File</Text>
-            </TouchableOpacity>
-
-            {selectedAudioName && (
-              <View style={styles.selectedFileCard}>
-                <Text style={styles.selectedFileLabel}>Selected:</Text>
-                <Text style={styles.selectedFileName}>{selectedAudioName}</Text>
-                {shouldWarnNonWav && (
-                  <Text style={styles.warningText}>
-                    This file is not a .wav file. For best results use WAV mono
-                    16 kHz.
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Transcript Text</Text>
-            <Text style={styles.sectionDescription}>
-              Enter the text that should be aligned to the selected audio.
-            </Text>
-            <Text style={styles.inputLabel}>Transcript</Text>
+            <Text style={styles.inputLabel}>Reference transcript (R)</Text>
             <TextInput
               style={styles.textInput}
-              value={transcriptText}
-              onChangeText={setTranscriptText}
-              placeholder="Enter transcript text..."
+              value={referenceTranscript}
+              onChangeText={setReferenceTranscript}
+              placeholder="Enter the reference transcript that should align to audio"
               multiline
-              numberOfLines={5}
             />
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>4. Options</Text>
-            <Text style={styles.sectionDescription}>
-              Set subtitle mode and granularity (character is accurate-only). In
-              VAD mode, this screen auto-creates/releases a temporary
-              segmentation buffer per run.
+            <Text style={styles.inlineHelpText}>
+              This buffer is always the reference text. It is never reused as
+              the ASR hypothesis in asr_mediated.
             </Text>
+          </SectionCard>
 
-            <View style={styles.modelSummaryCard}>
-              <Text style={styles.modelSummaryLabel}>Initialized model</Text>
-              <Text style={styles.modelSummaryValue}>
-                {initializedModelId
-                  ? getModelDisplayName(initializedModelId)
-                  : 'Not initialized'}
+          <SectionCard
+            stepLabel={stepLabels.granularity}
+            title="Choose valid granularity"
+            description={activeMode.granularityHint}
+          >
+            <View style={styles.choiceList}>
+              {ALL_GRANULARITIES.map((value) => {
+                const disabledReason = getGranularityDisabledReason(
+                  mode,
+                  value
+                );
+                const isSelected = granularity === value;
+                const disabled = disabledReason != null;
+                return (
+                  <Pressable
+                    key={value}
+                    style={[
+                      styles.choiceCard,
+                      isSelected && styles.choiceCardActive,
+                      disabled && styles.choiceCardDisabled,
+                    ]}
+                    onPress={() => {
+                      if (disabled) {
+                        return;
+                      }
+                      setGranularity(value);
+                    }}
+                    disabled={disabled}
+                  >
+                    <Text
+                      style={[
+                        styles.choiceTitle,
+                        isSelected && styles.choiceTitleActive,
+                        disabled && styles.choiceTitleDisabled,
+                      ]}
+                    >
+                      {value}
+                    </Text>
+                    <Text style={styles.choiceDescription}>
+                      {value === 'sentence'
+                        ? 'Generate one aligned unit per sentence.'
+                        : value === 'word'
+                        ? 'Generate one aligned unit per word.'
+                        : 'Generate one aligned unit per character.'}
+                    </Text>
+                    {disabledReason ? (
+                      <Text style={styles.choiceReason}>{disabledReason}</Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </SectionCard>
+
+          {activeMode.requiresEstimatedChunks ? (
+            <SectionCard
+              stepLabel={stepLabels.estimated!}
+              title="Provide estimated chunk timeline"
+              description="Estimated mode consumes caller-provided segmentSampleCounts and sampleRate exactly as documented. No alignment ONNX is loaded for this path."
+            >
+              <Text style={styles.inputLabel}>Sample rate</Text>
+              <TextInput
+                style={styles.inlineInput}
+                value={estimatedSampleRateText}
+                onChangeText={setEstimatedSampleRateText}
+                keyboardType="number-pad"
+                placeholder="16000"
+              />
+              <Text style={styles.inputLabel}>segmentSampleCounts</Text>
+              <TextInput
+                style={styles.textInput}
+                value={estimatedSegmentCountsText}
+                onChangeText={setEstimatedSegmentCountsText}
+                placeholder="3200, 4000, 2800"
+                multiline
+              />
+              <Text style={styles.inlineHelpText}>
+                Enter positive integers separated by commas, spaces, or new
+                lines.
               </Text>
-              {initializedModelPath && (
-                <Text style={styles.modelSummaryPath}>
-                  {initializedModelPath}
-                </Text>
-              )}
-            </View>
-
-            <View style={styles.optionRow}>
-              <Text style={styles.inputLabel}>Mode</Text>
-              <TouchableOpacity
-                style={styles.dropdownTrigger}
-                onPress={() => setOpenDropdown('mode')}
-              >
-                <Text style={styles.dropdownTriggerText}>
-                  {selectedMode.label}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.optionRow}>
-              <Text style={styles.inputLabel}>Granularity</Text>
-              <TouchableOpacity
-                style={styles.dropdownTrigger}
-                onPress={() => setOpenDropdown('granularity')}
-              >
-                <Text style={styles.dropdownTriggerText}>
-                  {selectedGranularity.label}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            {(mode === 'vad' ||
-              mode === 'accurate_auto_asr' ||
-              mode === 'accurate_auto_forced') && (
-              <View style={styles.vadConfigContainer}>
-                <Text style={styles.inputLabel}>
-                  VAD model for segmentation
-                </Text>
-                {loadingModels ? (
-                  <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="small" color="#007AFF" />
-                    <Text style={styles.loadingText}>
-                      Loading VAD models...
-                    </Text>
-                  </View>
-                ) : availableVadModels.length === 0 ? (
-                  <View style={styles.warningContainer}>
-                    <Text style={styles.warningBannerText}>
-                      No VAD models found. Add one under assets/models, PAD,
-                      documents/models, or downloads (category: vad).
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={styles.modelButtons}>
-                    {availableVadModels.map((model) => {
-                      const isSelected = selectedVadModelId === model.id;
-                      const isInitialized = initializedVadModelId === model.id;
-                      return (
-                        <TouchableOpacity
-                          key={model.id}
-                          style={[
-                            styles.modelSelectButton,
-                            isSelected && styles.modelSelectButtonActive,
-                            isInitialized &&
-                              styles.modelSelectButtonInitialized,
-                            initializingVadModel && styles.buttonDisabled,
-                          ]}
-                          onPress={() => setSelectedVadModelId(model.id)}
-                          disabled={initializingVadModel}
-                        >
-                          <Text
-                            style={[
-                              styles.modelSelectButtonTitle,
-                              isSelected && styles.modelSelectButtonTitleActive,
-                            ]}
-                          >
-                            {model.label}
-                          </Text>
-                          <Text style={styles.modelSelectButtonId}>
-                            {model.id}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    styles.applyButton,
-                    initializingVadModel && styles.buttonDisabled,
-                  ]}
-                  onPress={handleInitializeVadModel}
-                  disabled={
-                    initializingVadModel ||
-                    !selectedVadModelId ||
-                    availableVadModels.length === 0
-                  }
-                >
-                  {initializingVadModel ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.buttonText}>Use VAD model</Text>
-                  )}
-                </TouchableOpacity>
-                {vadInitResult && (
-                  <View style={styles.initResultCard}>
-                    <Text style={styles.initResultText}>{vadInitResult}</Text>
-                  </View>
-                )}
-                {(mode === 'accurate_auto_asr' ||
-                  mode === 'accurate_auto_forced') && (
-                  <Text style={styles.sectionDescription}>
-                    Auto-accurate modes require speech anchors. asrMediated also
-                    requires a timestamped ASR hypothesis buffer.
+              {estimatedTimeline.error ? (
+                <View style={styles.warningContainer}>
+                  <Text style={styles.warningBannerText}>
+                    {estimatedTimeline.error}
                   </Text>
-                )}
+                </View>
+              ) : (
+                <View style={styles.currentModelContainer}>
+                  <Text style={styles.currentModelText}>
+                    Parsed {estimatedTimeline.counts.length} chunk values at{' '}
+                    {estimatedTimeline.sampleRate} Hz
+                  </Text>
+                </View>
+              )}
+            </SectionCard>
+          ) : null}
+
+          {activeMode.requiresAlignmentModel ? (
+            <ModelPreparationCard
+              stepLabel={stepLabels.alignment!}
+              title="Prepare wav2vec2 alignment model"
+              description="Plain accurate and both anchor-constrained accurate modes require a wav2vec2 alignment model. Use model runs autodetect and stores the prepared selection for the next run."
+              loading={loadingModelCatalogs}
+              emptyMessage="No alignment models found. Add a wav2vec2 model under assets/models, PAD/documents/models, or downloads (category: alignment)."
+              models={alignmentCatalog.entries}
+              selectedId={selectedAlignmentModelId}
+              preparedId={preparedAlignmentModelId}
+              preparing={preparingAlignmentModel}
+              prepareLabel="Use alignment model"
+              preparedSummary={alignmentPrepareSummary}
+              onSelect={setSelectedAlignmentModelId}
+              onPrepare={handlePrepareAlignmentModel}
+            />
+          ) : null}
+
+          {activeMode.requiresVadModel ? (
+            <ModelPreparationCard
+              stepLabel={stepLabels.vad!}
+              title="Prepare VAD anchors"
+              description="Best-practice anchor generation: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelSource: FileSource }) — same detect path as streaming VAD. The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
+              loading={loadingModelCatalogs}
+              emptyMessage="No VAD models found. Add one under assets/models, PAD/documents/models, or downloads (category: vad)."
+              models={vadCatalog.entries}
+              selectedId={selectedVadModelId}
+              preparedId={preparedVadModelId}
+              preparing={preparingVadModel}
+              prepareLabel="Use VAD model"
+              preparedSummary={vadPrepareSummary}
+              onSelect={setSelectedVadModelId}
+              onPrepare={handlePrepareVadModel}
+            />
+          ) : null}
+
+          {activeMode.requiresSttModel ? (
+            <ModelPreparationCard
+              stepLabel={stepLabels.stt!}
+              title="Prepare STT hypothesis model"
+              description="asr_mediated requires a real hypothesis buffer H. Use model runs STT detection now; the run step then creates STT, writes H via stt.transcribe(audio, H), and passes that buffer into alignment."
+              loading={loadingModelCatalogs}
+              emptyMessage="No STT models found. Add one under assets/models, PAD/documents/models, or downloads (category: stt)."
+              models={sttCatalog.entries}
+              selectedId={selectedSttModelId}
+              preparedId={preparedSttModelId}
+              preparing={preparingSttModel}
+              prepareLabel="Use STT model"
+              preparedSummary={sttPrepareSummary}
+              onSelect={setSelectedSttModelId}
+              onPrepare={handlePrepareSttModel}
+            />
+          ) : null}
+
+          <SectionCard
+            stepLabel={stepLabels.run}
+            title="Run offline alignment"
+            description="This step creates fresh offline buffers, runs only the selected public mode, reads alignment segments from segmentOut, and then releases buffers and destroys engines in finally."
+          >
+            <View style={styles.resultCard}>
+              <Text style={styles.resultMetaText}>Pipeline summary</Text>
+              <Text style={styles.resultCodeText}>
+                mode: {activeMode.title}
+              </Text>
+              <Text style={styles.resultCodeText}>
+                native mode: {activeMode.apiMode}
+              </Text>
+              <Text style={styles.resultCodeText}>
+                granularity: {granularity}
+              </Text>
+              <Text style={styles.resultCodeText}>
+                alignment model:{' '}
+                {activeMode.requiresAlignmentModel
+                  ? preparedAlignmentModelId ?? 'missing'
+                  : 'not required'}
+              </Text>
+              {activeMode.requiresAlignmentModel ? (
+                <Text style={styles.resultCodeText}>
+                  alignment detect: {preparedAlignmentModelType ?? 'unknown'} ·{' '}
+                  {preparedAlignmentModelPath ?? 'path unavailable'}
+                </Text>
+              ) : null}
+              <Text style={styles.resultCodeText}>
+                VAD model:{' '}
+                {activeMode.requiresVadModel
+                  ? preparedVadModelId ?? 'missing'
+                  : 'not required'}
+              </Text>
+              {activeMode.requiresVadModel ? (
+                <Text style={styles.resultCodeText}>
+                  VAD detect: {preparedVadModelType ?? 'unknown'} ·{' '}
+                  {preparedVadModelPath ?? 'path unavailable'}
+                </Text>
+              ) : null}
+              <Text style={styles.resultCodeText}>
+                STT model:{' '}
+                {activeMode.requiresSttModel
+                  ? preparedSttModelId ?? 'missing'
+                  : 'not required'}
+              </Text>
+              {activeMode.requiresSttModel ? (
+                <Text style={styles.resultCodeText}>
+                  STT detect: {preparedSttModelType ?? 'unknown'}
+                </Text>
+              ) : null}
+            </View>
+
+            {runBlockingIssues.length > 0 ? (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningBannerText}>
+                  Resolve these inputs before running:
+                </Text>
+                {runBlockingIssues.map((issue) => (
+                  <Text key={issue} style={styles.warningListItem}>
+                    • {issue}
+                  </Text>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.readyCard}>
+                <Ionicons name="checkmark-circle" size={18} color="#1B5E20" />
+                <Text style={styles.readyText}>Pipeline is ready to run.</Text>
               </View>
             )}
 
-            <TouchableOpacity
+            <Pressable
               style={[
                 styles.button,
                 styles.generateButton,
-                running && styles.buttonDisabled,
+                (running || runBlockingIssues.length > 0) &&
+                  styles.buttonDisabled,
               ]}
-              onPress={handleGenerateTimestamps}
-              disabled={running}
+              onPress={handleRunAlignment}
+              disabled={running || runBlockingIssues.length > 0}
             >
               {running ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.buttonText}>Generate Timestamps</Text>
+                <Text style={styles.buttonText}>
+                  {activeMode.runButtonLabel}
+                </Text>
               )}
-            </TouchableOpacity>
+            </Pressable>
+          </SectionCard>
 
-            {error && errorSource === 'generate' && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </View>
+          {error || errorCode ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorTitle}>Pipeline error</Text>
+              {errorCode ? (
+                <Text style={styles.errorCode}>code: {errorCode}</Text>
+              ) : null}
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            </View>
+          ) : null}
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>5. Result</Text>
+          <SectionCard
+            stepLabel={stepLabels.result}
+            title="Result"
+            description="The output shown here is derived from the alignment segments already read from segmentOut before cleanup."
+          >
             {result ? (
               <>
                 <View style={styles.resultCard}>
@@ -1323,56 +1661,62 @@ export default function GenerateTimestampScreen() {
                     audioInBufferId: {result.audioInBufferId}
                   </Text>
                   <Text style={styles.resultCodeText}>
-                    segmentOutBufferId: {result.segmentOutBufferId}
+                    outputSegmentBufferId: {result.outputSegmentBufferId}
                   </Text>
-                  {result.vadSegmentationBufferId && (
+                  {result.anchorSegmentBufferId ? (
                     <Text style={styles.resultCodeText}>
-                      vadSegmentationBufferId: {result.vadSegmentationBufferId}
+                      anchorSegmentBufferId: {result.anchorSegmentBufferId}
                     </Text>
-                  )}
+                  ) : null}
+                  {result.hypothesisTextBufferId ? (
+                    <Text style={styles.resultCodeText}>
+                      hypothesisTextBufferId: {result.hypothesisTextBufferId}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <View style={styles.resultCard}>
-                  <Text style={styles.resultMetaText}>Write Result</Text>
-                  <Text style={styles.resultMetaText}>
+                  <Text style={styles.resultMetaText}>Write result</Text>
+                  <Text style={styles.resultCodeText}>mode: {result.mode}</Text>
+                  <Text style={styles.resultCodeText}>
                     segmentsWritten: {result.segmentsWritten}
                   </Text>
-                  <Text style={styles.resultMetaText}>
+                  <Text style={styles.resultCodeText}>
                     writeDurationMs: {formatMs(result.writeDurationMs)}
                   </Text>
-                  <Text style={styles.resultMetaText}>
-                    errorCode: {result.errorCode ?? 'none'}
-                  </Text>
-                  <Text style={styles.resultMetaText}>
+                  <Text style={styles.resultCodeText}>
                     warningCode: {result.warningCode ?? 'none'}
                   </Text>
-                  <Text style={styles.resultMetaText}>
-                    vadAnchorCount: {String(result.vadAnchorCount ?? 'n/a')}
-                  </Text>
-                  <Text style={styles.resultMetaText}>
-                    minAnchorsApplied:{' '}
-                    {String(result.minAnchorsApplied ?? 'n/a')}
-                  </Text>
+                  {result.warnings?.length ? (
+                    <View style={styles.warningList}>
+                      {result.warnings.map((warning) => (
+                        <Text
+                          key={`${warning.code}-${warning.message}`}
+                          style={styles.resultCodeText}
+                        >
+                          {warning.code}: {warning.message}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
 
                 <View style={styles.resultCard}>
-                  <TouchableOpacity
+                  <Pressable
                     style={styles.resultAccordionHeader}
-                    onPress={() => setSegmentsResultExpanded((prev) => !prev)}
+                    onPress={() => setSegmentsExpanded((prev) => !prev)}
                   >
                     <Text style={styles.resultMetaText}>
-                      SegmentBuffer Segments ({result.alignmentSegments.length})
+                      Alignment segments ({result.alignmentSegments.length})
                     </Text>
                     <Ionicons
-                      name={
-                        segmentsResultExpanded ? 'chevron-up' : 'chevron-down'
-                      }
+                      name={segmentsExpanded ? 'chevron-up' : 'chevron-down'}
                       size={16}
                       color="#666"
                     />
-                  </TouchableOpacity>
-                  {segmentsResultExpanded &&
-                    (result.alignmentSegments.length > 0 ? (
+                  </Pressable>
+                  {segmentsExpanded ? (
+                    result.alignmentSegments.length > 0 ? (
                       <View style={styles.subtitleList}>
                         {result.alignmentSegments.map((segment, index) => (
                           <View
@@ -1380,18 +1724,18 @@ export default function GenerateTimestampScreen() {
                             style={styles.subtitleItem}
                           >
                             <Text style={styles.subtitleText}>
-                              #{index} {segment.startSample}-{segment.endSample}{' '}
-                              ({segment.durationMs}ms)
+                              #{index + 1} [{segment.startSample} -{' '}
+                              {segment.endSample}] ({segment.durationMs}ms)
                             </Text>
                             <Text style={styles.subtitleTime}>
                               {segment.payload?.text ?? '...'}
                             </Text>
                             <Text style={styles.subtitleTime}>
-                              mode={segment.payload?.timingMode ?? 'n/a'}{' '}
+                              timingMode={segment.payload?.timingMode ?? 'n/a'}{' '}
                               granularity=
                               {segment.payload?.granularity ?? 'n/a'}
                             </Text>
-                            {segment.payload?.tokenMetadata && (
+                            {segment.payload?.tokenMetadata ? (
                               <Text style={styles.subtitleTime}>
                                 mapping=
                                 {String(
@@ -1414,35 +1758,35 @@ export default function GenerateTimestampScreen() {
                                     .minAnchorsApplied ?? 'n/a'
                                 )}
                               </Text>
-                            )}
+                            ) : null}
                           </View>
                         ))}
                       </View>
                     ) : (
                       <Text style={styles.emptyText}>
-                        Output buffer is empty (no alignment segments written).
+                        Output buffer completed successfully but wrote no
+                        alignment segments.
                       </Text>
-                    ))}
+                    )
+                  ) : null}
                 </View>
 
                 <View style={styles.resultCard}>
-                  <TouchableOpacity
+                  <Pressable
                     style={styles.resultAccordionHeader}
-                    onPress={() => setSubtitlesResultExpanded((prev) => !prev)}
+                    onPress={() => setSubtitlesExpanded((prev) => !prev)}
                   >
                     <Text style={styles.resultMetaText}>
-                      Derived Subtitles ({derivedSubtitles.length})
+                      Derived subtitles ({derivedSubtitles.length})
                     </Text>
                     <Ionicons
-                      name={
-                        subtitlesResultExpanded ? 'chevron-up' : 'chevron-down'
-                      }
+                      name={subtitlesExpanded ? 'chevron-up' : 'chevron-down'}
                       size={16}
                       color="#666"
                     />
-                  </TouchableOpacity>
-                  {subtitlesResultExpanded &&
-                    (derivedSubtitles.length > 0 ? (
+                  </Pressable>
+                  {subtitlesExpanded ? (
+                    derivedSubtitles.length > 0 ? (
                       <View style={styles.subtitleList}>
                         {derivedSubtitles.map((subtitle, index) => (
                           <View
@@ -1463,91 +1807,21 @@ export default function GenerateTimestampScreen() {
                       <Text style={styles.emptyText}>
                         No derived subtitles available.
                       </Text>
-                    ))}
+                    )
+                  ) : null}
                 </View>
               </>
             ) : (
               <Text style={styles.emptyText}>
-                No pipeline output yet. Initialize a model and run generation.
+                No output yet. Run one documented offline alignment mode to
+                populate the result cards.
               </Text>
             )}
-          </View>
+          </SectionCard>
         </ScrollView>
       </View>
 
       <ScreenIntroModal screenId="GenerateTimestamp" />
-
-      <Modal
-        transparent
-        visible={openDropdown != null}
-        animationType="fade"
-        onRequestClose={closeDropdown}
-      >
-        <Pressable style={styles.dropdownBackdrop} onPress={closeDropdown}>
-          <Pressable style={styles.dropdownMenu}>
-            <Text style={styles.dropdownTitle}>
-              {openDropdown === 'mode' ? 'Select mode' : 'Select granularity'}
-            </Text>
-            {openDropdown === 'mode'
-              ? MODE_OPTIONS.map((option) => {
-                  const active = option.value === mode;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[
-                        styles.dropdownItem,
-                        active && styles.dropdownItemActive,
-                      ]}
-                      onPress={() => {
-                        setMode(option.value);
-                        closeDropdown();
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          active && styles.dropdownItemTextActive,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                      <Text style={styles.dropdownItemDescription}>
-                        {option.description}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })
-              : granularityOptions.map((option) => {
-                  const active = option.value === granularity;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={[
-                        styles.dropdownItem,
-                        active && styles.dropdownItemActive,
-                      ]}
-                      onPress={() => {
-                        setGranularity(option.value);
-                        closeDropdown();
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          active && styles.dropdownItemTextActive,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                      <Text style={styles.dropdownItemDescription}>
-                        {option.description}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-          </Pressable>
-        </Pressable>
-      </Modal>
     </SafeAreaView>
   );
 }

@@ -11,7 +11,6 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.OutputStream
 
 /**
@@ -36,7 +35,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
       val readHandle = resolver.resolveSource(source)
       val writeHandle = resolver.resolveDestination(
         destination = destination,
-        mode = FileIOResolver.WriteMode.SEQUENTIAL,
         overwrite = overwrite,
         createParentDirectories = createParentDirectories,
       )
@@ -97,13 +95,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
                 bytesCopied = copyFromReadHandleToOutput(output)
               }
             }
-            is FileIOResolver.WriteHandle.FileDescriptor -> {
-              outputKind = "contentUri"
-              outputPath = wh.resultUri.toString()
-              FileOutputStream(wh.pfd.fileDescriptor).use { output ->
-                bytesCopied = copyFromReadHandleToOutput(output)
-              }
-            }
             is FileIOResolver.WriteHandle.Stream -> {
               outputKind = "contentUri"
               outputPath = wh.resultUri.toString()
@@ -139,7 +130,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     try {
       val writeHandle = resolver.resolveDestination(
         destination = destination,
-        mode = FileIOResolver.WriteMode.SEQUENTIAL,
         overwrite = overwrite,
         createParentDirectories = false,
       )
@@ -153,14 +143,6 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
             outputKind = "fs"
             outputPath = wh.file.absolutePath
             wh.file.writeBytes(bytes)
-          }
-          is FileIOResolver.WriteHandle.FileDescriptor -> {
-            outputKind = "contentUri"
-            outputPath = wh.resultUri.toString()
-            FileOutputStream(wh.pfd.fileDescriptor).use { out ->
-              out.write(bytes)
-              out.flush()
-            }
           }
           is FileIOResolver.WriteHandle.Stream -> {
             outputKind = "contentUri"
@@ -263,16 +245,60 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
    */
   fun resolveDestination(
     destination: ReadableMap,
-    mode: FileIOResolver.WriteMode = FileIOResolver.WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
-  ): FileIOResolver.WriteHandle = resolver.resolveDestination(destination, mode, overwrite, createParentDirectories)
+  ): FileIOResolver.WriteHandle =
+    resolver.resolveDestination(destination, overwrite, createParentDirectories)
 
   /**
    * Resolve a FileSource to a ReadHandle.
    * Used by audio buffer import to support direct fd-backed reads.
    */
   fun resolveSource(source: ReadableMap): FileIOResolver.ReadHandle = resolver.resolveSource(source)
+
+  /**
+   * Removes stale scratch files under [ReactApplicationContext.getCacheDir] if the app was killed
+   * mid-save (no [finally] ran to delete them). Targets:
+   *
+   * - `fileio_save_*` — temp path used when encoding to a [FileIOResolver.WriteHandle.Stream] destination.
+   * - `fileio_tmp_*` — temp files from [FileIOResolver.resolveSourceToFilePath] stream→disk copy.
+   * - `fileio-staging/fileio-temp-*` — same naming as the example app’s `saveAudioAsFile` staging step.
+   *
+   * Only files with [File.lastModified] older than [maxAgeMs] are deleted (default 1 hour, same order of
+   * magnitude as [com.sherpaonnx.audio.pipeline.OfflineEntry.sweepOrphanedTempFiles]).
+   */
+  fun sweepStaleFileioScratchFiles(maxAgeMs: Long = 3_600_000L) {
+    val cacheDir = context.cacheDir
+    val threshold = System.currentTimeMillis() - maxAgeMs
+    fun tryDeleteIfStale(f: File) {
+      try {
+        if (f.isFile && f.lastModified() < threshold) {
+          f.delete()
+        }
+      } catch (_: Exception) {
+      }
+    }
+    try {
+      cacheDir.listFiles()?.forEach { child ->
+        val n = child.name
+        if (child.isFile && (n.startsWith("fileio_save_") || n.startsWith("fileio_tmp_"))) {
+          tryDeleteIfStale(child)
+        }
+      }
+    } catch (_: Exception) {
+    }
+    try {
+      val staging = File(cacheDir, "fileio-staging")
+      if (staging.isDirectory) {
+        staging.listFiles()?.forEach { child ->
+          if (child.isFile && child.name.startsWith("fileio-temp-")) {
+            tryDeleteIfStale(child)
+          }
+        }
+      }
+    } catch (_: Exception) {
+    }
+  }
 
   private fun emitProgress(operationId: String, bytesTransferred: Long, totalBytes: Long, percent: Int) {
     try {

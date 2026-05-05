@@ -1,6 +1,10 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/resolved/alignment.onnx' },
+    }),
     alignAccurateForcedCtcFromPcm: jest
       .fn()
       .mockResolvedValueOnce({
@@ -24,7 +28,7 @@ jest.mock('../../../NativeSherpaOnnx', () => ({
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment.onnx'),
+  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({
@@ -140,7 +144,7 @@ describe('chunkedForcedCtc/driver pipeline', () => {
       audioIn: 'off_audio',
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
-      modelPath: { type: 'file', path: '/m' },
+      modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
     });
@@ -202,7 +206,7 @@ describe('chunkedForcedCtc/driver pipeline', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
         language: 'en',
       })

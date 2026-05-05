@@ -98,7 +98,7 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     });
 
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {
@@ -116,7 +116,8 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     );
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_out',
-      'off_staging'
+      'off_staging',
+      undefined
     );
     expect(releasePipelineAudioBuffer).toHaveBeenCalledWith('off_staging');
     expect(result).toMatchObject({
@@ -144,7 +145,7 @@ describe('tts synthesize mode 2 (segmented offline)', () => {
     });
 
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {

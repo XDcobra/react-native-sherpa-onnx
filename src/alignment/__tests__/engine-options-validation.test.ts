@@ -1,6 +1,10 @@
 jest.mock('../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/tmp/alignment-model/model.onnx' },
+    }),
     alignOfflineTextToAudio: jest.fn().mockResolvedValue({
       outputSegmentBufferId: 'seg_out',
       segmentsWritten: 1,
@@ -73,7 +77,7 @@ describe('AlignmentEngine options validation', () => {
     await expect(
       engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
         mode: 'accurate',
-        modelPath: '/tmp/model',
+        modelSource: '/tmp/model',
       } as any)
     ).rejects.toMatchObject({ code: 'ALIGNMENT_MODEL_PATH_INVALID' });
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
@@ -97,7 +101,7 @@ describe('AlignmentEngine options validation', () => {
     await expect(
       engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
         mode: 'accurate',
-        modelPath: { type: 'file', path: '/tmp/model' },
+        modelSource: { kind: 'fs', path: '/tmp/model' },
         granularity: 'word',
         segmentation: {
           mode: 'auto',
@@ -115,7 +119,7 @@ describe('AlignmentEngine options validation', () => {
     await expect(
       engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
         mode: 'accurate',
-        modelPath: { type: 'file', path: '/tmp/model' },
+        modelSource: { kind: 'fs', path: '/tmp/model' },
         granularity: 'word',
         segmentation: {
           mode: 'auto',
@@ -155,7 +159,7 @@ describe('AlignmentEngine options validation', () => {
     await expect(
       engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
         mode: 'accurate',
-        modelPath: { type: 'file', path: '/tmp/model' },
+        modelSource: { kind: 'fs', path: '/tmp/model' },
         granularity: 'word',
         segmentation: { mode: 'off' },
       })
@@ -168,7 +172,7 @@ describe('AlignmentEngine options validation', () => {
     await expect(
       engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
         mode: 'accurate',
-        modelPath: { type: 'file', path: '/tmp/model' },
+        modelSource: { kind: 'fs', path: '/tmp/model' },
         granularity: 'word',
         segmentation: {
           mode: 'manual',

@@ -22,7 +22,7 @@ There is no per-chunk stream object in the JS API anymore.
 
 ## Models and paths
 
-- `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - Streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
 - If your model is offline-only (for example Whisper), use [Offline STT](stt-offline.md)
 - Model setup details: [model-setup.md](model-setup.md)
@@ -58,7 +58,7 @@ if (!det.isStreaming) {
 }
 
 const engine = await createStreamingSTT({
-  modelPath: { type: 'file', path: '/path/to/my-streaming-model' },
+  modelSource: { kind: 'fs', path: '/path/to/my-streaming-model' },
   modelType: 'auto',
   enableEndpoint: true,
 });
@@ -122,7 +122,7 @@ All buffer parameters accept refs directly. Raw string ids are optional; malform
 
 ```ts
 const engine = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-zipformer-en' },
   modelType: 'zipformer2_ctc',
   endpointConfig: {
     rule1: {
@@ -199,7 +199,7 @@ function createStreamingSTT(options: StreamingSttInitOptions): Promise<LiveSttEn
 
 ```ts
 const engine = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-zipformer-en' },
   modelType: 'zipformer2_ctc',
 });
 ```
@@ -214,7 +214,7 @@ function createLiveSTT(options: StreamingSttInitOptions): Promise<LiveSttEngine>
 
 ```ts
 const engine = await createLiveSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-zipformer-en' },
   modelType: 'transducer',
 });
 ```
@@ -430,7 +430,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-zipformer' },
   modelType: 'zipformer2_ctc',
   enableEndpoint: true,
 });
@@ -476,8 +476,8 @@ const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCou
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 
-const vad = await createStreamingVAD({ modelPath: { type: 'asset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
-const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'files', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
+const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' }, modelType: 'auto' });
 
 const vadPipeline = await vad.process({ audioIn, segmentOut, options: { chunkSize: 512 } });
 const sttPipeline = await stt.transcribe(audioIn, textOut, { chunkSize: 3200 });

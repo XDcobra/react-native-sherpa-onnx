@@ -1,152 +1,25 @@
-import { Platform } from 'react-native';
-import type { ModelPathConfig } from './types';
 import SherpaOnnx from './NativeSherpaOnnx';
-import { resolveActualModelDir } from './download/validation';
-
-/**
- * Utility functions for model path handling
- */
-
-/**
- * Derive a bare asset name from a ModelPathConfig by stripping the path to its
- * last segment and removing common archive suffixes (.tar.bz2, .tar.gz, .tgz, .zip).
- * Returns null when no usable name can be derived.
- *
- * @param modelPath - Model path configuration
- * @returns Derived asset name string, or null
- */
-export function deriveAssetNameFromModelPath(
-  modelPath: ModelPathConfig
-): string | null {
-  const raw = modelPath.path?.trim();
-  if (!raw) return null;
-  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
-  if (!leaf) return null;
-  return leaf
-    .replace(/\.tar\.bz2$/i, '')
-    .replace(/\.tar\.gz$/i, '')
-    .replace(/\.tgz$/i, '')
-    .replace(/\.zip$/i, '');
-}
-
-/**
- * Get the default model directory path for the current platform.
- * This is a logical name (e.g. `'Documents/models'` on iOS), not an absolute path.
- * On iOS, when using file-based models without PAD, pass an absolute base path to
- * `getFileModelPath` instead (e.g. `DocumentDirectoryPath + '/models'` from react-native-fs).
- *
- * @returns Platform-specific default path
- */
-export function getDefaultModelPath(): string {
-  if (Platform.OS === 'ios') {
-    // iOS: Documents directory
-    return 'Documents/models';
-  } else {
-    // Android: Internal storage
-    return 'models';
-  }
-}
-
-/**
- * Create a model path configuration for asset models.
- * Use this when models are bundled in your app's assets.
- *
- * @param assetPath - Path relative to assets (e.g., "models/sherpa-onnx-model")
- * @returns Model path configuration
- */
-export function assetModelPath(assetPath: string): ModelPathConfig {
-  return {
-    type: 'asset',
-    path: assetPath,
-  };
-}
-
-/**
- * Create a model path configuration for file system models.
- * Use this when models are downloaded or stored in file system.
- *
- * @param filePath - Absolute path to model directory. On iOS, use an absolute path
- *   (e.g. from react-native-fs: `DocumentDirectoryPath + '/models/' + modelName` when
- *   using getFileModelPath without PAD).
- * @returns Model path configuration
- */
-export function fileModelPath(filePath: string): ModelPathConfig {
-  return {
-    type: 'file',
-    path: filePath,
-  };
-}
-
-/**
- * Create a model path configuration with auto-detection.
- * Tries asset first, then file system.
- *
- * @param path - Path to try (will be checked as both asset and file)
- * @returns Model path configuration
- */
-export function autoModelPath(path: string): ModelPathConfig {
-  return {
-    type: 'auto',
-    path: path,
-  };
-}
-
-/**
- * Resolve model path based on configuration.
- * This handles different path types (asset, file, auto) and returns
- * a platform-specific absolute path that can be used by native code.
- *
- * For type 'file', the path is normalized so that when the given path is an
- * install directory (e.g. with .ready and manifest.json and one model subdir),
- * the returned path is the subdirectory that actually contains the .onnx files.
- * This allows apps that build paths as baseDir/modelId to work without change.
- *
- * @param config - Model path configuration
- * @returns Promise resolving to absolute path usable by native code
- */
-export async function resolveModelPath(
-  config: ModelPathConfig
-): Promise<string> {
-  const path = await SherpaOnnx.resolveModelPath(config);
-  if (config.type === 'file') {
-    const resolved = await resolveActualModelDir(path);
-    // Diagnostic: log so we can tell if /usr/share/espeak-ng-data is due to our path or sherpa-onnx fallback.
-    if (__DEV__) {
-      console.log(
-        '[SherpaOnnx] resolveModelPath(file): native path=',
-        path,
-        resolved !== path
-          ? `resolvedActualModelDir=> ${resolved}`
-          : '(unchanged)'
-      );
-    }
-    return resolved;
-  }
-  return path;
-}
-
 /**
  * List all model folders in the assets/models directory.
  * Scans the platform-specific model directory and returns folder names.
  *
  * This is useful for discovering models at runtime without hardcoding paths.
- * You can then use the returned folder names with resolveModelPath and initialize.
+ * You can then use the returned folder names to construct FileSource inputs for detect/init APIs.
  *
  * @returns Promise resolving to array of model info objects
  *
  * @example
  * ```typescript
- * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+ * import { listAssetModels } from 'react-native-sherpa-onnx/utils';
+ * import { detectSttModel } from 'react-native-sherpa-onnx/stt';
  *
- * // Get all model folders
  * const models = await listAssetModels();
- * console.log('Found models:', models);
- * // Example output: [{ folder: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', hint: 'stt' }, { folder: 'sherpa-onnx-matcha-icefall-en_US-ljspeech', hint: 'tts' }]
- *
- * // Initialize each model to detect types
  * for (const model of models) {
- *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
- *   const result = await initializeStt(path);
+ *   const result = await detectSttModel({
+ *     kind: 'app',
+ *     base: 'files',
+ *     path: `models/${model.folder}`,
+ *   });
  *   if (result.success) {
  *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
  *   }

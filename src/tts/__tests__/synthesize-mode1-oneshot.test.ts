@@ -87,7 +87,7 @@ describe('tts synthesize mode 1 (one-shot)', () => {
 
   it('uses direct native synth path by default and returns complete result', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut);
@@ -109,7 +109,7 @@ describe('tts synthesize mode 1 (one-shot)', () => {
 
   it('keeps one-shot path when segmentation mode is explicitly off', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     const result = await tts.synthesize(textIn, audioOut, {
@@ -124,7 +124,7 @@ describe('tts synthesize mode 1 (one-shot)', () => {
 
   it('rejects segmentation.policy when mode is off', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     await expect(
@@ -142,7 +142,7 @@ describe('tts synthesize mode 1 (one-shot)', () => {
 
   it('rejects manual segmentation mode in offline synth API', async () => {
     const tts = await createTTS({
-      modelPath: { type: 'file', path: '/models/tts' },
+      modelSource: { kind: 'fs', path: '/models/tts' },
     });
 
     await expect(

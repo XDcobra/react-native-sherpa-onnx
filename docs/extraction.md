@@ -211,7 +211,8 @@ import {
 import type {
   BundledArchive, // archive descriptor (modelId, path, format, source type)
   ExtractArchiveOptions, // extraction options (force/progress/cancel/notification)
-  ExtractResult, // extraction result payload
+  ExtractResult, // extraction result payload (discriminated union from extractArchive)
+  ExtractArchiveResult, // native wire shape; use ExtractResult for app code
   ExtractProgressEvent, // progress event payload
 } from 'react-native-sherpa-onnx/extraction';
 ```
@@ -249,7 +250,7 @@ import type {
 ```typescript
 import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { listModelsAtPath, autoModelPath } from 'react-native-sherpa-onnx';
+import { autoModelPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 
 const targetDir = `${DocumentDirectoryPath}/models`;
 
@@ -290,7 +291,7 @@ If your app ships or downloads `.tar.zst` / `.tar.bz2` archives **outside** of P
 ```typescript
 import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { listModelsAtPath, fileModelPath } from 'react-native-sherpa-onnx';
+import { fileModelPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 // Suppose you downloaded model archives to a "downloads" folder
@@ -315,7 +316,7 @@ if (sttModel) {
   const mp = fileModelPath(`${modelsDir}/${sttModel.folder}`);
   const detection = await detectSttModel(mp);
   if (detection.success) {
-    const stt = await createSTT({ modelPath: mp, modelType: 'auto' });
+    const stt = await createSTT({ modelSource: mp, modelType: 'auto' });
     // ready to transcribe
   }
 }

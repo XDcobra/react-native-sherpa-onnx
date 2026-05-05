@@ -119,7 +119,7 @@ describe('streaming punctuation', () => {
 
   it('uses OnlinePunctuation and starts a LiveTextBuffer pipeline', async () => {
     const punc = await createStreamingPunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-online' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-online' },
     });
 
     const handle = await punc.punctuate(
@@ -163,7 +163,7 @@ describe('streaming punctuation', () => {
 
     await expect(
       createStreamingPunctuation({
-        modelPath: { type: 'file', path: '/models/punctuation-offline' },
+        modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
       })
     ).rejects.toThrow('online cnn_bilstm');
     expect(native.initializeOnlinePunctuation).not.toHaveBeenCalled();
@@ -171,7 +171,7 @@ describe('streaming punctuation', () => {
 
   it('attaches text_punctuation_assisted segmentation by default in auto mode', async () => {
     const punc = await createStreamingPunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-online' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-online' },
     });
 
     const handle = await punc.punctuate(
@@ -197,7 +197,7 @@ describe('streaming punctuation', () => {
 
   it('rejects offline buffers and continuous_frames policy', async () => {
     const punc = await createStreamingPunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-online' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-online' },
     });
 
     await expect(
@@ -223,7 +223,7 @@ describe('streaming punctuation', () => {
 
   it('allows pull API reads from streaming punctuation output segments', async () => {
     const punc = await createStreamingPunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-online' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-online' },
     });
 
     const outputId = 'txt_live_22222222-2222-2222-2222-222222222222';

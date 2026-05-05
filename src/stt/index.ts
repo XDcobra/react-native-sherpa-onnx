@@ -24,10 +24,11 @@ import type {
   SttRuntimeConfig,
 } from './types';
 import { validateSegmentationConfig } from '../segment/validation';
-import type { ModelPathConfig } from '../types';
 import type { FileSource } from '../fileio/types';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import {
+  resolveFileSourceForDetect,
+  resolveFileSourceForModelInit,
+} from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {
@@ -141,7 +142,7 @@ export async function detectSttModel(
 /**
  * Create an STT engine instance. Call destroy() on the returned engine when done to free native resources.
  *
- * @param options - STT initialization options or model path configuration
+ * @param options - STT initialization options
  * @returns Promise resolving to an SttEngine instance
  * @example
  * ```typescript
@@ -164,11 +165,11 @@ export async function detectSttModel(
  * ```
  */
 export async function createSTT(
-  options: STTInitializeOptions | ModelPathConfig
+  options: STTInitializeOptions
 ): Promise<SttEngine> {
   const instanceId = `stt_${++sttInstanceCounter}`;
 
-  let modelPath: ModelPathConfig;
+  const modelSource = options.modelSource;
   let preferInt8: boolean | undefined;
   let modelType: STTModelType | undefined;
   let hotwordsFile: string | undefined;
@@ -182,38 +183,21 @@ export async function createSTT(
   let modelingUnit: string | undefined;
   let bpeVocab: string | undefined;
 
-  if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    preferInt8 = options.preferInt8;
-    modelType = options.modelType;
-    hotwordsFile = options.hotwordsFile;
-    hotwordsScore = options.hotwordsScore;
-    numThreads = options.numThreads;
-    provider = options.provider;
-    ruleFsts = options.ruleFsts;
-    ruleFars = options.ruleFars;
-    dither = options.dither;
-    modelOptions = options.modelOptions;
-    modelingUnit = options.modelingUnit;
-    bpeVocab = options.bpeVocab;
-  } else {
-    modelPath = options;
-    preferInt8 = undefined;
-    modelType = undefined;
-    hotwordsFile = undefined;
-    hotwordsScore = undefined;
-    numThreads = undefined;
-    provider = undefined;
-    ruleFsts = undefined;
-    ruleFars = undefined;
-    dither = undefined;
-    modelOptions = undefined;
-    modelingUnit = undefined;
-    bpeVocab = undefined;
-  }
+  preferInt8 = options.preferInt8;
+  modelType = options.modelType;
+  hotwordsFile = options.hotwordsFile;
+  hotwordsScore = options.hotwordsScore;
+  numThreads = options.numThreads;
+  provider = options.provider;
+  ruleFsts = options.ruleFsts;
+  ruleFars = options.ruleFars;
+  dither = options.dither;
+  modelOptions = options.modelOptions;
+  modelingUnit = options.modelingUnit;
+  bpeVocab = options.bpeVocab;
 
-  const debug = 'modelPath' in options ? options.debug : undefined;
-  const resolvedPath = await resolveModelPath(modelPath);
+  const debug = options.debug;
+  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
 
   const result = await SherpaOnnx.initializeStt(
     instanceId,
@@ -282,7 +266,7 @@ export async function createSTT(
           silenceThresholdMs: 500,
           energyThresholdDb: -40,
           minSegmentMs: 1000,
-          maxSegmentMs: 30000,
+          maxSegmentMs: 120000,
           hangoverMs: 300,
         },
       });
@@ -357,13 +341,18 @@ export async function createSTT(
 
           await SherpaOnnx.populateOfflineTextBufferIfEmpty(
             textOutBufferId,
-            finalText
+            finalText,
+            {}
           );
         } finally {
           await releasePipelineTextBuffer(outputBuffer.bufferId);
         }
       } else {
-        await SherpaOnnx.populateOfflineTextBufferIfEmpty(textOutBufferId, '');
+        await SherpaOnnx.populateOfflineTextBufferIfEmpty(
+          textOutBufferId,
+          '',
+          {}
+        );
       }
 
       let runningOffset = 0;

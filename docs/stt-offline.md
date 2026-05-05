@@ -14,7 +14,7 @@ For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
 ## Models and paths
 
-- `ModelPathConfig`: `{ type: 'asset' | 'file' | 'auto', path: string }`
+- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - In-app model downloads: [download-manager.md](download-manager.md) with category `ModelCategory.Stt`
 - Model detection without engine init: `detectSttModel(...)`
 - Model setup and expected files: [model-setup.md](model-setup.md)
@@ -59,7 +59,7 @@ import {
 
 // --- Init-time: paths, hardware, hotwords (transducer / NeMo transducer), rules, debug ---
 const engine = await createSTT({
-  modelPath: { type: 'file', path: '/absolute/path/to/stt-model-dir' },
+  modelSource: { kind: 'fs', path: '/absolute/path/to/stt-model-dir' },
   modelType: 'whisper', // or 'transducer', 'paraformer', … — see STTInitializeOptions / STT_MODEL_TYPES
   preferInt8: true,
   numThreads: 4,
@@ -128,7 +128,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 // Same shape as createSTT / detectSttModel expect (bundled assets vs filesystem).
-const modelPath = { type: 'asset' as const, path: 'models/sherpa-onnx-whisper-tiny-en' };
+const modelPath = { kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' };
 
 // Cheap check of required files / model type before loading weights.
 const det = await detectSttModel({ kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' });
@@ -136,7 +136,7 @@ if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
 // Loads the offline recognizer; tune threads / int8 / provider per device.
 const engine = await createSTT({
-  modelPath,
+  modelSource: modelPath,
   modelType: (det.modelType as any) ?? 'auto',
   preferInt8: true,
   numThreads: 2,
@@ -227,12 +227,12 @@ For `FileSource` resolution problems, the promise can reject with `FILEIO_*` err
 #### `createSTT(options)`
 
 ```ts
-function createSTT(options: STTInitializeOptions | ModelPathConfig): Promise<SttEngine>;
+function createSTT(options: STTInitializeOptions | FileSource): Promise<SttEngine>;
 ```
 
 ```ts
 const engine = await createSTT({
-  modelPath: { type: 'file', path: '/absolute/path/model' },
+  modelSource: { kind: 'fs', path: '/absolute/path/model' },
   modelType: 'auto',
 });
 ```
@@ -332,7 +332,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createSTT({
-  modelPath: { type: 'file', path: '/path/to/whisper' },
+  modelSource: { kind: 'fs', path: '/path/to/whisper' },
   modelType: 'whisper',
   numThreads: 2,
 });
@@ -412,6 +412,8 @@ import type {
   SttModelOptions,
   SttErrorCodeValue,
 } from 'react-native-sherpa-onnx/stt';
+
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 ```
 
 For buffer/ref unions (`OfflineAudioBufferIdSource`, `OfflineTextBufferIdSource`, …), import from **`audiobuffer`** / **`textbuffer`** as needed.
@@ -454,7 +456,7 @@ const det = await detectSttModel({ kind: 'fs', path: modelDir });
 if (!det.success) throw new Error(det.error ?? 'Detection failed');
 
 const engine = await createSTT({
-  modelPath: { type: 'file', path: modelDir },
+  modelSource: { kind: 'fs', path: modelDir },
   modelType: det.modelType ?? 'auto',
 });
 
@@ -490,7 +492,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createSTT({
-  modelPath: { type: 'file', path: '/path/to/whisper' },
+  modelSource: { kind: 'fs', path: '/path/to/whisper' },
   modelType: 'whisper',
   numThreads: 2,
 });

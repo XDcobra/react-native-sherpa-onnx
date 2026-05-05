@@ -14,9 +14,11 @@ For **offline batch** enhancement (`OfflineAudioBuffer` → `OfflineAudioBuffer`
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
+If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or ingest decode target) explicitly to the model rate from `getSampleRate()`.
+
 ## Models and paths
 
-- **`ModelPathConfig`:** `{ type: 'asset' | 'file' | 'auto', path: string }` (from `react-native-sherpa-onnx`, same as STT/TTS).
+- **`FileSource`:** `FileSource` (from `react-native-sherpa-onnx/fileio`, same as STT/TTS).
 - In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
 - Model detection without loading the denoiser: **`detectEnhancementModel(...)`** (same rules as offline; see [Model detection](enhancement-offline.md#model-detection) on the offline page for the full rule list).
 - File expectations per family: [model-setup.md](model-setup.md) where applicable.
@@ -32,7 +34,7 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 - Recursively finds `.onnx` under the resolved model directory (depth 4, same family as other detectors).
 - Filename / path contains `gtcrn` → candidate **`gtcrn`**; contains `dpdfnet` or `dpcrn` → candidate **`dpdfnet`**.
 - **`modelType: 'auto'`** (default): prefers **`gtcrn`** if both ONNX stacks are present, else **`dpdfnet`**.
-- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelPath.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
+- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelSource.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
 
 **`detectionSources`:** optional ordered trace (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`). **`nameOnly`** means no file list was scanned — see native `error` when `success` is false.
 
@@ -52,7 +54,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 
 const denoiser = await createStreamingEnhancement({
-  modelPath: { type: 'file', path: '/absolute/path/to/enhancement-model-dir' },
+  modelSource: { kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' },
   modelType: 'auto',
 });
 
@@ -156,7 +158,7 @@ function createStreamingEnhancement(
 
 ```ts
 const denoiser = await createStreamingEnhancement({
-  modelPath: { type: 'file', path: '/absolute/path/to/model-dir' },
+  modelSource: { kind: 'fs', path: '/absolute/path/to/model-dir' },
   modelType: 'auto',
 });
 ```
@@ -328,7 +330,7 @@ import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement
 import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 
 const denoiser = await createStreamingEnhancement({
-  modelPath: { type: 'file', path: '/path/to/model' },
+  modelSource: { kind: 'fs', path: '/path/to/model' },
   modelType: 'auto',
 });
 
@@ -448,8 +450,8 @@ import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 
-const denoiser = await createStreamingEnhancement({ modelPath: { type: 'asset', path: 'models/enhancement' }, modelType: 'auto' });
-const stt = await createStreamingSTT({ modelPath: { type: 'asset', path: 'models/streaming-stt' }, modelType: 'auto' });
+const denoiser = await createStreamingEnhancement({ modelSource: { kind: 'app', base: 'files', path: 'models/enhancement' }, modelType: 'auto' });
+const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' }, modelType: 'auto' });
 
 const sr = await denoiser.getSampleRate();
 const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });

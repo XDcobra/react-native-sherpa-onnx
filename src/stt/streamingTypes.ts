@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
@@ -56,8 +56,8 @@ export interface EndpointConfig {
  * Options for initializing the streaming (online) STT engine.
  */
 export interface StreamingSttInitOptions {
-  /** Model path configuration (asset, file, or auto). */
-  modelPath: ModelPathConfig;
+  /** Model source configuration. */
+  modelSource: FileSource;
   /** Online model type. Use 'auto' to detect from model directory (calls detectSttModel and maps to an online type). */
   modelType: OnlineSTTModelType | 'auto';
   /** Enable endpoint detection. Default: true. */

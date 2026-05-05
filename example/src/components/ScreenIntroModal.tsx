@@ -38,12 +38,12 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen streams long audio through LiveAudioBuffer and LiveTextBuffer so transcription can start immediately without building a large offline decode buffer. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
   TTS: {
-    title: 'Text-to-Speech demo',
-    body: 'This screen shows batch and streaming TTS flows. It is useful for inspecting synthesis setup, generation modes, and how audio is produced for playback or export.',
+    title: 'Text-to-Speech (offline)',
+    body: 'This screen runs batch TTS: one-shot or segmented offline synthesis, buffer-to-buffer output, save/share, and voice-cloning options where the model supports them. Incremental streaming synthesis lives on the Text-to-Speech (Streaming) screen.',
   },
   TTSStreaming: {
     title: 'Text-to-Speech streaming demo',
-    body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+    body: 'This screen uses incremental TTS with live text and audio buffers so playback can start before the full prompt is finished. Configure text segmentation (off/manual/auto) here. For chunked offline synthesis, use Text-to-Speech (Offline).',
   },
   Punctuation: {
     title: 'Offline punctuation',
@@ -53,9 +53,17 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Streaming punctuation',
     body: 'This screen runs online CNN-BiLSTM punctuation over live text buffers. It is useful for checking the LiveTextBuffer input/output contract, pipeline lifecycle, and optional segmentation attach.',
   },
-  PipelineShowcase: {
-    title: 'End-to-end pipeline showcase',
-    body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',
+  OfflinePipelineShowcase: {
+    title: 'Offline batch pipeline',
+    body: 'This screen runs a full offline batch pipeline: audio file → STT (with optional speech segmentation) → transcript → TTS (with optional text segmentation) → synthesized audio → playback. Enable segmentation on either stage to process large inputs in chunks and keep peak native RAM low.',
+  },
+  LivePipelineShowcase: {
+    title: 'Live streaming pipeline',
+    body: 'This screen runs the full end-to-end streaming pipeline concurrently: mic or file audio → StreamingSTT → committed text segments → StreamingTTS → live audio → real-time playback. The segment event log shows each STT commit and its forwarding to TTS. Optional text re-segmentation between STT and TTS aligns input at sentence boundaries.',
+  },
+  FileIO: {
+    title: 'File I/O sandbox',
+    body: 'Use this screen to experiment with FileDestination kinds, audio source selection, and document-picker flows in isolation from other features.',
   },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',
@@ -68,6 +76,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   VAD: {
     title: 'Voice activity detection showcase',
     body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
+  },
+  SegmentationShowcase: {
+    title: 'Segmentation playground',
+    body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
   },
   Diarization: {
     title: 'Speaker diarization preview',

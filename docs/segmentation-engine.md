@@ -24,16 +24,32 @@ Related docs:
 
 ### Segmentation modes used by feature APIs
 
-Modes are configured in feature-level options and validated before orchestration:
+Features (STT, TTS, enhancement, punctuation, …) pass **`segmentation`** on their own API — **not** only via `segment`. Per-feature **`mode`**, **`policy`**, and limits are documented under **`## Segmentation`** in each guide.
 
-- `off`: no segmentation path; feature runs one-shot.
-- `manual`: caller commits segment boundaries explicitly (only where the feature supports manual mode).
-- `auto`: feature attaches a segmentation engine and applies a policy.
+**Modes (overview):** `off` = one-shot; `manual` = you commit boundaries (streaming where supported); `auto` = engine + `policy`. Offline features in `src/` often only `off`/`auto`; streaming often `off`/`manual`/`auto`.
 
-Current integration pattern in `src/`:
+### Evaluators (domain & behavior)
 
-- Offline STT/TTS/Enhancement/Punctuation: `off` or `auto` (manual not supported).
-- Streaming TTS/Enhancement/Punctuation: `off`, `manual`, or `auto`.
+Policies are **domain-specific**: only **text** evaluators go on text buffers; only **speech** evaluators on speech buffers. Wrong domain → `POLICY_INVALID`.
+
+| Evaluator | Domain | `segmentOfflineBuffer` · `attachSegmentationEngine` | Behavior |
+| --- | --- | --- | --- |
+| `text_synthetic_auto` | Text | Offline + live (text) | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
+| `text_punctuation_assisted` | Text | Offline + live (text); needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
+| `speech_energy_silence` | Speech | Offline + live (speech) | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
+| `speech_vad_model` | Speech | Offline + live (speech); needs `policy.modelPath` (**`FileSource`**) | Spans from VAD ONNX. JS runs **`detectVadModel`** on `modelPath` (same plumbing as **`createStreamingVAD`** / `detectVadModel`), then native uses the resolved `.onnx` file + `modelType` (`vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, …). |
+| `continuous_frames` | Speech | **Live speech only** (offline → `POLICY_INVALID_FOR_OFFLINE`) | Frame checkpoints (`checkpointIntervalMs`). |
+
+### Text `sentenceBoundary` delimiters
+
+For `text_synthetic_auto` and `text_punctuation_assisted`, when `sentenceBoundary` is **true**, splitting uses Unicode-aware scanning (not ASCII-only). Boundary characters include:
+
+- Latin / common: `.` `!` `?` `;` `:` and newline
+- CJK (full-width sentence punctuation): U+3002 `。` · U+FF01 `！` · U+FF1F `？` · U+FF61 `｡`
+- Arabic question mark: U+061F `؟`
+- Devanagari sentence marks: U+0964 `।` · U+0965 `॥`
+
+Optional **`sentenceBoundaryChars`** (`string[]`, non-empty after validation) replaces the default delimiter list entirely (no merge).
 
 ## Quick start
 
@@ -46,16 +62,13 @@ import {
   getAllSegmentLinks,
 } from 'react-native-sherpa-onnx/segment';
 import { createEmptyOfflineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  createEmptyOfflineTextBuffer,
-  appendOfflineText,
-} from 'react-native-sherpa-onnx/textbuffer';
+import { createOfflineTextBufferFromText } from 'react-native-sherpa-onnx/textbuffer';
 
 const offlineAudio = await createEmptyOfflineAudioBuffer({ sampleRate: 16000 });
-const offlineText = await createEmptyOfflineTextBuffer();
-
-// Keep text and audio in bounded chunks to reduce peak RAM on long inputs.
-await appendOfflineText(offlineText, 'Hello world. This is a long paragraph that should be split.');
+// Pre-fill offline text in one step (`appendOfflineText` is not a public JS export).
+const offlineText = await createOfflineTextBufferFromText(
+  'Hello world. This is a long paragraph that should be split.'
+);
 
 // Materialize text segments (domain='text') for offline text buffer.
 await segmentOfflineBuffer(offlineText, {
@@ -161,14 +174,14 @@ function segmentOfflineBuffer(
 ```ts
 const ref = await segmentOfflineBuffer(offlineAudioBuffer, {
   evaluator: 'speech_vad_model',
-  modelPath: { type: 'file', path: '/models/silero_vad.onnx' },
+  modelPath: { kind: 'fs', path: '/models/sherpa-onnx-silero-vad' },
   vadThreshold: 0.5,
   vadMinSpeechMs: 250,
   vadMinSilenceMs: 200,
 });
 ```
 
-Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` is required and resolved before native calls.
+Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` (**`FileSource`**) is required; JS resolves it with **`detectVadModel`** and forwards a concrete `.onnx` path plus `modelType` to native (no directory heuristics on the native side).
 
 ### Live text helpers
 
@@ -257,6 +270,8 @@ const items = await getSegments(segRef, 0, 64);
 ```
 
 Reads text or speech segments from the resolved source. Throws `SEGMENT_INDEX_OUT_OF_RANGE` on invalid windows.
+
+**`reason` / `source` / `createdAtMs`:** Segments produced by engines (for example offline `segmentOfflineBuffer` with `speech_vad_model`, or streaming VAD writing into a pipeline segment buffer) carry the native annotation on each row — typically `vad_boundary`, `length_limit` when a max-duration policy splits a span, or `finalize` at end-of-input. **`manual_commit` applies to explicit `commitSegment(...)` calls only.** Optional `source` and `createdAtMs` are included when the bridge provides them.
 
 #### `getSegmentCount(buffer)`
 
@@ -451,9 +466,32 @@ Returns map metadata (`linkMapId`, `linkCount`, optional associated buffer ids).
 ## Types and constants
 
 ```ts
+import type {
+  SegmentationPolicy, // evaluator + tuning
+  SegmentationConfig, // { policy? } for attachSegmentationEngine
+  SegmentationEngineRef, // { engineId } handle from attach
+  SegmentationEngineInfo, // state from getSegmentationEngineInfo
+  SegmentationEvaluator, // policy.evaluator discriminator
+  SegmentationMode, // off | manual | auto (feature/runtime wiring)
+  Segment, // TextSegment | SpeechSegment
+  TextSegment,
+  SpeechSegment,
+  SegmentDomain,
+  SegmentReason,
+  SegmentSource,
+  SegmentLink, // cross-domain link record
+  SegmentLinkMapRef, // lightweight handle to native-held map
+  SegmentLinkMapInfo, // getSegmentLinkMapInfo result
+  SegmentLinkType, // alignment / proportional / vad_assisted / ...
+  ValidateSegmentationOptions, // options for validateSegmentationConfig
+} from 'react-native-sherpa-onnx/segment';
+
 import {
   SegmentBufferRef, // resolved segment buffer handle (domain + parent ids)
   CommitSegmentOptions, // metadata for manual segment commits
+  isTextSegment, // type guard for TextSegment
+  isSpeechSegment, // type guard for SpeechSegment
+  validateSegmentationConfig, // feature-level mode/policy validation
   attachSegmentationEngine, // attach engine to live text/audio
   detachSegmentationEngine, // detach engine and optional final flush
   getSegmentationEngineInfo, // runtime state for an attached engine
@@ -474,14 +512,13 @@ import {
   getSegmentLinkCount, // total link count
   getSegmentLinkMapInfo, // link-map metadata
   releaseSegmentLinkMap, // free link-map resources
+  segmentFromJson, // JSON → Segment
+  segmentToJson, // Segment → JSON
+  segmentLinkFromJson,
+  segmentLinkToJson,
+  validateSegment, // runtime validation helper
+  validateSegmentLink,
 } from 'react-native-sherpa-onnx/segment';
-
-import {
-  Segment, // union of TextSegment | SpeechSegment
-  SegmentLink, // cross-domain link record
-  SegmentLinkMapRef, // lightweight handle to native-held map
-  SegmentLinkType, // alignment/proportional/vad_assisted/... discriminator
-} from 'react-native-sherpa-onnx';
 ```
 
 ## Error codes

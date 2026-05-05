@@ -4,7 +4,7 @@
 
 Pipeline-based streaming TTS: a native background worker drains text segments from a `LiveTextBuffer`, synthesizes each segment, and writes PCM samples to a `LiveAudioBuffer`. **Audio data never crosses the JS bridge during steady-state** — JS only orchestrates start/stop/status.
 
-**For incremental streaming sessions (`createIncrementalStreamingTTS`):** see [Incremental text feeding](#4-incremental-text-feeding). **For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md).
+**For full-buffer synthesis, timestamps, and WAV save/share:** see [Offline TTS](tts-offline.md). **Streaming + subtitles:** see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md).
 
 **Import path:** `react-native-sherpa-onnx/tts`
 
@@ -28,25 +28,9 @@ Downstream consumers (enhancement pipeline, PCM player, STT pipeline, WAV export
 LiveTextBuffer ──→ [Streaming TTS] ──→ LiveAudioBuffer₁ ──→ [Enhancement] ──→ LiveAudioBuffer₂ ──→ [Streaming STT]
 ```
 
-## Choosing a streaming API (decision matrix)
-
-Sherpa-ONNX **offline** TTS models do **not** implement low-latency *acoustic* streaming (partial text -> wavefront in real time). What this SDK calls **streaming** is **chunked PCM delivery** plus optional **segment-by-segment** synthesis: native `OfflineTts` emits audio in callbacks while a sentence (or your segment) is processed, and the pipeline writes samples into a `LiveAudioBuffer` without steady-state JS bridge traffic. Incremental TTS is the same engine underneath; it adds automatic segmentation, queues, and session semantics for continuous text input.
-
-| Criterion | Prefer **`createStreamingTTS` + `synthesize()`** | Prefer **`createIncrementalStreamingTTS`** |
-|-----------|---------------------------------------------------|--------------------------------------------|
-| You already emit **discrete, meaningful segments** (sentences, paragraphs, UI blocks) | Yes | No |
-| Text arrives as a **continuous stream** (e.g. LLM tokens, live captions) and you want the library to **cut segments** | No | Yes |
-| You need **segmentation policy** (punctuation, max chars, debounce, auto-commit timeout) | Roll your own before `appendLiveTextSegment` | Built-in (`SegmentationPolicy`) |
-| You need **queue behavior** (FIFO vs replace-tail vs latest-wins, overflow rules) | Roll your own | Built-in (`QueuePolicy`) |
-| You need **per-segment `meta`** (`sid`, `speed`) from your own pipeline | Straightforward via `appendLiveTextSegment(..., meta)` | Use segment events / policies; cloning is pipeline-wide |
-| You want the **smallest surface** (buffers + pipeline only) | Yes | No |
-| You want **session lifecycle** events (idle, draining, errors) and **metrics** | Build on top | Built-in |
-
-**Rule of thumb:** if you are comfortable **owning segment boundaries** and writing to a `LiveTextBuffer`, use **`createStreamingTTS`**. If text is **open-ended or token-sized** and you want automatic boundaries and backpressure, use **`createIncrementalStreamingTTS`** (it wraps `StreamingTtsEngine`) and follow [Incremental text feeding](#4-incremental-text-feeding).
-
 ## Models & paths
 
-- **`ModelPathConfig`** (from `react-native-sherpa-onnx`): `{ type: 'asset' | 'file' | 'auto', path: string }` — directory that contains the TTS model files.
+- **`FileSource`** (from `react-native-sherpa-onnx/fileio`): `FileSource` — directory that contains the TTS model files.
 - **Downloaded models:** use the [Download Manager](download-manager.md) with **`ModelCategory.Tts`**. Valid **`modelId`** values and the GitHub release tag are listed in [Model ids](download-manager.md#model-ids) (`tts-models`).
 - **`detectTtsModel()`** below accepts a `FileSource` and returns kinds **without** initializing the engine (see [Detection](#detection)).
 
@@ -67,14 +51,14 @@ import {
   finalizeLiveAudioBuffer,
 } from 'react-native-sherpa-onnx/tts';
 
-const modelPath = { type: 'asset' as const, path: 'models/vits-piper-en_US-lessac-medium' };
+const modelPath = { kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' };
 const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
 if (!det.success || det.modelType !== 'vits') {
   throw new Error(det.error ?? 'Expected a VITS model for this example');
 }
 
 const tts = await createStreamingTTS({
-  modelPath,
+  modelSource: modelPath,
   modelType: det.modelType,
   numThreads: 2,
   modelOptions: {
@@ -147,15 +131,11 @@ const pipeline = await tts.synthesize(textIn, audioOut, {
 
 **Note:** Zipvoice cloning requires `referenceText` and is **not** supported in streaming on Android. For Zipvoice voice cloning, use batch `generateSpeech` on the offline path — [tts-offline.md](tts-offline.md).
 
-### 4) Incremental text feeding
-
-For progressive/tokenized text input (chat/LLM typing), use [Incremental text feeding](#4-incremental-text-feeding).
-
 ## Setup (iOS & Android)
 
 | Topic | Requirement |
 | --- | --- |
-| Execution providers | Optional `provider` on init; check availability via root helpers (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
+| Execution providers | Optional `provider` on init; check availability via `react-native-sherpa-onnx/provider` (e.g. `getCoreMlSupport`) — [execution-providers.md](execution-providers.md) |
 | Subtitles + streaming | Not on the streaming API surface — finish synthesis, then **`alignTextToAudio`**; see [Subtitles](#subtitles) and [alignment-offline.md](alignment-offline.md) |
 | Multi-instance | Each `createStreamingTTS` gets a unique native `instanceId`; do not use an engine after `destroy()` |
 | One pipeline per engine | `synthesize()` rejects with `TTS_PIPELINE_ALREADY_RUNNING` if a pipeline is already active on the same engine |
@@ -201,13 +181,13 @@ if (!result.success) console.warn(result.error);
 ### `createStreamingTTS(options)`
 
 ```ts
-function createStreamingTTS(options: TTSInitializeOptions | ModelPathConfig): Promise<StreamingTtsEngine>;
+function createStreamingTTS(options: TTSInitializeOptions | FileSource): Promise<StreamingTtsEngine>;
 ```
 
 Creates a **streaming** TTS engine. Same init union as [`createTTS`](tts-offline.md#createttsoptions); call `destroy()` when finished.
 
 ```ts
-const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/model' } });
+const tts = await createStreamingTTS({ modelSource: { kind: 'fs', path: '/path/to/model' } });
 ```
 
 For `createIncrementalStreamingTTS(options)`, see [API reference](#api-reference).
@@ -345,13 +325,13 @@ More end-to-end patterns: [feature-pipelines.md#tts-streaming-patterns](feature-
 
 ## Types
 
-Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `ModelPathConfig` is imported from `react-native-sherpa-onnx`.
+Listed types are those used by **streaming TTS** in this document. Batch-only types (`TtsEngine`, `GeneratedAudio`, `GeneratedAudioWithTimestamps`, save helpers, `TtsUpdateOptions`, `SubtitleOptions`, …) are in [tts-offline.md](tts-offline.md). `FileSource` is imported from `react-native-sherpa-onnx/fileio`.
 
 ### Detection & model path
 
 | Type | Notes |
 | --- | --- |
-| `ModelPathConfig` | `{ type: 'asset' \| 'file' \| 'auto'; path: string }` |
+| `FileSource` | `FileSource` |
 | `FileSource` | `{ kind: 'fs' \| 'app' \| 'contentUri' \| 'securityScoped' \| 'pad', ... }` |
 | `TTSModelType` | `'vits' \| 'matcha' \| 'kokoro' \| 'kitten' \| 'pocket' \| 'zipvoice' \| 'supertonic' \| 'auto'` |
 | `TTS_MODEL_TYPES` | Readonly list of model type literals |
@@ -367,7 +347,7 @@ Listed types are those used by **streaming TTS** in this document. Batch-only ty
 | Type | Notes |
 | --- | --- |
 | `TTSInitializeOptions` | `createStreamingTTS()` — with `modelType` omitted/`'auto'`, **`modelOptions` is disallowed** |
-| `TTSInitializeOptionsBase` | Shared fields: `modelPath`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
+| `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsVoiceClone` / `TtsVoiceCloneZipvoice` / `TtsVoiceClonePocket` | Cloning discriminant types |
 | `TtsExecutionProvider` | `'cpu' \| 'coreml' \| 'xnnpack' \| 'nnapi' \| 'qnn' \| (string & {})` |
 | `TtsModelOptions` | Internal aggregate for native flattening; prefer init unions in app code |
@@ -408,7 +388,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/model' },
+  modelSource: { kind: 'fs', path: '/path/to/model' },
   modelType: 'kokoro',
 });
 const sampleRate = await tts.getSampleRate();
@@ -459,10 +439,6 @@ See [segmentation-engine.md](segmentation-engine.md) for the full segmentation r
 | Methods throw after `destroy` | Engine already released | Create a new engine |
 | Wrong or slow inference | Provider not built / unavailable | Check [execution-providers.md](execution-providers.md) and native logs |
 
-## Mapping to Native API
-
-If you call the **`NativeSherpaOnnx`** TurboModule directly: `startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options?)` starts the native worker. Pipeline control methods (`stopStreamingPipeline`, `flushStreamingPipeline`, `resetStreamingPipeline`, `getStreamingPipelineStatus`) take a `pipelineId`. Prefer the factory APIs in this document unless you manage native instances yourself.
-
 ## Use case examples
 
 <details>
@@ -479,7 +455,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/vits' },
+  modelSource: { kind: 'fs', path: '/path/to/vits' },
   modelType: 'vits',
 });
 const sr = await tts.getSampleRate();
@@ -513,7 +489,7 @@ import {
   finalizeLiveTextBuffer,
 } from 'react-native-sherpa-onnx/tts';
 
-const tts = await createStreamingTTS({ modelPath: { type: 'file', path: '/path/to/multi-speaker' }, modelType: 'vits' });
+const tts = await createStreamingTTS({ modelSource: { kind: 'fs', path: '/path/to/multi-speaker' }, modelType: 'vits' });
 const sr = await tts.getSampleRate();
 const textIn = await createLiveTextBuffer();
 const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
@@ -546,7 +522,7 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 
 const tts = await createStreamingTTS({
-  modelPath: { type: 'file', path: '/path/to/kokoro' },
+  modelSource: { kind: 'fs', path: '/path/to/kokoro' },
   modelType: 'kokoro',
 });
 
@@ -574,7 +550,6 @@ await tts.destroy();
 ## See also
 
 - [tts-offline.md](tts-offline.md) — batch TTS, timestamps, save/share
-- [Incremental text feeding](#4-incremental-text-feeding) — incremental/session-based streaming TTS
 - [pcm-player.md](pcm-player.md) — standalone PCM player
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, modes, alignment models (post-hoc after streaming)
 - [execution-providers.md](execution-providers.md) — ORT execution providers

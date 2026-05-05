@@ -6,14 +6,6 @@
  * available models dynamically instead of hardcoding model names.
  */
 
-import {
-  autoModelPath,
-  assetModelPath,
-  fileModelPath,
-  getDefaultModelPath,
-  resolveModelPath,
-  type ModelPathConfig,
-} from 'react-native-sherpa-onnx';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
@@ -57,8 +49,8 @@ export function getModelDisplayName(modelFolder: string): string {
  * const models = await listAssetModels();
  * const modelPath = getModelPath(models[0].folder);
  */
-export function getModelPath(modelName: string): ModelPathConfig {
-  return autoModelPath(`models/${modelName}`);
+export function getModelPath(modelName: string): FileSource {
+  return { kind: 'app', base: 'files', path: `models/${modelName}` };
 }
 
 /**
@@ -67,8 +59,8 @@ export function getModelPath(modelName: string): ModelPathConfig {
  * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
  * @returns Model path configuration
  */
-export function getAssetModelPath(modelName: string): ModelPathConfig {
-  return assetModelPath(`models/${modelName}`);
+export function getAssetModelPath(modelName: string): FileSource {
+  return { kind: 'app', base: 'files', path: `models/${modelName}` };
 }
 
 /**
@@ -82,26 +74,19 @@ export function getFileModelPath(
   modelName: string,
   category?: ModelCategory,
   basePath?: string
-): ModelPathConfig {
+): FileSource {
   const resolvedBase = basePath
     ? basePath.replace(/\/+$/, '')
     : category
     ? `${DocumentDirectoryPath}/sherpa-onnx/models/${category}`
-    : getDefaultModelPath();
+    : `${DocumentDirectoryPath}/sherpa-onnx/models`;
   const path = `${resolvedBase}/${modelName}`.replace(/\/+/g, '/');
-  return fileModelPath(path);
+  return { kind: 'fs', path };
 }
 
 /**
- * Resolve a {@link ModelPathConfig} to a {@link FileSource} suitable for detect APIs.
- * For `file` type, converts directly. For `asset`/`auto`, resolves the path first.
+ * Identity helper kept for call-site stability while example screens migrate.
  */
-export async function toDetectSource(
-  config: ModelPathConfig
-): Promise<FileSource> {
-  if (config.type === 'file') {
-    return { kind: 'fs', path: config.path };
-  }
-  const resolved = await resolveModelPath(config);
-  return { kind: 'fs', path: resolved };
+export async function toDetectSource(config: FileSource): Promise<FileSource> {
+  return config;
 }

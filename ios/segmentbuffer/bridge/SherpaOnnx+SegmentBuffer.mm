@@ -1,4 +1,5 @@
 #import "../../SherpaOnnx.h"
+#import <Foundation/Foundation.h>
 #include "../core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
@@ -14,6 +15,7 @@
 #include <random>
 #include <sstream>
 #include <unordered_set>
+#include <vector>
 #include <unistd.h>
 #include <zlib.h>
 
@@ -49,6 +51,158 @@ std::string seg_uuid() {
 
 std::string seg_new_id(const std::string &prefix) {
   return prefix + "_" + seg_uuid();
+}
+
+/**
+ * Sentence / clause boundaries for text segmentation: Latin punctuation, newline,
+ * and common full-width CJK marks plus Arabic question mark and Devanagari danda.
+ * Uses NSString so UTF-8 boundaries are not split mid-codepoint (find_first_of on bytes is unsafe for multibyte UTF-8).
+ */
+static NSCharacterSet *seg_text_sentence_boundary_charset(void) {
+  static NSCharacterSet *set = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    NSMutableCharacterSet *m =
+      [NSMutableCharacterSet characterSetWithCharactersInString:@".!?\n;:"];
+    [m addCharactersInString:@"\u3002\uFF01\uFF1F\uFF61\u061F\u0964\u0965"];
+    set = [m copy];
+  });
+  return set;
+}
+
+/** UTF-8 byte length of `remaining` through and including the first boundary character, or npos if none. */
+static size_t seg_utf8_sentence_boundary_prefix_len_first(const std::string &remaining) {
+  if (remaining.empty()) {
+    return std::string::npos;
+  }
+  NSString *ns = [[NSString alloc] initWithBytes:remaining.data()
+                                            length:remaining.size()
+                                          encoding:NSUTF8StringEncoding];
+  if (!ns) {
+    return std::string::npos;
+  }
+  NSRange r = [ns rangeOfCharacterFromSet:seg_text_sentence_boundary_charset()
+                                  options:0
+                                    range:NSMakeRange(0, ns.length)];
+  if (r.location == NSNotFound) {
+    return std::string::npos;
+  }
+  NSString *through = [ns substringToIndex:r.location + r.length];
+  return (size_t)[through lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+}
+
+/** UTF-8 byte length through and including the last boundary character in `s`, or npos. */
+static size_t seg_utf8_sentence_boundary_prefix_len_last(const std::string &s) {
+  if (s.empty()) {
+    return std::string::npos;
+  }
+  NSString *ns = [[NSString alloc] initWithBytes:s.data()
+                                            length:s.size()
+                                          encoding:NSUTF8StringEncoding];
+  if (!ns) {
+    return std::string::npos;
+  }
+  NSRange r = [ns rangeOfCharacterFromSet:seg_text_sentence_boundary_charset()
+                                   options:NSBackwardsSearch
+                                     range:NSMakeRange(0, ns.length)];
+  if (r.location == NSNotFound) {
+    return std::string::npos;
+  }
+  NSString *through = [ns substringToIndex:r.location + r.length];
+  return (size_t)[through lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+}
+
+/** Byte length through first boundary (forward scan); uses UTF-8 NSString suffix matching. */
+static size_t seg_utf8_custom_delimiter_prefix_len_first(
+  const std::string &remaining,
+  const std::vector<std::string> &delims
+) {
+  if (remaining.empty() || delims.empty()) {
+    return std::string::npos;
+  }
+  NSString *ns =
+    [[NSString alloc] initWithBytes:remaining.data()
+                               length:remaining.size()
+                             encoding:NSUTF8StringEncoding];
+  if (!ns) {
+    return std::string::npos;
+  }
+  for (NSUInteger len = 1; len <= ns.length; len++) {
+    NSString *prefix = [ns substringToIndex:len];
+    for (const auto &d : delims) {
+      if (d.empty()) {
+        continue;
+      }
+      NSString *ds = [NSString stringWithUTF8String:d.c_str()];
+      if (!ds || ds.length == 0) {
+        continue;
+      }
+      if ([prefix hasSuffix:ds]) {
+        return (size_t)[prefix lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      }
+    }
+  }
+  return std::string::npos;
+}
+
+/** Byte length through last boundary in `s` (live text commit-at-last-boundary). */
+static size_t seg_utf8_custom_delimiter_prefix_len_last(
+  const std::string &s,
+  const std::vector<std::string> &delims
+) {
+  if (s.empty() || delims.empty()) {
+    return std::string::npos;
+  }
+  NSString *ns =
+    [[NSString alloc] initWithBytes:s.data()
+                               length:s.size()
+                             encoding:NSUTF8StringEncoding];
+  if (!ns) {
+    return std::string::npos;
+  }
+  for (NSUInteger len = ns.length; len >= 1; len--) {
+    NSString *prefix = [ns substringToIndex:len];
+    for (const auto &d : delims) {
+      if (d.empty()) {
+        continue;
+      }
+      NSString *ds = [NSString stringWithUTF8String:d.c_str()];
+      if (!ds || ds.length == 0) {
+        continue;
+      }
+      if ([prefix hasSuffix:ds]) {
+        return (size_t)[prefix lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      }
+    }
+  }
+  return std::string::npos;
+}
+
+static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy) {
+  id raw = policy[@"sentenceBoundaryChars"];
+  if (raw == nil) {
+    return nil;
+  }
+  if (![raw isKindOfClass:[NSArray class]]) {
+    return @"sentenceBoundaryChars must be an array of strings";
+  }
+  NSArray *arr = (NSArray *)raw;
+  if (arr.count > 128) {
+    return @"sentenceBoundaryChars must have at most 128 entries";
+  }
+  for (id o in arr) {
+    if (![o isKindOfClass:[NSString class]]) {
+      return @"sentenceBoundaryChars must only contain strings";
+    }
+    NSString *s = (NSString *)o;
+    if (s.length == 0) {
+      continue;
+    }
+    if (s.length > 64) {
+      return @"sentenceBoundaryChars entries must be at most 64 characters";
+    }
+  }
+  return nil;
 }
 
 bool seg_is_valid_kind(const std::string &kind) {
@@ -178,7 +332,7 @@ struct SegLiveEntry {
   State state = RECORDING;
   std::string sourceAudioBufferId;
   std::vector<SegRecord> segments;
-  int maxSegments = 1000;
+  int maxSegments = 4096;
   int64_t evictedCount = 0;
   int64_t totalSegmentsWritten = 0;
 
@@ -732,17 +886,21 @@ enum class SegEngineState {
 
 struct SegEnginePolicy {
   std::string evaluator;
-  int maxLengthChars = 500;
+  int maxLengthChars = 2000;
   bool sentenceBoundary = true;
+  /** Non-empty => replace built-in delimiter set (UTF-8 delimiter strings). */
+  std::vector<std::string> sentenceBoundaryChars;
   int silenceThresholdMs = 500;
   double energyThresholdDb = -40.0;
   int minSegmentMs = 1000;
-  int maxSegmentMs = 30000;
+  int maxSegmentMs = 120000;
   int hangoverMs = 300;
   int checkpointIntervalMs = 0;
   std::string punctuationInstanceId;
-  /** Resolved filesystem path (from JS); used for speech_vad_model. */
+  /** Absolute path to VAD `.onnx` (from JS `detectVadModel`). */
   std::string modelPath;
+  /** `silero_vad` or `ten_vad` (from JS `detectVadModel`). */
+  std::string modelType;
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
   int vadMinSilenceMs = 250;
@@ -823,54 +981,13 @@ static bool seg_file_exists(const std::string &path) {
     fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]];
 }
 
-static bool seg_directory_exists(const std::string &path) {
+static bool seg_is_regular_file(const std::string &path) {
   if (path.empty()) return false;
   BOOL isDir = NO;
   BOOL exists = [[NSFileManager defaultManager]
     fileExistsAtPath:[NSString stringWithUTF8String:path.c_str()]
     isDirectory:&isDir];
-  return exists && isDir;
-}
-
-static std::string seg_join_path(const std::string &dir, const std::string &name) {
-  if (dir.empty()) return name;
-  if (dir.back() == '/') return dir + name;
-  return dir + "/" + name;
-}
-
-static std::string seg_resolve_vad_model_path(const std::string &modelId) {
-  const std::string trimmed = modelId;
-  if (trimmed.empty()) {
-    return "";
-  }
-
-  if (seg_file_exists(trimmed)) {
-    return trimmed;
-  }
-
-  if (seg_directory_exists(trimmed)) {
-    static const std::vector<std::string> kCandidates = {
-      "silero_vad.onnx",
-      "silero.onnx",
-      "model.onnx",
-      "ten_vad.onnx",
-      "ten-vad.onnx",
-    };
-    for (const auto &name : kCandidates) {
-      const std::string candidate = seg_join_path(trimmed, name);
-      if (seg_file_exists(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return "";
-}
-
-static std::string seg_vad_model_type_from_path(const std::string &modelPath) {
-  std::string lower = modelPath;
-  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-  return lower.find("ten") != std::string::npos ? "ten_vad" : "silero_vad";
+  return exists && !isDir;
 }
 
 static bool seg_init_vad_runtime(
@@ -883,17 +1000,25 @@ static bool seg_init_vad_runtime(
     return false;
   }
 
-  const std::string resolvedVadPath = seg_resolve_vad_model_path(engine->policy.modelPath);
-  if (resolvedVadPath.empty()) {
+  const std::string &onnxPath = engine->policy.modelPath;
+  if (onnxPath.empty() || !seg_is_regular_file(onnxPath)) {
     if (errorOut) {
-      *errorOut = "speech_vad_model model not found for modelPath: " + engine->policy.modelPath;
+      *errorOut = "speech_vad_model modelPath must be an existing .onnx file: " + onnxPath;
+    }
+    return false;
+  }
+
+  const std::string &mt = engine->policy.modelType;
+  if (mt != "silero_vad" && mt != "ten_vad") {
+    if (errorOut) {
+      *errorOut = "speech_vad_model requires modelType silero_vad or ten_vad";
     }
     return false;
   }
 
   VadRuntimeConfig cfg;
-  cfg.modelType = seg_vad_model_type_from_path(resolvedVadPath);
-  cfg.modelPath = resolvedVadPath;
+  cfg.modelType = mt;
+  cfg.modelPath = onnxPath;
   cfg.sampleRate = std::max(1, sampleRate);
   cfg.numThreads = 1;
   cfg.provider = "cpu";
@@ -1154,9 +1279,14 @@ static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
     }
 
     if (engine->policy.sentenceBoundary) {
-      size_t boundary = decisionText.find_last_of(".!?;:\n");
-      if (boundary != std::string::npos) {
-        commitLength = std::min((int)partial.size(), (int)boundary + 1);
+      size_t prefixLen = engine->policy.sentenceBoundaryChars.empty()
+        ? seg_utf8_sentence_boundary_prefix_len_last(decisionText)
+        : seg_utf8_custom_delimiter_prefix_len_last(
+            decisionText,
+            engine->policy.sentenceBoundaryChars
+          );
+      if (prefixLen != std::string::npos && prefixLen > 0) {
+        commitLength = std::min((int)partial.size(), (int)prefixLen);
         reason = "punctuation";
       }
     }
@@ -1324,6 +1454,19 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   }
   if ([p[@"maxLengthChars"] respondsToSelector:@selector(intValue)]) out.maxLengthChars = std::max(1, [p[@"maxLengthChars"] intValue]);
   if ([p[@"sentenceBoundary"] respondsToSelector:@selector(boolValue)]) out.sentenceBoundary = [p[@"sentenceBoundary"] boolValue];
+  id rawSbc = p[@"sentenceBoundaryChars"];
+  if ([rawSbc isKindOfClass:[NSArray class]]) {
+    for (id item in (NSArray *)rawSbc) {
+      if (![item isKindOfClass:[NSString class]]) {
+        continue;
+      }
+      NSString *s = (NSString *)item;
+      if (s.length == 0) {
+        continue;
+      }
+      out.sentenceBoundaryChars.push_back([s UTF8String] ?: "");
+    }
+  }
   if ([p[@"silenceThresholdMs"] respondsToSelector:@selector(intValue)]) out.silenceThresholdMs = std::max(50, [p[@"silenceThresholdMs"] intValue]);
   if ([p[@"energyThresholdDb"] respondsToSelector:@selector(doubleValue)]) out.energyThresholdDb = [p[@"energyThresholdDb"] doubleValue];
   if ([p[@"minSegmentMs"] respondsToSelector:@selector(intValue)]) out.minSegmentMs = std::max(100, [p[@"minSegmentMs"] intValue]);
@@ -1340,6 +1483,9 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
     if ([pathVal isKindOfClass:[NSString class]]) {
       out.modelPath = [pathVal UTF8String] ?: "";
     }
+  }
+  if ([p[@"modelType"] isKindOfClass:[NSString class]]) {
+    out.modelType = [p[@"modelType"] UTF8String] ?: "";
   }
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
@@ -1363,9 +1509,16 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"vadMinSpeechMs": @(p.vadMinSpeechMs),
     @"vadMinSilenceMs": @(p.vadMinSilenceMs),
   } mutableCopy];
+  if (!p.sentenceBoundaryChars.empty()) {
+    NSMutableArray *arr = [NSMutableArray array];
+    for (const auto &s : p.sentenceBoundaryChars) {
+      [arr addObject:[NSString stringWithUTF8String:s.c_str()] ?: @""];
+    }
+    md[@"sentenceBoundaryChars"] = arr;
+  }
   if (!p.modelPath.empty()) {
     md[@"modelPath"] = @{
-      @"type": @"file",
+      @"kind": @"fs",
       @"path": [NSString stringWithUTF8String:p.modelPath.c_str()] ?: @"",
     };
   }
@@ -1544,6 +1697,12 @@ bool seg_engine_peek_annotation(
       }
     }
 
+    NSString *sbcErrAttach = seg_validate_sentence_boundary_chars_field(policy);
+    if (sbcErrAttach != nil) {
+      reject(@"POLICY_INVALID", sbcErrAttach, nil);
+      return;
+    }
+
     auto engine = std::make_shared<SegEngine>();
     engine->engineId = seg_new_engine_id();
     engine->domain = d;
@@ -1591,7 +1750,7 @@ bool seg_engine_peek_annotation(
       auto entry = std::make_shared<SegLiveEntry>();
       entry->bufferId = seg_new_id("seg_live");
       entry->sourceAudioBufferId = bid;
-      entry->maxSegments = 1000;
+      entry->maxSegments = 4096;
       entry->spoolingMode = SegLiveEntry::SPOOL_ON;
       NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
                        [NSString stringWithFormat:@"seg_spool_%@.json", [NSUUID UUID].UUIDString]];
@@ -1757,6 +1916,11 @@ bool seg_engine_peek_annotation(
     std::transform(domainRaw.begin(), domainRaw.end(), domainRaw.begin(), ::tolower);
 
     if (domainRaw == "text") {
+      NSString *sbcErr = seg_validate_sentence_boundary_chars_field(policy);
+      if (sbcErr != nil) {
+        reject(@"POLICY_INVALID", sbcErr, nil);
+        return;
+      }
       std::string text;
       std::string err;
       if (!txt_read_offline_text(bid, &text, &err)) {
@@ -1795,9 +1959,11 @@ bool seg_engine_peek_annotation(
         bool foundBoundary = false;
         std::string remaining = text.substr((size_t)index);
         if (p.sentenceBoundary) {
-          size_t b = remaining.find_first_of(".!?\n");
-          if (b != std::string::npos) {
-            split = (int)b + 1;
+          size_t prefixLen = p.sentenceBoundaryChars.empty()
+            ? seg_utf8_sentence_boundary_prefix_len_first(remaining)
+            : seg_utf8_custom_delimiter_prefix_len_first(remaining, p.sentenceBoundaryChars);
+          if (prefixLen != std::string::npos && prefixLen > 0) {
+            split = (int)prefixLen;
             foundBoundary = true;
           }
         }
@@ -2054,7 +2220,7 @@ bool seg_engine_peek_annotation(
     auto entry = std::make_shared<SegLiveEntry>();
     entry->bufferId = seg_new_id("seg_live");
     entry->sourceAudioBufferId = [opts[@"sourceAudioBufferId"] isKindOfClass:[NSString class]] ? [opts[@"sourceAudioBufferId"] UTF8String] : "";
-    entry->maxSegments = [opts[@"maxSegments"] respondsToSelector:@selector(intValue)] ? std::max(1, [opts[@"maxSegments"] intValue]) : 1000;
+    entry->maxSegments = [opts[@"maxSegments"] respondsToSelector:@selector(intValue)] ? std::max(1, [opts[@"maxSegments"] intValue]) : 4096;
     NSString *modeRaw = [opts[@"spoolingMode"] isKindOfClass:[NSString class]] ? opts[@"spoolingMode"] : @"on";
     if ([modeRaw isEqualToString:@"off"]) entry->spoolingMode = SegLiveEntry::SPOOL_OFF;
     else if ([modeRaw isEqualToString:@"auto"]) entry->spoolingMode = SegLiveEntry::SPOOL_AUTO;

@@ -2,7 +2,7 @@
 
 Discover, resolve, and validate model paths across bundled assets, Play Asset Delivery (PAD), and downloaded models.
 
-**Import path:** `react-native-sherpa-onnx`
+**Import paths:** path helpers (`assetModelPath`, `resolveModelPath`, …) live in `react-native-sherpa-onnx/utils`. The **`FileSource`** type is exported from **`react-native-sherpa-onnx/fileio`**.
 
 ---
 
@@ -46,7 +46,7 @@ import {
   assetModelPath,
   listAssetModels,
   resolveModelPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import { detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 // 1) Discover bundled models
@@ -61,7 +61,7 @@ console.log(detection.isStreaming);   // false (whisper is offline-only)
 // 3) Create engine
 const modelPath = assetModelPath('models/sherpa-onnx-whisper-tiny-en');
 const stt = await createSTT({
-  modelPath,
+  modelSource: modelPath,
   modelType: 'auto', // uses detected type
 });
 ```
@@ -74,11 +74,11 @@ const stt = await createSTT({
 
 #### `assetModelPath(assetPath)`
 
-Create a `ModelPathConfig` pointing to a model bundled in app assets.
+Create a `FileSource` pointing to a model bundled in app assets.
 
 ```ts
-function assetModelPath(assetPath: string): ModelPathConfig;
-// Returns { type: 'asset', path: assetPath }
+function assetModelPath(assetPath: string): FileSource;
+// Returns { kind: 'app', base: 'files', path: assetPath }
 ```
 
 **Android:** relative to `assets/` (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
@@ -86,37 +86,39 @@ function assetModelPath(assetPath: string): ModelPathConfig;
 
 #### `fileModelPath(filePath)`
 
-Create a `ModelPathConfig` pointing to a model on the filesystem.
+Create a `FileSource` pointing to a model on the filesystem.
 
 ```ts
-function fileModelPath(filePath: string): ModelPathConfig;
-// Returns { type: 'file', path: filePath }
+function fileModelPath(filePath: string): FileSource;
+// Returns { kind: 'fs', path: filePath }
 ```
 
 Use absolute paths (e.g. from downloads or PAD). On iOS, use the Documents directory path.
 
 #### `autoModelPath(path)`
 
-Create a `ModelPathConfig` that tries asset first, then filesystem.
+Create a `FileSource` that tries asset first, then filesystem.
 
 ```ts
-function autoModelPath(path: string): ModelPathConfig;
-// Returns { type: 'auto', path }
+function autoModelPath(path: string): FileSource;
+// Returns { kind: 'app', base: 'files', path } (tries bundled assets)
 ```
 
 #### `resolveModelPath(config)`
 
-Resolve a `ModelPathConfig` to an absolute filesystem path that native code can use.
+Resolve a `FileSource` to an absolute filesystem path that native code can use.
 
 ```ts
-function resolveModelPath(config: ModelPathConfig): Promise<string>;
+function resolveModelPath(config: FileSource): Promise<string>;
 ```
 
-| `type` | Resolution |
+| `kind` | Resolution |
 | --- | --- |
-| `'asset'` | Native copies/locates the asset and returns an absolute path |
-| `'file'` | Returns the path as-is |
-| `'auto'` | Tries asset first; falls back to file |
+| `'app'` | Native copies/locates the bundled asset and returns an absolute path |
+| `'fs'` | Returns the path as-is |
+| `'pad'` | Reads from Play Asset Delivery pack |
+| `'contentUri'` | Resolves Android content URI (detect only, not init) |
+| `'securityScoped'` | Resolves iOS security-scoped bookmark (detect only, not init) |
 
 #### `getDefaultModelPath()`
 
@@ -247,7 +249,7 @@ Detection is a **cheap preflight**: no recognizer / TTS engine allocation, faste
 **STT — return shape, options, and matching `createSTT`:**
 
 ```typescript
-import { assetModelPath } from 'react-native-sherpa-onnx';
+import { assetModelPath } from 'react-native-sherpa-onnx/utils';
 import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 const modelPath = assetModelPath('models/my-pack');
@@ -279,7 +281,7 @@ if (!det.success) {
   // Prefer modelType: 'auto' here (not det.modelType): createSTT re-runs the same native auto-selection
   // on this path + preferInt8, so behavior stays one code path and matches future heuristic changes.
   // Pass an explicit modelType only when the user overrides auto, e.g. picked from det.detectedModels.
-  await createSTT({ modelPath, modelType: 'auto', preferInt8: true });
+  await createSTT({ modelSource: modelPath, modelType: 'auto', preferInt8: true });
 }
 ```
 
@@ -315,12 +317,12 @@ Combining multiple sources:
 
 ```typescript
 import {
-  listAssetModels,
-  getAssetPackPath,
-  listModelsAtPath,
-  fileModelPath,
   assetModelPath,
-} from 'react-native-sherpa-onnx';
+  fileModelPath,
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx/utils';
 import { getLocalModelPathByCategory, listDownloadedModelsByCategory, ModelCategory } from 'react-native-sherpa-onnx/download';
 
 // Bundled
@@ -341,7 +343,7 @@ const downloaded = await listDownloadedModelsByCategory(ModelCategory.Stt);
 ### Auto-detect and init the first available STT model
 
 ```typescript
-import { listAssetModels, assetModelPath } from 'react-native-sherpa-onnx';
+import { assetModelPath, listAssetModels } from 'react-native-sherpa-onnx/utils';
 import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
 
 const models = await listAssetModels();
@@ -351,7 +353,7 @@ for (const m of sttModels) {
   const mp = assetModelPath(`models/${m.folder}`);
   const detection = await detectSttModel(mp, { preferInt8: true });
   if (detection.success) {
-    const stt = await createSTT({ modelPath: mp, modelType: 'auto', preferInt8: true });
+    const stt = await createSTT({ modelSource: mp, modelType: 'auto', preferInt8: true });
     return stt;
   }
 }
@@ -370,7 +372,7 @@ const sttFolder = models.find((m) => m.hint === 'stt');
 if (sttFolder) {
   const fullPath = `${padPath}/${sttFolder.folder}`;
   const stt = await createSTT({
-    modelPath: fileModelPath(fullPath),
+    modelSource: fileModelPath(fullPath),
     modelType: 'auto',
   });
 }

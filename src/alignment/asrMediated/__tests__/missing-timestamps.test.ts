@@ -7,7 +7,7 @@ jest.mock('../../linker/linker', () => ({
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment.onnx'),
+  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({
@@ -65,6 +65,10 @@ jest.mock('../../../segmentbuffer', () => ({
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/resolved/alignment.onnx' },
+    }),
     alignAccurateFromPcm: jest.fn(),
   },
 }));
@@ -80,7 +84,7 @@ describe('asrMediated/missing-timestamps', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({

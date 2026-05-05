@@ -5,6 +5,7 @@
     "paths": {
       "@kesha-antonov/react-native-background-downloader": ["../src/download/background-downloader-types.ts"],
       "react-native-sherpa-onnx": ["../src/index.tsx"],
+      "react-native-sherpa-onnx/provider": ["../src/provider.ts"],
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],
       "react-native-sherpa-onnx/pcm": ["../src/pcm/index.ts"],

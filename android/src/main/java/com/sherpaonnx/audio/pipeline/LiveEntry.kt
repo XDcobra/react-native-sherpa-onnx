@@ -244,7 +244,11 @@ class LiveEntry(
       if (state != State.RECORDING) return AppendResult.BUFFER_FINALIZED
     }
 
+    var ringCommitted = false
     rwLock.write {
+      // Finalize can race between the fast-path check above and taking the write lock.
+      if (state != State.RECORDING) return@write
+      ringCommitted = true
       for (s in toAppend) {
         ring[writePos] = s
         writePos = (writePos + 1) % windowCapacity
@@ -261,6 +265,7 @@ class LiveEntry(
         }
       }
     }
+    if (!ringCommitted) return AppendResult.BUFFER_FINALIZED
 
     // Write to spool file (outside ring lock for better concurrency)
     spoolWriter?.let { writer ->

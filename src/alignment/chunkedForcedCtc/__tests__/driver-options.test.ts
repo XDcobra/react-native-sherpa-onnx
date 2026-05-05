@@ -1,12 +1,16 @@
 jest.mock('../../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
+    detectAlignmentModel: jest.fn().mockResolvedValue({
+      success: true,
+      paths: { model: '/resolved/alignment.onnx' },
+    }),
     alignAccurateForcedCtcFromPcm: jest.fn(),
   },
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment.onnx'),
+  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({
@@ -125,7 +129,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_OPTIONS_INVALID' });
@@ -150,7 +154,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_ANCHOR_OUT_OF_RANGE' });
@@ -172,7 +176,7 @@ describe('chunkedForcedCtc/driver options', () => {
         audioIn: 'off_audio',
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
-        modelPath: { type: 'file', path: '/m' },
+        modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_FAILED' });

@@ -24,6 +24,7 @@ import type {
 export type {
   BundledArchive,
   ExtractArchiveOptions,
+  ExtractArchiveResult,
   ExtractNotificationArgs,
   ExtractResult,
   ExtractProgressEvent,

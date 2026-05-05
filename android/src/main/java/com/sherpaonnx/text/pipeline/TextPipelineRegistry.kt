@@ -101,7 +101,7 @@ object TextPipelineRegistry {
    */
   fun createLive(
     windowMaxChars: Int = 65536,
-    maxSegments: Int = 1000,
+    maxSegments: Int = 4096,
     emitPartialEvents: Boolean = false,
     partialEventMinIntervalMs: Long = 0,
     spoolingMode: TextSpoolingMode = TextSpoolingMode.ON,

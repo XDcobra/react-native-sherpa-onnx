@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 
 export type SegmentationEvaluator =
   | 'text_synthetic_auto'
@@ -11,6 +11,13 @@ export interface SegmentationPolicy {
   evaluator: SegmentationEvaluator;
   maxLengthChars?: number;
   sentenceBoundary?: boolean;
+  /**
+   * When set (non-empty), replaces the built-in sentence-boundary delimiter set for
+   * `text_synthetic_auto` and `text_punctuation_assisted`. Each entry is one delimiter
+   * string (often one character; multi-character sequences such as `…` or `\r\n` are allowed).
+   * Omit or leave unset to use SDK defaults (Latin/CJK/Arabic/Devanagari punctuation + newline).
+   */
+  sentenceBoundaryChars?: string[];
   languageHints?: string[];
   silenceThresholdMs?: number;
   energyThresholdDb?: number;
@@ -20,10 +27,10 @@ export interface SegmentationPolicy {
   checkpointIntervalMs?: number;
   punctuationInstanceId?: string;
   /**
-   * Required for `speech_vad_model` (same shape as STT/VAD `modelPath`).
-   * Resolved to an absolute path before the native bridge.
+   * Required for `speech_vad_model`. Same `FileSource` model location as
+   * `detectVadModel` / `createStreamingVAD`; JS runs detection before native attach.
    */
-  modelPath?: ModelPathConfig;
+  modelPath?: FileSource;
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;

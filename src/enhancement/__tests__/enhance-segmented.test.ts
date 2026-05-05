@@ -8,15 +8,12 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   },
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/enhancement'),
-}));
-
 jest.mock('../../detect', () => ({
   resolveFileSourceForDetect: jest.fn(async () => ({
     modelDir: '/models/enhancement',
     assetName: 'model.onnx',
   })),
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/enhancement'),
 }));
 
 jest.mock('../../model-languages', () => ({
@@ -59,7 +56,7 @@ describe('enhancement segmented offline API', () => {
 
   it('uses native single-shot path when segmentation is off', async () => {
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output');
@@ -90,7 +87,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {
@@ -105,7 +102,8 @@ describe('enhancement segmented offline API', () => {
     );
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_output',
-      'off_orchestrated'
+      'off_orchestrated',
+      undefined
     );
     expect(releasePipelineAudioBuffer).toHaveBeenCalledWith('off_orchestrated');
   });
@@ -127,7 +125,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {
@@ -139,7 +137,8 @@ describe('enhancement segmented offline API', () => {
     expect(result.failedSegment?.segmentId).toBe('speech_1');
     expect(native.populateOfflineAudioBufferIfEmpty).toHaveBeenCalledWith(
       'off_output',
-      'off_partial'
+      'off_partial',
+      undefined
     );
   });
 
@@ -159,7 +158,7 @@ describe('enhancement segmented offline API', () => {
     });
 
     const enhancement = await createEnhancement({
-      modelPath: { type: 'file', path: '/models/enhancement' },
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
     });
 
     const result = await enhancement.enhance('off_input', 'off_output', {

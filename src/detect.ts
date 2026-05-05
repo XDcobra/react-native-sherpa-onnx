@@ -173,3 +173,33 @@ export async function resolveFileSourceForDetect(
     throw toFileIOResolveError(error);
   }
 }
+
+/**
+ * Resolve a {@link FileSource} to a concrete local model directory for engine
+ * initialization.
+ *
+ * Unlike detect resolution, init requires a real filesystem directory.
+ * Name-only sources (for example content URIs) are rejected with explicit
+ * FILEIO_* errors to keep failure modes deterministic.
+ */
+export async function resolveFileSourceForModelInit(
+  source: FileSource
+): Promise<string> {
+  if (source.kind === 'contentUri' || source.kind === 'securityScoped') {
+    createFileIOError(
+      FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
+      `Model initialization does not support source kind '${source.kind}'. Use a directory-backed source such as 'fs', 'app', or 'pad'.`
+    );
+  }
+
+  const resolved = await resolveFileSourceForDetect(source);
+  const modelDir = resolved.modelDir.trim();
+  if (modelDir.length > 0) {
+    return modelDir;
+  }
+
+  createFileIOError(
+    FileIOErrorCode.RESOLVE_ERROR,
+    `Unable to resolve a local model directory for source kind '${source.kind}'.`
+  );
+}

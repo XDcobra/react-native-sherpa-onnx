@@ -88,7 +88,7 @@ Steps:
    - `cursor += consumedTokenCount`.
    - If `consumedTokenCount === 0`:
      - Emit warning `ALIGNMENT_ANCHOR_NO_PROGRESS`.
-     - If two consecutive anchors have zero progress → fail with `ALIGNMENT_FORCED_CTC_STUCK`.
+     - If three consecutive anchors have zero progress → fail with `ALIGNMENT_FORCED_CTC_STUCK`.
 3. After loop: if `cursor < refTokenCount` → emit warning `ALIGNMENT_RESIDUAL_TOKENS_REMAINING`. No silent fix.
 
 ### 4.3 Native function
@@ -160,7 +160,7 @@ Failure: throws/rejects with structured error including `code: 'FORCED_CTC_FAILE
 | Code | Layer | Meaning |
 |------|-------|---------|
 | `ALIGNMENT_FORCED_CTC_FAILED` | native/driver | Native rejected slice or text |
-| `ALIGNMENT_FORCED_CTC_STUCK` | driver | Two consecutive anchors with zero progress |
+| `ALIGNMENT_FORCED_CTC_STUCK` | driver | Three consecutive anchors with zero progress |
 | `ALIGNMENT_ANCHOR_OUT_OF_RANGE` | driver | Anchor extends past audio length |
 
 Warnings on result:
@@ -188,7 +188,7 @@ Warnings on result:
   - Asserts global timestamps.
   - Asserts residual warning when last anchor under-consumes.
 - `src/alignment/chunkedForcedCtc/__tests__/driver-stuck.test.ts`:
-  - Mock returns 0 consumed twice → throws `ALIGNMENT_FORCED_CTC_STUCK`.
+  - Mock returns 0 consumed three times → throws `ALIGNMENT_FORCED_CTC_STUCK`.
 
 ### Contract
 

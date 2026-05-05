@@ -8,6 +8,8 @@
 
 For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For immutable offline workflows, see [Pipeline audio buffers — offline](audiobuffer-offline.md).
 
+Practical default policy: live buffers default to `16000` Hz, so VAD/STT/segmentation typically consume `16000` PCM unless you explicitly configure another rate.
+
 ---
 
 ## Concepts
@@ -90,7 +92,7 @@ const SAMPLE_RATE = 16000;
 
 // Online recognizer + text sink (same sample rate as `live` below).
 const recognizer = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/my-streaming-model' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/my-streaming-model' },
   modelType: 'transducer',
 });
 const textOut = await createLiveTextBuffer({
@@ -268,6 +270,8 @@ function createEmptyLiveAudioBuffer(
 ): Promise<LiveAudioBufferRef>;
 ```
 
+If `options.sampleRate` is omitted, the live buffer defaults to `16000` Hz.
+
 ```ts
 const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
@@ -303,6 +307,12 @@ await ingest.done;
 ```
 
 Use this when the source audio is still a file and you want downstream native consumers to start processing before the whole file has been decoded.
+
+`options.targetSampleRateHz` semantics:
+
+- omit / `undefined` → `16000` Hz
+- `0` → keep source file rate
+- `> 0` → resample to that exact rate
 
 - Source kind: any `FileSource`
 - Buffer state: live buffer must still be `recording`
@@ -529,7 +539,7 @@ The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 const stt = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-stt' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' },
   modelType: 'auto',
 });
 

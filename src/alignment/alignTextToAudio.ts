@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolveModelPath } from '../utils';
+import { resolveFileSourceForModelInit } from '../detect';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,
@@ -61,14 +61,26 @@ async function buildNativeOptions(
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const resolved = (await resolveModelPath(options.modelPath)).trim();
-    if (!resolved) {
+    const modelDir = (
+      await resolveFileSourceForModelInit(options.modelSource)
+    ).trim();
+    if (!modelDir) {
       throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.modelPath for accurate alignment.'
+        'ALIGNMENT_MODEL_MISSING: Provide options.modelSource for accurate alignment.'
       );
     }
+    const det = await SherpaOnnx.detectAlignmentModel(modelDir, 'auto');
+    const onnxPath =
+      typeof det.paths?.model === 'string' ? det.paths.model.trim() : '';
+    if (!det.success || !onnxPath) {
+      const err =
+        typeof det.error === 'string' && det.error.trim().length > 0
+          ? det.error.trim()
+          : 'Alignment model detection failed: no ONNX path.';
+      throw new Error(`ALIGNMENT_MODEL_LOAD_FAILED: ${err}`);
+    }
     const base: Record<string, unknown> = {
-      modelPath: resolved,
+      modelPath: onnxPath,
       ...(language.length > 0 ? { language } : {}),
     };
     if (options.segmentation?.mode !== 'off' && options.segmentation != null) {
@@ -136,7 +148,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         segmentOut,
         anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
         hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
-        modelPath: options.modelPath,
+        modelSource: options.modelSource,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
         ...(typeof options.language === 'string'
           ? { language: options.language }
@@ -149,7 +161,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       audioIn,
       segmentOut,
       anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
-      modelPath: options.modelPath,
+      modelSource: options.modelSource,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
       ...(typeof options.language === 'string'
         ? { language: options.language }

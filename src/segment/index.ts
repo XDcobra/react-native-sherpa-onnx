@@ -59,19 +59,120 @@ import type {
   SegmentationEngineRef,
   SegmentationPolicy,
 } from './engine-types';
-import { resolveModelPath } from '../utils';
+import { detectVadModel } from '../vad/engine';
 import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
+const MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES = 128;
+const MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN = 64;
+
+function normalizeSentenceBoundaryCharsForNative(
+  raw: unknown
+): string[] | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must be an array of strings when provided'
+    );
+  }
+  if (raw.length > MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES) {
+    throw new Error(
+      `SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must have at most ${MAX_SENTENCE_BOUNDARY_DELIMITER_ENTRIES} entries`
+    );
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: sentenceBoundaryChars must contain only strings'
+      );
+    }
+    if (item.length === 0) {
+      continue;
+    }
+    if (item.length > MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN) {
+      throw new Error(
+        `SEGMENT_INVALID_ARGUMENT: each sentenceBoundaryChars entry must be at most ${MAX_SENTENCE_BOUNDARY_DELIMITER_STRLEN} characters`
+      );
+    }
+    out.push(item);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function normalizeSegmentationPolicyFromNative(
+  raw: unknown
+): SegmentationPolicy {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('SEGMENT_INTERNAL: invalid native segmentation policy');
+  }
+  const p = { ...(raw as Record<string, unknown>) } as Record<string, unknown>;
+  const mp = p.modelPath;
+  if (mp != null) {
+    if (typeof mp === 'string' && mp.trim().length > 0) {
+      p.modelPath = { kind: 'fs', path: mp.trim() };
+    } else if (typeof mp === 'object' && !Array.isArray(mp)) {
+      const m = mp as Record<string, unknown>;
+      if (m.kind === 'fs' && typeof m.path === 'string') {
+        p.modelPath = { kind: 'fs', path: m.path };
+      } else if (m.type === 'file' && typeof m.path === 'string') {
+        p.modelPath = { kind: 'fs', path: m.path };
+      } else {
+        delete p.modelPath;
+      }
+    }
+  }
+  delete p.modelType;
+  return p as unknown as SegmentationPolicy;
+}
+
 async function segmentationPolicyForNative(
   policy: SegmentationPolicy
 ): Promise<Object> {
-  const { modelPath: modelPathConfig, ...rest } = policy;
+  const { modelPath: fileSource, sentenceBoundaryChars, ...rest } = policy;
   const out: Record<string, unknown> = { ...rest };
-  if (modelPathConfig != null) {
-    out.modelPath = await resolveModelPath(modelPathConfig);
+  const normalized = normalizeSentenceBoundaryCharsForNative(
+    sentenceBoundaryChars
+  );
+  if (normalized !== undefined) {
+    out.sentenceBoundaryChars = normalized;
+  }
+  if (policy.evaluator === 'speech_vad_model') {
+    if (fileSource == null) {
+      throw new Error(
+        'SEGMENT_INVALID_ARGUMENT: speech_vad_model requires policy.modelPath'
+      );
+    }
+    const detect = await detectVadModel(fileSource, { modelType: 'auto' });
+    const onnxPath = detect.paths?.model?.trim();
+    if (
+      !detect.success ||
+      onnxPath == null ||
+      onnxPath.length === 0 ||
+      detect.modelType == null ||
+      detect.modelType === ''
+    ) {
+      const detail =
+        typeof detect.error === 'string' && detect.error.trim().length > 0
+          ? detect.error.trim()
+          : 'VAD model detection failed';
+      throw Object.assign(
+        new Error(
+          `POLICY_MODEL_UNAVAILABLE: speech_vad_model requires a detectable VAD bundle (${detail})`
+        ),
+        { code: 'POLICY_MODEL_UNAVAILABLE' }
+      );
+    }
+    out.modelPath = onnxPath;
+    out.modelType = detect.modelType;
+  } else if (fileSource != null) {
+    throw new Error(
+      'SEGMENT_INVALID_ARGUMENT: policy.modelPath is only valid for speech_vad_model'
+    );
   }
   return out as Object;
 }
@@ -85,7 +186,7 @@ const pendingOfflineAudioSegmentBufferByParentBufferId = new Map<
 const DEFAULT_TEXT_POLICY: SegmentationPolicy = {
   evaluator: 'text_synthetic_auto',
   sentenceBoundary: true,
-  maxLengthChars: 500,
+  maxLengthChars: 2000,
 };
 
 const DEFAULT_SPEECH_POLICY: SegmentationPolicy = {
@@ -93,7 +194,7 @@ const DEFAULT_SPEECH_POLICY: SegmentationPolicy = {
   silenceThresholdMs: 500,
   energyThresholdDb: -40,
   minSegmentMs: 1000,
-  maxSegmentMs: 30000,
+  maxSegmentMs: 120000,
   hangoverMs: 300,
 };
 
@@ -165,7 +266,7 @@ function toEngineInfo(raw: {
     engineId: raw.engineId,
     attachedBufferId: raw.attachedBufferId,
     domain: raw.domain,
-    policy: raw.policy as SegmentationPolicy,
+    policy: normalizeSegmentationPolicyFromNative(raw.policy),
     state: raw.state,
     totalSegmentsCommitted: raw.totalSegmentsCommitted,
     ...(typeof raw.lastSegmentId === 'string' && raw.lastSegmentId.length > 0
@@ -239,7 +340,7 @@ function normalizeLinkType(raw: unknown): SegmentLinkType {
   ) {
     return raw;
   }
-  throw new Error(`SEGMENT_LINK_INVALID: invalid linkType \"${String(raw)}\"`);
+  throw new Error(`SEGMENT_LINK_INVALID: invalid linkType "${String(raw)}"`);
 }
 
 function sanitizeLink(raw: {
@@ -307,7 +408,7 @@ function toPublicTextSegmentMeta(
 async function readTextSegments(
   liveTextBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<TextSegment[]> {
   const count = await getLiveTextBufferSegmentCount(liveTextBufferId);
   if (count <= 0 || maxCount === 0) return [];
@@ -384,7 +485,7 @@ async function readTextSegments(
 async function readOfflineTextSegments(
   offlineTextBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<TextSegment[]> {
   const info = await getPipelineTextBufferInfo(offlineTextBufferId);
   if (info.kind !== 'offlineTextBuffer') {
@@ -453,7 +554,7 @@ async function readSpeechSegmentsFromSegmentBuffer(
   segmentBufferId: string,
   parentBufferId: string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SpeechSegment[]> {
   const totalCount = segmentBufferId.startsWith('seg_live_')
     ? await getLiveSegmentBufferSegmentCount(segmentBufferId)
@@ -472,15 +573,9 @@ async function readSpeechSegmentsFromSegmentBuffer(
   return raw
     .filter((segment) => segment.kind === 'speech')
     .map((segment, idx) => {
-      const nativeReason = toSegmentReason(
-        (segment as unknown as { reason?: string }).reason
-      );
-      const nativeSource = toSegmentSource(
-        (segment as unknown as { source?: string }).source
-      );
-      const nativeCreatedAtMsRaw = (
-        segment as unknown as { createdAtMs?: number }
-      ).createdAtMs;
+      const nativeReason = toSegmentReason(segment.reason);
+      const nativeSource = toSegmentSource(segment.source);
+      const nativeCreatedAtMsRaw = segment.createdAtMs;
       const annotation = getSpeechSegmentAnnotation(segment.id);
       return {
         segmentId: segment.id,
@@ -897,7 +992,7 @@ export async function getSegmentBuffer(
 export async function getSegments(
   buffer: SegmentBufferSource,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<Segment[]> {
   const window = normalizeReadWindow(startIndex, maxCount);
   const segBuffer = await getSegmentBuffer(buffer);
@@ -1057,7 +1152,7 @@ export async function getTextSegmentsForSpeech(
 export async function getAllSegmentLinks(
   linkMap: SegmentLinkMapRef | string,
   startIndex = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SegmentLink[]> {
   const linkMapId = typeof linkMap === 'string' ? linkMap : linkMap.linkMapId;
   const out = await getNative().getAllSegmentLinks(
@@ -1098,3 +1193,43 @@ export async function releaseSegmentLinkMap(
   const linkMapId = typeof linkMap === 'string' ? linkMap : linkMap.linkMapId;
   await getNative().releaseSegmentLinkMap(linkMapId);
 }
+
+export type {
+  SegmentationConfig,
+  SegmentationEngineInfo,
+  SegmentationEngineRef,
+  SegmentationEvaluator,
+  SegmentationPolicy,
+} from './engine-types';
+
+export type { SegmentationMode } from './runtime-state';
+
+export type {
+  Segment,
+  SegmentBase,
+  SegmentDomain,
+  SegmentReason,
+  SegmentSource,
+  SpeechSegment,
+  SpeechSegmentVadInfo,
+  TextSegment,
+} from './segment';
+export { isSpeechSegment, isTextSegment } from './segment';
+
+export type {
+  SegmentLink,
+  SegmentLinkMapInfo,
+  SegmentLinkMapRef,
+  SegmentLinkType,
+} from './segment-link';
+
+export type { ValidateSegmentationOptions } from './validation';
+export { validateSegmentationConfig } from './validation';
+
+export {
+  segmentFromJson,
+  segmentLinkFromJson,
+  segmentLinkToJson,
+  segmentToJson,
+} from './segment-serialization';
+export { validateSegment, validateSegmentLink } from './segment-validation';

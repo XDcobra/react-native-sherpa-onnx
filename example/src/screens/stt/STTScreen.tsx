@@ -7,22 +7,15 @@ import {
   ScrollView,
   Alert,
   Share,
-  Platform,
-  Pressable,
-  ToastAndroid,
-  DeviceEventEmitter,
 } from 'react-native';
 import { styles } from './STTScreen.styles';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
 import {
-  autoModelPath,
   getAssetPackPath,
   listAssetModels,
-  resolveModelPath,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
@@ -32,15 +25,10 @@ import {
 import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   createSTT,
-  createStreamingSTT,
   detectSttModel,
   type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
-import type {
-  SttEngine,
-  LiveSttEngine,
-  SttPipelineHandle,
-} from 'react-native-sherpa-onnx/stt';
+import type { SttEngine } from 'react-native-sherpa-onnx/stt';
 import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
 import {
   getAssetModelPath,
@@ -48,20 +36,11 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import { getAudioFilesForModel, type AudioFileInfo } from '../../audioConfig';
+import { getAudioFilesForModel } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import {
-  createEmptyLiveAudioBuffer,
-  createOfflineAudioBufferFromFile,
-  startMicToLiveAudioBuffer,
-  stopMicToLiveAudioBuffer,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineTextBuffer,
-  createLiveTextBuffer,
   getPipelineTextBufferInfo,
   getOfflineTextBufferTextSlice,
   getOfflineTextBufferTokensSlice,
@@ -70,37 +49,21 @@ import {
   getOfflineTextBufferLang,
   getOfflineTextBufferEmotion,
   getOfflineTextBufferEvent,
-  getLiveTextBufferPartialSlice,
-  getLiveTextBufferSegmentCount,
-  getLiveTextBufferSegments,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { OfflineTextBufferInfo } from 'react-native-sherpa-onnx/textbuffer';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  startPcmFilePlayback,
-  stopPcmFilePlayback,
-  type ActivePcmFilePlayback,
-} from '../../utils/audioFilePcmPlayback';
-import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
-import {
-  fetchInputDevices,
-  fetchOutputDevices,
-  keepValidDeviceSelection,
-  type AudioRouteDevice,
-} from '../../utils/audioDevices';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+} from '../../components/OfflineAudioBufferWidget';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 
 const PAD_PACK_NAME = 'sherpa_models';
-
-type SttOfflineInputBufferState = {
-  bufferId: string;
-  sourceType: 'example' | 'own';
-  sourceLabel: string;
-  selectedAudioId: string | null;
-  customAudioPath: string | null;
-  customAudioName: string | null;
-};
 
 type SttTranscriptionResult = {
   text: string;
@@ -118,7 +81,7 @@ type SttOfflineTextBufferState = SttTranscriptionResult & {
   createdAt: number;
 };
 
-let gSttOfflineInputBuffer: SttOfflineInputBufferState | null = null;
+let gSttOfflineInputBuffer: OfflineAudioBufferInfo | null = null;
 let gSttOfflineTextBuffers: SttOfflineTextBufferState[] = [];
 
 export default function STTScreen() {
@@ -139,21 +102,11 @@ export default function STTScreen() {
   >([]);
   const [selectedModelType, setSelectedModelType] =
     useState<STTModelType | null>(null);
-  const [isStreamingModel, setIsStreamingModel] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<'init' | 'transcribe' | null>(
     null
   );
-  const [audioSourceType, setAudioSourceType] = useState<
-    'example' | 'own' | 'live' | null
-  >(null);
-  const [isLiveRecording, setIsLiveRecording] = useState(false);
-  const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
-    null
-  );
-  const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
-  const [customAudioName, setCustomAudioName] = useState<string | null>(null);
   const [transcriptionResult, setTranscriptionResult] =
     useState<SttTranscriptionResult | null>(null);
   const [offlineTextBuffers, setOfflineTextBuffers] = useState<
@@ -163,153 +116,19 @@ export default function STTScreen() {
   const [timestampsExpanded, setTimestampsExpanded] = useState(false);
   const [durationsExpanded, setDurationsExpanded] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const [preparingAudioBuffer, setPreparingAudioBuffer] = useState(false);
-  const [offlineBufferBuildProgress, setOfflineBufferBuildProgress] = useState<
-    number | null
-  >(null);
-  const [offlineBufferBuildStatus, setOfflineBufferBuildStatus] = useState<
-    string | null
-  >(null);
-  const [offlineBufferPlaying, setOfflineBufferPlaying] = useState(false);
   const [offlineInputBuffer, setOfflineInputBuffer] =
-    useState<SttOfflineInputBufferState | null>(gSttOfflineInputBuffer);
-  const [inputDevices, setInputDevices] = useState<AudioRouteDevice[]>([]);
-  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
-  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState<
-    string | null
-  >(null);
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
-    string | null
-  >(null);
+    useState<OfflineAudioBufferInfo | null>(gSttOfflineInputBuffer);
+  const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'off',
+  });
 
   const sttEngineRef = useRef<SttEngine | null>(null);
-  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
-  const offlineBufferPlayerRef = useRef<PcmPlayer | null>(null);
-  const streamingEngineRef = useRef<LiveSttEngine | null>(null);
-  const livePipelineRef = useRef<{
-    liveAudioBufferId: string;
-    liveTextBufferId: string;
-    pipelineHandle: SttPipelineHandle;
-    micErrorSubscription: { remove: () => void };
-    audioUnsubscribe: () => void;
-    textUnsubscribe: () => void;
-  } | null>(null);
-  const livePreviewTimerRef = useRef<ReturnType<typeof setInterval> | null>(
-    null
-  );
-  const livePreviewInFlightRef = useRef(false);
-  const offlineBufferBuildRequestRef = useRef(0);
-  const liveAccumulatorRef = useRef<{
-    segmentCount: number;
-    segmentTexts: string[];
-  }>({ segmentCount: 0, segmentTexts: [] });
   const STT_NUM_THREADS = 2;
-  const LIVE_SAMPLE_RATE = 16000;
 
-  const refreshAudioDevices = useCallback(async () => {
-    const [nextInputDevices, nextOutputDevices] = await Promise.all([
-      fetchInputDevices(),
-      fetchOutputDevices(),
-    ]);
-
-    setInputDevices(nextInputDevices);
-    setOutputDevices(nextOutputDevices);
-    setSelectedInputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextInputDevices)
-    );
-    setSelectedOutputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextOutputDevices)
-    );
-  }, []);
-
-  const isLiveSupported = isStreamingModel;
   const availableAudioFiles = useMemo(
     () => (currentModelFolder ? getAudioFilesForModel(currentModelFolder) : []),
     [currentModelFolder]
   );
-
-  const buildTranscriptionResult = (
-    text: string,
-    tokens: string[] = [],
-    timestamps: number[] = []
-  ): SttTranscriptionResult => ({
-    text,
-    tokens,
-    timestamps,
-    lang: '',
-    emotion: '',
-    event: '',
-    durations: [],
-  });
-
-  const composeLiveText = (segmentTexts: string[], partialText: string) => {
-    const parts = segmentTexts
-      .map((segment) => segment.trim())
-      .filter((segment) => segment.length > 0);
-    const trimmedPartial = partialText.trim();
-    if (trimmedPartial.length > 0) {
-      parts.push(trimmedPartial);
-    }
-    return parts.join(' ').trim();
-  };
-
-  const stopLivePreviewPolling = () => {
-    if (livePreviewTimerRef.current != null) {
-      clearInterval(livePreviewTimerRef.current);
-      livePreviewTimerRef.current = null;
-    }
-    livePreviewInFlightRef.current = false;
-  };
-
-  const syncLivePreview = async (liveTextBufferId: string) => {
-    if (livePreviewInFlightRef.current) return;
-    livePreviewInFlightRef.current = true;
-    try {
-      const accumulator = liveAccumulatorRef.current;
-      const segmentCount = await getLiveTextBufferSegmentCount(
-        liveTextBufferId
-      );
-
-      if (segmentCount < accumulator.segmentCount) {
-        const fullSegments =
-          segmentCount > 0
-            ? await getLiveTextBufferSegments(liveTextBufferId, 0, segmentCount)
-            : [];
-        accumulator.segmentCount = segmentCount;
-        accumulator.segmentTexts = fullSegments
-          .map((segment) => segment.text)
-          .filter((segment) => segment.trim().length > 0);
-      } else if (segmentCount > accumulator.segmentCount) {
-        const newSegments = await getLiveTextBufferSegments(
-          liveTextBufferId,
-          accumulator.segmentCount,
-          segmentCount - accumulator.segmentCount
-        );
-        for (const segment of newSegments) {
-          if (segment.text.trim().length > 0) {
-            accumulator.segmentTexts.push(segment.text);
-          }
-        }
-        accumulator.segmentCount = segmentCount;
-      }
-
-      const partialText = await getLiveTextBufferPartialSlice(
-        liveTextBufferId,
-        0,
-        4096
-      );
-      const previewText = composeLiveText(
-        accumulator.segmentTexts,
-        partialText
-      );
-
-      setTranscriptionResult(buildTranscriptionResult(previewText));
-    } catch {
-      // Ignore polling race conditions during teardown.
-    } finally {
-      livePreviewInFlightRef.current = false;
-    }
-  };
 
   // Load available models on mount
   useEffect(() => {
@@ -325,12 +144,6 @@ export default function STTScreen() {
     });
     return unsubscribe;
   }, []);
-
-  useEffect(() => {
-    refreshAudioDevices().catch(() => {
-      // ignore missing device-list support on unsupported platforms
-    });
-  }, [refreshAudioDevices]);
 
   // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
@@ -349,50 +162,6 @@ export default function STTScreen() {
           .join(', ')}`
       );
     }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      stopLivePreviewPolling();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (gSttOfflineInputBuffer == null) {
-      return;
-    }
-    setOfflineInputBuffer(gSttOfflineInputBuffer);
-    setAudioSourceType(gSttOfflineInputBuffer.sourceType);
-    setCustomAudioPath(gSttOfflineInputBuffer.customAudioPath);
-    setCustomAudioName(gSttOfflineInputBuffer.customAudioName);
-  }, []);
-
-  useEffect(() => {
-    if (
-      offlineInputBuffer == null ||
-      offlineInputBuffer.selectedAudioId == null
-    ) {
-      return;
-    }
-    const matched = availableAudioFiles.find(
-      (audio) => audio.id === offlineInputBuffer.selectedAudioId
-    );
-    if (matched) {
-      setSelectedAudio(matched);
-    }
-  }, [availableAudioFiles, offlineInputBuffer]);
-
-  useEffect(() => {
-    return () => {
-      if (pcmPlaybackRef.current) {
-        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
-        pcmPlaybackRef.current = null;
-      }
-      if (offlineBufferPlayerRef.current) {
-        offlineBufferPlayerRef.current.destroy().catch(() => {});
-        offlineBufferPlayerRef.current = null;
-      }
-    };
   }, []);
 
   const loadAvailableModels = async () => {
@@ -477,119 +246,6 @@ export default function STTScreen() {
     return getAssetModelPath(modelFolder);
   };
 
-  const resolveInputSource = async (
-    override?: {
-      selectedAudio?: AudioFileInfo | null;
-      customAudioPath?: string | null;
-      customAudioName?: string | null;
-    } | null
-  ): Promise<{
-    source: FileSource;
-    sourceType: 'example' | 'own';
-    sourceLabel: string;
-    selectedAudioId: string | null;
-    customAudioPath: string | null;
-    customAudioName: string | null;
-  }> => {
-    const effectiveCustomAudioPath =
-      override?.customAudioPath ?? customAudioPath;
-    const effectiveCustomAudioName =
-      override?.customAudioName ?? customAudioName;
-
-    if (effectiveCustomAudioPath) {
-      const trimmed = effectiveCustomAudioPath.trim();
-      if (trimmed.startsWith('content://')) {
-        return {
-          source: { kind: 'contentUri', uri: trimmed },
-          sourceType: 'own',
-          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-          selectedAudioId: null,
-          customAudioPath: effectiveCustomAudioPath,
-          customAudioName: effectiveCustomAudioName,
-        };
-      }
-      if (trimmed.startsWith('file://')) {
-        const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
-        if (filePath.startsWith('/proc/self/fd/')) {
-          throw new Error(
-            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
-          );
-        }
-        return {
-          source: { kind: 'fs', path: filePath },
-          sourceType: 'own',
-          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-          selectedAudioId: null,
-          customAudioPath: effectiveCustomAudioPath,
-          customAudioName: effectiveCustomAudioName,
-        };
-      }
-      if (trimmed.startsWith('/proc/self/fd/')) {
-        throw new Error(
-          'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
-        );
-      }
-      return {
-        source: { kind: 'fs', path: trimmed },
-        sourceType: 'own',
-        sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-        selectedAudioId: null,
-        customAudioPath: effectiveCustomAudioPath,
-        customAudioName: effectiveCustomAudioName,
-      };
-    }
-
-    const effectiveSelectedAudio = override?.selectedAudio ?? selectedAudio;
-    if (!effectiveSelectedAudio) {
-      throw new Error('Please select an audio file (example or local WAV)');
-    }
-
-    const audioPathConfig = autoModelPath(effectiveSelectedAudio.id);
-    const resolvedAudioPath = await resolveModelPath(audioPathConfig);
-    return {
-      source: { kind: 'fs', path: resolvedAudioPath },
-      sourceType: 'example',
-      sourceLabel: effectiveSelectedAudio.name,
-      selectedAudioId: effectiveSelectedAudio.id,
-      customAudioPath: null,
-      customAudioName: null,
-    };
-  };
-
-  const clearOfflineInputBuffer = async (resetSelection: boolean) => {
-    offlineBufferBuildRequestRef.current += 1;
-    setOfflineBufferBuildProgress(null);
-    setOfflineBufferBuildStatus(null);
-
-    if (offlineBufferPlayerRef.current) {
-      await offlineBufferPlayerRef.current.destroy().catch(() => {});
-      offlineBufferPlayerRef.current = null;
-      setOfflineBufferPlaying(false);
-    }
-
-    if (pcmPlaybackRef.current) {
-      const activePlayback = pcmPlaybackRef.current;
-      pcmPlaybackRef.current = null;
-      await stopPcmFilePlayback(activePlayback);
-    }
-
-    const existing = gSttOfflineInputBuffer;
-    gSttOfflineInputBuffer = null;
-    setOfflineInputBuffer(null);
-
-    if (existing?.bufferId) {
-      await releasePipelineAudioBuffer(existing.bufferId).catch(() => {});
-    }
-
-    if (resetSelection) {
-      setAudioSourceType(null);
-      setSelectedAudio(null);
-      setCustomAudioPath(null);
-      setCustomAudioName(null);
-      setTranscriptionResult(null);
-    }
-  };
-
   const appendOfflineTextBuffer = useCallback(
     (result: SttOfflineTextBufferState) => {
       setOfflineTextBuffers((prev) => {
@@ -620,98 +276,6 @@ export default function STTScreen() {
     });
   }, []);
 
-  const prepareOfflineInputBuffer = async (
-    override?: {
-      selectedAudio?: AudioFileInfo | null;
-      customAudioPath?: string | null;
-      customAudioName?: string | null;
-    } | null
-  ) => {
-    const requestId = ++offlineBufferBuildRequestRef.current;
-    setPreparingAudioBuffer(true);
-    setOfflineBufferBuildProgress(0);
-    setOfflineBufferBuildStatus('Preparing OfflineAudioBuffer...');
-    setError(null);
-    setErrorSource(null);
-    setTranscriptionResult(null);
-
-    try {
-      const resolved = await resolveInputSource(override);
-      if (requestId !== offlineBufferBuildRequestRef.current) {
-        return;
-      }
-
-      setOfflineBufferBuildStatus(
-        `Decoding \"${resolved.sourceLabel}\" into OfflineAudioBuffer...`
-      );
-
-      if (gSttOfflineInputBuffer?.bufferId) {
-        await releasePipelineAudioBuffer(gSttOfflineInputBuffer.bufferId).catch(
-          () => {}
-        );
-      }
-
-      const audioRef = await createOfflineAudioBufferFromFile(resolved.source, {
-        targetSampleRateHz: LIVE_SAMPLE_RATE,
-        forceMono: true,
-        onProgress: (event) => {
-          if (requestId !== offlineBufferBuildRequestRef.current) {
-            return;
-          }
-
-          const percent = Math.max(0, Math.min(100, event.percent ?? 0));
-          setOfflineBufferBuildProgress(percent);
-
-          const totalFrames = event.totalFramesEstimate ?? 0;
-          if (totalFrames > 0) {
-            setOfflineBufferBuildStatus(
-              `Decoding \"${resolved.sourceLabel}\"... ${Math.round(
-                percent
-              )}% (${event.framesDecoded}/${totalFrames} frames)`
-            );
-            return;
-          }
-
-          setOfflineBufferBuildStatus(
-            `Decoding \"${resolved.sourceLabel}\"... ${Math.round(percent)}%`
-          );
-        },
-      });
-
-      if (requestId !== offlineBufferBuildRequestRef.current) {
-        await releasePipelineAudioBuffer(audioRef.bufferId).catch(() => {});
-        return;
-      }
-
-      const nextBufferState: SttOfflineInputBufferState = {
-        bufferId: audioRef.bufferId,
-        sourceType: resolved.sourceType,
-        sourceLabel: resolved.sourceLabel,
-        selectedAudioId: resolved.selectedAudioId,
-        customAudioPath: resolved.customAudioPath,
-        customAudioName: resolved.customAudioName,
-      };
-      gSttOfflineInputBuffer = nextBufferState;
-      setOfflineInputBuffer(nextBufferState);
-      setAudioSourceType(resolved.sourceType);
-      setOfflineBufferBuildProgress(null);
-      setOfflineBufferBuildStatus(null);
-    } catch (err) {
-      if (requestId !== offlineBufferBuildRequestRef.current) {
-        return;
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorSource('transcribe');
-      setError(msg);
-      setOfflineBufferBuildProgress(null);
-      setOfflineBufferBuildStatus(null);
-    } finally {
-      if (requestId === offlineBufferBuildRequestRef.current) {
-        setPreparingAudioBuffer(false);
-      }
-    }
-  };
-
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
     setError(null);
@@ -719,7 +283,6 @@ export default function STTScreen() {
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
-    setIsStreamingModel(false);
 
     try {
       // Release previous engine if switching to another model
@@ -733,7 +296,7 @@ export default function STTScreen() {
       const modelPath = resolveSttModelPath(modelFolder);
 
       const engine = await createSTT({
-        modelPath,
+        modelSource: modelPath,
         numThreads: STT_NUM_THREADS,
       });
 
@@ -759,7 +322,6 @@ export default function STTScreen() {
       setDetectedModels(normalizedDetected);
       setCurrentModelFolder(modelFolder);
       setSelectedModelForInit(modelFolder);
-      setIsStreamingModel(detectResult.isStreaming);
       if (loadedType) {
         setSelectedModelType(loadedType);
       } else if (normalizedDetected.length === 1 && normalizedDetected[0]) {
@@ -780,10 +342,6 @@ export default function STTScreen() {
         loadedType ?? normalizedDetected[0]?.type ?? null
       );
 
-      setAudioSourceType(null);
-      setSelectedAudio(null);
-      setCustomAudioPath(null);
-      setCustomAudioName(null);
       setTranscriptionResult(null);
     } catch (err) {
       // Log full error details for debugging
@@ -854,7 +412,10 @@ export default function STTScreen() {
       const textBufferId = textRef.bufferId;
       let keepTextBuffer = false;
       try {
-        await engine.transcribe(offlineInputBuffer.bufferId as any, textRef);
+        const segOption = buildSegmentationOption(segConfig);
+        await engine.transcribe(offlineInputBuffer.bufferId as any, textRef, {
+          segmentation: segOption,
+        });
 
         const rawInfo = await getPipelineTextBufferInfo(textBufferId);
         const info = rawInfo as OfflineTextBufferInfo;
@@ -951,10 +512,6 @@ export default function STTScreen() {
   };
 
   const handleFree = async () => {
-    if (isLiveRecording || livePipelineRef.current) {
-      await handleLivePressOut();
-    }
-
     const engine = sttEngineRef.current;
     if (!engine) return;
     try {
@@ -969,7 +526,12 @@ export default function STTScreen() {
     setDetectedModels([]);
     setSelectedModelType(null);
     setInitResult(null);
-    await clearOfflineInputBuffer(true);
+    const prevBuf = gSttOfflineInputBuffer;
+    gSttOfflineInputBuffer = null;
+    setOfflineInputBuffer(null);
+    if (prevBuf?.bufferId) {
+      await releasePipelineAudioBuffer(prevBuf.bufferId).catch(() => {});
+    }
     setTranscriptionResult(null);
     const textBuffersToRelease = gSttOfflineTextBuffers;
     gSttOfflineTextBuffers = [];
@@ -979,353 +541,6 @@ export default function STTScreen() {
     }
     setError(null);
     setErrorSource(null);
-  };
-
-  const handlePickLocalFile = async () => {
-    setError(null);
-    setErrorSource(null);
-    setTranscriptionResult(null);
-
-    try {
-      const res = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
-      });
-
-      // res may be an array or single object depending on version/config
-      const file = Array.isArray(res) ? res[0] : res;
-      const uri =
-        file.uri ??
-        (file as any).fileCopyUri ??
-        (file as any).localUri ??
-        (file as any).nativeUri;
-      const name = file.name || uri?.split('/')?.pop() || 'local.wav';
-
-      if (!uri) {
-        setErrorSource('transcribe');
-        setError('Could not get file URI from picker result');
-        return;
-      }
-      const fsPathProbe = uri.startsWith('file://')
-        ? decodeURI(uri.replace(/^file:\/\//, ''))
-        : uri;
-      if (
-        uri.startsWith('/proc/self/fd/') ||
-        fsPathProbe.startsWith('/proc/self/fd/')
-      ) {
-        setErrorSource('transcribe');
-        setError(
-          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
-        );
-        return;
-      }
-
-      setCustomAudioPath(uri);
-      setCustomAudioName(name);
-      // clear example selection when choosing a local file
-      setSelectedAudio(null);
-      setAudioSourceType('own');
-      await prepareOfflineInputBuffer({
-        customAudioPath: uri,
-        customAudioName: name,
-      });
-    } catch (err: any) {
-      const isCancel =
-        (DocumentPicker &&
-          typeof (DocumentPicker as any).isCancel === 'function' &&
-          (DocumentPicker as any).isCancel(err)) ||
-        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
-        err?.name === 'DocumentPickerCanceled' ||
-        (typeof err?.message === 'string' &&
-          err.message.toLowerCase().includes('cancel'));
-      if (isCancel) {
-        // user cancelled, ignore
-        return;
-      }
-      console.error('File pick error:', err);
-      setErrorSource('transcribe');
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const handlePlayAudio = async () => {
-    if (!customAudioPath) return;
-    try {
-      if (pcmPlaybackRef.current) {
-        const activePlayback = pcmPlaybackRef.current;
-        pcmPlaybackRef.current = null;
-        await stopPcmFilePlayback(activePlayback);
-      }
-
-      let nextPlayback: ActivePcmFilePlayback | null = null;
-      await setPipelineAudioRoutePreference({
-        outputDeviceId: selectedOutputDeviceId ?? null,
-      }).catch(() => {});
-      nextPlayback = await startPcmFilePlayback(customAudioPath, () => {
-        if (pcmPlaybackRef.current === nextPlayback) {
-          pcmPlaybackRef.current = null;
-        }
-      });
-      pcmPlaybackRef.current = nextPlayback;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Playback failed', msg);
-    }
-  };
-
-  const handleToggleOfflineBufferPlayback = async () => {
-    const buffer = offlineInputBuffer;
-    if (!buffer) return;
-
-    if (offlineBufferPlayerRef.current) {
-      const current = offlineBufferPlayerRef.current;
-      offlineBufferPlayerRef.current = null;
-      setOfflineBufferPlaying(false);
-      await current.destroy().catch(() => {});
-      return;
-    }
-
-    try {
-      await setPipelineAudioRoutePreference({
-        outputDeviceId: selectedOutputDeviceId ?? null,
-      }).catch(() => {});
-      const player = await createPcmPlayer(buffer.bufferId as any, {
-        onEnded: () => {
-          const current = offlineBufferPlayerRef.current;
-          offlineBufferPlayerRef.current = null;
-          setOfflineBufferPlaying(false);
-          if (current) {
-            current.destroy().catch(() => {});
-          }
-        },
-      });
-      offlineBufferPlayerRef.current = player;
-      setOfflineBufferPlaying(true);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Playback failed', msg);
-      setOfflineBufferPlaying(false);
-    }
-  };
-
-  const handleLivePressIn = async () => {
-    if (!currentModelFolder || !selectedModelType || !isLiveSupported) return;
-    if (isLiveRecording) {
-      handleLivePressOut();
-      return;
-    }
-    if (livePipelineRef.current) {
-      await handleLivePressOut();
-    }
-
-    setError(null);
-    setErrorSource(null);
-    setTranscriptionResult(null);
-
-    let engine: LiveSttEngine | null = null;
-    let liveAudioBufferId: string | null = null;
-    let liveTextBufferId: string | null = null;
-    let pipelineHandle: SttPipelineHandle | null = null;
-    let micErrorSubscription: { remove: () => void } | null = null;
-    let audioUnsubscribe = () => {};
-    let textUnsubscribe = () => {};
-
-    try {
-      const modelPathConfig = resolveSttModelPath(currentModelFolder);
-
-      const onlineType: 'auto' = 'auto';
-
-      engine = await createStreamingSTT({
-        modelPath: modelPathConfig,
-        modelType: onlineType,
-        numThreads: STT_NUM_THREADS,
-      });
-      streamingEngineRef.current = engine;
-
-      const liveAudioBuffer = await createEmptyLiveAudioBuffer({
-        sampleRate: LIVE_SAMPLE_RATE,
-        channelCount: 1,
-        ringSeconds: 120,
-        retention: 'auto',
-        streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
-      });
-      liveAudioBufferId = liveAudioBuffer.bufferId;
-      audioUnsubscribe = liveAudioBuffer.unsubscribeEvents;
-
-      const liveTextBuffer = await createLiveTextBuffer({
-        windowMaxChars: 65536,
-        maxSegments: 2048,
-      });
-      liveTextBufferId = liveTextBuffer.bufferId;
-      textUnsubscribe = liveTextBuffer.unsubscribeEvents;
-
-      pipelineHandle = await engine.transcribe(
-        liveAudioBuffer.bufferId,
-        liveTextBuffer.bufferId
-      );
-
-      micErrorSubscription = DeviceEventEmitter.addListener(
-        'pipelineLiveAudioError',
-        (event: { message?: string; liveBufferId?: string }) => {
-          if (
-            event.liveBufferId != null &&
-            event.liveBufferId !== liveAudioBuffer.bufferId
-          ) {
-            return;
-          }
-          setErrorSource('transcribe');
-          setError(event.message ?? 'Microphone error');
-        }
-      );
-
-      liveAccumulatorRef.current = {
-        segmentCount: 0,
-        segmentTexts: [],
-      };
-      stopLivePreviewPolling();
-      livePreviewTimerRef.current = setInterval(() => {
-        syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
-      }, 150);
-      syncLivePreview(liveTextBuffer.bufferId).catch(() => {});
-
-      livePipelineRef.current = {
-        liveAudioBufferId: liveAudioBuffer.bufferId,
-        liveTextBufferId: liveTextBuffer.bufferId,
-        pipelineHandle,
-        micErrorSubscription,
-        audioUnsubscribe,
-        textUnsubscribe,
-      };
-
-      try {
-        await setPipelineAudioRoutePreference({
-          inputDeviceId: selectedInputDeviceId ?? null,
-        }).catch(() => {});
-        await startMicToLiveAudioBuffer(liveAudioBuffer.bufferId, {
-          emitToJs: false,
-        });
-      } catch (startErr) {
-        throw startErr;
-      }
-
-      setIsLiveRecording(true);
-    } catch (err) {
-      stopLivePreviewPolling();
-      await stopMicToLiveAudioBuffer().catch(() => {});
-
-      micErrorSubscription?.remove();
-      audioUnsubscribe();
-      textUnsubscribe();
-
-      if (pipelineHandle) {
-        await pipelineHandle.stop().catch(() => {});
-      }
-
-      if (engine) {
-        await engine.destroy().catch(() => {});
-        if (streamingEngineRef.current === engine) {
-          streamingEngineRef.current = null;
-        }
-      }
-
-      if (liveTextBufferId) {
-        await releasePipelineTextBuffer(liveTextBufferId).catch(() => {});
-      }
-      if (liveAudioBufferId) {
-        await releasePipelineAudioBuffer(liveAudioBufferId).catch(() => {});
-      }
-
-      livePipelineRef.current = null;
-      liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
-
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorSource('transcribe');
-      setError(msg);
-    }
-  };
-
-  const handleLivePressOut = async () => {
-    if (!isLiveRecording && !livePipelineRef.current) return;
-    setIsLiveRecording(false);
-
-    const pipelineState = livePipelineRef.current;
-    livePipelineRef.current = null;
-
-    stopLivePreviewPolling();
-    await stopMicToLiveAudioBuffer().catch(() => {});
-
-    if (pipelineState) {
-      try {
-        await pipelineState.pipelineHandle.flush();
-      } catch {
-        // ignore flush races during teardown
-      }
-
-      try {
-        const segmentCount = await getLiveTextBufferSegmentCount(
-          pipelineState.liveTextBufferId
-        );
-        const segments =
-          segmentCount > 0
-            ? await getLiveTextBufferSegments(
-                pipelineState.liveTextBufferId,
-                0,
-                segmentCount,
-                { includeTokens: true, includeTimestamps: true }
-              )
-            : [];
-        const partialText = await getLiveTextBufferPartialSlice(
-          pipelineState.liveTextBufferId,
-          0,
-          4096
-        );
-        const segmentTexts = segments
-          .map((segment) => segment.text)
-          .filter((segment) => segment.trim().length > 0);
-        const text = composeLiveText(segmentTexts, partialText);
-        const tokens = segments.flatMap((segment) => segment.tokens ?? []);
-        const timestamps = segments.flatMap(
-          (segment) => segment.timestamps ?? []
-        );
-
-        setTranscriptionResult(
-          buildTranscriptionResult(text, tokens, timestamps)
-        );
-      } catch {
-        // ignore result-read errors during teardown
-      }
-
-      await pipelineState.pipelineHandle.stop().catch(() => {});
-      pipelineState.micErrorSubscription.remove();
-      pipelineState.audioUnsubscribe();
-      pipelineState.textUnsubscribe();
-
-      await releasePipelineTextBuffer(pipelineState.liveTextBufferId).catch(
-        () => {}
-      );
-      await releasePipelineAudioBuffer(pipelineState.liveAudioBufferId).catch(
-        () => {}
-      );
-    }
-
-    const engine = streamingEngineRef.current;
-    if (engine) {
-      await engine.destroy().catch(() => {});
-      if (streamingEngineRef.current === engine) {
-        streamingEngineRef.current = null;
-      }
-    }
-
-    liveAccumulatorRef.current = { segmentCount: 0, segmentTexts: [] };
-  };
-
-  const showLiveNotSupportedMessage = () => {
-    const message =
-      'This model does not support live transcription. Use a streaming model (e.g. transducer, paraformer, zipformer2_ctc).';
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.LONG);
-    } else {
-      Alert.alert('Live not supported', message);
-    }
   };
 
   return (
@@ -1561,154 +776,40 @@ export default function STTScreen() {
               </View>
             )}
 
-            {selectedModelType &&
-              (audioSourceType === 'example' || audioSourceType === 'own') &&
-              (preparingAudioBuffer || offlineBufferBuildStatus != null) && (
-                <View style={styles.decodeProgressContainer}>
-                  <View style={styles.decodeProgressHeaderRow}>
-                    <Text style={styles.decodeProgressLabel}>
-                      {offlineBufferBuildStatus ??
-                        'Preparing OfflineAudioBuffer...'}
-                    </Text>
-                    {offlineBufferBuildProgress != null && (
-                      <Text style={styles.decodeProgressPercent}>
-                        {Math.round(offlineBufferBuildProgress)}%
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.decodeProgressTrack}>
-                    <View
-                      style={[
-                        styles.decodeProgressFill,
-                        {
-                          width: `${Math.max(
-                            0,
-                            Math.min(100, offlineBufferBuildProgress ?? 0)
-                          )}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                  {preparingAudioBuffer && (
-                    <Text style={styles.decodeProgressMeta}>
-                      Large files can take a while to decode.
-                    </Text>
-                  )}
-                </View>
-              )}
-
-            {selectedModelType && !offlineInputBuffer && !audioSourceType && (
-              <>
-                <Text style={styles.subsectionTitle}>Choose Audio Source:</Text>
-                <View style={styles.sourceChoiceRow}>
-                  <TouchableOpacity
-                    style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => {
-                      setAudioSourceType('example');
-                      setCustomAudioPath(null);
-                      setCustomAudioName(null);
-                      setOfflineBufferBuildProgress(null);
-                      setOfflineBufferBuildStatus(null);
-                    }}
-                    disabled={preparingAudioBuffer || transcribing || loading}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="folder-outline"
-                        size={18}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.sourceChoiceButtonText}>
-                        Example Audio
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => {
-                      setAudioSourceType('own');
-                      setOfflineBufferBuildProgress(null);
-                      setOfflineBufferBuildStatus(null);
-                    }}
-                    disabled={preparingAudioBuffer || transcribing || loading}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="musical-notes"
-                        size={18}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.sourceChoiceButtonText}>
-                        Select Your Own Audio
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.sourceChoiceButton,
-                      styles.flex1,
-                      !isLiveSupported && styles.sourceChoiceButtonDisabled,
-                    ]}
-                    onPress={() => {
-                      if (isLiveSupported) {
-                        setAudioSourceType('live');
-                        setOfflineBufferBuildProgress(null);
-                        setOfflineBufferBuildStatus(null);
-                      } else {
-                        showLiveNotSupportedMessage();
-                      }
-                    }}
-                    disabled={preparingAudioBuffer || transcribing || loading}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="mic"
-                        size={18}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.sourceChoiceButtonText}>
-                        Live Transcription
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              </>
+            {selectedModelType && (
+              <OfflineAudioBufferWidget
+                audioFiles={availableAudioFiles}
+                disabled={transcribing || loading}
+                onBufferReady={(info) => {
+                  gSttOfflineInputBuffer = info;
+                  setOfflineInputBuffer(info);
+                  setTranscriptionResult(null);
+                  setError(null);
+                  setErrorSource(null);
+                }}
+                onBufferReleased={() => {
+                  gSttOfflineInputBuffer = null;
+                  setOfflineInputBuffer(null);
+                }}
+              />
             )}
 
             {selectedModelType && offlineInputBuffer && (
-              <View style={styles.selectedFileContainer}>
-                <View style={styles.bufferHeaderRow}>
-                  <View style={styles.bufferHeaderTextWrap}>
-                    <Text style={styles.selectedFileLabel}>
-                      OfflineAudioBuffer ready:
-                    </Text>
-                    <Text style={styles.selectedFileName}>
-                      {offlineInputBuffer.sourceLabel}
-                    </Text>
-                    <Text style={styles.bufferIdText} selectable>
-                      {offlineInputBuffer.bufferId}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.bufferDeleteButton}
-                    onPress={() => {
-                      clearOfflineInputBuffer(true).catch(() => {});
-                    }}
-                    disabled={loading || transcribing || preparingAudioBuffer}
-                  >
-                    <Ionicons name="trash-outline" size={18} color="#b71c1c" />
-                  </TouchableOpacity>
-                </View>
-
+              <>
+                <SegmentationPolicyControls
+                  variant="speech-offline"
+                  value={segConfig}
+                  onChange={setSegConfig}
+                  disabled={transcribing || loading}
+                />
                 <TouchableOpacity
                   style={[
                     styles.button,
                     styles.mt12,
-                    (transcribing || loading || preparingAudioBuffer) &&
-                      styles.buttonDisabled,
+                    (transcribing || loading) && styles.buttonDisabled,
                   ]}
                   onPress={handleTranscribe}
-                  disabled={transcribing || loading || preparingAudioBuffer}
+                  disabled={transcribing || loading}
                 >
                   {transcribing ? (
                     <ActivityIndicator color="#fff" />
@@ -1716,227 +817,21 @@ export default function STTScreen() {
                     <Text style={styles.buttonText}>Transcribe Audio</Text>
                   )}
                 </TouchableOpacity>
-
-                <AudioDeviceDropdown
-                  label="Output device"
-                  devices={outputDevices}
-                  selectedDeviceId={selectedOutputDeviceId}
-                  onSelectDeviceId={setSelectedOutputDeviceId}
-                  disabled={loading || transcribing || preparingAudioBuffer}
-                />
-
-                <TouchableOpacity
-                  style={[
-                    styles.playButton,
-                    styles.mt12,
-                    (loading || transcribing || preparingAudioBuffer) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={handleToggleOfflineBufferPlayback}
-                  disabled={loading || transcribing || preparingAudioBuffer}
-                >
-                  <View style={styles.rowAlignCenter}>
-                    <Ionicons
-                      name={offlineBufferPlaying ? 'stop' : 'play'}
-                      size={16}
-                      style={styles.iconInline}
-                    />
-                    <Text style={styles.playButtonText}>
-                      {offlineBufferPlaying ? 'Stop Buffer' : 'Play Buffer'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {selectedModelType &&
-              audioSourceType === 'example' &&
-              !offlineInputBuffer &&
-              availableAudioFiles.length > 0 && (
-                <>
-                  <Text style={styles.subsectionTitle}>Select Audio File:</Text>
-                  <View style={styles.audioFilesContainer}>
-                    {availableAudioFiles.map((audioFile) => (
-                      <TouchableOpacity
-                        key={audioFile.id}
-                        style={[
-                          styles.audioFileButton,
-                          selectedAudio?.id === audioFile.id &&
-                            styles.audioFileButtonActive,
-                        ]}
-                        disabled={
-                          preparingAudioBuffer || loading || transcribing
-                        }
-                        onPress={async () => {
-                          setSelectedAudio(audioFile);
-                          setCustomAudioPath(null);
-                          setCustomAudioName(null);
-                          await prepareOfflineInputBuffer({
-                            selectedAudio: audioFile,
-                          });
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.audioFileButtonText,
-                            selectedAudio?.id === audioFile.id &&
-                              styles.audioFileButtonTextActive,
-                          ]}
-                        >
-                          {audioFile.name}
-                        </Text>
-                        <Text style={styles.audioFileDescription}>
-                          {audioFile.description}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, styles.mt15]}
-                    onPress={() => {
-                      clearOfflineInputBuffer(true).catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      ← Change Audio Source
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-            {selectedModelType &&
-              audioSourceType === 'own' &&
-              !offlineInputBuffer && (
-                <>
-                  <Text style={styles.subsectionTitle}>
-                    Select Local WAV File:
-                  </Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (loading || preparingAudioBuffer || transcribing) &&
-                        styles.buttonDisabled,
-                    ]}
-                    onPress={handlePickLocalFile}
-                    disabled={loading || preparingAudioBuffer || transcribing}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="folder-open-outline"
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.buttonText}>Choose Local WAV</Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  {customAudioName && (
-                    <View style={styles.selectedFileContainer}>
-                      <Text style={styles.selectedFileLabel}>
-                        Selected file:
-                      </Text>
-                      <Text style={styles.selectedFileName}>
-                        {customAudioName}
-                      </Text>
-
-                      <AudioDeviceDropdown
-                        label="Output device"
-                        devices={outputDevices}
-                        selectedDeviceId={selectedOutputDeviceId}
-                        onSelectDeviceId={setSelectedOutputDeviceId}
-                        disabled={loading}
-                      />
-
-                      <TouchableOpacity
-                        style={[styles.playButton]}
-                        onPress={handlePlayAudio}
-                      >
-                        <View style={styles.rowAlignCenter}>
-                          <Ionicons
-                            name="play"
-                            size={16}
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.playButtonText}>Play Audio</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, styles.mt15]}
-                    onPress={() => {
-                      clearOfflineInputBuffer(true).catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      ← Change Audio Source
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-            {selectedModelType && audioSourceType === 'live' && (
-              <>
-                <Text style={styles.subsectionTitle}>Live Transcription</Text>
-                <AudioDeviceDropdown
-                  label="Input device"
-                  devices={inputDevices}
-                  selectedDeviceId={selectedInputDeviceId}
-                  onSelectDeviceId={setSelectedInputDeviceId}
-                  disabled={isLiveRecording}
-                />
-                <View style={styles.rowCenter}>
-                  <Pressable
-                    style={[
-                      styles.liveMicButton,
-                      isLiveRecording && styles.liveMicButtonActive,
-                    ]}
-                    onPressIn={handleLivePressIn}
-                    onPressOut={handleLivePressOut}
-                  >
-                    <Ionicons name="mic" size={48} style={styles.liveMicIcon} />
-                  </Pressable>
-                </View>
-                <Text style={styles.liveHint}>
-                  Hold the button and speak. Release to see the final result.
-                </Text>
-                <TouchableOpacity
-                  style={[styles.secondaryButton, styles.mt15]}
-                  onPress={() => {
-                    if (isLiveRecording) return;
-                    setAudioSourceType(null);
-                    setTranscriptionResult(null);
-                  }}
-                  disabled={isLiveRecording}
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    ← Change Audio Source
-                  </Text>
-                </TouchableOpacity>
               </>
             )}
 
             {selectedModelType &&
-              (audioSourceType === 'example' ||
-                audioSourceType === 'own' ||
-                audioSourceType === 'live') &&
-              (audioSourceType === 'live' ||
-                transcriptionResult != null ||
+              (transcriptionResult != null ||
                 offlineTextBuffers.length > 0) && (
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>3. Result</Text>
+                  <Text style={styles.sectionTitle}>
+                    {detectedModels.length > 1 ? '4. Result' : '3. Result'}
+                  </Text>
                   <Text style={styles.hint}>
                     Transcription output is stored in OfflineTextBuffers. Remove
                     buffers you no longer need to release memory.
                   </Text>
-                  <View
-                    style={[
-                      styles.resultSection,
-                      audioSourceType === 'live' && styles.liveResultContainer,
-                    ]}
-                  >
+                  <View style={styles.resultSection}>
                     {transcriptionResult ? (
                       <>
                         <View style={styles.resultLabelRow}>
@@ -2321,9 +1216,7 @@ export default function STTScreen() {
                       </>
                     ) : (
                       <Text style={styles.liveResultPlaceholder}>
-                        {audioSourceType === 'live'
-                          ? 'Transcription will appear here while you speak.'
-                          : 'No active transcription selected.'}
+                        No active transcription selected.
                       </Text>
                     )}
                   </View>
@@ -2374,16 +1267,6 @@ export default function STTScreen() {
                       ))}
                     </View>
                   )}
-                </View>
-              )}
-
-            {selectedModelType &&
-              audioSourceType === 'example' &&
-              availableAudioFiles.length === 0 && (
-                <View style={styles.warningContainer}>
-                  <Text style={styles.warningText}>
-                    No audio files available for this model
-                  </Text>
                 </View>
               )}
 

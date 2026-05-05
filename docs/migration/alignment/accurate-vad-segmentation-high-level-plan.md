@@ -230,7 +230,7 @@ Tasks:
 
 - Remove current JS hard-reject for `accurate + vad`.
 - Enforce strict requirements for this combo:
-  - `modelPath` (`ModelPathConfig`) required
+  - `modelPath` (`FileSource`) required
   - `segmentation.source === 'vad'` required
   - segmentation buffer id must resolve as offline segment buffer
 - Build native options for constrained accurate run (e.g. segmentation identifiers / strategy flags).

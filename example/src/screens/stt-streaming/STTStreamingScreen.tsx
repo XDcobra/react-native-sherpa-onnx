@@ -33,7 +33,7 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { listAssetModels } from 'react-native-sherpa-onnx';
+import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -302,7 +302,7 @@ export default function STTStreamingScreen() {
       }
 
       const engine = await createStreamingSTT({
-        modelPath,
+        modelSource: modelPath,
         modelType: 'auto',
         numThreads: 2,
       });

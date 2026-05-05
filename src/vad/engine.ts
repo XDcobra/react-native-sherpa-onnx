@@ -1,7 +1,9 @@
 import { NativeEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import {
+  resolveFileSourceForDetect,
+  resolveFileSourceForModelInit,
+} from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
@@ -165,7 +167,7 @@ export async function createStreamingVAD(
   options: VADInitializeOptions
 ): Promise<VADEngine> {
   const instanceId = `vad_${++vadInstanceCounter}`;
-  const modelDir = await resolveModelPath(options.modelPath);
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
   let resolvedModelType: 'auto' | VADModelType = options.modelType ?? 'auto';
   if (resolvedModelType === 'auto') {
     const detect = await SherpaOnnx.detectVadModel(modelDir, null, 'auto');

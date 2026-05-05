@@ -154,6 +154,16 @@ export const styles = StyleSheet.create({
     color: '#000000',
     marginBottom: 8,
   },
+  /** Single-line numeric / short option fields (Synthesis options). */
+  synthesisOptionInput: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#000000',
+    marginBottom: 16,
+  },
   textInput: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
@@ -180,8 +190,10 @@ export const styles = StyleSheet.create({
     color: '#000000',
   },
   referenceTextInput: {
-    minHeight: 48,
+    minHeight: 100,
     marginBottom: 12,
+    textAlignVertical: 'top',
+    paddingTop: 12,
   },
   optionsBlock: {
     marginBottom: 8,
@@ -430,6 +442,22 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginTop: 12,
+  },
+  /** Full-width column for save picker + share (offline TTS generated audio). */
+  generatedAudioSaveWrap: {
+    marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  generatedAudioShareButton: {
+    alignSelf: 'stretch',
+    marginTop: 10,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5856D6',
   },
   audioButton: {
     flexBasis: '30%',

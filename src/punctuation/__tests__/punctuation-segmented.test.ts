@@ -77,7 +77,7 @@ describe('offline punctuation segmentation', () => {
 
   it('keeps one-shot as the default path', async () => {
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     const result = await punc.punctuate(
@@ -119,7 +119,7 @@ describe('offline punctuation segmentation', () => {
     });
 
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     const result = await punc.punctuate(
@@ -154,7 +154,8 @@ describe('offline punctuation segmentation', () => {
     );
     expect(native.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_22222222-2222-2222-2222-222222222222',
-      'hello world yes'
+      'hello world yes',
+      {}
     );
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith(
       expect.objectContaining({ bufferId: 'txt_tmp' })
@@ -176,7 +177,7 @@ describe('offline punctuation segmentation', () => {
     });
 
     const punc = await createOfflinePunctuation({
-      modelPath: { type: 'file', path: '/models/punctuation-offline' },
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
     });
 
     await punc.punctuateString(
@@ -189,7 +190,8 @@ describe('offline punctuation segmentation', () => {
     expect(createEmptyOfflineTextBuffer).toHaveBeenCalled();
     expect(native.populateOfflineTextBufferIfEmpty).toHaveBeenCalledWith(
       'txt_off_temp',
-      'hello world'
+      'hello world',
+      {}
     );
     expect(runOfflineTextPipeline).toHaveBeenCalled();
     expect(releasePipelineTextBuffer).toHaveBeenCalledWith(

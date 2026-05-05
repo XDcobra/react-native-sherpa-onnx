@@ -215,8 +215,11 @@ export type AppendBackpressure = 'none' | 'block';
 
 /** Options for creating an empty live audio buffer. */
 export interface CreateEmptyLiveAudioBufferOptions {
-  /** Sample rate in Hz (e.g. 16000, 44100). */
-  sampleRate: number;
+  /**
+   * Sample rate in Hz (e.g. 16000, 44100).
+   * Default: 16000 when omitted.
+   */
+  sampleRate?: number;
   /** Number of channels. Only 1 (mono) is supported. */
   channelCount?: number;
   /**
@@ -295,8 +298,12 @@ export type PipelineAudioErrorCodeValue =
 /** Options for decoding an audio file into a pipeline buffer. */
 export interface AudioDecodeOptions {
   /**
-   * Target sample rate in Hz. If omitted or 0, keeps the source file's native sample rate.
-   * When specified, FFmpeg SwrContext resamples during decode (no second pass).
+   * Target sample rate in Hz for decode output.
+   * - omitted / undefined: defaults to 16000 Hz
+   * - 0: keep source file's native sample rate
+   * - > 0: resample to exactly this rate
+   *
+   * FFmpeg SwrContext resamples during decode (no second pass).
    */
   targetSampleRateHz?: number;
 
@@ -318,6 +325,17 @@ export interface AudioDecodeOptions {
    * does not declare duration).
    */
   onProgress?: (event: DecodeProgressEvent) => void;
+}
+
+/** Options for `createOfflineAudioBufferFromSamples`. */
+export interface OfflineFromSamplesOptions {
+  /**
+   * Target sample rate in Hz for the created offline buffer.
+   * - omitted / undefined: defaults to 16000 Hz
+   * - 0: keep the provided input sample rate
+   * - > 0: resample to exactly this rate before creating the buffer
+   */
+  targetSampleRateHz?: number;
 }
 
 /** Progress event emitted during audio file decode. */

@@ -48,7 +48,7 @@ Hotwords boost the probability of specified phrases during decoding. This is use
 import { createSTT, sttSupportsHotwords } from 'react-native-sherpa-onnx/stt';
 
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/sherpa-onnx-streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/sherpa-onnx-streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   hotwordsScore: 2.0,
@@ -202,7 +202,7 @@ The `bpeVocab` file is typically distributed with the model (e.g. `bpe.vocab` in
 
 ```typescript
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/zipformer-bilingual' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/zipformer-bilingual' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   modelingUnit: 'cjkchar+bpe',
@@ -245,7 +245,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const recognizer = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   hotwordsScore: 2.0,
@@ -336,7 +336,7 @@ const supportsHotwords =
     : false;
 
 const stt = await createSTT({
-  modelPath: { type: 'file', path: modelDir },
+  modelSource: { kind: 'fs', path: modelDir },
   modelType: 'auto',
   ...(supportsHotwords
     ? { hotwordsFile: '/path/to/hotwords.txt', hotwordsScore: 1.8 }
