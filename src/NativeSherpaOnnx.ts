@@ -1437,6 +1437,27 @@ export interface Spec extends TurboModule {
     }
   ): Promise<{ pipelineId: string }>;
 
+  /**
+   * Start a live-offline TTS pipeline: a segmentation engine drives the
+   * live text input buffer, and offline TTS synthesizes each committed text segment,
+   * writing audio chunks to the live audio output buffer.
+   *
+   * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+   */
+  startTtsOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      sid?: number;
+      speed?: number;
+      referenceAudioBufferId?: string;
+      referenceText?: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   startStreamingPunctuationPipeline(
     instanceId: string,
     inputBufferId: string,

@@ -11,8 +11,11 @@ import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
+import com.sherpaonnx.tts.pipeline.TtsOfflineLivePipelineWorker
 import com.sherpaonnx.tts.pipeline.TtsPipelineWorker
 import com.sherpaonnx.tts.pipeline.TtsVoiceCloneConfig
 import com.sherpaonnx.tts.service.TtsBatchGenerationService
@@ -219,6 +222,128 @@ internal class SherpaOnnxTtsCoordinator(
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject("STREAMING_PIPELINE_ERROR", "Failed to start TTS pipeline: ${e.message}", e)
+    }
+  }
+
+  fun startTtsOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    try {
+      val inst = repository.get(instanceId)
+      if (inst == null || !inst.hasEngine()) {
+        promise.reject("TTS_PIPELINE_INSTANCE_NOT_FOUND", "TTS engine instance not found: $instanceId")
+        return
+      }
+
+      val textInEntry = TextPipelineRegistry.getLive(textInLiveBufferId)
+      if (textInEntry == null) {
+        promise.reject("TTS_PIPELINE_TEXT_BUFFER_NOT_FOUND", "Input live text buffer not found: $textInLiveBufferId")
+        return
+      }
+
+      val audioOutEntry = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
+      if (audioOutEntry == null) {
+        promise.reject("TTS_PIPELINE_AUDIO_BUFFER_NOT_FOUND", "Output live audio buffer not found: $audioOutLiveBufferId")
+        return
+      }
+
+      if (textInEntry.state != LiveTextEntry.State.RECORDING) {
+        promise.reject("TTS_PIPELINE_BUFFER_NOT_RECORDING", "Input text buffer is not in recording state")
+        return
+      }
+
+      if (audioOutEntry.state != LiveEntry.State.RECORDING) {
+        promise.reject("TTS_PIPELINE_BUFFER_NOT_RECORDING", "Output audio buffer is not in recording state")
+        return
+      }
+
+      val ttsSampleRate = inst.dispatchSampleRate()
+      if (audioOutEntry.sampleRate != ttsSampleRate) {
+        promise.reject(
+          "TTS_PIPELINE_SAMPLE_RATE_MISMATCH",
+          "Output buffer sample rate (${audioOutEntry.sampleRate}) does not match TTS model sample rate ($ttsSampleRate)"
+        )
+        return
+      }
+
+      val attachedSegmentationEngineId =
+        options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
+      if (attachedSegmentationEngineId.isEmpty()) {
+        promise.reject("TTS_INVALID_ARGUMENT", "attachedSegmentationEngineId is required")
+        return
+      }
+
+      val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
+      if (segmentLiveBufferId.isEmpty()) {
+        promise.reject("TTS_INVALID_ARGUMENT", "segmentLiveBufferId is required")
+        return
+      }
+      val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+      if (segmentEntry == null) {
+        promise.reject("SEGMENT_BUFFER_NOT_FOUND", "Input live segment buffer not found: $segmentLiveBufferId")
+        return
+      }
+
+      val existingPipelineId = instanceToPipeline[instanceId]
+      if (existingPipelineId != null) {
+        val existingWorker = StreamingPipelineRegistry.get(existingPipelineId)
+        if (existingWorker != null && existingWorker.isRunning) {
+          promise.reject("TTS_PIPELINE_ALREADY_RUNNING", "TTS pipeline already running for instance: $instanceId")
+          return
+        }
+        StreamingPipelineRegistry.remove(existingPipelineId)
+        instanceToPipeline.remove(instanceId)
+      }
+
+      val defaultSid = if (options.hasKey("sid")) options.getDouble("sid").toInt() else 0
+      val defaultSpeed = if (options.hasKey("speed")) options.getDouble("speed").toFloat() else 1.0f
+
+      var voiceCloneConfig: TtsVoiceCloneConfig? = null
+      val refBufferId = options.getString("referenceAudioBufferId")?.trim().orEmpty()
+      if (refBufferId.isNotEmpty()) {
+        val refEntry = PipelineAudioRegistry.getOffline(refBufferId)
+        if (refEntry == null) {
+          promise.reject("TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND", "Reference audio buffer not found: $refBufferId")
+          return
+        }
+        if (!inst.isPocket) {
+          promise.reject("TTS_PIPELINE_VOICE_CLONE_UNSUPPORTED", "Voice cloning in pipeline mode is only supported for Pocket TTS")
+          return
+        }
+        voiceCloneConfig = TtsVoiceCloneConfig(
+          referenceAudio = refEntry.readAllSamples(),
+          referenceSampleRate = refEntry.sampleRate,
+          referenceText = options.getString("referenceText") ?: "",
+          silenceScale = 0.2f,
+          numSteps = 5,
+        )
+      }
+
+      val worker = TtsOfflineLivePipelineWorker(
+        pipelineId = UUID.randomUUID().toString(),
+        attachedSegmentationEngineId = attachedSegmentationEngineId,
+        textInput = OfflineLivePipelineWorker.TextInput(liveTextEntry = textInEntry),
+        ttsInstance = inst,
+        audioOutputEntry = audioOutEntry,
+        defaultSid = defaultSid,
+        defaultSpeed = defaultSpeed,
+        voiceClone = voiceCloneConfig,
+      )
+
+      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+      }
+      instanceToPipeline[instanceId] = pipelineId
+
+      val out = Arguments.createMap()
+      out.putString("pipelineId", pipelineId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("TTS_OFFLINE_LIVE_PIPELINE_ERROR", "Failed to start offline live TTS pipeline: ${e.message}", e)
     }
   }
 

@@ -9,6 +9,7 @@ import {
   type TtsSynthesisResult,
   type TTSModelInfo,
   type TtsEngine,
+  type TtsLivePipelineOptions,
 } from './types';
 import {
   isDetectionSource,
@@ -32,6 +33,7 @@ import { ModelCategory } from '../download/types';
 import {
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
+  subscribeLiveAudioBufferEvents,
 } from '../audiobuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { addSegmentLink, createSegmentLinkMap } from '../segment';
@@ -39,14 +41,177 @@ import { validateSegmentationConfig } from '../segment/validation';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
+  LiveAudioBufferRef,
 } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
+  LiveTextBufferRef,
 } from '../textbuffer/types';
 import { runOfflineTtsPipeline } from './orchestrate';
+import { validateLiveOfflinePipelineOptions } from '../livePipeline';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import type { TtsPipelineHandle } from './streamingTypes';
+import type { SpeechSegment } from '../segment/segment';
 
 let ttsInstanceCounter = 0;
+
+function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveAudioBufferRef).info === 'object' &&
+    (buffer as LiveAudioBufferRef).info?.kind === 'livePcmBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('txt_live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveTextBufferRef).info === 'object' &&
+    (buffer as LiveTextBufferRef).info?.kind === 'liveTextBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function createTtsPipelineHandle(
+  instanceId: string,
+  pipelineId: string
+): TtsPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus() {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
+
+function toNativeOfflineLivePipelineOptions(
+  options: TtsLivePipelineOptions
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (options.sid !== undefined) out.sid = options.sid;
+  if (options.speed !== undefined) out.speed = options.speed;
+  if (options.voiceClone != null) {
+    const vc = options.voiceClone;
+    out.referenceAudioBufferId = resolvePipelineAudioBufferId(
+      vc.referenceAudio
+    );
+    if (vc.kind === 'zipvoice') {
+      const referenceText = vc.referenceText?.trim() ?? '';
+      if (referenceText.length === 0) {
+        throw new Error(
+          '[TTS] Zipvoice voice cloning requires a non-empty referenceText in voiceClone options.'
+        );
+      }
+      out.referenceText = referenceText;
+    } else if (vc.referenceText !== undefined) {
+      out.referenceText = vc.referenceText.trim();
+    }
+  }
+  return out;
+}
+
+async function synthesizeLiveOverload(
+  instanceId: string,
+  textIn: LiveTextBufferIdSource,
+  audioOut: LiveAudioBufferIdSource,
+  options: TtsLivePipelineOptions
+): Promise<TtsPipelineHandle> {
+  const { policy } = validateLiveOfflinePipelineOptions({
+    featureName: 'live offline TTS',
+    domain: 'text',
+    segmentation: options.segmentation,
+  });
+
+  const inId = resolvePipelineTextBufferId(textIn);
+  const outId = resolvePipelineAudioBufferId(audioOut);
+
+  const attached = await attachSegmentationEngine(textIn, { policy });
+
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'TTS_ERROR: segmentation engine did not produce a segment buffer for text domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startTtsOfflineLivePipeline(
+      instanceId,
+      inId,
+      outId,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+        ...toNativeOfflineLivePipelineOptions(options),
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createTtsPipelineHandle(instanceId, pipelineId);
+
+  if (options.onSegment) {
+    const cb = options.onSegment;
+    const unsub = subscribeLiveAudioBufferEvents(audioOut, {
+      onSegment: (event) => {
+        cb(event.segment as SpeechSegment);
+      },
+    });
+    handle.completed.then(unsub, unsub);
+  }
+
+  return handle;
+}
 
 /**
  * Detect TTS model type and structure without initializing the engine.
@@ -229,19 +394,49 @@ export async function createTTS(
       return instanceId;
     },
 
-    async synthesize(
-      textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
-      audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
-      opts?: TtsSynthesisOptions
-    ): Promise<TtsSynthesisResult> {
+    synthesize: (async (
+      textIn:
+        | OfflineTextBufferRef
+        | OfflineTextBufferHandle
+        | LiveTextBufferIdSource,
+      audioOut:
+        | OfflineAudioBufferRef
+        | OfflineBufferHandle
+        | LiveAudioBufferIdSource,
+      opts?: TtsSynthesisOptions | TtsLivePipelineOptions
+    ): Promise<TtsSynthesisResult | TtsPipelineHandle> => {
       guard();
+
+      const textIsLive = isLiveTextSource(textIn);
+      const audioIsLive = isLiveAudioSource(audioOut);
+
+      if (textIsLive || audioIsLive) {
+        if (!(textIsLive && audioIsLive)) {
+          throw new Error(
+            'TTS_INVALID_ARGUMENT: synthesize() overload mismatch. Use (OfflineText, OfflineAudio, options?) for batch or (LiveText, LiveAudio, options) for live pipeline.'
+          );
+        }
+        return synthesizeLiveOverload(
+          instanceId,
+          textIn as LiveTextBufferIdSource,
+          audioOut as LiveAudioBufferIdSource,
+          opts as TtsLivePipelineOptions
+        );
+      }
+
+      // Batch path
+      const batchOpts = opts as TtsSynthesisOptions | undefined;
       const startedAtMs = Date.now();
-      const textInId = resolvePipelineTextBufferId(textIn);
-      const audioOutId = resolvePipelineAudioBufferId(audioOut);
+      const textInId = resolvePipelineTextBufferId(
+        textIn as OfflineTextBufferRef | OfflineTextBufferHandle
+      );
+      const audioOutId = resolvePipelineAudioBufferId(
+        audioOut as OfflineAudioBufferRef | OfflineBufferHandle
+      );
 
       const segmentation = validateSegmentationConfig({
-        mode: opts?.segmentation?.mode,
-        policy: opts?.segmentation?.policy,
+        mode: batchOpts?.segmentation?.mode,
+        policy: batchOpts?.segmentation?.policy,
         featureName: 'offline TTS',
         domain: 'text',
         supportsManual: false,
@@ -258,7 +453,7 @@ export async function createTTS(
           instanceId,
           textInId,
           audioOutId,
-          toNativeSynthesisOptions(opts) ?? undefined
+          toNativeSynthesisOptions(batchOpts) ?? undefined
         );
         return {
           status: 'complete',
@@ -266,17 +461,17 @@ export async function createTTS(
           completedSegments: 1,
           skippedSegments: [],
           processingTimeMs: Date.now() - startedAtMs,
-          linkMap: opts?.linkMap,
+          linkMap: batchOpts?.linkMap,
         };
       }
 
       const orchestrated = await runOfflineTtsPipeline(
         textInId,
         instanceId,
-        opts ?? {}
+        batchOpts ?? {}
       );
 
-      let linkMap = orchestrated.linkMap ?? opts?.linkMap;
+      let linkMap = orchestrated.linkMap ?? batchOpts?.linkMap;
       if (!linkMap && orchestrated.segmentMappings.length > 0) {
         linkMap = await createSegmentLinkMap({
           textBufferId: textInId,
@@ -319,7 +514,7 @@ export async function createTTS(
         processingTimeMs: orchestrated.processingTimeMs,
         ...(linkMap ? { linkMap } : {}),
       };
-    },
+    }) as TtsEngine['synthesize'],
 
     async updateParams(opts: TtsUpdateOptions): Promise<{
       success: boolean;
@@ -428,6 +623,7 @@ export type {
   SaveAudioTargetFile,
   SaveAudioTargetAndroidContent,
   TtsEngine,
+  TtsLivePipelineOptions,
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';
 export {

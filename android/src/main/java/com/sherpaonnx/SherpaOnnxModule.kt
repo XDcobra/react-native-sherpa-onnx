@@ -3771,6 +3771,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlineTtsHelper.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
   }
 
+  override fun startTtsOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    offlineTtsHelper.startTtsOfflineLivePipeline(
+      instanceId,
+      textInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
+  }
+
   override fun createPcmPlayer(
     playerId: String,
     audioBufferId: String,

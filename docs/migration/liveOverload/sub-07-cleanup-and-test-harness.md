@@ -58,6 +58,17 @@ A small set of **cross-feature** tests verify uniform contract behavior beyond t
 
 These tests are kept lean — they verify **uniformity**, not feature behavior (already covered by sub-03 … sub-06).
 
+### Jest/tooling stability requirements
+
+Jest execution stability is part of the contract for this phase. A green matrix is only valid when the required suites can run reliably.
+
+- [ ] If required suites fail due to runner/config/tooling issues (for example ESM transform/import parsing in dependencies), classify as `must-fix-before-release` in the parity audit.
+- [ ] Do not drop or silently skip required suites because of environment issues. Either fix configuration/tooling, or keep the phase blocked.
+- [ ] Keep one canonical reproducible command set (local + CI) for: per-feature suites, cross-feature matrix, and baseline regression suites.
+- [ ] For each completed phase, verify both newly added suites **and** pre-existing baseline suites in the same feature area.
+
+Example blocker class: Jest failing before test execution due to module-format mismatch in transitive dependencies.
+
 ---
 
 ## Workstream 3 — Example app integration
@@ -201,6 +212,7 @@ See the [design note](./docs/migration/liveOverload/offline-stt-live-pipeline-ma
 
 - [ ] Contract parity audit table is filled in and **all** items are `Implemented` (no `must-fix-before-release` items remaining).
 - [ ] Cross-feature test matrix (X-1 … X-5) is implemented and green.
+- [ ] Jest/tooling stability requirements are satisfied (no unresolved required-suite runner/config blockers).
 - [ ] Example app live showcase demoes STT live overload + one additional feature.
 - [ ] All listed docs updated with the "Live overload" section.
 - [ ] Android + iOS example apps build clean with no new warnings.
