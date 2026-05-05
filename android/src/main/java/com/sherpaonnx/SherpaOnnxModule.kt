@@ -23,6 +23,7 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
@@ -169,6 +170,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
     }
   )
+  private val offlinePunctuationLivePipelineHelper =
+    SherpaOnnxOfflinePunctuationLivePipelineHelper(
+      reactApplicationContext,
+      punctuationHelper,
+      NAME,
+    )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
   private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
   private val maxEventTextChars = 4096
@@ -4069,6 +4076,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     onlinePunctuationHelper.startStreamingPunctuationPipeline(instanceId, inputBufferId, outputBufferId, promise)
+  }
+
+  override fun startPunctuationOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlinePunctuationLivePipelineHelper.startPunctuationOfflineLivePipeline(
+      instanceId = instanceId,
+      textInLiveBufferId = textInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
   }
 
   override fun startVadPipeline(

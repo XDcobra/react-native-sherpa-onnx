@@ -2,9 +2,14 @@
 
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "../pipeline/PunctuationOfflineLivePipelineWorker.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <chrono>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -19,6 +24,7 @@ std::map<std::string, sherpa_onnx::cxx::OfflinePunctuation> g_punct_offline;
 static NSString *kInitErr = @"PUNCTUATION_INIT_ERROR";
 static NSString *kPunctErr = @"PUNCTUATION_ERROR";
 static NSString *kNotFound = @"PUNCTUATION_INSTANCE_NOT_FOUND";
+static NSString *kInvalidArg = @"PUNCTUATION_INVALID_ARGUMENT";
 static NSString *kTxtNotFound = @"TEXT_BUFFER_NOT_FOUND";
 static NSString *kTxtKind = @"TEXT_BUFFER_KIND_MISMATCH";
 static NSString *kTxtEmpty = @"TEXT_BUFFER_EMPTY";
@@ -308,6 +314,125 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     g_punct_offline.erase(iid);
   }
   resolve(nil);
+}
+
+- (void)startPunctuationOfflineLivePipeline:(NSString *)instanceId
+                          textInLiveBufferId:(NSString *)textInLiveBufferId
+                         textOutLiveBufferId:(NSString *)textOutLiveBufferId
+                                     options:(NSDictionary *)options
+                                     resolve:(RCTPromiseResolveBlock)resolve
+                                      reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(kInvalidArg, @"instanceId is required", nil);
+    return;
+  }
+  if (textInLiveBufferId == nil || [textInLiveBufferId length] == 0) {
+    reject(kInvalidArg, @"textInLiveBufferId is required", nil);
+    return;
+  }
+  if (textOutLiveBufferId == nil || [textOutLiveBufferId length] == 0) {
+    reject(kInvalidArg, @"textOutLiveBufferId is required", nil);
+    return;
+  }
+
+  NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
+  if (![attachedSegmentationEngineId isKindOfClass:[NSString class]] || [attachedSegmentationEngineId length] == 0) {
+    reject(kInvalidArg, @"options.attachedSegmentationEngineId is required", nil);
+    return;
+  }
+
+  NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
+  if (![segmentLiveBufferId isKindOfClass:[NSString class]] || [segmentLiveBufferId length] == 0) {
+    reject(kInvalidArg, @"options.segmentLiveBufferId is required", nil);
+    return;
+  }
+
+  std::string instanceIdStr = [instanceId UTF8String];
+  std::string textInIdStr = [textInLiveBufferId UTF8String];
+  std::string textOutIdStr = [textOutLiveBufferId UTF8String];
+  std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
+  std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
+
+  {
+    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
+    auto it = g_punct_offline.find(instanceIdStr);
+    if (it == g_punct_offline.end()) {
+      reject(kNotFound,
+             [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId],
+             nil);
+      return;
+    }
+  }
+
+  auto textInputEntry = txt_get_live_entry(textInIdStr);
+  if (!textInputEntry) {
+    reject(kTxtNotFound,
+           [NSString stringWithFormat:@"Input live text buffer not found: %@", textInLiveBufferId],
+           nil);
+    return;
+  }
+
+  if (!txt_live_is_recording(textInputEntry)) {
+    reject(kInvalidArg,
+           [NSString stringWithFormat:@"Input live text buffer is not in recording state: %@", textInLiveBufferId],
+           nil);
+    return;
+  }
+
+  auto textOutputEntry = txt_get_live_entry(textOutIdStr);
+  if (!textOutputEntry) {
+    reject(kTxtNotFound,
+           [NSString stringWithFormat:@"Output live text buffer not found: %@", textOutLiveBufferId],
+           nil);
+    return;
+  }
+
+  if (!txt_live_is_recording(textOutputEntry)) {
+    reject(kInvalidArg,
+           [NSString stringWithFormat:@"Output live text buffer is not in recording state: %@", textOutLiveBufferId],
+           nil);
+    return;
+  }
+
+  auto segmentInputEntry = seg_get_live_entry(segmentBufferIdStr);
+  if (!segmentInputEntry) {
+    reject(kInvalidArg,
+           [NSString stringWithFormat:@"Input live segment buffer not found: %@", segmentLiveBufferId],
+           nil);
+    return;
+  }
+
+  (void)segmentInputEntry;
+
+  try {
+    std::string pipelineId = std::string("punct_offline_live_") +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+    auto worker = std::make_shared<PunctuationOfflineLivePipelineWorker>(
+      pipelineId,
+      attachedEngineIdStr,
+      textInputEntry,
+      segmentBufferIdStr,
+      textOutputEntry,
+      instanceIdStr
+    );
+
+    {
+      std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+      g_streaming_pipelines[pipelineId] = worker;
+    }
+
+    worker->start();
+    so_start_streaming_pipeline_completion_watcher(self, pipelineId, worker);
+
+    resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pipelineId.c_str()] ?: @"" });
+  } catch (const std::exception &e) {
+    NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Failed to start live offline punctuation pipeline";
+    reject(kPunctErr, msg, nil);
+  } catch (...) {
+    reject(kPunctErr, @"Failed to start live offline punctuation pipeline", nil);
+  }
 }
 
 @end

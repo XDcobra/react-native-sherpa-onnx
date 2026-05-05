@@ -1423,6 +1423,20 @@ export interface Spec extends TurboModule {
 
   // ==================== Punctuation Pipeline ====================
 
+  /**
+   * Start a live-offline punctuation pipeline: a segmentation engine drives the
+   * live text input buffer, and offline punctuation runs per committed text segment.
+   */
+  startPunctuationOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   startStreamingPunctuationPipeline(
     instanceId: string,
     inputBufferId: string,

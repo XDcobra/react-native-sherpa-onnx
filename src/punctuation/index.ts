@@ -9,6 +9,7 @@ export type {
   OfflinePunctuateResult,
   OfflinePunctuateOptions,
   OfflinePunctuationModelType,
+  PunctuationLivePipelineOptions,
 } from './types';
 export type {
   OnlinePunctuationModelType,

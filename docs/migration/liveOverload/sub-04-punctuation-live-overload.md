@@ -1,5 +1,10 @@
 # Sub-Plan 04: Punctuation Live Overload
 
+Related migration docs:
+
+- Design note: [offline-stt-live-pipeline-mandatory-segmentation.md](./offline-stt-live-pipeline-mandatory-segmentation.md)
+- Overview: [live_overload_overview.md](./live_overload_overview.md)
+
 ## Status
 - Phase: **3**
 - Depends on: sub-01 (foundation contract), sub-02 (shared worker base), sub-03 (STT reference template).
