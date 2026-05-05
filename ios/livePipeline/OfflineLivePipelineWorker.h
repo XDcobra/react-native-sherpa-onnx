@@ -59,6 +59,7 @@ public:
 
 protected:
   virtual void onSegmentCommitted(const CommittedSegmentRef &segment) = 0;
+  void addUnitsWritten(int64_t units);
   virtual void onRelease() {}
 
 private:

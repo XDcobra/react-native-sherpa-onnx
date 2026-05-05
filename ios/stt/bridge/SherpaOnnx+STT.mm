@@ -7,13 +7,18 @@
 
 #import "../../SherpaOnnx.h"
 #import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../pipeline/SttOfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -400,6 +405,134 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception in setSttConfig: %@", exception.reason ?: @""];
         RCTLogError(@"%@", errorMsg);
         reject(kSttErrConfigFailed, errorMsg, nil);
+    }
+}
+
+- (void)startSttOfflineLivePipeline:(NSString *)instanceId
+                  audioInLiveBufferId:(NSString *)audioInLiveBufferId
+                 textOutLiveBufferId:(NSString *)textOutLiveBufferId
+                             options:(NSDictionary *)options
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
+        return;
+    }
+    if (audioInLiveBufferId == nil || [audioInLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"audioInLiveBufferId is required", nil);
+        return;
+    }
+    if (textOutLiveBufferId == nil || [textOutLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"textOutLiveBufferId is required", nil);
+        return;
+    }
+
+    NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
+    if (![attachedSegmentationEngineId isKindOfClass:[NSString class]] || [attachedSegmentationEngineId length] == 0) {
+        reject(kSttErrInvalidArgument, @"options.attachedSegmentationEngineId is required", nil);
+        return;
+    }
+
+    NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
+    if (![segmentLiveBufferId isKindOfClass:[NSString class]] || [segmentLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"options.segmentLiveBufferId is required", nil);
+        return;
+    }
+
+    int safeChunkSize = 3200;
+    NSNumber *chunkSize = options[@"chunkSize"];
+    if ([chunkSize isKindOfClass:[NSNumber class]] && [chunkSize intValue] > 0) {
+        safeChunkSize = [chunkSize intValue];
+    }
+
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::string audioInIdStr = [audioInLiveBufferId UTF8String];
+    std::string textOutIdStr = [textOutLiveBufferId UTF8String];
+    std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
+    std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
+
+    sherpaonnx::SttWrapper *wrapper = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_stt_mutex);
+        auto it = g_stt_instances.find(instanceIdStr);
+        if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+            reject(kSttErrInstanceNotFound, @"STT not initialized. Call initializeStt first.", nil);
+            return;
+        }
+        wrapper = it->second->wrapper.get();
+    }
+
+    auto inputEntry = pa_get_live_entry(audioInIdStr);
+    if (!inputEntry) {
+        reject(kSttErrBufferNotFound,
+               [NSString stringWithFormat:@"Input live audio buffer not found: %@", audioInLiveBufferId],
+               nil);
+        return;
+    }
+
+    if (inputEntry->state != PaLiveEntry::RECORDING) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Input live audio buffer is not in recording state: %@", audioInLiveBufferId],
+               nil);
+        return;
+    }
+
+    auto textOutputEntry = txt_get_live_entry(textOutIdStr);
+    if (!textOutputEntry) {
+        reject(kSttErrTextBufferNotFound,
+               [NSString stringWithFormat:@"Output live text buffer not found: %@", textOutLiveBufferId],
+               nil);
+        return;
+    }
+
+    if (!txt_live_is_recording(textOutputEntry)) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Output live text buffer is not in recording state: %@", textOutLiveBufferId],
+               nil);
+        return;
+    }
+
+    auto segmentInputEntry = seg_get_live_entry(segmentBufferIdStr);
+    if (!segmentInputEntry) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Input live segment buffer not found: %@", segmentLiveBufferId],
+               nil);
+        return;
+    }
+
+    (void)segmentInputEntry;
+
+    try {
+        std::string pipelineId = std::string("stt_offline_live_") +
+          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+        auto worker = std::make_shared<SttOfflineLivePipelineWorker>(
+            pipelineId,
+            attachedEngineIdStr,
+            inputEntry,
+            segmentBufferIdStr,
+            textOutputEntry,
+            wrapper,
+            safeChunkSize
+        );
+
+        {
+            std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+            g_streaming_pipelines[pipelineId] = worker;
+        }
+
+        worker->start();
+        so_start_streaming_pipeline_completion_watcher(self, pipelineId, worker);
+
+        resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pipelineId.c_str()] ?: @"" });
+    } catch (const std::bad_alloc&) {
+        reject(kSttErrOfflineOom, kSttOfflineOomMessage, nil);
+    } catch (const std::exception &e) {
+        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Failed to start live offline STT pipeline";
+        reject(kSttErrTranscribeFailed, msg, nil);
+    } catch (...) {
+        reject(kSttErrTranscribeFailed, @"Failed to start live offline STT pipeline", nil);
     }
 }
 

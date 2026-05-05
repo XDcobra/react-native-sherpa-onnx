@@ -86,6 +86,11 @@ internal abstract class OfflineLivePipelineWorker(
 
   protected abstract fun onSegmentCommitted(segment: CommittedSegmentRef)
 
+  protected fun addUnitsWritten(units: Long) {
+    if (units <= 0) return
+    unitsWritten += units
+  }
+
   protected open fun onRelease() = Unit
 
   override val isRunning: Boolean

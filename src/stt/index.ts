@@ -5,25 +5,41 @@ import {
   getPipelineTextBufferInfo,
   releasePipelineTextBuffer,
   resolvePipelineTextBufferId,
+  subscribeLiveTextBufferEvents,
 } from '../textbuffer';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
+  LiveAudioBufferRef,
 } from '../audiobuffer/types';
+import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
+  LiveTextBufferRef,
 } from '../textbuffer/types';
+import type { PipelineTextBufferIdSource } from '../textbuffer/types';
 import type {
   STTInitializeOptions,
   STTModelType,
   SttEngine,
+  SttLivePipelineOptions,
   SttModelOptions,
   SttTranscribeResult,
   SttTranscribeOptions,
   SttRuntimeConfig,
 } from './types';
 import { validateSegmentationConfig } from '../segment/validation';
+import { validateLiveOfflinePipelineOptions } from '../livePipeline';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import type { SttPipelineHandle } from './streamingTypes';
 import type { FileSource } from '../fileio/types';
 import {
   resolveFileSourceForDetect,
@@ -43,6 +59,134 @@ import type { TextSegment } from '../segment/segment';
 import { setOfflineTextSegments } from '../segment/runtime-state';
 
 let sttInstanceCounter = 0;
+
+function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveAudioBufferRef).info === 'object' &&
+    (buffer as LiveAudioBufferRef).info?.kind === 'livePcmBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('txt_live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveTextBufferRef).info === 'object' &&
+    (buffer as LiveTextBufferRef).info?.kind === 'liveTextBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function createSttPipelineHandle(
+  instanceId: string,
+  pipelineId: string
+): SttPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus() {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
+
+async function transcribeLiveOverload(
+  instanceId: string,
+  audioIn: LiveAudioBufferIdSource,
+  textOut: LiveTextBufferIdSource,
+  options: SttLivePipelineOptions
+): Promise<SttPipelineHandle> {
+  const { policy } = validateLiveOfflinePipelineOptions({
+    featureName: 'live offline STT',
+    domain: 'speech',
+    segmentation: options.segmentation,
+  });
+
+  const audioInId = resolvePipelineAudioBufferId(
+    audioIn as PipelineAudioBufferIdSource
+  );
+  const textOutId = resolvePipelineTextBufferId(
+    textOut as PipelineTextBufferIdSource
+  );
+
+  const attached = await attachSegmentationEngine(
+    audioIn as PipelineAudioBufferIdSource,
+    { policy }
+  );
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'STT_TRANSCRIBE_FAILED: segmentation engine did not produce a segment buffer for speech domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startSttOfflineLivePipeline(
+      instanceId,
+      audioInId,
+      textOutId,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+        ...(options.chunkSize != null ? { chunkSize: options.chunkSize } : {}),
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createSttPipelineHandle(instanceId, pipelineId);
+
+  if (options.onSegment) {
+    const cb = options.onSegment;
+    const unsub = subscribeLiveTextBufferEvents(textOut, {
+      onSegment: (event) => cb(event.segment as TextSegment),
+    });
+    handle.completed.then(unsub, unsub);
+  }
+
+  return handle;
+}
 
 function normalizeOfflineBufferInput(
   buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
@@ -238,26 +382,58 @@ export async function createSTT(
     }
   };
 
-  const engine: SttEngine = {
+  const engine = {
     get instanceId() {
       return instanceId;
     },
 
     async transcribe(
-      buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
-      textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string,
-      options?: SttTranscribeOptions
-    ): Promise<SttTranscribeResult> {
+      buffer:
+        | OfflineAudioBufferRef
+        | OfflineBufferHandle
+        | LiveAudioBufferIdSource
+        | string,
+      textOut:
+        | OfflineTextBufferRef
+        | OfflineTextBufferHandle
+        | LiveTextBufferIdSource
+        | string,
+      options?: SttTranscribeOptions | SttLivePipelineOptions
+    ): Promise<SttTranscribeResult | SttPipelineHandle> {
       guard();
+
+      const audioIsLive = isLiveAudioSource(buffer);
+      const textIsLive = isLiveTextSource(textOut);
+
+      if (audioIsLive || textIsLive) {
+        if (!(audioIsLive && textIsLive)) {
+          throw new Error(
+            'STT_INVALID_ARGUMENT: transcribe() overload mismatch. Use (OfflineAudio, OfflineText, options?) or (LiveAudio, LiveText, options).'
+          );
+        }
+        return transcribeLiveOverload(
+          instanceId,
+          buffer,
+          textOut,
+          options as SttLivePipelineOptions
+        );
+      }
+
+      // Batch path: narrow options to SttTranscribeOptions
+      const batchOptions = options as SttTranscribeOptions | undefined;
       const startedAtMs = Date.now();
-      const bufferId = normalizeOfflineBufferInput(buffer);
+      const bufferId = normalizeOfflineBufferInput(
+        buffer as OfflineAudioBufferRef | OfflineBufferHandle | string
+      );
       const textOutBufferId = resolvePipelineTextBufferId(
-        typeof textOut === 'string' ? textOut : textOut.bufferId
+        typeof textOut === 'string'
+          ? textOut
+          : String((textOut as OfflineTextBufferRef).bufferId ?? textOut)
       );
 
       const segmentation = validateSegmentationConfig({
-        mode: options?.segmentation?.mode,
-        policy: options?.segmentation?.policy,
+        mode: batchOptions?.segmentation?.mode,
+        policy: batchOptions?.segmentation?.policy,
         featureName: 'offline STT',
         domain: 'speech',
         supportsManual: false,
@@ -281,7 +457,7 @@ export async function createSTT(
           completedSegments: 1,
           skippedSegments: [],
           processingTimeMs: Date.now() - startedAtMs,
-          linkMap: options?.linkMap,
+          linkMap: batchOptions?.linkMap,
         };
       }
 
@@ -299,13 +475,13 @@ export async function createSTT(
             mode: segmentation.mode,
             policy: segmentation.policy,
           },
-          errorRecovery: options?.errorRecovery,
-          maxRetriesPerSegment: options?.maxRetriesPerSegment,
-          retryExhaustedFallback: options?.retryExhaustedFallback,
-          abortSignal: options?.abortSignal,
-          onProgress: options?.onProgress,
-          textSkipPlaceholder: options?.textSkipPlaceholder,
-          linkMap: options?.linkMap,
+          errorRecovery: batchOptions?.errorRecovery,
+          maxRetriesPerSegment: batchOptions?.maxRetriesPerSegment,
+          retryExhaustedFallback: batchOptions?.retryExhaustedFallback,
+          abortSignal: batchOptions?.abortSignal,
+          onProgress: batchOptions?.onProgress,
+          textSkipPlaceholder: batchOptions?.textSkipPlaceholder,
+          linkMap: batchOptions?.linkMap,
         }
       );
 
@@ -316,7 +492,7 @@ export async function createSTT(
         throw new Error(message);
       }
 
-      let linkMap = options?.linkMap;
+      let linkMap = batchOptions?.linkMap;
       if (!linkMap) {
         linkMap = await createSegmentLinkMap({
           audioBufferId: bufferId,
@@ -425,7 +601,7 @@ export async function createSTT(
     },
   };
 
-  return engine;
+  return engine as unknown as SttEngine;
 }
 
 // Streaming (online) STT

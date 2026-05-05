@@ -90,6 +90,12 @@ std::future<void> OfflineLivePipelineWorker::reset() {
   return future;
 }
 
+void OfflineLivePipelineWorker::addUnitsWritten(int64_t units) {
+  if (units <= 0) return;
+  std::lock_guard<std::mutex> statusLock(statusMtx_);
+  unitsWritten_ += units;
+}
+
 StreamingPipelineStatus OfflineLivePipelineWorker::getStatus() {
   std::lock_guard<std::mutex> statusLock(statusMtx_);
   return StreamingPipelineStatus{

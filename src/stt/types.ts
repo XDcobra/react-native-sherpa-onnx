@@ -2,10 +2,12 @@ import type { FileSource } from '../fileio/types';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
 } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
 } from '../textbuffer/types';
 import type {
   ErrorRecoveryStrategy,
@@ -15,6 +17,9 @@ import type {
 } from '../pipeline/offlineOrchestrator';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type { SttPipelineHandle } from './streamingTypes';
+import type { TextSegment } from '../segment/segment';
 
 /**
  * Supported STT model types.
@@ -349,19 +354,58 @@ export interface SttTranscribeResult {
   linkMap?: SegmentLinkMapRef;
 }
 
+// ========== Live pipeline options ==========
+
+/**
+ * Options for the live-overload of `SttEngine.transcribe(LiveAudio, LiveText, options)`.
+ *
+ * `segmentation.policy` is REQUIRED — offline weights cannot run in a live pipeline without
+ * a segmentation engine driving the segment commit loop.
+ * See design note: `docs/migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md`
+ */
+export interface SttLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
+  /**
+   * Number of audio samples fed per batch into the offline recognizer for a single committed
+   * segment. Default: 3200 (≈200 ms @ 16 kHz). Capped to the segment's actual length.
+   * Whisper note: Whisper uses an internal 30-second window; tune `maxSegmentMs` in your policy
+   * accordingly. See docs/stt-offline.md "Whisper and the 30-second window".
+   * See also: https://github.com/openai/whisper/discussions/1118
+   */
+  chunkSize?: number;
+
+  /**
+   * Optional per-segment mirror callback. Fires once per committed text segment with the
+   * recognised text. Executes on the worker thread — do not block.
+   * No `onPartial` is available; the live-offline path is commit-only by design
+   * (see design §7.1).
+   */
+  onSegment?: (segment: TextSegment) => void;
+}
+
 // ========== Engine interfaces ==========
 
 /**
  * Instance-based STT engine returned by createSTT().
  * transcribe() writes results into an OfflineTextBuffer; use TextBuffer getters to read them.
+ * A second overload accepts live buffers with mandatory segmentation (live-offline path).
  */
 export interface SttEngine {
   readonly instanceId: string;
+
+  // Existing batch overload (unchanged).
   transcribe(
     buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
     textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string,
     options?: SttTranscribeOptions
   ): Promise<SttTranscribeResult>;
+
+  // Live overload — offline weights driven by mandatory segmentation.
+  transcribe(
+    audioIn: LiveAudioBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options: SttLivePipelineOptions
+  ): Promise<SttPipelineHandle>;
+
   setConfig(options: SttRuntimeConfig): Promise<void>;
   destroy(): Promise<void>;
 }

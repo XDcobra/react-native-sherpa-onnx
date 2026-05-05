@@ -972,9 +972,6 @@ bool seg_live_append_segment(
   bool hasConfidence,
   double confidence,
   const std::string &payloadJson,
-  const std::string &annotationReason,
-  const std::string &annotationSource,
-  int64_t annotationCreatedAtMs,
   std::string *segmentId,
   int *segmentIndex,
   std::string *error
@@ -1029,15 +1026,6 @@ bool seg_live_append_segment(
     }
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
-
-    if (!annotationReason.empty() && !annotationSource.empty()) {
-      SegAnnotationSnapshot ann;
-      ann.reason = annotationReason;
-      ann.source = annotationSource;
-      ann.createdAtMs = annotationCreatedAtMs > 0 ? annotationCreatedAtMs : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-      ann.segmentIndex = idx;
-      seg_record_annotation_for_segment(seg.id, ann);
-    }
 
     seg_notify_segment_appended(entry, seg, idx);
     entry->notifyCommitListeners(seg.id, idx, seg);
@@ -1317,15 +1305,24 @@ static bool seg_append_speech_segment(
     false,
     0.0,
     payloadJson,
-    reason,
-    "segmentation_engine",
-    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
   );
   if (!ok) {
     return false;
+  }
+
+  {
+    const int64_t createdAtMs =
+      (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+    g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+      reason,
+      "segmentation_engine",
+      createdAtMs,
+      segmentIndex,
+    };
   }
 
   engine->totalSegmentsCommitted += 1;
@@ -1378,15 +1375,24 @@ static bool seg_append_speech_segment_range(
     false,
     0.0,
     payloadJson,
-    reason,
-    "segmentation_engine",
-    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
   );
   if (!ok) {
     return false;
+  }
+
+  {
+    const int64_t createdAtMs =
+      (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+    g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+      reason,
+      "segmentation_engine",
+      createdAtMs,
+      segmentIndex,
+    };
   }
 
   engine->totalSegmentsCommitted += 1;
@@ -2647,16 +2653,16 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
       NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
       NSString *annSource = [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"] : nil;
       if (annReason.length > 0 && annSource.length > 0) {
-        SegAnnotationSnapshot ann;
-        ann.reason = annReason.UTF8String;
-        ann.source = annSource.UTF8String;
-        if ([payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]) {
-          ann.createdAtMs = ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue;
-        } else {
-          ann.createdAtMs = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-        }
-        ann.segmentIndex = segmentIndex;
-        seg_record_annotation_for_segment(seg.id, ann);
+        int64_t annCreatedAtMs = [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
+          ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
+          : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+        std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+        g_seg_engine_annotation_by_segment[seg.id] = SegEngineAnnotation{
+          annReason.UTF8String,
+          annSource.UTF8String,
+          annCreatedAtMs,
+          segmentIndex,
+        };
       }
     }
 

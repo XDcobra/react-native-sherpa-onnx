@@ -486,3 +486,8 @@ Required follow-up notes:
 **Decision: Reuse `SttPipelineHandle` (accepted).**
 
 No new STT live-specific handle type is introduced in this phase.
+
+## Cross-references
+
+- `offline-stt-live-pipeline-mandatory-segmentation.md`
+- `live_overload_overview.md`

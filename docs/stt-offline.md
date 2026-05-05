@@ -367,6 +367,36 @@ The `SttTranscribeResult` returned by `transcribe` includes:
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
 
+### Whisper and the 30-second window
+
+Whisper's encoder processes audio in a fixed 30-second mel-spectrogram window. Segments that exceed this length cause Whisper to truncate or hallucinate text. When using a Whisper model, keep `maxSegmentMs` in your segmentation policy at or below 30 000 ms:
+
+```ts
+// Offline batch path with explicit segmentation policy:
+const result = await engine.transcribe(audio, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      maxSegmentMs: 25000, // keep well under Whisper's 30 s window
+    },
+  },
+});
+
+// Live-offline overload — same constraint applies:
+const handle = await stt.transcribe(liveAudio, liveText, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      maxSegmentMs: 25000,
+    },
+  },
+});
+```
+
+See [openai/whisper#1118](https://github.com/openai/whisper/discussions/1118) for background. This constraint does not apply to transducer, paraformer, SenseVoice, or other non-Whisper models.
+
 ## Pipeline composition
 
 ### Typical upstream

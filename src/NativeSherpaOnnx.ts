@@ -170,6 +170,22 @@ export interface Spec extends TurboModule {
   /** Release OnlineRecognizer and stop any active STT pipeline for this instance. */
   unloadOnlineStt(instanceId: string): Promise<void>;
 
+  /**
+   * Start a live-offline STT pipeline: a segmentation engine drives the live audio buffer,
+   * and the offline recognizer processes each committed speech segment.
+   * Returns a pipelineId compatible with stopStreamingPipeline / flushStreamingPipeline / etc.
+   */
+  startSttOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      chunkSize?: number;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   // ==================== Pipeline Audio Buffers ====================
 
   /**

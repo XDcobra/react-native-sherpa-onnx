@@ -47,6 +47,9 @@ internal class SherpaOnnxSttHelper(
 
   private fun getInstance(instanceId: String): SttEngineInstance? = instances[instanceId]
 
+  fun getRecognizer(instanceId: String): OfflineRecognizer? =
+    getInstance(instanceId)?.recognizer
+
   private val pathResolver = SttPathResolver(context)
   private val configFactory = OfflineSttRecognizerConfigFactory()
 

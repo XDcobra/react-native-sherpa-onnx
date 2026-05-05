@@ -28,6 +28,7 @@ import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
+import com.sherpaonnx.stt.facade.SherpaOnnxOfflineSttLivePipelineHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
 import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
@@ -118,6 +119,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val offlineSttLivePipelineHelper = SherpaOnnxOfflineSttLivePipelineHelper(
+    reactApplicationContext,
+    sttHelper,
+    NAME,
+  )
   private val pcmPlayerService = PcmPlayerService(reactApplicationContext).also {
     it.onPlayerEnded = { playerId, bufferId ->
       try {
@@ -924,6 +930,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       audioInLiveBufferId = audioInLiveBufferId,
       textOutLiveBufferId = textOutLiveBufferId,
       chunkSize = chunkSize?.toInt(),
+      promise = promise,
+    )
+  }
+
+  override fun startSttOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlineSttLivePipelineHelper.startSttOfflineLivePipeline(
+      instanceId = instanceId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
       promise = promise,
     )
   }
