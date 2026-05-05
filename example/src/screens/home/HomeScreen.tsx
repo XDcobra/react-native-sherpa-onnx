@@ -16,22 +16,22 @@ import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 type HomeFeature = Feature & { sectionTitle: string };
 
 const SECTION_ORDER = [
-  'Download & Modelle',
-  'Spracherkennung',
-  'Sprachsynthese',
+  'Download & Models',
+  'Speech Recognition',
+  'Speech Synthesis',
   'Pipelines & Demos',
-  'Alignment & Untertitel',
-  'Sprachverbesserung',
-  'Sprachaktivität',
-  'Interpunktion',
-  'Sprecher & Trennung',
+  'Alignment & Subtitles',
+  'Speech Enhancement',
+  'Voice Activity',
+  'Punctuation',
+  'Speakers & Separation',
 ] as const;
 
 const FEATURES: HomeFeature[] = [
   {
     id: 'download_showcase',
-    sectionTitle: 'Download & Modelle',
-    title: 'Downloadmanager',
+    sectionTitle: 'Download & Models',
+    title: 'Download Manager',
     description:
       'Try the download manager and download models for each feature screen: pause, resume, and clear partial installs',
     icon: 'cloud-download-outline',
@@ -40,7 +40,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'stt',
-    sectionTitle: 'Spracherkennung',
+    sectionTitle: 'Speech Recognition',
     title: 'Speech-to-Text',
     description: 'Convert speech to text using offline models',
     icon: 'mic',
@@ -49,7 +49,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'tts',
-    sectionTitle: 'Sprachsynthese',
+    sectionTitle: 'Speech Synthesis',
     title: 'Text-to-Speech (Offline)',
     description: 'Batch synthesis from text (one-shot or segmented)',
     icon: 'volume-high',
@@ -58,7 +58,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'stt_streaming',
-    sectionTitle: 'Spracherkennung',
+    sectionTitle: 'Speech Recognition',
     title: 'Speech-to-Text (Streaming)',
     description:
       'Stream long audio files through LiveAudioBuffer and LiveTextBuffer to avoid offline decode OOM',
@@ -68,7 +68,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'tts_streaming',
-    sectionTitle: 'Sprachsynthese',
+    sectionTitle: 'Speech Synthesis',
     title: 'Text-to-Speech (Streaming)',
     description:
       'Use incremental TTS to start synthesis before the full prompt is built offline',
@@ -98,7 +98,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'generate_timestamp',
-    sectionTitle: 'Alignment & Untertitel',
+    sectionTitle: 'Alignment & Subtitles',
     title: 'Alignment (Subtitles/Timestamps)',
     description:
       'Use the alignment API to generate subtitle/timestamp segments from audio + transcript',
@@ -108,7 +108,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'enhancement',
-    sectionTitle: 'Sprachverbesserung',
+    sectionTitle: 'Speech Enhancement',
     title: 'Speech Enhancement',
     description: 'Remove noise and improve audio quality (offline)',
     icon: 'options',
@@ -117,7 +117,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'enhancement_streaming',
-    sectionTitle: 'Sprachverbesserung',
+    sectionTitle: 'Speech Enhancement',
     title: 'Speech Enhancement (Streaming)',
     description:
       'Stream files through live buffers to avoid offline OOM on very long audio',
@@ -127,7 +127,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'vad',
-    sectionTitle: 'Sprachaktivität',
+    sectionTitle: 'Voice Activity',
     title: 'Voice Activity Detection',
     description: 'Detect voice activity in audio streams',
     icon: 'stats-chart',
@@ -136,7 +136,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'segmentation_showcase',
-    sectionTitle: 'Sprachaktivität',
+    sectionTitle: 'Voice Activity',
     title: 'Segmentation Showcase',
     description:
       'Experiment with text and audio segmentation policies. Control segment boundaries with configurable parameters.',
@@ -146,7 +146,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'punctuation',
-    sectionTitle: 'Interpunktion',
+    sectionTitle: 'Punctuation',
     title: 'Punctuation',
     description:
       'Offline CT-Transformer: plain text in, punctuated text out (buffers)',
@@ -156,7 +156,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'punctuation_streaming',
-    sectionTitle: 'Interpunktion',
+    sectionTitle: 'Punctuation',
     title: 'Punctuation Streaming',
     description: 'Online CNN-BiLSTM over LiveTextBuffer in/out',
     icon: 'chatbubbles-outline',
@@ -165,7 +165,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'diarization',
-    sectionTitle: 'Sprecher & Trennung',
+    sectionTitle: 'Speakers & Separation',
     title: 'Speaker Diarization',
     description: 'Identify who spoke when in audio',
     icon: 'people',
@@ -174,7 +174,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'separation',
-    sectionTitle: 'Sprecher & Trennung',
+    sectionTitle: 'Speakers & Separation',
     title: 'Source Separation',
     description: 'Separate voice from background music',
     icon: 'musical-notes',
