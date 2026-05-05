@@ -3,6 +3,8 @@ package com.sherpaonnx.segment.pipeline
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
@@ -17,6 +19,12 @@ class LiveSegmentEntry(
   private val emitSegmentAppendedEvents: Boolean = false,
   private val segmentEventMinIntervalMs: Long = 0L,
 ) {
+  data class CommittedSegment(
+    val segmentId: String,
+    val segmentIndex: Int,
+    val record: SegmentRecord,
+  )
+
   companion object {
     private val ALLOWED_KINDS = setOf("speech", "alignment")
   }
@@ -31,6 +39,10 @@ class LiveSegmentEntry(
   private val segments = ArrayList<SegmentRecord>()
   private var evictedCount: Long = 0
   private val totalSegmentsWritten = AtomicLong(0)
+  private val cursors = HashMap<Int, AtomicInteger>()
+  private val nextCursorId = AtomicInteger(0)
+  private val commitListeners = CopyOnWriteArrayList<Pair<Int, (String, Int, SegmentRecord) -> Unit>>()
+  private val nextCommitListenerToken = AtomicInteger(0)
   @Volatile
   private var lastSegmentEventEmitAtMs: Long = 0L
 
@@ -174,6 +186,7 @@ class LiveSegmentEntry(
         }
       }
     }
+    notifyCommitListeners(segmentId, segmentIndex, appendRecord)
     return Pair(segmentId, segmentIndex)
   }
 
@@ -251,6 +264,59 @@ class LiveSegmentEntry(
       if (startIndex >= segments.size) return emptyList()
       val end = minOf(startIndex + maxCount, segments.size)
       return segments.subList(startIndex, end).toList()
+    }
+  }
+
+  fun createSegmentCursor(): Int = synchronized(segmentLock) {
+    val cursorId = nextCursorId.getAndIncrement()
+    cursors[cursorId] = AtomicInteger(0)
+    cursorId
+  }
+
+  fun drainSegments(cursorId: Int, maxCount: Int): List<CommittedSegment> = synchronized(segmentLock) {
+    if (maxCount <= 0) return emptyList()
+    val cursor = cursors[cursorId]
+      ?: throw SegmentPipelineException(
+        SegmentErrorCodes.BUFFER_NOT_FOUND,
+        "Segment cursor not found: $cursorId"
+      )
+    val currentPos = cursor.get()
+    if (currentPos >= segments.size) return emptyList()
+    val end = minOf(currentPos + maxCount, segments.size)
+    val committed = ArrayList<CommittedSegment>(end - currentPos)
+    for (idx in currentPos until end) {
+      val absoluteIndex = (evictedCount + idx).toInt()
+      committed.add(
+        CommittedSegment(
+          segmentId = segments[idx].id,
+          segmentIndex = absoluteIndex,
+          record = segments[idx],
+        )
+      )
+    }
+    cursor.set(end)
+    committed
+  }
+
+  fun releaseSegmentCursor(cursorId: Int) {
+    synchronized(segmentLock) {
+      cursors.remove(cursorId)
+    }
+  }
+
+  fun addCommitListener(listener: (segmentId: String, segmentIndex: Int, record: SegmentRecord) -> Unit): Int {
+    val token = nextCommitListenerToken.getAndIncrement()
+    commitListeners.add(Pair(token, listener))
+    return token
+  }
+
+  fun removeCommitListener(token: Int) {
+    commitListeners.removeAll { it.first == token }
+  }
+
+  private fun notifyCommitListeners(segmentId: String, segmentIndex: Int, record: SegmentRecord) {
+    for ((_, listener) in commitListeners) {
+      listener(segmentId, segmentIndex, record)
     }
   }
 

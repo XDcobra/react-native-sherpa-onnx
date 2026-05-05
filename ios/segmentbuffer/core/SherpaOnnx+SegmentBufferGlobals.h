@@ -36,6 +36,21 @@ extern std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> g_seg_live
 extern std::mutex g_seg_mutex;
 
 std::shared_ptr<SegLiveEntry> seg_get_live_entry(const std::string &bufferId);
+int seg_live_add_commit_listener(
+  const std::string &liveBufferId,
+  std::function<void(const std::string &, int, const SegRecord &)> listener,
+  std::string *error
+);
+void seg_live_remove_commit_listener(const std::string &liveBufferId, int token);
+int seg_live_create_cursor(const std::string &liveBufferId, std::string *error);
+std::vector<SegRecord> seg_live_drain_segments(
+  const std::string &liveBufferId,
+  int cursorId,
+  int maxCount,
+  int *startIndex,
+  std::string *error
+);
+void seg_live_release_cursor(const std::string &liveBufferId, int cursorId);
 bool seg_live_append_segment(
   const std::string &liveBufferId,
   const std::string &kind,
@@ -65,6 +80,7 @@ void seg_engine_on_audio_append(
 );
 void seg_engine_on_buffer_finalized(const std::string &bufferId);
 void seg_engine_on_buffer_released(const std::string &bufferId);
+bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string *error);
 
 // Segment annotation metadata (reason/source/timestamps) emitted by native engines.
 bool seg_engine_peek_annotation(

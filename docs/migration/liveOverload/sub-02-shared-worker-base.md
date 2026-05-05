@@ -5,6 +5,11 @@
 - Depends on: existing `StreamingPipelineRegistry` / `StreamingPipelineWorker` (Android + iOS), existing `SegmentationEngineRegistry`, sub-01 (cross-feature contract).
 - Prerequisite for: sub-03, sub-04, sub-05, sub-06.
 
+## Cross-references
+
+- Design note: [`offline-stt-live-pipeline-mandatory-segmentation.md`](./offline-stt-live-pipeline-mandatory-segmentation.md)
+- Phase overview: [`live_overload_overview.md`](./live_overload_overview.md)
+
 ## Purpose
 
 Per design §7.4 (`Shared worker base — non-negotiable`):
