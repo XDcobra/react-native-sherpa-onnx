@@ -192,6 +192,35 @@ const tts = await createStreamingTTS({ modelSource: { kind: 'fs', path: '/path/t
 
 For `createIncrementalStreamingTTS(options)`, see [API reference](#api-reference).
 
+## Live overload on offline TTS (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline TTS engine can drive a live pipeline directly. This is useful when you have a high-quality offline model (like a large VITS or Kokoro pack) and want to use it for live synthesis from a `LiveTextBuffer`.
+
+```ts
+const engine = await createTTS({ /* offline init */ });
+const pipeline = await engine.synthesize(textIn, audioOut, {
+  segmentation: { 
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto' } 
+  },
+});
+
+// pipeline.stop() / .flush() / .completed as usual
+const completion = await pipeline.completed;
+console.log(`Produced ${completion.unitsWritten} audio samples`);
+```
+
+| Aspect | Live overload (`createTTS`) | Streaming engine (`createStreamingTTS`) |
+| --- | --- | --- |
+| Weights | Offline-optimized | Streaming-optimized |
+| Logic | One-shot per segment | Incremental (where supported) |
+| Latency | Per-segment (higher) | Per-chunk (lower) |
+| Voice Cloning | Support varies (Pocket/Zipvoice) | Support varies (Pocket/Zipvoice) |
+
+
+
 ## Streaming engine (`StreamingTtsEngine`)
 
 ### `tts.synthesize(textIn, audioOut, options?)`

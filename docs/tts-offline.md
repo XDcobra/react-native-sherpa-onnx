@@ -364,6 +364,38 @@ await tts.destroy();
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
 
+## Live overload on offline TTS (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline TTS engine can drive a live pipeline directly. This is useful when you want to use a high-fidelity offline model (like VITS or Kokoro) against a live stream of text (e.g. from a live STT buffer) without the sample-level incremental generation of the native streaming engine.
+
+```ts
+const tts = await createTTS({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/vits-piper-en' },
+  modelType: 'vits',
+});
+
+const handle = await tts.synthesize(liveTextIn, liveAudioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Synthesized ${completion.unitsWritten} samples`);
+```
+
+| Aspect | Live overload (`createTTS`) | Streaming engine (`createStreamingTTS`) |
+| --- | --- | --- |
+| Weights | Offline (VITS, Kokoro) | Online (Incremental VITS/Pocket) |
+| Incremental | No (Per-segment synthesis) | Yes (Per-character/chunk) |
+| Latency | Per-segment (higher) | Per-chunk (lower) |
+
+
+
 ## Pipeline composition
 
 ### Typical upstream

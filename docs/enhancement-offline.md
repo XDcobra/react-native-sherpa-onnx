@@ -304,6 +304,34 @@ try {
 
 See [segmentation-engine.md](segmentation-engine.md) for policy details and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
+## Live overload on offline enhancement (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline denoiser can drive a live pipeline directly. This is useful when you want to process a live audio stream using a monolithic offline model.
+
+> [!WARNING]
+> Because offline models are designed for whole-utterance processing, using them in live contexts via segmentation can introduce audible artifacts at segment boundaries.
+
+```ts
+const denoiser = await createEnhancement({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/gtcrn' },
+});
+
+const handle = await denoiser.enhance(liveAudioIn, liveAudioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 10000 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Denoised ${completion.unitsRead} samples`);
+```
+
+
+
 ## Pipeline composition
 
 ### Typical upstream

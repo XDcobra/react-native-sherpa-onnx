@@ -51,6 +51,12 @@ For `text_synthetic_auto` and `text_punctuation_assisted`, when `sentenceBoundar
 
 Optional **`sentenceBoundaryChars`** (`string[]`, non-empty after validation) replaces the default delimiter list entirely (no merge).
 
+### Live overload integration
+
+The segmentation engine is the core runtime for the **Live Overload** feature. When an offline-only model (like Whisper or CT-Transformer) is used for live transcription or synthesis, the SDK automatically attaches a segmentation engine to the input live buffer. This engine is responsible for splitting the continuous live stream into discrete segments that the monolithic offline model can process.
+
+For this reason, `segmentation.policy` is **mandatory** when using `createSTT`, `createTTS`, `createOfflinePunctuation`, or `createEnhancement` with live buffers. See the [Live overload overview](migration/liveOverload/live_overload_overview.md) for architectural details.
+
 ## Quick start
 
 ```ts

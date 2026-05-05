@@ -102,41 +102,36 @@ try {
 
 ---
 
-## Live overload (Phase 3)
+## Live overload on offline punctuation (offline weights, live consumption)
 
-`createOfflinePunctuation()` now also supports a live-buffer overload:
+> Mandatory `segmentation.policy`. Commit-only — no partials.
 
-- Input: `LiveTextBuffer` (`txt_live_*`)
-- Output: `LiveTextBuffer` (`txt_live_*`)
-- Required option: `segmentation.policy` (mode must not be `off`)
-- Return type: `PunctuationPipelineHandle` (`stop`, `flush`, `reset`, `getStatus`, `completed`)
-- Output semantics: commit-only segments (`onSegment` optional mirror callback), no partials
+The offline punctuation engine can drive a live pipeline directly. This is useful when you want to punctuate a live stream of text (e.g. from an STT live buffer) using a high-quality CT-Transformer model without the latency/BPE-size constraints of streaming CNN models.
 
 ```ts
 const punct = await createOfflinePunctuation({
   modelSource: { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' },
 });
 
-const handle = await punct.punctuate(
-  'txt_live_11111111-1111-1111-1111-111111111111',
-  'txt_live_22222222-2222-2222-2222-222222222222',
-  {
-    segmentation: {
-      mode: 'auto',
-      policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
-    },
-    onSegment: (segment) => {
-      console.log('Committed punctuated segment:', segment.text);
-    },
-  }
-);
+const handle = await punct.punctuate(liveTextIn, liveTextOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
 
-await handle.flush();
-await handle.stop();
-await punct.destroy();
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Punctuated ${completion.unitsRead} characters`);
 ```
 
-For live-overload validation, missing/invalid segmentation uses `LIVE_OFFLINE_SEGMENTATION_REQUIRED` (shared with other live-overload features per the design/overview docs above).
+| Aspect | Live overload (`createOfflinePunctuation`) | Streaming engine (`createStreamingPunctuation`) |
+| --- | --- | --- |
+| Weights | CT-Transformer (Higher quality) | CNN-BiLSTM (Lower quality) |
+| Latency | Per-segment (higher) | Per-token (lower) |
+| Context | Global (per segment) | Local (sliding window) |
+
+
 
 ---
 
