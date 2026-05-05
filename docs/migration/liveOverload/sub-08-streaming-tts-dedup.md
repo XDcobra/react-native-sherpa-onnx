@@ -1,11 +1,11 @@
 # Sub-Plan 08: Streaming TTS Deduplication (Post-Implementation Track)
 
 ## Status
-- Phase: **7 (deferred — explicit exception to the clean-cut rule)**
-- Depends on: sub-01 … sub-07 — **all** must be merged, stable, and shipped at least once before this phase begins.
-- Blocks: nothing inside this rollout — this is the **final** house-keeping step.
+- Phase: **7 (same release, final step — explicit exception to the clean-cut rule)**
+- Depends on: sub-01 … sub-07 — all must be implemented and verified before this phase begins.
+- Blocks: nothing inside this rollout — this is the final house-keeping step of the same release train.
 
-> ⚠️ **Read this first.** Per the rollout principles: "clean cut without legacy logic, exception: StreamingTTS." This sub-plan is the **only** place where a deprecation alias is acceptable. Every other live overload phase (sub-03 … sub-06) does a clean cut without aliases. The reasoning is documented in the design note §7.5: TTS streaming is the precedent that motivated the live overload, and dedup is "important but scheduled later" precisely so we don't block the public release on a dedup design that needs telemetry to validate.
+> ⚠️ **Read this first.** Per the rollout principles: "clean cut without legacy logic, exception: StreamingTTS." This sub-plan is the **only** place where a compatibility alias is acceptable. Every other live overload phase (sub-03 … sub-06) does a clean cut without aliases. For this project, dedup is executed in the same release after sub-01 … sub-07 are complete.
 
 ## Purpose
 
@@ -19,11 +19,11 @@ End state: there is **one** way to drive offline TTS weights from a `LiveTextBuf
 
 ---
 
-## Why this is its own (deferred) phase
+## Why this is its own final phase
 
 1. **Parity gate**: sub-05 LT-10 is the dedup gate — if the live overload doesn't produce sample-equal output to `createStreamingTTS().synthesize(...)`, dedup is unsafe.
-2. **Telemetry**: until the live overload ships in a public release, we don't know which factory users actually adopt. Pre-emptively deprecating one path before users have a chance to validate the other risks churn.
-3. **Single release vs. major bump**: full removal of `createStreamingTTS` is a **breaking change**. Aligning that with a planned major version is cleaner than crowbar-ing it into the live overload's first public release.
+2. **Release sequencing**: dedup is intentionally placed at the end of the implementation train so parity work can settle first.
+3. **Future removal remains breaking**: full removal of `createStreamingTTS` is still a major-version concern; this phase performs dedup/redirect in-place.
 
 ---
 
@@ -79,15 +79,9 @@ Cons: breaking change for existing users; collides with the otherwise additive n
 
 ### Recommendation
 
-**Start with Option β (internal redirect, no user-facing change). Plan a transition to Option γ (deprecation messaging) once telemetry shows live-overload adoption is ≥30% of new TTS usage.**
+**Use Option β in this same release (internal redirect, no immediate runtime deprecation warning), after sub-01 … sub-07 are complete.**
 
-Why:
-
-- Pre-release SDK + first public release should not deprecate features the very same release introduced replacements for. Users need time to discover the live overload.
-- Internal redirect (β) immediately gives us **single-implementation** safety (one native worker, one Jest path) without imposing migration pain.
-- Once the live overload is established (typically one to two minor releases), flipping to γ is mechanical: add `@deprecated`, add `console.warn`, set removal milestone.
-
-This is the path encoded in the implementation plan below.
+Then keep Option γ/Step 4 as a controlled follow-up policy decision (docs demotion + optional deprecation messaging), not a blocker for this release.
 
 ---
 
@@ -129,15 +123,15 @@ return tts.synthesize(textIn, audioOut, {
 
 - `tts-streaming.md` collapses the two sections ("Streaming TTS factory" + "Live overload on offline TTS") into **one** section: "Live TTS pipelines (offline weights)". The doc explains both entry points exist, recommends `createTTS().synthesize(...)` for new code, and notes that `createStreamingTTS` is preserved for backward compatibility.
 
-### Step 4 — Deprecation gate (post-telemetry)
+### Step 4 — Deprecation gate (optional follow-up)
 
-Once the live overload has been public for at least one minor release **and** telemetry / community feedback indicates adoption:
+If/when the team decides to introduce explicit deprecation messaging:
 
 - Add `@deprecated` annotation to `createStreamingTTS` JSDoc + TypeScript decorator.
 - Add a one-time `console.warn` on first invocation per process.
 - Open a tracking issue for full removal at the next major version.
 
-This step is **post-Step 1**, not blocking it. Step 1 ships dedup; Step 4 schedules removal.
+This step is optional for the same-release rollout and does not block dedup completion.
 
 ### Step 5 — Major-version removal
 
@@ -152,14 +146,14 @@ At the next major (e.g. v1.0):
 
 ## What to verify before this phase begins
 
-The trigger for Step 1 is **all** of the following:
+The trigger for Step 1 in this release is **all** of the following:
 
-- [ ] sub-05 (TTS live overload) is merged, stable, and shipped at least once in a public release.
-- [ ] Sub-05 LT-10 (parity test) is green for at least one full release cycle (no regressions filed).
+- [ ] sub-05 (TTS live overload) is merged and stable in the current branch.
+- [ ] Sub-05 LT-10 (parity test) is green in current CI.
 - [ ] No outstanding bug reports against `createTTS().synthesize(LiveText, LiveAudio, ...)` related to audio quality, latency, or `streamingPipelineCompleted` event semantics.
 - [ ] Voice cloning live-overload test (LT-7) is green and at least one community example uses voice cloning via the live overload.
 
-If any of these fails, Step 1 is **deferred further**. The clean-cut exception is real but bounded: once sub-08 starts, it must finish.
+If any of these fails, Step 1 is deferred until fixed. The clean-cut exception is real but bounded: once sub-08 starts, it must finish in the same release train.
 
 ---
 
@@ -187,47 +181,26 @@ If any of these fails, Step 1 is **deferred further**. The clean-cut exception i
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-8.1 — When in time should Step 1 (internal redirect) actually happen?
 
-**Question.** Should Step 1 land in the **same release** as sub-03 … sub-07, or in the next minor release?
+**Decision: Same release as sub-03 … sub-07 (accepted).**
 
-**Recommendation: Next minor release after sub-03 … sub-07 ships.** Reasoning:
-
-- The first public release with the live overload should be **purely additive** — users see the new overload, no factory behavior changes. This minimizes regression risk.
-- If we redirect `createStreamingTTS` internally in the same release, any subtle behavior drift between the old and new worker becomes a regression in the same release, not a clean dedup follow-up.
-- The next minor release ships with the redirect; users see no behavior change but the dedup is real internally.
+Because the public SDK has not been published yet, dedup is executed in the same release train after sub-phases 01–08 implementation is complete and verified.
 
 ### OQ-8.2 — Should `createStreamingTTS` stay listed as a public entry point in the docs after Step 4?
 
-**Question.** Even after `@deprecated` is added, do we keep documenting `createStreamingTTS` as a primary entry point or hide it as "legacy / for backward compatibility"?
-
-**Recommendation: Demote to "legacy" section post-Step 4.** Reasoning:
-
-- Showing two equally-prominent entry points contradicts the deprecation message.
-- Keeping the docs page (so existing users can find migration guidance) is important; demoting it to a final "Legacy / migration" section is the right balance.
+**Decision: Demote to a \"legacy\" section post-Step 4 (accepted).**
 
 ### OQ-8.3 — How long is "post-telemetry"?
 
-**Question.** Step 4 says "after at least one minor release"; that's a fuzzy timeline. Should we hard-commit to a calendar?
+**Decision: Dedup in the same release after sub-phases 01–08 are finished (accepted).**
 
-**Recommendation: Hard-commit to "next minor release with at least 30 days of public exposure."** Reasoning:
-
-- A hard floor (≥30 days) prevents the deprecation from racing the release announcement.
-- Next-minor cadence gives users one full release cycle to discover the live overload.
-- Post-deprecation, removal in the **next major** gives at least another full release cycle of warnings before the breaking change.
-
-If the SDK uses semver-loose versioning (frequent minors), tighten to ≥60 days. The point is to give users a stable window, not to optimize for fast cleanup.
+No waiting window/post-telemetry gate is required for dedup execution in this rollout.
 
 ### OQ-8.4 — What about `StreamingTtsEngine` type — same lifecycle as the factory?
 
-**Question.** The `StreamingTtsEngine` interface is defined in `streamingTypes.ts`. Should it follow the same deprecation/removal lifecycle as the factory?
+**Decision: Yes, same lifecycle; keep field shape identical to the live-overload return (accepted).**
 
-**Recommendation: Yes, but keep its **field shape** identical to the live overload's return.** Reasoning:
-
-- During Step 1 (internal redirect) the type is still used by `createStreamingTTS`'s return value — keep it as-is.
-- During Step 4 (deprecation), mark the type `@deprecated` and recommend `TtsEngine` instead.
-- During Step 5 (removal), delete the type alongside the factory.
-
-If users imported `StreamingTtsEngine` directly, they get a clean migration path: rename to `TtsEngine`. The field shape remains identical (same `synthesize`, same `getModelInfo`, etc.) so the migration is mechanical.
+If/when deprecation/removal occurs, `StreamingTtsEngine` follows the factory lifecycle, and remains mechanically migratable because shape parity is preserved.

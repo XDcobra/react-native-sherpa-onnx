@@ -305,38 +305,25 @@ Existing Jest suites (`punctuation-segmented.test.ts`, `streaming-punctuation.te
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-4.1 — Default policy: `text_synthetic_auto` or `text_punctuation_assisted`?
 
-**Question.** `text_punctuation_assisted` uses an actual punctuation model to decide segment boundaries, which gives more semantically aware splits. But the live overload's whole point is that the user **already has** an offline CT-Transformer punctuation engine — could that be reused as the policy's `punctuationInstanceId`?
+**Decision: Default to `text_synthetic_auto`. Do NOT auto-wire the engine as `punctuationInstanceId` (accepted).**
 
-**Recommendation: Default to `text_synthetic_auto`. Do NOT auto-wire the engine as the `punctuationInstanceId`.** Reasoning:
+`text_punctuation_assisted` remains opt-in and requires explicit caller-provided `policy.punctuationInstanceId`.
 
-- `text_punctuation_assisted` is intended for the **streaming punctuation** engine (CNN-BiLSTM, low-latency token classifier), not the heavier CT-Transformer offline model. Running CT-Transformer twice per text chunk (once for boundary detection, once for the actual punctuation pass) doubles the work for no real boundary-quality benefit.
-- `text_synthetic_auto` (regex-based sentence boundaries with `maxLengthChars`) is fast, deterministic, and matches what users expect when they tell the SDK "split on sentence ends".
-- Users who specifically want assisted segmentation can still pass `policy: { evaluator: 'text_punctuation_assisted', punctuationInstanceId: <their streaming punctuation instance> }` explicitly. The validator (sub-01) accepts that.
+### OQ-4.2 — Should the live overload write committed segments only, or also partials?
 
-If telemetry post-release shows users want the engine self-driving its own boundaries, we can add an opt-in flag — but the default should not pay double inference cost silently.
+**Decision: Commit-only — no partials (accepted).**
 
-### OQ-4.2 — Should the live overload write each punctuated segment to **one** committed text segment, or stream characters partially?
+Required follow-up documentation:
 
-**Question.** The output `LiveTextBuffer` supports `setPartial` / `appendPartial` plus committed segments. Should we use partials at all here?
+- Add/keep explicit commit-only behavior in punctuation feature docs (`docs/punctuation.md` or equivalent) as part of sub-07.
+- Add/keep explicit commit-only wording in relevant in-code docstrings/comments at useful call sites (for example on `PunctuationLivePipelineOptions` and live-overload `punctuate(...)` overload docs). If needed, repeat at multiple relevant points to prevent drift.
 
-**Recommendation: Commit-only — no partials.** Reasoning:
+### OQ-4.3 — Should live overload include batch orchestration options like `onProgress`?
 
-- Per design §7.1, partials are a **true-streaming** contract; the live-offline path is commit-only across the whole rollout. Punctuation falls under the same rule.
-- Each input segment maps to **exactly one** punctuated output segment (CT-Transformer is a one-shot per text). There's no natural partial intermediary state.
-- Mixing partials in one feature and commits in others would break the cross-feature contract from the design note.
+**Decision: No — keep the live-overload option shape minimal (accepted).**
 
-### OQ-4.3 — What about `onProgress` (which exists on the offline batch path)?
-
-**Question.** `OfflinePunctuateOptions` already has `onProgress`, `errorRecovery`, `linkMap`, etc. — should the live overload accept these too?
-
-**Recommendation: No — keep the live overload's option shape minimal.** Reasoning:
-
-- `onProgress` / `errorRecovery` / `linkMap` are orchestration concerns of the **batch** segmented path (where we know the total segment count up front). The live path has an open-ended segment stream from the segmentation engine; these options have no meaningful semantics there.
-- Adding them would invite confusion ("what does `errorRecovery: 'retry'` mean for a live commit?").
-- The `onSegment` callback covers the live-path observability story; users who need orchestration-style control can still use the offline batch path.
-
-If a future user requirement surfaces (e.g. live `linkMap` aggregation), it can be added explicitly with documented semantics.
+Do not add `onProgress`, `errorRecovery`, `linkMap`, or batch-only orchestration fields to the live-overload options.

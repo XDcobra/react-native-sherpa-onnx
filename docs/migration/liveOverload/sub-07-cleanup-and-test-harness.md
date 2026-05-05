@@ -75,6 +75,17 @@ Punctuation and Enhancement live demos are **nice to have** but not required for
 
 - Home screen (`example/src/screens/home/HomeScreen.tsx`): the existing "Live Pipeline" entry continues to point at the live showcase screen. Add a sub-section header inside that screen for "Offline weights, live pipeline (NEW)".
 - Live showcase screen: add a toggle for engine kind ("streaming engine" vs "offline engine + live overload"). The toggle determines which `createX` factory is used, and which method overload is called. Keep the surrounding mic / playback UI identical so users can A/B compare.
+- **Model filtering must react to selected engine kind**:
+  - streaming-only path: show only streaming-capable models.
+  - live-overload path (offline factory + live overload): show offline-capable models; where both kinds are supported, show both with explicit badges.
+  - if live-overload path is selected, do not offer `segmentation.mode = 'off'`; show an inline hint that segmentation is mandatory in this configuration.
+- Apply this behavior not only to `LivePipelineShowcaseScreen`, but consistently across relevant feature screens (`STTScreen`, `STTStreamingScreen`, `OfflineTTSScreen`, `StreamingTTSScreen`, `PunctuationScreen`, `PunctuationStreamingScreen`, `EnhancementScreen`, `EnhancementStreamingScreen`) once phases are implemented.
+- Introduce a shared React UI abstraction to avoid duplication:
+  - either extend current shared controls (`SegmentationPolicyControls`) or add a new common component (recommended: `EngineModeModelSelector`) that centralizes:
+    - engine-mode toggle
+    - model capability filtering
+    - segmentation mandatory-state UX (including disabled `off` mode + explanatory hint)
+  - screen-level code should provide feature-specific capability predicates; shared component owns rendering/UX logic.
 
 ### Non-goals
 
@@ -206,30 +217,29 @@ See the [design note](./docs/migration/liveOverload/offline-stt-live-pipeline-ma
 (a) An additional toggle on the existing screen ("streaming engine" vs "offline engine + live overload"),
 (b) A new sibling screen `LiveOverloadShowcaseScreen`?
 
-**Recommendation: (a) Extension of existing screen.** Reasoning:
+## Resolved decisions
 
-- The two paths share UI (mic input, segment list, playback) — duplicating a screen is wasteful.
-- The toggle directly demonstrates the design note's selling point: "same engines you already know, just with a live consumption mode."
-- Keeps the example app's home screen lean (one entry, two demos, A/B comparison).
+### OQ-7.1 — New screen vs. extension of existing live showcase?
 
-If the toggle UI gets unwieldy after sub-08 simplifies the TTS story, we can split.
+**Decision: (a) Extend existing screen (accepted).**
+
+Implementation constraints:
+
+- Keep one showcase screen and add an engine-mode toggle.
+- Model lists must be capability-aware per mode (streaming-only vs live-overload/offline-factory path).
+- Where both model kinds are valid, show both with clear labels/badges.
+- In live-overload mode, do not expose `segmentation.mode='off'`; show an explanatory hint that segmentation is mandatory in this setup.
+- Roll out the same behavior across all relevant feature screens, not just `LivePipelineShowcaseScreen`.
+- Use a shared React abstraction to avoid duplicated UI/logic (extend existing shared controls or add a new common selector component).
 
 ### OQ-7.2 — Should we deprecate any existing test files?
 
-**Question.** Several existing tests (e.g. `streaming-mode4-segmentation.test.ts` for TTS) cover scenarios very close to what the new live-offline tests cover. Should we delete or merge them?
+**Decision: Keep them all (accepted).**
 
-**Recommendation: Keep them all.** Reasoning:
-
-- They test `createStreamingTTS` (which sub-08 will dedup, but is **stable** in this rollout).
-- Deleting tests as part of an additive rollout is a bad signal — keep dual coverage until sub-08 actually removes the duplicated entry point.
-- Sub-08 will own the test cleanup as part of its dedup work.
+Do not remove existing streaming test suites in this phase; test cleanup remains explicitly deferred to sub-08 where applicable.
 
 ### OQ-7.3 — Should this sub-plan also do a migration-doc parity audit (analogous to segmentation engine sub-06 workstream 1)?
 
-**Question.** The segmentation engine cleanup phase did a thorough doc-vs-code audit. Should we replicate that here?
+**Decision: Yes, but compressed (accepted).**
 
-**Recommendation: Yes, but compressed.** Reasoning:
-
-- The live-overload surface is **much smaller** than the segmentation engine migration (4 features × thin shared base vs. dozens of touching sub-systems). A full doc-vs-code matrix would be overkill.
-- Workstream 1 above is the compressed form: a single per-acceptance-criterion checklist instead of a per-method audit.
-- If the implementation diverges materially from the sub-plans during execution, the per-feature sub-plan has the per-feature acceptance criteria for finer-grained verification.
+Use the compressed parity checklist in Workstream 1 (acceptance-criteria-based audit), not a full method-by-method matrix.

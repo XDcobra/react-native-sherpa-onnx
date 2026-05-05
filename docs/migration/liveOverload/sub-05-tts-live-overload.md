@@ -346,49 +346,28 @@ Existing `synthesize-mode2-segmented.test.ts`, `streaming-mode4-segmentation.tes
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-5.1 — Per-segment `meta.sid` / `meta.speed` resolution
 
-**Question.** The existing `TtsPipelineWorker` (streaming TTS) reads `segment.meta.sid` / `segment.meta.speed` per text segment, falling back to pipeline defaults. Should the live overload mirror this behavior?
+**Decision: Yes — mirror existing streaming TTS behavior exactly (accepted).**
 
-**Recommendation: Yes — mirror exactly.** Reasoning:
-
-- It's already the established TTS streaming contract.
-- Sub-08 (TTS dedup) expects byte-for-byte output parity; deviating here would break the dedup track later.
-- Users putting `meta.sid: 1` on segment N expect speaker 1 for that segment regardless of which entry point ran the synthesis.
-
-Implementation cost is trivial — the segment record already carries `meta`.
+Per-segment `meta.sid` / `meta.speed` overrides pipeline defaults; fallback stays `options.sid` / `options.speed`.
 
 ### OQ-5.2 — Should `voiceClone` ever be re-loaded mid-pipeline?
 
-**Question.** Each TTS pipeline today loads voice-clone reference audio **once** at pipeline start. Should the live overload allow per-segment voice clone overrides via `meta`?
+**Decision: No — keep voice clone pipeline-scoped (accepted).**
 
-**Recommendation: No — keep voice clone pipeline-scoped.** Reasoning:
-
-- Voice clone reference loading is expensive (decode, mel-spectrogram extraction, model conditioning); doing it per segment would torpedo latency.
-- The existing streaming-TTS contract is also pipeline-scoped — keeping symmetry is essential for the sub-08 dedup track.
-- Users who need per-segment voice can split their input into multiple pipelines, each with its own clone reference.
+`voiceClone` is initialized once at pipeline start and is not overridden per segment via `meta`.
 
 ### OQ-5.3 — How to surface a mid-pipeline TTS failure (e.g. one segment fails)?
 
-**Question.** If `tts.generate(text)` throws on segment N, should the worker abort the whole pipeline (reject `completed`), skip that segment and continue, or signal via a per-segment error event?
+**Decision: Skip failed segment and continue, with status accounting (accepted).**
 
-**Recommendation: Skip and continue, with status-counter accounting.** Reasoning:
+Worker records the latest error in pipeline status (`pipeline.getStatus().error`) and continues processing subsequent segments.
 
-- The streaming-TTS contract is "best-effort live" — one bad segment shouldn't kill the live audio output stream.
-- The shared base (sub-02) already accounts for this in `runLoop`'s try/catch — error message is recorded on the worker but `running` stays true.
-- The user observes the failure through `pipeline.getStatus().error` (the most recent error message stays visible) and a missing audio segment for that index.
+### OQ-5.4 — Should the live overload support `silenceScale` / `numSteps` from offline batch options?
 
-Alternative considered: aggregate a `Map<segmentId, error>` and expose it via `pipeline.getDiagnostics()`. Rejected for now — adds public API surface for a rarely-needed case. Can be added in a minor version if telemetry shows demand.
+**Decision: No — keep live overload option shape aligned with streaming TTS (`sid`, `speed`, `voiceClone`) (accepted).**
 
-### OQ-5.4 — Should the live overload support `silenceScale` / `numSteps` from the offline batch options?
-
-**Question.** `TtsSynthesisOptions` has `silenceScale` and `numSteps` (currently only applied with voice cloning). Should the live overload accept these?
-
-**Recommendation: Mirror existing streaming-TTS limits — accept only `sid`, `speed`, `voiceClone`.** Reasoning:
-
-- That's the existing streaming-TTS contract; matching it preserves the parity gate (LT-10) for sub-08.
-- `silenceScale` and `numSteps` are voice-clone tuning knobs; the cloning config block can absorb them if needed in the future without changing the live overload's main option shape.
-
-If a future user explicitly needs `silenceScale` outside cloning on the live path, it can be added in a minor version with documented implications.
+`silenceScale` / `numSteps` are not part of the Phase-4 live-overload option shape.

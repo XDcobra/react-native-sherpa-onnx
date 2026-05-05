@@ -457,38 +457,32 @@ Both platforms verify:
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-3.1 — Should `chunkSize` actually do something for the live overload, or be ignored?
 
-**Question.** `chunkSize` controls the streaming worker's drain granularity. In the live-offline path, every segment is decoded as a whole (`stream.acceptWaveform(pcm, sr); stream.inputFinished(); recognizer.decode(stream);`). What should the option do?
+**Decision: Use `chunkSize` for very long segments, otherwise ignore (accepted).**
 
-**Recommendation: Use `chunkSize` for very long segments, otherwise ignore.** Specifically:
+Implementation behavior:
 
-- If `pcm.length <= chunkSize`, decode in one shot (current behavior).
-- If `pcm.length > chunkSize`, accept the waveform in `chunkSize`-sized batches before `inputFinished()`. This prevents pathological long segments (e.g. 5+ minute monologues without VAD silence) from spiking memory in the recognizer's internal feature buffer.
-- Default `chunkSize: 3200` (≈200 ms @ 16 kHz) matches the streaming-STT default and is a safe lower bound.
-
-Alternative considered: drop `chunkSize` entirely. Rejected because long segments are precisely the case where users without VAD models hit OOM, and exposing the knob is cheap.
+- If `pcm.length <= chunkSize`, decode in one shot.
+- If `pcm.length > chunkSize`, feed audio in `chunkSize` batches before `inputFinished()`.
+- Keep default `chunkSize: 3200` (about 200 ms @ 16 kHz), aligned with streaming STT defaults.
 
 ### OQ-3.2 — Whisper-internal segmentation: collision with policy?
 
-**Question.** Whisper's offline decoder produces 30 s windows internally. If the user picks a `speech_energy_silence` policy with `maxSegmentMs: 60000`, each commit decodes ~60 s of audio with two internal Whisper passes. Should we cap or warn?
+**Decision: Document, do not cap (accepted).**
 
-**Recommendation: Document, do not cap.** Reasoning:
+Whisper is a special case because it operates with a 30-second window internally. This is a user-tuning concern, not a planner/runtime cap to enforce in this phase.
 
-- Capping would override user intent without telemetry to justify a default.
-- The existing offline orchestrator already handles long Whisper inputs the same way; this overload's behavior matches.
-- Add a documentation note in `docs/stt-offline.md` (see sub-07) recommending `maxSegmentMs ≤ 30000` for Whisper to reduce per-segment latency.
+Required follow-up notes:
+
+- Add a user-facing documentation note in `docs/stt-offline.md` that Whisper users should tune segmentation policy accordingly (for example `maxSegmentMs <= 30000` where latency/behavior needs it).
+- Add an implementation comment in STT live-overload code (regular code comment, **not** a docstring) near the segment-feed/decode path to document the Whisper-specific 30-second window caveat for maintainers.
+- Include a dedicated reference to Whisper discussion [#1118](https://github.com/openai/whisper/discussions/1118).
 
 ### OQ-3.3 — Should the live overload return `SttPipelineHandle` (existing) or a new `SttLivePipelineHandle`?
 
-**Question.** The existing `SttPipelineHandle` is exposed by streaming STT (`createStreamingSTT().transcribe(...)`). Reusing it for the live overload could imply identical semantics, while users may want to differentiate.
+**Decision: Reuse `SttPipelineHandle` (accepted).**
 
-**Recommendation: Reuse `SttPipelineHandle`.** Reasoning:
-
-- Both handles use the same `streamingPipelineCompleted` event, the same `stop`/`flush`/`reset`/`getStatus` calls, and write to the same `LiveTextBuffer`.
-- The differences (no partials in the live-offline case) are documented at the engine level, not the handle level — handle methods all behave identically.
-- Adding a new handle type would balloon the public type surface for zero ergonomic gain.
-
-If telemetry shows users tripping over "did this come from streaming STT or live-offline STT?", we can add a `kind: 'streaming' | 'live-offline'` field on the handle in a minor version. Until then: keep one handle type.
+No new STT live-specific handle type is introduced in this phase.

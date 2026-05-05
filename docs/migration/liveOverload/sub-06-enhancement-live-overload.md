@@ -324,48 +324,28 @@ Existing batch enhancement tests must remain green (the batch overload signature
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-6.1 — Should the live overload **replace** `createStreamingEnhancement` long-term?
 
-**Question.** Like the TTS dedup question (sub-08), is there an analogous case for enhancement? Both engines (`createStreamingEnhancement` for online denoiser, `createEnhancement` live overload for offline denoiser via `continuous_frames`) sit on **different model weights**.
+**Decision: No — keep both (accepted).**
 
-**Recommendation: No — keep both. They own different weights.** Reasoning:
-
-- Online enhancement (`createStreamingEnhancement`) uses a **streaming-capable denoiser** (e.g. some GTCRN variants are explicitly trained for online causal inference); offline denoisers (e.g. DPDFNet) require non-causal context.
-- The boundary-artifact trade-off is real and documented; users with audio quality requirements will pick the streaming engine.
-- Removing `createStreamingEnhancement` would be a breaking change for an active use case.
-
-This mirrors the punctuation analysis (sub-04): different model weights → no dedup question.
+`createStreamingEnhancement` and `createEnhancement(...live overload...)` remain separate because they target different model-weight classes and different runtime quality/latency trade-offs.
 
 ### OQ-6.2 — Should we expose `overlapSamples` on the live overload?
 
-**Question.** The offline batch enhancement options expose `overlapSamples` (smoother boundaries via overlap-and-add). Should the live overload also support this?
+**Decision: Keep live-overload option shape minimal; no separate `overlapSamples` option (accepted).**
 
-**Recommendation: Yes, but plumb it through `policy.checkpointIntervalMs` indirection — not as a separate option.** Reasoning:
-
-- The `continuous_frames` evaluator already controls the chunk granularity through `checkpointIntervalMs` (and natively `frameShiftSamples`). Adding a separate `overlapSamples` knob would duplicate that responsibility.
-- A `continuous_frames` policy with `overlapMs: <N>` is a cleaner extension point — adds the overlap as a policy field consumed by the segmentation engine, not a separate option on the live overload.
-- This keeps the live overload's option shape minimal and consistent with the cross-feature pattern.
-
-If post-release telemetry shows users explicitly need overlap on the live path independent of policy, we can add it later. Until then: defer.
+Any overlap-like tuning should remain policy-driven (for example via `continuous_frames` policy evolution), not via a dedicated live-overload top-level option in this phase.
 
 ### OQ-6.3 — How to handle the implicit boundary-artifact warning?
 
-**Question.** The design note explicitly says "audible boundary discontinuities are possible." Should we surface this as a `console.warn` on first call, a doc note, or no JS-side surfacing at all?
+**Decision: Doc-only warning, no runtime warning (accepted).**
 
-**Recommendation: Doc-only warning, no runtime warn.** Reasoning:
-
-- Once the user picks `createEnhancement().enhance(LiveAudio, LiveAudio, ...)` they have **read the docs** that describe this limitation; warning at runtime adds noise without changing the user's options.
-- A `console.warn` for **every** live-enhancement pipeline would be highly intrusive and quickly muted/ignored.
-- Documentation in `docs/enhancement-streaming.md` (sub-07) plus a comparison table (live overload vs. streaming engine) is the right surface.
+Document artifact trade-offs in enhancement docs and comparison tables; do not add `console.warn` behavior on live-enhancement calls.
 
 ### OQ-6.4 — Should the live overload support both audio-out-as-live-buffer AND audio-out-as-callback?
 
-**Question.** Some users may want denoised PCM directly delivered to a JS callback rather than written to a `LiveAudioBuffer`. Should we add that path?
+**Decision: No — `LiveAudioBuffer` output only (accepted).**
 
-**Recommendation: No — `LiveAudioBuffer` only.** Reasoning:
-
-- All other live overloads (STT, TTS, punctuation) consume/produce live buffers; adding a callback-output mode for enhancement breaks the cross-feature symmetry.
-- Users who want PCM in JS can still attach a `LiveAudioBuffer` reader (existing API).
-- Per-frame JS callbacks would also be a performance footgun (bridge crossing per chunk).
+No callback-output mode is added for this phase.

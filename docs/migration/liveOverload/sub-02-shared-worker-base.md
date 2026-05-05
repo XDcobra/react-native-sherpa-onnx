@@ -511,45 +511,30 @@ Lifecycle calls (`stopStreamingPipeline`, `flushStreamingPipeline`, `resetStream
 
 ---
 
-## Open questions
+## Resolved decisions
 
 ### OQ-2.1 — Listener wakeup vs. periodic poll for segment drain
 
-**Question.** Should the worker drain be event-driven (commit-listener-based wakeup, with a short max-wait timeout for finalize detection) or polled (fixed 20–50 ms sleep)?
+**Decision: event-driven listener with short timeout fallback (accepted).**
 
-**Recommendation: event-driven listener with short timeout fallback.** Reasoning:
-
-- The text-domain workers (`TtsPipelineWorker`, `PunctuationPipelineWorker`) already use the `addCommitListener`-driven pattern with a small fallback timeout (50 ms). Mirroring that on the audio side gives parity and keeps p99 latency low.
-- The fallback timeout (~100 ms) covers the input-finalized state transition without depending on the segmentation engine triggering a wakeup at finalize.
-- Polling would add 20–50 ms minimum latency floor for every segment commit and waste CPU during idle periods.
+Use commit-listener-based wakeup with a short timeout fallback for finalize/state transitions. Do not use periodic polling as the primary mechanism.
 
 ### OQ-2.2 — Should `LiveSegmentEntry::addCommitListener` be public on the JS side too?
 
-**Question.** Today `LiveTextEntry::addCommitListener` is consumed only natively (the JS-side `onSegment` event uses a separate `SegmentBufferEventBridge`). Should the audio version expose anything on JS?
+**Decision: No — keep it native-only (accepted).**
 
-**Recommendation: No — keep it native-only.** Reasoning:
-
-- The JS-side `onSegment` event for audio buffers already exists via `SegmentBufferEventBridge` / `LiveSegmentEntry`'s segment-appended event. JS users don't need a second event.
-- Adding a JS API would couple a private pipeline-orchestration concern with a public surface unnecessarily.
-- Live overload's optional `onSegment` callback (per design §4.1) is a thin wrapper around the **existing** JS event for the output buffer, not the input segment store.
+No JS API is added for `addCommitListener`; JS keeps using existing segment events (`SegmentBufferEventBridge`) and optional `onSegment` wrappers on output buffers.
 
 ### OQ-2.3 — Where should `OfflineLivePipelineWorker` physically live?
 
-**Question.** New Kotlin package + new iOS folder, or fit inside the existing `audio/pipeline/` namespace?
+**Decision: New `livePipeline/` package on Android and new `ios/livePipeline/` folder on iOS (accepted).**
 
-**Recommendation: New `livePipeline/` package on Android, new `ios/livePipeline/` folder on iOS.** Reasoning:
-
-- The base concerns **all** features (audio + text input), not just audio. Putting it under `audio/pipeline/` would mis-imply audio-only.
-- A dedicated namespace mirrors the JS layout (`src/livePipeline/` from sub-01) — same name on both sides for findability.
+Do not place the shared base under `audio/pipeline/`; this worker is cross-domain (audio + text), not audio-only.
 
 ### OQ-2.4 — What does `reset()` do in this worker?
 
-**Question.** The `StreamingPipelineWorker` interface includes `reset()`, which on the existing online-decoder workers re-initializes decoder state. The live-offline worker has no decoder state across segments (each segment is a fresh decode).
+**Decision: `reset()` is a no-op that completes successfully (accepted).**
 
-**Recommendation: `reset()` is a no-op that completes successfully.** Reasoning:
+`OfflineLivePipelineWorker.reset()` must resolve successfully without re-attaching segmentation or clearing segment cursors. This behavior must be explicitly documented in code docstrings/comments on both platforms.
 
-- There is no per-segment carry-over in the live-offline worker (offline decoders are stateless per call).
-- Removing the method from the interface is a bigger change for low value; making it a documented no-op is the minimal-touch fix.
-- A safer alternative would be to drop the in-flight segmentation engine cursor and re-attach, but that would lose segment indices and confuse downstream consumers — net negative.
-
-If a future feature needs reset semantics (e.g. punctuation prefix context), it can override the no-op default.
+If a future feature needs non-trivial reset semantics, it can override the default no-op behavior in its subclass.
