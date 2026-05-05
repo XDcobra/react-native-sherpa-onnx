@@ -383,29 +383,31 @@ internal class SherpaOnnxEnhancementHelper(
   ) = try {
     val enhancer = instances[instanceId]?.denoiser
       ?: error("Enhancement instance not found: $instanceId")
-    val liveAudioIn = PipelineAudioRegistry.requireLive(audioInLiveBufferId)
-    val liveAudioOut = PipelineAudioRegistry.requireLive(audioOutLiveBufferId)
+    val liveAudioIn = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      ?: error("Input live buffer not found: $audioInLiveBufferId")
+    val liveAudioOut = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
+      ?: error("Output live buffer not found: $audioOutLiveBufferId")
 
-    val policyMap = options.getMap("segmentationPolicy")
-      ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentationPolicy missing on native bridge")
-    val policy = SegmentationEngineRegistry.parsePolicy(policyMap)
-    require(policy.evaluator == "continuous_frames") {
-      "LIVE_OFFLINE_SEGMENTATION_REQUIRED: live enhancement supports only continuous_frames policy; received ${policy.evaluator}"
+    val attachedSegmentationEngineId = options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
+    if (attachedSegmentationEngineId.isEmpty()) {
+      error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: attachedSegmentationEngineId missing on native bridge")
     }
 
-    val seg = SegmentationEngineRegistry.attach(
-      bufferId = audioInLiveBufferId,
-      policy = policy,
-    )
-    val liveSegmentEntry = SegmentPipelineRegistry.requireLive(seg.segmentBufferId!!)
+    val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
+    if (segmentLiveBufferId.isEmpty()) {
+      error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentLiveBufferId missing on native bridge")
+    }
+
+    val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+      ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
 
     val pipelineId = "live_offline_enh_${UUID.randomUUID()}"
     val worker = EnhancementOfflineLivePipelineWorker(
       pipelineId = pipelineId,
-      attachedSegmentationEngineId = seg.engineId,
-      audioInput = OfflineLivePipelineWorker.AudioInput(
+      attachedSegmentationEngineId = attachedSegmentationEngineId,
+      audioInputRef = OfflineLivePipelineWorker.AudioInput(
         liveAudioEntry = liveAudioIn,
-        liveSegmentEntry = liveSegmentEntry,
+        liveSegmentEntry = segmentEntry,
       ),
       enhancer = enhancer,
       audioOutputEntry = liveAudioOut,

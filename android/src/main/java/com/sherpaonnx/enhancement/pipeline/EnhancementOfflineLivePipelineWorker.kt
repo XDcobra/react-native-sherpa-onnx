@@ -8,13 +8,13 @@ import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 internal class EnhancementOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
-  audioInput: AudioInput,
+  private val audioInputRef: AudioInput,
   private val enhancer: OfflineSpeechDenoiser,
   private val audioOutputEntry: LiveEntry,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
   attachedSegmentationEngineId = attachedSegmentationEngineId,
-  audioInput = audioInput,
+  audioInput = audioInputRef,
   textInput = null,
 ) {
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
@@ -25,10 +25,14 @@ internal class EnhancementOfflineLivePipelineWorker(
       "ENHANCEMENT_SAMPLE_RATE_MISMATCH: live audio out is ${audioOutputEntry.sampleRate} Hz; chunk is ${speech.sampleRate} Hz"
     }
 
-    val pcm = audioInput!!.liveAudioEntry.readSamples(
-      startSample = speech.startSample,
-      endSample = speech.endSample,
+    val frameCount = (speech.endSample - speech.startSample).coerceAtLeast(0)
+    if (frameCount == 0) return
+
+    val pcm = audioInputRef.liveAudioEntry.getSamplesSlice(
+      startFrame = speech.startSample,
+      frameCount = frameCount,
     )
+    if (pcm.isEmpty()) return
 
     val denoised = enhancer.run(pcm, speech.sampleRate)
     audioOutputEntry.appendSamples(denoised.samples)

@@ -54,7 +54,6 @@ import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   getAssetModelPath,
   getFileModelPath,
-  getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
@@ -63,6 +62,10 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  EngineModeModelSelector,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
 import { styles } from './LivePipelineShowcaseScreen.styles';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -104,7 +107,13 @@ function toFileSource(uri: string): FileSource {
 export default function LivePipelineShowcaseScreen() {
   // ── model lists ────────────────────────────────────────────────────────────
   const [sttModels, setSttModels] = useState<string[]>([]);
+  const [streamingSttModelIds, setStreamingSttModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [ttsModels, setTtsModels] = useState<string[]>([]);
+  const [streamingTtsModelIds, setStreamingTtsModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [sttPadIds, setSttPadIds] = useState<string[]>([]);
   const [ttsPadIds, setTtsPadIds] = useState<string[]>([]);
   const [sttPadPath, setSttPadPath] = useState<string | null>(null);
@@ -115,10 +124,15 @@ export default function LivePipelineShowcaseScreen() {
 
   // ── selection ──────────────────────────────────────────────────────────────
   const [sourceMode, setSourceMode] = useState<SourceMode>('file');
+  const [sttEngineMode, setSttEngineMode] = useState<EngineMode>('streaming');
+  const [ttsEngineMode, setTtsEngineMode] = useState<EngineMode>('streaming');
   const [selectedSttModel, setSelectedSttModel] = useState<string | null>(null);
   const [selectedTtsModel, setSelectedTtsModel] = useState<string | null>(null);
   const [pickedFileUri, setPickedFileUri] = useState<string | null>(null);
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
+  const [sttSegConfig, setSttSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'off',
+  });
   const [textSegConfig, setTextSegConfig] = useState<SegmentationControlConfig>(
     { mode: 'off' }
   );
@@ -250,21 +264,30 @@ export default function LivePipelineShowcaseScreen() {
                 modelType: 'auto',
               }
             );
-            return detected.success ? folder : null;
+            return detected.success
+              ? { folder, isStreaming: !!detected.isStreaming }
+              : null;
           } catch {
             return null;
           }
         })
       );
 
-      const streamingSttModels = streamingSttRaw.filter(
-        (m): m is string => m != null
+      const validSttModels = streamingSttRaw
+        .map((m, i) => (m || sttCandidates[i] ? sttCandidates[i] : null))
+        .filter((m): m is string => m != null);
+      const streamingSttModelsSet = new Set(
+        streamingSttRaw.filter((m): m is string => m != null)
       );
-      const validTtsModels = validTtsRaw.filter((m): m is string => m != null);
-      const effectiveSttModels =
-        streamingSttModels.length > 0 ? streamingSttModels : sttCandidates;
-      const effectiveTtsModels =
-        validTtsModels.length > 0 ? validTtsModels : ttsCandidates;
+
+      const validTtsModels = validTtsRaw
+        .filter((r): r is { folder: string; isStreaming: boolean } => r != null)
+        .map((r) => r.folder);
+      const streamingTtsModelsSet = new Set(
+        validTtsRaw
+          .filter((r) => r != null && r.isStreaming)
+          .map((r) => r!.folder)
+      );
 
       setSttPadIds(padSttIds);
       setTtsPadIds(padTtsIds);
@@ -272,17 +295,26 @@ export default function LivePipelineShowcaseScreen() {
       setTtsPadPath(padTtsIds.length > 0 ? padPath : null);
       setSttDownloadedIds([...new Set([...sttDl, ...sttFsIds, ...padSttIds])]);
       setTtsDownloadedIds([...new Set([...ttsDl, ...ttsFsIds, ...padTtsIds])]);
-      setSttModels(effectiveSttModels);
-      setTtsModels(effectiveTtsModels);
+      setSttModels(validSttModels);
+      setStreamingSttModelIds(streamingSttModelsSet);
+      setTtsModels(validTtsModels);
+      setStreamingTtsModelIds(streamingTtsModelsSet);
+
+      const initialStt =
+        sttEngineMode === 'streaming'
+          ? validSttModels.find((m) => streamingSttModelsSet.has(m))
+          : validSttModels[0];
+
+      const initialTts =
+        ttsEngineMode === 'streaming'
+          ? validTtsModels.find((m) => streamingTtsModelsSet.has(m))
+          : validTtsModels[0];
+
       setSelectedSttModel((prev) =>
-        prev && effectiveSttModels.includes(prev)
-          ? prev
-          : effectiveSttModels[0] ?? null
+        prev && validSttModels.includes(prev) ? prev : initialStt ?? null
       );
       setSelectedTtsModel((prev) =>
-        prev && effectiveTtsModels.includes(prev)
-          ? prev
-          : effectiveTtsModels[0] ?? null
+        prev && validTtsModels.includes(prev) ? prev : initialTts ?? null
       );
     } catch {
       // leave lists empty
@@ -291,7 +323,40 @@ export default function LivePipelineShowcaseScreen() {
     } finally {
       setLoadingModels(false);
     }
-  }, []);
+  }, [sttEngineMode, ttsEngineMode]);
+
+  // Auto-enforce segmentation on mode switch
+  useEffect(() => {
+    if (sttEngineMode === 'offline') {
+      setSttSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 10000 },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [sttEngineMode]);
+
+  useEffect(() => {
+    if (ttsEngineMode === 'offline') {
+      setTextSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: {
+              evaluator: 'text_synthetic_auto',
+              maxLengthChars: 320,
+              sentenceBoundary: true,
+            },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [ttsEngineMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -454,7 +519,7 @@ export default function LivePipelineShowcaseScreen() {
     await releaseAllResources();
 
     try {
-      // ── Validate streaming STT ──────────────────────────────────────────────
+      // ── Resolve and Detect STT ──────────────────────────────────────────────
       setStatusText('Detecting STT model…');
       const sttSource = await resolveSttSource(selectedSttModel);
       const detection = await detectSttModel(sttSource, { modelType: 'auto' });
@@ -463,9 +528,12 @@ export default function LivePipelineShowcaseScreen() {
           `STT model detection failed: ${detection.error ?? 'unknown error'}`
         );
       }
-      if (!detection.isStreaming) {
+
+      // In streaming mode, we MUST have a streaming model.
+      // In offline mode (Live Overload), we can use any model (e.g. Whisper).
+      if (sttEngineMode === 'streaming' && !detection.isStreaming) {
         setValidationError(
-          'This STT model is offline-only. Pick a streaming-capable model for the Live Pipeline screen.'
+          'This STT model is offline-only. Switch STT to "Live Overload" mode to use it in a live pipeline.'
         );
         setPipelineState('idle');
         setStatusText('');
@@ -473,24 +541,60 @@ export default function LivePipelineShowcaseScreen() {
       }
 
       // ── Init STT engine ────────────────────────────────────────────────────
-      setStatusText('Initializing streaming STT…');
-      const sttEngine = await createStreamingSTT({
-        modelSource: sttSource,
-        modelType: 'auto',
-        numThreads: NUM_THREADS,
-      });
-      sttEngineRef.current = sttEngine;
+      if (sttEngineMode === 'streaming') {
+        setStatusText('Initializing streaming STT…');
+        const sttEngine = await createStreamingSTT({
+          modelSource: sttSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        sttEngineRef.current = sttEngine;
+      } else {
+        setStatusText('Initializing offline STT (Live Overload)…');
+        const { createSTT } = require('react-native-sherpa-onnx/stt');
+        const sttEngine = await createSTT({
+          modelSource: sttSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        sttEngineRef.current = sttEngine;
+      }
 
       // ── Init TTS engine ────────────────────────────────────────────────────
-      setStatusText('Initializing streaming TTS…');
       const ttsSource = await resolveTtsSource(selectedTtsModel);
-      const ttsEngine = await createStreamingTTS({
-        modelSource: ttsSource,
+      const ttsDetection = await detectTtsModel(ttsSource, {
         modelType: 'auto',
-        numThreads: NUM_THREADS,
       });
-      ttsEngineRef.current = ttsEngine;
-      const ttsSampleRate = await ttsEngine.getSampleRate();
+
+      if (ttsEngineMode === 'streaming' && !ttsDetection.isStreaming) {
+        setValidationError(
+          'This TTS model is offline-only. Switch TTS to "Live Overload" mode to use it in a live pipeline.'
+        );
+        setPipelineState('idle');
+        setStatusText('');
+        return;
+      }
+
+      if (ttsEngineMode === 'streaming') {
+        setStatusText('Initializing streaming TTS…');
+        const ttsEngine = await createStreamingTTS({
+          modelSource: ttsSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        ttsEngineRef.current = ttsEngine;
+      } else {
+        setStatusText('Initializing offline TTS (Live Overload)…');
+        const { createTTS } = require('react-native-sherpa-onnx/tts');
+        const ttsEngine = await createTTS({
+          modelSource: ttsSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        ttsEngineRef.current = ttsEngine as unknown as StreamingTtsEngine;
+      }
+
+      const ttsSampleRate = await ttsEngineRef.current!.getSampleRate();
 
       // ── Create audio buffers ───────────────────────────────────────────────
       const sttInputAudio = await createEmptyLiveAudioBuffer({
@@ -573,17 +677,30 @@ export default function LivePipelineShowcaseScreen() {
       sttOutputTextRef.current = sttOutputText;
 
       // ── Start pipelines ────────────────────────────────────────────────────
-      const sttPipeline = await sttEngine.transcribe(
+      const sttPipeline = await sttEngineRef.current!.transcribe(
         sttInputAudio,
         sttOutputText,
-        { chunkSize: 3200 }
+        {
+          chunkSize: 3200,
+          ...(() => {
+            const opt = buildSegmentationOption(sttSegConfig);
+            return opt && opt.mode !== 'off' ? { segmentation: opt } : {};
+          })(),
+        }
       );
       sttPipelineRef.current = sttPipeline;
 
-      const ttsPipeline = await ttsEngine.synthesize(
+      const ttsPipeline = await ttsEngineRef.current!.synthesize(
         ttsInputText.bufferId,
         ttsOutputAudio.bufferId,
-        {}
+        {
+          ...(() => {
+            const ttsOpt = buildSegmentationOption(textSegConfig);
+            return ttsOpt && ttsOpt.mode !== 'off'
+              ? { segmentation: ttsOpt }
+              : {};
+          })(),
+        }
       );
       ttsPipelineRef.current = ttsPipeline;
 
@@ -656,6 +773,9 @@ export default function LivePipelineShowcaseScreen() {
     pickedFileUri,
     pipelineState,
     textSegConfig,
+    sttSegConfig,
+    sttEngineMode,
+    ttsEngineMode,
     releaseAllResources,
     resolveSttSource,
     resolveTtsSource,
@@ -684,6 +804,35 @@ export default function LivePipelineShowcaseScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        <EngineModeModelSelector
+          label={`STT Model (${
+            sttEngineMode === 'streaming' ? 'Streaming' : 'Offline'
+          })`}
+          engineMode={sttEngineMode}
+          onEngineModeChange={setSttEngineMode}
+          models={sttModels}
+          selectedModel={selectedSttModel}
+          onModelSelect={setSelectedSttModel}
+          isModelStreamingCapable={(m) => streamingSttModelIds.has(m)}
+          loading={loadingModels}
+          disabled={pipelineState !== 'idle'}
+        />
+
+        {/* STT segmentation (only shown in Live Overload mode) */}
+        {sttEngineMode === 'offline' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Speech Segmentation</Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={sttSegConfig}
+              onChange={setSttSegConfig}
+              disabled={pipelineState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory segmentation. Choose Auto or Manual."
+            />
+          </View>
+        )}
+
         {/* Pipeline diagram */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pipeline</Text>
@@ -773,97 +922,40 @@ export default function LivePipelineShowcaseScreen() {
           )}
         </View>
 
-        {/* STT model */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>STT Model (Streaming)</Text>
-          <Text style={styles.hint}>
-            Only streaming-capable models work here. Offline-only models will be
-            rejected at startup.
-          </Text>
-          {loadingModels ? (
-            <ActivityIndicator size="small" />
-          ) : sttModels.length === 0 ? (
-            <Text style={styles.hint}>
-              No STT models found. Download one from the Model Downloads screen.
-            </Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.optionRow}>
-                {sttModels.map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[
-                      styles.optionButton,
-                      selectedSttModel === m && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedSttModel(m)}
-                    disabled={pipelineState !== 'idle'}
-                  >
-                    <Text
-                      style={[
-                        styles.optionButtonText,
-                        selectedSttModel === m && styles.optionButtonTextActive,
-                      ]}
-                    >
-                      {getModelDisplayName(m)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-        </View>
-
         {/* TTS model + text segmentation */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            TTS Model (Offline model used by Streaming TTS)
-          </Text>
-          {loadingModels ? (
-            <ActivityIndicator size="small" />
-          ) : ttsModels.length === 0 ? (
+        <EngineModeModelSelector
+          label={`TTS Model (${
+            ttsEngineMode === 'streaming' ? 'Streaming' : 'Offline'
+          })`}
+          engineMode={ttsEngineMode}
+          onEngineModeChange={setTtsEngineMode}
+          models={ttsModels}
+          selectedModel={selectedTtsModel}
+          onModelSelect={setSelectedTtsModel}
+          isModelStreamingCapable={(m) => streamingTtsModelIds.has(m)}
+          loading={loadingModels}
+          disabled={pipelineState !== 'idle'}
+        />
+
+        {/* TTS text segmentation */}
+        {ttsEngineMode === 'offline' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Text Segmentation (STT→TTS)</Text>
             <Text style={styles.hint}>
-              No TTS models found. Download one from the Model Downloads screen.
+              Off: each STT segment is forwarded directly to TTS.{'\n'}
+              Auto: partial STT output is re-segmented at sentence boundaries
+              before being synthesized.
             </Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.optionRow}>
-                {ttsModels.map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[
-                      styles.optionButton,
-                      selectedTtsModel === m && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedTtsModel(m)}
-                    disabled={pipelineState !== 'idle'}
-                  >
-                    <Text
-                      style={[
-                        styles.optionButtonText,
-                        selectedTtsModel === m && styles.optionButtonTextActive,
-                      ]}
-                    >
-                      {getModelDisplayName(m)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-          <Text style={styles.sectionTitle}>Text Segmentation (STT→TTS)</Text>
-          <Text style={styles.hint}>
-            Off: each STT segment is forwarded directly to TTS.{'\n'}
-            Auto: partial STT output is re-segmented at sentence boundaries
-            before being synthesized.
-          </Text>
-          <SegmentationPolicyControls
-            variant="text-streaming"
-            value={textSegConfig}
-            onChange={setTextSegConfig}
-            disabled={pipelineState !== 'idle'}
-          />
-        </View>
+            <SegmentationPolicyControls
+              variant="text-offline"
+              value={textSegConfig}
+              onChange={setTextSegConfig}
+              disabled={pipelineState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory text segmentation. Choose Auto or Manual."
+            />
+          </View>
+        )}
 
         {/* Validation error */}
         {validationError ? (

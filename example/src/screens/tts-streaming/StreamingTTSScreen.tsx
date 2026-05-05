@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -19,6 +18,10 @@ import {
   type StreamingTtsEngine,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  EngineModeModelSelector,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
 import {
   createEmptyLiveAudioBuffer,
   finalizeLiveAudioBuffer,
@@ -54,7 +57,6 @@ import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
-  getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
 
@@ -105,8 +107,14 @@ async function createStreamingSessionEngine(options: {
   modelType: TTSModelType;
   numThreads: number;
   debug: boolean;
+  engineMode: EngineMode;
 }): Promise<StreamingSessionEngine> {
-  const ttsEngine: StreamingTtsEngine = await createStreamingTTS(options);
+  const ttsEngine: StreamingTtsEngine =
+    options.engineMode === 'streaming'
+      ? await createStreamingTTS(options)
+      : ((await require('react-native-sherpa-onnx/tts').createTTS(
+          options
+        )) as unknown as StreamingTtsEngine);
   let activePipeline: TtsPipelineHandle | null = null;
   let activeTextBufferId: string | null = null;
 
@@ -168,6 +176,10 @@ export default function StreamingTTSScreen() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
     null
+  );
+  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
+  const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
+    new Set()
   );
   const [inputText, setInputText] = useState(
     'This example streams text into the TTS pipeline so synthesis can start before the whole script is fully prepared.'
@@ -234,46 +246,87 @@ export default function StreamingTTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
+      // ── Load PAD models ───────────────────────────────────────────────────
+      const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+      const fallbackPath = `${DocumentDirectoryPath}/models`;
+      const padPath = padPathFromNative ?? fallbackPath;
+      const padResults = await listModelsAtPath(padPath).catch(() => []);
+      const padFolders = padResults
+        .filter((m) => m.hint === 'tts')
+        .map((m) => m.folder);
+      const resolvedPadPath = padFolders.length > 0 ? padPath : null;
+
+      // ── Load asset models ─────────────────────────────────────────────────
       const assetModels = await listAssetModels();
       const ttsFolders = assetModels
-        .filter((model) => model.hint === 'tts')
-        .map((model) => model.folder);
-      const downloadedList = await listDownloadedModels(ModelCategory.Tts);
-      const downloadedIds = downloadedList.map((model) => model.id);
+        .filter((m) => m.hint === 'tts')
+        .map((m) => m.folder);
 
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => m.hint === 'tts')
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch {
-        padFolders = [];
-      }
+      // ── Load downloaded / fs models ───────────────────────────────────────
+      const downloadedModels = await listDownloadedModels(ModelCategory.Tts);
+      const downloadedIds = downloadedModels.map((m) => m.id);
+      const ttsFilePath = `${DocumentDirectoryPath}/sherpa-onnx/models/${ModelCategory.Tts}`;
+      const ttsFs = await listModelsAtPath(ttsFilePath).catch(() => []);
+      const ttsFsIds = ttsFs.map((m) => m.folder);
+      const allDownloadedIds = [...new Set([...downloadedIds, ...ttsFsIds])];
 
-      const combined = [
+      const candidateModels = [
         ...padFolders,
         ...ttsFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedIds.filter(
+        ...allDownloadedIds.filter(
           (f) => !padFolders.includes(f) && !ttsFolders.includes(f)
         ),
       ];
 
+      const detectionResults = await Promise.all(
+        candidateModels.map(async (folder) => {
+          try {
+            const source = padFolders.includes(folder)
+              ? getFileModelPath(
+                  folder,
+                  ModelCategory.Tts,
+                  resolvedPadPath ?? padPath
+                )
+              : ttsFolders.includes(folder)
+              ? getAssetModelPath(folder)
+              : getFileModelPath(folder, ModelCategory.Tts);
+            const detected = await detectTtsModel(
+              await toDetectSource(source),
+              {
+                modelType: 'auto',
+              }
+            );
+            return { folder, isStreaming: !!detected.isStreaming };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const available = candidateModels.filter(
+        (_, i) => detectionResults[i] != null || true
+      );
+      const streamingIds = new Set(
+        detectionResults
+          .filter((r) => r != null && r.isStreaming)
+          .map((r) => r!.folder)
+      );
+
       setPadModelsPath(resolvedPadPath);
       setPadModelIds(padFolders);
-      setAvailableModels(combined);
-      setDownloadedModelIds(downloadedIds);
+      setAvailableModels(available);
+      setStreamingModelIds(streamingIds);
+      setDownloadedModelIds(allDownloadedIds);
+
+      const initialModel =
+        engineMode === 'streaming'
+          ? available.find((m) => streamingIds.has(m))
+          : available[0];
+
       setSelectedModelFolder((prev) =>
-        prev && combined.includes(prev) ? prev : combined[0] ?? null
+        prev && available.includes(prev) ? prev : initialModel ?? null
       );
-      if (combined.length === 0) {
+      if (available.length === 0) {
         setStatus(
           'No TTS models found. Add one under assets, PAD, or downloads (category: tts).'
         );
@@ -284,7 +337,26 @@ export default function StreamingTTSScreen() {
     } finally {
       setLoadingModels(false);
     }
-  }, []);
+  }, [engineMode]);
+
+  // Auto-enforce segmentation when switching to Live Overload mode
+  useEffect(() => {
+    if (engineMode === 'offline') {
+      setSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: {
+              evaluator: 'text_synthetic_auto',
+              maxLengthChars: 320,
+              sentenceBoundary: true,
+            },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [engineMode]);
 
   useEffect(() => {
     loadModels().catch(() => {
@@ -394,11 +466,18 @@ export default function StreamingTTSScreen() {
         throw new Error(detection.error ?? 'TTS model detection failed');
       }
 
+      if (engineMode === 'streaming' && !detection.isStreaming) {
+        throw new Error(
+          'This TTS model is offline-only. Switch to "Live Overload" mode to use it.'
+        );
+      }
+
       const engine = await createStreamingSessionEngine({
         modelSource: modelPath,
         modelType: 'auto' as TTSModelType,
         numThreads: 2,
         debug: false,
+        engineMode,
       });
       engineRef.current = engine;
 
@@ -457,6 +536,7 @@ export default function StreamingTTSScreen() {
     }
   }, [
     cleanupStream,
+    engineMode,
     inputText,
     releaseResultBuffer,
     resolveModelPath,
@@ -628,40 +708,62 @@ export default function StreamingTTSScreen() {
           <Text style={styles.headerTitle}>Text-to-Speech Streaming</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Model</Text>
-          {loadingModels ? (
-            <View style={styles.inlineRow}>
-              <ActivityIndicator />
-              <Text style={styles.mutedText}>Loading models...</Text>
+        <EngineModeModelSelector
+          label="TTS Engine"
+          engineMode={engineMode}
+          onEngineModeChange={setEngineMode}
+          models={availableModels}
+          selectedModel={selectedModelFolder}
+          onModelSelect={setSelectedModelFolder}
+          isModelStreamingCapable={(m) => streamingModelIds.has(m)}
+          loading={loadingModels}
+          disabled={streamingState !== 'idle'}
+        />
+
+        {engineMode === 'streaming' && (
+          <View style={styles.card}>
+            <View style={[styles.inlineRow, { gap: 10, marginBottom: 8 }]}>
+              <Ionicons name="information-circle" size={20} color="#007AFF" />
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { marginBottom: 0, color: '#007AFF', flex: 1 },
+                ]}
+              >
+                No real streaming TTS model
+              </Text>
             </View>
-          ) : null}
-          <View style={styles.modelList}>
-            {availableModels.map((modelFolder) => {
-              const selected = modelFolder === selectedModelFolder;
-              return (
-                <Pressable
-                  key={modelFolder}
-                  onPress={() => setSelectedModelFolder(modelFolder)}
-                  style={[
-                    styles.modelListItem,
-                    selected && styles.modelListItemSelected,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modelListTitle,
-                      selected && styles.modelListTitleSelected,
-                    ]}
-                  >
-                    {getModelDisplayName(modelFolder)}
-                  </Text>
-                  <Text style={styles.modelListSubtitle}>{modelFolder}</Text>
-                </Pressable>
-              );
-            })}
+            <Text style={styles.bodyText}>
+              TTS synthesis cannot generate audio incrementally frame-by-frame
+              like streaming STT. There are no "streaming" TTS models in the
+              sherpa-onnx sense.
+            </Text>
+            <Text style={[styles.bodyText, { marginTop: 8 }]}>
+              Switch to <Text style={{ fontWeight: '700' }}>Live Overload</Text>{' '}
+              mode to use offline TTS models with mandatory text segmentation.
+              The SDK will chunk your input text at sentence/length boundaries
+              and synthesize each chunk without pre-buffering the whole script.
+            </Text>
           </View>
-        </View>
+        )}
+
+        {engineMode === 'offline' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Text Segmentation</Text>
+            <Text style={[styles.mutedText, { marginBottom: 10 }]}>
+              Live Overload requires segmentation to chunk text before
+              synthesis. The 'Off' option is disabled.
+            </Text>
+            <SegmentationPolicyControls
+              variant="text-offline"
+              value={segConfig}
+              onChange={setSegConfig}
+              disabled={streamingState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory text segmentation to split input into processable chunks."
+            />
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Input</Text>
@@ -689,20 +791,6 @@ export default function StreamingTTSScreen() {
             placeholder="Enter a long prompt to stream through TTS..."
             multiline
             style={styles.textInput}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Segmentation</Text>
-          <Text style={[styles.mutedText, { marginBottom: 10 }]}>
-            Off or Manual: text is fed as you type (debounced). Auto: attaches
-            the text segmentation engine per policy.
-          </Text>
-          <SegmentationPolicyControls
-            variant="text-streaming"
-            value={segConfig}
-            onChange={setSegConfig}
-            disabled={streamingState !== 'idle'}
           />
         </View>
 
@@ -874,6 +962,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#6B7280',
+  },
+  bodyText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#374151',
   },
   modelList: {
     gap: 8,

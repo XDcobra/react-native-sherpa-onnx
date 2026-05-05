@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -17,6 +16,10 @@ import {
   type LiveSttEngine,
   type SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
+import {
+  EngineModeModelSelector,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
 import {
   createEmptyLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
@@ -42,9 +45,13 @@ import {
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
+import {
   getAssetModelPath,
   getFileModelPath,
-  getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
 
@@ -83,6 +90,13 @@ export default function STTStreamingScreen() {
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
     null
   );
+  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
+  const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'off',
+  });
   const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [status, setStatus] = useState(
@@ -112,6 +126,24 @@ export default function STTStreamingScreen() {
     },
     [downloadedModelIds]
   );
+
+  // Auto-enforce segmentation when switching to Live Overload mode
+  useEffect(() => {
+    if (engineMode === 'offline') {
+      setSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: {
+              evaluator: 'speech_energy_silence',
+              maxSegmentMs: 10000,
+            },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [engineMode]);
 
   const loadModels = useCallback(async () => {
     setLoadingModels(true);
@@ -150,18 +182,29 @@ export default function STTStreamingScreen() {
         })
       );
 
-      const available = streamingModelsRaw.filter(
-        (modelFolder): modelFolder is string => modelFolder != null
+      const available = candidateModels.filter(
+        (_, i) => streamingModelsRaw[i] != null || true // In offline mode we show all
+      );
+
+      const streamingIds = new Set(
+        streamingModelsRaw.filter((m): m is string => m != null)
       );
 
       setAvailableModels(available);
+      setStreamingModelIds(streamingIds);
       setDownloadedModelIds(downloadedIds);
+
+      const initialModel =
+        engineMode === 'streaming'
+          ? available.find((m) => streamingIds.has(m))
+          : available[0];
+
       setSelectedModelFolder((prev) =>
-        prev && available.includes(prev) ? prev : available[0] ?? null
+        prev && available.includes(prev) ? prev : initialModel ?? null
       );
       if (available.length === 0) {
         setStatus(
-          'No streaming STT models found. Install/download a streaming model to use this screen.'
+          'No STT models found. Install/download a model to use this screen.'
         );
       }
     } catch (loadErr) {
@@ -170,7 +213,7 @@ export default function STTStreamingScreen() {
     } finally {
       setLoadingModels(false);
     }
-  }, []);
+  }, [engineMode]);
 
   useEffect(() => {
     loadModels().catch(() => {
@@ -295,18 +338,28 @@ export default function STTStreamingScreen() {
       if (!detection.success) {
         throw new Error(detection.error ?? 'STT model detection failed');
       }
-      if (!detection.isStreaming) {
+      if (engineMode === 'streaming' && !detection.isStreaming) {
         throw new Error(
-          'This STT model is offline-only. Pick a streaming STT model for this screen.'
+          'This STT model is offline-only. Switch to "Live Overload" mode to use it.'
         );
       }
 
-      const engine = await createStreamingSTT({
-        modelSource: modelPath,
-        modelType: 'auto',
-        numThreads: 2,
-      });
-      engineRef.current = engine;
+      if (engineMode === 'streaming') {
+        const engine = await createStreamingSTT({
+          modelSource: modelPath,
+          modelType: 'auto',
+          numThreads: 2,
+        });
+        engineRef.current = engine;
+      } else {
+        const { createSTT } = require('react-native-sherpa-onnx/stt');
+        const engine = await createSTT({
+          modelSource: modelPath,
+          modelType: 'auto',
+          numThreads: 2,
+        });
+        engineRef.current = engine;
+      }
 
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: STT_INPUT_SAMPLE_RATE,
@@ -322,11 +375,13 @@ export default function STTStreamingScreen() {
       });
       liveTextBufferRef.current = liveText;
 
-      const pipeline = await engine.transcribe(
+      const segOpt = buildSegmentationOption(segConfig);
+      const pipeline = await engineRef.current!.transcribe(
         liveAudio.bufferId,
         liveText.bufferId,
         {
           chunkSize: 3200,
+          ...(segOpt && segOpt.mode !== 'off' ? { segmentation: segOpt } : {}),
         }
       );
       pipelineRef.current = pipeline;
@@ -384,7 +439,9 @@ export default function STTStreamingScreen() {
     }
   }, [
     cleanupStream,
+    engineMode,
     resolveModelPath,
+    segConfig,
     selectedFileUri,
     selectedModelFolder,
     stopPolling,
@@ -460,40 +517,35 @@ export default function STTStreamingScreen() {
           <Text style={styles.headerTitle}>Speech-to-Text Streaming</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Model</Text>
-          {loadingModels ? (
-            <View style={styles.inlineRow}>
-              <ActivityIndicator />
-              <Text style={styles.mutedText}>Loading models...</Text>
-            </View>
-          ) : null}
-          <View style={styles.modelList}>
-            {availableModels.map((modelFolder) => {
-              const selected = modelFolder === selectedModelFolder;
-              return (
-                <Pressable
-                  key={modelFolder}
-                  onPress={() => setSelectedModelFolder(modelFolder)}
-                  style={[
-                    styles.modelListItem,
-                    selected && styles.modelListItemSelected,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modelListTitle,
-                      selected && styles.modelListTitleSelected,
-                    ]}
-                  >
-                    {getModelDisplayName(modelFolder)}
-                  </Text>
-                  <Text style={styles.modelListSubtitle}>{modelFolder}</Text>
-                </Pressable>
-              );
-            })}
+        <EngineModeModelSelector
+          label="STT Engine"
+          engineMode={engineMode}
+          onEngineModeChange={setEngineMode}
+          models={availableModels}
+          selectedModel={selectedModelFolder}
+          onModelSelect={setSelectedModelFolder}
+          isModelStreamingCapable={(m) => streamingModelIds.has(m)}
+          loading={loadingModels}
+          disabled={streamingState !== 'idle'}
+        />
+
+        {engineMode === 'offline' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Speech Segmentation</Text>
+            <Text style={styles.bodyText}>
+              Live Overload requires segmentation to commit speech into discrete
+              chunks before transcription. The 'Off' option is disabled.
+            </Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={segConfig}
+              onChange={setSegConfig}
+              disabled={streamingState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory segmentation to commit speech segments for transcription."
+            />
           </View>
-        </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Source</Text>

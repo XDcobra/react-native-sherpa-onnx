@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Text,
   View,
@@ -30,6 +30,7 @@ import {
   type EnhancementPipelineHandle,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
+import { type EngineMode } from '../../components/EngineModeModelSelector';
 import {
   createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromLive,
@@ -161,6 +162,7 @@ export default function EnhancementStreamingScreen() {
     string | null
   >(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
   const [segStreamingConfig, setSegStreamingConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
@@ -201,13 +203,13 @@ export default function EnhancementStreamingScreen() {
     setActivePlaybackKind(null);
   };
 
-  const refreshOutputDevices = async () => {
+  const refreshOutputDevices = useCallback(async () => {
     const nextOutputDevices = await fetchOutputDevices();
     setOutputDevices(nextOutputDevices);
     setSelectedOutputDeviceId((prev) =>
       keepValidDeviceSelection(prev, nextOutputDevices)
     );
-  };
+  }, []);
 
   const clearFinalizedOutput = async () => {
     const existingOutputBufferId = finalizedOutputBufferIdRef.current;
@@ -346,22 +348,20 @@ export default function EnhancementStreamingScreen() {
     throw new Error('Select example audio or a local WAV file');
   };
 
+  // Auto-enforce segmentation when switching to Live Overload mode
   useEffect(() => {
-    loadAvailableModels();
-    refreshOutputDevices().catch(() => {
-      // Ignore unsupported-platform lookup failures.
-    });
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Enhancement) return;
-      loadAvailableModels().catch(() => {
-        // Ignore refresh errors.
+    if (engineMode === 'offline') {
+      setSegStreamingConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: { evaluator: 'continuous_frames' },
+          };
+        }
+        return prev;
       });
-    });
-    return unsubscribe;
-  }, []);
+    }
+  }, [engineMode]);
 
   useEffect(() => {
     return () => {
@@ -404,7 +404,7 @@ export default function EnhancementStreamingScreen() {
     return getAssetModelPath(modelFolder);
   };
 
-  const loadAvailableModels = async () => {
+  const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
     setError(null);
     setErrorSource(null);
@@ -465,29 +465,39 @@ export default function EnhancementStreamingScreen() {
       ];
 
       const streamingModels: string[] = [];
+      const allDetectedModels: string[] = [];
       for (const modelFolder of combined) {
         try {
           const detection = await detectEnhancementModel(
             await toDetectSource(resolvePathForCandidate(modelFolder)),
             { modelType: 'auto' }
           );
-          if (detection.success && detection.isStreaming) {
-            streamingModels.push(modelFolder);
+          if (detection.success) {
+            allDetectedModels.push(modelFolder);
+            if (detection.isStreaming) {
+              streamingModels.push(modelFolder);
+            }
           }
         } catch {
           // Ignore models that cannot be detected.
         }
       }
 
+      // In Live Overload mode show all detected models; streaming mode shows only streaming-capable
+      const modelsToShow =
+        engineMode === 'offline' ? allDetectedModels : streamingModels;
+
       setPadModelIds(padFolders);
       setDownloadedModelIds(downloadedFolders);
       setPadModelsPath(resolvedPadPath);
-      setAvailableModels(streamingModels);
+      setAvailableModels(modelsToShow);
 
-      if (streamingModels.length === 0) {
+      if (modelsToShow.length === 0) {
         setErrorSource('init');
         setError(
-          'No streaming enhancement models found. Use a model that reports isStreaming=true via detectEnhancementModel.'
+          engineMode === 'offline'
+            ? 'No enhancement models found. Add a model under assets, PAD, or downloads (category: enhancement).'
+            : 'No streaming enhancement models found. Use a model that reports isStreaming=true via detectEnhancementModel.'
         );
       }
     } catch (err) {
@@ -498,7 +508,24 @@ export default function EnhancementStreamingScreen() {
     } finally {
       setLoadingModels(false);
     }
-  };
+  }, [engineMode]);
+
+  useEffect(() => {
+    loadAvailableModels().catch(() => {});
+    refreshOutputDevices().catch(() => {
+      // Ignore unsupported-platform lookup failures.
+    });
+  }, [loadAvailableModels, refreshOutputDevices]);
+
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Enhancement) return;
+      loadAvailableModels().catch(() => {
+        // Ignore refresh errors.
+      });
+    });
+    return unsubscribe;
+  }, [loadAvailableModels]);
 
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
@@ -1042,9 +1069,46 @@ export default function EnhancementStreamingScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize model</Text>
             <Text style={styles.hint}>
-              Streaming enhancement for long-form audio. Only models with
-              isStreaming=true are shown here.
+              {engineMode === 'streaming'
+                ? 'Streaming enhancement for long-form audio. Only models with isStreaming=true are shown.'
+                : 'Live Overload mode: all detected enhancement models are shown. Mandatory segmentation splits audio into chunks for processing.'}
             </Text>
+
+            {/* Engine mode toggle */}
+            <View
+              style={[localStyles.optionRow, { marginTop: 0, marginBottom: 8 }]}
+            >
+              <Text style={localStyles.optionLabel}>Mode</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {(['streaming', 'offline'] as EngineMode[]).map((m) => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[
+                      styles.button,
+                      engineMode === m && styles.applyButton,
+                      {
+                        paddingVertical: 6,
+                        paddingHorizontal: 12,
+                        minWidth: 0,
+                      },
+                      (loading || enhancing) && styles.buttonDisabled,
+                    ]}
+                    onPress={() => setEngineMode(m)}
+                    disabled={loading || enhancing}
+                  >
+                    <Text
+                      style={[
+                        styles.buttonText,
+                        engineMode === m && { color: '#fff' },
+                        engineMode !== m && { color: '#555' },
+                      ]}
+                    >
+                      {m === 'streaming' ? '⚡ Streaming' : '💿 Live Overload'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
             {(currentModelFolder || selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
@@ -1209,17 +1273,28 @@ export default function EnhancementStreamingScreen() {
             {!engineReady && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Initialize a streaming enhancement model first.
+                  Initialize an enhancement model first.
                 </Text>
               </View>
             )}
 
-            {engineReady && (
+            {engineReady && engineMode === 'streaming' && (
               <SegmentationPolicyControls
                 variant="speech-streaming"
                 value={segStreamingConfig}
                 onChange={setSegStreamingConfig}
                 disabled={enhancing || loading || preparingInputBuffer}
+              />
+            )}
+
+            {engineReady && engineMode === 'offline' && (
+              <SegmentationPolicyControls
+                variant="speech-offline"
+                value={segStreamingConfig}
+                onChange={setSegStreamingConfig}
+                disabled={enhancing || loading || preparingInputBuffer}
+                disableOff
+                offDisabledMessage="Live Overload requires mandatory segmentation to split audio into processable chunks."
               />
             )}
 
@@ -1502,8 +1577,8 @@ export default function EnhancementStreamingScreen() {
                         const location = formatResolvedLocation(result);
                         Alert.alert('Saved', `Audio saved to:\n${location}`);
                       }}
-                      onError={(error) => {
-                        Alert.alert('Save failed', error.message);
+                      onError={(saveErr) => {
+                        Alert.alert('Save failed', saveErr.message);
                       }}
                     />
                   </View>
