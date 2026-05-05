@@ -70,14 +70,23 @@ export type OfflinePunctuationInitializeOptions = {
 export type OfflinePunctuationEngine = {
   readonly instanceId: string;
 
-  // Existing batch overload (unchanged).
+  /**
+   * Batch punctuation on offline text buffers.
+   * Reads from an `OfflineTextBuffer` and writes punctuated text into an
+   * offline output buffer.
+   */
   punctuate(
     textIn: OfflineTextBufferIdSource,
     textOut: OfflineTextBufferIdSource,
     options?: OfflinePunctuateOptions
   ): Promise<OfflinePunctuateResult>;
 
-  // Live overload — offline CT weights consumed in a live pipeline.
+  /**
+   * Live overload on the offline CT punctuation engine.
+   * Consumes committed text segments from a `LiveTextBuffer` and writes
+   * punctuated committed segments to a live output buffer.
+   * Segmentation policy is mandatory for this path.
+   */
   punctuate(
     textIn: LiveTextBufferIdSource,
     textOut: LiveTextBufferIdSource,

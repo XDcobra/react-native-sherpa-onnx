@@ -1,6 +1,12 @@
 import type { FileSource } from '../fileio/types';
 import type { EnhancementDetectModelResult } from '../types/modelDetect';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  OfflineAudioBufferIdSource,
+  LiveAudioBufferIdSource,
+} from '../audiobuffer/types';
+import type { SpeechSegment } from '../segment/segment';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type { EnhancementPipelineHandle } from './streamingTypes';
 import type {
   ErrorRecoveryStrategy,
   FailedSegmentInfo,
@@ -59,6 +65,25 @@ export interface EnhancementResult {
   processingTimeMs: number;
 }
 
+/**
+ * Live-pipeline options for enhancement. Policy evaluator is restricted to
+ * `continuous_frames` — see `sub-06-enhancement-live-overload.md`.
+ */
+export interface EnhancementLivePipelineOptions
+  extends LiveOfflinePipelineBaseOptions {
+  segmentation: {
+    /** Required. Must be a `continuous_frames` policy. */
+    policy: SegmentationPolicy & { evaluator: 'continuous_frames' };
+    mode?: 'auto';
+  };
+
+  /**
+   * Optional mirror of every committed audio chunk (per `continuous_frames`
+   * checkpoint). Same constraints as STT's `onSegment`.
+   */
+  onSegment?: (segment: SpeechSegment) => void;
+}
+
 export interface EnhancementEngine {
   readonly instanceId: string;
   /**
@@ -71,6 +96,19 @@ export interface EnhancementEngine {
     audioOut: OfflineAudioBufferIdSource,
     options?: EnhanceOptions
   ): Promise<EnhancementResult>;
+
+  /**
+   * Live overload on the offline enhancement engine.
+   * Consumes committed speech chunks from a live input buffer and writes
+   * denoised committed chunks to a live audio output buffer.
+   * Restricted to `continuous_frames` segmentation policies.
+   */
+  enhance(
+    audioIn: LiveAudioBufferIdSource,
+    audioOut: LiveAudioBufferIdSource,
+    options: EnhancementLivePipelineOptions
+  ): Promise<EnhancementPipelineHandle>;
+
   getSampleRate(): Promise<number>;
   destroy(): Promise<void>;
 }

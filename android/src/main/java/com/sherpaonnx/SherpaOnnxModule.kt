@@ -3981,6 +3981,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
   }
 
+  override fun startEnhancementOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    enhancementHelper.startEnhancementOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {

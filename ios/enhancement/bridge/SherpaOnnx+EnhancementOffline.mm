@@ -4,6 +4,12 @@
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
+#include "../EnhancementOfflineLivePipelineWorker.h"
+#include "../../segment/core/SherpaOnnx+SegmentationGlobals.h"
+#include "../../segment/engine/SegmentationEngineRegistry.h"
+#include "../../segment/pipeline/SegmentPipelineRegistry.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 
 #include <memory>
 #include <mutex>
@@ -217,6 +223,101 @@ static NSString *const kOfflineEnhancementOomMessage =
     sherpaonnx::enhancement::bridge::g_enhancement_instances.erase(it);
   }
   resolve(nil);
+}
+
+- (void)startEnhancementOfflineLivePipeline:(NSString *)instanceId
+                        audioInLiveBufferId:(NSString *)audioInLiveBufferId
+                       audioOutLiveBufferId:(NSString *)audioOutLiveBufferId
+                                    options:(NSDictionary *)options
+                                    resolve:(RCTPromiseResolveBlock)resolve
+                                     reject:(RCTPromiseRejectBlock)reject
+{
+  if (!instanceId || !audioInLiveBufferId || !audioOutLiveBufferId) {
+    reject(@"ENHANCEMENT_ERROR", @"Missing required buffer IDs", nil);
+    return;
+  }
+
+  std::string instanceIdStr = [instanceId UTF8String];
+  sherpaonnx::EnhancementWrapper *enhancer = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+    auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
+    if (it == sherpaonnx::enhancement::bridge::g_enhancement_instances.end() || it->second->wrapper == nullptr) {
+      reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
+      return;
+    }
+    enhancer = it->second->wrapper.get();
+  }
+
+  std::string audioInId = [audioInLiveBufferId UTF8String];
+  std::string audioOutId = [audioOutLiveBufferId UTF8String];
+
+  auto liveAudioIn = pa_get_live_entry(audioInId);
+  if (!liveAudioIn) {
+    reject(@"ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND", @"Input live buffer not found", nil);
+    return;
+  }
+  auto liveAudioOut = pa_get_live_entry(audioOutId);
+  if (!liveAudioOut) {
+    reject(@"ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND", @"Output live buffer not found", nil);
+    return;
+  }
+
+  NSDictionary *policyMap = options[@"segmentationPolicy"];
+  if (!policyMap) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"segmentationPolicy missing on native bridge", nil);
+    return;
+  }
+  
+  NSString *evaluator = policyMap[@"evaluator"];
+  if (![evaluator isEqualToString:@"continuous_frames"]) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED",
+           [NSString stringWithFormat:@"live enhancement supports only continuous_frames policy; received %@", evaluator],
+           nil);
+    return;
+  }
+
+  std::string errCode, errMsg;
+  auto parsedPolicy = sherpaonnx::segmentation::parseSegmentationPolicy(policyMap, &errCode, &errMsg);
+  if (!errCode.empty()) {
+    reject([NSString stringWithUTF8String:errCode.c_str()], [NSString stringWithUTF8String:errMsg.c_str()], nil);
+    return;
+  }
+
+  auto seg = sherpaonnx::segmentation::SegmentationEngineRegistry::getInstance().attach(
+    audioInId, "speech", parsedPolicy, &errCode, &errMsg
+  );
+  if (!seg) {
+    reject([NSString stringWithUTF8String:errCode.c_str()], [NSString stringWithUTF8String:errMsg.c_str()], nil);
+    return;
+  }
+
+  auto liveSegmentEntry = sherpaonnx::segmentation::SegmentPipelineRegistry::getInstance().getLiveEntry(seg->segmentBufferId);
+  if (!liveSegmentEntry) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Segment buffer not found", nil);
+    return;
+  }
+
+  NSString *uuidString = [[NSUUID UUID] UUIDString];
+  std::string pipelineId = "live_offline_enh_" + std::string([uuidString UTF8String]);
+
+  auto worker = std::make_shared<EnhancementOfflineLivePipelineWorker>(
+    pipelineId,
+    seg->engineId,
+    liveAudioIn,
+    seg->segmentBufferId,
+    liveAudioOut,
+    enhancer
+  );
+
+  {
+    std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+    g_streaming_pipelines[pipelineId] = worker;
+  }
+  worker->start();
+  so_start_streaming_pipeline_completion_watcher(self, pipelineId, worker);
+
+  resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pipelineId.c_str()] });
 }
 
 @end

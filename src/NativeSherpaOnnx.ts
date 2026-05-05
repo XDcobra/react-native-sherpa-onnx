@@ -186,6 +186,19 @@ export interface Spec extends TurboModule {
     }
   ): Promise<{ pipelineId: string }>;
 
+  /**
+   * Start a live-offline Enhancement pipeline.
+   * Restricts evaluator to `continuous_frames`.
+   */
+  startEnhancementOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      segmentationPolicy: Object;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   // ==================== Pipeline Audio Buffers ====================
 
   /**

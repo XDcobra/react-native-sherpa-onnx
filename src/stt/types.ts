@@ -392,14 +392,23 @@ export interface SttLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
 export interface SttEngine {
   readonly instanceId: string;
 
-  // Existing batch overload (unchanged).
+  /**
+   * Batch transcription on offline audio/text buffers.
+   * Reads from an offline audio buffer and writes the final transcript to an
+   * offline text output buffer.
+   */
   transcribe(
     buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
     textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string,
     options?: SttTranscribeOptions
   ): Promise<SttTranscribeResult>;
 
-  // Live overload — offline weights driven by mandatory segmentation.
+  /**
+   * Live overload on the offline STT engine.
+   * Consumes committed speech segments from a live audio buffer and writes
+   * committed transcript segments to a live text output buffer.
+   * Segmentation policy is mandatory for this path.
+   */
   transcribe(
     audioIn: LiveAudioBufferIdSource,
     textOut: LiveTextBufferIdSource,
