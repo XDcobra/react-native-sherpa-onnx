@@ -52,7 +52,8 @@ function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
 
 function createPunctuationPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedEngineId?: string
 ): PunctuationPipelineHandle {
   const completed = createStreamingPipelineCompletionPromise(pipelineId).then(
     () => undefined
@@ -64,6 +65,9 @@ function createPunctuationPipelineHandle(
     completed,
     async stop(): Promise<void> {
       await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -140,7 +144,11 @@ async function punctuateLiveOverload(
     throw err;
   }
 
-  const handle = createPunctuationPipelineHandle(instanceId, pipelineId);
+  const handle = createPunctuationPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
 
   if (options.onSegment) {
     const cb = options.onSegment;
@@ -253,7 +261,9 @@ export async function createOfflinePunctuation(
     punctuate: (async (
       textIn: OfflineTextBufferIdSource | LiveTextBufferIdSource,
       textOut: OfflineTextBufferIdSource | LiveTextBufferIdSource,
-      options?: OfflinePunctuateOptions | PunctuationLivePipelineOptions
+      punctuateOptions?:
+        | OfflinePunctuateOptions
+        | PunctuationLivePipelineOptions
     ): Promise<OfflinePunctuateResult | PunctuationPipelineHandle> => {
       guard();
 
@@ -270,24 +280,24 @@ export async function createOfflinePunctuation(
           instanceId,
           textIn,
           textOut,
-          options as PunctuationLivePipelineOptions
+          punctuateOptions as PunctuationLivePipelineOptions
         );
       }
 
       return punctuateOffline(
         textIn as OfflineTextBufferIdSource,
         textOut as OfflineTextBufferIdSource,
-        options as OfflinePunctuateOptions | undefined
+        punctuateOptions as OfflinePunctuateOptions | undefined
       );
     }) as OfflinePunctuationEngine['punctuate'],
     async punctuateString(
       plain: string,
       textOut: OfflineTextBufferRef,
-      options?: OfflinePunctuateOptions
+      punctuateOptions?: OfflinePunctuateOptions
     ): Promise<OfflinePunctuateResult> {
       guard();
       const outId = resolveOfflineTextBufferId(textOut);
-      const mode = options?.segmentation?.mode ?? 'off';
+      const mode = punctuateOptions?.segmentation?.mode ?? 'off';
       if (mode !== 'off') {
         const input = await createEmptyOfflineTextBuffer();
         await SherpaOnnx.populateOfflineTextBufferIfEmpty(
@@ -296,7 +306,7 @@ export async function createOfflinePunctuation(
           {}
         );
         try {
-          return await punctuateOffline(input, outId, options);
+          return await punctuateOffline(input, outId, punctuateOptions);
         } finally {
           await releasePipelineTextBuffer(input).catch(() => undefined);
         }

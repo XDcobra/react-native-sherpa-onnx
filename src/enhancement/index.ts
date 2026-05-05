@@ -29,6 +29,11 @@ import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import { subscribeLiveAudioBufferEvents } from '../audiobuffer';
 import type { EnhancementLivePipelineOptions } from './types';
 import type { EnhancementPipelineHandle } from './streamingTypes';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 
 let enhancementInstanceCounter = 0;
@@ -49,7 +54,8 @@ function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
 
 function createEnhancementPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedEngineId?: string
 ): EnhancementPipelineHandle {
   const completed = createStreamingPipelineCompletionPromise(pipelineId);
   return {
@@ -58,6 +64,9 @@ function createEnhancementPipelineHandle(
     completed,
     async stop(): Promise<void> {
       await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -87,14 +96,51 @@ async function enhanceLiveOverload(
   const inId = resolvePipelineAudioBufferId(audioIn);
   const outId = resolvePipelineAudioBufferId(audioOut);
 
-  const { pipelineId } = await SherpaOnnx.startEnhancementOfflineLivePipeline(
-    instanceId,
-    inId,
-    outId,
-    { segmentationPolicy: policy }
-  );
+  const attached = await attachSegmentationEngine(audioIn, { policy });
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
 
-  const handle = createEnhancementPipelineHandle(instanceId, pipelineId);
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'ENHANCEMENT_ERROR: segmentation engine did not produce a segment buffer for speech domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startEnhancementOfflineLivePipeline(
+      instanceId,
+      inId,
+      outId,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createEnhancementPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
 
   if (options.onSegment) {
     const cb = options.onSegment;

@@ -93,7 +93,8 @@ function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
 
 function createTtsPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedEngineId?: string
 ): TtsPipelineHandle {
   const completed = createStreamingPipelineCompletionPromise(pipelineId);
   return {
@@ -102,6 +103,9 @@ function createTtsPipelineHandle(
     completed,
     async stop(): Promise<void> {
       await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -198,7 +202,11 @@ async function synthesizeLiveOverload(
     throw err;
   }
 
-  const handle = createTtsPipelineHandle(instanceId, pipelineId);
+  const handle = createTtsPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
 
   if (options.onSegment) {
     const cb = options.onSegment;
@@ -521,14 +529,14 @@ export async function createTTS(
       detectedModels: DetectedModelEntry[];
     }> {
       guard();
-      const expanded = expandTtsUpdateOptions(opts);
+      const updateExpanded = expandTtsUpdateOptions(opts);
       const effectiveModelTypeForUpdate =
-        expanded.modelType && expanded.modelType !== 'auto'
-          ? expanded.modelType
+        updateExpanded.modelType && updateExpanded.modelType !== 'auto'
+          ? updateExpanded.modelType
           : effectiveModelType;
       const flatOpts = flattenTtsModelOptionsForNative(
         effectiveModelTypeForUpdate,
-        expanded.modelOptions
+        updateExpanded.modelOptions
       );
       const noiseArg =
         flatOpts.noiseScale === undefined ? Number.NaN : flatOpts.noiseScale;

@@ -90,7 +90,8 @@ function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
 
 function createSttPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedEngineId?: string
 ): SttPipelineHandle {
   const completed = createStreamingPipelineCompletionPromise(pipelineId);
   return {
@@ -99,6 +100,9 @@ function createSttPipelineHandle(
     completed,
     async stop(): Promise<void> {
       await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -175,7 +179,11 @@ async function transcribeLiveOverload(
     throw err;
   }
 
-  const handle = createSttPipelineHandle(instanceId, pipelineId);
+  const handle = createSttPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
 
   if (options.onSegment) {
     const cb = options.onSegment;
@@ -398,7 +406,7 @@ export async function createSTT(
         | OfflineTextBufferHandle
         | LiveTextBufferIdSource
         | string,
-      options?: SttTranscribeOptions | SttLivePipelineOptions
+      transcribeOptions?: SttTranscribeOptions | SttLivePipelineOptions
     ): Promise<SttTranscribeResult | SttPipelineHandle> {
       guard();
 
@@ -415,12 +423,14 @@ export async function createSTT(
           instanceId,
           buffer,
           textOut,
-          options as SttLivePipelineOptions
+          transcribeOptions as SttLivePipelineOptions
         );
       }
 
       // Batch path: narrow options to SttTranscribeOptions
-      const batchOptions = options as SttTranscribeOptions | undefined;
+      const batchOptions = transcribeOptions as
+        | SttTranscribeOptions
+        | undefined;
       const startedAtMs = Date.now();
       const bufferId = normalizeOfflineBufferInput(
         buffer as OfflineAudioBufferRef | OfflineBufferHandle | string

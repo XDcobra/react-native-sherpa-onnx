@@ -195,7 +195,8 @@ export interface Spec extends TurboModule {
     audioInLiveBufferId: string,
     audioOutLiveBufferId: string,
     options: {
-      segmentationPolicy: Object;
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
     }
   ): Promise<{ pipelineId: string }>;
 

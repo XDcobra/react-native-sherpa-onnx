@@ -263,36 +263,18 @@ static NSString *const kOfflineEnhancementOomMessage =
     return;
   }
 
-  NSDictionary *policyMap = options[@"segmentationPolicy"];
-  if (!policyMap) {
-    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"segmentationPolicy missing on native bridge", nil);
-    return;
-  }
-  
-  NSString *evaluator = policyMap[@"evaluator"];
-  if (![evaluator isEqualToString:@"continuous_frames"]) {
-    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED",
-           [NSString stringWithFormat:@"live enhancement supports only continuous_frames policy; received %@", evaluator],
-           nil);
+  NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
+  NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
+
+  if (!attachedSegmentationEngineId || !segmentLiveBufferId) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Missing attachedSegmentationEngineId or segmentLiveBufferId", nil);
     return;
   }
 
-  std::string errCode, errMsg;
-  auto parsedPolicy = sherpaonnx::segmentation::parseSegmentationPolicy(policyMap, &errCode, &errMsg);
-  if (!errCode.empty()) {
-    reject([NSString stringWithUTF8String:errCode.c_str()], [NSString stringWithUTF8String:errMsg.c_str()], nil);
-    return;
-  }
+  std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
+  std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
-  auto seg = sherpaonnx::segmentation::SegmentationEngineRegistry::getInstance().attach(
-    audioInId, "speech", parsedPolicy, &errCode, &errMsg
-  );
-  if (!seg) {
-    reject([NSString stringWithUTF8String:errCode.c_str()], [NSString stringWithUTF8String:errMsg.c_str()], nil);
-    return;
-  }
-
-  auto liveSegmentEntry = sherpaonnx::segmentation::SegmentPipelineRegistry::getInstance().getLiveEntry(seg->segmentBufferId);
+  auto liveSegmentEntry = sherpaonnx::segmentation::SegmentPipelineRegistry::getInstance().getLiveEntry(segmentBufferIdStr);
   if (!liveSegmentEntry) {
     reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Segment buffer not found", nil);
     return;
@@ -303,9 +285,9 @@ static NSString *const kOfflineEnhancementOomMessage =
 
   auto worker = std::make_shared<EnhancementOfflineLivePipelineWorker>(
     pipelineId,
-    seg->engineId,
+    attachedEngineIdStr,
     liveAudioIn,
-    seg->segmentBufferId,
+    segmentBufferIdStr,
     liveAudioOut,
     enhancer
   );
