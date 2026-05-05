@@ -77,13 +77,23 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
-    id: 'pipeline_showcase',
+    id: 'offline_pipeline_showcase',
     sectionTitle: 'Pipelines & Demos',
-    title: 'Pipeline Showcase',
+    title: 'Offline Pipeline',
     description:
-      'Mic/File -> Streaming STT -> Incremental TTS -> PCM playback with live metrics and finalize/save flow',
+      'Batch audio → STT → TTS pipeline with optional segmentation for memory-safe processing of long audio',
+    icon: 'layers-outline',
+    screen: 'OfflinePipelineShowcase',
+    implemented: true,
+  },
+  {
+    id: 'live_pipeline_showcase',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Live Pipeline',
+    description:
+      'Real-time Mic/File → Streaming STT → Streaming TTS → Playback with event-driven segment forwarding',
     icon: 'git-compare',
-    screen: 'PipelineShowcase',
+    screen: 'LivePipelineShowcase',
     implemented: true,
   },
   {
@@ -136,7 +146,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'segmentation_showcase',
-    sectionTitle: 'Voice Activity',
+    sectionTitle: 'Pipelines & Demos',
     title: 'Segmentation Showcase',
     description:
       'Experiment with text and audio segmentation policies. Control segment boundaries with configurable parameters.',

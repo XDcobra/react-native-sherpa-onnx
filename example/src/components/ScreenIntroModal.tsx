@@ -53,9 +53,13 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Streaming punctuation',
     body: 'This screen runs online CNN-BiLSTM punctuation over live text buffers. It is useful for checking the LiveTextBuffer input/output contract, pipeline lifecycle, and optional segmentation attach.',
   },
-  PipelineShowcase: {
-    title: 'End-to-end pipeline showcase',
-    body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',
+  OfflinePipelineShowcase: {
+    title: 'Offline batch pipeline',
+    body: 'This screen runs a full offline batch pipeline: audio file → STT (with optional speech segmentation) → transcript → TTS (with optional text segmentation) → synthesized audio → playback. Enable segmentation on either stage to process large inputs in chunks and keep peak native RAM low.',
+  },
+  LivePipelineShowcase: {
+    title: 'Live streaming pipeline',
+    body: 'This screen runs the full end-to-end streaming pipeline concurrently: mic or file audio → StreamingSTT → committed text segments → StreamingTTS → live audio → real-time playback. The segment event log shows each STT commit and its forwarding to TTS. Optional text re-segmentation between STT and TTS aligns input at sentence boundaries.',
   },
   FileIO: {
     title: 'File I/O sandbox',

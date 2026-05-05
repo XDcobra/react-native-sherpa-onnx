@@ -8,7 +8,8 @@ import STTStreamingScreen from '../screens/stt-streaming/STTStreamingScreen';
 import StreamingTTSScreen from '../screens/tts-streaming/StreamingTTSScreen';
 import PunctuationScreen from '../screens/punctuation/PunctuationScreen';
 import PunctuationStreamingScreen from '../screens/punctuation-streaming/PunctuationStreamingScreen';
-import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcaseScreen';
+import OfflinePipelineShowcaseScreen from '../screens/offline-pipeline-showcase/OfflinePipelineShowcaseScreen';
+import LivePipelineShowcaseScreen from '../screens/live-pipeline-showcase/LivePipelineShowcaseScreen';
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
@@ -86,10 +87,17 @@ export default function RootNavigator() {
         }}
       />
       <Stack.Screen
-        name="PipelineShowcase"
-        component={PipelineShowcaseScreen}
+        name="OfflinePipelineShowcase"
+        component={OfflinePipelineShowcaseScreen}
         options={{
-          title: 'Pipeline Showcase',
+          title: 'Offline Pipeline Showcase',
+        }}
+      />
+      <Stack.Screen
+        name="LivePipelineShowcase"
+        component={LivePipelineShowcaseScreen}
+        options={{
+          title: 'Live Pipeline Showcase',
         }}
       />
       <Stack.Screen
