@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   createStreamingSTT,
@@ -36,7 +37,11 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { listAssetModels } from 'react-native-sherpa-onnx/utils';
+import {
+  getAssetPackPath,
+  listAssetModels,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx/utils';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -56,6 +61,7 @@ import {
 } from '../../modelConfig';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
+const PAD_PACK_NAME = 'sherpa_models';
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -85,13 +91,19 @@ type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
 
 export default function STTStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
+  /** File-backed STT locations: downloads, FS scan, and asset-pack pad (same union as Live Pipeline Showcase). */
+  const [sttFileBackedIds, setSttFileBackedIds] = useState<string[]>([]);
+  const [sttPadIds, setSttPadIds] = useState<string[]>([]);
+  const [sttPadPath, setSttPadPath] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
     null
   );
   const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
   const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [offlineModelIds, setOfflineModelIds] = useState<Set<string>>(
     new Set()
   );
   const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
@@ -119,12 +131,17 @@ export default function STTStreamingScreen() {
 
   const resolveModelPath = useCallback(
     (modelFolder: string) => {
-      if (downloadedModelIds.includes(modelFolder)) {
+      if (sttPadIds.includes(modelFolder)) {
+        return sttPadPath
+          ? getFileModelPath(modelFolder, ModelCategory.Stt, sttPadPath)
+          : getFileModelPath(modelFolder, ModelCategory.Stt);
+      }
+      if (sttFileBackedIds.includes(modelFolder)) {
         return getFileModelPath(modelFolder, ModelCategory.Stt);
       }
       return getAssetModelPath(modelFolder);
     },
-    [downloadedModelIds]
+    [sttFileBackedIds, sttPadIds, sttPadPath]
   );
 
   // Auto-enforce segmentation when switching to Live Overload mode
@@ -149,55 +166,98 @@ export default function STTStreamingScreen() {
     setLoadingModels(true);
     setError(null);
     try {
-      const [assets, downloaded] = await Promise.all([
-        listAssetModels(),
-        listDownloadedModels(ModelCategory.Stt),
-      ]);
-      const assetModels = assets
-        .filter((model) => model.hint === 'stt')
-        .map((model) => model.folder);
-      const downloadedIds = downloaded.map((model) => model.id);
+      const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+      const fallbackPath = `${DocumentDirectoryPath}/models`;
+      const padPath = padPathFromNative ?? fallbackPath;
 
-      const candidateModels = Array.from(
-        new Set([...assetModels, ...downloadedIds])
+      const allAsset = await listAssetModels();
+      const assetSttIds = allAsset
+        .filter((m) => m.hint === 'stt')
+        .map((m) => m.folder);
+
+      const sttDl = await listDownloadedModels(ModelCategory.Stt).then((r) =>
+        r.map((m) => m.id)
       );
-      const streamingModelsRaw = await Promise.all(
+
+      const padResults = await listModelsAtPath(padPath).catch(() => []);
+      const padSttIds = padResults
+        .filter((m) => m.hint === 'stt')
+        .map((m) => m.folder);
+
+      const sttFilePath = `${DocumentDirectoryPath}/sherpa-onnx/models/${ModelCategory.Stt}`;
+      const sttFs = await listModelsAtPath(sttFilePath).catch(() => []);
+      const sttFsIds = sttFs.map((m) => m.folder);
+
+      const candidateModels = [
+        ...padSttIds,
+        ...assetSttIds.filter((f) => !padSttIds.includes(f)),
+        ...sttDl.filter(
+          (f) => !padSttIds.includes(f) && !assetSttIds.includes(f)
+        ),
+        ...sttFsIds.filter(
+          (f) =>
+            !padSttIds.includes(f) &&
+            !assetSttIds.includes(f) &&
+            !sttDl.includes(f)
+        ),
+      ];
+
+      const sttPadSet = new Set(padSttIds);
+      const sttAssetSet = new Set(assetSttIds);
+      const fileBackedUnion = [
+        ...new Set([...sttDl, ...sttFsIds, ...padSttIds]),
+      ];
+
+      const sttDetections = await Promise.all(
         candidateModels.map(async (modelFolder) => {
           try {
-            const modelPath = downloadedIds.includes(modelFolder)
-              ? getFileModelPath(modelFolder, ModelCategory.Stt)
-              : getAssetModelPath(modelFolder);
+            const modelPath = sttPadSet.has(modelFolder)
+              ? getFileModelPath(modelFolder, ModelCategory.Stt, padPath)
+              : sttAssetSet.has(modelFolder)
+              ? getAssetModelPath(modelFolder)
+              : getFileModelPath(modelFolder, ModelCategory.Stt);
             const detection = await detectSttModel(
               await toDetectSource(modelPath),
               {
                 modelType: 'auto',
               }
             );
-            return detection.success && detection.isStreaming
-              ? modelFolder
-              : null;
+            if (!detection.success) {
+              return { folder: modelFolder, streaming: false, offline: false };
+            }
+            return {
+              folder: modelFolder,
+              streaming: detection.isStreaming,
+              offline: !detection.isStreaming,
+            };
           } catch {
-            return null;
+            return { folder: modelFolder, streaming: false, offline: false };
           }
         })
       );
 
-      const available = candidateModels.filter(
-        (_, i) => streamingModelsRaw[i] != null || true // In offline mode we show all
+      const streamingIds = new Set(
+        sttDetections.filter((r) => r.streaming).map((r) => r.folder)
+      );
+      const offlineIds = new Set(
+        sttDetections.filter((r) => r.offline).map((r) => r.folder)
       );
 
-      const streamingIds = new Set(
-        streamingModelsRaw.filter((m): m is string => m != null)
+      const available = candidateModels.filter(
+        (folder) => streamingIds.has(folder) || offlineIds.has(folder)
       );
 
       setAvailableModels(available);
       setStreamingModelIds(streamingIds);
-      setDownloadedModelIds(downloadedIds);
+      setOfflineModelIds(offlineIds);
+      setSttPadIds(padSttIds);
+      setSttPadPath(padSttIds.length > 0 ? padPath : null);
+      setSttFileBackedIds(fileBackedUnion);
 
       const initialModel =
         engineMode === 'streaming'
           ? available.find((m) => streamingIds.has(m))
-          : available[0];
+          : available.find((m) => offlineIds.has(m));
 
       setSelectedModelFolder((prev) =>
         prev && available.includes(prev) ? prev : initialModel ?? null
@@ -341,6 +401,11 @@ export default function STTStreamingScreen() {
       if (engineMode === 'streaming' && !detection.isStreaming) {
         throw new Error(
           'This STT model is offline-only. Switch to "Live Overload" mode to use it.'
+        );
+      }
+      if (engineMode === 'offline' && detection.isStreaming) {
+        throw new Error(
+          'This STT model is streaming-only (incremental encoder). Live Overload needs offline weights — pick another model or use ⚡ Streaming.'
         );
       }
 
@@ -525,6 +590,7 @@ export default function STTStreamingScreen() {
           selectedModel={selectedModelFolder}
           onModelSelect={setSelectedModelFolder}
           isModelStreamingCapable={(m) => streamingModelIds.has(m)}
+          isModelOfflineCapable={(m) => offlineModelIds.has(m)}
           loading={loadingModels}
           disabled={streamingState !== 'idle'}
         />

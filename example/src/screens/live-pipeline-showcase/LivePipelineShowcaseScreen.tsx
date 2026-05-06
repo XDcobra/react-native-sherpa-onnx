@@ -35,6 +35,8 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  finalizeLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
@@ -69,6 +71,7 @@ import {
   TTS_STREAMING_MODEL_AREA_PLACEHOLDER,
   type EngineMode,
 } from '../../components/EngineModeModelSelector';
+import { PipelineOfflineAudioResultCard } from '../../components/PipelineOfflineAudioResultCard';
 import { styles } from './LivePipelineShowcaseScreen.styles';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -113,6 +116,9 @@ export default function LivePipelineShowcaseScreen() {
   const [streamingSttModelIds, setStreamingSttModelIds] = useState<Set<string>>(
     new Set()
   );
+  const [offlineSttModelIds, setOfflineSttModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [ttsModels, setTtsModels] = useState<string[]>([]);
   const [streamingTtsModelIds, setStreamingTtsModelIds] = useState<Set<string>>(
     new Set()
@@ -149,6 +155,12 @@ export default function LivePipelineShowcaseScreen() {
   const [committedSegments, setCommittedSegments] = useState<string[]>([]);
   const [segmentEvents, setSegmentEvents] = useState<SegmentEvent[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [pipelineTtsOutput, setPipelineTtsOutput] = useState<{
+    bufferId: string;
+    sourceLabel: string;
+    sampleRate: number;
+    durationMs: number;
+  } | null>(null);
 
   // ── refs ───────────────────────────────────────────────────────────────────
   const sttEngineRef = useRef<LiveSttEngine | null>(null);
@@ -162,6 +174,9 @@ export default function LivePipelineShowcaseScreen() {
   const playerRef = useRef<PcmPlayer | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
   const segCountRef = useRef(0);
+  const capturedTtsOfflineIdRef = useRef<string | null>(null);
+  /** Prevents concurrent teardown (e.g. Stop + pipeline.completed both calling release). */
+  const releaseAllInFlightRef = useRef<Promise<void> | null>(null);
 
   // ── load model lists ───────────────────────────────────────────────────────
   const loadModels = useCallback(async () => {
@@ -232,7 +247,7 @@ export default function LivePipelineShowcaseScreen() {
       const sttAssetSet = new Set(assetSttIds);
       const ttsAssetSet = new Set(assetTtsIds);
 
-      const streamingSttRaw = await Promise.all(
+      const sttDetectionRows = await Promise.all(
         sttCandidates.map(async (folder) => {
           try {
             const source = sttPadSet.has(folder)
@@ -246,9 +261,16 @@ export default function LivePipelineShowcaseScreen() {
                 modelType: 'auto',
               }
             );
-            return detected.success && detected.isStreaming ? folder : null;
+            if (!detected.success) {
+              return { folder, streaming: false, offline: false };
+            }
+            return {
+              folder,
+              streaming: detected.isStreaming,
+              offline: !detected.isStreaming,
+            };
           } catch {
-            return null;
+            return { folder, streaming: false, offline: false };
           }
         })
       );
@@ -276,11 +298,15 @@ export default function LivePipelineShowcaseScreen() {
         })
       );
 
-      const validSttModels = streamingSttRaw
-        .map((m, i) => (m || sttCandidates[i] ? sttCandidates[i] : null))
-        .filter((m): m is string => m != null);
       const streamingSttModelsSet = new Set(
-        streamingSttRaw.filter((m): m is string => m != null)
+        sttDetectionRows.filter((r) => r.streaming).map((r) => r.folder)
+      );
+      const offlineSttModelsSet = new Set(
+        sttDetectionRows.filter((r) => r.offline).map((r) => r.folder)
+      );
+      const validSttModels = sttCandidates.filter(
+        (folder) =>
+          streamingSttModelsSet.has(folder) || offlineSttModelsSet.has(folder)
       );
 
       const validTtsModels = validTtsRaw
@@ -300,13 +326,14 @@ export default function LivePipelineShowcaseScreen() {
       setTtsDownloadedIds([...new Set([...ttsDl, ...ttsFsIds, ...padTtsIds])]);
       setSttModels(validSttModels);
       setStreamingSttModelIds(streamingSttModelsSet);
+      setOfflineSttModelIds(offlineSttModelsSet);
       setTtsModels(validTtsModels);
       setStreamingTtsModelIds(streamingTtsModelsSet);
 
       const initialStt =
         sttEngineMode === 'streaming'
           ? validSttModels.find((m) => streamingSttModelsSet.has(m))
-          : validSttModels[0];
+          : validSttModels.find((m) => offlineSttModelsSet.has(m));
 
       const initialTts =
         ttsEngineMode === 'streaming' ? null : validTtsModels[0];
@@ -417,73 +444,150 @@ export default function LivePipelineShowcaseScreen() {
     [ttsPadIds, ttsPadPath, ttsDownloadedIds]
   );
 
+  const releasePriorCapturedTts = useCallback(async () => {
+    const id = capturedTtsOfflineIdRef.current;
+    capturedTtsOfflineIdRef.current = null;
+    setPipelineTtsOutput(null);
+    if (id) {
+      await releasePipelineAudioBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const captureLiveTtsToOfflineSnapshot = useCallback(
+    async (ttsLive: LiveAudioBufferRef) => {
+      try {
+        try {
+          await finalizeLiveAudioBuffer(ttsLive.bufferId);
+        } catch {
+          /* already finalized */
+        }
+        const offline = await createOfflineAudioBufferFromLive(
+          ttsLive.bufferId,
+          'fullIfSpooled'
+        );
+        if (offline.info.numSamples <= 0) {
+          await releasePipelineAudioBuffer(offline.bufferId).catch(() => {});
+          return;
+        }
+        const prior = capturedTtsOfflineIdRef.current;
+        if (prior && prior !== offline.bufferId) {
+          await releasePipelineAudioBuffer(prior).catch(() => {});
+        }
+        capturedTtsOfflineIdRef.current = offline.bufferId;
+        setPipelineTtsOutput({
+          bufferId: offline.bufferId,
+          sourceLabel: 'Pipeline TTS output',
+          sampleRate: offline.info.sampleRate,
+          durationMs: offline.info.durationMs,
+        });
+      } catch {
+        /* ignore snapshot errors */
+      }
+    },
+    []
+  );
+
   // ── cleanup helpers ────────────────────────────────────────────────────────
   const releaseAllResources = useCallback(async () => {
-    // Cleanup order per plan: stop mic → cancel ingest → stop STT → finalize sttText → stop TTS → release buffers → destroy engines
-    await stopMicToLiveAudioBuffer().catch(() => {});
-
-    const ingest = ingestRef.current;
-    ingestRef.current = null;
-    if (ingest) {
-      ingest.cancel();
+    const existing = releaseAllInFlightRef.current;
+    if (existing) {
+      await existing;
+      return;
     }
 
-    const sttPipeline = sttPipelineRef.current;
-    sttPipelineRef.current = null;
-    if (sttPipeline) {
-      await sttPipeline.stop().catch(() => {});
-    }
+    const releaseToken: { p: Promise<void> | null } = { p: null };
+    releaseToken.p = (async () => {
+      try {
+        // Cleanup order: stop mic → ingest → STT pipeline → finalize STT text →
+        // flush/stop TTS pipeline → snapshot TTS live audio → release text/player/buffers → destroy engines.
+        await stopMicToLiveAudioBuffer().catch(() => {});
 
-    const sttText = sttOutputTextRef.current;
-    sttOutputTextRef.current = null;
-    if (sttText) {
-      await finalizeLiveTextBuffer(sttText.bufferId).catch(() => {});
-      await releasePipelineTextBuffer(sttText.bufferId).catch(() => {});
-      sttText.unsubscribeEvents();
-    }
+        const ingest = ingestRef.current;
+        ingestRef.current = null;
+        if (ingest) {
+          ingest.cancel();
+        }
 
-    const ttsPipeline = ttsPipelineRef.current;
-    ttsPipelineRef.current = null;
-    if (ttsPipeline) {
-      await ttsPipeline.stop().catch(() => {});
-    }
+        const sttPipeline = sttPipelineRef.current;
+        sttPipelineRef.current = null;
+        if (sttPipeline) {
+          await sttPipeline.stop().catch(() => {});
+        }
 
-    const ttsText = ttsInputTextRef.current;
-    ttsInputTextRef.current = null;
-    if (ttsText) {
-      await releasePipelineTextBuffer(ttsText.bufferId).catch(() => {});
-      ttsText.unsubscribeEvents();
-    }
+        const sttText = sttOutputTextRef.current;
+        sttOutputTextRef.current = null;
+        if (sttText) {
+          await finalizeLiveTextBuffer(sttText.bufferId).catch(() => {});
+          await releasePipelineTextBuffer(sttText.bufferId).catch(() => {});
+          sttText.unsubscribeEvents();
+        }
 
-    const player = playerRef.current;
-    playerRef.current = null;
-    if (player) {
-      await player.destroy().catch(() => {});
-    }
+        const ttsAudioForCapture = ttsOutputAudioRef.current;
 
-    const sttAudio = sttInputAudioRef.current;
-    sttInputAudioRef.current = null;
-    if (sttAudio) {
-      await releasePipelineAudioBuffer(sttAudio.bufferId).catch(() => {});
-    }
+        const ttsPipeline = ttsPipelineRef.current;
+        ttsPipelineRef.current = null;
+        if (ttsPipeline) {
+          await ttsPipeline.flush().catch(() => {});
+          await ttsPipeline.stop().catch(() => {});
+        }
 
-    const ttsAudio = ttsOutputAudioRef.current;
-    ttsOutputAudioRef.current = null;
-    if (ttsAudio) {
-      await releasePipelineAudioBuffer(ttsAudio.bufferId).catch(() => {});
-    }
+        if (ttsAudioForCapture) {
+          await captureLiveTtsToOfflineSnapshot(ttsAudioForCapture);
+        }
 
-    const sttEng = sttEngineRef.current;
-    sttEngineRef.current = null;
-    const ttsEng = ttsEngineRef.current;
-    ttsEngineRef.current = null;
-    await Promise.all([
-      sttEng ? sttEng.destroy().catch(() => {}) : Promise.resolve(),
-      ttsEng ? ttsEng.destroy().catch(() => {}) : Promise.resolve(),
-    ]);
+        const ttsText = ttsInputTextRef.current;
+        ttsInputTextRef.current = null;
+        if (ttsText) {
+          await releasePipelineTextBuffer(ttsText.bufferId).catch(() => {});
+          ttsText.unsubscribeEvents();
+        }
 
-    setActiveSteps(new Set());
-  }, []);
+        const player = playerRef.current;
+        playerRef.current = null;
+        if (player) {
+          await player.destroy().catch(() => {});
+        }
+
+        const sttAudio = sttInputAudioRef.current;
+        sttInputAudioRef.current = null;
+        if (sttAudio) {
+          await releasePipelineAudioBuffer(sttAudio.bufferId).catch(() => {});
+        }
+
+        ttsOutputAudioRef.current = null;
+        if (ttsAudioForCapture) {
+          await releasePipelineAudioBuffer(ttsAudioForCapture.bufferId).catch(
+            () => {}
+          );
+        }
+
+        const sttEng = sttEngineRef.current;
+        sttEngineRef.current = null;
+        const ttsEng = ttsEngineRef.current;
+        ttsEngineRef.current = null;
+        await Promise.all([
+          sttEng ? sttEng.destroy().catch(() => {}) : Promise.resolve(),
+          ttsEng ? ttsEng.destroy().catch(() => {}) : Promise.resolve(),
+        ]);
+
+        setActiveSteps(new Set());
+      } finally {
+        const p = releaseToken.p;
+        if (p != null && releaseAllInFlightRef.current === p) {
+          releaseAllInFlightRef.current = null;
+        }
+      }
+    })();
+
+    releaseAllInFlightRef.current = releaseToken.p;
+    await releaseToken.p;
+  }, [captureLiveTtsToOfflineSnapshot]);
+
+  useEffect(() => {
+    return () => {
+      void releasePriorCapturedTts();
+    };
+  }, [releasePriorCapturedTts]);
 
   // ── file picker ────────────────────────────────────────────────────────────
   const pickFile = useCallback(async () => {
@@ -520,6 +624,7 @@ export default function LivePipelineShowcaseScreen() {
     setSegmentEvents([]);
     segCountRef.current = 0;
 
+    await releasePriorCapturedTts();
     await releaseAllResources();
 
     try {
@@ -533,11 +638,18 @@ export default function LivePipelineShowcaseScreen() {
         );
       }
 
-      // In streaming mode, we MUST have a streaming model.
-      // In offline mode (Live Overload), we can use any model (e.g. Whisper).
+      // Streaming mode requires streaming-compatible weights; Live Overload requires offline weights.
       if (sttEngineMode === 'streaming' && !detection.isStreaming) {
         setValidationError(
           'This STT model is offline-only. Switch STT to "Live Overload" mode to use it in a live pipeline.'
+        );
+        setPipelineState('idle');
+        setStatusText('');
+        return;
+      }
+      if (sttEngineMode === 'offline' && detection.isStreaming) {
+        setValidationError(
+          'This STT model is streaming-only. Live Overload needs offline STT weights — pick another STT model or use Streaming STT.'
         );
         setPipelineState('idle');
         setStatusText('');
@@ -762,6 +874,7 @@ export default function LivePipelineShowcaseScreen() {
     sttSegConfig,
     sttEngineMode,
     releaseAllResources,
+    releasePriorCapturedTts,
     resolveSttSource,
     resolveTtsSource,
   ]);
@@ -784,7 +897,7 @@ export default function LivePipelineShowcaseScreen() {
     pipelineState === 'idle';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <ScreenIntroModal screenId="LivePipelineShowcase" />
       <ScrollView
         style={styles.scrollView}
@@ -890,6 +1003,7 @@ export default function LivePipelineShowcaseScreen() {
           selectedModel={selectedSttModel}
           onModelSelect={setSelectedSttModel}
           isModelStreamingCapable={(m) => streamingSttModelIds.has(m)}
+          isModelOfflineCapable={(m) => offlineSttModelIds.has(m)}
           loading={loadingModels}
           disabled={pipelineState !== 'idle'}
         />
@@ -1055,6 +1169,26 @@ export default function LivePipelineShowcaseScreen() {
             ))}
           </View>
         )}
+
+        {pipelineTtsOutput ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>TTS output (last run)</Text>
+            <Text style={styles.hint}>
+              After Stop or when the pipeline finishes, synthesized speech is
+              captured here. Play, save to a file, or dismiss to free memory.
+            </Text>
+            <PipelineOfflineAudioResultCard
+              bufferId={pipelineTtsOutput.bufferId}
+              sourceLabel={pipelineTtsOutput.sourceLabel}
+              sampleRate={pipelineTtsOutput.sampleRate}
+              durationMs={pipelineTtsOutput.durationMs}
+              onDismiss={releasePriorCapturedTts}
+              disabled={
+                pipelineState === 'running' || pipelineState === 'starting'
+              }
+            />
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

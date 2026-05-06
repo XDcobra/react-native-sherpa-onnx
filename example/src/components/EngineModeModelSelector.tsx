@@ -32,6 +32,12 @@ export interface EngineModeModelSelectorProps {
   selectedModel: string | null;
   onModelSelect: (model: string | null) => void;
   isModelStreamingCapable: (model: string) => boolean;
+  /**
+   * When `engineMode === 'offline'` (Live Overload), only models for which this returns true
+   * are listed. Omit for non-STT flows (e.g. TTS) where offline mode should keep showing all
+   * `models` entries.
+   */
+  isModelOfflineCapable?: (model: string) => boolean;
   loading?: boolean;
   disabled?: boolean;
   showEngineModeToggle?: boolean;
@@ -53,6 +59,7 @@ export function EngineModeModelSelector({
   selectedModel,
   onModelSelect,
   isModelStreamingCapable,
+  isModelOfflineCapable,
   loading = false,
   disabled = false,
   showEngineModeToggle = true,
@@ -63,9 +70,15 @@ export function EngineModeModelSelector({
   const filteredModels =
     engineMode === 'streaming' && streamingModelAreaPlaceholder
       ? []
-      : models.filter((m) =>
-          engineMode === 'streaming' ? isModelStreamingCapable(m) : true
-        );
+      : models.filter((m) => {
+          if (engineMode === 'streaming') {
+            return isModelStreamingCapable(m);
+          }
+          if (isModelOfflineCapable) {
+            return isModelOfflineCapable(m);
+          }
+          return true;
+        });
 
   return (
     <View style={styles.section}>
@@ -107,7 +120,7 @@ export function EngineModeModelSelector({
         {engineMode === 'streaming'
           ? streamingHintOverride ??
             'Real-time incremental decoding. Requires streaming models.'
-          : 'Commit-only decoding using offline models. Mandatory segmentation.'}
+          : 'Commit-only path on the offline engine (full segments, not the streaming incremental graph). Mandatory segmentation.'}
       </Text>
 
       {loading ? (
