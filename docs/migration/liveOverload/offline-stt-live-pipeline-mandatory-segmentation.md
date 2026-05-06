@@ -6,7 +6,7 @@
 
 **Out of scope:** The example app pipeline-showcase split (already shipped); see [pipeline-showcase-offline-live-rework.md](./pipeline-showcase-offline-live-rework.md) only as historical context.
 
-**Related:** [Offline STT](../stt-offline.md), [Streaming STT](../stt-streaming.md), [Streaming TTS](../tts-streaming.md), [Segmentation engine](../segmentation-engine.md), [offline vs streaming model guards](./offline-streaming-model-engine-mismatch-guards.md).
+**Related:** [Offline STT](../stt-offline.md), [Streaming STT](../stt-streaming.md), [Offline TTS](../tts-offline.md), [Segmentation engine](../segmentation-engine.md), [offline vs streaming model guards](./offline-streaming-model-engine-mismatch-guards.md).
 
 ---
 

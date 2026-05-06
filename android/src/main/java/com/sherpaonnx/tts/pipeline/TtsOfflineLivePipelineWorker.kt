@@ -16,8 +16,8 @@ import com.sherpaonnx.tts.core.TtsEngineInstance
  * the offline TTS engine (batch `generate`) and appends the resulting PCM to the live audio
  * output buffer.
  *
- * Mirrors the streaming [TtsPipelineWorker] for per-segment sid/speed resolution and voice
- * cloning, but uses the simpler batch-generate API (no streaming callback) because each
+ * Preserves per-segment sid/speed resolution and voice cloning behavior while using
+ * the simpler batch-generate API (no streaming callback), because each
  * committed segment is already bounded in length by the segmentation policy.
  *
  * See: docs/migration/liveOverload/sub-05-tts-live-overload.md

@@ -12,7 +12,7 @@ Final hardening pass before the live overload ships:
 1. **Contract parity audit** (Doc vs. Code) for sub-01 … sub-06.
 2. **Cross-feature test matrix** — make sure the overall contract holds uniformly across STT, Punctuation, TTS, Enhancement.
 3. **Example app integration** — wire the live overload into the existing live pipeline showcase screen so users have something to play with.
-4. **Documentation closure** — update the public docs (`stt-offline.md`, `tts-streaming.md`, `enhancement-streaming.md`, `punctuation.md`) with "Live overload" sections that link back to the design note.
+4. **Documentation closure** — update the public docs (`stt-offline.md`, `tts-offline.md`, `enhancement-streaming.md`, `punctuation.md`) with "Live overload" sections that link back to the design note.
 5. **Native build verification** — Android + iOS compile clean; example app smoke-tests pass on both platforms.
 
 After this phase, the live overload feature is **release-ready**, except for the explicitly deferred TTS dedup (sub-08).
@@ -137,7 +137,7 @@ Files to update:
 |---|---|
 | `docs/stt-offline.md` | Add **"Live overload"** section. |
 | `docs/stt-streaming.md` | Add cross-link to STT live overload as the offline-weights alternative. |
-| `docs/tts-streaming.md` | Add **"Live overload on offline TTS"** section. Until sub-08 lands, document both `createStreamingTTS` and the live overload as separate entry points with a comparison table. |
+| `docs/tts-offline.md` | Add/maintain **"Live overload on offline TTS"** section. |
 | `docs/enhancement-streaming.md` (or `docs/enhancement-offline.md` if that's where the offline path lives) | Add **"Live overload on offline enhancement (restricted)"** section with the artifact disclaimer. |
 | `docs/punctuation.md` (or feature equivalent) | Add **"Live overload on offline punctuation"** section. |
 | `docs/segmentation-engine.md` | Add a small **"Live overload integration"** call-out describing how the segmentation engine is the runtime for the live overload. |

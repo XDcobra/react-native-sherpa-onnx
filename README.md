@@ -114,7 +114,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 ### Speech & media features
 
 - Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- Text-to-Speech (TTS): [Offline](./docs/tts-offline.md)
 - Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - VAD: [Streaming](./docs/vad-streaming.md)
@@ -261,7 +261,7 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. **Voice cloning** on **Android:** batch and streaming TTS. **iOS:** cloning is experimental. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 | **Supertonic**    | `'supertonic'`        | Lightning-fast, on-device text-to-speech system designed for extreme performance with minimal computational overhead. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
-For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
+For **live TTS pipelines** (segment-driven synthesis from live text), use `createTTS().synthesize(LiveTextBuffer, LiveAudioBuffer, { segmentation })`. See [Offline Text-to-Speech](./docs/tts-offline.md) ("Live overload on offline TTS").
 
 </details>
 
@@ -333,7 +333,7 @@ Every active engine keeps its model weights resident in native memory for its en
 - [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning, **offline-only models vs segmentation / chunking**
 - [Segmentation engine](./docs/segmentation-engine.md) – segment boundaries, links, modes; **OOM mitigation** when using offline models on constrained devices
 - **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md)
 - **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - **Punctuation:** [Offline](./docs/punctuation-offline.md)
 - [Voice Activity Detection (VAD)](./docs/vad-streaming.md)

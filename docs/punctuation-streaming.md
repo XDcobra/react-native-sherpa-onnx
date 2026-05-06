@@ -288,7 +288,7 @@ Additional `FILEIO_*` errors can occur during model path/source resolution befor
 - [Text buffers — streaming](textbuffer-streaming.md)
 - [Text buffers — offline](textbuffer-offline.md)
 - [STT streaming](stt-streaming.md)
-- [TTS streaming](tts-streaming.md)
+- [TTS offline](tts-offline.md)
 - [Segmentation engine](segmentation-engine.md)
 - [Model setup](model-setup.md)
 - [Execution providers](execution-providers.md)

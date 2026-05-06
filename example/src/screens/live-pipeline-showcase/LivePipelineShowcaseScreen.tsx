@@ -27,9 +27,10 @@ import {
   type SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import {
-  createStreamingTTS,
+  createTTS,
   detectTtsModel,
-  type StreamingTtsEngine,
+  type TtsEngine,
+  type TtsLivePipelineOptions,
   type TtsPipelineHandle,
 } from 'react-native-sherpa-onnx/tts';
 import {
@@ -151,7 +152,7 @@ export default function LivePipelineShowcaseScreen() {
 
   // ── refs ───────────────────────────────────────────────────────────────────
   const sttEngineRef = useRef<LiveSttEngine | null>(null);
-  const ttsEngineRef = useRef<StreamingTtsEngine | null>(null);
+  const ttsEngineRef = useRef<TtsEngine | null>(null);
   const sttInputAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const ttsOutputAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const sttOutputTextRef = useRef<LiveTextBufferRef | null>(null);
@@ -565,37 +566,14 @@ export default function LivePipelineShowcaseScreen() {
 
       // ── Init TTS engine ────────────────────────────────────────────────────
       const ttsSource = await resolveTtsSource(selectedTtsModel);
-      const ttsDetection = await detectTtsModel(ttsSource, {
+
+      setStatusText('Initializing TTS…');
+      const ttsEngine = await createTTS({
+        modelSource: ttsSource,
         modelType: 'auto',
+        numThreads: NUM_THREADS,
       });
-
-      if (ttsEngineMode === 'streaming' && !ttsDetection.isStreaming) {
-        setValidationError(
-          'This TTS model is offline-only. Switch TTS to "Live Overload" mode to use it in a live pipeline.'
-        );
-        setPipelineState('idle');
-        setStatusText('');
-        return;
-      }
-
-      if (ttsEngineMode === 'streaming') {
-        setStatusText('Initializing streaming TTS…');
-        const ttsEngine = await createStreamingTTS({
-          modelSource: ttsSource,
-          modelType: 'auto',
-          numThreads: NUM_THREADS,
-        });
-        ttsEngineRef.current = ttsEngine;
-      } else {
-        setStatusText('Initializing offline TTS (Live Overload)…');
-        const { createTTS } = require('react-native-sherpa-onnx/tts');
-        const ttsEngine = await createTTS({
-          modelSource: ttsSource,
-          modelType: 'auto',
-          numThreads: NUM_THREADS,
-        });
-        ttsEngineRef.current = ttsEngine as unknown as StreamingTtsEngine;
-      }
+      ttsEngineRef.current = ttsEngine;
 
       const ttsSampleRate = await ttsEngineRef.current!.getSampleRate();
 
@@ -687,16 +665,25 @@ export default function LivePipelineShowcaseScreen() {
       );
       sttPipelineRef.current = sttPipeline;
 
+      const ttsSegmentation: TtsLivePipelineOptions['segmentation'] = (() => {
+        const ttsOpt = buildSegmentationOption(textSegConfig);
+        return ttsOpt && ttsOpt.mode === 'auto' && ttsOpt.policy
+          ? { mode: 'auto', policy: ttsOpt.policy }
+          : {
+              mode: 'auto',
+              policy: {
+                evaluator: 'text_synthetic_auto',
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
+      })();
+
       const ttsPipeline = await ttsEngineRef.current!.synthesize(
         ttsInputText.bufferId,
         ttsOutputAudio.bufferId,
         {
-          ...(() => {
-            const ttsOpt = buildSegmentationOption(textSegConfig);
-            return ttsOpt && ttsOpt.mode !== 'off'
-              ? { segmentation: ttsOpt }
-              : {};
-          })(),
+          segmentation: ttsSegmentation,
         }
       );
       ttsPipelineRef.current = ttsPipeline;
@@ -774,7 +761,6 @@ export default function LivePipelineShowcaseScreen() {
     textSegConfig,
     sttSegConfig,
     sttEngineMode,
-    ttsEngineMode,
     releaseAllResources,
     resolveSttSource,
     resolveTtsSource,

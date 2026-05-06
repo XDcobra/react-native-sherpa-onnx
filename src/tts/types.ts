@@ -21,7 +21,12 @@ import type { SegmentationPolicy } from '../segment/engine-types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { SpeechSegment } from '../segment/segment';
-import type { TtsPipelineHandle } from './streamingTypes';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+
+/** TTS-specific pipeline handle returned by live pipeline synthesis. */
+export interface TtsPipelineHandle extends StreamingPipelineHandle {
+  readonly instanceId: string;
+}
 
 /**
  * Supported TTS model types.
@@ -397,7 +402,7 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
 /**
  * Instance-based batch TTS engine returned by createTTS().
  * Use synthesize() for buffer-to-buffer offline synthesis.
- * For streaming, use createStreamingTTS() and StreamingTtsEngine instead.
+ * For live pipelines, use the LiveText/LiveAudio synthesize overload.
  * Call destroy() when done to free native resources.
  */
 export interface TtsEngine {

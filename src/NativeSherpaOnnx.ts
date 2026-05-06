@@ -1215,20 +1215,7 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
-  // ==================== Online (streaming) TTS Methods ====================
-
-  /**
-   * Start a streaming TTS pipeline worker.
-   * Reads committed segments from a LiveTextBuffer, synthesizes each one
-   * (using per-segment meta overrides where available), and writes PCM
-   * samples to a LiveAudioBuffer.
-   */
-  startTtsPipeline(
-    instanceId: string,
-    textInLiveBufferId: string,
-    audioOutLiveBufferId: string,
-    options?: Object
-  ): Promise<{ pipelineId: string }>;
+  // ==================== TTS Runtime Methods ====================
 
   /**
    * Create a standalone PCM player session.

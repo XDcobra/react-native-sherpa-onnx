@@ -342,7 +342,7 @@ Existing `synthesize-mode2-segmented.test.ts`, `streaming-mode4-segmentation.tes
 - Existing batch + streaming-TTS test suites remain green.
 - Worker is a thin subclass of `OfflineLivePipelineWorker`.
 - `createStreamingTTS` is **untouched** in this sub-plan (intentional — see sub-08).
-- Doc `docs/tts-streaming.md` gets a new section **"Live overload on offline TTS"** linking to the design note (sub-07). Until sub-08 lands, both `createStreamingTTS` and the live overload are documented as **separate** entry points with a clear comparison table.
+- Doc `docs/tts-offline.md` documents the **"Live overload on offline TTS"** behavior and links to the design note.
 
 ---
 

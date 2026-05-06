@@ -76,7 +76,7 @@ This screen streams long files through LiveAudioBuffer to LiveTextBuffer with a 
 |     |     |     |
 
 
-This screen tests incremental TTS by pushing text chunks into a live text pipeline and synthesizing into a live audio buffer. It is used to validate low time-to-first-audio behavior, flush/cancel lifecycle, and final buffer playback, aligned with [docs/tts-streaming.md](../docs/tts-streaming.md).
+This screen tests live TTS by pushing text chunks into a live text pipeline and synthesizing into a live audio buffer. It is used to validate low time-to-first-audio behavior, flush/cancel lifecycle, and final buffer playback, aligned with the live-overload guidance in [docs/tts-offline.md](../docs/tts-offline.md).
 
 ## Pipeline showcase (STT -> TTS -> playback)
 

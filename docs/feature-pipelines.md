@@ -30,7 +30,7 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 | `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
 | `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, VAD `process`, PCM player | Continuous stream; supports running pipelines |
 | `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff |
-| `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createStreamingTTS().synthesize`, streaming punctuation input | Partial + committed segments |
+| `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
 | `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
 | `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments | gating, timeline UI, downstream orchestration | Event-driven segment stream |
 | Segmentation engine (`react-native-sherpa-onnx/segment`) | attached to text/audio streams or offline orchestrators | STT/TTS/enhancement/punctuation/alignment chunk orchestration | Use to bound peak memory on offline-heavy workloads |
@@ -96,7 +96,7 @@ Related docs:
 ```mermaid
 flowchart LR
   A[App commits text segments] --> B[LiveTextBuffer]
-  B --> C[createStreamingTTS().synthesize]
+  B --> C[createTTS().synthesize Live overload]
   C --> D[LiveAudioBuffer]
   D --> E[PCM playback or finalize to offline audio]
 ```
@@ -106,7 +106,7 @@ When to use:
 - Interactive voice UX with low time-to-first-audio.
 
 Related docs:
-- [tts-streaming.md](tts-streaming.md)
+- [tts-offline.md](tts-offline.md)
 - [textbuffer-streaming.md](textbuffer-streaming.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
 
@@ -178,7 +178,7 @@ When to use:
 
 Related docs:
 - [punctuation-streaming.md](punctuation-streaming.md)
-- [tts-streaming.md](tts-streaming.md)
+- [tts-offline.md](tts-offline.md)
 
 ## VAD streaming patterns
 

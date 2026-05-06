@@ -87,7 +87,7 @@ Mental model:
 | 1 | Offline batch (off) | `Offline → Engine → Offline` | Today (unchanged) |
 | 2 | Offline batch (auto) | `Offline + SegEngine → Engine → Offline` | Segmentation-engine migration (already shipped) |
 | 3 | Streaming with online decoder | `Live → online decoder → Live` | Today (unchanged) |
-| 4 | Streaming TTS (offline weights, segmentation-driven) | `LiveText + SegEngine → OfflineTts → LiveAudio` | Today (`createStreamingTTS`); deduplicated post-impl (sub-08) |
+| 4 | Live TTS (offline weights, segmentation-driven) | `LiveText + SegEngine → OfflineTts → LiveAudio` | `createTTS().synthesize(LiveText, LiveAudio, { segmentation })` |
 | 5 | **Live overload on offline engine** | `Live + SegEngine → offline engine per segment → Live` | **NEW — this rollout** |
 
 Mode 5 is the contract this rollout adds.
@@ -106,8 +106,8 @@ Each phase ships independently and is verified in isolation before moving to the
 | **Phase 3** | [sub-04](./sub-04-punctuation-live-overload.md) | Punctuation live overload. New `punctuate(LiveText, LiveText, options)` overload on `OfflinePunctuationEngine` (CT-Transformer weights). | Golden Jest test + negative test pattern as Phase 2; reuses Phase 1 base unchanged. |
 | **Phase 4** | [sub-05](./sub-05-tts-live-overload.md) | TTS live overload (Track A). New `synthesize(LiveText, LiveAudio, options)` overload on `TtsEngine`. **No dedup with `createStreamingTTS` yet** (sub-08). | Golden Jest test + negative test; verifies parity with `createStreamingTTS`-style output for the same `text_synthetic_auto` policy. |
 | **Phase 5** | [sub-06](./sub-06-enhancement-live-overload.md) | Enhancement live overload (restricted). New `enhance(LiveAudio, LiveAudio, options)` overload on `EnhancementEngine`; policy is **enforced** to `continuous_frames`. | Golden Jest test + negative tests: missing policy AND non-`continuous_frames` policy both throw `LIVE_OFFLINE_SEGMENTATION_REQUIRED`. |
-| **Phase 6** | [sub-07](./sub-07-cleanup-and-test-harness.md) | Cleanup, cross-feature parity audit, example-app live screen wiring, doc updates (`stt-offline.md`, `tts-streaming.md`, etc.). | All sub-plan acceptance items checked; CI green on Android + iOS; example app live-pipeline screen demoes the overload for at least STT (+1 other feature). |
-| **Phase 7** *(deferred)* | [sub-08](./sub-08-streaming-tts-dedup.md) | Post-implementation dedup of `createStreamingTTS` against TTS live overload. Per design §7.5: **explicitly deferred** until phases 1–6 are stable; explicit exception to the otherwise clean-cut rule. | Out of scope for the initial rollout; tracked as a follow-up milestone with its own gates. |
+| **Phase 6** | [sub-07](./sub-07-cleanup-and-test-harness.md) | Cleanup, cross-feature parity audit, example-app live screen wiring, doc updates (`stt-offline.md`, `tts-offline.md`, etc.). | All sub-plan acceptance items checked; CI green on Android + iOS; example app live-pipeline screen demoes the overload for at least STT (+1 other feature). |
+| **Phase 7** | [sub-08](./sub-08-streaming-tts-dedup.md) | Streaming TTS dedup and hard removal. Legacy `createStreamingTTS` path removed; live pipelines use `createTTS` overload only. | Breaking minor rollout complete; docs/tests/native worker cleanup complete. |
 
 ---
 
@@ -119,7 +119,7 @@ Each phase ships independently and is verified in isolation before moving to the
 > - **Commit-only output.** No `onPartial` on the live overload — partials are a true-streaming contract (design §7.1).
 > - **Shared native worker base, exactly once.** Per-feature work is `onSegmentCommitted(...)` only — drain loop, flush, stop, completion event, registry hand-off are shared (design §7.4).
 > - **Reused public types where they exist.** `<Feature>PipelineHandle`, `StreamingPipelineStatus`, `streamingPipelineCompleted` event — all unchanged. The overload returns the **same handle types** as the streaming engine.
-> - **Pre-release, clean-cut.** No deprecated leftovers — the only exception is `createStreamingTTS` (sub-08), which is intentionally kept until the dedup track lands.
+> - **Pre-release, clean-cut.** No deprecated leftovers remain after sub-08 hard removal.
 
 ## Cross-feature error contract
 
@@ -150,4 +150,4 @@ Each phase ships independently and is verified in isolation before moving to the
 - [ ] Streaming pipeline registry events (`streamingPipelineCompleted`) deliver consistent payloads for the new pipelines.
 - [ ] Doc set updated: `stt-offline.md`, `tts-offline.md` (where it exists), `enhancement-offline.md`, `punctuation.md` — each gains a "Live overload" section pointing back to the design note.
 - [ ] Example app live-pipeline screen demoes at least STT live overload + one of (TTS / punctuation / enhancement) (sub-07).
-- [ ] No legacy adapter or "deprecated alias" beyond `createStreamingTTS` (sub-08, intentional exception).
+- [ ] No legacy adapter or deprecated alias remains after sub-08 hard removal.

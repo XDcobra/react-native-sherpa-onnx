@@ -1,9 +1,13 @@
 # Sub-Plan 08: Streaming TTS Deduplication (Post-Implementation Track)
 
+Companion references:
+- [Design note: offline-stt-live-pipeline-mandatory-segmentation.md](./offline-stt-live-pipeline-mandatory-segmentation.md)
+- [Phase overview: live_overload_overview.md](./live_overload_overview.md)
+
 ## Status
-- Phase: **7 (same release, final step — explicit exception to the clean-cut rule)**
+- Phase: **8 (minor breaking rollout completed)**
 - Depends on: sub-01 … sub-07 — all must be implemented and verified before this phase begins.
-- Blocks: nothing inside this rollout — this is the final house-keeping step of the same release train.
+- Blocks: none.
 
 > ⚠️ **Read this first.** Per the rollout principles: "clean cut without legacy logic, exception: StreamingTTS." This sub-plan is the **only** place where a compatibility alias is acceptable. Every other live overload phase (sub-03 … sub-06) does a clean cut without aliases. For this project, dedup is executed in the same release after sub-01 … sub-07 are complete.
 
@@ -79,9 +83,9 @@ Cons: breaking change for existing users; collides with the otherwise additive n
 
 ### Recommendation
 
-**Use Option β in this same release (internal redirect, no immediate runtime deprecation warning), after sub-01 … sub-07 are complete.**
+**Use Option δ in this minor release (hard removal, no alias).**
 
-Then keep Option γ/Step 4 as a controlled follow-up policy decision (docs demotion + optional deprecation messaging), not a blocker for this release.
+`createStreamingTTS` and `StreamingTtsEngine` are removed. Live pipelines must use `createTTS().synthesize(LiveText, LiveAudio, { segmentation })`.
 
 ---
 
@@ -121,7 +125,7 @@ return tts.synthesize(textIn, audioOut, {
 
 ### Step 3 — Docs consolidation
 
-- `tts-streaming.md` collapses the two sections ("Streaming TTS factory" + "Live overload on offline TTS") into **one** section: "Live TTS pipelines (offline weights)". The doc explains both entry points exist, recommends `createTTS().synthesize(...)` for new code, and notes that `createStreamingTTS` is preserved for backward compatibility.
+- `tts-offline.md` is the canonical public doc for live TTS pipelines on offline weights (`createTTS().synthesize(LiveText, LiveAudio, { segmentation })`).
 
 ### Step 4 — Deprecation gate (optional follow-up)
 
@@ -162,7 +166,7 @@ If any of these fails, Step 1 is deferred until fixed. The clean-cut exception i
 - `createStreamingTTS().synthesize(...)` returns the **same** `TtsPipelineHandle` as `createTTS().synthesize(LiveText, LiveAudio, ...)`.
 - The native code base contains exactly **one** TTS pipeline worker (`TtsOfflineLivePipelineWorker` from sub-05). `TtsPipelineWorker.kt` / `.mm` are removed.
 - All existing streaming-TTS Jest tests pass against the redirect (no behavior change).
-- Documentation in `tts-streaming.md` is consolidated.
+- Documentation in `tts-offline.md` reflects the live-overload-only entrypoint.
 - No `console.warn` yet.
 
 ## Acceptance criteria (Step 4 — deprecation messaging)

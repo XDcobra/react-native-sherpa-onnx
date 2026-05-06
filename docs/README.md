@@ -32,7 +32,6 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [tts-offline.md](./tts-offline.md) | Offline (batch) speech generation |
-| [tts-streaming.md](./tts-streaming.md) | Incremental streaming TTS — low latency, playback while generating |
 
 ---
 

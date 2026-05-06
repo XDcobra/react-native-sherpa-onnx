@@ -9,6 +9,7 @@ import {
   type TtsSynthesisResult,
   type TTSModelInfo,
   type TtsEngine,
+  type TtsPipelineHandle,
   type TtsLivePipelineOptions,
 } from './types';
 import {
@@ -58,7 +59,6 @@ import {
   getSegmentationEngineInfo,
 } from '../segment';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
-import type { TtsPipelineHandle } from './streamingTypes';
 import type { SpeechSegment } from '../segment/segment';
 
 let ttsInstanceCounter = 0;
@@ -592,14 +592,6 @@ export async function createTTS(
   return engine;
 }
 
-// Streaming TTS (pipeline-based; use createStreamingTTS for native pipeline streaming)
-export { createStreamingTTS } from './streaming';
-export type {
-  StreamingTtsEngine,
-  TtsPipelineHandle,
-  TtsPipelineOptions,
-} from './streamingTypes';
-
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
@@ -635,6 +627,7 @@ export type {
   SaveAudioTargetFile,
   SaveAudioTargetAndroidContent,
   TtsEngine,
+  TtsPipelineHandle,
   TtsLivePipelineOptions,
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';

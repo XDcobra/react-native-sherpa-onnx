@@ -364,7 +364,7 @@ See [textbuffer-streaming.md](textbuffer-streaming.md).
 | --- | --- | --- |
 | Live transcript UI | `LiveTextBuffer` (`txt_live_*`) | Read partial and committed segments while pipeline runs. |
 | Streaming punctuation | `LiveTextBuffer` (`txt_live_*`) | Add punctuation before downstream use. |
-| Streaming TTS input | `LiveTextBuffer` (`txt_live_*`) | Feed committed text into `createStreamingTTS()`. |
+| Streaming TTS input | `LiveTextBuffer` (`txt_live_*`) | Feed committed text into `createTTS().synthesize(LiveText, LiveAudio, { segmentation })`. |
 
 ```mermaid
 flowchart LR

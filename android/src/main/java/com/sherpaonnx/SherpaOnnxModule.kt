@@ -35,7 +35,6 @@ import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
 import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
-import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
 import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
@@ -144,7 +143,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
-  private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val fileIOHelper = com.sherpaonnx.fileio.FileIOHelper(reactApplicationContext)
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
@@ -3756,19 +3754,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       language,
       promise,
     )
-  }
-
-  /**
-   * Start a streaming TTS pipeline worker.
-   */
-  override fun startTtsPipeline(
-    instanceId: String,
-    textInLiveBufferId: String,
-    audioOutLiveBufferId: String,
-    options: ReadableMap?,
-    promise: Promise
-  ) {
-    onlineTtsHelper.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
   }
 
   override fun startTtsOfflineLivePipeline(

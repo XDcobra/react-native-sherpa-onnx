@@ -52,8 +52,7 @@ jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
-import { createTTS } from '../index';
-import type { TtsPipelineHandle } from '../streamingTypes';
+import { createTTS, type TtsPipelineHandle } from '../index';
 
 describe('tts live offline overload', () => {
   const mockNative = SherpaOnnx as unknown as {

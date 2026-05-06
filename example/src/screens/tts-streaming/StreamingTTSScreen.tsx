@@ -11,11 +11,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createStreamingTTS,
+  createTTS,
   detectTtsModel,
+  type TtsEngine,
+  type TtsLivePipelineOptions,
   type TtsPipelineHandle,
-  type TtsPipelineOptions,
-  type StreamingTtsEngine,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
 import {
@@ -99,7 +99,7 @@ type StreamingSessionEngine = {
   getSampleRate: () => Promise<number>;
   startSession: (
     audioOut: LiveAudioBufferRef | string,
-    options?: TtsPipelineOptions
+    options?: Partial<TtsLivePipelineOptions>
   ) => Promise<StreamingSessionController>;
   destroy: () => Promise<void>;
 };
@@ -109,14 +109,8 @@ async function createStreamingSessionEngine(options: {
   modelType: TTSModelType;
   numThreads: number;
   debug: boolean;
-  engineMode: EngineMode;
 }): Promise<StreamingSessionEngine> {
-  const ttsEngine: StreamingTtsEngine =
-    options.engineMode === 'streaming'
-      ? await createStreamingTTS(options)
-      : ((await require('react-native-sherpa-onnx/tts').createTTS(
-          options
-        )) as unknown as StreamingTtsEngine);
+  const ttsEngine: TtsEngine = await createTTS(options);
   let activePipeline: TtsPipelineHandle | null = null;
   let activeTextBufferId: string | null = null;
 
@@ -136,10 +130,25 @@ async function createStreamingSessionEngine(options: {
       activeTextBufferId = textBuffer.bufferId;
       const audioOutId =
         typeof audioOut === 'string' ? audioOut : audioOut.bufferId;
+      const effectiveSegmentation =
+        pipelineOptions?.segmentation?.mode === 'auto' &&
+        pipelineOptions.segmentation.policy
+          ? pipelineOptions.segmentation
+          : {
+              mode: 'auto' as const,
+              policy: {
+                evaluator: 'text_synthetic_auto' as const,
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
       const pipeline = await ttsEngine.synthesize(
         textBuffer.bufferId,
         audioOutId,
-        pipelineOptions ?? {}
+        {
+          ...(pipelineOptions ?? {}),
+          segmentation: effectiveSegmentation,
+        }
       );
       activePipeline = pipeline;
 
@@ -477,7 +486,6 @@ export default function StreamingTTSScreen() {
         modelType: 'auto' as TTSModelType,
         numThreads: 2,
         debug: false,
-        engineMode,
       });
       engineRef.current = engine;
 
@@ -495,10 +503,21 @@ export default function StreamingTTSScreen() {
       audioBufferRef.current = audioBuffer;
 
       const seg = buildSegmentationOption(segConfig);
+      const segmentation: TtsLivePipelineOptions['segmentation'] =
+        seg && seg.mode === 'auto' && seg.policy
+          ? { mode: 'auto', policy: seg.policy }
+          : {
+              mode: 'auto',
+              policy: {
+                evaluator: 'text_synthetic_auto',
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
       const controller = await engine.startSession(audioBuffer.bufferId, {
         sid: Number.parseInt(speakerId, 10) || 0,
         speed: Number.parseFloat(speed) || 1.0,
-        ...(seg ? { segmentation: seg } : {}),
+        segmentation,
       });
       controllerRef.current = controller;
 
