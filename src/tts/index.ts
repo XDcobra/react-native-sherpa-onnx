@@ -173,12 +173,16 @@ async function synthesizeLiveOverload(
   }
 
   const segmentLiveBufferId = engineInfo.segmentBufferId;
-  if (!segmentLiveBufferId) {
+  // Speech-domain segmentation mirrors commits into a dedicated seg_live_* buffer.
+  // Text-domain engines (text_synthetic_auto, etc.) commit segments on the live
+  // txt_live_* buffer itself; native attach does not allocate seg_live_* for text.
+  // Offline live TTS drains committed segments via the text-buffer cursor only.
+  if (!segmentLiveBufferId && engineInfo.domain !== 'text') {
     await detachSegmentationEngine(attached.engineId, {
       flushFinal: false,
     }).catch(() => undefined);
     throw new Error(
-      'TTS_ERROR: segmentation engine did not produce a segment buffer for text domain'
+      'TTS_ERROR: segmentation engine did not produce a segment buffer for speech domain'
     );
   }
 
@@ -190,7 +194,7 @@ async function synthesizeLiveOverload(
       outId,
       {
         attachedSegmentationEngineId: attached.engineId,
-        segmentLiveBufferId,
+        ...(segmentLiveBufferId ? { segmentLiveBufferId } : {}),
         ...toNativeOfflineLivePipelineOptions(options),
       }
     );

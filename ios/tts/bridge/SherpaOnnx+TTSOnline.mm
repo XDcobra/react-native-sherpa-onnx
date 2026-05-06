@@ -259,17 +259,19 @@ static std::mutex g_tts_pipeline_mutex;
         reject(@"TTS_INVALID_ARGUMENT", @"options.attachedSegmentationEngineId is required", nil);
         return;
     }
-    NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
-    if (![segmentLiveBufferId isKindOfClass:[NSString class]] || [segmentLiveBufferId length] == 0) {
-        reject(@"TTS_INVALID_ARGUMENT", @"options.segmentLiveBufferId is required", nil);
-        return;
-    }
+    NSString *segmentLiveBufferIdRaw = options[@"segmentLiveBufferId"];
+    NSString *segmentLiveBufferId =
+      ([segmentLiveBufferIdRaw isKindOfClass:[NSString class]] &&
+       [segmentLiveBufferIdRaw length] > 0)
+        ? segmentLiveBufferIdRaw
+        : nil;
 
     std::string instanceKey = [instanceId UTF8String];
     std::string textBufferKey = [textInLiveBufferId UTF8String];
     std::string audioBufferKey = [audioOutLiveBufferId UTF8String];
     std::string attachedEngineKey = [attachedSegmentationEngineId UTF8String];
-    std::string segmentBufferKey = [segmentLiveBufferId UTF8String];
+    std::string segmentBufferKey =
+      segmentLiveBufferId ? std::string([segmentLiveBufferId UTF8String]) : "";
 
     std::shared_ptr<TtsInstanceState> inst;
     {
@@ -310,13 +312,16 @@ static std::mutex g_tts_pipeline_mutex;
         return;
     }
 
-    auto segmentInputEntry = seg_get_live_entry(segmentBufferKey);
-    if (!segmentInputEntry) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND",
-               [NSString stringWithFormat:@"Input live segment buffer not found: %@", segmentLiveBufferId], nil);
-        return;
+    if (!segmentBufferKey.empty()) {
+        auto segmentInputEntry = seg_get_live_entry(segmentBufferKey);
+        if (!segmentInputEntry) {
+            reject(@"SEGMENT_BUFFER_NOT_FOUND",
+                   [NSString stringWithFormat:@"Input live segment buffer not found: %@", segmentLiveBufferId ?: @""],
+                   nil);
+            return;
+        }
+        (void)segmentInputEntry;
     }
-    (void)segmentInputEntry;
 
     int ttsSampleRate = inst->wrapper->getSampleRate();
     if (outputEntry->sampleRate != ttsSampleRate) {

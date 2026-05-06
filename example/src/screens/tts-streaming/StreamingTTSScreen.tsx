@@ -20,6 +20,8 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 import {
   EngineModeModelSelector,
+  TTS_STREAMING_MODE_HINT,
+  TTS_STREAMING_MODEL_AREA_PLACEHOLDER,
   type EngineMode,
 } from '../../components/EngineModeModelSelector';
 import {
@@ -318,14 +320,12 @@ export default function StreamingTTSScreen() {
       setStreamingModelIds(streamingIds);
       setDownloadedModelIds(allDownloadedIds);
 
-      const initialModel =
-        engineMode === 'streaming'
-          ? available.find((m) => streamingIds.has(m))
-          : available[0];
+      const initialModel = engineMode === 'streaming' ? null : available[0];
 
-      setSelectedModelFolder((prev) =>
-        prev && available.includes(prev) ? prev : initialModel ?? null
-      );
+      setSelectedModelFolder((prev) => {
+        if (engineMode === 'streaming') return null;
+        return prev && available.includes(prev) ? prev : initialModel ?? null;
+      });
       if (available.length === 0) {
         setStatus(
           'No TTS models found. Add one under assets, PAD, or downloads (category: tts).'
@@ -443,6 +443,12 @@ export default function StreamingTTSScreen() {
     if (streamingState !== 'idle') {
       return;
     }
+    if (engineMode === 'streaming') {
+      setError(
+        'There is no streaming TTS model to run. Switch to Live Overload and select an offline model.'
+      );
+      return;
+    }
     if (!selectedModelFolder) {
       setError('Select a TTS model first.');
       return;
@@ -464,12 +470,6 @@ export default function StreamingTTSScreen() {
       const detection = await detectTtsModel(await toDetectSource(modelPath));
       if (!detection.success) {
         throw new Error(detection.error ?? 'TTS model detection failed');
-      }
-
-      if (engineMode === 'streaming' && !detection.isStreaming) {
-        throw new Error(
-          'This TTS model is offline-only. Switch to "Live Overload" mode to use it.'
-        );
       }
 
       const engine = await createStreamingSessionEngine({
@@ -684,14 +684,15 @@ export default function StreamingTTSScreen() {
 
   useEffect(() => {
     return () => {
-      void (async () => {
+      const run = async () => {
         if (deltaDebounceTimerRef.current) {
           clearTimeout(deltaDebounceTimerRef.current);
           deltaDebounceTimerRef.current = null;
         }
         await cleanupStream();
         await releaseResultBuffer();
-      })();
+      };
+      run().catch(() => {});
     };
   }, [cleanupStream, releaseResultBuffer]);
 
@@ -718,39 +719,14 @@ export default function StreamingTTSScreen() {
           isModelStreamingCapable={(m) => streamingModelIds.has(m)}
           loading={loadingModels}
           disabled={streamingState !== 'idle'}
+          streamingHintOverride={TTS_STREAMING_MODE_HINT}
+          streamingModelAreaPlaceholder={TTS_STREAMING_MODEL_AREA_PLACEHOLDER}
         />
-
-        {engineMode === 'streaming' && (
-          <View style={styles.card}>
-            <View style={[styles.inlineRow, { gap: 10, marginBottom: 8 }]}>
-              <Ionicons name="information-circle" size={20} color="#007AFF" />
-              <Text
-                style={[
-                  styles.cardTitle,
-                  { marginBottom: 0, color: '#007AFF', flex: 1 },
-                ]}
-              >
-                No real streaming TTS model
-              </Text>
-            </View>
-            <Text style={styles.bodyText}>
-              TTS synthesis cannot generate audio incrementally frame-by-frame
-              like streaming STT. There are no "streaming" TTS models in the
-              sherpa-onnx sense.
-            </Text>
-            <Text style={[styles.bodyText, { marginTop: 8 }]}>
-              Switch to <Text style={{ fontWeight: '700' }}>Live Overload</Text>{' '}
-              mode to use offline TTS models with mandatory text segmentation.
-              The SDK will chunk your input text at sentence/length boundaries
-              and synthesize each chunk without pre-buffering the whole script.
-            </Text>
-          </View>
-        )}
 
         {engineMode === 'offline' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Text Segmentation</Text>
-            <Text style={[styles.mutedText, { marginBottom: 10 }]}>
+            <Text style={[styles.mutedText, styles.mutedTextSegHint]}>
               Live Overload requires segmentation to chunk text before
               synthesis. The 'Off' option is disabled.
             </Text>
@@ -800,19 +776,23 @@ export default function StreamingTTSScreen() {
             <Pressable
               style={[
                 styles.primaryButton,
-                streamingState === 'starting' || streamingState === 'stopping'
+                streamingState === 'starting' ||
+                streamingState === 'stopping' ||
+                (streamingState === 'idle' && engineMode === 'streaming')
                   ? styles.buttonDisabled
                   : null,
               ]}
               onPress={() => {
                 if (streamingState === 'idle') {
-                  void startStreaming();
+                  startStreaming().catch(() => {});
                 } else if (streamingState === 'running') {
-                  void stopStreaming();
+                  stopStreaming().catch(() => {});
                 }
               }}
               disabled={
-                streamingState === 'starting' || streamingState === 'stopping'
+                streamingState === 'starting' ||
+                streamingState === 'stopping' ||
+                (streamingState === 'idle' && engineMode === 'streaming')
               }
             >
               <Text style={styles.primaryButtonText}>
@@ -962,6 +942,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#6B7280',
+  },
+  mutedTextSegHint: {
+    marginBottom: 10,
   },
   bodyText: {
     fontSize: 14,

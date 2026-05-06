@@ -278,14 +278,12 @@ internal class SherpaOnnxTtsCoordinator(
       }
 
       val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
-      if (segmentLiveBufferId.isEmpty()) {
-        promise.reject("TTS_INVALID_ARGUMENT", "segmentLiveBufferId is required")
-        return
-      }
-      val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
-      if (segmentEntry == null) {
-        promise.reject("SEGMENT_BUFFER_NOT_FOUND", "Input live segment buffer not found: $segmentLiveBufferId")
-        return
+      if (segmentLiveBufferId.isNotEmpty()) {
+        val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+        if (segmentEntry == null) {
+          promise.reject("SEGMENT_BUFFER_NOT_FOUND", "Input live segment buffer not found: $segmentLiveBufferId")
+          return
+        }
       }
 
       val existingPipelineId = instanceToPipeline[instanceId]

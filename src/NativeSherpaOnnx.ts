@@ -1464,7 +1464,8 @@ export interface Spec extends TurboModule {
     audioOutLiveBufferId: string,
     options: {
       attachedSegmentationEngineId: string;
-      segmentLiveBufferId: string;
+      /** Present when speech-domain segmentation mirrors into seg_live_*; omitted for text-domain engines. */
+      segmentLiveBufferId?: string;
       sid?: number;
       speed?: number;
       referenceAudioBufferId?: string;

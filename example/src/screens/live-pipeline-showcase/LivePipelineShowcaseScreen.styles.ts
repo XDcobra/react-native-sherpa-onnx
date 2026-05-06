@@ -26,6 +26,29 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1C1C1E',
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  infoBodyWrap: {
+    flex: 1,
+  },
+  infoBodyParagraphSpacing: {
+    marginTop: 8,
+  },
+  optionButtonInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  optionButtonAlignStart: {
+    alignSelf: 'flex-start',
+  },
+  metaChipMandatoryWrap: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
   hint: {
     fontSize: 13,
     lineHeight: 18,
@@ -46,6 +69,28 @@ export const styles = StyleSheet.create({
     color: '#D32F2F',
     fontSize: 13,
     flex: 1,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#E8F4FD',
+    borderLeftColor: '#007AFF',
+    borderLeftWidth: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    gap: 10,
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0065D1',
+    marginBottom: 6,
+  },
+  infoBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#374151',
   },
   optionRow: {
     flexDirection: 'row',
@@ -152,6 +197,9 @@ export const styles = StyleSheet.create({
   },
   runButtonDisabled: {
     backgroundColor: '#B0C8E8',
+  },
+  runButtonStop: {
+    backgroundColor: '#D32F2F',
   },
   runButtonText: {
     fontSize: 16,

@@ -5,6 +5,25 @@ import { styles } from '../screens/live-pipeline-showcase/LivePipelineShowcaseSc
 
 export type EngineMode = 'streaming' | 'offline';
 
+/** Shown in place of the model grid when mode is Streaming (e.g. TTS has no true streaming models). */
+export type StreamingModelAreaPlaceholder = {
+  title: string;
+  paragraphs: string[];
+};
+
+/** Use with {@link StreamingModelAreaPlaceholder} for TTS engine rows. */
+export const TTS_STREAMING_MODEL_AREA_PLACEHOLDER: StreamingModelAreaPlaceholder =
+  {
+    title: 'No real streaming TTS models',
+    paragraphs: [
+      'TTS synthesis cannot generate audio incrementally frame-by-frame like streaming STT. There are no “streaming” TTS models in the sherpa-onnx sense.',
+      'Switch to Live Overload to use offline TTS models with mandatory text segmentation. The SDK chunks input at sentence/length boundaries and synthesizes each chunk without pre-buffering the whole script.',
+    ],
+  };
+
+export const TTS_STREAMING_MODE_HINT =
+  'True incremental streaming exists for STT in this SDK, not for TTS. Choose Live Overload to pick a model and run live chunked synthesis.';
+
 export interface EngineModeModelSelectorProps {
   label: string;
   engineMode: EngineMode;
@@ -17,6 +36,13 @@ export interface EngineModeModelSelectorProps {
   disabled?: boolean;
   showEngineModeToggle?: boolean;
   mandatorySegmentationHint?: string;
+  /** When set, replaces the default streaming-mode hint under the toggle. */
+  streamingHintOverride?: string;
+  /**
+   * When `engineMode === 'streaming'`, show this instead of the model list
+   * (loading spinner still shows while `loading` is true).
+   */
+  streamingModelAreaPlaceholder?: StreamingModelAreaPlaceholder;
 }
 
 export function EngineModeModelSelector({
@@ -31,14 +57,19 @@ export function EngineModeModelSelector({
   disabled = false,
   showEngineModeToggle = true,
   mandatorySegmentationHint,
+  streamingHintOverride,
+  streamingModelAreaPlaceholder,
 }: EngineModeModelSelectorProps) {
-  const filteredModels = models.filter((m) =>
-    engineMode === 'streaming' ? isModelStreamingCapable(m) : true
-  );
+  const filteredModels =
+    engineMode === 'streaming' && streamingModelAreaPlaceholder
+      ? []
+      : models.filter((m) =>
+          engineMode === 'streaming' ? isModelStreamingCapable(m) : true
+        );
 
   return (
     <View style={styles.section}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <View style={styles.sectionTitleRow}>
         <Text style={styles.sectionTitle}>{label}</Text>
         {engineMode === 'offline' && (
           <View style={styles.metaChip}>
@@ -74,12 +105,33 @@ export function EngineModeModelSelector({
 
       <Text style={styles.hint}>
         {engineMode === 'streaming'
-          ? 'Real-time incremental decoding. Requires streaming models.'
+          ? streamingHintOverride ??
+            'Real-time incremental decoding. Requires streaming models.'
           : 'Commit-only decoding using offline models. Mandatory segmentation.'}
       </Text>
 
       {loading ? (
         <ActivityIndicator size="small" />
+      ) : engineMode === 'streaming' && streamingModelAreaPlaceholder ? (
+        <View style={styles.infoBox}>
+          <Ionicons name="information-circle" size={22} color="#007AFF" />
+          <View style={styles.infoBodyWrap}>
+            <Text style={styles.infoTitle}>
+              {streamingModelAreaPlaceholder.title}
+            </Text>
+            {streamingModelAreaPlaceholder.paragraphs.map((p, i) => (
+              <Text
+                key={i}
+                style={[
+                  styles.infoBody,
+                  i > 0 && styles.infoBodyParagraphSpacing,
+                ]}
+              >
+                {p}
+              </Text>
+            ))}
+          </View>
+        </View>
       ) : filteredModels.length === 0 ? (
         <View style={styles.errorBox}>
           <Ionicons name="alert-circle" size={16} color="#D32F2F" />
@@ -102,9 +154,7 @@ export function EngineModeModelSelector({
                 onPress={() => onModelSelect(m)}
                 disabled={disabled}
               >
-                <View
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                >
+                <View style={styles.optionButtonInnerRow}>
                   <Text
                     style={[
                       styles.optionButtonText,
@@ -128,7 +178,7 @@ export function EngineModeModelSelector({
           style={[
             styles.metaChip,
             styles.metaChipWarn,
-            { alignSelf: 'flex-start', marginTop: 4 },
+            styles.metaChipMandatoryWrap,
           ]}
         >
           <Text style={[styles.metaChipText, styles.metaChipTextWarn]}>

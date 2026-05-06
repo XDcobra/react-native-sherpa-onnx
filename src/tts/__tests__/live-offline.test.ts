@@ -101,6 +101,7 @@ describe('tts live offline overload', () => {
     mockAttachSegmentationEngine.mockResolvedValue({ engineId: 'seg_txt_1' });
     mockGetSegmentationEngineInfo.mockResolvedValue({
       engineId: 'seg_txt_1',
+      domain: 'text',
       segmentBufferId: 'seg_live_txt_1',
     });
     mockDetachSegmentationEngine.mockResolvedValue(undefined);
@@ -133,6 +134,32 @@ describe('tts live offline overload', () => {
       })
     );
     expect(handle.pipelineId).toBe('tts_pipe_1');
+  });
+
+  it('does not pass segmentLiveBufferId when text segmentation has no seg_live mirror', async () => {
+    mockGetSegmentationEngineInfo.mockResolvedValue({
+      engineId: 'seg_txt_1',
+      domain: 'text',
+      segmentBufferId: undefined,
+    });
+
+    const tts = await createTTS({
+      modelSource: { kind: 'fs', path: '/models/tts' },
+    });
+
+    await tts.synthesize('txt_live_in_1', 'live_out_1', {
+      segmentation: {
+        mode: 'auto',
+        policy: { evaluator: 'text_synthetic_auto' },
+      },
+    });
+
+    const opts = mockNative.startTtsOfflineLivePipeline.mock.calls[0][3] as {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId?: string;
+    };
+    expect(opts.segmentLiveBufferId).toBeUndefined();
+    expect(opts.attachedSegmentationEngineId).toBe('seg_txt_1');
   });
 
   it('rejects missing segmentation policy', async () => {

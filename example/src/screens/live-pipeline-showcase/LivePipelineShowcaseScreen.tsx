@@ -64,6 +64,8 @@ import {
 } from '../../components/SegmentationPolicyControls';
 import {
   EngineModeModelSelector,
+  TTS_STREAMING_MODE_HINT,
+  TTS_STREAMING_MODEL_AREA_PLACEHOLDER,
   type EngineMode,
 } from '../../components/EngineModeModelSelector';
 import { styles } from './LivePipelineShowcaseScreen.styles';
@@ -306,16 +308,17 @@ export default function LivePipelineShowcaseScreen() {
           : validSttModels[0];
 
       const initialTts =
-        ttsEngineMode === 'streaming'
-          ? validTtsModels.find((m) => streamingTtsModelsSet.has(m))
-          : validTtsModels[0];
+        ttsEngineMode === 'streaming' ? null : validTtsModels[0];
 
       setSelectedSttModel((prev) =>
         prev && validSttModels.includes(prev) ? prev : initialStt ?? null
       );
-      setSelectedTtsModel((prev) =>
-        prev && validTtsModels.includes(prev) ? prev : initialTts ?? null
-      );
+      setSelectedTtsModel((prev) => {
+        if (ttsEngineMode === 'streaming') return null;
+        return prev && validTtsModels.includes(prev)
+          ? prev
+          : initialTts ?? null;
+      });
     } catch {
       // leave lists empty
       setSttModels([]);
@@ -366,15 +369,15 @@ export default function LivePipelineShowcaseScreen() {
       await loadModels();
     }
 
-    void loadModelsSafe();
+    loadModelsSafe().catch(() => {});
 
     const unsubStt = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Stt) return;
-      void loadModelsSafe();
+      loadModelsSafe().catch(() => {});
     });
     const unsubTts = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Tts) return;
-      void loadModelsSafe();
+      loadModelsSafe().catch(() => {});
     });
 
     return () => {
@@ -616,19 +619,13 @@ export default function LivePipelineShowcaseScreen() {
       ttsOutputAudioRef.current = ttsOutputAudio;
 
       // ── Create TTS input text buffer ───────────────────────────────────────
-      // If mode=auto, attach segmentation engine so forwarded partial text gets
-      // re-committed at sentence/length boundaries before reaching TTS.
+      // Segmentation must NOT be attached here when using live TTS pipelines:
+      // both streaming and offline `synthesize(LiveText, …)` attach their own
+      // engine from `segmentation` in pipeline options; a second attach throws
+      // ENGINE_ALREADY_ATTACHED.
       const ttsSegOption = buildSegmentationOption(textSegConfig);
       const ttsInputText = await createLiveTextBuffer({
         streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
-        ...(ttsSegOption?.mode === 'auto' && ttsSegOption.policy
-          ? {
-              segmentation: {
-                mode: 'auto' as const,
-                policy: ttsSegOption.policy,
-              },
-            }
-          : {}),
       });
       ttsInputTextRef.current = ttsInputText;
 
@@ -739,7 +736,7 @@ export default function LivePipelineShowcaseScreen() {
         );
         ingestRef.current = ingest;
 
-        void ingest.done
+        ingest.done
           .then(() => {
             setStatusText('File ingested. Waiting for STT and TTS to drain…');
           })
@@ -752,14 +749,16 @@ export default function LivePipelineShowcaseScreen() {
       }
 
       // Watch for pipeline completion
-      void Promise.all([
+      Promise.all([
         sttPipeline.completed.catch(() => {}),
         ttsPipeline.completed.catch(() => {}),
-      ]).then(async () => {
-        setStatusText('Pipeline completed.');
-        await releaseAllResources();
-        setPipelineState('idle');
-      });
+      ])
+        .then(async () => {
+          setStatusText('Pipeline completed.');
+          await releaseAllResources();
+          setPipelineState('idle');
+        })
+        .catch(() => {});
     } catch (startErr) {
       setError(normalizeErrorMessage(startErr));
       setStatusText('Failed to start pipeline.');
@@ -790,9 +789,11 @@ export default function LivePipelineShowcaseScreen() {
     setStatusText('Stopped.');
   }, [pipelineState, releaseAllResources]);
 
+  const ttsReadyForPipeline = ttsEngineMode === 'offline' && !!selectedTtsModel;
+
   const canStart =
     !!selectedSttModel &&
-    !!selectedTtsModel &&
+    ttsReadyForPipeline &&
     (sourceMode === 'mic' || !!pickedFileUri) &&
     pipelineState === 'idle';
 
@@ -804,35 +805,6 @@ export default function LivePipelineShowcaseScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <EngineModeModelSelector
-          label={`STT Model (${
-            sttEngineMode === 'streaming' ? 'Streaming' : 'Offline'
-          })`}
-          engineMode={sttEngineMode}
-          onEngineModeChange={setSttEngineMode}
-          models={sttModels}
-          selectedModel={selectedSttModel}
-          onModelSelect={setSelectedSttModel}
-          isModelStreamingCapable={(m) => streamingSttModelIds.has(m)}
-          loading={loadingModels}
-          disabled={pipelineState !== 'idle'}
-        />
-
-        {/* STT segmentation (only shown in Live Overload mode) */}
-        {sttEngineMode === 'offline' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Speech Segmentation</Text>
-            <SegmentationPolicyControls
-              variant="speech-offline"
-              value={sttSegConfig}
-              onChange={setSttSegConfig}
-              disabled={pipelineState !== 'idle'}
-              disableOff
-              offDisabledMessage="Live Overload requires mandatory segmentation. Choose Auto or Manual."
-            />
-          </View>
-        )}
-
         {/* Pipeline diagram */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pipeline</Text>
@@ -910,7 +882,7 @@ export default function LivePipelineShowcaseScreen() {
           {sourceMode === 'file' && (
             <>
               <TouchableOpacity
-                style={[styles.optionButton, { alignSelf: 'flex-start' }]}
+                style={[styles.optionButton, styles.optionButtonAlignStart]}
                 onPress={pickFile}
                 disabled={pipelineState !== 'idle'}
               >
@@ -921,6 +893,35 @@ export default function LivePipelineShowcaseScreen() {
             </>
           )}
         </View>
+
+        <EngineModeModelSelector
+          label={`STT Model (${
+            sttEngineMode === 'streaming' ? 'Streaming' : 'Offline'
+          })`}
+          engineMode={sttEngineMode}
+          onEngineModeChange={setSttEngineMode}
+          models={sttModels}
+          selectedModel={selectedSttModel}
+          onModelSelect={setSelectedSttModel}
+          isModelStreamingCapable={(m) => streamingSttModelIds.has(m)}
+          loading={loadingModels}
+          disabled={pipelineState !== 'idle'}
+        />
+
+        {/* STT segmentation (only shown in Live Overload mode) */}
+        {sttEngineMode === 'offline' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Speech Segmentation</Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={sttSegConfig}
+              onChange={setSttSegConfig}
+              disabled={pipelineState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory segmentation. Choose Auto or Manual."
+            />
+          </View>
+        )}
 
         {/* TTS model + text segmentation */}
         <EngineModeModelSelector
@@ -935,6 +936,8 @@ export default function LivePipelineShowcaseScreen() {
           isModelStreamingCapable={(m) => streamingTtsModelIds.has(m)}
           loading={loadingModels}
           disabled={pipelineState !== 'idle'}
+          streamingHintOverride={TTS_STREAMING_MODE_HINT}
+          streamingModelAreaPlaceholder={TTS_STREAMING_MODEL_AREA_PLACEHOLDER}
         />
 
         {/* TTS text segmentation */}
@@ -984,7 +987,7 @@ export default function LivePipelineShowcaseScreen() {
               <TouchableOpacity
                 style={[
                   styles.runButton,
-                  { backgroundColor: '#D32F2F' },
+                  styles.runButtonStop,
                   pipelineState === 'stopping' && styles.runButtonDisabled,
                 ]}
                 onPress={stopPipeline}
