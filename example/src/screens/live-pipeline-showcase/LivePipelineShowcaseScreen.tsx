@@ -499,7 +499,7 @@ export default function LivePipelineShowcaseScreen() {
     releaseToken.p = (async () => {
       try {
         // Cleanup order: stop mic → ingest → STT pipeline → finalize STT text →
-        // flush/stop TTS pipeline → snapshot TTS live audio → release text/player/buffers → destroy engines.
+        // pause/destroy PCM player → flush/stop TTS → snapshot TTS live audio → release text/buffers → destroy engines.
         await stopMicToLiveAudioBuffer().catch(() => {});
 
         const ingest = ingestRef.current;
@@ -522,6 +522,15 @@ export default function LivePipelineShowcaseScreen() {
           sttText.unsubscribeEvents();
         }
 
+        // Tear down PCM playback before TTS pipeline stop / live buffer finalize.
+        // Otherwise finalize/append wakeups can enqueue a short tail into AudioTrack.
+        const player = playerRef.current;
+        playerRef.current = null;
+        if (player) {
+          await player.pause().catch(() => {});
+          await player.destroy().catch(() => {});
+        }
+
         const ttsAudioForCapture = ttsOutputAudioRef.current;
 
         const ttsPipeline = ttsPipelineRef.current;
@@ -540,12 +549,6 @@ export default function LivePipelineShowcaseScreen() {
         if (ttsText) {
           await releasePipelineTextBuffer(ttsText.bufferId).catch(() => {});
           ttsText.unsubscribeEvents();
-        }
-
-        const player = playerRef.current;
-        playerRef.current = null;
-        if (player) {
-          await player.destroy().catch(() => {});
         }
 
         const sttAudio = sttInputAudioRef.current;
@@ -585,7 +588,7 @@ export default function LivePipelineShowcaseScreen() {
 
   useEffect(() => {
     return () => {
-      void releasePriorCapturedTts();
+      releasePriorCapturedTts().catch(() => {});
     };
   }, [releasePriorCapturedTts]);
 

@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
@@ -117,13 +117,15 @@ export function PipelineOfflineAudioResultCard({
           <Text style={s.bufferIdText} selectable>
             {bufferId}
           </Text>
-          <Text style={[s.bufferIdText, { marginTop: 4 }]}>
+          <Text style={[s.bufferIdText, localStyles.bufferMetaLine]}>
             {sampleRate} Hz · {durSec}s
           </Text>
         </View>
         <TouchableOpacity
           style={[s.bufferDeleteButton, disabled && s.buttonDisabled]}
-          onPress={() => void handleDismiss()}
+          onPress={() => {
+            handleDismiss().catch(() => {});
+          }}
           disabled={disabled}
           accessibilityLabel="Dismiss captured audio"
         >
@@ -141,7 +143,9 @@ export function PipelineOfflineAudioResultCard({
 
       <TouchableOpacity
         style={[s.playButton, disabled && s.buttonDisabled]}
-        onPress={() => void handleTogglePlayback()}
+        onPress={() => {
+          handleTogglePlayback().catch(() => {});
+        }}
         disabled={disabled}
       >
         <View style={s.rowAlignCenter}>
@@ -154,8 +158,10 @@ export function PipelineOfflineAudioResultCard({
         </View>
       </TouchableOpacity>
 
-      <View style={{ marginTop: 14 }}>
-        <Text style={[s.subsectionTitle, { marginTop: 0 }]}>Save as file</Text>
+      <View style={localStyles.saveSection}>
+        <Text style={[s.subsectionTitle, localStyles.saveSubsectionTitle]}>
+          Save as file
+        </Text>
         <AudioSaveDestinationPicker
           audioInput={bufferId}
           filename={`pipeline_tts_${Date.now()}.${
@@ -173,3 +179,9 @@ export function PipelineOfflineAudioResultCard({
     </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  bufferMetaLine: { marginTop: 4 },
+  saveSection: { marginTop: 14 },
+  saveSubsectionTitle: { marginTop: 0 },
+});

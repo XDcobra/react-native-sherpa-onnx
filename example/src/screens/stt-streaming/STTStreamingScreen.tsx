@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,6 +25,7 @@ import {
   createEmptyLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
+  startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   type FileIngestHandle,
   type LiveAudioBufferRef,
@@ -59,6 +60,7 @@ import {
   getFileModelPath,
   toDetectSource,
 } from '../../modelConfig';
+import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
@@ -88,6 +90,7 @@ function toFileSource(input: string): FileSource {
 }
 
 type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
+type SourceMode = 'mic' | 'file';
 
 export default function STTStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -109,10 +112,11 @@ export default function STTStreamingScreen() {
   const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
     mode: 'off',
   });
+  const [sourceMode, setSourceMode] = useState<SourceMode>('file');
   const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [status, setStatus] = useState(
-    'Select a model and a long file, then stream it through live buffers.'
+    'Select a model, choose microphone or file input, then start streaming.'
   );
   const [error, setError] = useState<string | null>(null);
   const [streamingState, setStreamingState] = useState<StreamingState>('idle');
@@ -377,8 +381,8 @@ export default function STTStreamingScreen() {
       setError('Select an STT model first.');
       return;
     }
-    if (!selectedFileUri) {
-      setError('Pick a long audio file first.');
+    if (sourceMode === 'file' && !selectedFileUri) {
+      setError('Pick an audio file first.');
       return;
     }
 
@@ -451,31 +455,42 @@ export default function STTStreamingScreen() {
       );
       pipelineRef.current = pipeline;
 
-      const source = toFileSource(selectedFileUri);
-      const ingest = await ingestFileToLiveAudioBuffer(
-        liveAudio.bufferId,
-        source,
-        {
-          targetSampleRateHz: STT_INPUT_SAMPLE_RATE,
-          forceMono: true,
-          autoFinalize: true,
-          backpressure: 'block',
-          onProgress: (event) => {
-            setProgress(event.percent);
-            setStatus(
-              `Streaming decode ${event.percent.toFixed(
-                0
-              )}% • ${event.framesDecoded.toLocaleString()} frames decoded`
-            );
-          },
-        }
-      );
-      ingestHandleRef.current = ingest;
+      let fileIngestDone: Promise<unknown> = Promise.resolve();
+
+      if (sourceMode === 'file') {
+        const source = toFileSource(selectedFileUri!);
+        const ingest = await ingestFileToLiveAudioBuffer(
+          liveAudio.bufferId,
+          source,
+          {
+            targetSampleRateHz: STT_INPUT_SAMPLE_RATE,
+            forceMono: true,
+            autoFinalize: true,
+            backpressure: 'block',
+            onProgress: (event) => {
+              setProgress(event.percent);
+              setStatus(
+                `Streaming decode ${event.percent.toFixed(
+                  0
+                )}% • ${event.framesDecoded.toLocaleString()} frames decoded`
+              );
+            },
+          }
+        );
+        ingestHandleRef.current = ingest;
+        fileIngestDone = ingest.done;
+        setStatus(
+          'Streaming STT is running. The live buffer stays lossless while the text buffer tracks committed and partial text.'
+        );
+      } else {
+        ingestHandleRef.current = null;
+        await startMicToLiveAudioBuffer(liveAudio, { emitToJs: false });
+        setStatus(
+          'Microphone active. Speak to transcribe; tap Stop when finished.'
+        );
+      }
 
       setStreamingState('running');
-      setStatus(
-        'Streaming STT is running. The live buffer stays lossless while the text buffer tracks committed and partial text.'
-      );
 
       stopPolling();
       pollTimerRef.current = setInterval(() => {
@@ -484,19 +499,26 @@ export default function STTStreamingScreen() {
         });
       }, 150);
 
-      void (async () => {
+      (async () => {
         try {
-          await Promise.all([ingest.done, pipeline.completed]);
+          if (sourceMode === 'file') {
+            await Promise.all([fileIngestDone, pipeline.completed]);
+          } else {
+            await pipeline.completed;
+          }
           setStatus('Streaming transcription completed.');
         } catch (streamErr) {
-          setError(normalizeErrorMessage(streamErr));
-          setStatus('Streaming transcription failed.');
+          const code = (streamErr as { code?: string })?.code;
+          if (code !== 'DECODE_CANCELLED') {
+            setError(normalizeErrorMessage(streamErr));
+            setStatus('Streaming transcription failed.');
+          }
         } finally {
           await syncTranscript().catch(() => {});
           await cleanupStream();
           setStreamingState('idle');
         }
-      })();
+      })().catch(() => {});
     } catch (startErr) {
       setError(normalizeErrorMessage(startErr));
       setStreamingState('idle');
@@ -508,6 +530,7 @@ export default function STTStreamingScreen() {
     resolveModelPath,
     segConfig,
     selectedFileUri,
+    sourceMode,
     selectedModelFolder,
     stopPolling,
     streamingState,
@@ -537,27 +560,20 @@ export default function STTStreamingScreen() {
 
   const pickFile = useCallback(async () => {
     try {
-      const picked = await DocumentPicker.pick({
+      const [result] = await DocumentPicker.pick({
         type: [DocumentPicker.types.audio],
       });
-      const file = Array.isArray(picked) ? picked[0] : picked;
-      const uri =
-        file.uri ??
-        (file as any).fileCopyUri ??
-        (file as any).localUri ??
-        (file as any).nativeUri;
-      if (!uri) {
-        throw new Error('Could not resolve a file URI from the picker result.');
+      if (result) {
+        setSelectedFileUri(result.uri);
+        setSelectedFileName(result.name ?? result.uri);
       }
-      setSelectedFileUri(uri);
-      setSelectedFileName(file.name || uri.split('/').pop() || 'audio-file');
-    } catch (pickErr: any) {
-      const isCancel =
+    } catch (pickErr) {
+      const isPickCancel =
         (DocumentPicker as any)?.isCancel?.(pickErr) ||
-        pickErr?.code === 'DOCUMENT_PICKER_CANCELED' ||
-        pickErr?.name === 'DocumentPickerCanceled';
-      if (!isCancel) {
-        Alert.alert('File pick error', normalizeErrorMessage(pickErr));
+        (pickErr as any)?.code === 'DOCUMENT_PICKER_CANCELED' ||
+        (pickErr as any)?.name === 'DocumentPickerCanceled';
+      if (!isPickCancel) {
+        setError(normalizeErrorMessage(pickErr));
       }
     }
   }, []);
@@ -571,6 +587,11 @@ export default function STTStreamingScreen() {
     setProgress(null);
     setStatus('Audio file removed. Choose another file to continue.');
   }, [streamingState]);
+
+  const canStart =
+    !!selectedModelFolder &&
+    streamingState === 'idle' &&
+    (sourceMode === 'mic' || !!selectedFileUri);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -614,38 +635,84 @@ export default function STTStreamingScreen() {
         )}
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Source</Text>
-          {!selectedFileUri ? (
-            <>
-              <Pressable
-                style={styles.primaryButton}
-                onPress={() => void pickFile()}
-              >
-                <Text style={styles.primaryButtonText}>Choose audio file</Text>
-              </Pressable>
-              <Text style={styles.bodyText}>No file selected yet.</Text>
-            </>
-          ) : (
-            <View style={styles.selectedFileCard}>
-              <View style={styles.selectedFileInfo}>
-                <Text style={styles.selectedFileLabel}>Selected file</Text>
-                <Text style={styles.selectedFileName} numberOfLines={2}>
-                  {selectedFileName ?? selectedFileUri}
-                </Text>
-              </View>
-              <Pressable
+          <Text style={styles.cardTitle}>Input Source</Text>
+          <View style={lpStyles.sourceToggle}>
+            {(['mic', 'file'] as SourceMode[]).map((mode) => (
+              <TouchableOpacity
+                key={mode}
                 style={[
-                  styles.removeFileButton,
-                  streamingState !== 'idle' && styles.buttonDisabled,
+                  lpStyles.sourceToggleBtn,
+                  sourceMode === mode && lpStyles.sourceToggleBtnActive,
                 ]}
-                onPress={clearSelectedFile}
+                onPress={() => setSourceMode(mode)}
                 disabled={streamingState !== 'idle'}
-                accessibilityLabel="Remove selected audio file"
               >
-                <Ionicons name="trash-outline" size={18} color="#B42318" />
-              </Pressable>
-            </View>
+                <Text
+                  style={[
+                    lpStyles.sourceToggleText,
+                    sourceMode === mode && lpStyles.sourceToggleTextActive,
+                  ]}
+                >
+                  {mode === 'mic' ? '🎤 Microphone' : '📁 File'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {sourceMode === 'file' && (
+            <>
+              {!selectedFileUri ? (
+                <>
+                  <TouchableOpacity
+                    style={[
+                      lpStyles.optionButton,
+                      lpStyles.optionButtonAlignStart,
+                      styles.inputSourcePickButton,
+                    ]}
+                    onPress={() => {
+                      pickFile().catch(() => {});
+                    }}
+                    disabled={streamingState !== 'idle'}
+                  >
+                    <Text style={lpStyles.optionButtonText}>
+                      Pick audio file…
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.bodyText, styles.inputSourceFileHint]}>
+                    No file selected yet.
+                  </Text>
+                </>
+              ) : (
+                <View
+                  style={[styles.selectedFileCard, styles.inputSourceFileCard]}
+                >
+                  <View style={styles.selectedFileInfo}>
+                    <Text style={styles.selectedFileLabel}>Selected file</Text>
+                    <Text style={styles.selectedFileName} numberOfLines={2}>
+                      {selectedFileName ?? selectedFileUri}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={[
+                      styles.removeFileButton,
+                      streamingState !== 'idle' && styles.buttonDisabled,
+                    ]}
+                    onPress={clearSelectedFile}
+                    disabled={streamingState !== 'idle'}
+                    accessibilityLabel="Remove selected audio file"
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#B42318" />
+                  </Pressable>
+                </View>
+              )}
+            </>
           )}
+          {sourceMode === 'mic' ? (
+            <Text style={[styles.bodyText, styles.inputSourceMicHint]}>
+              Audio is captured from the device microphone at{' '}
+              {STT_INPUT_SAMPLE_RATE} Hz mono. Grant mic permission when
+              prompted.
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -654,10 +721,13 @@ export default function STTStreamingScreen() {
             <Pressable
               style={[
                 styles.primaryButton,
-                streamingState !== 'idle' && styles.buttonDisabled,
+                (!canStart || streamingState !== 'idle') &&
+                  styles.buttonDisabled,
               ]}
-              onPress={() => void startStreaming()}
-              disabled={streamingState !== 'idle'}
+              onPress={() => {
+                startStreaming().catch(() => {});
+              }}
+              disabled={!canStart || streamingState !== 'idle'}
             >
               <Text style={styles.primaryButtonText}>Start streaming</Text>
             </Pressable>
@@ -666,14 +736,16 @@ export default function STTStreamingScreen() {
                 styles.secondaryButton,
                 streamingState === 'idle' && styles.buttonDisabled,
               ]}
-              onPress={() => void stopStreaming()}
+              onPress={() => {
+                stopStreaming().catch(() => {});
+              }}
               disabled={streamingState === 'idle'}
             >
               <Text style={styles.secondaryButtonText}>Stop</Text>
             </Pressable>
           </View>
           <Text style={styles.mutedText}>{status}</Text>
-          {progress != null ? (
+          {sourceMode === 'file' && progress != null ? (
             <Text style={styles.mutedText}>
               Decode progress: {progress.toFixed(0)}%
             </Text>
@@ -757,6 +829,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#374151',
+  },
+  inputSourcePickButton: {
+    marginTop: 12,
+  },
+  inputSourceFileHint: {
+    marginTop: 10,
+  },
+  inputSourceFileCard: {
+    marginTop: 12,
+  },
+  inputSourceMicHint: {
+    marginTop: 12,
   },
   selectedFileCard: {
     marginTop: 2,
