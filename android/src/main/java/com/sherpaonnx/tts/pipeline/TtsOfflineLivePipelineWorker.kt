@@ -63,7 +63,7 @@ internal class TtsOfflineLivePipelineWorker(
       tts.generate(text.text, effectiveSid, effectiveSpeed)
     }
 
-    if (audio != null && audio.samples.isNotEmpty()) {
+    if (audio.samples.isNotEmpty()) {
       audioOutputEntry.tryAppendSamples(audio.samples, audio.sampleRate, LIVE_APPEND_SOURCE_TTS)
       addUnitsWritten(audio.samples.size.toLong())
     }

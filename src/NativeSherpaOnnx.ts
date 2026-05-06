@@ -182,6 +182,7 @@ export interface Spec extends TurboModule {
     options: {
       attachedSegmentationEngineId: string;
       segmentLiveBufferId: string;
+      /** @deprecated Ignored by native; do not rely on this field. */
       chunkSize?: number;
     }
   ): Promise<{ pipelineId: string }>;

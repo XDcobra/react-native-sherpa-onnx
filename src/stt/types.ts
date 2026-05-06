@@ -365,11 +365,10 @@ export interface SttTranscribeResult {
  */
 export interface SttLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
   /**
-   * Number of audio samples fed per batch into the offline recognizer for a single committed
-   * segment. Default: 3200 (≈200 ms @ 16 kHz). Capped to the segment's actual length.
-   * Whisper note: Whisper uses an internal 30-second window; tune `maxSegmentMs` in your policy
-   * accordingly. See docs/stt-offline.md "Whisper and the 30-second window".
-   * See also: https://github.com/openai/whisper/discussions/1118
+   * Ignored for live-offline STT. Each committed speech segment is decoded in one shot (full
+   * waveform per segment). Kept on the type so existing call sites that pass `chunkSize` keep
+   * compiling. For **streaming** online STT, use `chunkSize` on `LiveSttEngine.transcribe`
+   * options (`SttPipelineOptions` in `streamingTypes.ts`).
    */
   chunkSize?: number;
 

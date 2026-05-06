@@ -11,8 +11,7 @@ public:
     std::shared_ptr<PaLiveEntry> audioInput,
     std::string audioSegmentInputBufferId,
     std::shared_ptr<TxtLiveEntry> textOutput,
-    sherpaonnx::SttWrapper *wrapper,
-    int chunkSize
+    sherpaonnx::SttWrapper *wrapper
   );
 
 protected:
@@ -22,5 +21,4 @@ private:
   std::shared_ptr<PaLiveEntry> audioInput_;
   std::shared_ptr<TxtLiveEntry> textOutput_;
   sherpaonnx::SttWrapper *wrapper_ = nullptr;
-  int chunkSize_ = 3200;
 };

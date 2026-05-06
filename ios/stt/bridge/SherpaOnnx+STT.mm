@@ -440,12 +440,6 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         return;
     }
 
-    int safeChunkSize = 3200;
-    NSNumber *chunkSize = options[@"chunkSize"];
-    if ([chunkSize isKindOfClass:[NSNumber class]] && [chunkSize intValue] > 0) {
-        safeChunkSize = [chunkSize intValue];
-    }
-
     std::string instanceIdStr = [instanceId UTF8String];
     std::string audioInIdStr = [audioInLiveBufferId UTF8String];
     std::string textOutIdStr = [textOutLiveBufferId UTF8String];
@@ -513,8 +507,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             inputEntry,
             segmentBufferIdStr,
             textOutputEntry,
-            wrapper,
-            safeChunkSize
+            wrapper
         );
 
         {

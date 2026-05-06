@@ -9,8 +9,7 @@ SttOfflineLivePipelineWorker::SttOfflineLivePipelineWorker(
   std::shared_ptr<PaLiveEntry> audioInput,
   std::string audioSegmentInputBufferId,
   std::shared_ptr<TxtLiveEntry> textOutput,
-  sherpaonnx::SttWrapper *wrapper,
-  int chunkSize
+  sherpaonnx::SttWrapper *wrapper
 )
   : OfflineLivePipelineWorker(
       std::move(pipelineId),
@@ -21,8 +20,7 @@ SttOfflineLivePipelineWorker::SttOfflineLivePipelineWorker(
     ),
     audioInput_(std::move(audioInput)),
     textOutput_(std::move(textOutput)),
-    wrapper_(wrapper),
-    chunkSize_(std::max(1, chunkSize))
+    wrapper_(wrapper)
 {}
 
 void SttOfflineLivePipelineWorker::onSegmentCommitted(
@@ -40,11 +38,9 @@ void SttOfflineLivePipelineWorker::onSegmentCommitted(
   auto samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
   if (samples.empty()) return;
 
-  // Feed in chunkSize_ batches when the segment is long; one-shot for short segments.
-  auto result = wrapper_->transcribeSamplesChunked(
+  auto result = wrapper_->transcribeSamples(
     samples,
-    static_cast<int32_t>(speech.sampleRate),
-    chunkSize_
+    static_cast<int32_t>(speech.sampleRate)
   );
 
   std::string err;

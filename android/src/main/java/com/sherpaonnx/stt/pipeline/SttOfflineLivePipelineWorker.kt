@@ -12,7 +12,6 @@ internal class SttOfflineLivePipelineWorker(
   private val audioInputRef: AudioInput,
   private val recognizer: OfflineRecognizer,
   private val textOutputEntry: LiveTextEntry,
-  private val chunkSize: Int = 3200,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
   attachedSegmentationEngineId = attachedSegmentationEngineId,
@@ -27,30 +26,12 @@ internal class SttOfflineLivePipelineWorker(
 
     val stream: OfflineStream = recognizer.createStream()
     try {
-      if (frameCount <= chunkSize) {
-        // Short segment: one-shot feed.
-        val samples = audioInputRef.liveAudioEntry.getSamplesSlice(
-          startFrame = speech.startSample,
-          frameCount = frameCount,
-        )
-        if (samples.isEmpty()) return
-        stream.acceptWaveform(samples, speech.sampleRate)
-      } else {
-        // Long segment: feed in chunkSize batches before decoding.
-        // Whisper uses an internal 30-second window; see docs/stt-offline.md.
-        var offset = speech.startSample
-        val end = speech.endSample
-        while (offset < end) {
-          val count = minOf(chunkSize, end - offset)
-          val chunk = audioInputRef.liveAudioEntry.getSamplesSlice(
-            startFrame = offset,
-            frameCount = count,
-          )
-          if (chunk.isEmpty()) break
-          stream.acceptWaveform(chunk, speech.sampleRate)
-          offset += count
-        }
-      }
+      val samples = audioInputRef.liveAudioEntry.getSamplesSlice(
+        startFrame = speech.startSample,
+        frameCount = frameCount,
+      )
+      if (samples.isEmpty()) return
+      stream.acceptWaveform(samples, speech.sampleRate)
       recognizer.decode(stream)
       val result = recognizer.getResult(stream)
 

@@ -2076,13 +2076,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       var dest: ResolvedDestination? = null
 
       try {
-        readHandle = fileIOHelper.resolveSource(source)
-        val source = when (val handle = readHandle) {
+        val resolvedHandle = fileIOHelper.resolveSource(source)
+        readHandle = resolvedHandle
+        val source = when (resolvedHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            handle.file.absolutePath to -1
+            resolvedHandle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            null to handle.pfd.fd
+            null to resolvedHandle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -2090,7 +2091,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
             )
           }
-          null -> throw RuntimeException("Resolved read handle is null")
         }
         val sourcePath = source.first
         val sourceFd = source.second

@@ -168,7 +168,6 @@ async function transcribeLiveOverload(
       {
         attachedSegmentationEngineId: attached.engineId,
         segmentLiveBufferId,
-        ...(options.chunkSize != null ? { chunkSize: options.chunkSize } : {}),
       }
     );
     pipelineId = result.pipelineId;

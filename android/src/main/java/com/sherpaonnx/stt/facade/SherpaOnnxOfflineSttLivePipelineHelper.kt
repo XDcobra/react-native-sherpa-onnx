@@ -64,12 +64,6 @@ internal class SherpaOnnxOfflineSttLivePipelineHelper(
         return
       }
 
-      val chunkSize = if (options.hasKey("chunkSize")) {
-        options.getDouble("chunkSize").toInt()
-      } else {
-        3200
-      }
-
       val worker = SttOfflineLivePipelineWorker(
         pipelineId = java.util.UUID.randomUUID().toString(),
         attachedSegmentationEngineId = attachedSegmentationEngineId,
@@ -79,7 +73,6 @@ internal class SherpaOnnxOfflineSttLivePipelineHelper(
         ),
         recognizer = recognizer,
         textOutputEntry = textEntry,
-        chunkSize = chunkSize,
       )
 
       val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->

@@ -91,9 +91,9 @@ export interface StreamingSttInitOptions {
   debug?: boolean;
 }
 
-/** Options for starting a native STT pipeline worker. */
+/** Options for starting a native **streaming (online)** STT pipeline worker. */
 export interface SttPipelineOptions {
-  /** Number of audio samples drained per worker loop. Default: 3200. */
+  /** Samples drained per worker loop. Default: 3200. Not used by offline live-overload STT. */
   chunkSize?: number;
 }
 
