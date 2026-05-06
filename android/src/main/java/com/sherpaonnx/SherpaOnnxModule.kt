@@ -107,6 +107,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } catch (_: Exception) {
       }
     }
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = { entry, source ->
+      maybeEmitLiveTextPartial(entry, source)
+    }
     tryInstallJsiBindings()
   }
 
@@ -334,6 +337,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = null
     liveTextPartialLastEmitAtMs.clear()
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
@@ -2650,7 +2654,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
 
       entry.writePartial(text)
-      maybeEmitLiveTextPartial(entry, "replace")
       promise.resolve(null)
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -2677,7 +2680,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
 
       entry.appendText(text)
-      maybeEmitLiveTextPartial(entry, "append")
       promise.resolve(null)
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)

@@ -1133,20 +1133,19 @@ export default function LivePipelineShowcaseScreen() {
           partialText) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Live Transcript</Text>
-            <View style={styles.transcriptBox}>
-              {committedSegments.length > 0 ? (
-                committedSegments.map((seg, i) => (
-                  <Text key={`seg-${i}`} style={styles.committedText}>
-                    {seg}
-                  </Text>
-                ))
-              ) : (
-                <Text style={styles.hint}>Waiting for speech…</Text>
-              )}
-              {partialText ? (
-                <Text style={styles.partialText}>{partialText}</Text>
-              ) : null}
-            </View>
+            <Text style={styles.transcriptMetric}>
+              Segments: {committedSegments.length}
+            </Text>
+            <Text style={styles.transcriptLabel}>Committed</Text>
+            <Text style={styles.transcriptTextArea} selectable>
+              {committedSegments.length > 0
+                ? committedSegments.join(' ')
+                : 'Waiting for committed segments…'}
+            </Text>
+            <Text style={styles.transcriptLabelSpaced}>Partial</Text>
+            <Text style={styles.transcriptTextAreaPartial} selectable>
+              {partialText.trim() || 'Waiting for partial text…'}
+            </Text>
           </View>
         )}
 

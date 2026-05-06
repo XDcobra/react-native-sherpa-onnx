@@ -20,6 +20,17 @@ object TextPipelineRegistry {
   @Volatile
   private var cacheDir: File? = null
 
+  /**
+   * Optional bridge: emits [pipelineLiveTextPartial] when live partial text is updated natively
+   * (e.g. STT worker [LiveTextEntry.writePartial]). Set by [SherpaOnnxModule]; cleared on invalidate.
+   */
+  @Volatile
+  var liveTextPartialEmitter: ((LiveTextEntry, String) -> Unit)? = null
+
+  internal fun notifyLivePartialWritten(entry: LiveTextEntry, source: String) {
+    liveTextPartialEmitter?.invoke(entry, source)
+  }
+
   fun initializeWithCacheDir(dir: File) {
     cacheDir = dir
   }

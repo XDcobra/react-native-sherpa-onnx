@@ -47,6 +47,7 @@ extern "C" void slm_release_all_link_maps(void);
 {
     self = [super initWithDisabledObservation];
     if (self) {
+        txt_set_partial_event_module(self);
         [self autoInstallJSI];
         // Sweep orphaned mmap temp files from previous sessions
         pa_sweepOrphanedTempFiles();
@@ -58,6 +59,7 @@ extern "C" void slm_release_all_link_maps(void);
 
 - (void)invalidate
 {
+    txt_set_partial_event_module(nil);
     paMicStopQueue();
     sherpaonnx_punct_offline_invalidate_all();
     sherpaonnx_punct_online_invalidate_all();
