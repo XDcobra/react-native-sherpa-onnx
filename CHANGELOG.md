@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.2...v0.4.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **android:** align libsherpaonnx.so to 16KB pages ([d8f0c2f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/d8f0c2f84d00cdcb8e9128830f401158f8d806fa))
+
 ## [0.4.2](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.1...v0.4.2) (2026-04-04)
 
 
