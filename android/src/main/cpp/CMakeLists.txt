@@ -224,3 +224,10 @@ target_compile_options(sherpaonnx PRIVATE
     -Wextra
     -fvisibility=hidden
 )
+
+# Android 15+ requires 16 KB page-size compatibility on arm64 devices.
+# Keep this target aligned with the other bundled sherpa shared libraries.
+# https://github.com/XDcobra/react-native-sherpa-onnx/issues/76
+if(ANDROID)
+    target_link_options(sherpaonnx PRIVATE "-Wl,-z,max-page-size=16384")
+endif()
