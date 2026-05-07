@@ -31,7 +31,7 @@ yarn ios
 ## Download manager showcase
 
 
-|     |     |     |
+| ![Download manager 1](../docs/images/example/download_1.png) | ![Download manager 2](../docs/images/example/download_2.png) | ![Download manager 3](../docs/images/example/download_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -41,7 +41,7 @@ This screen exercises the runtime model delivery flow from [docs/download-manage
 ## Speech-to-Text (offline)
 
 
-|     |     |     |
+| ![STT offline 1](../docs/images/example/stt_1.png) | ![STT offline 2](../docs/images/example/stt_2.png) | ![STT offline 3](../docs/images/example/stt_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -51,7 +51,7 @@ This screen initializes offline STT engines and runs file-based transcription th
 ## Text-to-Speech (offline)
 
 
-|     |     |     |
+| ![TTS offline 1](../docs/images/example/tts_1.png) | ![TTS offline 2](../docs/images/example/tts_2.png) | ![TTS offline 3](../docs/images/example/tts_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -61,7 +61,7 @@ This screen focuses on offline synthesis with [docs/tts-offline.md](../docs/tts-
 ## Speech-to-Text (streaming)
 
 
-|     |     |     |
+| ![STT streaming 1](../docs/images/example/stt_streaming_1.png) | ![STT streaming 2](../docs/images/example/stt_streaming_2.png) | ![STT streaming 3](../docs/images/example/stt_streaming_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -71,27 +71,37 @@ This screen streams long files through LiveAudioBuffer to LiveTextBuffer with a 
 ## Text-to-Speech (streaming)
 
 
-|     |     |     |
+| ![TTS streaming 1](../docs/images/example/tts_streaming_1.png) | ![TTS streaming 2](../docs/images/example/tts_streaming_2.png) | ![TTS streaming 3](../docs/images/example/tts_streaming_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
 
 This screen tests live TTS by pushing text chunks into a live text pipeline and synthesizing into a live audio buffer. It is used to validate low time-to-first-audio behavior, flush/cancel lifecycle, and final buffer playback, aligned with the live-overload guidance in [docs/tts-offline.md](../docs/tts-offline.md).
 
-## Pipeline showcase (STT -> TTS -> playback)
+## Offline Pipeline Showcase (File -> STT -> TTS -> playback)
 
 
-|     |     |     |
+| ![Pipeline offline 1](../docs/images/example/pipeline_offline_1.png) | ![Pipeline offline 2](../docs/images/example/pipeline_offline_2.png) | ![Pipeline offline 3](../docs/images/example/pipeline_offline_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
 
-This screen demonstrates an end-to-end live pipeline: source input (mic/file) to streaming STT, then incremental TTS, then PCM playback, with metrics and finalize/save output flow. It is the most complete pipeline integration example for live buffer chaining and runtime orchestration.
+This screen demonstrates an end-to-end offline chain from file input to offline STT, then offline TTS, followed by playback/final output handling. It is the reference for batch-style orchestration and segmented offline processing flows in a single pipeline scenario.
+
+## Live Pipeline Showcase (Mic/File -> STT -> TTS -> playback)
+
+
+| ![Pipeline streaming 1](../docs/images/example/pipeline_streaming_1.png) | ![Pipeline streaming 2](../docs/images/example/pipeline_streaming_2.png) | ![Pipeline streaming 3](../docs/images/example/pipeline_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen demonstrates an end-to-end live pipeline: source input (mic/file) to streaming STT, then incremental TTS, then PCM playback with runtime metrics and finalize/save output flow. It is the main integration example for live buffer chaining and low-latency pipeline orchestration.
 
 ## Alignment (subtitles/timestamps)
 
 
-|     |     |     |
+| ![Alignment 1](../docs/images/example/alignment_1.png) | ![Alignment 2](../docs/images/example/alignment_2.png) | ![Alignment 3](../docs/images/example/alignment_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -101,7 +111,7 @@ This screen generates subtitle/timestamp segments from audio and transcript inpu
 ## Speech enhancement (offline)
 
 
-|     |     |     |
+| ![Enhancement offline 1](../docs/images/example/enhancement_offline_1.png) | ![Enhancement offline 2](../docs/images/example/enhancement_offline_2.png) | ![Enhancement offline 3](../docs/images/example/enhancement_offline_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -111,7 +121,7 @@ This screen runs offline enhancement over prepared input buffers, supports segme
 ## Speech enhancement (streaming)
 
 
-|     |     |     |
+| ![Enhancement streaming 1](../docs/images/example/enhancement_streaming_1.png) | ![Enhancement streaming 2](../docs/images/example/enhancement_streaming_2.png) | ![Enhancement streaming 3](../docs/images/example/enhancement_streaming_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -121,7 +131,7 @@ This screen streams source audio through live enhancement pipelines, including i
 ## Voice Activity Detection
 
 
-|     |     |     |
+| ![VAD 1](../docs/images/example/vad_1.png) | ![VAD 2](../docs/images/example/vad_2.png) | ![VAD 3](../docs/images/example/vad_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -131,7 +141,7 @@ This screen supports both live and offline VAD flows, including file and microph
 ## Punctuation (offline)
 
 
-|     |     |     |
+| ![Punctuation offline 1](../docs/images/example/punctuation_offline_1.png) | ![Punctuation offline 2](../docs/images/example/punctuation_offline_2.png) | ![Punctuation offline 3](../docs/images/example/punctuation_offline_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
@@ -141,39 +151,44 @@ This screen tests offline CT-Transformer punctuation with text buffers, model de
 ## Punctuation (streaming)
 
 
-|     |     |     |
+| ![Punctuation streaming 1](../docs/images/example/punctuation_streaming_1.png) | ![Punctuation streaming 2](../docs/images/example/punctuation_streaming_2.png) | ![Punctuation streaming 3](../docs/images/example/punctuation_streaming_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
 
 This screen runs online punctuation over live text buffers. It shows incremental input append, optional segmentation attach mode, pipeline completion, and final live output extraction, aligned with [docs/punctuation-streaming.md](../docs/punctuation-streaming.md).
 
-## Speaker diarization (coming soon)
+## File I/O showcase
 
 
-|     |     |     |
+| ![File I/O 1](../docs/images/example/fileio_1.png) | ![File I/O 2](../docs/images/example/fileio_2.png) | ![File I/O 3](../docs/images/example/fileio_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
 
-The app includes a dedicated diarization placeholder screen that is marked as Coming Soon. It is prepared as a navigation entry and UI shell for future speaker-timeline workflows. Current SDK status is documented in [docs/diarization.md](../docs/diarization.md).
+This screen validates file and conversion workflows, including loading local assets/files and exporting generated or transformed audio outputs. It is the UI reference for [docs/fileio.md](../docs/fileio.md) and [docs/audio-conversion.md](../docs/audio-conversion.md).
 
-## Source separation (coming soon)
+## Segmentation showcase
 
 
-|     |     |     |
+| ![Segmentation audio 1](../docs/images/example/segmentation_audio_1.png) | ![Segmentation audio 2](../docs/images/example/segmentation_audio_2.png) | ![Segmentation audio 3](../docs/images/example/segmentation_audio_3.png) |
 | --- | --- | --- |
-|     |     |     |
+| ![Segmentation text 1](../docs/images/example/segmentation_text_1.png) | ![Segmentation text 2](../docs/images/example/segmentation_text_2.png) | ![Segmentation text 3](../docs/images/example/segmentation_text_3.png) |
 
 
-The app includes a dedicated source-separation placeholder screen marked as Coming Soon. It is kept in the home feature list for planned integration and future testing flow. Current SDK status is documented in [docs/separation.md](../docs/separation.md).
+This screen demonstrates segmentation policies for audio and text pipelines to keep processing bounded and memory usage predictable on long inputs. It maps to [docs/segmentation-engine.md](../docs/segmentation-engine.md).
 
 ## Settings and provider diagnostics
 
 
-|     |     |     |
+| ![Settings 1](../docs/images/example/settings_1.png) | ![Settings 2](../docs/images/example/settings_2.png) | ![Settings 3](../docs/images/example/settings_3.png) |
 | --- | --- | --- |
 |     |     |     |
 
 
 The Settings screen (gear button on Home) provides runtime diagnostics for acceleration backends and provider availability. It exposes checks for QNN, NNAPI, XNNPACK, Core ML, and available providers, plus app/SDK version display. This is used for environment verification before running model-heavy screens. See [docs/execution-providers.md](../docs/execution-providers.md).
+
+## Speaker diarization (coming soon)
+
+
+## Source separation (coming soon)
