@@ -844,9 +844,9 @@ export function SegmentationPolicyControls({
         <View style={s.body}>
           <View style={s.sectionDivider} />
 
-          {/* Evaluator chips */}
-          <View style={s.row}>
-            <Text style={s.rowLabel}>Evaluator</Text>
+          {/* Evaluator chips: label above row so it is not squeezed by multiple chips (e.g. streaming speech). */}
+          <View style={s.evaluatorBlock}>
+            <Text style={s.evaluatorSectionLabel}>Evaluator</Text>
             <View style={s.evaluatorScroll}>
               {evaluators.map(({ key, label }) => {
                 const active = value.policy?.evaluator === key;

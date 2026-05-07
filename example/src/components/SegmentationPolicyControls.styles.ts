@@ -64,10 +64,21 @@ export const segStyles = StyleSheet.create({
     color: '#555',
     flex: 1,
   },
+  /** Stacked evaluator header + chips (avoids squeezing the label beside 3+ chips). */
+  evaluatorBlock: {
+    width: '100%',
+    gap: 8,
+  },
+  evaluatorSectionLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#555',
+  },
   evaluatorScroll: {
     flexDirection: 'row',
-    gap: 6,
     flexWrap: 'wrap',
+    gap: 6,
+    width: '100%',
   },
   evaluatorChip: {
     paddingHorizontal: 10,
@@ -76,6 +87,7 @@ export const segStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#c8d0df',
     backgroundColor: '#fff',
+    flexShrink: 0,
   },
   evaluatorChipActive: {
     borderColor: '#007AFF',
