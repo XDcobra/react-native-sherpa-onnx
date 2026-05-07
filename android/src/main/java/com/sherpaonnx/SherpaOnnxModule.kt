@@ -23,17 +23,18 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
+import com.sherpaonnx.stt.facade.SherpaOnnxOfflineSttLivePipelineHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
 import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
-import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
 import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
@@ -106,6 +107,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } catch (_: Exception) {
       }
     }
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = { entry, source ->
+      maybeEmitLiveTextPartial(entry, source)
+    }
     tryInstallJsiBindings()
   }
 
@@ -118,6 +122,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val offlineSttLivePipelineHelper = SherpaOnnxOfflineSttLivePipelineHelper(
+    reactApplicationContext,
+    sttHelper,
+    NAME,
+  )
   private val pcmPlayerService = PcmPlayerService(reactApplicationContext).also {
     it.onPlayerEnded = { playerId, bufferId ->
       try {
@@ -137,7 +146,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
-  private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val fileIOHelper = com.sherpaonnx.fileio.FileIOHelper(reactApplicationContext)
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
@@ -163,6 +171,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
     }
   )
+  private val offlinePunctuationLivePipelineHelper =
+    SherpaOnnxOfflinePunctuationLivePipelineHelper(
+      reactApplicationContext,
+      punctuationHelper,
+      NAME,
+    )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
   private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
   private val maxEventTextChars = 4096
@@ -323,6 +337,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = null
     liveTextPartialLastEmitAtMs.clear()
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
@@ -924,6 +939,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       audioInLiveBufferId = audioInLiveBufferId,
       textOutLiveBufferId = textOutLiveBufferId,
       chunkSize = chunkSize?.toInt(),
+      promise = promise,
+    )
+  }
+
+  override fun startSttOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlineSttLivePipelineHelper.startSttOfflineLivePipeline(
+      instanceId = instanceId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
       promise = promise,
     )
   }
@@ -2049,13 +2080,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       var dest: ResolvedDestination? = null
 
       try {
-        readHandle = fileIOHelper.resolveSource(source)
-        val source = when (val handle = readHandle) {
+        val resolvedHandle = fileIOHelper.resolveSource(source)
+        readHandle = resolvedHandle
+        val source = when (resolvedHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            handle.file.absolutePath to -1
+            resolvedHandle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            null to handle.pfd.fd
+            null to resolvedHandle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -2063,7 +2095,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
             )
           }
-          null -> throw RuntimeException("Resolved read handle is null")
         }
         val sourcePath = source.first
         val sourceFd = source.second
@@ -2623,7 +2654,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
 
       entry.writePartial(text)
-      maybeEmitLiveTextPartial(entry, "replace")
       promise.resolve(null)
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -2650,7 +2680,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
 
       entry.appendText(text)
-      maybeEmitLiveTextPartial(entry, "append")
       promise.resolve(null)
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -3729,17 +3758,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
-  /**
-   * Start a streaming TTS pipeline worker.
-   */
-  override fun startTtsPipeline(
+  override fun startTtsOfflineLivePipeline(
     instanceId: String,
     textInLiveBufferId: String,
     audioOutLiveBufferId: String,
-    options: ReadableMap?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    onlineTtsHelper.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
+    offlineTtsHelper.startTtsOfflineLivePipeline(
+      instanceId,
+      textInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
   }
 
   override fun createPcmPlayer(
@@ -3936,6 +3968,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
   }
 
+  override fun startEnhancementOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    enhancementHelper.startEnhancementOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -4047,6 +4095,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     onlinePunctuationHelper.startStreamingPunctuationPipeline(instanceId, inputBufferId, outputBufferId, promise)
+  }
+
+  override fun startPunctuationOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlinePunctuationLivePipelineHelper.startPunctuationOfflineLivePipeline(
+      instanceId = instanceId,
+      textInLiveBufferId = textInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
   }
 
   override fun startVadPipeline(

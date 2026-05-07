@@ -380,6 +380,7 @@ class LiveTextEntry(
     )
 
     SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    TextPipelineRegistry.notifyLivePartialWritten(this, "replace")
   }
 
   /**
@@ -406,6 +407,7 @@ class LiveTextEntry(
     )
 
     SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    TextPipelineRegistry.notifyLivePartialWritten(this, "append")
   }
 
   /**

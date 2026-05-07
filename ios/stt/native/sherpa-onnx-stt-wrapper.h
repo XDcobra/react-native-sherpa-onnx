@@ -135,6 +135,13 @@ public:
 
     SttRecognitionResult transcribeSamples(const std::vector<float>& samples, int32_t sampleRate);
 
+    /**
+     * Feeds `samples` into an offline stream in batches of `chunkSize` before decoding.
+     * When `samples.size() <= chunkSize`, equivalent to `transcribeSamples`.
+     * Whisper uses an internal 30-second window; see docs/stt-offline.md.
+     */
+    SttRecognitionResult transcribeSamplesChunked(const std::vector<float>& samples, int32_t sampleRate, int32_t chunkSize);
+
     void setConfig(const SttRuntimeConfigOptions& options);
 
     bool isInitialized() const;

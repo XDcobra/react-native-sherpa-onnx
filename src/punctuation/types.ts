@@ -2,6 +2,7 @@ import type { FileSource } from '../fileio/types';
 import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferRef,
+  LiveTextBufferIdSource,
 } from '../textbuffer/types';
 import type {
   OrchestrationProgress,
@@ -10,6 +11,9 @@ import type {
 } from '../pipeline/offlineOrchestrator';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
+import type { TextSegment } from '../segment/segment';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type { PunctuationPipelineHandle } from './streamingTypes';
 
 /** v1: only `processingTimeMs` (native punctuate duration in milliseconds). */
 export type OfflinePunctuateResult = {
@@ -65,11 +69,30 @@ export type OfflinePunctuationInitializeOptions = {
 
 export type OfflinePunctuationEngine = {
   readonly instanceId: string;
+
+  /**
+   * Batch punctuation on offline text buffers.
+   * Reads from an `OfflineTextBuffer` and writes punctuated text into an
+   * offline output buffer.
+   */
   punctuate(
     textIn: OfflineTextBufferIdSource,
     textOut: OfflineTextBufferIdSource,
     options?: OfflinePunctuateOptions
   ): Promise<OfflinePunctuateResult>;
+
+  /**
+   * Live overload on the offline CT punctuation engine.
+   * Consumes committed text segments from a `LiveTextBuffer` and writes
+   * punctuated committed segments to a live output buffer.
+   * Segmentation policy is mandatory for this path.
+   */
+  punctuate(
+    textIn: LiveTextBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options: PunctuationLivePipelineOptions
+  ): Promise<PunctuationPipelineHandle>;
+
   /** Caller-owned `textOut` buffer; engine only populates it. */
   punctuateString(
     plain: string,
@@ -78,3 +101,12 @@ export type OfflinePunctuationEngine = {
   ): Promise<OfflinePunctuateResult>;
   destroy(): Promise<void>;
 };
+
+export interface PunctuationLivePipelineOptions
+  extends LiveOfflinePipelineBaseOptions {
+  /**
+   * Optional mirror callback for each committed punctuated output segment.
+   * Commit-only path: no partial callback is exposed.
+   */
+  onSegment?: (segment: TextSegment) => void;
+}

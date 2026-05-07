@@ -17,6 +17,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Switch,
   Text,
   TextInput,
@@ -74,6 +75,10 @@ type Props = {
   value: SegmentationControlConfig;
   onChange: (config: SegmentationControlConfig) => void;
   disabled?: boolean;
+  /** When true, the 'Off' tab is shown but disabled; pressing it shows an alert instead. */
+  disableOff?: boolean;
+  /** Alert message shown when the user presses the disabled 'Off' tab. */
+  offDisabledMessage?: string;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -723,6 +728,8 @@ export function SegmentationPolicyControls({
   value,
   onChange,
   disabled = false,
+  disableOff = false,
+  offDisabledMessage,
 }: Props) {
   const modes = getAvailableModes(variant);
   const evaluators = getEvaluators(variant);
@@ -800,15 +807,27 @@ export function SegmentationPolicyControls({
         <View style={s.modeTabs}>
           {modes.map((m) => {
             const active = value.mode === m;
+            const isOffTab = m === 'off';
+            const offIsLocked = isOffTab && disableOff;
             return (
               <TouchableOpacity
                 key={m}
                 style={[
                   s.modeTab,
                   active && s.modeTabActive,
-                  disabled && s.modeTabDisabled,
+                  (disabled || offIsLocked) && s.modeTabDisabled,
                 ]}
-                onPress={() => handleModeChange(m)}
+                onPress={() => {
+                  if (offIsLocked) {
+                    Alert.alert(
+                      'Segmentation required',
+                      offDisabledMessage ??
+                        'Segmentation is mandatory in this mode.'
+                    );
+                    return;
+                  }
+                  handleModeChange(m);
+                }}
                 disabled={disabled}
               >
                 <Text style={[s.modeTabText, active && s.modeTabTextActive]}>
@@ -825,9 +844,9 @@ export function SegmentationPolicyControls({
         <View style={s.body}>
           <View style={s.sectionDivider} />
 
-          {/* Evaluator chips */}
-          <View style={s.row}>
-            <Text style={s.rowLabel}>Evaluator</Text>
+          {/* Evaluator chips: label above row so it is not squeezed by multiple chips (e.g. streaming speech). */}
+          <View style={s.evaluatorBlock}>
+            <Text style={s.evaluatorSectionLabel}>Evaluator</Text>
             <View style={s.evaluatorScroll}>
               {evaluators.map(({ key, label }) => {
                 const active = value.policy?.evaluator === key;

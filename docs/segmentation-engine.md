@@ -20,7 +20,7 @@ Related docs:
 
 - Memory planning and OOM: [memory-and-models.md](./memory-and-models.md)
 - Buffer contracts: [audiobuffer-offline.md](./audiobuffer-offline.md), [textbuffer-offline.md](./textbuffer-offline.md), [segmentbuffer-offline.md](./segmentbuffer-offline.md)
-- Feature integration points: [stt-offline.md](./stt-offline.md), [tts-offline.md](./tts-offline.md), [enhancement-offline.md](./enhancement-offline.md), [punctuation-offline.md](./punctuation-offline.md), [tts-streaming.md](./tts-streaming.md)
+- Feature integration points: [stt-offline.md](./stt-offline.md), [tts-offline.md](./tts-offline.md), [enhancement-offline.md](./enhancement-offline.md), [punctuation-offline.md](./punctuation-offline.md)
 
 ### Segmentation modes used by feature APIs
 
@@ -50,6 +50,12 @@ For `text_synthetic_auto` and `text_punctuation_assisted`, when `sentenceBoundar
 - Devanagari sentence marks: U+0964 `।` · U+0965 `॥`
 
 Optional **`sentenceBoundaryChars`** (`string[]`, non-empty after validation) replaces the default delimiter list entirely (no merge).
+
+### Live overload integration
+
+The segmentation engine is the core runtime for the **Live Overload** feature. When an offline-only model (like Whisper or CT-Transformer) is used for live transcription or synthesis, the SDK automatically attaches a segmentation engine to the input live buffer. This engine is responsible for splitting the continuous live stream into discrete segments that the monolithic offline model can process.
+
+For this reason, `segmentation.policy` is **mandatory** when using `createSTT`, `createTTS`, `createOfflinePunctuation`, or `createEnhancement` with live buffers. See the [Live overload overview](migration/liveOverload/live_overload_overview.md) for architectural details.
 
 ## Quick start
 

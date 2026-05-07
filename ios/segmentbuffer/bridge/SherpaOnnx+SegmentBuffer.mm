@@ -360,8 +360,112 @@ struct SegLiveEntry {
 
   std::mutex lock;
   std::mutex spoolLock;
+  std::mutex commitListenerMutex;
+  std::mutex cursorMutex;
+  std::atomic<int> nextCommitListenerToken{0};
+  std::atomic<int> nextCursorId{0};
+
+  struct NativeCommitListener {
+    int token;
+    std::function<void(const std::string &, int, const SegRecord &)> callback;
+  };
+
+  struct SegmentCursor {
+    int cursorId;
+    std::atomic<int> readPos{0};
+  };
+
+  std::vector<NativeCommitListener> commitListeners;
+  std::unordered_map<int, std::unique_ptr<SegmentCursor>> cursors;
 
   ~SegLiveEntry() { release(); }
+
+  int addCommitListener(
+    std::function<void(const std::string &, int, const SegRecord &)> listener
+  ) {
+    int token = nextCommitListenerToken.fetch_add(1);
+    std::lock_guard<std::mutex> lockGuard(commitListenerMutex);
+    commitListeners.push_back({token, std::move(listener)});
+    return token;
+  }
+
+  void removeCommitListener(int token) {
+    std::lock_guard<std::mutex> lockGuard(commitListenerMutex);
+    commitListeners.erase(
+      std::remove_if(
+        commitListeners.begin(),
+        commitListeners.end(),
+        [token](const NativeCommitListener &entry) {
+          return entry.token == token;
+        }
+      ),
+      commitListeners.end()
+    );
+  }
+
+  void notifyCommitListeners(const std::string &segmentId, int segmentIndex, const SegRecord &record) {
+    std::vector<std::function<void(const std::string &, int, const SegRecord &)>> callbacks;
+    {
+      std::lock_guard<std::mutex> lockGuard(commitListenerMutex);
+      callbacks.reserve(commitListeners.size());
+      for (auto &entry : commitListeners) {
+        callbacks.push_back(entry.callback);
+      }
+    }
+    for (auto &callback : callbacks) {
+      callback(segmentId, segmentIndex, record);
+    }
+  }
+
+  int createSegmentCursor() {
+    int cursorId = nextCursorId.fetch_add(1);
+    auto cursor = std::make_unique<SegmentCursor>();
+    cursor->cursorId = cursorId;
+    cursor->readPos.store(0);
+    std::lock_guard<std::mutex> lockGuard(cursorMutex);
+    cursors[cursorId] = std::move(cursor);
+    return cursorId;
+  }
+
+  std::vector<SegRecord> drainSegments(int cursorId, int maxCount, int *startIndex) {
+    if (maxCount <= 0) {
+      if (startIndex) *startIndex = -1;
+      return {};
+    }
+
+    std::unique_lock<std::mutex> cursorLock(cursorMutex);
+    auto it = cursors.find(cursorId);
+    if (it == cursors.end()) {
+      if (startIndex) *startIndex = -1;
+      return {};
+    }
+    int position = it->second->readPos.load();
+    cursorLock.unlock();
+
+    std::lock_guard<std::mutex> segmentLock(lock);
+    if (position >= static_cast<int>(segments.size())) {
+      if (startIndex) *startIndex = -1;
+      return {};
+    }
+
+    int end = std::min(position + maxCount, static_cast<int>(segments.size()));
+    std::vector<SegRecord> result(segments.begin() + position, segments.begin() + end);
+    if (startIndex) {
+      *startIndex = static_cast<int>(evictedCount + static_cast<int64_t>(position));
+    }
+
+    cursorLock.lock();
+    auto itAfter = cursors.find(cursorId);
+    if (itAfter != cursors.end()) {
+      itAfter->second->readPos.store(end);
+    }
+    return result;
+  }
+
+  void releaseSegmentCursor(int cursorId) {
+    std::lock_guard<std::mutex> lockGuard(cursorMutex);
+    cursors.erase(cursorId);
+  }
 
   static std::string modeRaw(SpoolingMode mode) {
     switch (mode) {
@@ -721,6 +825,15 @@ struct SegLiveEntry {
       remove((pathToDelete + ".segj").c_str());
       remove((pathToDelete + ".segc").c_str());
     }
+
+    {
+      std::lock_guard<std::mutex> listenerLock(commitListenerMutex);
+      commitListeners.clear();
+    }
+    {
+      std::lock_guard<std::mutex> cursorLock(cursorMutex);
+      cursors.clear();
+    }
   }
 };
 
@@ -782,6 +895,72 @@ std::shared_ptr<SegLiveEntry> seg_get_live_entry(const std::string &bufferId) {
   return it->second;
 }
 
+int seg_live_add_commit_listener(
+  const std::string &liveBufferId,
+  std::function<void(const std::string &, int, const SegRecord &)> listener,
+  std::string *error
+) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) {
+    if (error) *error = "SEGMENT_BUFFER_NOT_FOUND: Live segment buffer not found: " + liveBufferId;
+    return -1;
+  }
+  try {
+    return entry->addCommitListener(std::move(listener));
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return -1;
+  }
+}
+
+void seg_live_remove_commit_listener(const std::string &liveBufferId, int token) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) return;
+  entry->removeCommitListener(token);
+}
+
+int seg_live_create_cursor(const std::string &liveBufferId, std::string *error) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) {
+    if (error) *error = "SEGMENT_BUFFER_NOT_FOUND: Live segment buffer not found: " + liveBufferId;
+    return -1;
+  }
+  try {
+    return entry->createSegmentCursor();
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return -1;
+  }
+}
+
+std::vector<SegRecord> seg_live_drain_segments(
+  const std::string &liveBufferId,
+  int cursorId,
+  int maxCount,
+  int *startIndex,
+  std::string *error
+) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) {
+    if (error) *error = "SEGMENT_BUFFER_NOT_FOUND: Live segment buffer not found: " + liveBufferId;
+    if (startIndex) *startIndex = -1;
+    return {};
+  }
+  try {
+    return entry->drainSegments(cursorId, maxCount, startIndex);
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    if (startIndex) *startIndex = -1;
+    return {};
+  }
+}
+
+void seg_live_release_cursor(const std::string &liveBufferId, int cursorId) {
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) return;
+  entry->releaseSegmentCursor(cursorId);
+}
+
 bool seg_live_append_segment(
   const std::string &liveBufferId,
   const std::string &kind,
@@ -793,9 +972,6 @@ bool seg_live_append_segment(
   bool hasConfidence,
   double confidence,
   const std::string &payloadJson,
-  const std::string &annotationReason,
-  const std::string &annotationSource,
-  int64_t annotationCreatedAtMs,
   std::string *segmentId,
   int *segmentIndex,
   std::string *error
@@ -851,16 +1027,8 @@ bool seg_live_append_segment(
     entry->totalSegmentsWritten++;
     entry->maybeWriteSnapshotToSpool(snapshot, true);
 
-    if (!annotationReason.empty() && !annotationSource.empty()) {
-      SegAnnotationSnapshot ann;
-      ann.reason = annotationReason;
-      ann.source = annotationSource;
-      ann.createdAtMs = annotationCreatedAtMs > 0 ? annotationCreatedAtMs : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-      ann.segmentIndex = idx;
-      seg_record_annotation_for_segment(seg.id, ann);
-    }
-
     seg_notify_segment_appended(entry, seg, idx);
+    entry->notifyCommitListeners(seg.id, idx, seg);
 
     if (segmentId) *segmentId = seg.id;
     if (segmentIndex) *segmentIndex = idx;
@@ -1137,15 +1305,24 @@ static bool seg_append_speech_segment(
     false,
     0.0,
     payloadJson,
-    reason,
-    "segmentation_engine",
-    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
   );
   if (!ok) {
     return false;
+  }
+
+  {
+    const int64_t createdAtMs =
+      (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+    g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+      reason,
+      "segmentation_engine",
+      createdAtMs,
+      segmentIndex,
+    };
   }
 
   engine->totalSegmentsCommitted += 1;
@@ -1198,15 +1375,24 @@ static bool seg_append_speech_segment_range(
     false,
     0.0,
     payloadJson,
-    reason,
-    "segmentation_engine",
-    (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0),
     &segmentId,
     &segmentIndex,
     &err
   );
   if (!ok) {
     return false;
+  }
+
+  {
+    const int64_t createdAtMs =
+      (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+    g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+      reason,
+      "segmentation_engine",
+      createdAtMs,
+      segmentIndex,
+    };
   }
 
   engine->totalSegmentsCommitted += 1;
@@ -1650,6 +1836,39 @@ bool seg_engine_peek_annotation(
   if (source) *source = it->second.source;
   if (createdAtMs) *createdAtMs = it->second.createdAtMs;
   if (segmentIndex) *segmentIndex = it->second.segmentIndex;
+  return true;
+}
+
+bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string *error) {
+  std::shared_ptr<SegEngine> engine;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    auto it = g_seg_engine_by_id.find(engineId);
+    if (it == g_seg_engine_by_id.end()) {
+      if (error) *error = "ENGINE_DETACHED: Segmentation engine not found: " + engineId;
+      return false;
+    }
+    engine = it->second;
+  }
+
+  if (engine->state != SegEngineState::ACTIVE) {
+    if (error) *error = "ENGINE_DETACHED: Segmentation engine already detached: " + engineId;
+    return false;
+  }
+
+  if (flushFinal) {
+    if (engine->domain == SegEngineDomain::TEXT) {
+      seg_engine_flush_text(engine);
+    } else {
+      seg_engine_flush_audio(engine);
+    }
+  }
+
+  engine->state = SegEngineState::DETACHED;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    g_seg_engine_id_by_buffer.erase(engine->attachedBufferId);
+  }
   return true;
 }
 #endif
@@ -2434,20 +2653,21 @@ bool seg_engine_peek_annotation(
       NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
       NSString *annSource = [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"] : nil;
       if (annReason.length > 0 && annSource.length > 0) {
-        SegAnnotationSnapshot ann;
-        ann.reason = annReason.UTF8String;
-        ann.source = annSource.UTF8String;
-        if ([payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]) {
-          ann.createdAtMs = ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue;
-        } else {
-          ann.createdAtMs = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-        }
-        ann.segmentIndex = segmentIndex;
-        seg_record_annotation_for_segment(seg.id, ann);
+        int64_t annCreatedAtMs = [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
+          ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
+          : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+        std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+        g_seg_engine_annotation_by_segment[seg.id] = SegEngineAnnotation{
+          annReason.UTF8String,
+          annSource.UTF8String,
+          annCreatedAtMs,
+          segmentIndex,
+        };
       }
     }
 
     seg_notify_segment_appended(entry, seg, segmentIndex);
+    entry->notifyCommitListeners(seg.id, segmentIndex, seg);
     resolve(@{ @"segmentId": [NSString stringWithUTF8String:seg.id.c_str()], @"segmentIndex": @(segmentIndex) });
   } catch (const std::exception &e) {
     NSString *msg = [NSString stringWithUTF8String:e.what()];

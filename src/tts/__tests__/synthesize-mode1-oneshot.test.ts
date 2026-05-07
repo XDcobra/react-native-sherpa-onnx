@@ -14,6 +14,7 @@ jest.mock('../../utils', () => ({
 }));
 
 jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/tts'),
   resolveFileSourceForDetect: jest.fn(async () => ({
     modelDir: '/models/tts',
     assetName: 'model.onnx',

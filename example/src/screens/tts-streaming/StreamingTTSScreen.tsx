@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -12,13 +11,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createStreamingTTS,
+  createTTS,
   detectTtsModel,
+  type TtsEngine,
+  type TtsLivePipelineOptions,
   type TtsPipelineHandle,
-  type TtsPipelineOptions,
-  type StreamingTtsEngine,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
+import {
+  EngineModeModelSelector,
+  TTS_STREAMING_MODE_HINT,
+  TTS_STREAMING_MODEL_AREA_PLACEHOLDER,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
 import {
   createEmptyLiveAudioBuffer,
   finalizeLiveAudioBuffer,
@@ -54,7 +59,6 @@ import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   getAssetModelPath,
   getFileModelPath,
-  getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
 
@@ -95,7 +99,7 @@ type StreamingSessionEngine = {
   getSampleRate: () => Promise<number>;
   startSession: (
     audioOut: LiveAudioBufferRef | string,
-    options?: TtsPipelineOptions
+    options?: Partial<TtsLivePipelineOptions>
   ) => Promise<StreamingSessionController>;
   destroy: () => Promise<void>;
 };
@@ -106,7 +110,7 @@ async function createStreamingSessionEngine(options: {
   numThreads: number;
   debug: boolean;
 }): Promise<StreamingSessionEngine> {
-  const ttsEngine: StreamingTtsEngine = await createStreamingTTS(options);
+  const ttsEngine: TtsEngine = await createTTS(options);
   let activePipeline: TtsPipelineHandle | null = null;
   let activeTextBufferId: string | null = null;
 
@@ -126,10 +130,25 @@ async function createStreamingSessionEngine(options: {
       activeTextBufferId = textBuffer.bufferId;
       const audioOutId =
         typeof audioOut === 'string' ? audioOut : audioOut.bufferId;
+      const effectiveSegmentation =
+        pipelineOptions?.segmentation?.mode === 'auto' &&
+        pipelineOptions.segmentation.policy
+          ? pipelineOptions.segmentation
+          : {
+              mode: 'auto' as const,
+              policy: {
+                evaluator: 'text_synthetic_auto' as const,
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
       const pipeline = await ttsEngine.synthesize(
         textBuffer.bufferId,
         audioOutId,
-        pipelineOptions ?? {}
+        {
+          ...(pipelineOptions ?? {}),
+          segmentation: effectiveSegmentation,
+        }
       );
       activePipeline = pipeline;
 
@@ -168,6 +187,10 @@ export default function StreamingTTSScreen() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
     null
+  );
+  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
+  const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
+    new Set()
   );
   const [inputText, setInputText] = useState(
     'This example streams text into the TTS pipeline so synthesis can start before the whole script is fully prepared.'
@@ -234,46 +257,85 @@ export default function StreamingTTSScreen() {
     setLoadingModels(true);
     setError(null);
     try {
+      // ── Load PAD models ───────────────────────────────────────────────────
+      const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
+      const fallbackPath = `${DocumentDirectoryPath}/models`;
+      const padPath = padPathFromNative ?? fallbackPath;
+      const padResults = await listModelsAtPath(padPath).catch(() => []);
+      const padFolders = padResults
+        .filter((m) => m.hint === 'tts')
+        .map((m) => m.folder);
+      const resolvedPadPath = padFolders.length > 0 ? padPath : null;
+
+      // ── Load asset models ─────────────────────────────────────────────────
       const assetModels = await listAssetModels();
       const ttsFolders = assetModels
-        .filter((model) => model.hint === 'tts')
-        .map((model) => model.folder);
-      const downloadedList = await listDownloadedModels(ModelCategory.Tts);
-      const downloadedIds = downloadedList.map((model) => model.id);
+        .filter((m) => m.hint === 'tts')
+        .map((m) => m.folder);
 
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => m.hint === 'tts')
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch {
-        padFolders = [];
-      }
+      // ── Load downloaded / fs models ───────────────────────────────────────
+      const downloadedModels = await listDownloadedModels(ModelCategory.Tts);
+      const downloadedIds = downloadedModels.map((m) => m.id);
+      const ttsFilePath = `${DocumentDirectoryPath}/sherpa-onnx/models/${ModelCategory.Tts}`;
+      const ttsFs = await listModelsAtPath(ttsFilePath).catch(() => []);
+      const ttsFsIds = ttsFs.map((m) => m.folder);
+      const allDownloadedIds = [...new Set([...downloadedIds, ...ttsFsIds])];
 
-      const combined = [
+      const candidateModels = [
         ...padFolders,
         ...ttsFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedIds.filter(
+        ...allDownloadedIds.filter(
           (f) => !padFolders.includes(f) && !ttsFolders.includes(f)
         ),
       ];
 
+      const detectionResults = await Promise.all(
+        candidateModels.map(async (folder) => {
+          try {
+            const source = padFolders.includes(folder)
+              ? getFileModelPath(
+                  folder,
+                  ModelCategory.Tts,
+                  resolvedPadPath ?? padPath
+                )
+              : ttsFolders.includes(folder)
+              ? getAssetModelPath(folder)
+              : getFileModelPath(folder, ModelCategory.Tts);
+            const detected = await detectTtsModel(
+              await toDetectSource(source),
+              {
+                modelType: 'auto',
+              }
+            );
+            return { folder, isStreaming: !!detected.isStreaming };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const available = candidateModels.filter(
+        (_, i) => detectionResults[i] != null || true
+      );
+      const streamingIds = new Set(
+        detectionResults
+          .filter((r) => r != null && r.isStreaming)
+          .map((r) => r!.folder)
+      );
+
       setPadModelsPath(resolvedPadPath);
       setPadModelIds(padFolders);
-      setAvailableModels(combined);
-      setDownloadedModelIds(downloadedIds);
-      setSelectedModelFolder((prev) =>
-        prev && combined.includes(prev) ? prev : combined[0] ?? null
-      );
-      if (combined.length === 0) {
+      setAvailableModels(available);
+      setStreamingModelIds(streamingIds);
+      setDownloadedModelIds(allDownloadedIds);
+
+      const initialModel = engineMode === 'streaming' ? null : available[0];
+
+      setSelectedModelFolder((prev) => {
+        if (engineMode === 'streaming') return null;
+        return prev && available.includes(prev) ? prev : initialModel ?? null;
+      });
+      if (available.length === 0) {
         setStatus(
           'No TTS models found. Add one under assets, PAD, or downloads (category: tts).'
         );
@@ -284,7 +346,26 @@ export default function StreamingTTSScreen() {
     } finally {
       setLoadingModels(false);
     }
-  }, []);
+  }, [engineMode]);
+
+  // Auto-enforce segmentation when switching to Live Overload mode
+  useEffect(() => {
+    if (engineMode === 'offline') {
+      setSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: {
+              evaluator: 'text_synthetic_auto',
+              maxLengthChars: 320,
+              sentenceBoundary: true,
+            },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [engineMode]);
 
   useEffect(() => {
     loadModels().catch(() => {
@@ -371,6 +452,12 @@ export default function StreamingTTSScreen() {
     if (streamingState !== 'idle') {
       return;
     }
+    if (engineMode === 'streaming') {
+      setError(
+        'There is no streaming TTS model to run. Switch to Live Overload and select an offline model.'
+      );
+      return;
+    }
     if (!selectedModelFolder) {
       setError('Select a TTS model first.');
       return;
@@ -416,10 +503,21 @@ export default function StreamingTTSScreen() {
       audioBufferRef.current = audioBuffer;
 
       const seg = buildSegmentationOption(segConfig);
+      const segmentation: TtsLivePipelineOptions['segmentation'] =
+        seg && seg.mode === 'auto' && seg.policy
+          ? { mode: 'auto', policy: seg.policy }
+          : {
+              mode: 'auto',
+              policy: {
+                evaluator: 'text_synthetic_auto',
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
       const controller = await engine.startSession(audioBuffer.bufferId, {
         sid: Number.parseInt(speakerId, 10) || 0,
         speed: Number.parseFloat(speed) || 1.0,
-        ...(seg ? { segmentation: seg } : {}),
+        segmentation,
       });
       controllerRef.current = controller;
 
@@ -457,6 +555,7 @@ export default function StreamingTTSScreen() {
     }
   }, [
     cleanupStream,
+    engineMode,
     inputText,
     releaseResultBuffer,
     resolveModelPath,
@@ -604,14 +703,15 @@ export default function StreamingTTSScreen() {
 
   useEffect(() => {
     return () => {
-      void (async () => {
+      const run = async () => {
         if (deltaDebounceTimerRef.current) {
           clearTimeout(deltaDebounceTimerRef.current);
           deltaDebounceTimerRef.current = null;
         }
         await cleanupStream();
         await releaseResultBuffer();
-      })();
+      };
+      run().catch(() => {});
     };
   }, [cleanupStream, releaseResultBuffer]);
 
@@ -628,40 +728,37 @@ export default function StreamingTTSScreen() {
           <Text style={styles.headerTitle}>Text-to-Speech Streaming</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Model</Text>
-          {loadingModels ? (
-            <View style={styles.inlineRow}>
-              <ActivityIndicator />
-              <Text style={styles.mutedText}>Loading models...</Text>
-            </View>
-          ) : null}
-          <View style={styles.modelList}>
-            {availableModels.map((modelFolder) => {
-              const selected = modelFolder === selectedModelFolder;
-              return (
-                <Pressable
-                  key={modelFolder}
-                  onPress={() => setSelectedModelFolder(modelFolder)}
-                  style={[
-                    styles.modelListItem,
-                    selected && styles.modelListItemSelected,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modelListTitle,
-                      selected && styles.modelListTitleSelected,
-                    ]}
-                  >
-                    {getModelDisplayName(modelFolder)}
-                  </Text>
-                  <Text style={styles.modelListSubtitle}>{modelFolder}</Text>
-                </Pressable>
-              );
-            })}
+        <EngineModeModelSelector
+          label="TTS Engine"
+          engineMode={engineMode}
+          onEngineModeChange={setEngineMode}
+          models={availableModels}
+          selectedModel={selectedModelFolder}
+          onModelSelect={setSelectedModelFolder}
+          isModelStreamingCapable={(m) => streamingModelIds.has(m)}
+          loading={loadingModels}
+          disabled={streamingState !== 'idle'}
+          streamingHintOverride={TTS_STREAMING_MODE_HINT}
+          streamingModelAreaPlaceholder={TTS_STREAMING_MODEL_AREA_PLACEHOLDER}
+        />
+
+        {engineMode === 'offline' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Text Segmentation</Text>
+            <Text style={[styles.mutedText, styles.mutedTextSegHint]}>
+              Live Overload requires segmentation to chunk text before
+              synthesis. The 'Off' option is disabled.
+            </Text>
+            <SegmentationPolicyControls
+              variant="text-offline"
+              value={segConfig}
+              onChange={setSegConfig}
+              disabled={streamingState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory text segmentation to split input into processable chunks."
+            />
           </View>
-        </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Input</Text>
@@ -693,38 +790,28 @@ export default function StreamingTTSScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Segmentation</Text>
-          <Text style={[styles.mutedText, { marginBottom: 10 }]}>
-            Off or Manual: text is fed as you type (debounced). Auto: attaches
-            the text segmentation engine per policy.
-          </Text>
-          <SegmentationPolicyControls
-            variant="text-streaming"
-            value={segConfig}
-            onChange={setSegConfig}
-            disabled={streamingState !== 'idle'}
-          />
-        </View>
-
-        <View style={styles.card}>
           <Text style={styles.cardTitle}>Run</Text>
           <View style={styles.actionRow}>
             <Pressable
               style={[
                 styles.primaryButton,
-                streamingState === 'starting' || streamingState === 'stopping'
+                streamingState === 'starting' ||
+                streamingState === 'stopping' ||
+                (streamingState === 'idle' && engineMode === 'streaming')
                   ? styles.buttonDisabled
                   : null,
               ]}
               onPress={() => {
                 if (streamingState === 'idle') {
-                  void startStreaming();
+                  startStreaming().catch(() => {});
                 } else if (streamingState === 'running') {
-                  void stopStreaming();
+                  stopStreaming().catch(() => {});
                 }
               }}
               disabled={
-                streamingState === 'starting' || streamingState === 'stopping'
+                streamingState === 'starting' ||
+                streamingState === 'stopping' ||
+                (streamingState === 'idle' && engineMode === 'streaming')
               }
             >
               <Text style={styles.primaryButtonText}>
@@ -874,6 +961,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#6B7280',
+  },
+  mutedTextSegHint: {
+    marginBottom: 10,
+  },
+  bodyText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#374151',
   },
   modelList: {
     gap: 8,

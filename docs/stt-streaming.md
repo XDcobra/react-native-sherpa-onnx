@@ -24,7 +24,7 @@ There is no per-chunk stream object in the JS API anymore.
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - Streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
-- If your model is offline-only (for example Whisper), use [Offline STT](stt-offline.md)
+- If your model is offline-only (for example Whisper), you can still use it for live consumption via the **[Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)** pattern.
 - Model setup details: [model-setup.md](model-setup.md)
 
 ## Quick start
@@ -364,7 +364,7 @@ See [textbuffer-streaming.md](textbuffer-streaming.md).
 | --- | --- | --- |
 | Live transcript UI | `LiveTextBuffer` (`txt_live_*`) | Read partial and committed segments while pipeline runs. |
 | Streaming punctuation | `LiveTextBuffer` (`txt_live_*`) | Add punctuation before downstream use. |
-| Streaming TTS input | `LiveTextBuffer` (`txt_live_*`) | Feed committed text into `createStreamingTTS()`. |
+| Streaming TTS input | `LiveTextBuffer` (`txt_live_*`) | Feed committed text into `createTTS().synthesize(LiveText, LiveAudio, { segmentation })`. |
 
 ```mermaid
 flowchart LR

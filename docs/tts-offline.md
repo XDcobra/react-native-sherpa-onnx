@@ -4,7 +4,7 @@
 
 On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as an `OfflineTextBuffer`, audio comes out in an `OfflineAudioBuffer`. The engine is **instance-based** — create with `createTTS()`, call `destroy()` when done.
 
-**For streaming synthesis with PCM playback:** see [tts-streaming.md](tts-streaming.md). **For incremental streaming sessions:** see [tts-streaming.md#4-incremental-text-feeding](tts-streaming.md#4-incremental-text-feeding).
+**For live synthesis with PCM playback:** use the Live overload section in this document.
 
 **Import paths:**
 ```ts
@@ -364,6 +364,38 @@ await tts.destroy();
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
 
+## Live overload on offline TTS (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline TTS engine can drive a live pipeline directly. This is useful when you want to use a high-fidelity offline model (like VITS or Kokoro) against a live stream of text (e.g. from a live STT buffer) without the sample-level incremental generation of the native streaming engine.
+
+```ts
+const tts = await createTTS({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/vits-piper-en' },
+  modelType: 'vits',
+});
+
+const handle = await tts.synthesize(liveTextIn, liveAudioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Synthesized ${completion.unitsWritten} samples`);
+```
+
+| Aspect | Live overload (`createTTS`) |
+| --- | --- |
+| Weights | Offline (VITS, Kokoro, Pocket, Zipvoice, Matcha, Supertonic) |
+| Incremental | No (Per-segment synthesis) |
+| Latency | Per-segment (higher) |
+
+
+
 ## Pipeline composition
 
 ### Typical upstream
@@ -560,7 +592,6 @@ await tts.destroy();
 
 ## See also
 
-- [tts-streaming.md](tts-streaming.md) — incremental synthesis, PCM player, `generateSpeechStream`
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, subtitle timing, alignment models
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)

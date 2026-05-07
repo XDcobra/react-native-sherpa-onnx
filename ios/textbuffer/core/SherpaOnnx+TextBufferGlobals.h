@@ -24,6 +24,25 @@ void seg_engine_on_text_write(const std::string &liveBufferId);
 void seg_engine_on_buffer_finalized(const std::string &bufferId);
 void seg_engine_on_buffer_released(const std::string &bufferId);
 
+// Emits pipelineLiveTextPartial when partial events are enabled (throttled). Called after live partial text updates.
+void txt_dispatch_pipeline_live_text_partial(
+	const std::string &bufferId,
+	const char *source,
+	const std::string &partialText,
+	int64_t revisionValue,
+	int64_t partialEventMinIntervalMs);
+
+#ifdef __OBJC__
+@class SherpaOnnx;
+#ifdef __cplusplus
+extern "C" {
+#endif
+void txt_set_partial_event_module(SherpaOnnx *module);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 // Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
 struct TxtOfflineEntry;
 
@@ -481,44 +500,74 @@ struct TxtLiveEntry {
 	}
 
 	void writePartial(const std::string &text) {
-		std::lock_guard<std::mutex> lock(stateMutex);
-		if (state == FINISHED) {
-			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+		bool shouldEmitPartial = false;
+		int64_t minIntervalMs = 0;
+		std::string bid;
+		std::string partialSnap;
+		int64_t revSnap = 0;
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+			if (state == FINISHED) {
+				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+			}
+			NSString *ns = [NSString stringWithUTF8String:text.c_str()];
+			int len = ns ? (int)[ns length] : 0;
+			if (len > windowMaxChars) {
+				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+				currentText = [trimmed UTF8String] ?: "";
+			} else {
+				currentText = text;
+			}
+			totalCharsWritten += len;
+			revision.fetch_add(1);
+			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			seg_engine_on_text_write(bufferId);
+			shouldEmitPartial = emitPartialEvents;
+			minIntervalMs = partialEventMinIntervalMs;
+			bid = bufferId;
+			partialSnap = currentText;
+			revSnap = (int64_t)revision.load();
 		}
-		NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-		int len = ns ? (int)[ns length] : 0;
-		if (len > windowMaxChars) {
-			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-			currentText = [trimmed UTF8String] ?: "";
-		} else {
-			currentText = text;
+		if (shouldEmitPartial) {
+			txt_dispatch_pipeline_live_text_partial(bid, "replace", partialSnap, revSnap, minIntervalMs);
 		}
-		totalCharsWritten += len;
-		revision.fetch_add(1);
-		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
-		seg_engine_on_text_write(bufferId);
 	}
 
 	void appendText(const std::string &text) {
-		std::lock_guard<std::mutex> lock(stateMutex);
-		if (state == FINISHED) {
-			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+		bool shouldEmitPartial = false;
+		int64_t minIntervalMs = 0;
+		std::string bid;
+		std::string partialSnap;
+		int64_t revSnap = 0;
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+			if (state == FINISHED) {
+				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+			}
+			std::string combined = currentText + text;
+			NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
+			int len = ns ? (int)[ns length] : 0;
+			NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
+			int appendLen = textNs ? (int)[textNs length] : 0;
+			if (len > windowMaxChars) {
+				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+				currentText = [trimmed UTF8String] ?: "";
+			} else {
+				currentText = combined;
+			}
+			totalCharsWritten += appendLen;
+			revision.fetch_add(1);
+			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			seg_engine_on_text_write(bufferId);
+			shouldEmitPartial = emitPartialEvents;
+			minIntervalMs = partialEventMinIntervalMs;
+			bid = bufferId;
+			partialSnap = currentText;
+			revSnap = (int64_t)revision.load();
 		}
-		std::string combined = currentText + text;
-		NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
-		int len = ns ? (int)[ns length] : 0;
-		NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-		int appendLen = textNs ? (int)[textNs length] : 0;
-		if (len > windowMaxChars) {
-			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-			currentText = [trimmed UTF8String] ?: "";
-		} else {
-			currentText = combined;
+		if (shouldEmitPartial) {
+			txt_dispatch_pipeline_live_text_partial(bid, "append", partialSnap, revSnap, minIntervalMs);
 		}
-		totalCharsWritten += appendLen;
-		revision.fetch_add(1);
-		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
-		seg_engine_on_text_write(bufferId);
 	}
 
 	int commitSegment(const std::string &text,

@@ -5,7 +5,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Feature | sherpa-onnx: offline config (Kotlin/C API) | sherpa-onnx: live/streaming config (Kotlin/C API) | This SDK: offline engine | This SDK: live engine (real vs. fake) |
 |---|---|---|---|---|
 | STT (Speech-to-Text) | Yes | Yes | Yes (`createSTT`) | Yes, **real streaming** (`createStreamingSTT` / `createLiveSTT`) |
-| TTS (Text-to-Speech) | Yes | No | Yes (`createTTS`) | Yes, **fake streaming** (pipeline streaming via `createStreamingTTS` + `createIncrementalStreamingTTS`, but no native online TTS config in sherpa) |
+| TTS (Text-to-Speech) | Yes | No | Yes (`createTTS`) | Yes, live pipeline via `createTTS().synthesize(LiveText, LiveAudio, { segmentation })` |
 | VAD (Voice Activity Detection) | No (no separate offline config model in sherpa) | Yes (`VadModelConfig`) | Yes (offline run via `createStreamingVAD(...).process()` with offline audio) | Yes, **real streaming** (`createStreamingVAD` with live audio pipeline) |
 | Speech enhancement / denoiser | Yes (`OfflineSpeechDenoiserConfig`) | Yes (`OnlineSpeechDenoiserConfig`) | Yes (`createEnhancement`) | Yes, **real streaming** (`createStreamingEnhancement`) |
 | Alignment (audio/text alignment) | No (no dedicated sherpa alignment config in Kotlin/C API) | No | Yes (`AlignmentEngine`) | Not as a dedicated live engine; **fake streaming possible manually** (chunk/segment-wise orchestration) |

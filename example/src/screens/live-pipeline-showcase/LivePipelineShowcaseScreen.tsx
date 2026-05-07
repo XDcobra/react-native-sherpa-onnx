@@ -27,13 +27,16 @@ import {
   type SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import {
-  createStreamingTTS,
+  createTTS,
   detectTtsModel,
-  type StreamingTtsEngine,
+  type TtsEngine,
+  type TtsLivePipelineOptions,
   type TtsPipelineHandle,
 } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  finalizeLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
@@ -42,19 +45,18 @@ import {
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
-  appendLiveTextSegment,
   createLiveTextBuffer,
   finalizeLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { appendPartial } from 'react-native-sherpa-onnx/segment';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   getAssetModelPath,
   getFileModelPath,
-  getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
@@ -63,17 +65,26 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  EngineModeModelSelector,
+  TTS_STREAMING_MODE_HINT,
+  TTS_STREAMING_MODEL_AREA_PLACEHOLDER,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
+import { PipelineOfflineAudioResultCard } from '../../components/PipelineOfflineAudioResultCard';
 import { styles } from './LivePipelineShowcaseScreen.styles';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
 const MAX_SEGMENT_EVENTS = 20;
+/** Same interval as STTStreamingScreen `syncTranscript` for comparable UI updates. */
+const STT_TRANSCRIPT_POLL_MS = 150;
 
 type PipelineState = 'idle' | 'starting' | 'running' | 'stopping';
 type SourceMode = 'mic' | 'file';
 
-type PipelineStep = 'input' | 'stt' | 'tts' | 'play';
+type PipelineStep = 'input' | 'stt' | 'tts';
 
 type SegmentEvent = {
   index: number;
@@ -104,7 +115,16 @@ function toFileSource(uri: string): FileSource {
 export default function LivePipelineShowcaseScreen() {
   // ── model lists ────────────────────────────────────────────────────────────
   const [sttModels, setSttModels] = useState<string[]>([]);
+  const [streamingSttModelIds, setStreamingSttModelIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [offlineSttModelIds, setOfflineSttModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [ttsModels, setTtsModels] = useState<string[]>([]);
+  const [streamingTtsModelIds, setStreamingTtsModelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [sttPadIds, setSttPadIds] = useState<string[]>([]);
   const [ttsPadIds, setTtsPadIds] = useState<string[]>([]);
   const [sttPadPath, setSttPadPath] = useState<string | null>(null);
@@ -115,10 +135,15 @@ export default function LivePipelineShowcaseScreen() {
 
   // ── selection ──────────────────────────────────────────────────────────────
   const [sourceMode, setSourceMode] = useState<SourceMode>('file');
+  const [sttEngineMode, setSttEngineMode] = useState<EngineMode>('streaming');
+  const [ttsEngineMode, setTtsEngineMode] = useState<EngineMode>('streaming');
   const [selectedSttModel, setSelectedSttModel] = useState<string | null>(null);
   const [selectedTtsModel, setSelectedTtsModel] = useState<string | null>(null);
   const [pickedFileUri, setPickedFileUri] = useState<string | null>(null);
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
+  const [sttSegConfig, setSttSegConfig] = useState<SegmentationControlConfig>({
+    mode: 'off',
+  });
   const [textSegConfig, setTextSegConfig] = useState<SegmentationControlConfig>(
     { mode: 'off' }
   );
@@ -132,19 +157,33 @@ export default function LivePipelineShowcaseScreen() {
   const [committedSegments, setCommittedSegments] = useState<string[]>([]);
   const [segmentEvents, setSegmentEvents] = useState<SegmentEvent[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [pipelineTtsOutput, setPipelineTtsOutput] = useState<{
+    bufferId: string;
+    sourceLabel: string;
+    sampleRate: number;
+    durationMs: number;
+  } | null>(null);
 
   // ── refs ───────────────────────────────────────────────────────────────────
   const sttEngineRef = useRef<LiveSttEngine | null>(null);
-  const ttsEngineRef = useRef<StreamingTtsEngine | null>(null);
+  const ttsEngineRef = useRef<TtsEngine | null>(null);
   const sttInputAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const ttsOutputAudioRef = useRef<LiveAudioBufferRef | null>(null);
-  const sttOutputTextRef = useRef<LiveTextBufferRef | null>(null);
-  const ttsInputTextRef = useRef<LiveTextBufferRef | null>(null);
+  /** Single buffer: STT `transcribe` commits here; TTS live overload `synthesize` consumes the same buffer natively (no JS copy). */
+  const sharedSttTtsTextRef = useRef<LiveTextBufferRef | null>(null);
   const sttPipelineRef = useRef<SttPipelineHandle | null>(null);
   const ttsPipelineRef = useRef<TtsPipelineHandle | null>(null);
-  const playerRef = useRef<PcmPlayer | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
-  const segCountRef = useRef(0);
+  const sttTranscriptPollRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  /** Segment log cursor for showcase UI only (segment event list); TTS uses native drain on the shared buffer. */
+  const lastUiPolledSegmentCountRef = useRef(0);
+  /** Monotonic index for segment event log rows. */
+  const sttSegmentEventIndexRef = useRef(0);
+  const capturedTtsOfflineIdRef = useRef<string | null>(null);
+  /** Prevents concurrent teardown (e.g. Stop + pipeline.completed both calling release). */
+  const releaseAllInFlightRef = useRef<Promise<void> | null>(null);
 
   // ── load model lists ───────────────────────────────────────────────────────
   const loadModels = useCallback(async () => {
@@ -215,7 +254,7 @@ export default function LivePipelineShowcaseScreen() {
       const sttAssetSet = new Set(assetSttIds);
       const ttsAssetSet = new Set(assetTtsIds);
 
-      const streamingSttRaw = await Promise.all(
+      const sttDetectionRows = await Promise.all(
         sttCandidates.map(async (folder) => {
           try {
             const source = sttPadSet.has(folder)
@@ -229,9 +268,16 @@ export default function LivePipelineShowcaseScreen() {
                 modelType: 'auto',
               }
             );
-            return detected.success && detected.isStreaming ? folder : null;
+            if (!detected.success) {
+              return { folder, streaming: false, offline: false };
+            }
+            return {
+              folder,
+              streaming: detected.isStreaming,
+              offline: !detected.isStreaming,
+            };
           } catch {
-            return null;
+            return { folder, streaming: false, offline: false };
           }
         })
       );
@@ -250,21 +296,34 @@ export default function LivePipelineShowcaseScreen() {
                 modelType: 'auto',
               }
             );
-            return detected.success ? folder : null;
+            return detected.success
+              ? { folder, isStreaming: !!detected.isStreaming }
+              : null;
           } catch {
             return null;
           }
         })
       );
 
-      const streamingSttModels = streamingSttRaw.filter(
-        (m): m is string => m != null
+      const streamingSttModelsSet = new Set(
+        sttDetectionRows.filter((r) => r.streaming).map((r) => r.folder)
       );
-      const validTtsModels = validTtsRaw.filter((m): m is string => m != null);
-      const effectiveSttModels =
-        streamingSttModels.length > 0 ? streamingSttModels : sttCandidates;
-      const effectiveTtsModels =
-        validTtsModels.length > 0 ? validTtsModels : ttsCandidates;
+      const offlineSttModelsSet = new Set(
+        sttDetectionRows.filter((r) => r.offline).map((r) => r.folder)
+      );
+      const validSttModels = sttCandidates.filter(
+        (folder) =>
+          streamingSttModelsSet.has(folder) || offlineSttModelsSet.has(folder)
+      );
+
+      const validTtsModels = validTtsRaw
+        .filter((r): r is { folder: string; isStreaming: boolean } => r != null)
+        .map((r) => r.folder);
+      const streamingTtsModelsSet = new Set(
+        validTtsRaw
+          .filter((r) => r != null && r.isStreaming)
+          .map((r) => r!.folder)
+      );
 
       setSttPadIds(padSttIds);
       setTtsPadIds(padTtsIds);
@@ -272,18 +331,29 @@ export default function LivePipelineShowcaseScreen() {
       setTtsPadPath(padTtsIds.length > 0 ? padPath : null);
       setSttDownloadedIds([...new Set([...sttDl, ...sttFsIds, ...padSttIds])]);
       setTtsDownloadedIds([...new Set([...ttsDl, ...ttsFsIds, ...padTtsIds])]);
-      setSttModels(effectiveSttModels);
-      setTtsModels(effectiveTtsModels);
+      setSttModels(validSttModels);
+      setStreamingSttModelIds(streamingSttModelsSet);
+      setOfflineSttModelIds(offlineSttModelsSet);
+      setTtsModels(validTtsModels);
+      setStreamingTtsModelIds(streamingTtsModelsSet);
+
+      const initialStt =
+        sttEngineMode === 'streaming'
+          ? validSttModels.find((m) => streamingSttModelsSet.has(m))
+          : validSttModels.find((m) => offlineSttModelsSet.has(m));
+
+      const initialTts =
+        ttsEngineMode === 'streaming' ? null : validTtsModels[0];
+
       setSelectedSttModel((prev) =>
-        prev && effectiveSttModels.includes(prev)
-          ? prev
-          : effectiveSttModels[0] ?? null
+        prev && validSttModels.includes(prev) ? prev : initialStt ?? null
       );
-      setSelectedTtsModel((prev) =>
-        prev && effectiveTtsModels.includes(prev)
+      setSelectedTtsModel((prev) => {
+        if (ttsEngineMode === 'streaming') return null;
+        return prev && validTtsModels.includes(prev)
           ? prev
-          : effectiveTtsModels[0] ?? null
-      );
+          : initialTts ?? null;
+      });
     } catch {
       // leave lists empty
       setSttModels([]);
@@ -291,7 +361,40 @@ export default function LivePipelineShowcaseScreen() {
     } finally {
       setLoadingModels(false);
     }
-  }, []);
+  }, [sttEngineMode, ttsEngineMode]);
+
+  // Auto-enforce segmentation on mode switch
+  useEffect(() => {
+    if (sttEngineMode === 'offline') {
+      setSttSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 10000 },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [sttEngineMode]);
+
+  useEffect(() => {
+    if (ttsEngineMode === 'offline') {
+      setTextSegConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: {
+              evaluator: 'text_synthetic_auto',
+              maxLengthChars: 320,
+              sentenceBoundary: true,
+            },
+          };
+        }
+        return prev;
+      });
+    }
+  }, [ttsEngineMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -301,15 +404,15 @@ export default function LivePipelineShowcaseScreen() {
       await loadModels();
     }
 
-    void loadModelsSafe();
+    loadModelsSafe().catch(() => {});
 
     const unsubStt = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Stt) return;
-      void loadModelsSafe();
+      loadModelsSafe().catch(() => {});
     });
     const unsubTts = onModelsListUpdated((category) => {
       if (category !== ModelCategory.Tts) return;
-      void loadModelsSafe();
+      loadModelsSafe().catch(() => {});
     });
 
     return () => {
@@ -348,73 +451,216 @@ export default function LivePipelineShowcaseScreen() {
     [ttsPadIds, ttsPadPath, ttsDownloadedIds]
   );
 
+  const releasePriorCapturedTts = useCallback(async () => {
+    const id = capturedTtsOfflineIdRef.current;
+    capturedTtsOfflineIdRef.current = null;
+    setPipelineTtsOutput(null);
+    if (id) {
+      await releasePipelineAudioBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const captureLiveTtsToOfflineSnapshot = useCallback(
+    async (ttsLive: LiveAudioBufferRef) => {
+      try {
+        try {
+          await finalizeLiveAudioBuffer(ttsLive.bufferId);
+        } catch {
+          /* already finalized */
+        }
+        const offline = await createOfflineAudioBufferFromLive(
+          ttsLive.bufferId,
+          'fullIfSpooled'
+        );
+        if (offline.info.numSamples <= 0) {
+          await releasePipelineAudioBuffer(offline.bufferId).catch(() => {});
+          return;
+        }
+        const prior = capturedTtsOfflineIdRef.current;
+        if (prior && prior !== offline.bufferId) {
+          await releasePipelineAudioBuffer(prior).catch(() => {});
+        }
+        capturedTtsOfflineIdRef.current = offline.bufferId;
+        setPipelineTtsOutput({
+          bufferId: offline.bufferId,
+          sourceLabel: 'Pipeline TTS output',
+          sampleRate: offline.info.sampleRate,
+          durationMs: offline.info.durationMs,
+        });
+      } catch {
+        /* ignore snapshot errors */
+      }
+    },
+    []
+  );
+
+  const stopSttTranscriptPolling = useCallback(() => {
+    if (sttTranscriptPollRef.current) {
+      clearInterval(sttTranscriptPollRef.current);
+      sttTranscriptPollRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Same reads as STTStreamingScreen `syncTranscript` for UI parity only.
+   * STT→TTS data flow uses one native `LiveTextBuffer` (no JS forwarding).
+   */
+  const syncTranscriptStt = useCallback(async () => {
+    const textBuffer = sharedSttTtsTextRef.current;
+    if (!textBuffer) return;
+
+    const bufferId = textBuffer.bufferId;
+    let segmentCountNow: number;
+    try {
+      segmentCountNow = await getLiveTextBufferSegmentCount(bufferId);
+    } catch {
+      return;
+    }
+
+    const segments =
+      segmentCountNow > 0
+        ? await getLiveTextBufferSegments(bufferId, 0, segmentCountNow)
+        : [];
+
+    let partial = '';
+    try {
+      partial = await getLiveTextBufferPartialSlice(bufferId, 0, 4096);
+    } catch {
+      /* ignore */
+    }
+    setPartialText(partial.trim());
+
+    const nonEmptyTexts = segments
+      .map((s) => s.text.trim())
+      .filter((t) => t.length > 0);
+    setCommittedSegments(
+      nonEmptyTexts.length > 5
+        ? nonEmptyTexts.slice(nonEmptyTexts.length - 5)
+        : nonEmptyTexts
+    );
+
+    const prevUi = lastUiPolledSegmentCountRef.current;
+    if (segmentCountNow <= prevUi) {
+      return;
+    }
+
+    const newSegments = await getLiveTextBufferSegments(
+      bufferId,
+      prevUi,
+      segmentCountNow - prevUi
+    );
+
+    for (const seg of newSegments) {
+      const text = seg.text.trim();
+      if (text) {
+        sttSegmentEventIndexRef.current += 1;
+        const idx = sttSegmentEventIndexRef.current;
+        setSegmentEvents((prevEvs) => {
+          const ev: SegmentEvent = { index: idx, text };
+          const next = [...prevEvs, ev];
+          return next.length > MAX_SEGMENT_EVENTS
+            ? next.slice(next.length - MAX_SEGMENT_EVENTS)
+            : next;
+        });
+      }
+    }
+    lastUiPolledSegmentCountRef.current = segmentCountNow;
+  }, []);
+
   // ── cleanup helpers ────────────────────────────────────────────────────────
   const releaseAllResources = useCallback(async () => {
-    // Cleanup order per plan: stop mic → cancel ingest → stop STT → finalize sttText → stop TTS → release buffers → destroy engines
-    await stopMicToLiveAudioBuffer().catch(() => {});
-
-    const ingest = ingestRef.current;
-    ingestRef.current = null;
-    if (ingest) {
-      ingest.cancel();
+    const existing = releaseAllInFlightRef.current;
+    if (existing) {
+      await existing;
+      return;
     }
 
-    const sttPipeline = sttPipelineRef.current;
-    sttPipelineRef.current = null;
-    if (sttPipeline) {
-      await sttPipeline.stop().catch(() => {});
-    }
+    const releaseToken: { p: Promise<void> | null } = { p: null };
+    releaseToken.p = (async () => {
+      try {
+        await syncTranscriptStt().catch(() => {});
+        stopSttTranscriptPolling();
+        // Cleanup order: stop mic → ingest → STT pipeline → flush/stop TTS →
+        // snapshot TTS live audio → finalize/release shared text + buffers → destroy engines.
+        await stopMicToLiveAudioBuffer().catch(() => {});
 
-    const sttText = sttOutputTextRef.current;
-    sttOutputTextRef.current = null;
-    if (sttText) {
-      await finalizeLiveTextBuffer(sttText.bufferId).catch(() => {});
-      await releasePipelineTextBuffer(sttText.bufferId).catch(() => {});
-      sttText.unsubscribeEvents();
-    }
+        const ingest = ingestRef.current;
+        ingestRef.current = null;
+        if (ingest) {
+          ingest.cancel();
+        }
 
-    const ttsPipeline = ttsPipelineRef.current;
-    ttsPipelineRef.current = null;
-    if (ttsPipeline) {
-      await ttsPipeline.stop().catch(() => {});
-    }
+        const sttPipeline = sttPipelineRef.current;
+        sttPipelineRef.current = null;
+        if (sttPipeline) {
+          await sttPipeline.stop().catch(() => {});
+        }
 
-    const ttsText = ttsInputTextRef.current;
-    ttsInputTextRef.current = null;
-    if (ttsText) {
-      await releasePipelineTextBuffer(ttsText.bufferId).catch(() => {});
-      ttsText.unsubscribeEvents();
-    }
+        const ttsAudioForCapture = ttsOutputAudioRef.current;
 
-    const player = playerRef.current;
-    playerRef.current = null;
-    if (player) {
-      await player.destroy().catch(() => {});
-    }
+        const ttsPipeline = ttsPipelineRef.current;
+        ttsPipelineRef.current = null;
+        if (ttsPipeline) {
+          await ttsPipeline.flush().catch(() => {});
+          await ttsPipeline.stop().catch(() => {});
+        }
 
-    const sttAudio = sttInputAudioRef.current;
-    sttInputAudioRef.current = null;
-    if (sttAudio) {
-      await releasePipelineAudioBuffer(sttAudio.bufferId).catch(() => {});
-    }
+        if (ttsAudioForCapture) {
+          await captureLiveTtsToOfflineSnapshot(ttsAudioForCapture);
+        }
 
-    const ttsAudio = ttsOutputAudioRef.current;
-    ttsOutputAudioRef.current = null;
-    if (ttsAudio) {
-      await releasePipelineAudioBuffer(ttsAudio.bufferId).catch(() => {});
-    }
+        const sharedText = sharedSttTtsTextRef.current;
+        sharedSttTtsTextRef.current = null;
+        if (sharedText) {
+          await finalizeLiveTextBuffer(sharedText.bufferId).catch(() => {});
+          await releasePipelineTextBuffer(sharedText.bufferId).catch(() => {});
+          sharedText.unsubscribeEvents();
+        }
 
-    const sttEng = sttEngineRef.current;
-    sttEngineRef.current = null;
-    const ttsEng = ttsEngineRef.current;
-    ttsEngineRef.current = null;
-    await Promise.all([
-      sttEng ? sttEng.destroy().catch(() => {}) : Promise.resolve(),
-      ttsEng ? ttsEng.destroy().catch(() => {}) : Promise.resolve(),
-    ]);
+        const sttAudio = sttInputAudioRef.current;
+        sttInputAudioRef.current = null;
+        if (sttAudio) {
+          await releasePipelineAudioBuffer(sttAudio.bufferId).catch(() => {});
+        }
 
-    setActiveSteps(new Set());
-  }, []);
+        ttsOutputAudioRef.current = null;
+        if (ttsAudioForCapture) {
+          await releasePipelineAudioBuffer(ttsAudioForCapture.bufferId).catch(
+            () => {}
+          );
+        }
+
+        const sttEng = sttEngineRef.current;
+        sttEngineRef.current = null;
+        const ttsEng = ttsEngineRef.current;
+        ttsEngineRef.current = null;
+        await Promise.all([
+          sttEng ? sttEng.destroy().catch(() => {}) : Promise.resolve(),
+          ttsEng ? ttsEng.destroy().catch(() => {}) : Promise.resolve(),
+        ]);
+
+        setActiveSteps(new Set());
+      } finally {
+        const p = releaseToken.p;
+        if (p != null && releaseAllInFlightRef.current === p) {
+          releaseAllInFlightRef.current = null;
+        }
+      }
+    })();
+
+    releaseAllInFlightRef.current = releaseToken.p;
+    await releaseToken.p;
+  }, [
+    captureLiveTtsToOfflineSnapshot,
+    stopSttTranscriptPolling,
+    syncTranscriptStt,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      releasePriorCapturedTts().catch(() => {});
+    };
+  }, [releasePriorCapturedTts]);
 
   // ── file picker ────────────────────────────────────────────────────────────
   const pickFile = useCallback(async () => {
@@ -449,12 +695,14 @@ export default function LivePipelineShowcaseScreen() {
     setPartialText('');
     setCommittedSegments([]);
     setSegmentEvents([]);
-    segCountRef.current = 0;
+    lastUiPolledSegmentCountRef.current = 0;
+    sttSegmentEventIndexRef.current = 0;
 
+    await releasePriorCapturedTts();
     await releaseAllResources();
 
     try {
-      // ── Validate streaming STT ──────────────────────────────────────────────
+      // ── Resolve and Detect STT ──────────────────────────────────────────────
       setStatusText('Detecting STT model…');
       const sttSource = await resolveSttSource(selectedSttModel);
       const detection = await detectSttModel(sttSource, { modelType: 'auto' });
@@ -463,9 +711,19 @@ export default function LivePipelineShowcaseScreen() {
           `STT model detection failed: ${detection.error ?? 'unknown error'}`
         );
       }
-      if (!detection.isStreaming) {
+
+      // Streaming mode requires streaming-compatible weights; Live Overload requires offline weights.
+      if (sttEngineMode === 'streaming' && !detection.isStreaming) {
         setValidationError(
-          'This STT model is offline-only. Pick a streaming-capable model for the Live Pipeline screen.'
+          'This STT model is offline-only. Switch STT to "Live Overload" mode to use it in a live pipeline.'
+        );
+        setPipelineState('idle');
+        setStatusText('');
+        return;
+      }
+      if (sttEngineMode === 'offline' && detection.isStreaming) {
+        setValidationError(
+          'This STT model is streaming-only. Live Overload needs offline STT weights — pick another STT model or use Streaming STT.'
         );
         setPipelineState('idle');
         setStatusText('');
@@ -473,24 +731,37 @@ export default function LivePipelineShowcaseScreen() {
       }
 
       // ── Init STT engine ────────────────────────────────────────────────────
-      setStatusText('Initializing streaming STT…');
-      const sttEngine = await createStreamingSTT({
-        modelSource: sttSource,
-        modelType: 'auto',
-        numThreads: NUM_THREADS,
-      });
-      sttEngineRef.current = sttEngine;
+      if (sttEngineMode === 'streaming') {
+        setStatusText('Initializing streaming STT…');
+        const sttEngine = await createStreamingSTT({
+          modelSource: sttSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        sttEngineRef.current = sttEngine;
+      } else {
+        setStatusText('Initializing offline STT (Live Overload)…');
+        const { createSTT } = require('react-native-sherpa-onnx/stt');
+        const sttEngine = await createSTT({
+          modelSource: sttSource,
+          modelType: 'auto',
+          numThreads: NUM_THREADS,
+        });
+        sttEngineRef.current = sttEngine;
+      }
 
       // ── Init TTS engine ────────────────────────────────────────────────────
-      setStatusText('Initializing streaming TTS…');
       const ttsSource = await resolveTtsSource(selectedTtsModel);
-      const ttsEngine = await createStreamingTTS({
+
+      setStatusText('Initializing TTS…');
+      const ttsEngine = await createTTS({
         modelSource: ttsSource,
         modelType: 'auto',
         numThreads: NUM_THREADS,
       });
       ttsEngineRef.current = ttsEngine;
-      const ttsSampleRate = await ttsEngine.getSampleRate();
+
+      const ttsSampleRate = await ttsEngineRef.current!.getSampleRate();
 
       // ── Create audio buffers ───────────────────────────────────────────────
       const sttInputAudio = await createEmptyLiveAudioBuffer({
@@ -511,102 +782,59 @@ export default function LivePipelineShowcaseScreen() {
       });
       ttsOutputAudioRef.current = ttsOutputAudio;
 
-      // ── Create TTS input text buffer ───────────────────────────────────────
-      // If mode=auto, attach segmentation engine so forwarded partial text gets
-      // re-committed at sentence/length boundaries before reaching TTS.
-      const ttsSegOption = buildSegmentationOption(textSegConfig);
-      const ttsInputText = await createLiveTextBuffer({
+      // ── Shared live text buffer (contract: docs/feature-pipelines.md TTS streaming) ──
+      // STT commits segments here; `synthesize(LiveText, LiveAudio)` attaches text-domain
+      // segmentation and drains commits natively — no second buffer or JS append chain.
+      const sharedSttTtsText = await createLiveTextBuffer({
         streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
-        ...(ttsSegOption?.mode === 'auto' && ttsSegOption.policy
-          ? {
-              segmentation: {
-                mode: 'auto' as const,
-                policy: ttsSegOption.policy,
-              },
-            }
-          : {}),
       });
-      ttsInputTextRef.current = ttsInputText;
-
-      // ── Create STT output text buffer ──────────────────────────────────────
-      // onSegment callback forwards committed STT segments to TTS input buffer.
-      let localSegCount = 0;
-      const sttOutputText = await createLiveTextBuffer({
-        streamEvents: { partial: { enabled: true, minIntervalMs: 50 } },
-        onPartial: (event) => {
-          setPartialText(event.partialText);
-        },
-        onSegment: (event) => {
-          const seg = event.segment;
-          const text = seg.domain === 'text' ? seg.text : '';
-          if (!text) return;
-
-          localSegCount += 1;
-          const idx = localSegCount;
-
-          // Forward to TTS input buffer
-          const ttsId = ttsInputTextRef.current?.bufferId;
-          if (ttsId) {
-            if (ttsSegOption?.mode === 'auto') {
-              // Forward as partial so the TTS segmentation engine re-commits at boundaries
-              appendPartial(ttsId, text).catch(() => {});
-            } else {
-              // Forward directly as a committed segment
-              appendLiveTextSegment(ttsId, text).catch(() => {});
-            }
-          }
-
-          setPartialText('');
-          setCommittedSegments((prev) => {
-            const next = [...prev, text];
-            return next.length > 5 ? next.slice(next.length - 5) : next;
-          });
-          setSegmentEvents((prev) => {
-            const ev: SegmentEvent = { index: idx, text };
-            const next = [...prev, ev];
-            return next.length > MAX_SEGMENT_EVENTS
-              ? next.slice(next.length - MAX_SEGMENT_EVENTS)
-              : next;
-          });
-        },
-      });
-      sttOutputTextRef.current = sttOutputText;
+      sharedSttTtsTextRef.current = sharedSttTtsText;
 
       // ── Start pipelines ────────────────────────────────────────────────────
-      const sttPipeline = await sttEngine.transcribe(
+      const sttPipeline = await sttEngineRef.current!.transcribe(
         sttInputAudio,
-        sttOutputText,
-        { chunkSize: 3200 }
+        sharedSttTtsText,
+        {
+          chunkSize: 3200,
+          ...(() => {
+            const opt = buildSegmentationOption(sttSegConfig);
+            return opt && opt.mode !== 'off' ? { segmentation: opt } : {};
+          })(),
+        }
       );
       sttPipelineRef.current = sttPipeline;
 
-      const ttsPipeline = await ttsEngine.synthesize(
-        ttsInputText.bufferId,
+      const ttsSegmentation: TtsLivePipelineOptions['segmentation'] = (() => {
+        const ttsOpt = buildSegmentationOption(textSegConfig);
+        return ttsOpt && ttsOpt.mode === 'auto' && ttsOpt.policy
+          ? { mode: 'auto', policy: ttsOpt.policy }
+          : {
+              mode: 'auto',
+              policy: {
+                evaluator: 'text_synthetic_auto',
+                sentenceBoundary: true,
+                maxLengthChars: 500,
+              },
+            };
+      })();
+
+      const ttsPipeline = await ttsEngineRef.current!.synthesize(
+        sharedSttTtsText.bufferId,
         ttsOutputAudio.bufferId,
-        {}
+        {
+          segmentation: ttsSegmentation,
+        }
       );
       ttsPipelineRef.current = ttsPipeline;
 
-      // ── Start PCM player ───────────────────────────────────────────────────
-      const player = await createPcmPlayer(ttsOutputAudio, {
-        onEnded: () => {
-          setActiveSteps((prev) => {
-            const s = new Set(prev);
-            s.delete('play');
-            return s;
-          });
-        },
-      });
-      playerRef.current = player;
-
-      setActiveSteps(new Set<PipelineStep>(['input', 'stt', 'tts', 'play']));
+      setActiveSteps(new Set<PipelineStep>(['input', 'stt', 'tts']));
       setPipelineState('running');
 
       // ── Start source ───────────────────────────────────────────────────────
       if (sourceMode === 'mic') {
         await startMicToLiveAudioBuffer(sttInputAudio, { emitToJs: false });
         setStatusText(
-          'Microphone active. Speech → STT → TTS → Playback is running.'
+          'Microphone active. Speech → STT → TTS (no live playback; use TTS output below after stop).'
         );
       } else {
         const source = toFileSource(pickedFileUri!);
@@ -622,7 +850,7 @@ export default function LivePipelineShowcaseScreen() {
         );
         ingestRef.current = ingest;
 
-        void ingest.done
+        ingest.done
           .then(() => {
             setStatusText('File ingested. Waiting for STT and TTS to drain…');
           })
@@ -634,15 +862,22 @@ export default function LivePipelineShowcaseScreen() {
           });
       }
 
+      stopSttTranscriptPolling();
+      sttTranscriptPollRef.current = setInterval(() => {
+        syncTranscriptStt().catch(() => {});
+      }, STT_TRANSCRIPT_POLL_MS);
+
       // Watch for pipeline completion
-      void Promise.all([
+      Promise.all([
         sttPipeline.completed.catch(() => {}),
         ttsPipeline.completed.catch(() => {}),
-      ]).then(async () => {
-        setStatusText('Pipeline completed.');
-        await releaseAllResources();
-        setPipelineState('idle');
-      });
+      ])
+        .then(async () => {
+          setStatusText('Pipeline completed.');
+          await releaseAllResources();
+          setPipelineState('idle');
+        })
+        .catch(() => {});
     } catch (startErr) {
       setError(normalizeErrorMessage(startErr));
       setStatusText('Failed to start pipeline.');
@@ -656,9 +891,14 @@ export default function LivePipelineShowcaseScreen() {
     pickedFileUri,
     pipelineState,
     textSegConfig,
+    sttSegConfig,
+    sttEngineMode,
     releaseAllResources,
+    releasePriorCapturedTts,
     resolveSttSource,
     resolveTtsSource,
+    syncTranscriptStt,
+    stopSttTranscriptPolling,
   ]);
 
   const stopPipeline = useCallback(async () => {
@@ -670,14 +910,16 @@ export default function LivePipelineShowcaseScreen() {
     setStatusText('Stopped.');
   }, [pipelineState, releaseAllResources]);
 
+  const ttsReadyForPipeline = ttsEngineMode === 'offline' && !!selectedTtsModel;
+
   const canStart =
     !!selectedSttModel &&
-    !!selectedTtsModel &&
+    ttsReadyForPipeline &&
     (sourceMode === 'mic' || !!pickedFileUri) &&
     pipelineState === 'idle';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <ScreenIntroModal screenId="LivePipelineShowcase" />
       <ScrollView
         style={styles.scrollView}
@@ -688,48 +930,45 @@ export default function LivePipelineShowcaseScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pipeline</Text>
           <View style={styles.pipelineDiagram}>
-            {(['input', 'stt', 'tts', 'play'] as PipelineStep[]).map(
-              (step, i) => {
-                const isActive = activeSteps.has(step);
-                const labels: Record<PipelineStep, string> = {
-                  input: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
-                  stt: '📝 STT',
-                  tts: '🔊 TTS',
-                  play: '▶️ Play',
-                };
-                return (
-                  <>
-                    {i > 0 && (
-                      <Text
-                        key={`arrow-${step}`}
-                        style={[
-                          styles.pipelineArrow,
-                          isActive && styles.pipelineArrowActive,
-                        ]}
-                      >
-                        →
-                      </Text>
-                    )}
-                    <View
-                      key={step}
+            {(['input', 'stt', 'tts'] as PipelineStep[]).map((step, i) => {
+              const isActive = activeSteps.has(step);
+              const labels: Record<PipelineStep, string> = {
+                input: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
+                stt: '📝 STT',
+                tts: '🔊 TTS',
+              };
+              return (
+                <>
+                  {i > 0 && (
+                    <Text
+                      key={`arrow-${step}`}
                       style={[
-                        styles.pipelineStep,
-                        isActive && styles.pipelineStepActive,
+                        styles.pipelineArrow,
+                        isActive && styles.pipelineArrowActive,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.pipelineStepLabel,
-                          isActive && styles.pipelineStepLabelActive,
-                        ]}
-                      >
-                        {labels[step]}
-                      </Text>
-                    </View>
-                  </>
-                );
-              }
-            )}
+                      →
+                    </Text>
+                  )}
+                  <View
+                    key={step}
+                    style={[
+                      styles.pipelineStep,
+                      isActive && styles.pipelineStepActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.pipelineStepLabel,
+                        isActive && styles.pipelineStepLabelActive,
+                      ]}
+                    >
+                      {labels[step]}
+                    </Text>
+                  </View>
+                </>
+              );
+            })}
           </View>
         </View>
 
@@ -761,7 +1000,7 @@ export default function LivePipelineShowcaseScreen() {
           {sourceMode === 'file' && (
             <>
               <TouchableOpacity
-                style={[styles.optionButton, { alignSelf: 'flex-start' }]}
+                style={[styles.optionButton, styles.optionButtonAlignStart]}
                 onPress={pickFile}
                 disabled={pipelineState !== 'idle'}
               >
@@ -773,97 +1012,74 @@ export default function LivePipelineShowcaseScreen() {
           )}
         </View>
 
-        {/* STT model */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>STT Model (Streaming)</Text>
-          <Text style={styles.hint}>
-            Only streaming-capable models work here. Offline-only models will be
-            rejected at startup.
-          </Text>
-          {loadingModels ? (
-            <ActivityIndicator size="small" />
-          ) : sttModels.length === 0 ? (
-            <Text style={styles.hint}>
-              No STT models found. Download one from the Model Downloads screen.
-            </Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.optionRow}>
-                {sttModels.map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[
-                      styles.optionButton,
-                      selectedSttModel === m && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedSttModel(m)}
-                    disabled={pipelineState !== 'idle'}
-                  >
-                    <Text
-                      style={[
-                        styles.optionButtonText,
-                        selectedSttModel === m && styles.optionButtonTextActive,
-                      ]}
-                    >
-                      {getModelDisplayName(m)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-        </View>
+        <EngineModeModelSelector
+          label={`STT Model (${
+            sttEngineMode === 'streaming' ? 'Streaming' : 'Offline'
+          })`}
+          engineMode={sttEngineMode}
+          onEngineModeChange={setSttEngineMode}
+          models={sttModels}
+          selectedModel={selectedSttModel}
+          onModelSelect={setSelectedSttModel}
+          isModelStreamingCapable={(m) => streamingSttModelIds.has(m)}
+          isModelOfflineCapable={(m) => offlineSttModelIds.has(m)}
+          loading={loadingModels}
+          disabled={pipelineState !== 'idle'}
+        />
+
+        {/* STT segmentation (only shown in Live Overload mode) */}
+        {sttEngineMode === 'offline' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Speech Segmentation</Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={sttSegConfig}
+              onChange={setSttSegConfig}
+              disabled={pipelineState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory segmentation. Choose Auto or Manual."
+            />
+          </View>
+        )}
 
         {/* TTS model + text segmentation */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            TTS Model (Offline model used by Streaming TTS)
-          </Text>
-          {loadingModels ? (
-            <ActivityIndicator size="small" />
-          ) : ttsModels.length === 0 ? (
+        <EngineModeModelSelector
+          label={`TTS Model (${
+            ttsEngineMode === 'streaming' ? 'Streaming' : 'Offline'
+          })`}
+          engineMode={ttsEngineMode}
+          onEngineModeChange={setTtsEngineMode}
+          models={ttsModels}
+          selectedModel={selectedTtsModel}
+          onModelSelect={setSelectedTtsModel}
+          isModelStreamingCapable={(m) => streamingTtsModelIds.has(m)}
+          loading={loadingModels}
+          disabled={pipelineState !== 'idle'}
+          streamingHintOverride={TTS_STREAMING_MODE_HINT}
+          streamingModelAreaPlaceholder={TTS_STREAMING_MODEL_AREA_PLACEHOLDER}
+        />
+
+        {/* TTS text segmentation */}
+        {ttsEngineMode === 'offline' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Text Segmentation (STT→TTS)</Text>
             <Text style={styles.hint}>
-              No TTS models found. Download one from the Model Downloads screen.
+              STT and TTS share one LiveTextBuffer — commits stay native. This
+              policy configures TTS live overload text segmentation on that
+              buffer (chunking before synthesize).{'\n'}
+              Auto: sentence/length boundaries; Off: one synthesize chunk per
+              STT commit when policy allows.
             </Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.optionRow}>
-                {ttsModels.map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[
-                      styles.optionButton,
-                      selectedTtsModel === m && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedTtsModel(m)}
-                    disabled={pipelineState !== 'idle'}
-                  >
-                    <Text
-                      style={[
-                        styles.optionButtonText,
-                        selectedTtsModel === m && styles.optionButtonTextActive,
-                      ]}
-                    >
-                      {getModelDisplayName(m)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-          )}
-          <Text style={styles.sectionTitle}>Text Segmentation (STT→TTS)</Text>
-          <Text style={styles.hint}>
-            Off: each STT segment is forwarded directly to TTS.{'\n'}
-            Auto: partial STT output is re-segmented at sentence boundaries
-            before being synthesized.
-          </Text>
-          <SegmentationPolicyControls
-            variant="text-streaming"
-            value={textSegConfig}
-            onChange={setTextSegConfig}
-            disabled={pipelineState !== 'idle'}
-          />
-        </View>
+            <SegmentationPolicyControls
+              variant="text-offline"
+              value={textSegConfig}
+              onChange={setTextSegConfig}
+              disabled={pipelineState !== 'idle'}
+              disableOff
+              offDisabledMessage="Live Overload requires mandatory text segmentation. Choose Auto or Manual."
+            />
+          </View>
+        )}
 
         {/* Validation error */}
         {validationError ? (
@@ -892,7 +1108,7 @@ export default function LivePipelineShowcaseScreen() {
               <TouchableOpacity
                 style={[
                   styles.runButton,
-                  { backgroundColor: '#D32F2F' },
+                  styles.runButtonStop,
                   pipelineState === 'stopping' && styles.runButtonDisabled,
                 ]}
                 onPress={stopPipeline}
@@ -935,20 +1151,19 @@ export default function LivePipelineShowcaseScreen() {
           partialText) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Live Transcript</Text>
-            <View style={styles.transcriptBox}>
-              {committedSegments.length > 0 ? (
-                committedSegments.map((seg, i) => (
-                  <Text key={`seg-${i}`} style={styles.committedText}>
-                    {seg}
-                  </Text>
-                ))
-              ) : (
-                <Text style={styles.hint}>Waiting for speech…</Text>
-              )}
-              {partialText ? (
-                <Text style={styles.partialText}>{partialText}</Text>
-              ) : null}
-            </View>
+            <Text style={styles.transcriptMetric}>
+              Segments: {committedSegments.length}
+            </Text>
+            <Text style={styles.transcriptLabel}>Committed</Text>
+            <Text style={styles.transcriptTextArea} selectable>
+              {committedSegments.length > 0
+                ? committedSegments.join(' ')
+                : 'Waiting for committed segments…'}
+            </Text>
+            <Text style={styles.transcriptLabelSpaced}>Partial</Text>
+            <Text style={styles.transcriptTextAreaPartial} selectable>
+              {partialText.trim() || 'Waiting for partial text…'}
+            </Text>
           </View>
         )}
 
@@ -974,6 +1189,26 @@ export default function LivePipelineShowcaseScreen() {
             ))}
           </View>
         )}
+
+        {pipelineTtsOutput ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>TTS output (last run)</Text>
+            <Text style={styles.hint}>
+              After Stop or when the pipeline finishes, synthesized speech is
+              captured here. Play, save to a file, or dismiss to free memory.
+            </Text>
+            <PipelineOfflineAudioResultCard
+              bufferId={pipelineTtsOutput.bufferId}
+              sourceLabel={pipelineTtsOutput.sourceLabel}
+              sampleRate={pipelineTtsOutput.sampleRate}
+              durationMs={pipelineTtsOutput.durationMs}
+              onDismiss={releasePriorCapturedTts}
+              disabled={
+                pipelineState === 'running' || pipelineState === 'starting'
+              }
+            />
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

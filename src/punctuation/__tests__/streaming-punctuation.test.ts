@@ -12,8 +12,10 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   },
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/punctuation-online'),
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest.fn(
+    async () => '/models/punctuation-online'
+  ),
 }));
 
 jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({

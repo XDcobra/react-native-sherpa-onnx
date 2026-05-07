@@ -586,6 +586,44 @@ SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& sam
     }
 }
 
+SttRecognitionResult SttWrapper::transcribeSamplesChunked(const std::vector<float>& samples, int32_t sampleRate, int32_t chunkSize) {
+    if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
+        LOGE("Not initialized. Call initialize() first.");
+        throw std::runtime_error("STT not initialized. Call initialize() first.");
+    }
+    if (samples.empty()) {
+        SttRecognitionResult empty;
+        return empty;
+    }
+    const int32_t n = static_cast<int32_t>(samples.size());
+    const int32_t cs = std::max(1, chunkSize);
+    try {
+        auto stream = pImpl->recognizer.value().CreateStream();
+        if (pImpl->currentModelKind == SttModelKind::kQwen3Asr && !pImpl->qwen3_hotwords_csv.empty())
+            stream.SetOption("hotwords", pImpl->qwen3_hotwords_csv.c_str());
+        if (n <= cs) {
+            stream.AcceptWaveform(sampleRate, samples.data(), n);
+        } else {
+            // Long segment: feed in chunkSize batches. Whisper uses a 30-second internal window.
+            int32_t offset = 0;
+            while (offset < n) {
+                int32_t count = std::min(cs, n - offset);
+                stream.AcceptWaveform(sampleRate, samples.data() + offset, count);
+                offset += count;
+            }
+        }
+        pImpl->recognizer.value().Decode(&stream);
+        auto result = pImpl->recognizer.value().GetResult(&stream);
+        return offlineResultToSttResult(result);
+    } catch (const std::exception& e) {
+        LOGE("TranscribeSamplesChunked: recognition failed: %s", e.what());
+        throw;
+    } catch (...) {
+        LOGE("TranscribeSamplesChunked: recognition failed (unknown exception)");
+        throw std::runtime_error("Recognition failed.");
+    }
+}
+
 void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
     if (!pImpl->initialized || !pImpl->recognizer.has_value() || !pImpl->lastConfig.has_value()) {
         LOGE("Not initialized or no stored config.");

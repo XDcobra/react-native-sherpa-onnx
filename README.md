@@ -23,12 +23,48 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
+## Feature Support
+
+### Speech & media features
+
+- Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
+- Text-to-Speech (TTS): [Offline](./docs/tts-offline.md)
+- Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
+- VAD: [Streaming](./docs/vad-streaming.md)
+- Alignment / timestamps: [Offline](./docs/alignment-offline.md)
+
+### Pipeline & buffers
+
+- Audio buffers: [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
+- Text buffers: [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
+- Segment buffers: [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
+- Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
+- File and conversion I/O: [File I/O](./docs/fileio.md) · [Audio save / conversion](./docs/audio-conversion.md)
+
+### Playback & utilities
+
+- Playback: [PCM Player](./docs/pcm-player.md)
+- Runtime acceleration: [Execution providers](./docs/execution-providers.md)
+- Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
+- Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md)
+
+### Planned / not yet
+
+- Speaker diarization: [Diarization](./docs/diarization.md)
+- Source separation: [Separation](./docs/separation.md)
+
 ## Read before use
 
 - On-device models are loaded into native memory (C++), not the JS heap. Plan for peak usage, especially when multiple engines run concurrently. See [Memory and models](./docs/memory-and-models.md).
 - Many high-quality model bundles are offline-first or offline-only. Large offline jobs (long inputs, big buffers) can increase peak RAM and trigger OOM on mobile devices.
 - Use the [Segmentation engine](./docs/segmentation-engine.md) to split large offline work into bounded segments and run the offline engine per segment. This reduces peak RAM and is the main mitigation path for low-memory devices but may decrease result quality. See also [Memory and models - Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
+- **Long files on modest phones:** The same chunk-by-chunk design makes **multi-hour** recordings practical on device: you are not forced to hold an entire file in memory for one monolithic pass. That bounded-memory profile is a major reason these pipelines can still run on **mid-range or older smartphones**, not only flagships—provided you use segmentation (offline orchestration) and/or live buffers and policies suited to your feature. Details: [Segmentation engine](./docs/segmentation-engine.md), [Memory and models](./docs/memory-and-models.md).
 - Native errors use `OFFLINE_OOM` for this class of failures. The error guidance points to streaming alternatives (where available) and the segmentation documentation.
+
+## Segmentation
+
+The segmentation engine is not only about “clean” boundaries—it is how the SDK keeps **peak native RAM** predictable for STT, TTS, enhancement, punctuation, and related flows. **Offline** jobs run the same model repeatedly on successive segments; **streaming** and **live-overload** APIs attach speech or text policies so workers process one bounded unit at a time. That is what makes **hour-scale** inputs and reasonable performance on **less powerful devices** achievable without custom app-level chunking. Start with [Segmentation engine](./docs/segmentation-engine.md), then [Feature pipelines](./docs/feature-pipelines.md) and [Memory and models](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
 
 ## Installation
 
@@ -82,7 +118,9 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 ## Table of contents
 
 - [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
+- [Feature Support](#feature-support)
 - [Read before use](#read-before-use)
+- [Segmentation](#segmentation)
 - [Installation](#installation)
   - [Android](#android)
   - [iOS](#ios)
@@ -90,55 +128,16 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
   - [Offline pipeline (batch)](#offline-pipeline-batch)
   - [Streaming pipeline (live)](#streaming-pipeline-live)
   - [Decision guide: offline vs streaming](#decision-guide-offline-vs-streaming)
-- [Feature Support](#feature-support)
-- [Platform Support Status](#platform-support-status)
 - [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
 - [Memory and models](#memory-and-models)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
+  - [Platform Support Status](#platform-support-status)
 - [Example Apps](#example-apps)
   - [Example App (Monorepo SDK Showcase)](#example-app-monorepo-sdk-showcase)
 - [Contributing](#contributing)
 - [License](#license)
-
-## Platform Support Status
-
-| Platform | Status | Notes |
-|----------|--------|-------|
-| **Android** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
-| **iOS** | ✅ **Production Ready** | CI/CD automated, multiple models supported |
-
-## Feature Support
-
-### Speech & media features
-
-- Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
-- Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
-- VAD: [Streaming](./docs/vad-streaming.md)
-- Alignment / timestamps: [Offline](./docs/alignment-offline.md)
-
-### Pipeline & buffers
-
-- Audio buffers: [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
-- Text buffers: [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
-- Segment buffers: [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
-- Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
-- File and conversion I/O: [File I/O](./docs/fileio.md) · [Audio save / conversion](./docs/audio-conversion.md)
-
-### Playback & utilities
-
-- Playback: [PCM Player](./docs/pcm-player.md)
-- Runtime acceleration: [Execution providers](./docs/execution-providers.md)
-- Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
-- Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md)
-
-### Planned / not yet
-
-- Speaker diarization: [Diarization](./docs/diarization.md)
-- Source separation: [Separation](./docs/separation.md)
 
 ## SDK pipeline logic
 
@@ -164,7 +163,7 @@ flowchart LR
   F --> G[Read slices or save file]
 ```
 
-For offline-only model families and large inputs, segmenting first is often the safer default on phones: it bounds peak native RAM by running the same offline engine repeatedly on smaller chunks. See [Segmentation engine](./docs/segmentation-engine.md) and [Memory and models](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
+For offline-only model families and large inputs, segmenting first is often the safer default on phones: it bounds peak native RAM by running the same offline engine repeatedly on smaller chunks. That is how **hour-long** files and jobs on **less powerful** handsets stay within reach without loading the whole recording at once. See [Segmentation engine](./docs/segmentation-engine.md) and [Memory and models](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
 
 **Characteristics**
 - Simple lifecycle (`create` -> `run` -> `read` -> `release`)
@@ -261,7 +260,7 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 | **Pocket**       | `'pocket'`        | Flow-matching TTS. **Voice cloning** on **Android:** batch and streaming TTS. **iOS:** cloning is experimental. Detected by lm_flow, lm_main, text_conditioner, vocab/token_scores. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 | **Supertonic**    | `'supertonic'`        | Lightning-fast, on-device text-to-speech system designed for extreme performance with minimal computational overhead. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) |
 
-For **streaming TTS** (incremental generation, low latency), use `createStreamingTTS()` with supported model types. See [Streaming Text-to-Speech](./docs/tts-streaming.md).
+For **live TTS pipelines** (segment-driven synthesis from live text), use `createTTS().synthesize(LiveTextBuffer, LiveAudioBuffer, { segmentation })`. See [Offline Text-to-Speech](./docs/tts-offline.md) ("Live overload on offline TTS").
 
 </details>
 
@@ -333,7 +332,7 @@ Every active engine keeps its model weights resident in native memory for its en
 - [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning, **offline-only models vs segmentation / chunking**
 - [Segmentation engine](./docs/segmentation-engine.md) – segment boundaries, links, modes; **OOM mitigation** when using offline models on constrained devices
 - **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md)
 - **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - **Punctuation:** [Offline](./docs/punctuation-offline.md)
 - [Voice Activity Detection (VAD)](./docs/vad-streaming.md)
@@ -402,14 +401,14 @@ yarn android  # or yarn ios
 <div align="center">
 <table>
 <tr>
-<td><img src="./docs/images/example_home_screen.png" alt="Model selection home screen" width="240" /></td>
-<td><img src="./docs/images/example_stt_1.png" alt="Transcribe english audio" width="240" /></td>
-<td><img src="./docs/images/example_stt_2.png" alt="Transcribe cantonese audio" width="240" /></td>
+<td><img src="./docs/images/example/home_1.png" alt="Model selection home screen" width="240" /></td>
+<td><img src="./docs/images/example/home_2.png" alt="Transcribe english audio" width="240" /></td>
+<td><img src="./docs/images/example/home_3.png" alt="Transcribe cantonese audio" width="240" /></td>
 </tr>
 <tr>
-<td><img src="./docs/images/example_streaming.png" alt="Text to speech generation" width="240" /></td>
-<td><img src="./docs/images/example_tts.png" alt="Text to speech generation" width="240" /></td>
-<td><img src="./docs/images/example_provider.png" alt="Text to speech generation" width="240" /></td>
+<td><img src="./docs/images/example/stt_3.png" alt="Text to speech generation" width="240" /></td>
+<td><img src="./docs/images/example/tts_3.png" alt="Text to speech generation" width="240" /></td>
+<td><img src="./docs/images/example/segmentation_text_2.png" alt="Text to speech generation" width="240" /></td>
 </tr>
 </table>
 </div>

@@ -170,6 +170,37 @@ export interface Spec extends TurboModule {
   /** Release OnlineRecognizer and stop any active STT pipeline for this instance. */
   unloadOnlineStt(instanceId: string): Promise<void>;
 
+  /**
+   * Start a live-offline STT pipeline: a segmentation engine drives the live audio buffer,
+   * and the offline recognizer processes each committed speech segment.
+   * Returns a pipelineId compatible with stopStreamingPipeline / flushStreamingPipeline / etc.
+   */
+  startSttOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      /** @deprecated Ignored by native; do not rely on this field. */
+      chunkSize?: number;
+    }
+  ): Promise<{ pipelineId: string }>;
+
+  /**
+   * Start a live-offline Enhancement pipeline.
+   * Restricts evaluator to `continuous_frames`.
+   */
+  startEnhancementOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   // ==================== Pipeline Audio Buffers ====================
 
   /**
@@ -1185,20 +1216,7 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
-  // ==================== Online (streaming) TTS Methods ====================
-
-  /**
-   * Start a streaming TTS pipeline worker.
-   * Reads committed segments from a LiveTextBuffer, synthesizes each one
-   * (using per-segment meta overrides where available), and writes PCM
-   * samples to a LiveAudioBuffer.
-   */
-  startTtsPipeline(
-    instanceId: string,
-    textInLiveBufferId: string,
-    audioOutLiveBufferId: string,
-    options?: Object
-  ): Promise<{ pipelineId: string }>;
+  // ==================== TTS Runtime Methods ====================
 
   /**
    * Create a standalone PCM player session.
@@ -1406,6 +1424,42 @@ export interface Spec extends TurboModule {
   unloadOnlinePunctuation(instanceId: string): Promise<void>;
 
   // ==================== Punctuation Pipeline ====================
+
+  /**
+   * Start a live-offline punctuation pipeline: a segmentation engine drives the
+   * live text input buffer, and offline punctuation runs per committed text segment.
+   */
+  startPunctuationOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
+  /**
+   * Start a live-offline TTS pipeline: a segmentation engine drives the
+   * live text input buffer, and offline TTS synthesizes each committed text segment,
+   * writing audio chunks to the live audio output buffer.
+   *
+   * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+   */
+  startTtsOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      /** Present when speech-domain segmentation mirrors into seg_live_*; omitted for text-domain engines. */
+      segmentLiveBufferId?: string;
+      sid?: number;
+      speed?: number;
+      referenceAudioBufferId?: string;
+      referenceText?: string;
+    }
+  ): Promise<{ pipelineId: string }>;
 
   startStreamingPunctuationPipeline(
     instanceId: string,

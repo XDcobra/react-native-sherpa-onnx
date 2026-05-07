@@ -4,7 +4,13 @@
 
 **CT-Transformer** batch punctuation: **Input** = populated [offline text buffer](textbuffer-offline.md) (`lang` pass-through, not from the model). **Output** = empty buffer, one write; v1 leaves tokens/timestamps/etc. empty. **Return value** in JS always includes `processingTimeMs`; when segmentation is enabled it also includes orchestration fields (`status`, segment counters, optional failed/skipped segment details). Engine: `createOfflinePunctuation` → `punctuate` / `punctuateString`.
 
-`react-native-sherpa-onnx/punctuation` — loads **offline CT** only; online CNN is out of scope here ([`detectPunctuationModel`](#model-detection) for family checks). `txt_off_*` only, not live buffers. For online pipelines, see [punctuation-streaming.md](punctuation-streaming.md).
+`react-native-sherpa-onnx/punctuation` — loads **offline CT** only; online CNN is out of scope here ([`detectPunctuationModel`](#model-detection) for family checks). The offline engine supports both batch `txt_off_*` and the Phase-3 live overload `punctuate(txt_live_*, txt_live_*, { segmentation })`. For online CNN pipelines, see [punctuation-streaming.md](punctuation-streaming.md).
+
+Live-overload contract references:
+
+- Design note: [offline-stt-live-pipeline-mandatory-segmentation.md](migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md)
+- Overview: [live_overload_overview.md](migration/liveOverload/live_overload_overview.md)
+- Phase plan: [sub-04-punctuation-live-overload.md](migration/liveOverload/sub-04-punctuation-live-overload.md)
 
 ---
 
@@ -93,6 +99,39 @@ try {
   await releasePipelineTextBuffer(textOut2);
 }
 ```
+
+---
+
+## Live overload on offline punctuation (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline punctuation engine can drive a live pipeline directly. This is useful when you want to punctuate a live stream of text (e.g. from an STT live buffer) using a high-quality CT-Transformer model without the latency/BPE-size constraints of streaming CNN models.
+
+```ts
+const punct = await createOfflinePunctuation({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' },
+});
+
+const handle = await punct.punctuate(liveTextIn, liveTextOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Punctuated ${completion.unitsRead} characters`);
+```
+
+| Aspect | Live overload (`createOfflinePunctuation`) | Streaming engine (`createStreamingPunctuation`) |
+| --- | --- | --- |
+| Weights | CT-Transformer (Higher quality) | CNN-BiLSTM (Lower quality) |
+| Latency | Per-segment (higher) | Per-token (lower) |
+| Context | Global (per segment) | Local (sliding window) |
+
+
 
 ---
 

@@ -219,6 +219,8 @@ class SherpaOnnxPunctuationHelper(
 
   private fun getEngine(instanceId: String): OfflinePunctuation? = offlineEngines[instanceId]
 
+  fun getOfflineEngine(instanceId: String): OfflinePunctuation? = getEngine(instanceId)
+
   private fun readOfflineText(
     textInBufferId: String,
   ): Result<Pair<String, String>> {

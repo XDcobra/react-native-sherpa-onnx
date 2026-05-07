@@ -3,10 +3,12 @@ import type { DetectedModelEntry } from '../types/modelDetect';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
 } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
 } from '../textbuffer/types';
 import type {
   ErrorRecoveryStrategy,
@@ -17,6 +19,14 @@ import type {
 } from '../pipeline/offlineOrchestrator';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type { SpeechSegment } from '../segment/segment';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+
+/** TTS-specific pipeline handle returned by live pipeline synthesis. */
+export interface TtsPipelineHandle extends StreamingPipelineHandle {
+  readonly instanceId: string;
+}
 
 /**
  * Supported TTS model types.
@@ -365,9 +375,34 @@ export interface TtsSynthesisResult {
 }
 
 /**
+ * Options for the live offline TTS pipeline overload.
+ * Extends `LiveOfflinePipelineBaseOptions` which requires `segmentation.policy`
+ * with a text-domain evaluator (e.g. `text_synthetic_auto`).
+ *
+ * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+ * See: docs/migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md
+ */
+export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
+  /** Speaker ID for the entire pipeline. Default 0. Overridable per-segment via `segment.meta.sid`. */
+  sid?: number;
+  /** Speed multiplier. Default 1.0. Overridable per-segment via `segment.meta.speed`. */
+  speed?: number;
+  /**
+   * Voice cloning configuration. Initialized once per pipeline.
+   * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).
+   */
+  voiceClone?: TtsVoiceClone;
+  /**
+   * Optional mirror of every committed audio segment that lands on the output `LiveAudioBuffer`.
+   * Same constraints as STT's `onSegment` (worker thread, no `onPartial`).
+   */
+  onSegment?: (segment: SpeechSegment) => void;
+}
+
+/**
  * Instance-based batch TTS engine returned by createTTS().
  * Use synthesize() for buffer-to-buffer offline synthesis.
- * For streaming, use createStreamingTTS() and StreamingTtsEngine instead.
+ * For live pipelines, use the LiveText/LiveAudio synthesize overload.
  * Call destroy() when done to free native resources.
  */
 export interface TtsEngine {
@@ -385,6 +420,23 @@ export interface TtsEngine {
     audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
     options?: TtsSynthesisOptions
   ): Promise<TtsSynthesisResult>;
+  /**
+   * Live offline TTS pipeline: reads committed text segments from a `LiveTextBuffer`,
+   * synthesizes each via the offline TTS engine, and writes audio chunks to a `LiveAudioBuffer`.
+   * Segmentation policy is mandatory (text domain).
+   *
+   * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+   *
+   * @param textIn - Live text buffer (recording state, text domain segmentation applied)
+   * @param audioOut - Live audio buffer (recording state, sampleRate must equal model sampleRate)
+   * @param options - Pipeline options including mandatory segmentation policy
+   * @returns Handle to control and inspect the running pipeline
+   */
+  synthesize(
+    textIn: LiveTextBufferIdSource,
+    audioOut: LiveAudioBufferIdSource,
+    options: TtsLivePipelineOptions
+  ): Promise<TtsPipelineHandle>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: DetectedModelEntry[];

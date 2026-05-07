@@ -9,8 +9,10 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   },
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/punctuation-offline'),
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest.fn(
+    async () => '/models/punctuation-offline'
+  ),
 }));
 
 jest.mock('../../pipeline/offlineOrchestrator', () => ({

@@ -367,6 +367,65 @@ The `SttTranscribeResult` returned by `transcribe` includes:
 
 See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
 
+### Whisper and the 30-second window
+
+Whisper's encoder processes audio in a fixed 30-second mel-spectrogram window. Segments that exceed this length cause Whisper to truncate or hallucinate text. When using a Whisper model, keep `maxSegmentMs` in your segmentation policy at or below 30 000 ms:
+
+```ts
+// Offline batch path with explicit segmentation policy:
+const result = await engine.transcribe(audio, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      maxSegmentMs: 25000, // keep well under Whisper's 30 s window
+    },
+  },
+});
+
+// Live-offline overload — same constraint applies:
+const handle = await stt.transcribe(liveAudio, liveText, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      maxSegmentMs: 25000,
+    },
+  },
+});
+```
+
+See [openai/whisper#1118](https://github.com/openai/whisper/discussions/1118) for background. This constraint does not apply to transducer, paraformer, SenseVoice, or other non-Whisper models.
+
+## Live overload (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline STT engine can drive a live pipeline (mic input) directly. This is useful when you have a high-quality offline model (like Whisper) and want to use it for live transcription without a separate streaming-optimized model.
+
+```ts
+const engine = await createSTT({ /* offline init */ });
+const pipeline = await engine.transcribe(liveAudio, liveText, {
+  segmentation: { 
+    mode: 'auto',
+    policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 10000 } 
+  },
+});
+
+// pipeline.stop() / .flush() / .completed as usual
+const completion = await pipeline.completed;
+console.log(`Processed ${completion.unitsRead} audio samples`);
+```
+
+| Aspect | Live overload (`createSTT`) | Streaming engine (`createStreamingSTT`) |
+| --- | --- | --- |
+| Decoder | offline (monolithic) | online (incremental) |
+| Partials | no (commit-only) | yes (mid-utterance hypotheses) |
+| Latency | Per-segment (higher) | Per-chunk (lower) |
+| Accuracy | Usually higher (full context) | Balanced for speed |
+
+
+
 ## Pipeline composition
 
 ### Typical upstream

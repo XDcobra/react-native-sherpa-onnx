@@ -233,6 +233,35 @@ await denoiser.destroy();
 
 ---
 
+## Live overload on offline enhancement (restricted)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline enhancement engine can drive a live pipeline directly. **Warning:** This is a restricted path. Because the offline engine is designed for monolithic processing, it is wrapped in a segmentation loop that processed fixed-size blocks (using the `continuous_frames` policy). This may introduce audible artifacts at segment boundaries.
+
+```ts
+const engine = await createEnhancement({ /* offline init */ });
+const pipeline = await engine.enhance(inputBuf, outputBuf, {
+  segmentation: { 
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 } 
+  },
+});
+
+// pipeline.stop() / .flush() / .completed as usual
+const completion = await pipeline.completed;
+console.log(`Denoised ${completion.unitsWritten} samples`);
+```
+
+| Aspect | Live overload (`createEnhancement`) | Streaming engine (`createStreamingEnhancement`) |
+| --- | --- | --- |
+| Weights | Offline-optimized | Streaming-optimized |
+| Boundary handling | Hard split (possible clicks) | Seamless stateful streaming |
+| Latency | Per-segment (higher) | Per-frame (lower) |
+| Recommendation | Use only for short segments | Preferred for live mic |
+
+
+
 ### Pipeline handle (`EnhancementPipelineHandle`)
 
 `EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
