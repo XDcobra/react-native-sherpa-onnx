@@ -45,15 +45,15 @@ import {
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
-  appendLiveTextSegment,
   createLiveTextBuffer,
   finalizeLiveTextBuffer,
+  getLiveTextBufferPartialSlice,
+  getLiveTextBufferSegmentCount,
+  getLiveTextBufferSegments,
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { appendPartial } from 'react-native-sherpa-onnx/segment';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -78,11 +78,13 @@ const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
 const MAX_SEGMENT_EVENTS = 20;
+/** Same interval as STTStreamingScreen `syncTranscript` for comparable UI updates. */
+const STT_TRANSCRIPT_POLL_MS = 150;
 
 type PipelineState = 'idle' | 'starting' | 'running' | 'stopping';
 type SourceMode = 'mic' | 'file';
 
-type PipelineStep = 'input' | 'stt' | 'tts' | 'play';
+type PipelineStep = 'input' | 'stt' | 'tts';
 
 type SegmentEvent = {
   index: number;
@@ -167,13 +169,18 @@ export default function LivePipelineShowcaseScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const sttInputAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const ttsOutputAudioRef = useRef<LiveAudioBufferRef | null>(null);
-  const sttOutputTextRef = useRef<LiveTextBufferRef | null>(null);
-  const ttsInputTextRef = useRef<LiveTextBufferRef | null>(null);
+  /** Single buffer: STT `transcribe` commits here; TTS live overload `synthesize` consumes the same buffer natively (no JS copy). */
+  const sharedSttTtsTextRef = useRef<LiveTextBufferRef | null>(null);
   const sttPipelineRef = useRef<SttPipelineHandle | null>(null);
   const ttsPipelineRef = useRef<TtsPipelineHandle | null>(null);
-  const playerRef = useRef<PcmPlayer | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
-  const segCountRef = useRef(0);
+  const sttTranscriptPollRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  /** Segment log cursor for showcase UI only (segment event list); TTS uses native drain on the shared buffer. */
+  const lastUiPolledSegmentCountRef = useRef(0);
+  /** Monotonic index for segment event log rows. */
+  const sttSegmentEventIndexRef = useRef(0);
   const capturedTtsOfflineIdRef = useRef<string | null>(null);
   /** Prevents concurrent teardown (e.g. Stop + pipeline.completed both calling release). */
   const releaseAllInFlightRef = useRef<Promise<void> | null>(null);
@@ -487,6 +494,79 @@ export default function LivePipelineShowcaseScreen() {
     []
   );
 
+  const stopSttTranscriptPolling = useCallback(() => {
+    if (sttTranscriptPollRef.current) {
+      clearInterval(sttTranscriptPollRef.current);
+      sttTranscriptPollRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Same reads as STTStreamingScreen `syncTranscript` for UI parity only.
+   * STT→TTS data flow uses one native `LiveTextBuffer` (no JS forwarding).
+   */
+  const syncTranscriptStt = useCallback(async () => {
+    const textBuffer = sharedSttTtsTextRef.current;
+    if (!textBuffer) return;
+
+    const bufferId = textBuffer.bufferId;
+    let segmentCountNow: number;
+    try {
+      segmentCountNow = await getLiveTextBufferSegmentCount(bufferId);
+    } catch {
+      return;
+    }
+
+    const segments =
+      segmentCountNow > 0
+        ? await getLiveTextBufferSegments(bufferId, 0, segmentCountNow)
+        : [];
+
+    let partial = '';
+    try {
+      partial = await getLiveTextBufferPartialSlice(bufferId, 0, 4096);
+    } catch {
+      /* ignore */
+    }
+    setPartialText(partial.trim());
+
+    const nonEmptyTexts = segments
+      .map((s) => s.text.trim())
+      .filter((t) => t.length > 0);
+    setCommittedSegments(
+      nonEmptyTexts.length > 5
+        ? nonEmptyTexts.slice(nonEmptyTexts.length - 5)
+        : nonEmptyTexts
+    );
+
+    const prevUi = lastUiPolledSegmentCountRef.current;
+    if (segmentCountNow <= prevUi) {
+      return;
+    }
+
+    const newSegments = await getLiveTextBufferSegments(
+      bufferId,
+      prevUi,
+      segmentCountNow - prevUi
+    );
+
+    for (const seg of newSegments) {
+      const text = seg.text.trim();
+      if (text) {
+        sttSegmentEventIndexRef.current += 1;
+        const idx = sttSegmentEventIndexRef.current;
+        setSegmentEvents((prevEvs) => {
+          const ev: SegmentEvent = { index: idx, text };
+          const next = [...prevEvs, ev];
+          return next.length > MAX_SEGMENT_EVENTS
+            ? next.slice(next.length - MAX_SEGMENT_EVENTS)
+            : next;
+        });
+      }
+    }
+    lastUiPolledSegmentCountRef.current = segmentCountNow;
+  }, []);
+
   // ── cleanup helpers ────────────────────────────────────────────────────────
   const releaseAllResources = useCallback(async () => {
     const existing = releaseAllInFlightRef.current;
@@ -498,8 +578,10 @@ export default function LivePipelineShowcaseScreen() {
     const releaseToken: { p: Promise<void> | null } = { p: null };
     releaseToken.p = (async () => {
       try {
-        // Cleanup order: stop mic → ingest → STT pipeline → finalize STT text →
-        // pause/destroy PCM player → flush/stop TTS → snapshot TTS live audio → release text/buffers → destroy engines.
+        await syncTranscriptStt().catch(() => {});
+        stopSttTranscriptPolling();
+        // Cleanup order: stop mic → ingest → STT pipeline → flush/stop TTS →
+        // snapshot TTS live audio → finalize/release shared text + buffers → destroy engines.
         await stopMicToLiveAudioBuffer().catch(() => {});
 
         const ingest = ingestRef.current;
@@ -512,23 +594,6 @@ export default function LivePipelineShowcaseScreen() {
         sttPipelineRef.current = null;
         if (sttPipeline) {
           await sttPipeline.stop().catch(() => {});
-        }
-
-        const sttText = sttOutputTextRef.current;
-        sttOutputTextRef.current = null;
-        if (sttText) {
-          await finalizeLiveTextBuffer(sttText.bufferId).catch(() => {});
-          await releasePipelineTextBuffer(sttText.bufferId).catch(() => {});
-          sttText.unsubscribeEvents();
-        }
-
-        // Tear down PCM playback before TTS pipeline stop / live buffer finalize.
-        // Otherwise finalize/append wakeups can enqueue a short tail into AudioTrack.
-        const player = playerRef.current;
-        playerRef.current = null;
-        if (player) {
-          await player.pause().catch(() => {});
-          await player.destroy().catch(() => {});
         }
 
         const ttsAudioForCapture = ttsOutputAudioRef.current;
@@ -544,11 +609,12 @@ export default function LivePipelineShowcaseScreen() {
           await captureLiveTtsToOfflineSnapshot(ttsAudioForCapture);
         }
 
-        const ttsText = ttsInputTextRef.current;
-        ttsInputTextRef.current = null;
-        if (ttsText) {
-          await releasePipelineTextBuffer(ttsText.bufferId).catch(() => {});
-          ttsText.unsubscribeEvents();
+        const sharedText = sharedSttTtsTextRef.current;
+        sharedSttTtsTextRef.current = null;
+        if (sharedText) {
+          await finalizeLiveTextBuffer(sharedText.bufferId).catch(() => {});
+          await releasePipelineTextBuffer(sharedText.bufferId).catch(() => {});
+          sharedText.unsubscribeEvents();
         }
 
         const sttAudio = sttInputAudioRef.current;
@@ -584,7 +650,11 @@ export default function LivePipelineShowcaseScreen() {
 
     releaseAllInFlightRef.current = releaseToken.p;
     await releaseToken.p;
-  }, [captureLiveTtsToOfflineSnapshot]);
+  }, [
+    captureLiveTtsToOfflineSnapshot,
+    stopSttTranscriptPolling,
+    syncTranscriptStt,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -625,7 +695,8 @@ export default function LivePipelineShowcaseScreen() {
     setPartialText('');
     setCommittedSegments([]);
     setSegmentEvents([]);
-    segCountRef.current = 0;
+    lastUiPolledSegmentCountRef.current = 0;
+    sttSegmentEventIndexRef.current = 0;
 
     await releasePriorCapturedTts();
     await releaseAllResources();
@@ -711,65 +782,18 @@ export default function LivePipelineShowcaseScreen() {
       });
       ttsOutputAudioRef.current = ttsOutputAudio;
 
-      // ── Create TTS input text buffer ───────────────────────────────────────
-      // Segmentation must NOT be attached here when using live TTS pipelines:
-      // both streaming and offline `synthesize(LiveText, …)` attach their own
-      // engine from `segmentation` in pipeline options; a second attach throws
-      // ENGINE_ALREADY_ATTACHED.
-      const ttsSegOption = buildSegmentationOption(textSegConfig);
-      const ttsInputText = await createLiveTextBuffer({
+      // ── Shared live text buffer (contract: docs/feature-pipelines.md TTS streaming) ──
+      // STT commits segments here; `synthesize(LiveText, LiveAudio)` attaches text-domain
+      // segmentation and drains commits natively — no second buffer or JS append chain.
+      const sharedSttTtsText = await createLiveTextBuffer({
         streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
       });
-      ttsInputTextRef.current = ttsInputText;
-
-      // ── Create STT output text buffer ──────────────────────────────────────
-      // onSegment callback forwards committed STT segments to TTS input buffer.
-      let localSegCount = 0;
-      const sttOutputText = await createLiveTextBuffer({
-        streamEvents: { partial: { enabled: true, minIntervalMs: 50 } },
-        onPartial: (event) => {
-          setPartialText(event.partialText);
-        },
-        onSegment: (event) => {
-          const seg = event.segment;
-          const text = seg.domain === 'text' ? seg.text : '';
-          if (!text) return;
-
-          localSegCount += 1;
-          const idx = localSegCount;
-
-          // Forward to TTS input buffer
-          const ttsId = ttsInputTextRef.current?.bufferId;
-          if (ttsId) {
-            if (ttsSegOption?.mode === 'auto') {
-              // Forward as partial so the TTS segmentation engine re-commits at boundaries
-              appendPartial(ttsId, text).catch(() => {});
-            } else {
-              // Forward directly as a committed segment
-              appendLiveTextSegment(ttsId, text).catch(() => {});
-            }
-          }
-
-          setPartialText('');
-          setCommittedSegments((prev) => {
-            const next = [...prev, text];
-            return next.length > 5 ? next.slice(next.length - 5) : next;
-          });
-          setSegmentEvents((prev) => {
-            const ev: SegmentEvent = { index: idx, text };
-            const next = [...prev, ev];
-            return next.length > MAX_SEGMENT_EVENTS
-              ? next.slice(next.length - MAX_SEGMENT_EVENTS)
-              : next;
-          });
-        },
-      });
-      sttOutputTextRef.current = sttOutputText;
+      sharedSttTtsTextRef.current = sharedSttTtsText;
 
       // ── Start pipelines ────────────────────────────────────────────────────
       const sttPipeline = await sttEngineRef.current!.transcribe(
         sttInputAudio,
-        sttOutputText,
+        sharedSttTtsText,
         {
           chunkSize: 3200,
           ...(() => {
@@ -795,7 +819,7 @@ export default function LivePipelineShowcaseScreen() {
       })();
 
       const ttsPipeline = await ttsEngineRef.current!.synthesize(
-        ttsInputText.bufferId,
+        sharedSttTtsText.bufferId,
         ttsOutputAudio.bufferId,
         {
           segmentation: ttsSegmentation,
@@ -803,26 +827,14 @@ export default function LivePipelineShowcaseScreen() {
       );
       ttsPipelineRef.current = ttsPipeline;
 
-      // ── Start PCM player ───────────────────────────────────────────────────
-      const player = await createPcmPlayer(ttsOutputAudio, {
-        onEnded: () => {
-          setActiveSteps((prev) => {
-            const s = new Set(prev);
-            s.delete('play');
-            return s;
-          });
-        },
-      });
-      playerRef.current = player;
-
-      setActiveSteps(new Set<PipelineStep>(['input', 'stt', 'tts', 'play']));
+      setActiveSteps(new Set<PipelineStep>(['input', 'stt', 'tts']));
       setPipelineState('running');
 
       // ── Start source ───────────────────────────────────────────────────────
       if (sourceMode === 'mic') {
         await startMicToLiveAudioBuffer(sttInputAudio, { emitToJs: false });
         setStatusText(
-          'Microphone active. Speech → STT → TTS → Playback is running.'
+          'Microphone active. Speech → STT → TTS (no live playback; use TTS output below after stop).'
         );
       } else {
         const source = toFileSource(pickedFileUri!);
@@ -849,6 +861,11 @@ export default function LivePipelineShowcaseScreen() {
             }
           });
       }
+
+      stopSttTranscriptPolling();
+      sttTranscriptPollRef.current = setInterval(() => {
+        syncTranscriptStt().catch(() => {});
+      }, STT_TRANSCRIPT_POLL_MS);
 
       // Watch for pipeline completion
       Promise.all([
@@ -880,6 +897,8 @@ export default function LivePipelineShowcaseScreen() {
     releasePriorCapturedTts,
     resolveSttSource,
     resolveTtsSource,
+    syncTranscriptStt,
+    stopSttTranscriptPolling,
   ]);
 
   const stopPipeline = useCallback(async () => {
@@ -911,48 +930,45 @@ export default function LivePipelineShowcaseScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pipeline</Text>
           <View style={styles.pipelineDiagram}>
-            {(['input', 'stt', 'tts', 'play'] as PipelineStep[]).map(
-              (step, i) => {
-                const isActive = activeSteps.has(step);
-                const labels: Record<PipelineStep, string> = {
-                  input: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
-                  stt: '📝 STT',
-                  tts: '🔊 TTS',
-                  play: '▶️ Play',
-                };
-                return (
-                  <>
-                    {i > 0 && (
-                      <Text
-                        key={`arrow-${step}`}
-                        style={[
-                          styles.pipelineArrow,
-                          isActive && styles.pipelineArrowActive,
-                        ]}
-                      >
-                        →
-                      </Text>
-                    )}
-                    <View
-                      key={step}
+            {(['input', 'stt', 'tts'] as PipelineStep[]).map((step, i) => {
+              const isActive = activeSteps.has(step);
+              const labels: Record<PipelineStep, string> = {
+                input: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
+                stt: '📝 STT',
+                tts: '🔊 TTS',
+              };
+              return (
+                <>
+                  {i > 0 && (
+                    <Text
+                      key={`arrow-${step}`}
                       style={[
-                        styles.pipelineStep,
-                        isActive && styles.pipelineStepActive,
+                        styles.pipelineArrow,
+                        isActive && styles.pipelineArrowActive,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.pipelineStepLabel,
-                          isActive && styles.pipelineStepLabelActive,
-                        ]}
-                      >
-                        {labels[step]}
-                      </Text>
-                    </View>
-                  </>
-                );
-              }
-            )}
+                      →
+                    </Text>
+                  )}
+                  <View
+                    key={step}
+                    style={[
+                      styles.pipelineStep,
+                      isActive && styles.pipelineStepActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.pipelineStepLabel,
+                        isActive && styles.pipelineStepLabelActive,
+                      ]}
+                    >
+                      {labels[step]}
+                    </Text>
+                  </View>
+                </>
+              );
+            })}
           </View>
         </View>
 
@@ -1048,9 +1064,11 @@ export default function LivePipelineShowcaseScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Text Segmentation (STT→TTS)</Text>
             <Text style={styles.hint}>
-              Off: each STT segment is forwarded directly to TTS.{'\n'}
-              Auto: partial STT output is re-segmented at sentence boundaries
-              before being synthesized.
+              STT and TTS share one LiveTextBuffer — commits stay native. This
+              policy configures TTS live overload text segmentation on that
+              buffer (chunking before synthesize).{'\n'}
+              Auto: sentence/length boundaries; Off: one synthesize chunk per
+              STT commit when policy allows.
             </Text>
             <SegmentationPolicyControls
               variant="text-offline"
