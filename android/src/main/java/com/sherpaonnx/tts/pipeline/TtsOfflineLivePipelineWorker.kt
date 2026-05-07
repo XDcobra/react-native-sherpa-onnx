@@ -64,8 +64,14 @@ internal class TtsOfflineLivePipelineWorker(
     }
 
     if (audio.samples.isNotEmpty()) {
-      audioOutputEntry.tryAppendSamples(audio.samples, audio.sampleRate, LIVE_APPEND_SOURCE_TTS)
-      addUnitsWritten(audio.samples.size.toLong())
+      val result = audioOutputEntry.tryAppendSamples(audio.samples, audio.sampleRate, LIVE_APPEND_SOURCE_TTS)
+      if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED) {
+        stop()
+        return
+      }
+      if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED) {
+        addUnitsWritten(audio.samples.size.toLong())
+      }
     }
   }
 }

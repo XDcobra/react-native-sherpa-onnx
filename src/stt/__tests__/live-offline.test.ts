@@ -18,10 +18,7 @@ jest.mock('../../detect', () => ({
     modelDir: '/models/stt',
     assetName: 'model.onnx',
   })),
-  resolveFileSourceForModelInit: jest.fn(async () => ({
-    modelDir: '/models/stt',
-    assetName: 'model.onnx',
-  })),
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/stt'),
 }));
 
 jest.mock('../../audiobuffer', () => ({

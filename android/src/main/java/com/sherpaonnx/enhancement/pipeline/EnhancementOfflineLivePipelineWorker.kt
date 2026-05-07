@@ -35,6 +35,19 @@ internal class EnhancementOfflineLivePipelineWorker(
     if (pcm.isEmpty()) return
 
     val denoised = enhancer.run(pcm, speech.sampleRate)
-    audioOutputEntry.appendSamples(denoised.samples)
+    if (denoised.samples.isNotEmpty()) {
+      val result = audioOutputEntry.tryAppendSamples(
+        samples = denoised.samples,
+        inputSampleRate = speech.sampleRate,
+        source = com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_ENHANCEMENT
+      )
+      if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED) {
+        stop()
+        return
+      }
+      if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED) {
+        addUnitsWritten(denoised.samples.size.toLong())
+      }
+    }
   }
 }

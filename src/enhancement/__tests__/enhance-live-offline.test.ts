@@ -33,6 +33,18 @@ jest.mock('../../NativeSherpaOnnx', () => {
   };
 });
 
+const mockAttachSegmentationEngine = jest.fn();
+const mockGetSegmentationEngineInfo = jest.fn();
+const mockDetachSegmentationEngine = jest.fn();
+jest.mock('../../segment', () => ({
+  attachSegmentationEngine: (...args: unknown[]) =>
+    mockAttachSegmentationEngine(...args),
+  getSegmentationEngineInfo: (...args: unknown[]) =>
+    mockGetSegmentationEngineInfo(...args),
+  detachSegmentationEngine: (...args: unknown[]) =>
+    mockDetachSegmentationEngine(...args),
+}));
+
 import SherpaOnnx from '../../NativeSherpaOnnx';
 
 describe('Enhancement Engine - Live Offline Overload', () => {
@@ -40,6 +52,12 @@ describe('Enhancement Engine - Live Offline Overload', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockAttachSegmentationEngine.mockResolvedValue({ engineId: 'seg_1' });
+    mockGetSegmentationEngineInfo.mockResolvedValue({
+      engineId: 'seg_1',
+      segmentBufferId: 'seg_live_1',
+    });
+    mockDetachSegmentationEngine.mockResolvedValue(undefined);
     (SherpaOnnx.detectEnhancementModel as jest.Mock).mockResolvedValue({
       success: true,
       detectedModels: [{ type: 'auto', modelDir: 'test_model' }],
@@ -80,15 +98,20 @@ describe('Enhancement Engine - Live Offline Overload', () => {
     });
 
     expect(result).toHaveProperty('pipelineId', 'live_offline_enh_123');
+    expect(mockAttachSegmentationEngine).toHaveBeenCalledWith(dummyLiveIn, {
+      policy: {
+        evaluator: 'continuous_frames',
+        checkpointIntervalMs: 500,
+      },
+    });
+    expect(mockGetSegmentationEngineInfo).toHaveBeenCalledWith('seg_1');
     expect(SherpaOnnx.startEnhancementOfflineLivePipeline).toHaveBeenCalledWith(
       expect.any(String),
       'live_12345678-1234-1234-1234-123456789012',
       'live_87654321-4321-4321-4321-210987654321',
       {
-        segmentationPolicy: {
-          evaluator: 'continuous_frames',
-          checkpointIntervalMs: 500,
-        },
+        attachedSegmentationEngineId: 'seg_1',
+        segmentLiveBufferId: 'seg_live_1',
       }
     );
   });

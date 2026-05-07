@@ -380,48 +380,65 @@ internal class SherpaOnnxEnhancementHelper(
     audioOutLiveBufferId: String,
     options: ReadableMap,
     promise: Promise,
-  ) = try {
-    val enhancer = instances[instanceId]?.denoiser
-      ?: error("Enhancement instance not found: $instanceId")
-    val liveAudioIn = PipelineAudioRegistry.getLive(audioInLiveBufferId)
-      ?: error("Input live buffer not found: $audioInLiveBufferId")
-    val liveAudioOut = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
-      ?: error("Output live buffer not found: $audioOutLiveBufferId")
+  ) {
+    try {
+      val enhancer = instances[instanceId]?.denoiser
+      if (enhancer == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_ERROR, "Enhancement instance not found: $instanceId")
+        return
+      }
+      val liveAudioIn = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      if (liveAudioIn == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND, "Input live buffer not found: $audioInLiveBufferId")
+        return
+      }
+      val liveAudioOut = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
+      if (liveAudioOut == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND, "Output live buffer not found: $audioOutLiveBufferId")
+        return
+      }
 
-    val attachedSegmentationEngineId = options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
-    if (attachedSegmentationEngineId.isEmpty()) {
-      error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: attachedSegmentationEngineId missing on native bridge")
+      val attachedSegmentationEngineId = options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
+      if (attachedSegmentationEngineId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: attachedSegmentationEngineId missing on native bridge")
+      }
+
+      val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
+      if (segmentLiveBufferId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentLiveBufferId missing on native bridge")
+      }
+
+      val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+        ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
+
+      val pipelineId = "live_offline_enh_${UUID.randomUUID()}"
+      val worker = EnhancementOfflineLivePipelineWorker(
+        pipelineId = pipelineId,
+        attachedSegmentationEngineId = attachedSegmentationEngineId,
+        audioInputRef = OfflineLivePipelineWorker.AudioInput(
+          liveAudioEntry = liveAudioIn,
+          liveSegmentEntry = segmentEntry,
+        ),
+        enhancer = enhancer,
+        audioOutputEntry = liveAudioOut,
+      )
+      StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+      }
+      promise.resolve(WritableNativeMap().apply { putString("pipelineId", pipelineId) })
+    } catch (e: Exception) {
+      val msg = e.message ?: "live offline enhancement failed"
+      val code = if (msg.startsWith("LIVE_OFFLINE_SEGMENTATION_REQUIRED")) {
+        "LIVE_OFFLINE_SEGMENTATION_REQUIRED"
+      } else {
+        EnhancementErrorCodes.STREAMING_PIPELINE_ERROR
+      }
+      promise.reject(
+        code,
+        msg,
+        e,
+      )
     }
-
-    val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
-    if (segmentLiveBufferId.isEmpty()) {
-      error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentLiveBufferId missing on native bridge")
-    }
-
-    val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
-      ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
-
-    val pipelineId = "live_offline_enh_${UUID.randomUUID()}"
-    val worker = EnhancementOfflineLivePipelineWorker(
-      pipelineId = pipelineId,
-      attachedSegmentationEngineId = attachedSegmentationEngineId,
-      audioInputRef = OfflineLivePipelineWorker.AudioInput(
-        liveAudioEntry = liveAudioIn,
-        liveSegmentEntry = segmentEntry,
-      ),
-      enhancer = enhancer,
-      audioOutputEntry = liveAudioOut,
-    )
-    StreamingPipelineRegistry.registerAndStart(worker) { completion ->
-      emitPipelineCompletedEvent(completion)
-    }
-    promise.resolve(WritableNativeMap().apply { putString("pipelineId", pipelineId) })
-  } catch (e: Exception) {
-    promise.reject(
-      "LIVE_OFFLINE_SEGMENTATION_REQUIRED",
-      e.message ?: "live offline enhancement failed",
-      e,
-    )
   }
 
   private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {

@@ -321,7 +321,7 @@ const denoiser = await createEnhancement({
 const handle = await denoiser.enhance(liveAudioIn, liveAudioOut, {
   segmentation: {
     mode: 'auto',
-    policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 10000 },
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
   },
 });
 
