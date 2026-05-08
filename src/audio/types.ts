@@ -90,6 +90,8 @@ export const AudioSaveErrorCode = {
   BUFFER_NOT_FOUND: 'AUDIO_SAVE_BUFFER_NOT_FOUND',
   /** Live buffer is still in recording state — must be finalized first. */
   BUFFER_NOT_FINALIZED: 'AUDIO_SAVE_BUFFER_NOT_FINALIZED',
+  /** Live buffer reference became invalid after ownership transfer/disposal. */
+  BUFFER_INVALIDATED: 'AUDIO_SAVE_BUFFER_INVALIDATED',
   /** Buffer contains zero samples. */
   BUFFER_EMPTY: 'AUDIO_SAVE_BUFFER_EMPTY',
   /** Source file not found or not readable (FileSource input). */
@@ -104,6 +106,8 @@ export const AudioSaveErrorCode = {
   ENCODE_ERROR: 'AUDIO_SAVE_ENCODE_ERROR',
   /** Output file could not be written. */
   FILE_WRITE_ERROR: 'AUDIO_SAVE_FILE_WRITE_ERROR',
+  /** Destination resolved to an invalid/empty output path. */
+  DESTINATION_INVALID: 'AUDIO_SAVE_DESTINATION_INVALID',
   /** Operation was cancelled via AbortSignal. */
   CANCELLED: 'AUDIO_SAVE_CANCELLED',
 } as const;

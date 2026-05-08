@@ -228,6 +228,7 @@ Promise rejections use `AUDIO_SAVE_*` codes:
 | `AUDIO_SAVE_INVALID_ARGUMENT` | Invalid input arguments or malformed source/destination objects. |
 | `AUDIO_SAVE_BUFFER_NOT_FOUND` | The referenced audio buffer does not exist in the native registry. |
 | `AUDIO_SAVE_BUFFER_NOT_FINALIZED` | A live buffer is still recording and must be finalized first. |
+| `AUDIO_SAVE_BUFFER_INVALIDATED` | A live buffer became invalid after transfer/disposal and can no longer be saved. |
 | `AUDIO_SAVE_BUFFER_EMPTY` | The resolved input contains zero samples. |
 | `AUDIO_SAVE_SOURCE_NOT_FOUND` | A `FileSource` input could not be resolved or decoded. |
 | `AUDIO_SAVE_UNSUPPORTED_FORMAT` | The requested output format is not supported. |
@@ -235,6 +236,7 @@ Promise rejections use `AUDIO_SAVE_*` codes:
 | `AUDIO_SAVE_INVALID_QUALITY` | `quality` or `bitrate` values are invalid. |
 | `AUDIO_SAVE_ENCODE_ERROR` | Native decode or encode processing failed. |
 | `AUDIO_SAVE_FILE_WRITE_ERROR` | The destination file could not be written. |
+| `AUDIO_SAVE_DESTINATION_INVALID` | Destination resolution produced an invalid output path. |
 | `AUDIO_SAVE_CANCELLED` | The operation was cancelled via `AbortSignal`. |
 
 Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable comparisons.

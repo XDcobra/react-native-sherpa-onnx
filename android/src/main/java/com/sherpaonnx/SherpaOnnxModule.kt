@@ -1764,6 +1764,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try { File(path).delete() } catch (_: Exception) {}
   }
 
+  private fun sanitizeResolvedOutputPath(dest: ResolvedDestination?): String {
+    val resolved = dest?.resolvedOutputPath?.trim().orEmpty()
+    if (resolved.isNotEmpty()) return resolved
+    val output = dest?.outputPath?.trim().orEmpty()
+    if (output.isNotEmpty()) return output
+    throw IllegalStateException("AUDIO_SAVE_DESTINATION_INVALID: Empty resolved output path")
+  }
+
+  private fun sanitizeOutputKind(dest: ResolvedDestination?): String {
+    val kind = dest?.outputKind?.trim().orEmpty()
+    return if (kind.isNotEmpty()) kind else "fs"
+  }
+
   private fun encodeViaPcm(
     samples: FloatArray, sampleRate: Int, channelCount: Int,
     outputPath: String, format: String, outputSampleRateHz: Int,
@@ -1987,8 +2000,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         copyTmpToStreamIfNeeded(dest)
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
-          putString("outputKind", dest.outputKind)
-          putString("outputPath", dest.resolvedOutputPath)
+          putString("outputKind", sanitizeOutputKind(dest))
+          putString("outputPath", sanitizeResolvedOutputPath(dest))
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
@@ -1996,13 +2009,21 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(e.code, e.message, e)
       } catch (e: IllegalArgumentException) {
         cleanupOutputFile(dest?.outputPath)
-        val code = if (e.message?.contains("empty", ignoreCase = true) == true)
-          "AUDIO_SAVE_BUFFER_EMPTY" else "AUDIO_SAVE_SOURCE_NOT_FOUND"
+        val msg = e.message ?: ""
+        val code = when {
+          msg.contains("empty", ignoreCase = true) -> "AUDIO_SAVE_BUFFER_EMPTY"
+          msg.contains("buffer not found", ignoreCase = true) -> "AUDIO_SAVE_BUFFER_NOT_FOUND"
+          else -> "AUDIO_SAVE_SOURCE_NOT_FOUND"
+        }
         promise.reject(code, e.message, e)
       } catch (e: IllegalStateException) {
         cleanupOutputFile(dest?.outputPath)
         if (e.message?.contains("finalized", ignoreCase = true) == true) {
           promise.reject("AUDIO_SAVE_BUFFER_NOT_FINALIZED", e.message, e)
+        } else if (e.message?.contains("invalidated", ignoreCase = true) == true) {
+          promise.reject("AUDIO_SAVE_BUFFER_INVALIDATED", e.message, e)
+        } else if (e.message?.contains("AUDIO_SAVE_DESTINATION_INVALID") == true) {
+          promise.reject("AUDIO_SAVE_DESTINATION_INVALID", e.message, e)
         } else {
           promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
         }
@@ -2045,7 +2066,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
       ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(bufferId)) {
-        throw IllegalStateException("Live buffer is invalidated after transfer: $bufferId")
+        throw IllegalStateException("AUDIO_SAVE_BUFFER_INVALIDATED: Live buffer is invalidated after transfer: $bufferId")
       } else {
         throw IllegalArgumentException("Live buffer not found: $bufferId")
       }
@@ -2130,8 +2151,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         copyTmpToStreamIfNeeded(dest)
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
-          putString("outputKind", dest.outputKind)
-          putString("outputPath", dest.resolvedOutputPath)
+          putString("outputKind", sanitizeOutputKind(dest))
+          putString("outputPath", sanitizeResolvedOutputPath(dest))
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
@@ -2142,6 +2163,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val msg = e.message ?: ""
         val code = if (msg.startsWith("AUDIO_SAVE_")) msg.substringBefore(":").trim() else "AUDIO_SAVE_ENCODE_ERROR"
         promise.reject(code, msg, e)
+      } catch (e: IllegalStateException) {
+        cleanupOutputFile(dest?.outputPath)
+        if (e.message?.contains("AUDIO_SAVE_DESTINATION_INVALID") == true) {
+          promise.reject("AUDIO_SAVE_DESTINATION_INVALID", e.message, e)
+        } else {
+          promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
+        }
       } catch (e: Exception) {
         cleanupOutputFile(dest?.outputPath)
         promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
