@@ -107,12 +107,12 @@ const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn,
 const textOut = await createLiveTextBuffer({ windowMaxChars: 65536, maxSegments: 2048 });
 
 const vad = await createStreamingVAD({
-  modelSource: { kind: 'app', base: 'files', path: 'models/vad' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' },
   modelType: 'auto',
   sampleRate: 16000,
 });
 const stt = await createStreamingSTT({
-  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' },
   modelType: 'auto',
 });
 
@@ -191,7 +191,7 @@ function createStreamingVAD(options: VADInitializeOptions): Promise<VADEngine>;
 
 ```ts
 const engine = await createStreamingVAD({
-  modelSource: { kind: 'app', base: 'files', path: 'models/vad' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' },
   modelType: 'silero_vad',
   sampleRate: 16000,
   runtimeOptions: {
@@ -436,8 +436,8 @@ const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCou
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 
-const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'files', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
-const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' }, modelType: 'auto' });
+const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
+const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' }, modelType: 'auto' });
 
 const vadPipeline = await vad.process({ audioIn, segmentOut, options: { chunkSize: 512 } });
 const sttPipeline = await stt.transcribe(audioIn, textOut, { chunkSize: 3200 });

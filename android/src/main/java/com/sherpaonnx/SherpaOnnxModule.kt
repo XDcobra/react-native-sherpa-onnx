@@ -482,6 +482,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
             "No external files directory available"
           )
+        "apkAsset" -> throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
+          "AppBaseDir 'apkAsset' does not map to a sandbox directory. Use resolveModelPath({ type: 'asset', path }) for APK assets."
+        )
         else -> throw FileIOException(
           FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
           "Unknown AppBaseDir: $base"

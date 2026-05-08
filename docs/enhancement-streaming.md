@@ -479,8 +479,8 @@ import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 
-const denoiser = await createStreamingEnhancement({ modelSource: { kind: 'app', base: 'files', path: 'models/enhancement' }, modelType: 'auto' });
-const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' }, modelType: 'auto' });
+const denoiser = await createStreamingEnhancement({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/enhancement' }, modelType: 'auto' });
+const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' }, modelType: 'auto' });
 
 const sr = await denoiser.getSampleRate();
 const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });

@@ -78,7 +78,7 @@ Create a `FileSource` pointing to a model bundled in app assets.
 
 ```ts
 function assetModelPath(assetPath: string): FileSource;
-// Returns { kind: 'app', base: 'files', path: assetPath }
+// Returns { kind: 'app', base: 'apkAsset', path: assetPath }
 ```
 
 **Android:** relative to `assets/` (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
@@ -101,7 +101,7 @@ Create a `FileSource` that tries asset first, then filesystem.
 
 ```ts
 function autoModelPath(path: string): FileSource;
-// Returns { kind: 'app', base: 'files', path } (tries bundled assets)
+// Returns { kind: 'app', base: 'apkAsset', path } (tries bundled assets)
 ```
 
 #### `resolveModelPath(config)`
@@ -114,7 +114,8 @@ function resolveModelPath(config: FileSource): Promise<string>;
 
 | `kind` | Resolution |
 | --- | --- |
-| `'app'` | Native copies/locates the bundled asset and returns an absolute path |
+| `'app'` + `base: 'apkAsset'` | Android: materializes bundled APK assets and returns an absolute filesystem path. iOS: unsupported for `apkAsset` |
+| `'app'` + sandbox base (`files`, `cache`, `documents`, `tmp`, `externalFiles`) | App sandbox directory resolution |
 | `'fs'` | Returns the path as-is |
 | `'pad'` | Reads from Play Asset Delivery pack |
 | `'contentUri'` | Resolves Android content URI (detect only, not init) |
@@ -312,6 +313,13 @@ const langs = det.lexiconLanguageCandidates;
 | PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `autoModelPath` |
 | Downloaded models | `fileModelPath()` | `listModelsAtPath()` or Download Manager | User-selected models at runtime |
 | Fallback / auto | `autoModelPath()` | — | Try asset first, then file |
+
+`app:files` and `app:apkAsset` have different semantics and must not be mixed:
+
+| FileSource | Meaning | Typical resolved path behavior |
+| --- | --- | --- |
+| `{ kind: 'app', base: 'files', path: 'models/foo' }` | App sandbox internal files directory | `/data/user/0/<pkg>/files/models/foo` on Android |
+| `{ kind: 'app', base: 'apkAsset', path: 'models/foo' }` | Bundled APK asset tree | Materialized from `assets/models/foo` to a readable local directory on Android |
 
 Combining multiple sources:
 

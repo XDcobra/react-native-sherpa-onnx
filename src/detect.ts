@@ -5,6 +5,7 @@
 import SherpaOnnx from './NativeSherpaOnnx';
 import { FileIOErrorCode, type FileSource } from './fileio/types';
 import { resolveActualModelDir } from './download/validation';
+import { Platform } from 'react-native';
 
 /** Resolved fields that every native detect method needs. */
 export interface ResolvedDetectInput {
@@ -142,6 +143,21 @@ export async function resolveFileSourceForDetect(
           source.path,
           'app'
         );
+        if (source.base === 'apkAsset') {
+          const platformOs = (Platform as { OS?: string } | undefined)?.OS;
+          if (platformOs !== 'android') {
+            createFileIOError(
+              FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
+              'app:apkAsset is supported on Android only. Use app:files/fs/pad on this platform.'
+            );
+          }
+          const resolvedAssetPath = await SherpaOnnx.resolveModelPath({
+            type: 'asset',
+            path: safeRelativePath,
+          });
+          const modelDir = await resolveActualModelDir(resolvedAssetPath);
+          return { modelDir, assetName: deriveAssetName(source.path) };
+        }
         const baseDir = await SherpaOnnx.resolveAppBaseDir(source.base);
         const fullPath = joinBaseAndRelativePath(baseDir, safeRelativePath);
         const modelDir = await resolveActualModelDir(fullPath);

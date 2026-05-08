@@ -16,7 +16,12 @@ export type AppBaseDir =
   | 'documents'
   | 'files'
   | 'tmp'
-  | 'externalFiles';
+  | 'externalFiles'
+  /**
+   * Android APK bundled assets (e.g. `android/app/src/main/assets/...`).
+   * This is intentionally distinct from sandboxed `files`.
+   */
+  | 'apkAsset';
 
 /**
  * Discriminated union describing where to read a file from.

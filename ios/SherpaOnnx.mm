@@ -297,6 +297,11 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
     } else if ([base isEqualToString:@"externalFiles"]) {
         reject(kFIOErrUnsupportedOnPlatform, @"externalFiles is not supported on iOS", nil);
         return;
+    } else if ([base isEqualToString:@"apkAsset"]) {
+        reject(kFIOErrUnsupportedOnPlatform,
+               @"apkAsset is Android-only and does not map to an iOS app base directory",
+               nil);
+        return;
     } else {
         reject(kFIOErrUnsupportedLocationKind,
                [NSString stringWithFormat:@"Unknown AppBaseDir: %@", base], nil);

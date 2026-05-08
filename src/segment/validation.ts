@@ -17,7 +17,8 @@ function isFileSource(value: unknown): value is FileSource {
         base === 'documents' ||
         base === 'files' ||
         base === 'tmp' ||
-        base === 'externalFiles') &&
+        base === 'externalFiles' ||
+        base === 'apkAsset') &&
       typeof v.path === 'string' &&
       v.path.trim().length > 0
     );

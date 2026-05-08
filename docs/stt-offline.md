@@ -128,10 +128,10 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 // Same shape as createSTT / detectSttModel expect (bundled assets vs filesystem).
-const modelPath = { kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' };
+const modelPath = { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' };
 
 // Cheap check of required files / model type before loading weights.
-const det = await detectSttModel({ kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' });
+const det = await detectSttModel({ kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' });
 if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
 // Loads the offline recognizer; tune threads / int8 / provider per device.

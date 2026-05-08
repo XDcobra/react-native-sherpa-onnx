@@ -40,7 +40,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const stt = await createSTT({
-  modelSource: { kind: 'app', base: 'files', path: 'models/sherpa-onnx-whisper-tiny-en' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' },
   modelType: 'auto',
 });
 

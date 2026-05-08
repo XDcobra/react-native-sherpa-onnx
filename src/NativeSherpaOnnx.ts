@@ -1761,6 +1761,9 @@ export interface Spec extends TurboModule {
    * iOS:     cache -> NSCachesDirectory, documents -> NSDocumentDirectory,
    *          files -> NSApplicationSupportDirectory, tmp -> NSTemporaryDirectory.
    *
+   * Note: `apkAsset` does not resolve via this method. Use `resolveModelPath`
+   * with `{ type: 'asset', path }` to materialize bundled APK assets.
+   *
    * Rejects with `FILEIO_*` errors (e.g. `FILEIO_UNSUPPORTED_ON_PLATFORM`,
    * `FILEIO_UNSUPPORTED_LOCATION_KIND`, `FILEIO_WRITE_ERROR`, `FILEIO_RESOLVE_ERROR`).
    */

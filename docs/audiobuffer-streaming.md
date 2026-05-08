@@ -92,7 +92,7 @@ const SAMPLE_RATE = 16000;
 
 // Online recognizer + text sink (same sample rate as `live` below).
 const recognizer = await createStreamingSTT({
-  modelSource: { kind: 'app', base: 'files', path: 'models/my-streaming-model' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/my-streaming-model' },
   modelType: 'transducer',
 });
 const textOut = await createLiveTextBuffer({
@@ -539,7 +539,7 @@ The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
 const stt = await createStreamingSTT({
-  modelSource: { kind: 'app', base: 'files', path: 'models/streaming-stt' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' },
   modelType: 'auto',
 });
 

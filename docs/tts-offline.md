@@ -30,10 +30,10 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
-const modelPath = { kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' };
+const modelPath = { kind: 'app', base: 'apkAsset', path: 'models/vits-piper-en_US-lessac-medium' };
 
 // Detect without loading the engine — cheap pre-check that gives you `modelType` and model info.
-const det = await detectTtsModel({ kind: 'app', base: 'files', path: 'models/vits-piper-en_US-lessac-medium' });
+const det = await detectTtsModel({ kind: 'app', base: 'apkAsset', path: 'models/vits-piper-en_US-lessac-medium' });
 if (!det.success || det.modelType !== 'vits') throw new Error(det.error ?? 'Expected VITS model');
 
 // Create engine. Explicit modelType required when you want modelOptions.
@@ -181,7 +181,7 @@ const tts = await createTTS({
 });
 
 // With auto-detect (no modelOptions available):
-const tts = await createTTS({ kind: 'app', base: 'files', path: 'models/vits-piper-en' });
+const tts = await createTTS({ kind: 'app', base: 'apkAsset', path: 'models/vits-piper-en' });
 ```
 
 ### `tts.synthesize(textIn, audioOut, options?)`

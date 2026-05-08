@@ -50,7 +50,7 @@ export function getModelDisplayName(modelFolder: string): string {
  * const modelPath = getModelPath(models[0].folder);
  */
 export function getModelPath(modelName: string): FileSource {
-  return { kind: 'app', base: 'files', path: `models/${modelName}` };
+  return { kind: 'app', base: 'apkAsset', path: `models/${modelName}` };
 }
 
 /**
@@ -60,7 +60,7 @@ export function getModelPath(modelName: string): FileSource {
  * @returns Model path configuration
  */
 export function getAssetModelPath(modelName: string): FileSource {
-  return { kind: 'app', base: 'files', path: `models/${modelName}` };
+  return { kind: 'app', base: 'apkAsset', path: `models/${modelName}` };
 }
 
 /**
