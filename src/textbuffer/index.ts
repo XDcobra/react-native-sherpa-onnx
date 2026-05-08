@@ -19,7 +19,7 @@ import {
   releaseSegmentationStateForBuffer,
 } from '../segment/runtime-state';
 import type { TextSegment } from '../segment/segment';
-import { PipelineTextErrorCode } from './types';
+import { PipelineTextErrorCode, TEXT_MAX_SLICE_COUNT } from './types';
 import {
   toSegmentReason,
   toSegmentSource,
@@ -789,6 +789,98 @@ export async function releasePipelineTextBuffer(
 // ==================== Offline Getters (heavy payload, slices) ====================
 
 /**
+ * Native caps each bridge read at {@link TEXT_MAX_SLICE_COUNT} UTF-16 units (or array elements).
+ * These helpers issue multiple native calls and concatenate results — not exported.
+ */
+async function readOfflineTextSliceUsingNativeChunks(
+  nativeId: string,
+  startUtf16: number,
+  maxUtf16: number
+): Promise<string> {
+  const chunkCap = TEXT_MAX_SLICE_COUNT;
+  if (maxUtf16 <= chunkCap) {
+    return getNative().getOfflineTextBufferTextSlice(
+      nativeId,
+      startUtf16,
+      maxUtf16
+    );
+  }
+  let result = '';
+  let offset = startUtf16;
+  let remaining = maxUtf16;
+  while (remaining > 0) {
+    const requestLen = Math.min(remaining, chunkCap);
+    const piece = await getNative().getOfflineTextBufferTextSlice(
+      nativeId,
+      offset,
+      requestLen
+    );
+    result += piece;
+    const taken = piece.length;
+    offset += taken;
+    remaining -= taken;
+    if (taken < requestLen) {
+      break;
+    }
+  }
+  return result;
+}
+
+async function readOfflineStringArraySliceUsingNativeChunks(
+  readChunk: (id: string, start: number, maxCount: number) => Promise<string[]>,
+  nativeId: string,
+  start: number,
+  maxCount: number
+): Promise<string[]> {
+  const chunkCap = TEXT_MAX_SLICE_COUNT;
+  if (maxCount <= chunkCap) {
+    return readChunk(nativeId, start, maxCount);
+  }
+  const result: string[] = [];
+  let offset = start;
+  let remaining = maxCount;
+  while (remaining > 0) {
+    const requestLen = Math.min(remaining, chunkCap);
+    const piece = await readChunk(nativeId, offset, requestLen);
+    result.push(...piece);
+    const taken = piece.length;
+    offset += taken;
+    remaining -= taken;
+    if (taken < requestLen) {
+      break;
+    }
+  }
+  return result;
+}
+
+async function readOfflineNumberArraySliceUsingNativeChunks(
+  readChunk: (id: string, start: number, maxCount: number) => Promise<number[]>,
+  nativeId: string,
+  start: number,
+  maxCount: number
+): Promise<number[]> {
+  const chunkCap = TEXT_MAX_SLICE_COUNT;
+  if (maxCount <= chunkCap) {
+    return readChunk(nativeId, start, maxCount);
+  }
+  const result: number[] = [];
+  let offset = start;
+  let remaining = maxCount;
+  while (remaining > 0) {
+    const requestLen = Math.min(remaining, chunkCap);
+    const piece = await readChunk(nativeId, offset, requestLen);
+    result.push(...piece);
+    const taken = piece.length;
+    offset += taken;
+    remaining -= taken;
+    if (taken < requestLen) {
+      break;
+    }
+  }
+  return result;
+}
+
+/**
  * Get a slice of the hypothesis text from an offline text buffer.
  */
 export async function getOfflineTextBufferTextSlice(
@@ -797,7 +889,11 @@ export async function getOfflineTextBufferTextSlice(
   maxUtf16: number
 ): Promise<string> {
   const id = resolveOfflineTextBufferId(bufferId);
-  return getNative().getOfflineTextBufferTextSlice(id, startUtf16, maxUtf16);
+  return readOfflineTextSliceUsingNativeChunks(
+    id,
+    Math.trunc(startUtf16),
+    Math.trunc(maxUtf16)
+  );
 }
 
 /**
@@ -809,7 +905,12 @@ export async function getOfflineTextBufferTokensSlice(
   maxCount: number
 ): Promise<string[]> {
   const id = resolveOfflineTextBufferId(bufferId);
-  return getNative().getOfflineTextBufferTokensSlice(id, start, maxCount);
+  return readOfflineStringArraySliceUsingNativeChunks(
+    (buffer, s, m) => getNative().getOfflineTextBufferTokensSlice(buffer, s, m),
+    id,
+    Math.trunc(start),
+    Math.trunc(maxCount)
+  );
 }
 
 /**
@@ -821,7 +922,13 @@ export async function getOfflineTextBufferTimestampsSlice(
   maxCount: number
 ): Promise<number[]> {
   const id = resolveOfflineTextBufferId(bufferId);
-  return getNative().getOfflineTextBufferTimestampsSlice(id, start, maxCount);
+  return readOfflineNumberArraySliceUsingNativeChunks(
+    (buffer, s, m) =>
+      getNative().getOfflineTextBufferTimestampsSlice(buffer, s, m),
+    id,
+    Math.trunc(start),
+    Math.trunc(maxCount)
+  );
 }
 
 /**
@@ -833,7 +940,13 @@ export async function getOfflineTextBufferDurationsSlice(
   maxCount: number
 ): Promise<number[]> {
   const id = resolveOfflineTextBufferId(bufferId);
-  return getNative().getOfflineTextBufferDurationsSlice(id, start, maxCount);
+  return readOfflineNumberArraySliceUsingNativeChunks(
+    (buffer, s, m) =>
+      getNative().getOfflineTextBufferDurationsSlice(buffer, s, m),
+    id,
+    Math.trunc(start),
+    Math.trunc(maxCount)
+  );
 }
 
 /**
