@@ -6,6 +6,8 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
 import java.io.Closeable
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -324,20 +326,30 @@ object PipelineAudioRegistry {
     val f32File = File(dir, "pa_off_${bufferId}.f32")
 
     return try {
-      // Skip 44-byte WAV header, copy raw F32 bytes directly
-      File(spoolPath).inputStream().use { input ->
-        var remaining = 44L
-        while (remaining > 0L) {
-          val skipped = input.skip(remaining)
-          if (skipped > 0L) {
-            remaining -= skipped
-            continue
-          }
-          if (input.read() == -1) throw RuntimeException("Failed to skip WAV header")
-          remaining -= 1L
+      // Skip 44-byte WAV header, copy raw F32 bytes. Avoid FileInputStream.skip() —
+      // ART can abort in FileInputStream.skip0 JNI check on some devices/OS builds.
+      val spoolFile = File(spoolPath)
+      if (!spoolFile.exists() || spoolFile.length() <= 44L) {
+        return null
+      }
+      FileInputStream(spoolFile).use { fis ->
+        val inCh = fis.channel
+        val total = inCh.size()
+        val payloadBytes = total - 44L
+        if (payloadBytes <= 0L) {
+          return null
         }
-        f32File.outputStream().use { output ->
-          input.copyTo(output, bufferSize = 32768)
+        inCh.position(44L)
+        FileOutputStream(f32File).use { fos ->
+          val outCh = fos.channel
+          var written = 0L
+          while (written < payloadBytes) {
+            val n = outCh.transferFrom(inCh, written, payloadBytes - written)
+            if (n == 0L) {
+              throw RuntimeException("Incomplete copy from spool after WAV header")
+            }
+            written += n
+          }
         }
       }
 
