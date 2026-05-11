@@ -372,12 +372,18 @@ class LiveTextEntry(
     totalCharsWritten += text.length
     _revision.incrementAndGet()
 
-    writeTextSpoolOrThrow(
-      mayActivateAuto = true,
-      recordType = TEXT_SPOOL_PARTIAL_SET,
-      recordPayload = text,
-      checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
-    )
+    // Streaming STT clears the partial window after commitSegment with
+    // writePartial(""). Do not append TEXT_SPOOL_PARTIAL_SET with an empty
+    // payload: snapshotFullTextIfSpooled replays the journal by replacing with
+    // each PARTIAL_SET, so a trailing empty record would erase the transcript.
+    if (text.isNotEmpty()) {
+      writeTextSpoolOrThrow(
+        mayActivateAuto = true,
+        recordType = TEXT_SPOOL_PARTIAL_SET,
+        recordPayload = text,
+        checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
+      )
+    }
 
     SegmentationEngineRegistry.onLiveTextWrite(bufferId)
     TextPipelineRegistry.notifyLivePartialWritten(this, "replace")
