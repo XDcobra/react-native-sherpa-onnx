@@ -1613,7 +1613,10 @@ export interface Spec extends TurboModule {
    * ```
    */
   listAssetModels(): Promise<
-    Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
+    Array<{
+      folder: string;
+      hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+    }>
   >;
 
   /**
@@ -1623,7 +1626,12 @@ export interface Spec extends TurboModule {
   listModelsAtPath(
     path: string,
     recursive: boolean
-  ): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>;
+  ): Promise<
+    Array<{
+      folder: string;
+      hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+    }>
+  >;
 
   /**
    * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory

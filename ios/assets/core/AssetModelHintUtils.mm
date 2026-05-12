@@ -29,6 +29,10 @@ void SherpaOnnxCollectModelFolderNames(NSFileManager *fileManager,
 
 NSString *SherpaOnnxInferModelHint(NSString *folderName) {
   NSString *name = [folderName lowercaseString];
+  if ([name containsString:@"wav2vec2"]) {
+    return @"alignment";
+  }
+
   NSArray<NSString *> *sttHints = @[
     @"zipformer",
     @"paraformer",

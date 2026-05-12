@@ -27,7 +27,10 @@ import SherpaOnnx from './NativeSherpaOnnx';
  * ```
  */
 export async function listAssetModels(): Promise<
-  Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
+  Array<{
+    folder: string;
+    hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+  }>
 > {
   return SherpaOnnx.listAssetModels();
 }
@@ -39,7 +42,12 @@ export async function listAssetModels(): Promise<
 export async function listModelsAtPath(
   path: string,
   recursive = false
-): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>> {
+): Promise<
+  Array<{
+    folder: string;
+    hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+  }>
+> {
   return SherpaOnnx.listModelsAtPath(path, recursive);
 }
 

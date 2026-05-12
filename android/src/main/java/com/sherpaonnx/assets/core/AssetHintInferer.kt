@@ -36,8 +36,16 @@ internal object AssetHintInferer {
     "dpdfnet",
   )
 
+  /** Subtitle / forced CTC alignment (wav2vec2 bundles). Must run before STT heuristics. */
+  private val alignmentHints = listOf(
+    "wav2vec2",
+  )
+
   fun inferModelHint(folderName: String): String {
     val name = folderName.lowercase()
+    if (alignmentHints.any { name.contains(it) }) {
+      return "alignment"
+    }
     val isStt = sttHints.any { name.contains(it) }
     val isTts = ttsHints.any { name.contains(it) }
     val isEnhancement = enhancementHints.any { name.contains(it) }

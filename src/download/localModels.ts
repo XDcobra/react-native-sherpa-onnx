@@ -21,7 +21,7 @@ import {
 } from './paths';
 import { clearMemoryCacheForCategory } from './registry';
 import {
-  type ModelCategory,
+  ModelCategory,
   type ModelManifest,
   type ModelMeta,
   type ModelWithMetadata,
