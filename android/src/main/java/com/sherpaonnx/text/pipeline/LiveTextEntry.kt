@@ -448,7 +448,14 @@ class LiveTextEntry(
       committedSegmentIndex = segmentIndex
       // Capture full history snapshot before any ring eviction. This preserves
       // strict fullIfSpooled guarantees even when maxSegments is exceeded.
-      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + currentText
+      //
+      // Callers (e.g. streaming STT) typically still hold the just-committed
+      // utterance in [currentText] until they call writePartial(remainder).
+      // Concatenating segments + currentText verbatim would duplicate that tail
+      // in spool checkpoints and thus in snapshotFullTextIfSpooled replay.
+      val partialRemainder =
+        if (currentText.startsWith(text)) currentText.substring(text.length) else currentText
+      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + partialRemainder
 
       // Evict oldest if over capacity
       if (segments.size > maxSegments) {

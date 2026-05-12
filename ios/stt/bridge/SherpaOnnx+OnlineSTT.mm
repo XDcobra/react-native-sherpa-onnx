@@ -235,7 +235,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
         return;
     }
 
-    int safeChunkSize = 3200;
+    int safeChunkSize = 6400;
     if (chunkSize != nil && [chunkSize intValue] > 0) {
         safeChunkSize = [chunkSize intValue];
     }

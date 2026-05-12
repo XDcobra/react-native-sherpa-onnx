@@ -12,6 +12,24 @@ import { resolvePipelineTextBufferId } from '../textbuffer';
 
 let streamingSttInstanceCounter = 0;
 
+function logSttPipelineStart(args: {
+  pipelineId: string;
+  chunkSize: number | undefined;
+  audioInLiveBufferId: string;
+  textOutLiveBufferId: string;
+}): void {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    return;
+  }
+  console.warn('[SherpaOnnx:SttPipeline] transcribe started', {
+    pipelineId: args.pipelineId,
+    chunkSize:
+      args.chunkSize === undefined ? '(native default)' : args.chunkSize,
+    audioInLiveBufferId: args.audioInLiveBufferId,
+    textOutLiveBufferId: args.textOutLiveBufferId,
+  });
+}
+
 /**
  * Normalize a raw detected model type string to an {@link OnlineSTTModelType}.
  * Used internally by `createStreamingSTT` for auto-detection.
@@ -224,6 +242,12 @@ export async function createStreamingSTT(
         textOutLiveBufferId,
         pipelineOptions?.chunkSize
       );
+      logSttPipelineStart({
+        pipelineId: started.pipelineId,
+        chunkSize: pipelineOptions?.chunkSize,
+        audioInLiveBufferId,
+        textOutLiveBufferId,
+      });
       activePipelineId = started.pipelineId;
       const completed = createStreamingPipelineCompletionPromise(
         started.pipelineId
@@ -255,6 +279,11 @@ export async function createStreamingSTT(
           }
         },
         async flush(): Promise<void> {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.warn('[SherpaOnnx:SttPipeline] flush', {
+              pipelineId: started.pipelineId,
+            });
+          }
           await SherpaOnnx.flushStreamingPipeline(started.pipelineId);
         },
         async reset(): Promise<void> {

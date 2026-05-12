@@ -610,7 +610,14 @@ struct TxtLiveEntry {
 				int charLen = textNs ? (int)[textNs length] : 0;
 				totalCharsWritten += charLen;
 				revision.fetch_add(1);
-				maybeWriteSnapshotToSpool(committedTextFromSegmentsLocked() + currentText, true);
+				// Same as Android LiveTextEntry.commitSegment: callers often still
+				// hold the committed utterance in currentText until writePartial.
+				std::string partialRemainder = currentText;
+				if (currentText.size() >= text.size() &&
+					currentText.compare(0, text.size(), text) == 0) {
+					partialRemainder = currentText.substr(text.size());
+				}
+				maybeWriteSnapshotToSpool(committedTextFromSegmentsLocked() + partialRemainder, true);
 			}
 		}
 		notifyAppendListeners();

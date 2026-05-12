@@ -1,5 +1,6 @@
 package com.sherpaonnx.stt.pipeline
 
+import android.util.Log
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.sherpaonnx.audio.pipeline.LiveEntry
@@ -21,9 +22,19 @@ class SttPipelineWorker(
   private val stream: OnlineStream,
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveTextEntry,
-  private val chunkSize: Int = 3200,
+  private val chunkSize: Int = 6400,
   private val onSegmentCommitted: ((segment: TextSegment, totalSegments: Int) -> Unit)? = null,
 ) : StreamingPipelineWorker {
+
+  companion object {
+    private const val LOG_TAG = "SherpaOnnx:SttPipelineWorker"
+  }
+
+  /** First non-blank streaming hypothesis (for sessionEnd summary). */
+  private var dbgFirstHypothesis: String? = null
+
+  /** Commits from mid-stream endpoint detection (before EOF). */
+  private var dbgEndpointCommits: Int = 0
 
   @Volatile
   override var isRunning: Boolean = false
@@ -66,6 +77,12 @@ class SttPipelineWorker(
     executor.submit { runLoop() }
   }
 
+  private fun previewForLog(s: String, maxChars: Int = 96): String {
+    val t = s.trim()
+    if (t.length <= maxChars) return t
+    return t.take(maxChars) + "…"
+  }
+
   private fun runLoop() {
     val sampleRate = recognizer.config.featConfig.sampleRate
     try {
@@ -75,7 +92,7 @@ class SttPipelineWorker(
         val chunk = inputEntry.drainCursor(audioCursorId, chunkSize)
         if (chunk.isEmpty()) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
-            autoFlushAndCommit()
+            autoFlushAndCommit(endOfAudio = true)
             break
           }
           lock.withLock {
@@ -95,11 +112,16 @@ class SttPipelineWorker(
         val result = recognizer.getResult(stream)
 
         if (result.text.isNotBlank()) {
+          if (dbgFirstHypothesis == null) dbgFirstHypothesis = result.text
+        }
+
+        if (result.text.isNotBlank()) {
           outputEntry.writePartial(result.text)
         }
 
         if (recognizer.isEndpoint(stream)) {
           if (result.text.isNotBlank()) {
+            dbgEndpointCommits++
             val createdAtMs = System.currentTimeMillis()
             val segmentMeta = mapOf<String, Any>(
               "__segmentReason" to "endpoint",
@@ -143,11 +165,39 @@ class SttPipelineWorker(
     }
   }
 
-  private fun autoFlushAndCommit() {
+  /**
+   * Decode tail and optionally commit the final hypothesis.
+   *
+   * When [endOfAudio] is true (live input buffer finalized / file ingest done),
+   * call [OnlineStream.inputFinished] so sherpa-onnx can flush internal frames
+   * before the last decode passes — omitting this often truncates the transcript
+   * (especially the leading context for Zipformer streaming).
+   */
+  private fun autoFlushAndCommit(endOfAudio: Boolean = false) {
+    if (endOfAudio) {
+      stream.inputFinished()
+    }
+    var tailDecodePasses = 0
     while (recognizer.isReady(stream)) {
       recognizer.decode(stream)
+      tailDecodePasses++
     }
     val result = recognizer.getResult(stream)
+    if (endOfAudio) {
+      val firstLen = dbgFirstHypothesis?.length ?: 0
+      val finalLen = result.text.length
+      val ft = dbgFirstHypothesis?.trimStart().orEmpty()
+      val rt = result.text.trimStart()
+      val finalExtendsFirstOpening =
+        ft.isNotEmpty() && rt.startsWith(ft) && rt.length >= ft.length
+      Log.i(
+        LOG_TAG,
+        "sessionEnd {pipelineId=$pipelineId, unitsRead=$unitsRead, chunks=$chunksProcessed, " +
+          "endpointCommits=$dbgEndpointCommits, tailDecodePasses=$tailDecodePasses, " +
+          "firstHypLen=$firstLen, finalLen=$finalLen, finalExtendsFirst=$finalExtendsFirstOpening, " +
+          "preview=\"${previewForLog(result.text, 80)}\"}",
+      )
+    }
     if (result.text.isNotBlank()) {
       val createdAtMs = System.currentTimeMillis()
       val segmentMeta = mapOf<String, Any>(
@@ -184,7 +234,8 @@ class SttPipelineWorker(
       when (cmd) {
         is PipelineCommand.Flush -> {
           try {
-            autoFlushAndCommit()
+            // Do not call stream.inputFinished(): more audio may still arrive.
+            autoFlushAndCommit(endOfAudio = false)
             cmd.completion.complete(Unit)
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)

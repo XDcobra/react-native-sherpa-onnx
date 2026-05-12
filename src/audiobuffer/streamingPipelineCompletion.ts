@@ -6,6 +6,22 @@ import type {
   StreamingPipelineStatus,
 } from './streamingPipelineTypes';
 
+function logStreamingPipelineCompletion(
+  completion: StreamingPipelineCompletion
+): void {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    return;
+  }
+  console.warn('[SherpaOnnx:StreamingPipeline] completed', {
+    pipelineId: completion.pipelineId,
+    reason: completion.reason,
+    chunksProcessed: completion.chunksProcessed,
+    unitsRead: completion.unitsRead,
+    unitsWritten: completion.unitsWritten,
+    error: completion.error,
+  });
+}
+
 type NativeSubscription = { remove: () => void };
 
 type PendingCompletion = {
@@ -92,6 +108,7 @@ function settlePendingCompletion(
   pendingCompletions.delete(completion.pipelineId);
 
   if (completion.reason === 'error') {
+    logStreamingPipelineCompletion(completion);
     const error = Object.assign(
       new Error(
         completion.error ??
@@ -104,6 +121,7 @@ function settlePendingCompletion(
     );
     pending.reject(error);
   } else {
+    logStreamingPipelineCompletion(completion);
     pending.resolve(completion);
   }
 

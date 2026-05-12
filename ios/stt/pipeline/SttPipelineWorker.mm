@@ -1,7 +1,27 @@
 #include "SttPipelineWorker.h"
+#import <Foundation/Foundation.h>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <stdexcept>
+
+namespace {
+std::string TrimCopy(const std::string &s) {
+  size_t a = 0, b = s.size();
+  while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) a++;
+  while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) b--;
+  return s.substr(a, b - a);
+}
+std::string PreviewForLog(const std::string &s, size_t maxChars = 96) {
+  std::string t = TrimCopy(s);
+  if (t.size() <= maxChars) return t;
+  return t.substr(0, maxChars) + "…";
+}
+NSString *NsUtf8(const std::string &s) {
+  NSString *n = [NSString stringWithUTF8String:s.c_str()];
+  return n ?: @"";
+}
+}  // namespace
 
 SttPipelineWorker::SttPipelineWorker(
   sherpaonnx::OnlineSttWrapper *wrapper,
@@ -49,7 +69,7 @@ void SttPipelineWorker::runLoop() {
       auto chunk = inputEntry_->drainCursor(cursorId_, chunkSize_);
       if (chunk.empty()) {
         if (inputEntry_->state == PaLiveEntry::FINISHED) {
-          autoFlushAndCommit();
+          autoFlushAndCommit(true);
           break;
         }
         std::unique_lock<std::mutex> lock(mtx_);
@@ -75,6 +95,10 @@ void SttPipelineWorker::runLoop() {
       auto result = wrapper_->getResult(streamId_);
 
       if (!result.text.empty()) {
+        if (dbgFirstHypothesis_.empty()) dbgFirstHypothesis_ = result.text;
+      }
+
+      if (!result.text.empty()) {
         std::string err;
         if (!txt_live_write_partial(outputEntry_, result.text, &err)) {
           throw std::runtime_error("Failed to write partial text: " + err);
@@ -83,6 +107,7 @@ void SttPipelineWorker::runLoop() {
 
       if (wrapper_->isEndpoint(streamId_)) {
         if (!result.text.empty()) {
+          dbgEndpointCommits_++;
           const int64_t createdAtMs =
             static_cast<int64_t>(
               std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -144,12 +169,45 @@ void SttPipelineWorker::runLoop() {
   drainRemainingCommands();
 }
 
-void SttPipelineWorker::autoFlushAndCommit() {
+void SttPipelineWorker::autoFlushAndCommit(bool endOfAudio) {
+  if (endOfAudio && wrapper_) {
+    wrapper_->inputFinished(streamId_);
+  }
+  int tailDecodePasses = 0;
   while (wrapper_->isReady(streamId_)) {
     wrapper_->decode(streamId_);
+    tailDecodePasses++;
   }
 
   auto result = wrapper_->getResult(streamId_);
+  if (endOfAudio) {
+    const std::string &ft = dbgFirstHypothesis_;
+    const std::string &rt = result.text;
+    const std::string ftTrim = TrimCopy(ft);
+    const std::string rtTrim = TrimCopy(rt);
+    const bool finalExtendsFirstOpening =
+      !ftTrim.empty() && rtTrim.size() >= ftTrim.size() &&
+      rtTrim.compare(0, ftTrim.size(), ftTrim) == 0;
+    int64_t chunksSnap = 0;
+    int64_t unitsSnap = 0;
+    {
+      std::lock_guard<std::mutex> sLock(statusMtx_);
+      chunksSnap = chunksProcessed_;
+      unitsSnap = unitsRead_;
+    }
+    NSLog(
+      @"[SherpaOnnx:SttPipelineWorker] sessionEnd {pipelineId=%@, unitsRead=%lld, chunks=%lld, endpointCommits=%d, tailDecodePasses=%d, firstHypLen=%zu, finalLen=%zu, finalExtendsFirst=%d, preview=%@}",
+      NsUtf8(pipelineId),
+      (long long)unitsSnap,
+      (long long)chunksSnap,
+      dbgEndpointCommits_,
+      tailDecodePasses,
+      ft.size(),
+      rt.size(),
+      finalExtendsFirstOpening ? 1 : 0,
+      NsUtf8(PreviewForLog(rt, 80)));
+  }
+
   if (!result.text.empty()) {
     const int64_t createdAtMs =
       static_cast<int64_t>(
@@ -193,7 +251,8 @@ void SttPipelineWorker::processCommands() {
     switch (cmd.type) {
       case PipelineCommand::Flush: {
         try {
-          autoFlushAndCommit();
+          // Do not call inputFinished — more audio may still arrive.
+          autoFlushAndCommit(false);
           cmd.completion.set_value();
         } catch (...) {
           cmd.completion.set_exception(std::current_exception());

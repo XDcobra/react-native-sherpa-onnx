@@ -254,7 +254,7 @@ internal class SherpaOnnxOnlineSttHelper(
         stream = stream,
         inputEntry = inputEntry,
         outputEntry = outputEntry,
-        chunkSize = chunkSize ?: 3200,
+        chunkSize = chunkSize ?: 6400,
         onSegmentCommitted = { segment, totalSegments ->
           emitLiveTextSegmentEvent(textOutLiveBufferId, segment, totalSegments)
         },

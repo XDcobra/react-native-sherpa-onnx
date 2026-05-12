@@ -93,7 +93,7 @@ export interface StreamingSttInitOptions {
 
 /** Options for starting a native **streaming (online)** STT pipeline worker. */
 export interface SttPipelineOptions {
-  /** Samples drained per worker loop. Default: 3200. Not used by offline live-overload STT. */
+  /** Samples drained per worker loop. Default: 6400. Not used by offline live-overload STT. */
   chunkSize?: number;
 }
 
