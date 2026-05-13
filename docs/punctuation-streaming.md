@@ -4,11 +4,15 @@
 
 On-device streaming punctuation with a pipeline-first API:
 
-- Pipeline handle: `PunctuationPipelineHandle` provides `stop`, `flush`, `reset`, and `getStatus`.
+- Pipeline handle: `PunctuationPipelineHandle` provides `stop`, `flush`, `reset`, `getStatus`, and `completed`.
 
 Import path: `react-native-sherpa-onnx/punctuation`
 
 For batch punctuation with offline text buffers, see [punctuation-offline.md](punctuation-offline.md).
+
+## Streaming pipeline system
+
+`punctuate` starts a **native worker** that reads **committed text segments** from the live **input** buffer and writes punctuated segments to the live **output** buffer (not the raw partial window). Shared **`stop` / `flush` / `reset` / `getStatus` / `completed`** semantics are in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**; punctuation additionally requires a **post-input-finalize `flush()`** barrier — see Quick start and **`pipeline.flush()`** below.
 
 ## Models and paths
 
@@ -167,11 +171,15 @@ await engine.destroy();
 
 ### Pipeline handle (`PunctuationPipelineHandle`)
 
+Typed like other streaming handles (`stop`, `flush`, `reset`, `getStatus`). In JS, **`completed`** resolves to **`void`** (completion details are still emitted on the native `streamingPipelineCompleted` event like other pipelines).
+
 #### `pipeline.stop()`
 
 ```ts
 stop(): Promise<void>;
 ```
+
+**Hard teardown** of the punctuation worker. Use when cancelling or before releasing buffers if the worker might still be running.
 
 #### `pipeline.flush()`
 
@@ -179,13 +187,17 @@ stop(): Promise<void>;
 flush(): Promise<void>;
 ```
 
-**Contract:** after **`finalizeLiveTextBuffer`** on the live **input** text buffer, call **`pipeline.flush()`** so the worker can drain any tail segments and exit. Then **`pipeline.stop()`** and **`await pipeline.completed`** (see Quick start). Omitting **`flush()`** after a finished input leaves the worker running until **`stop()`**. This is **not** “pipeline flush before text finalize”: finalize the **buffer** first, then pipeline **`flush`** — flushing while the input is still `recording` does not prevent later segments (e.g. committed at finalize).
+**Drain barrier on the segment log:** drains any **unread committed segments** on the live **input**, runs **`addPunctuation`**, and commits results to **`textOut`**. After the live **input** is **`finalizeLiveTextBuffer`**, you **must** call **`flush()`** (then **`stop()`** / **`completed`**) so the worker can finish and so `flush()` does not race a worker that already exited — see Quick start.
+
+**Contract:** after **`finalizeLiveTextBuffer`** on the live **input** text buffer, call **`pipeline.flush()`** so the worker can drain any tail segments and exit. Then **`pipeline.stop()`** and **`await pipeline.completed`**. Omitting **`flush()`** after a finished input leaves the worker running until **`stop()`**. This is **not** “pipeline flush before text finalize”: finalize the **buffer** first, then pipeline **`flush`** — flushing while the input is still `recording` does not prevent later segments (e.g. committed at finalize).
 
 #### `pipeline.reset()`
 
 ```ts
 reset(): Promise<void>;
 ```
+
+Clears **online punctuation** internal stream state where supported; pipeline may **continue running**. Prefer **`stop()`** for full teardown.
 
 #### `pipeline.getStatus()`
 
@@ -197,6 +209,10 @@ getStatus(): Promise<StreamingPipelineStatus>;
 const status = await pipeline.getStatus();
 console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ```
+
+#### `pipeline.completed`
+
+Await after **`flush()`** / **`stop()`** in the recommended order so teardown and buffer release do not race.
 
 ## Segmentation
 

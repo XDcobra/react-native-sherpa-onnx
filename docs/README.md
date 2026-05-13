@@ -15,6 +15,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [model-setup.md](./model-setup.md) | Bundled assets, Play Asset Delivery (PAD), model discovery APIs, troubleshooting |
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
+| [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |
 
 ---
 
@@ -32,6 +33,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [tts-offline.md](./tts-offline.md) | Offline (batch) speech generation |
+| [tts-streaming.md](./tts-streaming.md) | Live TTS entry point — links live overload (`TtsPipelineHandle`) |
 
 ---
 

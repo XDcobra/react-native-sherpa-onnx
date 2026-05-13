@@ -8,6 +8,10 @@
 
 For streaming STT pipelines that write into live text buffers, see [stt-streaming.md](stt-streaming.md).
 
+## Relation to streaming pipelines
+
+Live text buffers are **sinks** or **sources** for segment-oriented workers (STT transcript, streaming punctuation, TTS live overload, …). **Finalizing** a live text buffer (`finalizeLiveTextBuffer`) is a **buffer** operation; **flushing** a running feature is a **pipeline handle** operation on the STT/TTS/punctuation engine — both layers appear in end-to-end flows. See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
+
 ---
 
 ## Concepts

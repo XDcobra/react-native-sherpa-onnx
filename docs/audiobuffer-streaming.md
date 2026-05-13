@@ -10,6 +10,10 @@ For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio
 
 Practical default policy: live buffers default to `16000` Hz, so VAD/STT/segmentation typically consume `16000` PCM unless you explicitly configure another rate.
 
+## Relation to streaming pipelines
+
+Live audio buffers are the usual **operand** for native workers (STT, enhancement, VAD, …). Those features return a **pipeline handle** (`stop` / `flush` / `reset` / `getStatus` / `completed`) that coordinates the worker with **mic stop**, **`finalizeLiveAudioBuffer`**, and teardown — separate from the buffer APIs on this page. See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
+
 ---
 
 ## Concepts

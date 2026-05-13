@@ -20,6 +20,10 @@ There is no per-chunk stream object in the JS API anymore.
 
 **Naming in this doc:** **`engine`** is the value returned by **`createStreamingSTT`** / **`createLiveSTT`** (`LiveSttEngine`). **`pipeline`** is the handle returned by **`engine.transcribe(...)`** (`SttPipelineHandle`).
 
+## Streaming pipeline system
+
+`transcribe` starts a **native worker** that reads **`LiveAudioBuffer`** frames and writes partial + committed **`LiveTextBuffer`** output. Control is exclusively through the returned **`SttPipelineHandle`** (not by pushing audio through JS). For the shared meaning of **`stop` / `flush` / `reset` / `getStatus` / `completed`** and how that ties into buffer finalization, see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
+
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
@@ -260,7 +264,7 @@ Stops any active pipeline and unloads the native online engine instance.
 
 ### Pipeline handle (`SttPipelineHandle`)
 
-`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`).
+`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`). The handle is the only way to **coordinate** the STT worker with **buffer lifecycle** (mic stopped, optional `finalizeLiveAudioBuffer`, then tail decode).
 
 #### `pipeline.stop()`
 
@@ -272,6 +276,8 @@ stop(): Promise<void>;
 await pipeline.stop();
 ```
 
+**Hard teardown** of the STT worker: cancels in-flight work and removes the pipeline from the native registry. Call before releasing **`audioIn`** / **`textOut`** if the pipeline might still be running. After a successful stop, further handle calls may fail with `PIPELINE_NOT_FOUND`.
+
 #### `pipeline.flush()`
 
 ```ts
@@ -282,7 +288,7 @@ flush(): Promise<void>;
 await pipeline.flush();
 ```
 
-Forces decode of currently buffered audio and commits pending final text.
+**Drain barrier:** forces decode of audio still buffered in the recognizer, runs the **tail** through the segmentation path where applicable (`flushFinal`), and commits **final** partial text to **`textOut`**. Typical order: stop feeding audio (e.g. `stopMicToLiveAudioBuffer`) → optional **`finalizeLiveAudioBuffer(audioIn)`** if you need a strict end-of-stream marker → **`await pipeline.flush()`** → then **`stop()`** / **`await pipeline.completed`** as needed. See also [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 #### `pipeline.reset()`
 
@@ -294,7 +300,7 @@ reset(): Promise<void>;
 await pipeline.reset();
 ```
 
-Resets engine stream state and clears current partial text.
+Clears **online recognizer stream state** and the current **partial** text view; the pipeline **keeps running** if it was running. Use for “new session / same buffers” only when you understand the UX implications.
 
 #### `pipeline.getStatus()`
 
@@ -307,13 +313,15 @@ const status = await pipeline.getStatus();
 console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ```
 
-Status fields:
+Fields: `isRunning`, `chunksProcessed`, `unitsRead` (audio samples), `unitsWritten` (text units), `error`.
 
-- `isRunning`
-- `chunksProcessed`
-- `unitsRead` (audio samples)
-- `unitsWritten` (text units)
-- `error`
+#### `pipeline.completed`
+
+```ts
+readonly completed: Promise<StreamingPipelineCompletion>;
+```
+
+Resolves when the native worker has **fully stopped** (normal completion, `stop()`, or error). Prefer awaiting it **after** `flush()` / `stop()` so you do not race teardown. Payload includes `reason`, chunk counts, and optional `error` (see `StreamingPipelineCompletion` in `audiobuffer` types).
 
 ## Pipeline buffers (audio + text)
 

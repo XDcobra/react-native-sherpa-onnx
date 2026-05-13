@@ -11,6 +11,10 @@ On-device streaming VAD with a pipeline-first API:
 
 Import path: `react-native-sherpa-onnx/vad`
 
+## Streaming pipeline system
+
+`process` starts a **native VAD worker** that consumes **audio** and emits **speech segments** (and optional speech-state callbacks). Control uses **`VADPipelineHandle`** (`stop`, `flush`, `reset`, `getStatus`, `completed`) — same **registry-backed** pattern as STT/enhancement; see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Important:** with **`autoFlushOnInputEnded: true`** (quick start), **`finalizeLiveAudioBuffer(audioIn)`** already triggers **terminal draining** — do **not** call **`pipeline.flush()`** again afterward (redundant / race-prone). For **parallel pipelines** (VAD + STT on the same `audioIn`), call each feature’s **`flush()`** before **`stop()`** when you need a coordinated end-of-session drain.
+
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
@@ -246,6 +250,8 @@ await engine.destroy();
 
 ### Pipeline handle (`VADPipelineHandle`)
 
+The handle wires **speech-state callbacks** and the same **control verbs** as other streaming pipelines. **`getStatus`** returns **`VADPipelineStatus`** (VAD-specific fields in addition to the usual running / counters pattern). See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)** for how **`flush` / `stop` / `completed`** interact with **buffer finalize** vs **parallel STT**.
+
 #### `pipeline.onSpeechStateChanged` (optional)
 
 ```ts
@@ -260,8 +266,7 @@ Assign after `process` returns to receive VAD speech/activity without polling. T
 stop(): Promise<void>;
 ```
 
-`stop()` resolves only after native worker teardown is complete. After a successful stop,
-the pipeline id is terminal and may return `VAD_PIPELINE_NOT_FOUND` for later control calls.
+**Hard teardown** of the VAD worker. Resolves after native teardown; the pipeline id is then **terminal** (later control calls may return `VAD_PIPELINE_NOT_FOUND`).
 
 #### `pipeline.flush()`
 
@@ -269,17 +274,27 @@ the pipeline id is terminal and may return `VAD_PIPELINE_NOT_FOUND` for later co
 flush(): Promise<void>;
 ```
 
+**Drain barrier:** forces the worker to **process pending audio** and flush internal state into **`segmentOut`** where applicable. Use when **`autoFlushOnInputEnded`** is **false** or when coordinating **multiple** pipelines on the same audio (flush VAD and STT before stops). **Do not** call after **`finalizeLiveAudioBuffer`** when **`autoFlushOnInputEnded: true`** — finalize already ran terminal draining (see quick start comment).
+
 #### `pipeline.reset()`
 
 ```ts
 reset(): Promise<void>;
 ```
 
+Clears **VAD runtime state** (e.g. hangover counters) while keeping the pipeline registered; semantics follow native `resetStreamingPipeline` for this worker.
+
 #### `pipeline.getStatus()`
 
 ```ts
 getStatus(): Promise<VADPipelineStatus>;
 ```
+
+Snapshot of worker progress and VAD-specific flags (see exported `VADPipelineStatus` type).
+
+#### `pipeline.completed`
+
+Resolves when the worker has **fully stopped** (normal completion after finalize + auto-flush, `stop()`, or error). Use with **`await finalizeLiveAudioBuffer`** in the graceful path shown in the quick start.
 
 ## Pipeline composition
 

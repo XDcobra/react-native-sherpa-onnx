@@ -19,6 +19,10 @@
 
 `sourceAudioBufferId` accepts `PipelineAudioBufferIdSource` (audio ref/info/handle/id), not only raw strings.
 
+## Relation to streaming pipelines
+
+Live segment buffers collect **time-range events** (VAD, future streaming alignment) produced by native workers. Workers are **started and drained** via feature **pipeline handles**; this page documents **buffer** create/finalize/snapshot only. See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
+
 ---
 
 ## Main API (summary)

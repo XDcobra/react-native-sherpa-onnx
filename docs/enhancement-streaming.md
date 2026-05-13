@@ -16,6 +16,10 @@ For **offline STT / TTS / alignment** composition with pipeline buffers, see [st
 
 If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or ingest decode target) explicitly to the model rate from `getSampleRate()`.
 
+## Streaming pipeline system
+
+`enhance` registers a **native worker** that drains **`inputBuf`** in frame-sized steps and appends denoised PCM to **`outputBuf`**. There is no JS API to push samples into the denoiser directly — only buffer producers and the **`EnhancementPipelineHandle`**. Shared semantics of **`stop` / `flush` / `reset` / `getStatus` / `completed`** are described in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Streaming enhancement** is special in that **finalizing the live input audio buffer** normally causes the worker to **auto-flush and stop**; explicit `flush()` is still available for mid-run tail flush without stopping.
+
 ## Models and paths
 
 - **`FileSource`:** `FileSource` (from `react-native-sherpa-onnx/fileio`, same as STT/TTS).
@@ -264,7 +268,7 @@ console.log(`Denoised ${completion.unitsWritten} samples`);
 
 ### Pipeline handle (`EnhancementPipelineHandle`)
 
-`EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
+`EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus` / `completed`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
 
 #### `pipeline.stop()`
 
@@ -272,7 +276,7 @@ console.log(`Denoised ${completion.unitsWritten} samples`);
 stop(): Promise<void>;
 ```
 
-Stops the pipeline thread and removes it from the registry.
+**Hard teardown:** stops the worker thread and unregisters the pipeline. Call before releasing **`inputBuf`** / **`outputBuf`** when you need to cancel or tear down quickly.
 
 ---
 
@@ -282,7 +286,7 @@ Stops the pipeline thread and removes it from the registry.
 flush(): Promise<void>;
 ```
 
-Flushes the denoiser's internal state (appends tail samples to output). The pipeline **continues running** after flush.
+**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run (worker auto-completes), but useful if you must force a **mid-session** tail without finalizing the input.
 
 ---
 
@@ -292,7 +296,7 @@ Flushes the denoiser's internal state (appends tail samples to output). The pipe
 reset(): Promise<void>;
 ```
 
-Resets the denoiser's internal state. The pipeline **continues running** after reset.
+Resets **online denoiser state** (history / latency buffers). The pipeline **continues running** after reset.
 
 ---
 
@@ -312,6 +316,18 @@ interface StreamingPipelineStatus {
   error: string | null;
 }
 ```
+
+---
+
+#### `pipeline.completed`
+
+```ts
+readonly completed: Promise<StreamingPipelineCompletion>;
+```
+
+Settles when the worker has **fully stopped** (including the common case where input **finalize** triggered auto-stop). Await after `stop()` if you need the completion payload or to sequence buffer release.
+
+---
 
 ## Pipeline buffers (audio input + audio output)
 

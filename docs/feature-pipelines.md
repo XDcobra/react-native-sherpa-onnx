@@ -6,7 +6,7 @@ This guide is a pipeline composition cookbook for real, reusable end-to-end flow
 
 It focuses on public buffer contracts (`OfflineAudioBuffer`, `LiveAudioBuffer`, `OfflineTextBuffer`, `LiveTextBuffer`, `OfflineSegmentBuffer`, `LiveSegmentBuffer`) and public feature APIs, rather than internal implementation details.
 
-Use this file to pick a proven chain quickly. For full per-feature API details, follow the linked feature docs.
+Use this file to pick a proven chain quickly. For full per-feature API details, follow the linked feature docs. For **shared streaming pipeline handle** semantics (`stop` / `flush` / `reset` / `getStatus` / `completed`) across STT, enhancement, VAD, TTS live overload, and punctuation, see **[streaming-pipelines-overview.md](streaming-pipelines-overview.md)**.
 
 ## Table of contents
 
