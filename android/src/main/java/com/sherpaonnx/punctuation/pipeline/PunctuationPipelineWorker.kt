@@ -37,6 +37,16 @@ internal class PunctuationPipelineWorker(
   private val dataAvailable = lock.newCondition()
   private val commandQueue = LinkedBlockingQueue<PipelineCommand>()
 
+  /**
+   * Once the live input is [LiveTextEntry.State.FINISHED], the worker must not
+   * shut down until at least one [PipelineCommand.Flush] has completed while
+   * the input is still finished. That way `StreamingPipelineWorker.flush()` remains usable as a
+   * synchronization barrier (avoids races where the JS layer finalizes the
+   * input and then calls flush after a brief segment-drain window).
+   * Single-threaded: only the executor thread touches this flag.
+   */
+  private var postFinishFlushCompleted = false
+
   private sealed class PipelineCommand {
     class Flush(val completion: CompletableFuture<Unit>) : PipelineCommand()
     class Reset(val completion: CompletableFuture<Unit>) : PipelineCommand()
@@ -57,7 +67,11 @@ internal class PunctuationPipelineWorker(
         processCommands()
         val segments = inputEntry.drainSegments(textCursorId, 1)
         if (segments.isEmpty()) {
-          if (inputEntry.state == LiveTextEntry.State.FINISHED) break
+          if (inputEntry.state == LiveTextEntry.State.FINISHED) {
+            if (postFinishFlushCompleted) break
+            lock.withLock { dataAvailable.await(50, TimeUnit.MILLISECONDS) }
+            continue
+          }
           lock.withLock { dataAvailable.await(50, TimeUnit.MILLISECONDS) }
           continue
         }
@@ -110,6 +124,9 @@ internal class PunctuationPipelineWorker(
               punctuateSegment(seg.text, seg.meta)
               chunksProcessed++
             }
+            if (inputEntry.state == LiveTextEntry.State.FINISHED) {
+              postFinishFlushCompleted = true
+            }
             cmd.completion.complete(Unit)
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)
@@ -118,6 +135,7 @@ internal class PunctuationPipelineWorker(
         is PipelineCommand.Reset -> {
           try {
             while (inputEntry.drainSegments(textCursorId, 100).isNotEmpty()) { /* skip */ }
+            postFinishFlushCompleted = false
             cmd.completion.complete(Unit)
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)

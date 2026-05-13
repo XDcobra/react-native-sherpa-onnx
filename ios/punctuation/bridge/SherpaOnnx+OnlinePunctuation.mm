@@ -136,7 +136,12 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
         processCommands();
         auto segments = input_->drainSegments(cursorId_, 1);
         if (segments.empty()) {
-          if (input_->state == TxtLiveEntry::FINISHED) break;
+          if (input_->state == TxtLiveEntry::FINISHED) {
+            if (postFinishFlushCompleted_) break;
+            std::unique_lock<std::mutex> lock(mutex_);
+            cv_.wait_for(lock, std::chrono::milliseconds(50));
+            continue;
+          }
           std::unique_lock<std::mutex> lock(mutex_);
           cv_.wait_for(lock, std::chrono::milliseconds(50));
           continue;
@@ -190,8 +195,12 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
               chunksProcessed_++;
             }
           }
+          if (input_->state == TxtLiveEntry::FINISHED) {
+            postFinishFlushCompleted_ = true;
+          }
         } else {
           while (!input_->drainSegments(cursorId_, 100).empty()) {}
+          postFinishFlushCompleted_ = false;
         }
         cmd->promise.set_value();
       } catch (...) {
@@ -225,6 +234,9 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
   int64_t unitsRead_ = 0;
   int64_t unitsWritten_ = 0;
   std::string error_;
+  /// After input is FINISHED, runLoop exits only once a Flush has completed
+  /// while the input is still finished (single worker thread).
+  bool postFinishFlushCompleted_ = false;
 };
 
 }  // namespace

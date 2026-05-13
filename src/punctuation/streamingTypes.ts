@@ -30,6 +30,14 @@ export type PunctuationPipelineHandle = {
   readonly pipelineId: string;
   readonly completed: Promise<void>;
   stop(): Promise<void>;
+  /**
+   * Drain any remaining **input** segments through the worker (native queue).
+   * Call **after** `finalizeLiveTextBuffer` on the live **input** buffer so no
+   * further segments can appear; then `stop()` and `completed` as in the
+   * streaming punctuation doc (`docs/punctuation-streaming.md`). Flushing only
+   * the pipeline while the input is still `recording` does not replace
+   * finalizing the input — you may need another `flush()` after more commits.
+   */
   flush(): Promise<void>;
   reset(): Promise<void>;
   getStatus(): Promise<StreamingPipelineStatus>;

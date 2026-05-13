@@ -77,17 +77,22 @@ await appendLiveTextSegment(textIn, 'this is a second sentence');
 await finalizeLiveTextBuffer(textIn);
 
 await pipeline.flush();
+await pipeline.stop();
+await pipeline.completed;
 
 const outCount = await getLiveTextBufferSegmentCount(textOut);
 const outSegments =
   outCount > 0 ? await getLiveTextBufferSegments(textOut, 0, outCount) : [];
 console.log(outSegments.map((s) => s.text).join(' '));
 
-await pipeline.stop();
 await engine.destroy();
 await releasePipelineTextBuffer(textIn);
 await releasePipelineTextBuffer(textOut);
 ```
+
+After the live input is finalized, call **`pipeline.flush()`** (then **`stop()`** and **`completed`** as in the snippet). The native worker treats the post-finalize **`flush()`** as the barrier that allows it to finish draining tail segments before shutting down.
+
+**Order (recommended):** `finalizeLiveTextBuffer(textIn)` (live **text** buffer, no more writes / optional last partial → segment) → **`pipeline.flush()`** (pipeline **handle**, drain segment log through the model) → **`pipeline.stop()`** → **`pipeline.completed`**. That is **not** the same as “flush before finalize”: if you `flush()` while the input is still `recording`, more segments can still arrive afterward (e.g. last segment at finalize), so **`finalize` first** is the stable cut.
 
 ## API reference
 
@@ -173,6 +178,8 @@ stop(): Promise<void>;
 ```ts
 flush(): Promise<void>;
 ```
+
+**Contract:** after **`finalizeLiveTextBuffer`** on the live **input** text buffer, call **`pipeline.flush()`** so the worker can drain any tail segments and exit. Then **`pipeline.stop()`** and **`await pipeline.completed`** (see Quick start). Omitting **`flush()`** after a finished input leaves the worker running until **`stop()`**. This is **not** “pipeline flush before text finalize”: finalize the **buffer** first, then pipeline **`flush`** — flushing while the input is still `recording` does not prevent later segments (e.g. committed at finalize).
 
 #### `pipeline.reset()`
 

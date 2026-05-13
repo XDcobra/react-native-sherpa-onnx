@@ -287,6 +287,8 @@ export default function PunctuationStreamingScreen() {
         await appendLiveTextSegment(input, chunk);
       }
       await finalizeLiveTextBuffer(input);
+      await handle.flush();
+      await handle.stop();
       await handle.completed;
 
       const segments = await getLiveTextBufferSegments(output, 0, 100, {
@@ -319,9 +321,9 @@ export default function PunctuationStreamingScreen() {
           <Text style={styles.sectionTitle}>Online punctuation model</Text>
           <Text style={styles.hint}>
             Model directory must be a streaming CNN-BiLSTM layout. Flow: create
-            live text input and output buffers, stream text segments, then read
-            the output buffer. Re-running releases previous buffers and
-            allocates new ones.
+            live text input and output buffers, stream text segments, finalize
+            input, flush the pipeline, then read the output buffer. Re-running
+            releases previous buffers and allocates new ones.
           </Text>
         </View>
 
