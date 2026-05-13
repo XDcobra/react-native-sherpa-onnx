@@ -75,6 +75,10 @@ export type VADInitializeOptions = {
 };
 
 export type VADLiveRunOptions = {
+  /**
+   * How many samples to drain from the live audio cursor per pump (streaming pipeline only).
+   * Offline `createStreamingVAD().process()` uses the model `windowSize` from runtime options, not this field.
+   */
   chunkSize?: number;
   autoFlushOnInputEnded?: boolean;
   sourceTag?: string;
@@ -86,7 +90,6 @@ export type VADLiveRunOptions = {
 };
 
 export type VADOfflineRunOptions = {
-  chunkSize?: number;
   sourceTag?: string;
 };
 

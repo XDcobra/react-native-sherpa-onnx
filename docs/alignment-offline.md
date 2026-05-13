@@ -401,7 +401,7 @@ const vad = await createStreamingVAD({
 });
 
 try {
-  await vad.process({ audioIn: audio, segmentOut: vadAnchors, options: { chunkSize: 512 } });
+  await vad.process({ audioIn: audio, segmentOut: vadAnchors, options: {} });
 
   const alignment = createAlignment();
   await alignment.alignTextToAudio(transcript, audio, alignedOut, {

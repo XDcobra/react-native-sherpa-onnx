@@ -883,7 +883,6 @@ export default function VADScreen() {
         8000,
         Number.parseInt(sampleRateInput, 10) || 16000
       );
-      const chunkSize = Math.max(1, Number.parseInt(chunkSizeInput, 10) || 512);
       const threshold = Number.parseFloat(thresholdInput);
       const modelPath = resolveModelPath(selectedModelFolder);
       const resolvedModelType = await detectResolvedModelType(modelPath);
@@ -926,7 +925,7 @@ export default function VADScreen() {
       const run = await engine.process({
         audioIn: preparedOfflineInputBuffer.bufferId,
         segmentOut: segment,
-        options: { chunkSize },
+        options: {},
       });
       if (!('summary' in run)) {
         throw new Error('Expected offline VAD result but got live handle.');
@@ -992,7 +991,6 @@ export default function VADScreen() {
       setBusyOffline(false);
     }
   }, [
-    chunkSizeInput,
     logOfflineLifecycle,
     preparedOfflineInputBuffer,
     pushTimeline,
@@ -1134,7 +1132,9 @@ export default function VADScreen() {
             </Pressable>
           </View>
           <View style={styles.inlineRowWrap}>
-            <Text style={styles.inputLabel}>chunkSize: {chunkSizeInput}</Text>
+            <Text style={styles.inputLabel}>
+              chunkSize (live drain): {chunkSizeInput}
+            </Text>
             <Pressable
               style={styles.smallButton}
               onPress={() =>

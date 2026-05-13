@@ -269,7 +269,13 @@ class SherpaOnnxVadHelper(
     promise.resolve(map)
   }
 
-  fun runVadOffline(instanceId: String, audioInBufferId: String, segmentOutBufferId: String, options: ReadableMap?, promise: Promise) {
+  fun runVadOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    @Suppress("UNUSED_PARAMETER") options: ReadableMap?,
+    promise: Promise,
+  ) {
     val cfg = instances[instanceId]
     if (cfg == null) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance not initialized: $instanceId")
@@ -291,13 +297,11 @@ class SherpaOnnxVadHelper(
       return
     }
     val records = mutableListOf<SegmentRecord>()
-    val chunkSize = options?.takeIf { it.hasKey("chunkSize") && !it.isNull("chunkSize") }?.getDouble("chunkSize")?.toInt() ?: 512
     val samples = audio.readAllSamples()
     cfg.runtime.reset()
     val stats = runModelInferenceSegmentation(
       cfg = cfg,
       samples = samples,
-      chunkSize = chunkSize,
       sourceAudioBufferId = audioInBufferId,
       liveOut = liveOut,
       records = records,
@@ -325,13 +329,12 @@ class SherpaOnnxVadHelper(
   private fun runModelInferenceSegmentation(
     cfg: VadInstanceConfig,
     samples: FloatArray,
-    _chunkSize: Int,
     sourceAudioBufferId: String,
     liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
     records: MutableList<SegmentRecord>,
   ): OfflineInferenceStats {
     // ONNX VAD expects a fixed window (Silero/Ten: cfg.runtimeOptions.windowSize).
-    // The last slice of the file is often shorter than chunkSize (e.g. 228 samples) which
+    // The last slice of the file is often shorter than one full window (e.g. 228 samples) which
     // crashes compute — mirror VadPipelineWorker: pad the final partial window with zeros.
     val frameSize = cfg.runtimeOptions.windowSize.coerceAtLeast(1)
     var idx = 0
