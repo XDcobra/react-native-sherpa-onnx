@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <optional>
 #include <future>
+#include <algorithm>
 
 #include "sherpa-onnx-model-detect.h"
 
@@ -420,9 +421,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     return;
   }
   if (sampleRate > 0) cfg.sampleRate = sampleRate;
-  const int chunkSize = ([options[@"chunkSize"] respondsToSelector:@selector(intValue)]
-                             ? MAX(1, [options[@"chunkSize"] intValue])
-                             : 512);
+  const int frameSize = MAX(1, cfg.windowSize);
   if (!cfg.runtime) {
     reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
     return;
@@ -432,11 +431,9 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   int64_t speechDurationMs = 0;
   int chunksProcessed = 0;
   std::vector<SegRecord> records;
-  for (int i = 0; i < (int)samples.size(); i += chunkSize) {
-    const int n = std::min(chunkSize, static_cast<int>(samples.size()) - i);
-    cfg.runtime->AcceptWaveform(samples.data() + i, n);
-    chunksProcessed += 1;
-    const auto segments = cfg.runtime->PopSegments();
+  std::vector<float> pending;
+  pending.insert(pending.end(), samples.begin(), samples.end());
+  auto appendSegments = [&](const std::vector<VadRuntimeSegment> &segments) {
     for (const auto &segment : segments) {
       SegRecord r;
       r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
@@ -454,6 +451,20 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
       segmentCount++;
       speechDurationMs += segment.durationMs;
     }
+  };
+  while ((int)pending.size() >= frameSize) {
+    cfg.runtime->AcceptWaveform(pending.data(), frameSize);
+    chunksProcessed += 1;
+    appendSegments(cfg.runtime->PopSegments());
+    pending.erase(pending.begin(), pending.begin() + frameSize);
+  }
+  if (!pending.empty()) {
+    std::vector<float> tail(frameSize, 0.0f);
+    std::copy(pending.begin(), pending.end(), tail.begin());
+    cfg.runtime->AcceptWaveform(tail.data(), frameSize);
+    chunksProcessed += 1;
+    appendSegments(cfg.runtime->PopSegments());
+    pending.clear();
   }
   cfg.runtime->Flush();
   const auto finalSegments = cfg.runtime->PopSegments();

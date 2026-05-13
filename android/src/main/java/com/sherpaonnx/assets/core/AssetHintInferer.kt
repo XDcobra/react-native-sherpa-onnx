@@ -41,10 +41,32 @@ internal object AssetHintInferer {
     "wav2vec2",
   )
 
+  /**
+   * Voice activity detection bundles (Sherpa / Silero / Tencent-style names).
+   * Must run before STT/TTS heuristics so generic "vad" tokens are not misclassified.
+   */
+  private val vadHints = listOf(
+    "silero_vad",
+    "silero-vad",
+    "silero",
+    "ten-vad",
+    "tenvad",
+    "sherpa_vad",
+    "sherpa-vad",
+    "vad-int8",
+    "vad_float",
+    "voice_activity",
+    "voice-activity",
+    "vad",
+  )
+
   fun inferModelHint(folderName: String): String {
     val name = folderName.lowercase()
     if (alignmentHints.any { name.contains(it) }) {
       return "alignment"
+    }
+    if (vadHints.any { name.contains(it) }) {
+      return "vad"
     }
     val isStt = sttHints.any { name.contains(it) }
     val isTts = ttsHints.any { name.contains(it) }

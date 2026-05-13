@@ -33,6 +33,27 @@ NSString *SherpaOnnxInferModelHint(NSString *folderName) {
     return @"alignment";
   }
 
+  // VAD bundles (Sherpa / Silero / Tencent-style). Before STT/TTS heuristics.
+  NSArray<NSString *> *vadHints = @[
+    @"silero_vad",
+    @"silero-vad",
+    @"silero",
+    @"ten-vad",
+    @"tenvad",
+    @"sherpa_vad",
+    @"sherpa-vad",
+    @"vad-int8",
+    @"vad_float",
+    @"voice_activity",
+    @"voice-activity",
+    @"vad"
+  ];
+  for (NSString *hint in vadHints) {
+    if ([name containsString:hint]) {
+      return @"vad";
+    }
+  }
+
   NSArray<NSString *> *sttHints = @[
     @"zipformer",
     @"paraformer",

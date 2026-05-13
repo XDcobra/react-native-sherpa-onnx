@@ -325,11 +325,15 @@ class SherpaOnnxVadHelper(
   private fun runModelInferenceSegmentation(
     cfg: VadInstanceConfig,
     samples: FloatArray,
-    chunkSize: Int,
+    _chunkSize: Int,
     sourceAudioBufferId: String,
     liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
     records: MutableList<SegmentRecord>,
   ): OfflineInferenceStats {
+    // ONNX VAD expects a fixed window (Silero/Ten: cfg.runtimeOptions.windowSize).
+    // The last slice of the file is often shorter than chunkSize (e.g. 228 samples) which
+    // crashes compute — mirror VadPipelineWorker: pad the final partial window with zeros.
+    val frameSize = cfg.runtimeOptions.windowSize.coerceAtLeast(1)
     var idx = 0
     var inSpeech = false
     var segStart = 0
@@ -341,8 +345,12 @@ class SherpaOnnxVadHelper(
     var speechScoreSum = 0.0
     var speechScoreCount = 0
     while (idx < samples.size) {
-      val end = minOf(idx + chunkSize, samples.size)
-      val chunk = samples.copyOfRange(idx, end)
+      val end = minOf(idx + frameSize, samples.size)
+      val effectiveLen = end - idx
+      var chunk = samples.copyOfRange(idx, end)
+      if (chunk.size < frameSize) {
+        chunk = chunk.copyOf(frameSize)
+      }
       chunksProcessed += 1
       val decision = cfg.runtime.infer(chunk, cfg.sampleRate)
       if (decision.isSpeech) {
@@ -354,14 +362,14 @@ class SherpaOnnxVadHelper(
           speechScoreSum = 0.0
           speechScoreCount = 0
         }
-        speechSamples += (end - idx)
+        speechSamples += effectiveLen
         silenceSamples = 0
         if (decision.score != null) {
           speechScoreSum += decision.score
           speechScoreCount += 1
         }
       } else if (inSpeech) {
-        silenceSamples += (end - idx)
+        silenceSamples += effectiveLen
         val silenceMs = ((silenceSamples.toLong() * 1000L) / cfg.sampleRate.toLong()).toInt()
         if (silenceMs >= cfg.runtimeOptions.minSilenceDurationMs) {
           val segmentEnd = segStart + speechSamples
