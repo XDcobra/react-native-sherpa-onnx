@@ -21,6 +21,7 @@ export type {
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioOptionsVad,
+  AlignmentProgressCallbacks,
   AlignTextToAudioWriteResult,
   AlignmentAccurateSegmentationConfig,
   AlignmentAsrConfig,
@@ -35,6 +36,7 @@ export type {
   AlignmentWarningCode,
   AlignmentTimestamp,
   AlignmentTimingMode,
+  OrchestrationProgress,
 } from './types';
 export type { AlignmentDetectModelResult } from '../types/modelDetect';
 

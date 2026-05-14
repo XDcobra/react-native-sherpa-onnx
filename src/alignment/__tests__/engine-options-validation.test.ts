@@ -48,6 +48,12 @@ jest.mock('../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/tmp/alignment-model'),
 }));
 
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/tmp/alignment-model'),
+}));
+
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { createAlignment } from '../engine';
 
@@ -92,6 +98,18 @@ describe('AlignmentEngine options validation', () => {
         granularity: 'character',
       } as any)
     ).rejects.toMatchObject({ code: 'ALIGNMENT_GRANULARITY_INVALID' });
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
+
+  it('emits ALIGNMENT_OPTIONS_INVALID for non-function onProgress', async () => {
+    const engine = createAlignment();
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'proportional',
+        onProgress: 123 as any,
+      } as any)
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_OPTIONS_INVALID' });
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 

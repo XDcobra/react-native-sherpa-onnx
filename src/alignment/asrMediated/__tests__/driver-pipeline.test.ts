@@ -22,6 +22,12 @@ jest.mock('../../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
+jest.mock('../../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment-bundle'),
+}));
+
 jest.mock('../../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((id: string) => id),
   getPipelineAudioBufferInfo: jest.fn().mockResolvedValue({
@@ -164,7 +170,18 @@ const segmentbuffer = jest.requireMock('../../../segmentbuffer') as {
 };
 
 describe('asrMediated/driver pipeline', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('runs per-anchor accurate slices and aggregates deterministic output', async () => {
+    let fakeNow = 25_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => {
+      fakeNow += 7;
+      return fakeNow;
+    });
+    const onProgress = jest.fn();
+
     const out = await runAccurateAsrMediated({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
@@ -174,7 +191,10 @@ describe('asrMediated/driver pipeline', () => {
       modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
+      onProgress,
     });
+
+    nowSpy.mockRestore();
 
     expect(native.alignAccurateFromPcm).toHaveBeenCalledTimes(2);
     expect(native.alignAccurateFromPcm).toHaveBeenNthCalledWith(
@@ -190,6 +210,43 @@ describe('asrMediated/driver pipeline', () => {
       'word',
       'en'
     );
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 2,
+        fraction: 0,
+        currentSegmentDurationMs: 1000,
+      })
+    );
+    expect(onProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        currentSegment: 1,
+        totalSegments: 2,
+        fraction: 0.5,
+        currentSegmentDurationMs: 1000,
+      })
+    );
+
+    const firstElapsed = onProgress.mock.calls[0][0].elapsedMs as number;
+    const secondElapsed = onProgress.mock.calls[1][0].elapsedMs as number;
+    expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
+
+    const firstProgressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const secondProgressCallOrder = onProgress.mock.invocationCallOrder[1];
+    const firstNativeCallOrder =
+      native.alignAccurateFromPcm.mock.invocationCallOrder[0];
+    const secondNativeCallOrder =
+      native.alignAccurateFromPcm.mock.invocationCallOrder[1];
+
+    expect(firstProgressCallOrder).toBeDefined();
+    expect(secondProgressCallOrder).toBeDefined();
+    expect(firstNativeCallOrder).toBeDefined();
+    expect(secondNativeCallOrder).toBeDefined();
+    expect(firstProgressCallOrder!).toBeLessThan(firstNativeCallOrder!);
+    expect(secondProgressCallOrder!).toBeLessThan(secondNativeCallOrder!);
 
     expect(
       segmentbuffer.populateOfflineSegmentBufferIfEmpty

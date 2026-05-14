@@ -39,7 +39,9 @@ import type {
   AlignmentWarning,
   AlignmentWarningCode,
   AlignTextToAudioWriteResult,
+  OrchestrationProgress,
 } from '../types';
+import { createAlignmentProgressSession } from '../progress';
 import {
   advanceCursor,
   createChunkedForcedCtcCursor,
@@ -335,11 +337,14 @@ interface RunAccurateChunkedForcedCtcInput {
   modelSource: FileSource;
   granularity?: 'sentence' | 'word';
   language?: string;
+  onProgress?: (progress: OrchestrationProgress) => void;
 }
 
 export async function runAccurateChunkedForcedCtc(
   input: RunAccurateChunkedForcedCtcInput
 ): Promise<AlignTextToAudioWriteResult> {
+  const progressSession = createAlignmentProgressSession(input.onProgress);
+
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(input.audioIn);
   const segmentOutBufferId = resolveOfflineSegmentBufferId(input.segmentOut);
@@ -446,7 +451,7 @@ export async function runAccurateChunkedForcedCtc(
   let consecutiveNoProgress = 0;
 
   try {
-    for (const anchor of anchors) {
+    for (const [i, anchor] of anchors.entries()) {
       assertAnchorRangeWithinAudio(anchor, audioInfo);
       if (isCursorExhausted(cursor)) {
         break;
@@ -465,6 +470,8 @@ export async function runAccurateChunkedForcedCtc(
       if (textWindow.unitCount === 0 || textWindow.text.length === 0) {
         break;
       }
+
+      progressSession.emitStep(i, anchors.length, anchorDurationMs);
 
       let nativeResult: ChunkedForcedCtcNativeResult;
       try {

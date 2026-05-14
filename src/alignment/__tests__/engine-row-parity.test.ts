@@ -38,6 +38,12 @@ jest.mock('../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment'),
 }));
 
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment'),
+}));
+
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { createAlignment } from '../engine';
 
@@ -128,7 +134,7 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
       'accurate',
       'character',
       {
-        modelSource: '/resolved/alignment/model.onnx',
+        modelPath: '/resolved/alignment/model.onnx',
         language: 'en',
       }
     );
@@ -156,6 +162,26 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
         segmentationSource: 'vad',
         segmentationBufferId: 'seg_anchor',
       }
+    );
+  });
+
+  it('does not pass onProgress into native options payload', async () => {
+    const engine = createAlignment();
+    const onProgress = jest.fn();
+
+    await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
+      mode: 'proportional',
+      granularity: 'word',
+      onProgress,
+    });
+
+    expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
+      'txt_off',
+      'off_audio',
+      'seg_out',
+      'proportional',
+      'word',
+      {}
     );
   });
 });

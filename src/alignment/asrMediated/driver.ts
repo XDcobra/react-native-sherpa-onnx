@@ -39,7 +39,9 @@ import type {
   AlignmentWarning,
   AlignmentWarningCode,
   AlignTextToAudioWriteResult,
+  OrchestrationProgress,
 } from '../types';
+import { createAlignmentProgressSession } from '../progress';
 import type { LinkerWarning } from '../linker/types';
 import type {
   AsrMediatedAggregatedAlignmentSegment,
@@ -403,11 +405,14 @@ interface RunAccurateAsrMediatedInput {
   modelSource: FileSource;
   granularity?: 'sentence' | 'word';
   language?: string;
+  onProgress?: (progress: OrchestrationProgress) => void;
 }
 
 export async function runAccurateAsrMediated(
   input: RunAccurateAsrMediatedInput
 ): Promise<AlignTextToAudioWriteResult> {
+  const progressSession = createAlignmentProgressSession(input.onProgress);
+
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
   const audioInBufferId = resolvePipelineAudioBufferId(input.audioIn);
   const segmentOutBufferId = resolveOfflineSegmentBufferId(input.segmentOut);
@@ -519,13 +524,20 @@ export async function runAccurateAsrMediated(
 
   const aggregatedSegments: AsrMediatedAggregatedAlignmentSegment[] = [];
 
-  for (const job of jobs) {
+  for (const [j, job] of jobs.entries()) {
     assertAnchorRangeWithinAudio(job.anchor, audioInfo);
 
     const frameCount = job.anchor.endSample - job.anchor.startSample;
     if (frameCount <= 0) {
       continue;
     }
+
+    const currentSegmentDurationMs =
+      job.anchor.sampleRate > 0
+        ? (frameCount / job.anchor.sampleRate) * 1000
+        : 0;
+
+    progressSession.emitStep(j, jobs.length, currentSegmentDurationMs);
 
     const nativeResultRaw = await (async () => {
       try {

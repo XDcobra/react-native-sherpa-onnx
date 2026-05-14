@@ -140,6 +140,8 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   segmentOut,
   options
 ) => {
+  const onProgress = options.onProgress;
+
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
       return runAccurateAsrMediated({
@@ -150,6 +152,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
         modelSource: options.modelSource,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
+        ...(onProgress ? { onProgress } : {}),
         ...(typeof options.language === 'string'
           ? { language: options.language }
           : {}),
@@ -163,6 +166,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
       modelSource: options.modelSource,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
+      ...(onProgress ? { onProgress } : {}),
       ...(typeof options.language === 'string'
         ? { language: options.language }
         : {}),

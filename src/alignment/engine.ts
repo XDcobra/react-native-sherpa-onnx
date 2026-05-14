@@ -200,6 +200,16 @@ function validateAlignTextToAudioOptions(
     );
   }
 
+  if (
+    options.onProgress !== undefined &&
+    typeof options.onProgress !== 'function'
+  ) {
+    throw createAlignmentError(
+      'ALIGNMENT_OPTIONS_INVALID',
+      'options.onProgress must be a function when provided.'
+    );
+  }
+
   validateGranularity(mode, options.granularity);
 
   if (mode === 'proportional') {
