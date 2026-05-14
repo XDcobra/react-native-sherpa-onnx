@@ -2,7 +2,7 @@
  * SegmentationPolicyControls
  *
  * Shared component for configuring a SegmentationPolicy for offline feature calls
- * (STT, Enhancement, TTS, Punctuation).
+ * (STT, Enhancement, TTS, Punctuation, **offline VAD** `process` segmentation).
  *
  * Variant matrix (per segmentation-policy.md):
  *  - 'speech-offline' : modes off/auto; evaluators speech_energy_silence, speech_vad_model
@@ -57,7 +57,7 @@ export type SegmentationMode = 'off' | 'manual' | 'auto';
 /**
  * The shape output by this component — identical to the `segmentation` field
  * accepted by STT `transcribe`, Enhancement `enhance`, TTS `synthesize`,
- * and Punctuation `punctuate`.
+ * Punctuation `punctuate`, and offline `VADEngine.process` (`options.segmentation`).
  */
 export interface SegmentationControlConfig {
   mode: SegmentationMode;

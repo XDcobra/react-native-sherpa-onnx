@@ -42,6 +42,7 @@ import {
   detectVadModel,
   type VADEngine,
   type VADModelType,
+  type VADOfflineRunOptions,
   type VADPipelineHandle,
   type VADPipelineStatus,
   type VADSummary,
@@ -50,6 +51,11 @@ import {
   listDownloadedModels,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
+import {
+  buildSegmentationOption,
+  SegmentationPolicyControls,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
@@ -131,6 +137,8 @@ export default function VADScreen() {
   >(null);
   const [preparedOfflineInputBuffer, setPreparedOfflineInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
+  const [offlineSegConfig, setOfflineSegConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
   const [ingestProgress, setIngestProgress] = useState<number | null>(null);
   const [engineInstanceId, setEngineInstanceId] = useState<string | null>(null);
   const [pipelineId, setPipelineId] = useState<string | null>(null);
@@ -161,11 +169,16 @@ export default function VADScreen() {
     !!selectedModelFolder &&
     (liveSource === 'mic' || !!selectedLiveFileUri);
 
+  const offlineSegReady =
+    offlineSegConfig.mode === 'off' ||
+    (offlineSegConfig.mode === 'auto' && offlineSegConfig.policy != null);
+
   const canStartOffline =
     !busyOffline &&
     streamState === 'idle' &&
     !!selectedModelFolder &&
-    preparedOfflineInputBuffer != null;
+    preparedOfflineInputBuffer != null &&
+    offlineSegReady;
 
   const isBusy = streamState !== 'idle' || busyOffline;
 
@@ -903,7 +916,9 @@ export default function VADScreen() {
                   : undefined,
               },
             };
-      const segment = await createEmptyOfflineSegmentBuffer();
+      const segment = await createEmptyOfflineSegmentBuffer({
+        sourceAudioBufferId: preparedOfflineInputBuffer.bufferId,
+      });
       createdSegment = segment;
       offlineSegmentRef.current = segment;
       logOfflineLifecycle('segment.create', segment.bufferId);
@@ -922,10 +937,29 @@ export default function VADScreen() {
         runtimeOptions,
       });
       createdEngine = engine;
+
+      const builtSeg = buildSegmentationOption(offlineSegConfig);
+      let processOptions: VADOfflineRunOptions | undefined;
+      if (builtSeg?.mode === 'auto' && builtSeg.policy) {
+        processOptions = {
+          segmentation: { mode: 'auto', policy: builtSeg.policy },
+          onProgress: (p) => {
+            pushTimeline(
+              'vad.offline.progress',
+              `${p.currentSegment + 1}/${
+                p.totalSegments
+              } · fraction ${p.fraction.toFixed(2)}`
+            );
+          },
+        };
+      } else if (builtSeg?.mode === 'off') {
+        processOptions = { segmentation: { mode: 'off' } };
+      }
+
       const run = await engine.process({
         audioIn: preparedOfflineInputBuffer.bufferId,
         segmentOut: segment,
-        options: {},
+        options: processOptions ?? {},
       });
       if (!('summary' in run)) {
         throw new Error('Expected offline VAD result but got live handle.');
@@ -992,6 +1026,7 @@ export default function VADScreen() {
     }
   }, [
     logOfflineLifecycle,
+    offlineSegConfig,
     preparedOfflineInputBuffer,
     pushTimeline,
     resolveModelPath,
@@ -1031,8 +1066,9 @@ export default function VADScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Intro</Text>
           <Text style={styles.description}>
-            Standalone VAD showcase with live pipeline and deterministic offline
-            run. SegmentBuffer is the primary output contract.
+            Standalone VAD showcase with live pipeline and offline batch.
+            Offline supports optional speech segmentation (same controls as
+            offline STT). SegmentBuffer is the primary output contract.
           </Text>
         </View>
 
@@ -1320,6 +1356,19 @@ export default function VADScreen() {
                 setSegments([]);
                 setStatus('Offline input buffer removed.');
               }}
+            />
+            <Text style={styles.mutedText}>
+              Segmentation uses the same engine as offline STT (speech domain).{' '}
+              <Text style={{ fontWeight: '600' }}>Off</Text> = one native pass
+              over the file. <Text style={{ fontWeight: '600' }}>Auto</Text> =
+              split into speech slices, then VAD per slice; progress events go
+              to the timeline.
+            </Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={offlineSegConfig}
+              onChange={setOfflineSegConfig}
+              disabled={busyOffline}
             />
             <Pressable
               style={[
