@@ -12,6 +12,8 @@
 
 - Import **`createAlignmentProgressSession`** from [`src/alignment/progress.ts`](../../../src/alignment/progress.ts) **or** extract shared **`createOrchestrationStyleProgressSession`** to `src/pipeline/progressUtils.ts` if VAD must not depend on alignment package — **decision:** avoid circular deps (`vad` → `alignment` odd). **Preferred:** move tiny session factory to **`src/pipeline/progressSession.ts`** used by both alignment and VAD; **or** duplicate 5 lines in `vad` (acceptable if duplication is smaller than new module). Document chosen approach in ADR-002 amendment.
 
+Implementation note: v1 uses a tiny local session helper in `src/vad/engine.ts` to avoid introducing a `vad` -> `alignment` dependency and to keep Phase-2 churn minimal.
+
 ### 1.2 Session lifecycle
 
 - `startedAtMs = Date.now()` at **entry** to offline `process` (segmented branch only).
@@ -51,9 +53,9 @@
 
 ## 5. Exit criteria
 
-- [ ] `onProgress` matches orchestrator field semantics on segmented path.
-- [ ] Documented parity / intentional difference for single-pass (`off`) path.
-- [ ] Tests green.
+- [x] `onProgress` matches orchestrator field semantics on segmented path.
+- [x] Documented parity / intentional difference for single-pass (`off`) path.
+- [x] Tests green.
 
 ---
 

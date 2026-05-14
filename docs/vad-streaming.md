@@ -232,6 +232,23 @@ const run = await engine.process({
 });
 ```
 
+### Offline segmented progress (`options.onProgress`)
+
+For offline VAD (`audioIn = off_*`), progress behavior depends on `options.segmentation.mode`:
+
+| Mode | Native execution model | `onProgress` behavior |
+| --- | --- | --- |
+| `off` (default) | Single `runVadOffline(...)` over full buffer | No `onProgress` emission in v1 (single-pass parity) |
+| `auto` | Segmentation engine produces speech slices; VAD runs per slice | Emits `OrchestrationProgress` **before** each per-slice `runVadOffline(...)` |
+
+`OrchestrationProgress` fields follow offline orchestrator semantics:
+
+- `currentSegment`: zero-based slice index.
+- `totalSegments`: total speech slices for the run.
+- `fraction`: `totalSegments > 0 ? currentSegment / totalSegments : 1`.
+- `currentSegmentDurationMs`: current speech slice duration.
+- `elapsedMs`: elapsed time since segmented offline run start.
+
 #### `engine.isSpeechDetected()`
 
 ```ts

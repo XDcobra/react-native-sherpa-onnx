@@ -87,7 +87,7 @@ const { createStreamingVAD } = jest.requireActual(
   '../engine'
 ) as typeof import('../engine');
 
-describe('VAD offline phase-1 segmented contract', () => {
+describe('VAD offline phase-2 segmented progress contract', () => {
   let nextSliceAudio = 0;
   let nextSliceSegment = 0;
   let nextAppendedIndex = 0;
@@ -306,6 +306,7 @@ describe('VAD offline phase-1 segmented contract', () => {
     expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
     const call = mockRunVadOffline.mock.calls[0];
     expect(call?.[3]).toEqual({ sourceTag: 'job-123' });
+    expect(onProgress).not.toHaveBeenCalled();
   });
 
   it('segmented mode runs per speech segment and merges into offline target', async () => {
@@ -325,6 +326,38 @@ describe('VAD offline phase-1 segmented contract', () => {
     expect(mockRunVadOffline).toHaveBeenCalledTimes(2);
     expect(mockRunVadOffline.mock.calls[0]?.[1]).toBe('off_slice_0');
     expect(mockRunVadOffline.mock.calls[1]?.[1]).toBe('off_slice_1');
+    expect(onProgress).toHaveBeenCalledTimes(2);
+
+    const firstProgress = onProgress.mock.calls[0]?.[0] as
+      | OrchestrationProgress
+      | undefined;
+    const secondProgress = onProgress.mock.calls[1]?.[0] as
+      | OrchestrationProgress
+      | undefined;
+
+    expect(firstProgress).toMatchObject({
+      currentSegment: 0,
+      totalSegments: 2,
+      fraction: 0,
+      currentSegmentDurationMs: 25,
+    });
+    expect(secondProgress).toMatchObject({
+      currentSegment: 1,
+      totalSegments: 2,
+      fraction: 0.5,
+      currentSegmentDurationMs: 37.5,
+    });
+    expect((firstProgress?.elapsedMs ?? -1) >= 0).toBe(true);
+    expect(
+      (secondProgress?.elapsedMs ?? -1) >= (firstProgress?.elapsedMs ?? -1)
+    ).toBe(true);
+
+    const firstProgressOrder = onProgress.mock.invocationCallOrder[0] ?? 0;
+    const secondProgressOrder = onProgress.mock.invocationCallOrder[1] ?? 0;
+    const firstRunOrder = mockRunVadOffline.mock.invocationCallOrder[0] ?? 0;
+    const secondRunOrder = mockRunVadOffline.mock.invocationCallOrder[1] ?? 0;
+    expect(firstProgressOrder).toBeLessThan(firstRunOrder);
+    expect(secondProgressOrder).toBeLessThan(secondRunOrder);
 
     expect(mockAppendLiveSegment).toHaveBeenCalledTimes(2);
     expect(mockAppendLiveSegment.mock.calls[0]?.[0]).toBe('seg_live_staging');
@@ -347,7 +380,6 @@ describe('VAD offline phase-1 segmented contract', () => {
       'seg_off_output',
       'seg_live_staging'
     );
-    expect(onProgress).not.toHaveBeenCalled();
 
     expect(out).toMatchObject({
       segmentBufferId: 'seg_off_output',
@@ -359,6 +391,68 @@ describe('VAD offline phase-1 segmented contract', () => {
         speechDurationMs: 16,
       },
     });
+  });
+
+  it('segmented mode does not emit progress when onProgress is undefined', async () => {
+    const engine = await createEngine();
+
+    await engine.process({
+      audioIn: 'off_audio',
+      segmentOut: 'seg_off_output',
+      options: {
+        segmentation: { mode: 'auto' },
+      },
+    });
+
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(2);
+  });
+
+  it('emits progress before each segment run even when a later segment fails', async () => {
+    const engine = await createEngine();
+    const onProgress = jest.fn();
+    const failure = Object.assign(
+      new Error('VAD_INTERNAL_ERROR: segment failure'),
+      {
+        code: 'VAD_INTERNAL_ERROR',
+      }
+    );
+
+    mockRunVadOffline
+      .mockResolvedValueOnce({
+        chunksProcessed: 2,
+        unitsRead: 400,
+        unitsWritten: 1,
+        segmentCount: 1,
+        speechDurationMs: 7,
+      })
+      .mockRejectedValueOnce(failure);
+
+    await expect(
+      engine.process({
+        audioIn: 'off_audio',
+        segmentOut: 'seg_off_output',
+        options: {
+          segmentation: { mode: 'auto' },
+          onProgress,
+        },
+      })
+    ).rejects.toMatchObject({ code: 'VAD_INTERNAL_ERROR' });
+
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenCalledTimes(2);
+
+    const firstProgress = onProgress.mock.calls[0]?.[0] as
+      | OrchestrationProgress
+      | undefined;
+    const secondProgress = onProgress.mock.calls[1]?.[0] as
+      | OrchestrationProgress
+      | undefined;
+    expect(firstProgress?.currentSegment).toBe(0);
+    expect(secondProgress?.currentSegment).toBe(1);
+
+    const secondProgressOrder = onProgress.mock.invocationCallOrder[1] ?? 0;
+    const secondRunOrder = mockRunVadOffline.mock.invocationCallOrder[1] ?? 0;
+    expect(secondProgressOrder).toBeLessThan(secondRunOrder);
   });
 
   it('segmented mode writes directly into live target without offline staging', async () => {

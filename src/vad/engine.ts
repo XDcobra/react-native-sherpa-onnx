@@ -29,6 +29,7 @@ import { validateSegmentationConfig } from '../segment/validation';
 import type {
   DetectedModelEntry,
   DetectionSource,
+  OrchestrationProgress,
   VADDetectResult,
   VADEngine,
   VADInitializeOptions,
@@ -53,6 +54,44 @@ type OfflineVadNativeSummary = {
   segmentCount: number;
   speechDurationMs: number;
 };
+
+interface VadProgressSession {
+  emitStep(
+    currentSegment: number,
+    totalSegments: number,
+    currentSegmentDurationMs: number
+  ): void;
+}
+
+function isAbortRequested(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
+
+function createVadProgressSession(
+  onProgress: ((progress: OrchestrationProgress) => void) | undefined,
+  startedAtMs: number = Date.now()
+): VadProgressSession {
+  return {
+    emitStep(
+      currentSegment: number,
+      totalSegments: number,
+      currentSegmentDurationMs: number
+    ): void {
+      if (!onProgress) {
+        return;
+      }
+
+      const fraction = totalSegments > 0 ? currentSegment / totalSegments : 1;
+      onProgress({
+        currentSegment,
+        totalSegments,
+        fraction,
+        currentSegmentDurationMs,
+        elapsedMs: Date.now() - startedAtMs,
+      });
+    },
+  };
+}
 
 async function collectSpeechSegmentsForOfflineAudio(
   audioInBufferId: string,
@@ -481,10 +520,22 @@ export async function createStreamingVAD(
             'SEGMENTATION_POLICY_INVALID: offline VAD requires segmentation.policy when segmentation.mode=auto'
           );
         }
+        if (isAbortRequested(offlineOptions.abortSignal)) {
+          throw Object.assign(
+            new Error(
+              'VAD_ABORTED: offline VAD segmentation run was aborted before processing'
+            ),
+            { code: 'VAD_ABORTED' }
+          );
+        }
         const speechSegments = await collectSpeechSegmentsForOfflineAudio(
           audioInBufferId,
           segmentation.policy
         );
+        const progressSession = createVadProgressSession(
+          offlineOptions.onProgress
+        );
+        const totalSegments = speechSegments.length;
 
         const aggregated: VADSummary = {
           chunksProcessed: 0,
@@ -513,7 +564,10 @@ export async function createStreamingVAD(
         };
 
         try {
-          for (const speechSegment of speechSegments) {
+          for (const [
+            segmentIndex,
+            speechSegment,
+          ] of speechSegments.entries()) {
             const startSample = Math.max(
               0,
               Math.trunc(speechSegment.startOffset)
@@ -542,6 +596,24 @@ export async function createStreamingVAD(
               1,
               Math.trunc(speechSegment.sampleRate)
             );
+            const currentSegmentDurationMs =
+              typeof speechSegment.durationMs === 'number' &&
+              Number.isFinite(speechSegment.durationMs)
+                ? speechSegment.durationMs
+                : (frameCount / sampleRate) * 1000;
+            progressSession.emitStep(
+              segmentIndex,
+              totalSegments,
+              currentSegmentDurationMs
+            );
+            if (isAbortRequested(offlineOptions.abortSignal)) {
+              throw Object.assign(
+                new Error(
+                  `VAD_ABORTED: offline VAD segmentation run aborted before segment ${segmentIndex}`
+                ),
+                { code: 'VAD_ABORTED' }
+              );
+            }
             const sliceAudio = createOfflineAudioBufferFromSamples(
               sliceSamples,
               sampleRate,

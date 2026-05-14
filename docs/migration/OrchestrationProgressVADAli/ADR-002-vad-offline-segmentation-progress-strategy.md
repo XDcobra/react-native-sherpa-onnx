@@ -87,9 +87,9 @@ For `mode: 'off'`:
 
 - Temp-buffer orchestration introduces extra JS/native calls versus one monolithic pass.
 
-## Phase-1 implementation status
+## Implementation status (Phase 1 + Phase 2)
 
-Phase 1 is implemented with the following behavior (still without `onProgress` emission):
+Phase 1 and Phase 2 are implemented with the following behavior:
 
 - `segmentation.mode === 'auto'` runs segmentation (`segmentOfflineBuffer` + `getSegments`) and executes `runVadOffline` per speech slice.
 - Per-slice summaries are aggregated by field-wise sum (`chunksProcessed`, `unitsRead`, `unitsWritten`, `segmentCount`, `speechDurationMs`).
@@ -98,6 +98,12 @@ Phase 1 is implemented with the following behavior (still without `onProgress` e
    - `seg_live_*`: direct append into caller target.
    - `seg_off_*`: staging live segment buffer + `populateOfflineSegmentBufferIfEmpty(...)` into caller target.
 - Empty speech segmentation result (`0` speech slices): deterministic success with zero summary and no native per-slice VAD calls.
+- Phase 2 progress semantics for `segmentation.mode === 'auto'`:
+   - `onProgress` emits before each per-slice `runVadOffline(...)` call.
+   - `fraction` uses `totalSegments > 0 ? currentSegment / totalSegments : 1`.
+   - `elapsedMs` is measured from a per-run `Date.now()` session baseline.
+   - `segmentation.mode === 'off'` remains single-pass and does not emit `onProgress`.
+- Helper strategy decision for Phase 2: keep a tiny local progress session helper in `src/vad/engine.ts` (no `vad` -> `alignment` dependency and no new shared module churn for v1).
 
 ## Compatibility and migration
 
