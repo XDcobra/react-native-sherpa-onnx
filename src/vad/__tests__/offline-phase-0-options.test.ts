@@ -147,27 +147,35 @@ describe('VAD offline phase-3 edge-case contract', () => {
         new Float32Array(Math.max(0, Number(frameCount) || 0)).fill(0.125)
     );
 
-    mockCreateOfflineAudioBufferFromSamples.mockImplementation(() => ({
-      bufferId: `off_slice_${nextSliceAudio++}`,
-      info: {
-        bufferId: `off_slice_${nextSliceAudio}`,
-        kind: 'offlineAudioBuffer',
-        state: 'immutable',
-        sampleRate: 16000,
-        channelCount: 1,
-        numSamples: 1,
-      },
-    }));
+    mockCreateOfflineAudioBufferFromSamples.mockImplementation(() => {
+      const sliceIndex = nextSliceAudio;
+      nextSliceAudio += 1;
+      return {
+        bufferId: `off_slice_${sliceIndex}`,
+        info: {
+          bufferId: `off_slice_${sliceIndex}`,
+          kind: 'offlineAudioBuffer',
+          state: 'immutable',
+          sampleRate: 16000,
+          channelCount: 1,
+          numSamples: 1,
+        },
+      };
+    });
 
-    mockCreateEmptyOfflineSegmentBuffer.mockImplementation(async () => ({
-      bufferId: `seg_tmp_${nextSliceSegment++}`,
-      info: {
-        bufferId: `seg_tmp_${nextSliceSegment}`,
-        kind: 'offlineSegmentBuffer',
-        state: 'immutable',
-        segmentCount: 0,
-      },
-    }));
+    mockCreateEmptyOfflineSegmentBuffer.mockImplementation(async () => {
+      const segmentIndex = nextSliceSegment;
+      nextSliceSegment += 1;
+      return {
+        bufferId: `seg_tmp_${segmentIndex}`,
+        info: {
+          bufferId: `seg_tmp_${segmentIndex}`,
+          kind: 'offlineSegmentBuffer',
+          state: 'immutable',
+          segmentCount: 0,
+        },
+      };
+    });
 
     mockGetOfflineSegmentBufferSegments.mockImplementation(
       async (bufferId: unknown, start = 0) => {
@@ -623,6 +631,100 @@ describe('VAD offline phase-3 edge-case contract', () => {
     const secondProgressOrder = onProgress.mock.invocationCallOrder[1] ?? 0;
     const secondRunOrder = mockRunVadOffline.mock.invocationCallOrder[1] ?? 0;
     expect(secondProgressOrder).toBeLessThan(secondRunOrder);
+  });
+
+  it('emits progress for each planned segment even when one segment is skipped', async () => {
+    const engine = await createEngine();
+    const onProgress = jest.fn();
+    const segmentsWithZeroFrame: SpeechSegment[] = [
+      {
+        segmentId: 'speech_zero_frame',
+        domain: 'speech',
+        startOffset: 400,
+        endOffset: 400,
+        reason: 'energy_silence',
+        source: 'segmentation_engine',
+        createdAtMs: 1,
+        segmentIndex: 0,
+        sourceAudioBufferId: 'off_audio',
+        sampleRate: 16000,
+        durationMs: 0,
+      },
+      {
+        segmentId: 'speech_real',
+        domain: 'speech',
+        startOffset: 1000,
+        endOffset: 1800,
+        reason: 'energy_silence',
+        source: 'segmentation_engine',
+        createdAtMs: 2,
+        segmentIndex: 1,
+        sourceAudioBufferId: 'off_audio',
+        sampleRate: 16000,
+        durationMs: 50,
+      },
+    ];
+
+    mockGetSegments.mockImplementation(
+      async (_buffer: unknown, startIndex = 0): Promise<SpeechSegment[]> => {
+        if (startIndex > 0) {
+          return [];
+        }
+        return segmentsWithZeroFrame;
+      }
+    );
+
+    await engine.process({
+      audioIn: 'off_audio',
+      segmentOut: 'seg_off_output',
+      options: {
+        segmentation: { mode: 'auto' },
+        onProgress,
+      },
+    });
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({
+      currentSegment: 0,
+      totalSegments: 2,
+      fraction: 0,
+    });
+    expect(onProgress.mock.calls[1]?.[0]).toMatchObject({
+      currentSegment: 1,
+      totalSegments: 2,
+      fraction: 0.5,
+    });
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
+    expect(mockRunVadOffline.mock.calls[0]?.[1]).toBe('off_slice_0');
+  });
+
+  it('checks abort before emitting progress for the next segment', async () => {
+    const engine = await createEngine();
+    const abortController = new AbortController();
+    const onProgress = jest.fn((progress: OrchestrationProgress) => {
+      if (progress.currentSegment === 0) {
+        abortController.abort();
+      }
+    });
+
+    await expect(
+      engine.process({
+        audioIn: 'off_audio',
+        segmentOut: 'seg_off_output',
+        options: {
+          segmentation: { mode: 'auto' },
+          onProgress,
+          abortSignal: abortController.signal,
+        },
+      })
+    ).rejects.toMatchObject({ code: 'VAD_ABORTED' });
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({
+      currentSegment: 0,
+      totalSegments: 2,
+    });
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
   });
 
   it('segmented mode writes directly into live target without offline staging', async () => {

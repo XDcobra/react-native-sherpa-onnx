@@ -515,9 +515,13 @@ export async function createStreamingVAD(
           : {};
 
       if (segmentation.mode !== 'off') {
-        if (!segmentation.policy) {
-          throw new Error(
-            'SEGMENTATION_POLICY_INVALID: offline VAD requires segmentation.policy when segmentation.mode=auto'
+        const segmentationPolicy = segmentation.policy;
+        if (!segmentationPolicy) {
+          throw Object.assign(
+            new Error(
+              'SEGMENTATION_POLICY_INVALID: offline VAD requires segmentation.policy when segmentation.mode=auto'
+            ),
+            { code: 'SEGMENTATION_POLICY_INVALID' }
           );
         }
         if (isAbortRequested(offlineOptions.abortSignal)) {
@@ -530,7 +534,7 @@ export async function createStreamingVAD(
         }
         const speechSegments = await collectSpeechSegmentsForOfflineAudio(
           audioInBufferId,
-          segmentation.policy
+          segmentationPolicy
         );
         const progressSession = createVadProgressSession(
           offlineOptions.onProgress
@@ -568,6 +572,14 @@ export async function createStreamingVAD(
             segmentIndex,
             speechSegment,
           ] of speechSegments.entries()) {
+            if (isAbortRequested(offlineOptions.abortSignal)) {
+              throw Object.assign(
+                new Error(
+                  `VAD_ABORTED: offline VAD segmentation run aborted before segment ${segmentIndex}`
+                ),
+                { code: 'VAD_ABORTED' }
+              );
+            }
             const startSample = Math.max(
               0,
               Math.trunc(speechSegment.startOffset)
@@ -577,6 +589,24 @@ export async function createStreamingVAD(
               Math.trunc(speechSegment.endOffset)
             );
             const frameCount = endSample - startSample;
+            const sampleRate = Math.max(
+              1,
+              Math.trunc(speechSegment.sampleRate)
+            );
+            let currentSegmentDurationMs = 0;
+            if (
+              typeof speechSegment.durationMs === 'number' &&
+              Number.isFinite(speechSegment.durationMs)
+            ) {
+              currentSegmentDurationMs = speechSegment.durationMs;
+            } else if (frameCount > 0) {
+              currentSegmentDurationMs = (frameCount / sampleRate) * 1000;
+            }
+            progressSession.emitStep(
+              segmentIndex,
+              totalSegments,
+              currentSegmentDurationMs
+            );
 
             if (frameCount <= 0) {
               continue;
@@ -590,29 +620,6 @@ export async function createStreamingVAD(
 
             if (sliceSamples.length <= 0) {
               continue;
-            }
-
-            const sampleRate = Math.max(
-              1,
-              Math.trunc(speechSegment.sampleRate)
-            );
-            const currentSegmentDurationMs =
-              typeof speechSegment.durationMs === 'number' &&
-              Number.isFinite(speechSegment.durationMs)
-                ? speechSegment.durationMs
-                : (frameCount / sampleRate) * 1000;
-            progressSession.emitStep(
-              segmentIndex,
-              totalSegments,
-              currentSegmentDurationMs
-            );
-            if (isAbortRequested(offlineOptions.abortSignal)) {
-              throw Object.assign(
-                new Error(
-                  `VAD_ABORTED: offline VAD segmentation run aborted before segment ${segmentIndex}`
-                ),
-                { code: 'VAD_ABORTED' }
-              );
             }
             const sliceAudio = createOfflineAudioBufferFromSamples(
               sliceSamples,
