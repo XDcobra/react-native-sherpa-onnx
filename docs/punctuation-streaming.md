@@ -171,7 +171,7 @@ await engine.destroy();
 
 ### Pipeline handle (`PunctuationPipelineHandle`)
 
-Typed like other streaming handles (`stop`, `flush`, `reset`, `getStatus`). In JS, **`completed`** resolves to **`void`** (completion details are still emitted on the native `streamingPipelineCompleted` event like other pipelines).
+Typed like other streaming handles (`stop`, `flush`, `reset`, `getStatus`). **`completed`** resolves with **`StreamingPipelineCompletion`** when the native worker finishes (same contract as STT/TTS; see [streaming-pipelines-overview.md](streaming-pipelines-overview.md)).
 
 #### `pipeline.stop()`
 

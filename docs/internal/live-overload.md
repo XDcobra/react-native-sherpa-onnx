@@ -240,8 +240,7 @@ The subscription is automatically cleaned up when `handle.completed` settles (re
 | Supported policies | Any text-domain evaluator |
 | Bridge call | `startPunctuationOfflineLivePipeline` |
 | Options type | `PunctuationLivePipelineOptions` — extends `LiveOfflinePipelineBaseOptions` + `onSegment?` |
-| Pipeline handle | `PunctuationPipelineHandle` (own type, same shape as `StreamingPipelineHandle` + `instanceId`) |
-| Note | `PunctuationPipelineHandle.completed` resolves to `void` (not `StreamingPipelineCompletion`) due to `.then(() => undefined)` in the handle constructor. |
+| Pipeline handle | `PunctuationPipelineHandle` (same shape as `StreamingPipelineHandle` + `instanceId`) |
 
 ### Enhancement (`createEnhancement().enhance(LiveAudio, LiveAudio, options)`)
 
@@ -357,10 +356,8 @@ flowchart LR
    - Punctuation: `segmentLiveBufferId` is always required (throws if absent).
    - TTS: `segmentLiveBufferId` is optional — text-domain engines don't produce one, and the code explicitly handles the absent case.
 
-3. **`PunctuationPipelineHandle` resolved type differs.** The punctuation handle's `completed` promise resolves to `void` (via `.then(() => undefined)`) rather than `StreamingPipelineCompletion`. All other features resolve to `StreamingPipelineCompletion`. This is a minor inconsistency.
+3. **Segmentation engine is attached from JS, not native.** The migration plan mentioned native-side attach via `SegmentationEngineRegistry.attach(...)`. In the actual implementation, **JS calls `attachSegmentationEngine()`** (which is itself a TurboModule call) before calling the native pipeline start. The `attachedSegmentationEngineId` is passed down as a pre-existing engine reference.
 
-4. **Segmentation engine is attached from JS, not native.** The migration plan mentioned native-side attach via `SegmentationEngineRegistry.attach(...)`. In the actual implementation, **JS calls `attachSegmentationEngine()`** (which is itself a TurboModule call) before calling the native pipeline start. The `attachedSegmentationEngineId` is passed down as a pre-existing engine reference.
+4. **No `chunkSize` on TTS/Punctuation/Enhancement.** The migration plan mentioned `chunkSize` as a shared option. In practice, only STT exposes `chunkSize` in its bridge options. TTS, Punctuation, and Enhancement do not accept `chunkSize` in their bridge calls.
 
-5. **No `chunkSize` on TTS/Punctuation/Enhancement.** The migration plan mentioned `chunkSize` as a shared option. In practice, only STT exposes `chunkSize` in its bridge options. TTS, Punctuation, and Enhancement do not accept `chunkSize` in their bridge calls.
-
-6. **TTS voice cloning options are flattened.** The TTS live-overload passes `referenceAudioBufferId` and `referenceText` as top-level bridge fields, resolved from the `voiceClone` discriminated union in `toNativeOfflineLivePipelineOptions()`.
+5. **TTS voice cloning options are flattened.** The TTS live-overload passes `referenceAudioBufferId` and `referenceText` as top-level bridge fields, resolved from the `voiceClone` discriminated union in `toNativeOfflineLivePipelineOptions()`.

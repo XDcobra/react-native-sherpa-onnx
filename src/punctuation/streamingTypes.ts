@@ -1,5 +1,8 @@
 import type { FileSource } from '../fileio/types';
-import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
+import type {
+  StreamingPipelineCompletion,
+  StreamingPipelineStatus,
+} from '../audiobuffer/streamingPipelineTypes';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { PunctuationModelType } from './detect';
@@ -28,7 +31,7 @@ export type StreamingPunctuationOptions = {
 export type PunctuationPipelineHandle = {
   readonly instanceId: string;
   readonly pipelineId: string;
-  readonly completed: Promise<void>;
+  readonly completed: Promise<StreamingPipelineCompletion>;
   stop(): Promise<void>;
   /**
    * Drain any remaining **input** segments through the worker (native queue).

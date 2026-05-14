@@ -55,9 +55,7 @@ function createPunctuationPipelineHandle(
   pipelineId: string,
   attachedEngineId?: string
 ): PunctuationPipelineHandle {
-  const completed = createStreamingPipelineCompletionPromise(pipelineId).then(
-    () => undefined
-  );
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
 
   return {
     instanceId,

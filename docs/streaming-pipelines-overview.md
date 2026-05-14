@@ -23,7 +23,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | **`reset()`** | Clear **internal stream state** of the model/worker where supported; may **not** stop the pipeline. | Use for “new utterance / same session” patterns when the feature documents it. |
 | **`getStatus()`** | Snapshot: `isRunning`, chunk counts, `unitsRead` / `unitsWritten`, `error`. | Polling, debug UI, tests. |
 
-**`completed` typing:** Most handles expose `Promise<StreamingPipelineCompletion>`. **`PunctuationPipelineHandle.completed`** is intentionally **`Promise<void>`** in TypeScript; completion payloads still surface via the native **`streamingPipelineCompleted`** event (see [punctuation-streaming.md](punctuation-streaming.md)).
+**`completed` typing:** Pipeline handles expose **`Promise<StreamingPipelineCompletion>`** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`).
 
 **Ordering (rule of thumb):** finish feeding **buffers** (stop mic, **`finalizeLive*Buffer`** on inputs that define end-of-stream), then call **`pipeline.flush()`** so workers can process **tails**, then **`pipeline.stop()`** if you still need an explicit cancel, then **`await pipeline.completed`** when you care about the completion payload. **VAD** and **streaming enhancement** document **exceptions** (e.g. finalize already triggers terminal drain — do not double-flush blindly).
 

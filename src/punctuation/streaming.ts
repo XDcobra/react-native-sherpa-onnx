@@ -36,9 +36,10 @@ function createPunctuationPipelineHandle(
     }
   };
 
-  const completed = createStreamingPipelineCompletionPromise(pipelineId)
-    .finally(detachIfNeeded)
-    .then(() => undefined);
+  const completed =
+    createStreamingPipelineCompletionPromise(pipelineId).finally(
+      detachIfNeeded
+    );
 
   return {
     instanceId,
