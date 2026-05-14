@@ -85,8 +85,19 @@ For `mode: 'off'`:
 
 ### Trade-offs
 
-- `mode: 'auto'` is design-locked in Phase 0 but not executable until Phase 1.
 - Temp-buffer orchestration introduces extra JS/native calls versus one monolithic pass.
+
+## Phase-1 implementation status
+
+Phase 1 is implemented with the following behavior (still without `onProgress` emission):
+
+- `segmentation.mode === 'auto'` runs segmentation (`segmentOfflineBuffer` + `getSegments`) and executes `runVadOffline` per speech slice.
+- Per-slice summaries are aggregated by field-wise sum (`chunksProcessed`, `unitsRead`, `unitsWritten`, `segmentCount`, `speechDurationMs`).
+- Per-slice segment offsets are rebased to original audio sample coordinates before merge.
+- Merge targets:
+   - `seg_live_*`: direct append into caller target.
+   - `seg_off_*`: staging live segment buffer + `populateOfflineSegmentBufferIfEmpty(...)` into caller target.
+- Empty speech segmentation result (`0` speech slices): deterministic success with zero summary and no native per-slice VAD calls.
 
 ## Compatibility and migration
 

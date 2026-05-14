@@ -6,8 +6,25 @@ import {
 } from '../detect';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolvePipelineSegmentBufferId } from '../segmentbuffer';
+import {
+  createOfflineAudioBufferFromSamples,
+  getOfflineAudioBufferSamplesSlice,
+  releasePipelineAudioBuffer,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
+import { getSegments, segmentOfflineBuffer } from '../segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { SpeechSegment } from '../segment/segment';
+import {
+  appendLiveSegment,
+  createEmptyOfflineSegmentBuffer,
+  createLiveSegmentBuffer,
+  finalizeLiveSegmentBuffer,
+  getOfflineSegmentBufferSegments,
+  populateOfflineSegmentBufferIfEmpty,
+  releasePipelineSegmentBuffer,
+  resolvePipelineSegmentBufferId,
+} from '../segmentbuffer';
 import { validateSegmentationConfig } from '../segment/validation';
 import type {
   DetectedModelEntry,
@@ -27,6 +44,59 @@ import type { FileSource } from '../fileio/types';
 import { isDetectionSource } from './types';
 
 let vadInstanceCounter = 0;
+const SEGMENT_PAGE_SIZE = 4096;
+
+type OfflineVadNativeSummary = {
+  chunksProcessed: number;
+  unitsRead: number;
+  unitsWritten: number;
+  segmentCount: number;
+  speechDurationMs: number;
+};
+
+async function collectSpeechSegmentsForOfflineAudio(
+  audioInBufferId: string,
+  segmentationPolicy: SegmentationPolicy
+): Promise<SpeechSegment[]> {
+  const segmentRef = await segmentOfflineBuffer(
+    audioInBufferId,
+    segmentationPolicy
+  );
+
+  const speechSegments: SpeechSegment[] = [];
+  let startIndex = 0;
+
+  while (true) {
+    const page = await getSegments(segmentRef, startIndex, SEGMENT_PAGE_SIZE);
+    if (page.length === 0) {
+      break;
+    }
+
+    for (const segment of page) {
+      if (segment.domain === 'speech') {
+        speechSegments.push(segment);
+      }
+    }
+
+    startIndex += page.length;
+    if (page.length < SEGMENT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return speechSegments;
+}
+
+function accumulateVadSummary(
+  aggregate: VADSummary,
+  chunk: OfflineVadNativeSummary
+): void {
+  aggregate.chunksProcessed += chunk.chunksProcessed;
+  aggregate.unitsRead += chunk.unitsRead;
+  aggregate.unitsWritten += chunk.unitsWritten;
+  aggregate.segmentCount += chunk.segmentCount;
+  aggregate.speechDurationMs += chunk.speechDurationMs;
+}
 
 function toStatus(raw: any): VADPipelineStatus {
   return {
@@ -399,20 +469,168 @@ export async function createStreamingVAD(
         },
       });
 
-      if (segmentation.mode !== 'off') {
-        throw Object.assign(
-          new Error(
-            'VAD_NOT_IMPLEMENTED: segmented offline VAD (segmentation.mode=auto) is Phase 1 and not available in Phase 0'
-          ),
-          { code: 'VAD_NOT_IMPLEMENTED' }
-        );
-      }
-
       const nativeOfflineOptions =
         typeof offlineOptions.sourceTag === 'string' &&
         offlineOptions.sourceTag.trim().length > 0
           ? { sourceTag: offlineOptions.sourceTag }
           : {};
+
+      if (segmentation.mode !== 'off') {
+        if (!segmentation.policy) {
+          throw new Error(
+            'SEGMENTATION_POLICY_INVALID: offline VAD requires segmentation.policy when segmentation.mode=auto'
+          );
+        }
+        const speechSegments = await collectSpeechSegmentsForOfflineAudio(
+          audioInBufferId,
+          segmentation.policy
+        );
+
+        const aggregated: VADSummary = {
+          chunksProcessed: 0,
+          unitsRead: 0,
+          unitsWritten: 0,
+          segmentCount: 0,
+          speechDurationMs: 0,
+        };
+
+        const outputIsOffline = segmentOutBufferId.startsWith('seg_off_');
+        let stagingLiveBufferId: string | undefined;
+
+        const ensureLiveMergeTarget = async (): Promise<string> => {
+          if (!outputIsOffline) {
+            return segmentOutBufferId;
+          }
+          if (stagingLiveBufferId != null) {
+            return stagingLiveBufferId;
+          }
+          const staging = await createLiveSegmentBuffer({
+            sourceAudioBufferId: audioInBufferId,
+            spooling: { mode: 'on' },
+          });
+          stagingLiveBufferId = staging.bufferId;
+          return stagingLiveBufferId;
+        };
+
+        try {
+          for (const speechSegment of speechSegments) {
+            const startSample = Math.max(
+              0,
+              Math.trunc(speechSegment.startOffset)
+            );
+            const endSample = Math.max(
+              startSample,
+              Math.trunc(speechSegment.endOffset)
+            );
+            const frameCount = endSample - startSample;
+
+            if (frameCount <= 0) {
+              continue;
+            }
+
+            const sliceSamples = getOfflineAudioBufferSamplesSlice(
+              audioInBufferId,
+              startSample,
+              frameCount
+            );
+
+            if (sliceSamples.length <= 0) {
+              continue;
+            }
+
+            const sampleRate = Math.max(
+              1,
+              Math.trunc(speechSegment.sampleRate)
+            );
+            const sliceAudio = createOfflineAudioBufferFromSamples(
+              sliceSamples,
+              sampleRate,
+              { targetSampleRateHz: 0 }
+            );
+
+            const sliceSegmentOut = await createEmptyOfflineSegmentBuffer({
+              sourceAudioBufferId: sliceAudio.bufferId,
+            });
+
+            try {
+              const raw = (await SherpaOnnx.runVadOffline(
+                instanceId,
+                sliceAudio.bufferId,
+                sliceSegmentOut.bufferId,
+                nativeOfflineOptions
+              )) as OfflineVadNativeSummary;
+
+              accumulateVadSummary(aggregated, raw);
+
+              if (raw.segmentCount <= 0) {
+                continue;
+              }
+
+              const mergeTargetId = await ensureLiveMergeTarget();
+              let offset = 0;
+
+              while (offset < raw.segmentCount) {
+                const chunk = await getOfflineSegmentBufferSegments(
+                  sliceSegmentOut.bufferId,
+                  offset,
+                  Math.min(SEGMENT_PAGE_SIZE, raw.segmentCount - offset)
+                );
+
+                if (chunk.length === 0) {
+                  break;
+                }
+
+                offset += chunk.length;
+
+                for (const segment of chunk) {
+                  if (segment.kind !== 'speech') {
+                    continue;
+                  }
+
+                  await appendLiveSegment(mergeTargetId, {
+                    kind: 'speech',
+                    sourceAudioBufferId: audioInBufferId,
+                    startSample: startSample + segment.startSample,
+                    endSample: startSample + segment.endSample,
+                    sampleRate: segment.sampleRate,
+                    durationMs: segment.durationMs,
+                    confidence: segment.confidence,
+                    ...(segment.payload != null
+                      ? { payload: segment.payload }
+                      : {}),
+                  });
+                }
+              }
+            } finally {
+              await releasePipelineSegmentBuffer(
+                sliceSegmentOut.bufferId
+              ).catch(() => undefined);
+              await releasePipelineAudioBuffer(sliceAudio.bufferId).catch(
+                () => undefined
+              );
+            }
+          }
+
+          if (outputIsOffline && stagingLiveBufferId != null) {
+            await finalizeLiveSegmentBuffer(stagingLiveBufferId);
+            await populateOfflineSegmentBufferIfEmpty(
+              segmentOutBufferId,
+              stagingLiveBufferId
+            );
+          }
+
+          return {
+            summary: aggregated,
+            segmentBufferId: segmentOutBufferId,
+          };
+        } finally {
+          if (stagingLiveBufferId != null) {
+            await releasePipelineSegmentBuffer(stagingLiveBufferId).catch(
+              () => undefined
+            );
+          }
+        }
+      }
 
       const result = await SherpaOnnx.runVadOffline(
         instanceId,
