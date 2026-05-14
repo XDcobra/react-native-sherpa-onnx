@@ -232,31 +232,7 @@ const run = await engine.process({
 });
 ```
 
-### Offline segmented progress (`options.onProgress`)
-
-For offline VAD (`audioIn = off_*`), progress behavior depends on `options.segmentation.mode`:
-
-| Mode | Native execution model | `onProgress` behavior |
-| --- | --- | --- |
-| `off` (default) | Single `runVadOffline(...)` over full buffer | No `onProgress` emission in v1 (single-pass parity) |
-| `auto` | Segmentation engine produces speech slices; VAD runs per slice | Emits `OrchestrationProgress` **before** each per-slice `runVadOffline(...)` |
-
-`OrchestrationProgress` fields follow offline orchestrator semantics:
-
-- `currentSegment`: zero-based slice index.
-- `totalSegments`: total speech slices for the run.
-- `fraction`: `totalSegments > 0 ? currentSegment / totalSegments : 1`.
-- `currentSegmentDurationMs`: current speech slice duration.
-- `elapsedMs`: elapsed time since segmented offline run start.
-
-Phase-3 edge-case and failure policy for segmented offline mode (`segmentation.mode: 'auto'`):
-
-- If segmentation yields no speech slices, offline VAD returns a deterministic zero summary and performs no per-slice native calls.
-- If a single speech slice spans the full file, one progress event and one native per-slice call are executed.
-- Error policy is fail-fast without retry in v1 (no STT-style retry options on `VADOfflineRunOptions`).
-- If `onProgress` throws, the error is propagated and the run aborts (caller responsibility).
-
-FAQ: Enabling `segmentation.mode: 'auto'` can produce different segment boundaries than single-pass mode by design. Keep `segmentation.mode: 'off'` for legacy whole-file behavior.
+Offline batch: `segmentation`, `onProgress`, and `abortSignal` on `options` are documented under **[Segmentation](#segmentation)** (offline `off_*` audio only).
 
 #### `engine.isSpeechDetected()`
 
@@ -352,6 +328,113 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-pipelines.md#vad-streaming-patterns).
+
+## Segmentation
+
+**Scope:** `options.segmentation`, `onProgress`, and `abortSignal` exist only on **`VADOfflineRunOptions`**. The live `process` overload uses **`VADLiveProcessInput`** / **`VADLiveRunOptions`** — no batch segmentation step; use segment-buffer events instead.
+
+| | Offline batch (`off_*` → `seg_off_*` or `live_*` out) | Streaming pipeline (`live_*` → `live_*`) |
+| --- | --- | --- |
+| **Input audio** | `OfflineAudioBuffer` — full file (or finalized chunk) in one buffer | `LiveAudioBuffer` — samples appended over time |
+| **Segmentation engine** | Optional: `segmentation.mode: 'auto'` splits **offline** PCM into **speech** slices before VAD | **Not used** — the native VAD worker consumes the live stream directly |
+| **Progress** | `onProgress` with `OrchestrationProgress` **only** when `mode: 'auto'` and at least one speech slice exists; **`mode: 'off'`** → single native pass, **no** `onProgress` (STT single-pass parity) | **No** `OrchestrationProgress`. Use **`onSegmentAppended`** / `streamEvents.segmentAppended` on the **live** segment buffer for incremental segments |
+| **Cancellation** | `abortSignal` checked between slices (`segmentation.mode: 'auto'`) | Use **`pipeline.stop()`** / teardown; no `abortSignal` on live `options` |
+
+> `'manual'` segmentation mode is **not** supported for offline VAD (`supportsManual: false` in validation).
+
+### Modes (offline only)
+
+- **`'off'`** (default) — one `runVadOffline` over the **entire** `off_*` buffer; smallest surprise vs. pre-segmentation behavior.
+- **`'auto'`** — `segmentOfflineBuffer` + `getSegments` (domain **speech**); one `runVadOffline` per slice; results merged into `segmentOut`. **Segment boundaries can differ** from single-pass `off`; keep `off` if you rely on legacy whole-file semantics.
+
+For `mode: 'auto'`, **`policy` is required** (validation). The snippet below uses the same default shape as `validateSegmentationConfig` for offline VAD (`speech_energy_silence`, …). Tune in [segmentation-engine.md](segmentation-engine.md).
+
+### Offline: default (no segmentation)
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineSegmentBuffer,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const vad = await createStreamingVAD({
+  modelSource: { kind: 'fs', path: '/path/to/vad-model' },
+  modelType: 'auto',
+  sampleRate: 16000,
+});
+
+const audio = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/audio.wav',
+});
+const segOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+
+const { summary, segmentBufferId } = await vad.process({
+  audioIn: audio,
+  segmentOut: segOut,
+  // segmentation omitted → same as mode: 'off'
+});
+
+console.log(summary.segmentCount, segmentBufferId);
+
+await vad.destroy();
+await releasePipelineSegmentBuffer(segOut);
+await releasePipelineAudioBuffer(audio);
+```
+
+### Offline: segmented + progress
+
+`segmentation.mode: 'auto'` requires a **`policy`** object. `onProgress` fires **before** each per-slice `runVadOffline` (same field meanings as `offlineOrchestrator` / STT batch).
+
+```ts
+const controller = new AbortController();
+const { summary } = await vad.process({
+  audioIn: audio,
+  segmentOut: segOut,
+  options: {
+    segmentation: {
+      mode: 'auto',
+      policy: {
+        evaluator: 'speech_energy_silence',
+        silenceThresholdMs: 500,
+        energyThresholdDb: -40,
+        minSegmentMs: 1000,
+        maxSegmentMs: 120_000,
+        hangoverMs: 300,
+      },
+    },
+    onProgress: (p) =>
+      console.log(`vad slice ${p.currentSegment + 1}/${p.totalSegments}`, p.fraction),
+    abortSignal: controller.signal,
+  },
+});
+```
+
+**Edge cases (`auto`):** zero speech slices → zero summary, **no** native calls, **no** `onProgress`. `onProgress` throws → run aborts. Fail-fast per segment in v1 (no STT-style retries on `VADOfflineRunOptions`). Details: [ADR-002 — VAD offline segmentation & progress](./migration/OrchestrationProgressVADAli/ADR-002-vad-offline-segmentation-progress-strategy.md).
+
+### Streaming: live buffers (no `segmentation` options)
+
+Use **`VADLiveProcessInput`**: `live_*` audio in, `live_*` segment buffer out. Segment growth is **event-driven**, not `OrchestrationProgress`.
+
+```ts
+const pipeline = await vad.process({
+  audioIn: liveAudio,
+  segmentOut: liveSeg,
+  options: {
+    chunkSize: 512,
+    autoFlushOnInputEnded: true,
+    // no segmentation / onProgress here — use onSegmentAppended on liveSeg
+  },
+});
+```
+
+See **Quick start** above for a full `onSegmentAppended` example.
+
 
 ## Types and constants
 
@@ -564,6 +647,7 @@ try {
 
 ## See also
 
+- [Segmentation engine](segmentation-engine.md)
 - [Streaming STT](stt-streaming.md)
 - [Offline STT](stt-offline.md)
 - [Pipeline audio buffers — streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
