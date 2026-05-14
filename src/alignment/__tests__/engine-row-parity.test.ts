@@ -38,6 +38,12 @@ jest.mock('../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment'),
 }));
 
+jest.mock('../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment'),
+}));
+
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { createAlignment } from '../engine';
 
@@ -66,11 +72,13 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
 
   it('routes proportional mode unchanged', async () => {
     const engine = createAlignment();
+    const onProgress = jest.fn();
 
     await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
       mode: 'proportional',
       granularity: 'word',
       language: 'en',
+      onProgress,
     });
 
     expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
@@ -81,10 +89,28 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
       'word',
       { language: 'en' }
     );
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        fraction: 0,
+        currentSegmentDurationMs: 0,
+      })
+    );
+
+    const progressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const nativeCallOrder =
+      native.alignOfflineTextToAudio.mock.invocationCallOrder[0];
+    expect(progressCallOrder).toBeDefined();
+    expect(nativeCallOrder).toBeDefined();
+    expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
   });
 
   it('routes estimated mode unchanged', async () => {
     const engine = createAlignment();
+    const onProgress = jest.fn();
 
     await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
       mode: 'estimated',
@@ -93,6 +119,7 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
         sampleRate: 16000,
         segmentSampleCounts: [3.2, -2, 7.1],
       },
+      onProgress,
     });
 
     expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
@@ -109,16 +136,35 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
         },
       }
     );
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        fraction: 0,
+        currentSegmentDurationMs: 0,
+      })
+    );
+
+    const progressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const nativeCallOrder =
+      native.alignOfflineTextToAudio.mock.invocationCallOrder[0];
+    expect(progressCallOrder).toBeDefined();
+    expect(nativeCallOrder).toBeDefined();
+    expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
   });
 
   it('routes accurate mode without segmentation unchanged', async () => {
     const engine = createAlignment();
+    const onProgress = jest.fn();
 
     await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
       mode: 'accurate',
       granularity: 'character',
       language: 'en',
       modelSource: { kind: 'fs', path: '/models/alignment' },
+      onProgress,
     });
 
     expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
@@ -128,14 +174,32 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
       'accurate',
       'character',
       {
-        modelSource: '/resolved/alignment/model.onnx',
+        modelPath: '/resolved/alignment/model.onnx',
         language: 'en',
       }
     );
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        fraction: 0,
+        currentSegmentDurationMs: 0,
+      })
+    );
+
+    const progressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const nativeCallOrder =
+      native.alignOfflineTextToAudio.mock.invocationCallOrder[0];
+    expect(progressCallOrder).toBeDefined();
+    expect(nativeCallOrder).toBeDefined();
+    expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
   });
 
   it('routes vad mode unchanged', async () => {
     const engine = createAlignment();
+    const onProgress = jest.fn();
 
     await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
       mode: 'vad',
@@ -144,6 +208,7 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
         source: 'vad',
         segmentBuffer: 'seg_anchor',
       },
+      onProgress,
     });
 
     expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
@@ -156,6 +221,68 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
         segmentationSource: 'vad',
         segmentationBufferId: 'seg_anchor',
       }
+    );
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        fraction: 0,
+        currentSegmentDurationMs: 0,
+      })
+    );
+
+    const progressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const nativeCallOrder =
+      native.alignOfflineTextToAudio.mock.invocationCallOrder[0];
+    expect(progressCallOrder).toBeDefined();
+    expect(nativeCallOrder).toBeDefined();
+    expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
+  });
+
+  it('does not emit progress for vad when there are no speech anchors', async () => {
+    const engine = createAlignment();
+    const onProgress = jest.fn();
+
+    segmentBuffer.getOfflineSegmentBufferSegments.mockResolvedValueOnce([]);
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
+        mode: 'vad',
+        granularity: 'word',
+        segmentation: {
+          source: 'vad',
+          segmentBuffer: 'seg_anchor',
+        },
+        onProgress,
+      })
+    ).resolves.toEqual({
+      outputSegmentBufferId: 'seg_out',
+      segmentsWritten: 0,
+    });
+
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
+
+  it('does not pass onProgress into native options payload', async () => {
+    const engine = createAlignment();
+    const onProgress = jest.fn();
+
+    await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
+      mode: 'proportional',
+      granularity: 'word',
+      onProgress,
+    });
+
+    expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
+      'txt_off',
+      'off_audio',
+      'seg_out',
+      'proportional',
+      'word',
+      {}
     );
   });
 });

@@ -8,6 +8,10 @@ import {
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { runAccurateAsrMediated } from './asrMediated/driver';
 import { runAccurateChunkedForcedCtc } from './chunkedForcedCtc/driver';
+import {
+  createAlignmentProgressSession,
+  type AlignmentProgressSession,
+} from './progress';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -52,6 +56,12 @@ function toNativeMode(
     return mode;
   }
   throw new Error(`Unsupported alignment mode: ${String(mode)}`);
+}
+
+function emitSingleStepNativeAlignmentStart(
+  progressSession: AlignmentProgressSession
+): void {
+  progressSession.emitStep(0, 1, 0);
 }
 
 async function buildNativeOptions(
@@ -141,6 +151,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   options
 ) => {
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
+    const onProgress = options.onProgress;
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
       return runAccurateAsrMediated({
         textIn,
@@ -150,6 +161,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
         modelSource: options.modelSource,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
+        ...(onProgress ? { onProgress } : {}),
         ...(typeof options.language === 'string'
           ? { language: options.language }
           : {}),
@@ -163,11 +175,14 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
       modelSource: options.modelSource,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
+      ...(onProgress ? { onProgress } : {}),
       ...(typeof options.language === 'string'
         ? { language: options.language }
         : {}),
     });
   }
+
+  const progressSession = createAlignmentProgressSession(options.onProgress);
 
   const mode = toNativeMode(options.mode);
   const granularity = normalizeGranularity(options.granularity);
@@ -206,6 +221,8 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
 
   const nativeOptions = await buildNativeOptions(options);
+
+  emitSingleStepNativeAlignmentStart(progressSession);
 
   return SherpaOnnx.alignOfflineTextToAudio(
     textInBufferId,

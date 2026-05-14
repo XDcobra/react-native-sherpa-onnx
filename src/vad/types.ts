@@ -8,6 +8,8 @@ import type {
   LiveSegmentBufferIdSource,
   OfflineSegmentBufferIdSource,
 } from '../segmentbuffer/types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 export {
   DETECTION_SOURCES,
@@ -91,6 +93,26 @@ export type VADLiveRunOptions = {
 
 export type VADOfflineRunOptions = {
   sourceTag?: string;
+  /**
+   * When omitted or `mode: 'off'`, offline VAD runs a single native pass over the full buffer.
+   * When `mode: 'auto'`, the segmentation engine splits offline audio into speech segments and
+   * runs VAD per segment (see `src/vad/engine.ts` offline branch).
+   */
+  segmentation?: {
+    mode?: 'off' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  /**
+   * Emitted only for **segmented** offline runs (`segmentation.mode: 'auto'` with at least one
+   * speech segment). Not called for `mode: 'off'` (single native pass), matching offline STT
+   * single-pass behaviour. Payload matches `OrchestrationProgress` in `pipeline/offlineOrchestrator.ts`.
+   */
+  onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * When set, checked before the segmented loop and before each segment's native VAD call;
+   * aborted runs throw with code `VAD_ABORTED`.
+   */
+  abortSignal?: AbortSignal;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
@@ -108,6 +130,8 @@ export type VADOfflineResult = {
 };
 
 export type VADDetectResult = VadDetectModelResult;
+
+export type { OrchestrationProgress };
 
 export type VADPipelineHandle = {
   instanceId: string;

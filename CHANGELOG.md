@@ -32,6 +32,8 @@
 * **alignment:** native-first standalone APIs: `alignTextToAudioFromPath`, `alignTextToAudioFromPcm`, `alignTextToTtsSink`, and `getAudioDuration`.
 * **alignment:** new JS helper `alignTextToTtsSink(text, generatedAudio, options)` for zero PCM bridge round-trip when aligning TTS output.
 * **alignment:** unified shared C++ alignment engine for proportional, estimated, and accurate modes (single segmentation/timing implementation across Android and iOS).
+* **alignment:** optional offline `onProgress` on `AlignTextToAudioOptions` with `OrchestrationProgress` payload. Progress fires at the start of each alignment step and uses mode-specific `totalSegments` semantics documented in alignment offline docs.
+* **vad:** offline segmented mode (`segmentation.mode: 'auto'`) now includes orchestrator-style progress plus phase-3 edge-case hardening: deterministic zero-result behavior for no-speech segmentation, documented fail-fast/no-retry policy, and explicit callback error propagation semantics.
 
 ### Migration Guide
 

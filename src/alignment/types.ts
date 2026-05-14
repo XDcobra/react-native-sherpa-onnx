@@ -3,6 +3,7 @@ import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 
 export interface AlignmentTimestamp {
   text: string;
@@ -66,6 +67,16 @@ export type AlignmentTimingMode =
   | 'accurate'
   | 'vad';
 
+export type AlignmentProgressCallbacks = {
+  /**
+   * Fires at the start of a coarse progress step.
+   *
+   * This callback follows offline orchestrator semantics and is not sample-accurate.
+   * Alignment warnings remain the source for quality diagnostics.
+   */
+  onProgress?: (progress: OrchestrationProgress) => void;
+};
+
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
@@ -93,7 +104,7 @@ export type AlignTextToAudioOptionsProportional = {
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation?: never;
-};
+} & AlignmentProgressCallbacks;
 
 /** Estimated: segment sample counts from synthesis, STT, or other engines. */
 export type AlignTextToAudioOptionsEstimated = {
@@ -102,10 +113,9 @@ export type AlignTextToAudioOptionsEstimated = {
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation?: never;
-};
+} & AlignmentProgressCallbacks;
 
-/** Accurate: wav2vec2 CTC forced alignment. */
-export type AlignTextToAudioOptionsAccurate =
+type AlignTextToAudioOptionsAccurateBase =
   | {
       mode: 'accurate';
       /** FileSource for the alignment model; resolved before the native bridge. */
@@ -127,19 +137,25 @@ export type AlignTextToAudioOptionsAccurate =
       >;
     };
 
+/** Accurate: wav2vec2 CTC forced alignment. */
+export type AlignTextToAudioOptionsAccurate =
+  AlignTextToAudioOptionsAccurateBase & AlignmentProgressCallbacks;
+
 /** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
 export type AlignTextToAudioOptionsVad = {
   mode: 'vad';
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation: AlignmentVadSegmentationConfig;
-};
+} & AlignmentProgressCallbacks;
 
 export type AlignTextToAudioOptions =
   | AlignTextToAudioOptionsProportional
   | AlignTextToAudioOptionsEstimated
   | AlignTextToAudioOptionsAccurate
   | AlignTextToAudioOptionsVad;
+
+export type { OrchestrationProgress };
 
 export type AlignTextToAudioFn = (
   textIn: OfflineTextBufferIdSource,

@@ -11,6 +11,8 @@ This page describes what is **common** to native **streaming pipeline** workers 
 
 ## Pipeline handle — control surface
 
+Note: offline alignment progress is exposed on `alignTextToAudio(..., { onProgress })` as `OrchestrationProgress`; alignment has no streaming pipeline handle progress contract.
+
 Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`, …) but share the same **verbs** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`). They are thin JS facades over native `pipelineId` control (`stopStreamingPipeline`, `flushStreamingPipeline`, …).
 
 | Method / field | Role | Typical interplay |

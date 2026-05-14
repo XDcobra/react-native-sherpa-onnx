@@ -16,6 +16,12 @@ jest.mock('../../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
+jest.mock('../../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment-bundle'),
+}));
+
 jest.mock('../../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((id: string) => id),
   getPipelineAudioBufferInfo: jest.fn().mockResolvedValue({
@@ -173,6 +179,8 @@ describe('asrMediated/driver options', () => {
   });
 
   test('propagates ALIGNMENT_NATIVE_ACCURATE_FAILED from native accurate calls', async () => {
+    const onProgress = jest.fn();
+
     linker.runLinker.mockResolvedValue({
       version: 0,
       status: 'ok',
@@ -220,7 +228,25 @@ describe('asrMediated/driver options', () => {
         hypothesisTextBuffer: 'txt_hyp',
         modelSource: { kind: 'fs', path: '/m' },
         granularity: 'word',
+        onProgress,
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_NATIVE_ACCURATE_FAILED' });
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        fraction: 0,
+        currentSegmentDurationMs: 1000,
+      })
+    );
+    const progressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const nativeCallOrder =
+      native.alignAccurateFromPcm.mock.invocationCallOrder[0];
+
+    expect(progressCallOrder).toBeDefined();
+    expect(nativeCallOrder).toBeDefined();
+    expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
   });
 });

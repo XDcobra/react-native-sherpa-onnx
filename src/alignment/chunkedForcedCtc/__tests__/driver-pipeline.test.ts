@@ -31,6 +31,12 @@ jest.mock('../../../utils', () => ({
   resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
+jest.mock('../../../detect', () => ({
+  resolveFileSourceForModelInit: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment-bundle'),
+}));
+
 jest.mock('../../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((id: string) => id),
   getPipelineAudioBufferInfo: jest.fn().mockResolvedValue({
@@ -138,7 +144,18 @@ describe('chunkedForcedCtc/driver pipeline', () => {
     segment.addSegmentLink.mockResolvedValue({ linkId: 'lnk_1' });
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('advances cursor across anchors and writes global timestamps', async () => {
+    let fakeNow = 10_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => {
+      fakeNow += 5;
+      return fakeNow;
+    });
+    const onProgress = jest.fn();
+
     const out = await runAccurateChunkedForcedCtc({
       textIn: 'txt_ref',
       audioIn: 'off_audio',
@@ -147,7 +164,10 @@ describe('chunkedForcedCtc/driver pipeline', () => {
       modelSource: { kind: 'fs', path: '/m' },
       granularity: 'word',
       language: 'en',
+      onProgress,
     });
+
+    nowSpy.mockRestore();
 
     expect(out.outputSegmentBufferId).toBe('seg_out');
     expect(out.segmentsWritten).toBe(5);
@@ -167,6 +187,43 @@ describe('chunkedForcedCtc/driver pipeline', () => {
       'word',
       'en'
     );
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 2,
+        fraction: 0,
+        currentSegmentDurationMs: 1000,
+      })
+    );
+    expect(onProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        currentSegment: 1,
+        totalSegments: 2,
+        fraction: 0.5,
+        currentSegmentDurationMs: 1000,
+      })
+    );
+
+    const firstElapsed = onProgress.mock.calls[0][0].elapsedMs as number;
+    const secondElapsed = onProgress.mock.calls[1][0].elapsedMs as number;
+    expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
+
+    const firstProgressCallOrder = onProgress.mock.invocationCallOrder[0];
+    const secondProgressCallOrder = onProgress.mock.invocationCallOrder[1];
+    const firstNativeCallOrder =
+      native.alignAccurateForcedCtcFromPcm.mock.invocationCallOrder[0];
+    const secondNativeCallOrder =
+      native.alignAccurateForcedCtcFromPcm.mock.invocationCallOrder[1];
+
+    expect(firstProgressCallOrder).toBeDefined();
+    expect(secondProgressCallOrder).toBeDefined();
+    expect(firstNativeCallOrder).toBeDefined();
+    expect(secondNativeCallOrder).toBeDefined();
+    expect(firstProgressCallOrder!).toBeLessThan(firstNativeCallOrder!);
+    expect(secondProgressCallOrder!).toBeLessThan(secondNativeCallOrder!);
 
     expect(segmentbuffer.appendLiveSegment).toHaveBeenCalledTimes(5);
     expect(segment.createSegmentLinkMap).toHaveBeenCalledWith({
