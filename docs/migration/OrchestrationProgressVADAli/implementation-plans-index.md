@@ -2,6 +2,8 @@
 
 Concrete execution plans for the phases in [README §2–3](./README.md). **Phase 0 (alignment)** is design-complete ([ADR-001](./ADR-001-alignment-progress-strategy.md), [phase-0](./phase-0-alignment-progress-semantics.md)); no separate implementation plan.
 
+VAD Phase 0 design decisions are locked in [ADR-002](./ADR-002-vad-offline-segmentation-progress-strategy.md).
+
 | Track | Phase | Document |
 | --- | --- | --- |
 | **Alignment** | 1 — API surface | [impl-alignment-phase-1-api.md](./impl-alignment-phase-1-api.md) |

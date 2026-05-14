@@ -8,6 +8,8 @@ import type {
   LiveSegmentBufferIdSource,
   OfflineSegmentBufferIdSource,
 } from '../segmentbuffer/types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 export {
   DETECTION_SOURCES,
@@ -91,6 +93,23 @@ export type VADLiveRunOptions = {
 
 export type VADOfflineRunOptions = {
   sourceTag?: string;
+  /**
+   * Phase 0 API lock: when omitted or mode='off', offline VAD keeps the current single native pass.
+   * Segmented execution for mode='auto' is introduced in the next migration phase.
+   */
+  segmentation?: {
+    mode?: 'off' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  /**
+   * Reserved for segmented offline VAD orchestration progress.
+   * Payload shape is identical to pipeline/offlineOrchestrator.ts.
+   */
+  onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * Reserved for segmented offline cancellation checks.
+   */
+  abortSignal?: AbortSignal;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
@@ -108,6 +127,8 @@ export type VADOfflineResult = {
 };
 
 export type VADDetectResult = VadDetectModelResult;
+
+export type { OrchestrationProgress };
 
 export type VADPipelineHandle = {
   instanceId: string;

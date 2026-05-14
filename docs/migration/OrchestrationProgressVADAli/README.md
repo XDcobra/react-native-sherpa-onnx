@@ -7,6 +7,7 @@ This note captures the **product / API consistency** goal discussed for **`Orche
 | Doc | Purpose |
 | --- | --- |
 | [ADR-001 — Alignment offline progress strategy](./ADR-001-alignment-offline-progress-strategy.md) | **Accepted:** hybrid **C** — driver instrumentation + shared **`OrchestrationProgress`** payload; public `onProgress` on alignment options. |
+| [ADR-002 — VAD offline segmentation + progress strategy](./ADR-002-vad-offline-segmentation-progress-strategy.md) | **Accepted:** Phase-0 API/design lock for `VADOfflineRunOptions` (`segmentation`, `onProgress`, `abortSignal`) with legacy default `segmentation.mode='off'`. |
 | [Phase 0 — Per-mode progress semantics](./phase-0-alignment-progress-semantics.md) | **`totalSegments` / `currentSegment`** meaning per alignment **mode**; fallbacks when inner step counts are TBD. |
 
 ---
@@ -134,4 +135,4 @@ This note captures the **product / API consistency** goal discussed for **`Orche
 
 ---
 
-*Document status: strategy and Phase 0 semantics **locked** in ADR-001 + phase-0 doc; implementation tracked separately.*
+*Document status: alignment strategy/semantics locked in ADR-001 + phase-0 doc, and VAD Phase-0 design lock in ADR-002; implementation tracked separately.*

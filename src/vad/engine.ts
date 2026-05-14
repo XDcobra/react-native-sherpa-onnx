@@ -8,6 +8,7 @@ import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { resolvePipelineSegmentBufferId } from '../segmentbuffer';
+import { validateSegmentationConfig } from '../segment/validation';
 import type {
   DetectedModelEntry,
   DetectionSource,
@@ -369,11 +370,55 @@ export async function createStreamingVAD(
         return handle;
       }
 
+      const offlineOptions = (input as VADOfflineProcessInput).options ?? {};
+      if (
+        offlineOptions.onProgress != null &&
+        typeof offlineOptions.onProgress !== 'function'
+      ) {
+        throw Object.assign(
+          new Error(
+            'VAD_INVALID_OPTIONS: options.onProgress must be a function'
+          ),
+          { code: 'VAD_INVALID_OPTIONS' }
+        );
+      }
+
+      const segmentation = validateSegmentationConfig({
+        mode: offlineOptions.segmentation?.mode,
+        policy: offlineOptions.segmentation?.policy,
+        featureName: 'offline VAD',
+        domain: 'speech',
+        supportsManual: false,
+        defaultPolicy: {
+          evaluator: 'speech_energy_silence',
+          silenceThresholdMs: 500,
+          energyThresholdDb: -40,
+          minSegmentMs: 1000,
+          maxSegmentMs: 120000,
+          hangoverMs: 300,
+        },
+      });
+
+      if (segmentation.mode !== 'off') {
+        throw Object.assign(
+          new Error(
+            'VAD_NOT_IMPLEMENTED: segmented offline VAD (segmentation.mode=auto) is Phase 1 and not available in Phase 0'
+          ),
+          { code: 'VAD_NOT_IMPLEMENTED' }
+        );
+      }
+
+      const nativeOfflineOptions =
+        typeof offlineOptions.sourceTag === 'string' &&
+        offlineOptions.sourceTag.trim().length > 0
+          ? { sourceTag: offlineOptions.sourceTag }
+          : {};
+
       const result = await SherpaOnnx.runVadOffline(
         instanceId,
         audioInBufferId,
         segmentOutBufferId,
-        (input as VADOfflineProcessInput).options ?? {}
+        nativeOfflineOptions
       );
       return {
         summary: toSummary(result),

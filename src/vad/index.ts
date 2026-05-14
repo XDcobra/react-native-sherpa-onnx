@@ -4,6 +4,7 @@ export type {
   DetectionSource,
   DetectedModelEntry,
   ModelDetectResultBase,
+  OrchestrationProgress,
   VADModelType,
   VADDetectResult,
   VADEngine,
