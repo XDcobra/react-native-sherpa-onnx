@@ -331,6 +331,53 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feature-pipelines.md#alignment-offline-patterns).
 
+## Offline progress (`onProgress`)
+
+Alignment supports optional coarse offline progress via `onProgress` on all `AlignTextToAudioOptions` variants.
+The callback payload is `OrchestrationProgress` and follows offline orchestrator semantics:
+
+- The event fires at the start of step `i` (before heavy work for that step).
+- `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
+- This is not waveform-level progress and does not replace alignment warnings.
+
+Quick per-mode summary:
+
+| Mode path | `totalSegments` | Emission shape |
+| --- | --- | --- |
+| `accurate` + `segmentation.mode === 'auto'` + `chunked_forced_ctc` | `anchors.length` | multi-step (`currentSegment = anchor index`) |
+| `accurate` + `segmentation.mode === 'auto'` + `asr_mediated` | `jobs.length` | multi-step (`currentSegment = job index`) |
+| `accurate` without `auto` segmentation | `1` | single-shot (`currentSegment = 0`) |
+| `proportional` | `1` | single-shot (`currentSegment = 0`) |
+| `estimated` | `1` | single-shot (`currentSegment = 0`) |
+| `vad` with speech anchors | `1` | single-shot (`currentSegment = 0`) |
+| `vad` with zero speech anchors | n/a | no progress event (no alignment work) |
+
+Example:
+
+```ts
+const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  modelSource: { kind: 'fs', path: '/abs/path/to/model.onnx' },
+  segmentation: {
+    mode: 'auto',
+    anchorSegmentBuffer: anchorRef,
+    mappingStrategy: 'chunked_forced_ctc',
+  },
+  onProgress: (p) => {
+    console.log(
+      `alignment progress ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
+    );
+  },
+});
+```
+
+Caveats:
+
+- `onProgress` is coarse and step-based, not sample-accurate.
+- In chunked paths, an invocation can terminate before reaching a conceptual final tick; callers should treat progress as a start-of-work signal, not completion proof.
+- Use returned warnings / error codes for quality and failure diagnostics.
+
 ## Core types
 
 | Type | Description |

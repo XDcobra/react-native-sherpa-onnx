@@ -40,8 +40,8 @@ Rows marked **TBD impl** need a short spike in the driver / native bridge to cou
 | **`accurate`** + `segmentation.mode === 'auto'` + **`asr_mediated`** | `runAccurateAsrMediated` | **`jobs.length`** from `buildAnchorJobs(...)` (known before first native call). | **Job index `j`** for the native accurate attempt about to start (`0 .. jobs.length-1`). | If no jobs can be materialized, mode fails with linker errors before progress emission. |
 | **`accurate`** + `segmentation` absent, `off`, or not `auto` | Native `alignOfflineTextToAudio` (mode resolved as today; see `alignTextToAudio.ts`) | **`1`** | Single step: only `currentSegment === 0` | — |
 | **`proportional`** | Native single call | **`1`** | `0` once at start | — |
-| **`estimated`** | Native with `chunks.segmentSampleCounts` | **`max(1, segmentSampleCounts.length)`** when counts are the natural progress units; else **`1`**. | `i` = index of chunk **about** to be aligned **if** native/TS exposes sequential work; if native is one opaque call → **`1`** step only | **`1`** |
-| **`vad`** | VAD anchors + native; early exit if zero speech anchors | **`1`** if zero anchors (no work); else **TBD impl:** ideally `speechAnchorCount` or derived pass count | If single native batch after anchor prep → **`1`** | **`1`** |
+| **`estimated`** | Native with `chunks.segmentSampleCounts` | **`1`** (native bridge executes one opaque estimated alignment call). | Single step: `currentSegment === 0` at start of the native call. | — |
+| **`vad`** | VAD anchors + native; early exit if zero speech anchors | **`1`** when at least one speech anchor exists and native alignment runs. | Single step: `currentSegment === 0` for the native call. | If zero speech anchors, alignment returns early with no progress event (no work performed). |
 | **`aligned`** (if exposed as user-facing mode name) | Same native family as non-auto accurate path | **`1`** unless we document sub-phases | Single step | **`1`** |
 
 ---

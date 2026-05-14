@@ -212,6 +212,7 @@ flowchart LR
 When to use:
 - Subtitle and timing extraction from existing text + audio.
 - Post-processing workflows that require structured alignment segments.
+- Optional coarse progress UI with `onProgress: (p: OrchestrationProgress) => void` on alignment options.
 
 Related docs:
 - [alignment-offline.md](alignment-offline.md)

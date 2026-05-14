@@ -8,6 +8,10 @@ import {
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { runAccurateAsrMediated } from './asrMediated/driver';
 import { runAccurateChunkedForcedCtc } from './chunkedForcedCtc/driver';
+import {
+  createAlignmentProgressSession,
+  type AlignmentProgressSession,
+} from './progress';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -52,6 +56,12 @@ function toNativeMode(
     return mode;
   }
   throw new Error(`Unsupported alignment mode: ${String(mode)}`);
+}
+
+function emitSingleStepNativeAlignmentStart(
+  progressSession: AlignmentProgressSession
+): void {
+  progressSession.emitStep(0, 1, 0);
 }
 
 async function buildNativeOptions(
@@ -141,6 +151,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   options
 ) => {
   const onProgress = options.onProgress;
+  const progressSession = createAlignmentProgressSession(onProgress);
 
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
@@ -210,6 +221,8 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
 
   const nativeOptions = await buildNativeOptions(options);
+
+  emitSingleStepNativeAlignmentStart(progressSession);
 
   return SherpaOnnx.alignOfflineTextToAudio(
     textInBufferId,
