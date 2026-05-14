@@ -87,7 +87,7 @@ const { createStreamingVAD } = jest.requireActual(
   '../engine'
 ) as typeof import('../engine');
 
-describe('VAD offline phase-3 edge-case contract', () => {
+describe('VAD offline process: segmentation modes, native passes, and onProgress', () => {
   let nextSliceAudio = 0;
   let nextSliceSegment = 0;
   let nextAppendedIndex = 0;
