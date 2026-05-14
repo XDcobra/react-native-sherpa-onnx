@@ -249,6 +249,15 @@ For offline VAD (`audioIn = off_*`), progress behavior depends on `options.segme
 - `currentSegmentDurationMs`: current speech slice duration.
 - `elapsedMs`: elapsed time since segmented offline run start.
 
+Phase-3 edge-case and failure policy for segmented offline mode (`segmentation.mode: 'auto'`):
+
+- If segmentation yields no speech slices, offline VAD returns a deterministic zero summary and performs no per-slice native calls.
+- If a single speech slice spans the full file, one progress event and one native per-slice call are executed.
+- Error policy is fail-fast without retry in v1 (no STT-style retry options on `VADOfflineRunOptions`).
+- If `onProgress` throws, the error is propagated and the run aborts (caller responsibility).
+
+FAQ: Enabling `segmentation.mode: 'auto'` can produce different segment boundaries than single-pass mode by design. Keep `segmentation.mode: 'off'` for legacy whole-file behavior.
+
 #### `engine.isSpeechDetected()`
 
 ```ts

@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | **Accepted (Phase 0 design lock)** |
+| Status | **Accepted (Phase 0-3 lock)** |
 | Date | 2026-05-14 |
 | Context | Public SDK (pre-release); keep legacy VAD offline behavior unless segmentation is explicitly enabled. |
 
@@ -75,6 +75,13 @@ For `mode: 'off'`:
 
 `abortSignal` is part of the public offline options in Phase 0. Runtime checks and termination semantics are implemented with segmented execution (Phase 1/2), not in single-pass mode.
 
+### 7) Edge-case and failure policy (locked in Phase 3)
+
+- **No-speech segmentation result** (`totalSegments === 0`): segmented mode completes deterministically with zero summary and no per-slice native calls.
+- **Single full-span speech segment**: segmented mode emits exactly one progress event (`currentSegment=0`, `totalSegments=1`) and performs one native `runVadOffline(...)` slice call.
+- **Retry policy**: VAD offline segmented v1 is **fail-fast, no retry** (no STT-style `errorRecovery`/`maxRetriesPerSegment` fields in VAD options).
+- **Progress callback failures**: exceptions thrown by `onProgress` are propagated and abort the segmented run (caller responsibility, orchestrator-style behavior).
+
 ## Consequences
 
 ### Positive
@@ -87,9 +94,9 @@ For `mode: 'off'`:
 
 - Temp-buffer orchestration introduces extra JS/native calls versus one monolithic pass.
 
-## Implementation status (Phase 1 + Phase 2)
+## Implementation status (Phase 1 + Phase 2 + Phase 3)
 
-Phase 1 and Phase 2 are implemented with the following behavior:
+Phase 1, Phase 2, and Phase 3 are implemented with the following behavior:
 
 - `segmentation.mode === 'auto'` runs segmentation (`segmentOfflineBuffer` + `getSegments`) and executes `runVadOffline` per speech slice.
 - Per-slice summaries are aggregated by field-wise sum (`chunksProcessed`, `unitsRead`, `unitsWritten`, `segmentCount`, `speechDurationMs`).
@@ -104,6 +111,10 @@ Phase 1 and Phase 2 are implemented with the following behavior:
    - `elapsedMs` is measured from a per-run `Date.now()` session baseline.
    - `segmentation.mode === 'off'` remains single-pass and does not emit `onProgress`.
 - Helper strategy decision for Phase 2: keep a tiny local progress session helper in `src/vad/engine.ts` (no `vad` -> `alignment` dependency and no new shared module churn for v1).
+- Phase 3 hardening semantics:
+   - no-speech segmentation result returns zero summary without per-slice native calls;
+   - segmented path remains fail-fast without retry;
+   - callback exceptions from `onProgress` propagate and abort the current run.
 
 ## Compatibility and migration
 

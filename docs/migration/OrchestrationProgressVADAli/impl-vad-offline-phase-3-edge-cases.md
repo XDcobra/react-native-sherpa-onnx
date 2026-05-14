@@ -43,16 +43,16 @@
 
 ## 6. Documentation checklist
 
-- [ ] **CHANGELOG** entry for VAD offline segmentation + `onProgress`.
-- [ ] **Migration note:** apps relying on “VAD always whole file” learn that **`segmentation.mode`** controls behaviour.
-- [ ] **FAQ:** “Why do my VAD segments differ when I enable auto segmentation?” — link README risk §3.
+- [x] **CHANGELOG** entry for VAD offline segmentation + `onProgress`.
+- [x] **Migration note:** apps relying on “VAD always whole file” learn that **`segmentation.mode`** controls behaviour.
+- [x] **FAQ:** “Why do my VAD segments differ when I enable auto segmentation?” — link README risk §3.
 
 ---
 
 ## 7. Exit criteria
 
-- [ ] Golden / snapshot tests for at least one **silence**, **single-speech**, **multi-speech** fixture.
-- [ ] ADR-002 updated with **final** edge-case decisions.
+- [x] Golden / snapshot-style unit coverage for **silence**, **single-speech**, **multi-speech** scenarios.
+- [x] ADR-002 updated with **final** edge-case decisions.
 - [ ] Product sign-off on semantic change risk ([README](./README.md) §3 risks).
 
 ---

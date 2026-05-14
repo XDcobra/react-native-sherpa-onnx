@@ -80,6 +80,7 @@ This note captures the **product / API consistency** goal discussed for **`Orche
 - Default path remains single native **`runVadOffline`** over the **entire** offline audio buffer (`off_*`) when `segmentation` is omitted or `mode: 'off'`.
 - Segmented offline path is implemented for `segmentation.mode: 'auto'` in **`src/vad`** using segmentation-engine speech slices and per-slice VAD runs.
 - `onProgress` (`OrchestrationProgress`) is implemented for segmented mode (Phase 2), while `mode: 'off'` intentionally emits no progress in v1.
+- Phase 3 edge-case policy is implemented/documented: no-speech segmentation completes with zero summary (no per-slice native calls), and segmented errors are fail-fast with no retry in v1.
 
 ### Goal (as discussed)
 

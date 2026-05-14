@@ -87,7 +87,7 @@ const { createStreamingVAD } = jest.requireActual(
   '../engine'
 ) as typeof import('../engine');
 
-describe('VAD offline phase-2 segmented progress contract', () => {
+describe('VAD offline phase-3 edge-case contract', () => {
   let nextSliceAudio = 0;
   let nextSliceSegment = 0;
   let nextAppendedIndex = 0;
@@ -405,6 +405,176 @@ describe('VAD offline phase-2 segmented progress contract', () => {
     });
 
     expect(mockRunVadOffline).toHaveBeenCalledTimes(2);
+  });
+
+  it('segmented mode returns deterministic zero summary when no speech segments are found', async () => {
+    const engine = await createEngine();
+    const onProgress = jest.fn();
+    mockGetSegments.mockResolvedValueOnce([]);
+
+    const out = await engine.process({
+      audioIn: 'off_audio',
+      segmentOut: 'seg_off_output',
+      options: {
+        segmentation: { mode: 'auto' },
+        onProgress,
+      },
+    });
+
+    expect(mockSegmentOfflineBuffer).toHaveBeenCalledTimes(1);
+    expect(mockRunVadOffline).not.toHaveBeenCalled();
+    expect(mockCreateOfflineAudioBufferFromSamples).not.toHaveBeenCalled();
+    expect(mockAppendLiveSegment).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(out).toMatchObject({
+      segmentBufferId: 'seg_off_output',
+      summary: {
+        chunksProcessed: 0,
+        unitsRead: 0,
+        unitsWritten: 0,
+        segmentCount: 0,
+        speechDurationMs: 0,
+      },
+    });
+  });
+
+  it('segmented mode with one full-span speech segment emits one progress event and one native call', async () => {
+    const engine = await createEngine();
+    const onProgress = jest.fn();
+    const fullSpanSegment: SpeechSegment = {
+      segmentId: 'speech_full',
+      domain: 'speech',
+      startOffset: 0,
+      endOffset: 3200,
+      reason: 'energy_silence',
+      source: 'segmentation_engine',
+      createdAtMs: 10,
+      segmentIndex: 0,
+      sourceAudioBufferId: 'off_audio',
+      sampleRate: 16000,
+      durationMs: 200,
+    };
+
+    mockGetSegments.mockImplementation(
+      async (_buffer: unknown, startIndex = 0): Promise<SpeechSegment[]> => {
+        if (startIndex > 0) {
+          return [];
+        }
+        return [fullSpanSegment];
+      }
+    );
+
+    mockGetOfflineSegmentBufferSegments.mockImplementation(
+      async (bufferId: unknown, start = 0) => {
+        if (String(bufferId) !== 'seg_tmp_0' || Number(start) > 0) {
+          return [];
+        }
+        return [
+          {
+            id: 'slice_seg_full',
+            kind: 'speech',
+            sourceAudioBufferId: 'off_slice_0',
+            startSample: 0,
+            endSample: 3200,
+            sampleRate: 16000,
+            durationMs: 200,
+            payload: { source: 'vad', engine: 'vad', decision: 'model' },
+          },
+        ];
+      }
+    );
+
+    mockRunVadOffline.mockResolvedValueOnce({
+      chunksProcessed: 4,
+      unitsRead: 3200,
+      unitsWritten: 1,
+      segmentCount: 1,
+      speechDurationMs: 200,
+    });
+
+    const out = await engine.process({
+      audioIn: 'off_audio',
+      segmentOut: 'seg_off_output',
+      options: {
+        segmentation: { mode: 'auto' },
+        onProgress,
+      },
+    });
+
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
+    expect(mockRunVadOffline.mock.calls[0]?.[1]).toBe('off_slice_0');
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({
+      currentSegment: 0,
+      totalSegments: 1,
+      fraction: 0,
+      currentSegmentDurationMs: 200,
+    });
+    expect(mockAppendLiveSegment).toHaveBeenCalledWith(
+      'seg_live_staging',
+      expect.objectContaining({
+        sourceAudioBufferId: 'off_audio',
+        startSample: 0,
+        endSample: 3200,
+      })
+    );
+    expect(out).toMatchObject({
+      segmentBufferId: 'seg_off_output',
+      summary: {
+        chunksProcessed: 4,
+        unitsRead: 3200,
+        unitsWritten: 1,
+        segmentCount: 1,
+        speechDurationMs: 200,
+      },
+    });
+  });
+
+  it('segmented mode is fail-fast without retry when a segment call fails', async () => {
+    const engine = await createEngine();
+    const failure = Object.assign(
+      new Error('VAD_INTERNAL_ERROR: first segment failure'),
+      {
+        code: 'VAD_INTERNAL_ERROR',
+      }
+    );
+
+    mockRunVadOffline.mockRejectedValueOnce(failure);
+
+    await expect(
+      engine.process({
+        audioIn: 'off_audio',
+        segmentOut: 'seg_off_output',
+        options: {
+          segmentation: { mode: 'auto' },
+        },
+      })
+    ).rejects.toMatchObject({ code: 'VAD_INTERNAL_ERROR' });
+
+    expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
+    expect(mockRunVadOffline.mock.calls[0]?.[1]).toBe('off_slice_0');
+  });
+
+  it('propagates onProgress callback errors and does not run native VAD for that segment', async () => {
+    const engine = await createEngine();
+    const callbackFailure = new Error('VAD_PROGRESS_CALLBACK_FAILED');
+    const onProgress = jest.fn(() => {
+      throw callbackFailure;
+    });
+
+    await expect(
+      engine.process({
+        audioIn: 'off_audio',
+        segmentOut: 'seg_off_output',
+        options: {
+          segmentation: { mode: 'auto' },
+          onProgress,
+        },
+      })
+    ).rejects.toThrow('VAD_PROGRESS_CALLBACK_FAILED');
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(mockRunVadOffline).not.toHaveBeenCalled();
   });
 
   it('emits progress before each segment run even when a later segment fails', async () => {
