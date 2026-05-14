@@ -278,6 +278,13 @@
       "<rootDir>/example/node_modules",
       "<rootDir>/lib/"
     ],
+    "testPathIgnorePatterns": [
+      "<rootDir>/third_party/",
+      "<rootDir>/example/",
+      "<rootDir>/android/",
+      "<rootDir>/ios/",
+      "<rootDir>/lib/"
+    ],
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.js"
     ]
