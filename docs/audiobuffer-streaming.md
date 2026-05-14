@@ -25,9 +25,34 @@ Live audio buffers are the usual **operand** for native workers (STT, enhancemen
 
 **Offline and live work together:** both use **stable buffer ids** and the same TurboModule surface. Use **`appendOfflineToLiveAudioBuffer`** to play an offline clip into a live stream, **`ingestFileToLiveAudioBuffer`** to decode a file directly into a recording buffer, and **`createOfflineAudioBufferFromLive`** (on the [offline](audiobuffer-offline.md) page) to snapshot live audio for batch work. Native pipelines chain **live → live** so PCM **stays in native memory** between stages.
 
-**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended`) with metadata, independent of producer (`mic`, `append`, `append_offline`, `file_ingest`, or native pipeline **`source`**).
+**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended` for PCM, **`onSegment`** when live speech segmentation commits a slice, …) with metadata, independent of producer (`mic`, `append`, `append_offline`, `file_ingest`, or native pipeline **`source`**).
 
 `pipelineLiveAudioChunk` means: **new frames were appended to the live buffer** — one contract for waveform UI, logging, and streaming STT without tying those concerns to a specific producer.
+
+---
+
+## Live buffer callbacks: `onFramesAppended` vs `onSegment`
+
+Both are **optional**, **push-based** callbacks on `createEmptyLiveAudioBuffer` (or `subscribeLiveAudioBufferEvents`). They answer different questions:
+
+| Callback | Fires when | Typical use |
+| --- | --- | --- |
+| **`onFramesAppended`** | New **PCM samples** were appended to the ring (any producer: mic, JS `append*`, offline append, `file_ingest`, native pipeline `source`, …). | Waveform / levels, ingress throughput, “audio is moving”. |
+| **`onSegment`** | A **speech segment** was **committed** on this live audio buffer (segmentation log updated). | “A new speech slice exists” without polling; drive UI that cares about **segment boundaries**, not raw frame rate. |
+
+**`onSegment` payload (`LiveAudioBufferSegmentEvent`):**
+
+- `bufferId` — live audio buffer id
+- `segment` — committed [`Segment`](../src/segment/segment.ts) metadata (offsets, ids, `domain: 'speech'`, …). **No PCM** is shipped in the event; read samples with `getLiveAudioBufferSamplesSlice` if needed.
+- `totalSegments` — segment count **after** this commit (hint for UI ordering).
+
+**Requirements:** `onSegment` is only meaningful when **live audio segmentation** is active — set `segmentation.mode` to `'auto'` (policy-driven) or `'manual'` (you or native code commits segments). With `segmentation.mode === 'off'` (default), there are **no** speech segment commits, so **`onSegment` will not fire**. See [Segmentation engine](segmentation-engine.md) for policy evaluators.
+
+**Streaming STT transcript segments** live on the **`LiveTextBuffer`**, not on the live audio buffer: use **`createLiveTextBuffer({ onSegment })`** or `subscribeLiveTextBufferEvents` — see [Pipeline text buffers — live / committed segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
+
+**Advanced:** attach extra listeners after creation with `subscribeLiveAudioBufferEvents(live, { onSegment, ... })`; the unsub function removes only that subscription.
+
+Types: [`CreateEmptyLiveAudioBufferOptions`](../src/audiobuffer/types.ts), [`LiveAudioBufferSegmentEvent`](../src/audiobuffer/types.ts).
 
 ---
 
@@ -70,7 +95,8 @@ Without spool, APIs working on live reads/snapshots are window-bounded by design
 
 ```typescript
 // Mic → live ring buffer → native streaming STT worker → live text buffer.
-// Shows: append events (which producer wrote PCM) and a simple UI poll loop for partial + committed text.
+// Text updates are **event-driven**: `onPartial` streams hypotheses, `onSegment` fires on each commit — no `setInterval` poll loop.
+// PCM ingress still uses `onFramesAppended` on the live audio buffer.
 
 import {
   createEmptyLiveAudioBuffer,
@@ -81,7 +107,6 @@ import {
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import {
   createLiveTextBuffer,
-  getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
   releasePipelineTextBuffer,
@@ -102,6 +127,20 @@ const recognizer = await createStreamingSTT({
 const textOut = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
+  onPartial: (event) => {
+    if (event.partialText.length > 0) {
+      console.log('[partial]', event.partialText);
+      // Example output: [partial] hello wor
+    }
+    if (event.isEndpoint === true) {
+      console.log('[endpoint]');
+    }
+  },
+  onSegment: (e) => {
+    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+    // Example output: [committed 0] hello world
+  },
 });
 
 // Live audio: mic and/or append paths all show up as `onFramesAppended` with a `source` tag.
@@ -126,21 +165,6 @@ const pipeline = await recognizer.transcribe(live, textOut, {
   chunkSize: 3200,
 });
 
-// Poll text buffers from JS (STT itself stays native); tune interval vs battery.
-const previewTimer = setInterval(async () => {
-  const partial = await getLiveTextBufferPartialSlice(textOut, 0, 4096);
-  const segmentCount = await getLiveTextBufferSegmentCount(textOut);
-  const segments =
-    segmentCount > 0
-      ? await getLiveTextBufferSegments(textOut, 0, segmentCount)
-      : [];
-  const committed = segments.map((s) => s.text).join(' ');
-  const text = [committed, partial].filter(Boolean).join(' ').trim();
-  console.log(text);
-  // Example output: hello wor
-  // Example output (after endpoint): hello world
-}, 150);
-
 // Optional: set global input/output preference before starting mic.
 // See: [Pipeline Audio Session Coordination](audio-session.md)
 const inputDevices = await listAvailableInputDevices();
@@ -157,18 +181,25 @@ await setPipelineAudioRoutePreference({
 await startMicToLiveAudioBuffer(live);
 // … recording …
 await stopMicToLiveAudioBuffer();
-clearInterval(previewTimer);
 
 await pipeline.flush();
 
+// Optional one-shot pull after `flush()` if you want a final joined string
+// (not required if you already handled every line in `onSegment`).
+const segmentCount = await getLiveTextBufferSegmentCount(textOut);
+const segments =
+  segmentCount > 0 ? await getLiveTextBufferSegments(textOut, 0, segmentCount) : [];
+console.log('[final joined]', segments.map((s) => s.text).join(' '));
+
 live.unsubscribeEvents();
+textOut.unsubscribeEvents();
 await pipeline.stop();
 await recognizer.destroy();
 await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(live);
 ```
 
-`onFramesAppended` receives producer metadata only: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`.
+`onFramesAppended` receives producer metadata only: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`. On the text sink, opt in to **`streamEvents.partial`** (or pass **`onPartial`** alone — it opts in) and **`onSegment`** for push-driven UI; see [Pipeline text buffers — live](textbuffer-streaming.md).
 
 ---
 
@@ -224,7 +255,7 @@ await releasePipelineAudioBuffer(live);
 - `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
-- Callbacks: `onFramesAppended` / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents`
+- Callbacks: `onFramesAppended` / **`onSegment`** / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents` (see [Live buffer callbacks](#live-buffer-callbacks-onframesappended-vs-onsegment))
 - High-frequency native → JS for appends: optional `streamEvents.framesAppended` (`enabled` + `minIntervalMs`); if omitted, registering `onFramesAppended` opts in to events (see [`CreateEmptyLiveAudioBufferOptions`](../src/audiobuffer/types.ts))
 
 Device routing belongs to `react-native-sherpa-onnx/audio`: use `listAvailableInputDevices()`, `listAvailableOutputDevices()`, and `setPipelineAudioRoutePreference(...)`.
@@ -281,6 +312,21 @@ const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
   streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
   onFramesAppended: (e) => console.log(e.frameCount),
+});
+```
+
+```ts
+// Same buffer API: when `segmentation.mode` is `auto` or `manual`, use `onSegment`
+// for committed speech slices (see [Live buffer callbacks](#live-buffer-callbacks-onframesappended-vs-onsegment)).
+const liveWithSegments = await createEmptyLiveAudioBuffer({
+  sampleRate: 16000,
+  channelCount: 1,
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 },
+  },
+  onSegment: (e) =>
+    console.log('speech segment', e.segment.segmentIndex, 'total=', e.totalSegments),
 });
 ```
 
@@ -351,6 +397,7 @@ function subscribeLiveAudioBufferEvents(
 ```ts
 const unsub = subscribeLiveAudioBufferEvents(live, {
   onFramesAppended: (e) => console.log(e.frameCount),
+  onSegment: (e) => console.log('segment', e.segment.segmentIndex),
   onError: (e) => console.error(e.message, e.liveBufferId),
 });
 
@@ -467,6 +514,12 @@ const live = await createEmptyLiveAudioBuffer({
     mode: 'auto',
     policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 },
   },
+  onSegment: (e) => {
+    console.log(
+      `[speech segment ${e.segment.segmentIndex}]`,
+      `totalSegments=${e.totalSegments}`
+    );
+  },
 });
 ```
 
@@ -484,6 +537,7 @@ import type {
   LiveAudioBufferRecordingSource, // recording-only source accepted by append/finalize APIs
   CreateEmptyLiveAudioBufferOptions, // options for createEmptyLiveAudioBuffer
   LiveAudioBufferFramesAppendedEvent, // producer-agnostic append event payload
+  LiveAudioBufferSegmentEvent, // committed speech-segment event payload (`onSegment`)
   LiveAudioBufferErrorEvent, // error event payload for live buffer
   FileIngestHandle, // controls active file ingest into live buffer
   FileIngestOptions, // options for ingestFileToLiveAudioBuffer
@@ -522,7 +576,7 @@ import {
 
 ## Migration from removed `createPcmLiveStream`
 
-The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`** (events `pcmLiveStreamData` / `pcmLiveStreamError`) has been **removed**. Use **`audiobuffer`**: create a **live buffer** with `onFramesAppended` (and optional `streamEvents.framesAppended` for throttling), start mic capture (or append from other producers), and consume those callbacks.
+The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`** (events `pcmLiveStreamData` / `pcmLiveStreamError`) has been **removed**. Use **`audiobuffer`**: create a **live buffer** with `onFramesAppended` (and optional `streamEvents.framesAppended` for throttling), optional **`onSegment`** when `segmentation` is not `off`, start mic capture (or append from other producers), and consume those callbacks.
 
 ---
 
@@ -541,7 +595,10 @@ The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`
 
 ```ts
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[stt segment]', e.segment.text),
+});
 const stt = await createStreamingSTT({
   modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' },
   modelType: 'auto',

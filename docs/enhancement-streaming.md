@@ -501,7 +501,10 @@ const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAss
 const sr = await denoiser.getSampleRate();
 const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
 const cleanOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[stt]', e.segment.text),
+});
 
 const enhPipeline = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
 const sttPipeline = await stt.transcribe(cleanOut, textOut, { chunkSize: 3200 });

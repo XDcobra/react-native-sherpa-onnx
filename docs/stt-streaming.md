@@ -24,6 +24,12 @@ There is no per-chunk stream object in the JS API anymore.
 
 `transcribe` starts a **native worker** that reads **`LiveAudioBuffer`** frames and writes partial + committed **`LiveTextBuffer`** output. Control is exclusively through the returned **`SttPipelineHandle`** (not by pushing audio through JS). For the shared meaning of **`stop` / `flush` / `reset` / `getStatus` / `completed`** and how that ties into buffer finalization, see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
 
+### Observing committed segments
+
+Committed transcripts are **text segments** on the output `LiveTextBuffer`. Prefer **`onSegment`** on that buffer (or `subscribeLiveTextBufferEvents`) instead of polling `getLiveTextBufferSegmentCount` in a timer. See **[Pipeline text buffers — live / Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling)**.
+
+Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are a separate concern — they require **live audio segmentation** and carry **speech** metadata, not STT text. See **[Pipeline audio buffers — live / `onSegment`](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment)**.
+
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
@@ -76,6 +82,9 @@ const audioIn = await createEmptyLiveAudioBuffer({
 const textOut = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
+  onSegment: (e) => {
+    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+  },
 });
 
 const pipeline = await engine.transcribe(audioIn, textOut, {
@@ -443,7 +452,11 @@ const engine = await createStreamingSTT({
   enableEndpoint: true,
 });
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1, windowSeconds: 120 });
-const textOut = await createLiveTextBuffer({ windowMaxChars: 65536, maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[segment]', e.segment.text),
+});
 const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
 
 await startMicToLiveAudioBuffer(audioIn);
@@ -482,7 +495,10 @@ import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sh
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[segment]', e.segment.text),
+});
 
 const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
 const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' }, modelType: 'auto' });

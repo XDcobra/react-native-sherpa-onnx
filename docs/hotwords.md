@@ -252,7 +252,10 @@ const recognizer = await createStreamingSTT({
 });
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[segment]', e.segment.text),
+});
 
 const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });
 

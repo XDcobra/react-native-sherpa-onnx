@@ -108,7 +108,11 @@ import {
 // Shared live audio stream: both VAD and STT consume the same source.
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
-const textOut = await createLiveTextBuffer({ windowMaxChars: 65536, maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[stt]', e.segment.text),
+});
 
 const vad = await createStreamingVAD({
   modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' },
@@ -449,7 +453,10 @@ import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sh
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[stt]', e.segment.text),
+});
 
 const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });
 const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' }, modelType: 'auto' });

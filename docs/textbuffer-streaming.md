@@ -2,7 +2,7 @@
 
 ## Introduction
 
-**Live native text buffers** for incremental pipelines with partial text, committed segments, and optional spool-backed full history.
+**Live native text buffers** for incremental pipelines with partial text, committed segments, and optional spool-backed full history. Use **`onPartial`** for hypothesis streaming and **`onSegment`** for each **committed** text segment without polling (see [Committed text segments](#committed-text-segments-onsegment-no-polling)).
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
 
@@ -77,6 +77,10 @@ const liveText = await createLiveTextBuffer({
     }
     lastSegmentIndex = total;
   },
+  // Also fires on every commit — use alone or together with `onPartial` (see section below).
+  onSegment: (e) => {
+    console.log(`[onSegment ${e.segment.segmentIndex}]`, e.segment.text);
+  },
 });
 
 const stt = await createStreamingSTT({
@@ -104,13 +108,43 @@ await releasePipelineAudioBuffer(liveAudio);
 
 ---
 
+## Committed text segments: `onSegment` (no polling)
+
+Each time the native worker (or `appendLiveTextSegment`) **commits** a new transcript slice, the live text buffer can emit **`onSegment`** with a [`LiveTextBufferSegmentEvent`](../src/textbuffer/types.ts):
+
+- `bufferId` — live text buffer id  
+- `segment` — committed segment (`domain: 'text'`, `text`, `segmentIndex`, optional `tokens` / `timestamps` / `meta`)  
+- `totalSegments` — retained segment count **after** this commit (upper bound for pull APIs)
+
+This is the right hook when you want **“new subtitle line”** semantics instead of high-frequency **`onPartial`** updates. It complements (does not replace) **`onPartial`** for streaming STT.
+
+```ts
+import { createLiveTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const liveText = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+  onSegment: (e) => {
+    console.log(
+      `[segment ${e.segment.segmentIndex}]`,
+      e.segment.text,
+      `(total=${e.totalSegments})`
+    );
+  },
+});
+```
+
+For attach-after-creation, use **`subscribeLiveTextBufferEvents`** (same shape as `createLiveTextBuffer` callbacks). See also [Streaming STT](stt-streaming.md#observing-committed-segments).
+
+---
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/textbuffer`.
 
 Ref-first usage is recommended: pass `LiveTextBufferRef` directly.
 
-Partial events: optional `streamEvents.partial` (`enabled` + `minIntervalMs`); if omitted, registering `onPartial` opts in to events (see [`CreateLiveTextBufferOptions`](../src/textbuffer/types.ts)).
+Partial events: optional `streamEvents.partial` (`enabled` + `minIntervalMs`); if omitted, registering `onPartial` opts in to events (see [`CreateLiveTextBufferOptions`](../src/textbuffer/types.ts)). **Committed segments:** register **`onSegment`** for push notifications per commit (see [Committed text segments](#committed-text-segments-onsegment-no-polling)).
 
 ### General
 
@@ -161,6 +195,7 @@ const live = await createLiveTextBuffer({
   spooling: { mode: 'auto', thresholdBytes: 262144 },
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   onPartial: (e) => console.log(e.partialText),
+  onSegment: (e) => console.log('[commit]', e.segment.text),
   onError: (e) => console.warn(e.message),
 });
 ```
@@ -319,6 +354,8 @@ const live = await createLiveTextBuffer({
     mode: 'auto',
     policy: { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 },
   },
+  onSegment: (e) =>
+    console.log('text segment', e.segment.segmentIndex, 'total=', e.totalSegments),
 });
 ```
 
@@ -336,6 +373,7 @@ import type {
   LiveTextBufferRecordingSource, // recording-only source for append/finalize
   LiveTextSegment, // committed segment shape from live segment log
   LiveTextBufferPartialEvent, // partial event payload for streaming updates
+  LiveTextBufferSegmentEvent, // committed-segment event payload (`onSegment`)
   LiveTextBufferErrorEvent, // error event payload for live buffer
   CreateLiveTextBufferOptions, // options for createLiveTextBuffer
   OfflineTextBufferFromLiveMode, // conversion mode from live to offline
