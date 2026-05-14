@@ -150,10 +150,8 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
   segmentOut,
   options
 ) => {
-  const onProgress = options.onProgress;
-  const progressSession = createAlignmentProgressSession(onProgress);
-
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
+    const onProgress = options.onProgress;
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
       return runAccurateAsrMediated({
         textIn,
@@ -183,6 +181,8 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         : {}),
     });
   }
+
+  const progressSession = createAlignmentProgressSession(options.onProgress);
 
   const mode = toNativeMode(options.mode);
   const granularity = normalizeGranularity(options.granularity);

@@ -94,20 +94,23 @@ export type VADLiveRunOptions = {
 export type VADOfflineRunOptions = {
   sourceTag?: string;
   /**
-   * Phase 0 API lock: when omitted or mode='off', offline VAD keeps the current single native pass.
-   * Segmented execution for mode='auto' is introduced in the next migration phase.
+   * When omitted or `mode: 'off'`, offline VAD runs a single native pass over the full buffer.
+   * When `mode: 'auto'`, the segmentation engine splits offline audio into speech segments and
+   * runs VAD per segment (see `src/vad/engine.ts` offline branch).
    */
   segmentation?: {
     mode?: 'off' | 'auto';
     policy?: SegmentationPolicy;
   };
   /**
-   * Reserved for segmented offline VAD orchestration progress.
-   * Payload shape is identical to pipeline/offlineOrchestrator.ts.
+   * Emitted only for **segmented** offline runs (`segmentation.mode: 'auto'` with at least one
+   * speech segment). Not called for `mode: 'off'` (single native pass), matching offline STT
+   * single-pass behaviour. Payload matches `OrchestrationProgress` in `pipeline/offlineOrchestrator.ts`.
    */
   onProgress?: (progress: OrchestrationProgress) => void;
   /**
-   * Reserved for segmented offline cancellation checks.
+   * When set, checked before the segmented loop and before each segment's native VAD call;
+   * aborted runs throw with code `VAD_ABORTED`.
    */
   abortSignal?: AbortSignal;
 };
