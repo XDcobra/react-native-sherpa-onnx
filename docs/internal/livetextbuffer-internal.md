@@ -196,10 +196,12 @@ Online Recognizer
 - **No direct random-access API** to the spool journal.
 - **Indirect access:** `createOfflineTextBufferFromLive(buffer, 'fullIfSpooled')` replays the entire spool (checkpoint + journal) to reconstruct the full text, then returns an immutable `OfflineTextBuffer`.
 - The replay process:
-  1. Load checkpoint (`.txtc`) if present.
+  1. Load checkpoint (`.txtc`) if present — extract JSON `fullText` (Android) or raw snapshot string (iOS checkpoint file).
   2. Replay journal (`.txtj`) records in order.
-  3. Reconstruct full text.
+  3. Reconstruct full text. **`PARTIAL_SET` must not shrink** output below the checkpoint baseline (Android journals only the unstable partial window from `writePartial()`).
   4. Fail strict with `TEXT_SPOOL_*` errors on unavailable/read/corrupted conditions.
+- Checkpoints and `commitSegment` snapshots use `committed segments + partial remainder` (not `segments + currentText` verbatim) to avoid duplicating the committed tail in spool replay.
+- Unit tests: `android/src/test/java/com/sherpaonnx/text/pipeline/TextSpoolReplayTest.kt`.
 
 ---
 
