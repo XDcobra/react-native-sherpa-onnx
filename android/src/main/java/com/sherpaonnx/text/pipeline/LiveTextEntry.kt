@@ -165,8 +165,11 @@ class LiveTextEntry(
   }
 
   private fun snapshotFullTextForSpool(): String {
-    val committed = synchronized(segmentLock) { buildCommittedTextFromSegmentsLocked() }
-    return committed + currentText
+    synchronized(segmentLock) {
+      val committed = buildCommittedTextFromSegmentsLocked()
+      val lastCommitted = segments.lastOrNull()?.text
+      return TextSpoolReplay.snapshotFullText(committed, currentText, lastCommitted)
+    }
   }
 
   private fun markSpoolFailureAndThrow(
@@ -182,21 +185,8 @@ class LiveTextEntry(
   private fun journalPath(): String? = spoolPath?.let { "$it.txtj" }
   private fun checkpointPath(): String? = spoolPath?.let { "$it.txtc" }
 
-  private fun buildCheckpointPayload(fullText: String): String {
-    val escaped = fullText.replace("\\", "\\\\").replace("\"", "\\\"")
-    return """{"fullText":"$escaped","totalCharsWritten":$totalCharsWritten,"revision":$revision}"""
-  }
-
-  private fun extractCheckpointText(payload: String): String {
-    val marker = """"fullText":""""
-    val idx = payload.indexOf(marker)
-    if (idx < 0) return ""
-    val start = payload.indexOf('"', idx + marker.length)
-    if (start < 0) return ""
-    val end = payload.indexOf('"', start + 1)
-    if (end < 0) return ""
-    return payload.substring(start + 1, end).replace("\\\"", "\"").replace("\\\\", "\\")
-  }
+  private fun buildCheckpointPayload(fullText: String): String =
+    TextSpoolReplay.buildCheckpointPayload(fullText, totalCharsWritten, revision)
 
   private fun appendSpoolRecordLocked(writer: TextSpoolWriter, recordType: Int, payload: String): Long {
     val payloadBytes = payload.toByteArray(StandardCharsets.UTF_8)
@@ -662,22 +652,10 @@ class LiveTextEntry(
     val hasSpool = File(cpPath).exists() || File(jPath).exists()
     if (hasSpool) {
       try {
-        var fullText = ""
-        val cpPayload = TextSpoolReader.readCheckpoint(cpPath)
-        if (cpPayload != null) {
-          fullText = extractCheckpointText(cpPayload)
-        }
-        TextSpoolReader.readJournal(jPath).forEach { rec ->
-          when (rec.type) {
-            TEXT_SPOOL_PARTIAL_SET -> fullText = rec.payload
-            TEXT_SPOOL_PARTIAL_APPEND -> fullText += rec.payload
-            TEXT_SPOOL_SEGMENT_COMMIT -> {
-              val obj = JSONObject(rec.payload)
-              fullText += obj.optString("text", "")
-            }
-          }
-        }
-        return fullText
+        return TextSpoolReplay.replayFullTextFromCheckpointAndJournal(
+          TextSpoolReader.readCheckpoint(cpPath),
+          TextSpoolReader.readJournal(jPath),
+        )
       } catch (e: TextPipelineException) {
         throw e
       } catch (e: Exception) {
@@ -789,12 +767,12 @@ private class TextSpoolWriter(filePath: String) {
   }
 }
 
-private object TextSpoolReader {
+internal data class TextSpoolJournalRecord(val type: Int, val payload: String)
+
+internal object TextSpoolReader {
   private const val TEXT_SPOOL_MAGIC = 0x32545854 // TXT2
   private const val TEXT_SPOOL_VERSION = 2
   private const val TEXT_SPOOL_CHECKPOINT = 4
-
-  data class JournalRecord(val type: Int, val payload: String)
 
   fun readCheckpoint(filePath: String): String? {
     val file = File(filePath)
@@ -820,11 +798,11 @@ private object TextSpoolReader {
     }
   }
 
-  fun readJournal(filePath: String): List<JournalRecord> {
+  fun readJournal(filePath: String): List<TextSpoolJournalRecord> {
     val file = File(filePath)
     if (!file.exists()) return emptyList()
     RandomAccessFile(file, "r").use { raf ->
-      val out = ArrayList<JournalRecord>()
+      val out = ArrayList<TextSpoolJournalRecord>()
       while (raf.filePointer < raf.length()) {
         if (raf.length() - raf.filePointer < 16) {
           throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Corrupted text journal header in $filePath")
@@ -846,7 +824,7 @@ private object TextSpoolReader {
         if (actual != checksum) {
           throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Text journal checksum mismatch in $filePath")
         }
-        out.add(JournalRecord(type, String(payload, StandardCharsets.UTF_8)))
+        out.add(TextSpoolJournalRecord(type, String(payload, StandardCharsets.UTF_8)))
       }
       return out
     }

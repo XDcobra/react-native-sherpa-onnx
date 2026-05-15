@@ -255,9 +255,25 @@ struct TxtLiveEntry {
 		return committed;
 	}
 
+	std::string partialRemainderFromCurrentTextLocked() {
+		if (currentText.empty()) {
+			return "";
+		}
+		std::string lastCommitted;
+		if (!segments.empty()) {
+			lastCommitted = segments.back().text;
+		}
+		if (!lastCommitted.empty() &&
+			currentText.size() >= lastCommitted.size() &&
+			currentText.compare(0, lastCommitted.size(), lastCommitted) == 0) {
+			return currentText.substr(lastCommitted.size());
+		}
+		return currentText;
+	}
+
 	std::string currentFullSnapshotLocked() {
 		std::lock_guard<std::mutex> segmentLock(segmentMutex);
-		return committedTextFromSegmentsLocked() + currentText;
+		return committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked();
 	}
 
 	std::string journalPath() const { return spoolPath + ".txtj"; }
@@ -791,10 +807,27 @@ struct TxtLiveEntry {
 						throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Text journal checksum mismatch for " + bufferId);
 					}
 
-					if (recordType == kTextSpoolRecordPartialSet ||
-						recordType == kTextSpoolRecordPartialAppend ||
-						recordType == kTextSpoolRecordSegmentCommit) {
-						latest = payload;
+					if (recordType == kTextSpoolRecordPartialSet) {
+						// Journal payloads are full snapshots from currentFullSnapshotLocked().
+						// Never shrink below the checkpoint baseline (stale partial windows).
+						if (payload.size() >= latest.size()) {
+							latest = payload;
+						}
+					} else if (recordType == kTextSpoolRecordPartialAppend) {
+						latest += payload;
+					} else if (recordType == kTextSpoolRecordSegmentCommit) {
+						// Android-compatible journal rows (segment JSON); iOS normally
+						// checkpoints full snapshots instead.
+						const std::string marker = "\"text\":";
+						const size_t idx = payload.find(marker);
+						if (idx != std::string::npos) {
+							const size_t start = payload.find('"', idx + marker.size());
+							const size_t end =
+								start == std::string::npos ? std::string::npos : payload.find('"', start + 1);
+							if (start != std::string::npos && end != std::string::npos && end > start) {
+								latest += payload.substr(start + 1, end - start - 1);
+							}
+						}
 					}
 				}
 				fclose(jr);
