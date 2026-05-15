@@ -459,7 +459,25 @@ export async function createSTT(
       const segmentationEnabled = segmentation.mode !== 'off';
 
       if (!segmentationEnabled) {
+        if (batchOptions?.onProgress) {
+          batchOptions.onProgress({
+            currentSegment: 0,
+            totalSegments: 1,
+            fraction: 0,
+            elapsedMs: 0,
+            currentSegmentDurationMs: 0,
+          });
+        }
         await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
+        if (batchOptions?.onProgress) {
+          batchOptions.onProgress({
+            currentSegment: 0,
+            totalSegments: 1,
+            fraction: 1,
+            elapsedMs: Date.now() - startedAtMs,
+            currentSegmentDurationMs: Date.now() - startedAtMs,
+          });
+        }
         return {
           status: 'complete',
           totalSegments: 1,
