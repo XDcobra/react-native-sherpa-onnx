@@ -19,6 +19,7 @@ For batch punctuation with offline text buffers, see [punctuation-offline.md](pu
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - `FileSource` is used by `detectPunctuationModel(...)` for preflight checks.
 - Streaming punctuation requires an online-capable `cnn_bilstm` layout. Offline `ct_transformer` models are not valid for this API.
+- **Input normalization:** `textInputNormalization` defaults to `'lower'` so ALL-CAPS ASR text is normalized before inference. Pass `'none'` to disable.
 - Download/catalog setup: [download-manager.md](download-manager.md), [model-setup.md](model-setup.md)
 
 ## Model detection
@@ -158,6 +159,9 @@ Notes:
 - Both `textIn` and `textOut` must be live text buffers (`txt_live_*`).
 - Input/output kind mismatch is rejected with `PUNCTUATION_INVALID_ARGUMENT`.
 - `segmentation.mode: 'auto'` attaches the segmentation engine to input text.
+- `textInputNormalization` (default `'lower'`): lowercases each input segment before inference. Use `'none'` to keep upstream casing (not recommended for ALL-CAPS ASR).
+- `text_punctuation_assisted` segmentation commits at the **first** sentence boundary in punctuated text (not the last), so partial buffers are not re-committed wholesale on every STT update once punctuation inserts `.?!`.
+- **Do not** attach `text_punctuation_assisted` to a live buffer that already receives upstream `commitSegment` rows (e.g. pipelined `stt → punctuation`). Use `segmentation: { mode: 'off' }` and let the punctuation worker drain upstream segments only.
 
 #### `engine.destroy()`
 

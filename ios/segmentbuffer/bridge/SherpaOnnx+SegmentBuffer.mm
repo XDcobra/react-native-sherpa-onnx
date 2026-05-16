@@ -30,6 +30,8 @@ extern "C" bool sherpaonnx_punct_online_add_punctuation_if_exists(
 extern "C" bool sherpaonnx_punct_offline_has_instance(const std::string &instanceId);
 extern "C" bool sherpaonnx_punct_online_has_instance(const std::string &instanceId);
 
+#include "../../punctuation/core/PunctuationTextInputNormalization.hpp"
+
 std::unordered_map<std::string, std::shared_ptr<SegOfflineEntry>> g_seg_offline;
 std::unordered_map<std::string, std::shared_ptr<SegLiveEntry>> g_seg_live;
 std::mutex g_seg_mutex;
@@ -1439,6 +1441,45 @@ static std::string seg_add_punctuation_or_throw(
   );
 }
 
+static size_t seg_first_delimiter_end_exclusive(
+  const std::string &text,
+  const SegEnginePolicy &policy
+) {
+  if (policy.sentenceBoundaryChars.empty()) {
+    return seg_utf8_sentence_boundary_prefix_len_first(text);
+  }
+  return seg_utf8_custom_delimiter_prefix_len_first(text, policy.sentenceBoundaryChars);
+}
+
+static int seg_assisted_commit_length(
+  const std::string &partial,
+  const std::string &instanceId,
+  const SegEnginePolicy &policy
+) {
+  if (partial.empty()) return 0;
+  const std::string normalized =
+      punct_text_input_normalization::normalize(partial, "lower");
+  const std::string punctuated =
+      seg_add_punctuation_or_throw(instanceId, normalized);
+  const size_t endInPunctuated = seg_first_delimiter_end_exclusive(punctuated, policy);
+  if (endInPunctuated == std::string::npos || endInPunctuated == 0) return 0;
+  if (endInPunctuated <= normalized.size()) {
+    return (int)std::min(partial.size(), endInPunctuated);
+  }
+  int n = (int)std::min(normalized.size(), endInPunctuated);
+  while (n > 0) {
+    const std::string prefixPunctuated = seg_add_punctuation_or_throw(
+        instanceId, normalized.substr(0, (size_t)n));
+    const size_t prefixEnd =
+        seg_first_delimiter_end_exclusive(prefixPunctuated, policy);
+    if (prefixEnd != std::string::npos && prefixEnd == prefixPunctuated.size()) {
+      return (int)std::min(partial.size(), (size_t)n);
+    }
+    n--;
+  }
+  return 0;
+}
+
 static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
   if (!engine || engine->state != SegEngineState::ACTIVE) return;
   auto entry = txt_get_live_entry(engine->attachedBufferId);
@@ -1450,7 +1491,6 @@ static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
 
     int commitLength = 0;
     std::string reason = "policy_checkpoint";
-    std::string decisionText = partial;
 
     if (engine->policy.evaluator == "text_punctuation_assisted") {
       if (engine->policy.punctuationInstanceId.empty()) {
@@ -1458,19 +1498,16 @@ static void seg_engine_evaluate_text(const std::shared_ptr<SegEngine> &engine) {
           "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND: text_punctuation_assisted requires punctuationInstanceId"
         );
       }
-      decisionText = seg_add_punctuation_or_throw(
-        engine->policy.punctuationInstanceId,
-        partial
-      );
-    }
-
-    if (engine->policy.sentenceBoundary) {
-      size_t prefixLen = engine->policy.sentenceBoundaryChars.empty()
-        ? seg_utf8_sentence_boundary_prefix_len_last(decisionText)
-        : seg_utf8_custom_delimiter_prefix_len_last(
-            decisionText,
-            engine->policy.sentenceBoundaryChars
-          );
+      if (engine->policy.sentenceBoundary) {
+        commitLength = seg_assisted_commit_length(
+            partial, engine->policy.punctuationInstanceId, engine->policy);
+        if (commitLength > 0) {
+          reason = "punctuation";
+        }
+      }
+    } else if (engine->policy.sentenceBoundary) {
+      const size_t prefixLen =
+          seg_first_delimiter_end_exclusive(partial, engine->policy);
       if (prefixLen != std::string::npos && prefixLen > 0) {
         commitLength = std::min((int)partial.size(), (int)prefixLen);
         reason = "punctuation";

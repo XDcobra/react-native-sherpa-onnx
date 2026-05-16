@@ -9,6 +9,7 @@ import {
 } from '../textbuffer';
 import { resolveFileSourceForModelInit } from '../detect';
 import { createOnlinePunctuationConfig } from './detect';
+import { resolveTextInputNormalization } from './textInputNormalization';
 import type {
   PunctuationPipelineHandle,
   StreamingPunctuationEngine,
@@ -150,11 +151,16 @@ export async function createStreamingPunctuation(
         attachedSegmentationEngineId = attached.engineId;
       }
 
+      const textInputNormalization = resolveTextInputNormalization(
+        punctuateOptions?.textInputNormalization
+      );
+
       try {
         const raw = await SherpaOnnx.startStreamingPunctuationPipeline(
           instanceId,
           inputId,
-          outputId
+          outputId,
+          textInputNormalization
         );
         return createPunctuationPipelineHandle(
           instanceId,

@@ -31,6 +31,7 @@ import type {
   PunctuationLivePipelineOptions,
 } from './types';
 import { runOfflinePunctuationPipeline } from './orchestrate';
+import { resolveTextInputNormalization } from './textInputNormalization';
 import type { TextSegment } from '../segment/segment';
 import type { PunctuationPipelineHandle } from './streamingTypes';
 
@@ -125,6 +126,9 @@ async function punctuateLiveOverload(
 
   let pipelineId: string;
   try {
+    const textInputNormalization = resolveTextInputNormalization(
+      options.textInputNormalization
+    );
     const result = await SherpaOnnx.startPunctuationOfflineLivePipeline(
       instanceId,
       inId,
@@ -132,6 +136,7 @@ async function punctuateLiveOverload(
       {
         attachedSegmentationEngineId: attached.engineId,
         segmentLiveBufferId,
+        textInputNormalization,
       }
     );
     pipelineId = result.pipelineId;
@@ -244,10 +249,14 @@ export async function createOfflinePunctuation(
           : {}),
       };
     }
+    const textInputNormalization = resolveTextInputNormalization(
+      punctuateOptions?.textInputNormalization
+    );
     const raw = await SherpaOnnx.punctuateOfflineTextBuffers(
       instanceId,
       inId,
-      outId
+      outId,
+      textInputNormalization
     );
     return { processingTimeMs: raw.processingTimeMs };
   };
@@ -309,10 +318,14 @@ export async function createOfflinePunctuation(
           await releasePipelineTextBuffer(input).catch(() => undefined);
         }
       }
+      const textInputNormalization = resolveTextInputNormalization(
+        punctuateOptions?.textInputNormalization
+      );
       const raw = await SherpaOnnx.punctuateOfflineString(
         instanceId,
         plain,
-        outId
+        outId,
+        textInputNormalization
       );
       return { processingTimeMs: raw.processingTimeMs };
     },

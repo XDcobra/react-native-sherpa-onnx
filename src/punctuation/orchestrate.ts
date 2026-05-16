@@ -8,6 +8,7 @@ import type {
 import type { SegmentationPolicy } from '../segment/engine-types';
 import { validateSegmentationConfig } from '../segment/validation';
 import type { OfflinePunctuateOptions } from './types';
+import { resolveTextInputNormalization } from './textInputNormalization';
 
 const DEFAULT_PUNCTUATION_SEGMENTATION_POLICY: SegmentationPolicy = {
   evaluator: 'text_synthetic_auto',
@@ -29,13 +30,18 @@ export async function runOfflinePunctuationPipeline(
     defaultPolicy: DEFAULT_PUNCTUATION_SEGMENTATION_POLICY,
   });
 
+  const textInputNormalization = resolveTextInputNormalization(
+    options.textInputNormalization
+  );
+
   return runOfflineTextPipeline(
     input,
     async (segIn, segOut) => {
       await SherpaOnnx.punctuateOfflineTextBuffers(
         instanceId,
         segIn.bufferId,
-        segOut.bufferId
+        segOut.bufferId,
+        textInputNormalization
       );
     },
     {

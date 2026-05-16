@@ -9,6 +9,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.punctuation.pipeline.PunctuationOfflineLivePipelineWorker
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
@@ -82,6 +83,12 @@ internal class SherpaOnnxOfflinePunctuationLivePipelineHelper(
         return
       }
 
+      val textInputNormalization =
+        if (options.hasKey("textInputNormalization")) {
+          options.getString("textInputNormalization")
+        } else {
+          null
+        }
       val worker = PunctuationOfflineLivePipelineWorker(
         pipelineId = java.util.UUID.randomUUID().toString(),
         attachedSegmentationEngineId = attachedSegmentationEngineId,
@@ -90,6 +97,8 @@ internal class SherpaOnnxOfflinePunctuationLivePipelineHelper(
         ),
         punctuator = punctuator,
         textOutputEntry = textOutEntry,
+        textInputNormalization =
+          PunctuationTextInputNormalization.resolve(textInputNormalization),
       )
 
       val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->

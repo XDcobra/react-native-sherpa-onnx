@@ -3,6 +3,7 @@ package com.sherpaonnx.punctuation.pipeline
 import com.k2fsa.sherpa.onnx.OnlinePunctuation
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -16,6 +17,7 @@ internal class PunctuationPipelineWorker(
   private val engine: OnlinePunctuation,
   private val inputEntry: LiveTextEntry,
   private val outputEntry: LiveTextEntry,
+  private val textInputNormalization: String = PunctuationTextInputNormalization.DEFAULT_MODE,
 ) : StreamingPipelineWorker {
   @Volatile
   override var isRunning: Boolean = false
@@ -92,8 +94,10 @@ internal class PunctuationPipelineWorker(
   }
 
   private fun punctuateSegment(text: String, meta: Map<String, Any?>?) {
-    unitsRead += text.length
-    val punctuated = engine.addPunctuation(text)
+    val normalized =
+      PunctuationTextInputNormalization.normalize(text, textInputNormalization)
+    unitsRead += normalized.length
+    val punctuated = engine.addPunctuation(normalized)
     val outMeta = mutableMapOf<String, Any?>(
       "__segmentReason" to "punctuation",
       "__segmentSource" to "segmentation_engine",

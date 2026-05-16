@@ -140,7 +140,8 @@ describe('streaming punctuation', () => {
     expect(native.startStreamingPunctuationPipeline).toHaveBeenCalledWith(
       punc.instanceId,
       'txt_live_11111111-1111-1111-1111-111111111111',
-      'txt_live_22222222-2222-2222-2222-222222222222'
+      'txt_live_22222222-2222-2222-2222-222222222222',
+      'lower'
     );
     await handle.flush();
     await handle.reset();

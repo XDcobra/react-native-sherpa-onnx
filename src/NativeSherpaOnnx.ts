@@ -1382,7 +1382,8 @@ export interface Spec extends TurboModule {
   punctuateOfflineTextBuffers(
     instanceId: string,
     textInBufferId: string,
-    textOutBufferId: string
+    textOutBufferId: string,
+    textInputNormalization?: string
   ): Promise<{ processingTimeMs: number }>;
 
   /**
@@ -1391,7 +1392,8 @@ export interface Spec extends TurboModule {
   punctuateOfflineString(
     instanceId: string,
     plain: string,
-    textOutBufferId: string
+    textOutBufferId: string,
+    textInputNormalization?: string
   ): Promise<{ processingTimeMs: number }>;
 
   /** Release native `OfflinePunctuation` for this instance. */
@@ -1417,7 +1419,8 @@ export interface Spec extends TurboModule {
   /** Punctuate one committed live-text chunk with an existing OnlinePunctuation instance. */
   processOnlinePunctuationChunk(
     instanceId: string,
-    text: string
+    text: string,
+    textInputNormalization?: string
   ): Promise<{ punctuatedText: string; processingTimeMs: number }>;
 
   /** Release native `OnlinePunctuation` for this instance. */
@@ -1436,6 +1439,7 @@ export interface Spec extends TurboModule {
     options: {
       attachedSegmentationEngineId: string;
       segmentLiveBufferId: string;
+      textInputNormalization?: string;
     }
   ): Promise<{ pipelineId: string }>;
 
@@ -1464,7 +1468,8 @@ export interface Spec extends TurboModule {
   startStreamingPunctuationPipeline(
     instanceId: string,
     inputBufferId: string,
-    outputBufferId: string
+    outputBufferId: string,
+    textInputNormalization?: string
   ): Promise<{ pipelineId: string }>;
 
   initializeEnhancement(

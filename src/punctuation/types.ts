@@ -14,6 +14,7 @@ import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { TextSegment } from '../segment/segment';
 import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { PunctuationPipelineHandle } from './streamingTypes';
+import type { TextInputNormalization } from './textInputNormalization';
 
 /** v1: only `processingTimeMs` (native punctuate duration in milliseconds). */
 export type OfflinePunctuateResult = {
@@ -38,6 +39,8 @@ export type OfflinePunctuateResult = {
 export type OfflinePunctuationSegmentationMode = 'off' | 'manual' | 'auto';
 
 export type OfflinePunctuateOptions = {
+  /** Default: `'lower'`. */
+  textInputNormalization?: TextInputNormalization;
   segmentation?: {
     mode?: OfflinePunctuationSegmentationMode;
     policy?: SegmentationPolicy;
@@ -104,6 +107,8 @@ export type OfflinePunctuationEngine = {
 
 export interface PunctuationLivePipelineOptions
   extends LiveOfflinePipelineBaseOptions {
+  /** Default: `'lower'`. */
+  textInputNormalization?: TextInputNormalization;
   /**
    * Optional mirror callback for each committed punctuated output segment.
    * Commit-only path: no partial callback is exposed.

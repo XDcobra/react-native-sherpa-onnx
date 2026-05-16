@@ -103,7 +103,8 @@ describe('runOfflinePunctuationPipeline', () => {
     expect(native.punctuateOfflineTextBuffers).toHaveBeenCalledWith(
       'punc_off_1',
       'txt_seg_in',
-      'txt_seg_out'
+      'txt_seg_out',
+      'lower'
     );
   });
 });

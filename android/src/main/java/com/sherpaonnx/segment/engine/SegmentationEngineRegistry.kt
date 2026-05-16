@@ -2,6 +2,7 @@ package com.sherpaonnx.segment.engine
 
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.segment.pipeline.OfflineSegmentEntry
@@ -306,6 +307,40 @@ private fun resolvePunctuatedTextOrThrow(instanceId: String, text: String): Stri
   )
 }
 
+/**
+ * Maps the first sentence boundary in punctuated text back to a prefix length in the
+ * (length-preserving) normalized partial. Punctuation can insert `.?!` so punctuated
+ * indices must not be applied directly to the raw partial string.
+ */
+private fun assistedCommitLengthFromPunctuated(
+  partial: String,
+  punctuationInstanceId: String,
+  delimiters: List<String>,
+): Int {
+  if (partial.isEmpty()) return 0
+  val normalized =
+    PunctuationTextInputNormalization.normalize(partial, null)
+  val punctuated = resolvePunctuatedTextOrThrow(punctuationInstanceId, normalized)
+  val endInPunctuated = firstDelimiterEndExclusive(punctuated, delimiters)
+  if (endInPunctuated <= 0) return 0
+  if (endInPunctuated <= normalized.length) {
+    return minOf(partial.length, endInPunctuated)
+  }
+  var n = minOf(normalized.length, endInPunctuated)
+  while (n > 0) {
+    val prefixPunctuated =
+      resolvePunctuatedTextOrThrow(
+        punctuationInstanceId,
+        normalized.substring(0, n),
+      )
+    if (firstDelimiterEndExclusive(prefixPunctuated, delimiters) == prefixPunctuated.length) {
+      return minOf(partial.length, n)
+    }
+    n--
+  }
+  return 0
+}
+
 private class TextPunctuationAssistedEngine(
   engineId: String,
   attachedBufferId: String,
@@ -331,19 +366,14 @@ private class TextPunctuationAssistedEngine(
         message = "text_punctuation_assisted requires policy.punctuationInstanceId",
       )
 
-    val punctuated = resolvePunctuatedTextOrThrow(instanceId, partial)
-    val endExclusive =
-      if (policy.sentenceBoundary) {
-        lastDelimiterEndExclusive(punctuated, boundaryDelimiters)
-      } else {
-        -1
-      }
-
     var commitLength = 0
     var commitReason = reason
-    if (policy.sentenceBoundary && endExclusive >= 0) {
-      commitLength = minOf(partial.length, endExclusive)
-      commitReason = "punctuation"
+    if (policy.sentenceBoundary) {
+      commitLength =
+        assistedCommitLengthFromPunctuated(partial, instanceId, boundaryDelimiters)
+      if (commitLength > 0) {
+        commitReason = "punctuation"
+      }
     }
 
     if (commitLength <= 0 && partial.length >= policy.maxLengthChars) {

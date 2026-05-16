@@ -12,6 +12,7 @@ import com.k2fsa.sherpa.onnx.OnlinePunctuationModelConfig
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
+import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.punctuation.pipeline.PunctuationPipelineWorker
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.text.pipeline.TextErrorCodes
@@ -32,7 +33,9 @@ class SherpaOnnxOnlinePunctuationHelper(
 
     fun processOnlineIfExists(instanceId: String, text: String): String? {
       val engine = onlineEngines[instanceId] ?: return null
-      return engine.addPunctuation(text)
+      val normalized =
+        PunctuationTextInputNormalization.normalize(text, null)
+      return engine.addPunctuation(normalized)
     }
 
     fun hasOnlineInstance(instanceId: String): Boolean {
@@ -144,7 +147,12 @@ class SherpaOnnxOnlinePunctuationHelper(
     }
   }
 
-  fun processOnlinePunctuationChunk(instanceId: String, text: String, promise: Promise) {
+  fun processOnlinePunctuationChunk(
+    instanceId: String,
+    text: String,
+    textInputNormalization: String?,
+    promise: Promise
+  ) {
     val eng = onlineEngines[instanceId]
     if (eng == null) {
       promise.reject(PunctuationErrorCodes.NOT_FOUND, "Online punctuation instance not found: $instanceId")
@@ -152,7 +160,9 @@ class SherpaOnnxOnlinePunctuationHelper(
     }
     try {
       val t0 = SystemClock.elapsedRealtime()
-      val outText = eng.addPunctuation(text)
+      val normalized =
+        PunctuationTextInputNormalization.normalize(text, textInputNormalization)
+      val outText = eng.addPunctuation(normalized)
       val t1 = SystemClock.elapsedRealtime()
       val out = Arguments.createMap()
       out.putString("punctuatedText", outText)
@@ -167,6 +177,7 @@ class SherpaOnnxOnlinePunctuationHelper(
     instanceId: String,
     inputBufferId: String,
     outputBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
     val eng = onlineEngines[instanceId]
@@ -195,6 +206,8 @@ class SherpaOnnxOnlinePunctuationHelper(
         engine = eng,
         inputEntry = input,
         outputEntry = output,
+        textInputNormalization =
+          PunctuationTextInputNormalization.resolve(textInputNormalization),
       )
       val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) {
         completion -> emitPipelineCompletedEvent(completion)

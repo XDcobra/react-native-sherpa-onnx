@@ -5,6 +5,7 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "../../punctuation/core/PunctuationTextInputNormalization.hpp"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <condition_variable>
@@ -29,6 +30,36 @@ static NSString *kNotFound = @"PUNCTUATION_INSTANCE_NOT_FOUND";
 static NSString *kTxtKind = @"TEXT_BUFFER_KIND_MISMATCH";
 static NSString *kTxtState = @"TEXT_INVALID_STATE";
 
+static std::string punct_resolve_text_input_normalization(NSString *mode) {
+  if (mode == nil || mode.length == 0) {
+    return "lower";
+  }
+  std::string resolved = mode.UTF8String ?: "lower";
+  if (resolved == "none") {
+    return "none";
+  }
+  return "lower";
+}
+
+static std::string punct_normalize_input_text(
+    const std::string &text,
+    const std::string &mode) {
+  if (mode == "none" || text.empty()) {
+    return text;
+  }
+  NSString *ns = [[NSString alloc] initWithBytes:text.data()
+                                          length:text.size()
+                                        encoding:NSUTF8StringEncoding];
+  if (ns == nil) {
+    return text;
+  }
+  NSString *lower = [ns lowercaseString];
+  if (lower == nil) {
+    return text;
+  }
+  return std::string(lower.UTF8String ?: "");
+}
+
 std::string punct_uuid() {
   static const char *kHex = "0123456789abcdef";
   std::random_device rd;
@@ -48,10 +79,12 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
   PunctuationPipelineWorker(
       std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine,
       std::shared_ptr<TxtLiveEntry> input,
-      std::shared_ptr<TxtLiveEntry> output)
+      std::shared_ptr<TxtLiveEntry> output,
+      std::string textInputNormalization)
       : engine_(std::move(engine)),
         input_(std::move(input)),
-        output_(std::move(output)) {
+        output_(std::move(output)),
+        textInputNormalization_(std::move(textInputNormalization)) {
     pipelineId = "punct_pipeline_" + punct_uuid();
   }
 
@@ -161,8 +194,10 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
   }
 
   void punctuateSegment(const TextSegment &segment) {
-    unitsRead_ += (int64_t)segment.text.size();
-    std::string outText = engine_->AddPunctuation(segment.text);
+    const std::string normalized =
+        punct_normalize_input_text(segment.text, textInputNormalization_);
+    unitsRead_ += (int64_t)normalized.size();
+    std::string outText = engine_->AddPunctuation(normalized);
     NSMutableDictionary *meta = [NSMutableDictionary dictionaryWithDictionary:@{
       @"__segmentReason": @"punctuation",
       @"__segmentSource": @"segmentation_engine",
@@ -224,6 +259,7 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
   std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine_;
   std::shared_ptr<TxtLiveEntry> input_;
   std::shared_ptr<TxtLiveEntry> output_;
+  std::string textInputNormalization_;
   std::thread thread_;
   int cursorId_ = -1;
   int appendListenerToken_ = -1;
@@ -260,7 +296,9 @@ extern "C" bool sherpaonnx_punct_online_add_punctuation_if_exists(
     engine = it->second;
   }
   if (outText != nullptr) {
-    *outText = engine->AddPunctuation(text);
+    const std::string normalized =
+        punct_text_input_normalization::normalize(text, "lower");
+    *outText = engine->AddPunctuation(normalized);
   }
   return true;
 }
@@ -347,9 +385,10 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
 }
 
 - (void)processOnlinePunctuationChunk:(NSString *)instanceId
-                                  text:(NSString *)text
-                               resolve:(RCTPromiseResolveBlock)resolve
-                                reject:(RCTPromiseRejectBlock)reject
+                                 text:(NSString *)text
+               textInputNormalization:(NSString *)textInputNormalization
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
 {
   std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine;
   {
@@ -361,8 +400,11 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
     }
     engine = it->second;
   }
+  const std::string mode = punct_resolve_text_input_normalization(textInputNormalization);
+  const std::string normalized =
+      punct_normalize_input_text(text.UTF8String ?: "", mode);
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
-  std::string outText = engine->AddPunctuation(text.UTF8String ?: "");
+  std::string outText = engine->AddPunctuation(normalized);
   CFTimeInterval t1 = CFAbsoluteTimeGetCurrent();
   resolve(@{
     @"punctuatedText": [NSString stringWithUTF8String:outText.c_str()] ?: @"",
@@ -382,6 +424,7 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
 - (void)startStreamingPunctuationPipeline:(NSString *)instanceId
                    inputBufferId:(NSString *)inputBufferId
                   outputBufferId:(NSString *)outputBufferId
+               textInputNormalization:(NSString *)textInputNormalization
                          resolve:(RCTPromiseResolveBlock)resolve
                           reject:(RCTPromiseRejectBlock)reject
 {
@@ -407,7 +450,10 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
     return;
   }
 
-  auto worker = std::make_shared<PunctuationPipelineWorker>(engine, input, output);
+  const std::string normalization =
+      punct_resolve_text_input_normalization(textInputNormalization);
+  auto worker = std::make_shared<PunctuationPipelineWorker>(
+      engine, input, output, normalization);
   std::string pid = worker->pipelineId;
   {
     std::lock_guard<std::mutex> pipeLock(g_streaming_pipeline_mutex);

@@ -8,6 +8,7 @@ import com.k2fsa.sherpa.onnx.OfflinePunctuation
 import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig
 import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
+import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.text.pipeline.TextErrorCodes
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.concurrent.ConcurrentHashMap
@@ -24,7 +25,9 @@ class SherpaOnnxPunctuationHelper(
 
     fun processOfflineIfExists(instanceId: String, text: String): String? {
       val engine = offlineEngines[instanceId] ?: return null
-      return engine.addPunctuation(text)
+      val normalized =
+        PunctuationTextInputNormalization.normalize(text, null)
+      return engine.addPunctuation(normalized)
     }
 
     fun hasOfflineInstance(instanceId: String): Boolean {
@@ -247,6 +250,7 @@ class SherpaOnnxPunctuationHelper(
     instanceId: String,
     textInBufferId: String,
     textOutBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
     val eng = getEngine(instanceId)
@@ -269,7 +273,9 @@ class SherpaOnnxPunctuationHelper(
       promise.reject(code, msg, null)
       return
     }
-    val (plain, lang) = read.getOrThrow()
+    val (plainRaw, lang) = read.getOrThrow()
+    val plain =
+      PunctuationTextInputNormalization.normalize(plainRaw, textInputNormalization)
     if (!textOutBufferId.startsWith("txt_off_")) {
       promise.reject(
         TextErrorCodes.BUFFER_KIND_MISMATCH,
@@ -330,6 +336,7 @@ class SherpaOnnxPunctuationHelper(
     instanceId: String,
     plain: String,
     textOutBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
     val eng = getEngine(instanceId)
@@ -362,10 +369,12 @@ class SherpaOnnxPunctuationHelper(
       )
       return
     }
+    val normalizedPlain =
+      PunctuationTextInputNormalization.normalize(plain, textInputNormalization)
     val t0 = SystemClock.elapsedRealtime()
     val outText: String
     try {
-      outText = eng.addPunctuation(plain)
+      outText = eng.addPunctuation(normalizedPlain)
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "punctuateOfflineString", e)
       promise.reject(

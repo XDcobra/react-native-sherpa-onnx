@@ -7,6 +7,7 @@
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/PunctuationOfflineLivePipelineWorker.h"
+#include "../core/PunctuationTextInputNormalization.hpp"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <chrono>
@@ -51,7 +52,9 @@ extern "C" bool sherpaonnx_punct_offline_add_punctuation_if_exists(
     engine = &it->second;
   }
   if (outText != nullptr) {
-    *outText = engine->AddPunctuation(text);
+    const std::string normalized =
+        punct_text_input_normalization::normalize(text, "lower");
+    *outText = engine->AddPunctuation(normalized);
   }
   return true;
 }
@@ -158,6 +161,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 - (void)punctuateOfflineTextBuffers:(NSString *)instanceId
                    textInBufferId:(NSString *)textInId
                   textOutBufferId:(NSString *)textOutId
+               textInputNormalization:(NSString *)textInputNormalization
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject
 {
@@ -207,10 +211,14 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
       return;
     }
   }
+  const std::string normalization =
+      punct_text_input_normalization::resolve_mode(textInputNormalization);
+  const std::string normalizedPlain =
+      punct_text_input_normalization::normalize(plain, normalization);
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
   std::string outText;
   @try {
-    outText = eng->AddPunctuation(plain);
+    outText = eng->AddPunctuation(normalizedPlain);
   } @catch (NSException *exception) {
     reject(kPunctErr, [NSString stringWithFormat:@"Punctuation: %@", exception.reason], nil);
     return;
@@ -237,6 +245,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 - (void)punctuateOfflineString:(NSString *)instanceId
                         plain:(NSString *)plain
                textOutBufferId:(NSString *)textOutId
+               textInputNormalization:(NSString *)textInputNormalization
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
@@ -272,7 +281,10 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
       return;
     }
   }
-  std::string plainStr = [plain UTF8String];
+  const std::string normalization =
+      punct_text_input_normalization::resolve_mode(textInputNormalization);
+  const std::string plainStr =
+      punct_text_input_normalization::normalize([plain UTF8String], normalization);
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
   std::string outText;
   @try {

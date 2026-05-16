@@ -6,6 +6,7 @@ import type {
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { PunctuationModelType } from './detect';
+import type { TextInputNormalization } from './textInputNormalization';
 
 export type OnlinePunctuationModelType = Extract<
   PunctuationModelType,
@@ -22,6 +23,11 @@ export type StreamingPunctuationInitializeOptions = {
 };
 
 export type StreamingPunctuationOptions = {
+  /**
+   * Applied to each committed input segment before `OnlinePunctuation` inference.
+   * Default: `'lower'` (recommended for ASR uppercase output).
+   */
+  textInputNormalization?: TextInputNormalization;
   segmentation?: {
     mode?: 'off' | 'manual' | 'auto';
     policy?: SegmentationPolicy;

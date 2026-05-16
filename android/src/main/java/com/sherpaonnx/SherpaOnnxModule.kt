@@ -4064,18 +4064,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     instanceId: String,
     textInBufferId: String,
     textOutBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
-    punctuationHelper.punctuateOfflineTextBuffers(instanceId, textInBufferId, textOutBufferId, promise)
+    punctuationHelper.punctuateOfflineTextBuffers(
+      instanceId,
+      textInBufferId,
+      textOutBufferId,
+      textInputNormalization,
+      promise
+    )
   }
 
   override fun punctuateOfflineString(
     instanceId: String,
     plain: String,
     textOutBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
-    punctuationHelper.punctuateOfflineString(instanceId, plain, textOutBufferId, promise)
+    punctuationHelper.punctuateOfflineString(
+      instanceId,
+      plain,
+      textOutBufferId,
+      textInputNormalization,
+      promise
+    )
   }
 
   override fun unloadOfflinePunctuation(
@@ -4108,9 +4122,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun processOnlinePunctuationChunk(
     instanceId: String,
     text: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
-    onlinePunctuationHelper.processOnlinePunctuationChunk(instanceId, text, promise)
+    onlinePunctuationHelper.processOnlinePunctuationChunk(
+      instanceId,
+      text,
+      textInputNormalization,
+      promise
+    )
   }
 
   override fun unloadOnlinePunctuation(
@@ -4124,9 +4144,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     instanceId: String,
     inputBufferId: String,
     outputBufferId: String,
+    textInputNormalization: String?,
     promise: Promise
   ) {
-    onlinePunctuationHelper.startStreamingPunctuationPipeline(instanceId, inputBufferId, outputBufferId, promise)
+    onlinePunctuationHelper.startStreamingPunctuationPipeline(
+      instanceId,
+      inputBufferId,
+      outputBufferId,
+      textInputNormalization,
+      promise
+    )
   }
 
   override fun startPunctuationOfflineLivePipeline(

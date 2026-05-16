@@ -18,3 +18,9 @@ export type {
   StreamingPunctuationOptions,
   PunctuationPipelineHandle,
 } from './streamingTypes';
+export type { TextInputNormalization } from './textInputNormalization';
+export {
+  DEFAULT_TEXT_INPUT_NORMALIZATION,
+  normalizePunctuationInputText,
+  resolveTextInputNormalization,
+} from './textInputNormalization';
