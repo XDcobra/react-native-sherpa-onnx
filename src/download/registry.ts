@@ -9,6 +9,9 @@ import {
   MODEL_ARCHIVE_EXT,
   MODEL_ONNX_EXT,
 } from './constants';
+import { categoryUsesCatalogDetect } from './catalogDetectCategories';
+import { buildCatalogHintsMap, type CatalogDetectHint } from './catalogHints';
+import type { CatalogDetectCategory } from './catalogDetectCategories';
 import { emitModelsListUpdated } from './downloadEvents';
 import {
   CATEGORY_CONFIG,
@@ -23,13 +26,8 @@ import {
   type CachePayload,
   type CacheStatus,
   type ModelMeta,
-  type Quantization,
-  type SizeTier,
-  type TtsModelType,
 } from './types';
 import { parseChecksumFile } from './validation';
-import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolvePublicLanguageHints } from '../model-languages';
 
 export type RefreshModelsOptions = {
   forceRefresh?: boolean;
@@ -43,14 +41,6 @@ type ReleaseAsset = {
   size: number;
   browser_download_url: string;
   digest?: string;
-};
-
-type NativeTtsCatalogHint = {
-  modelId: string;
-  modelType: string;
-  languages: string[];
-  quantization: string;
-  sizeTier: string;
 };
 
 const memoryCacheByCategory: Partial<Record<ModelCategory, CachePayload>> = {};
@@ -136,61 +126,6 @@ function deriveDisplayName(id: string): string {
   return toTitleCase(cleaned);
 }
 
-async function buildTtsCatalogHintsMap(
-  ids: string[]
-): Promise<Map<string, NativeTtsCatalogHint>> {
-  const map = new Map<string, NativeTtsCatalogHint>();
-  for (const id of ids) {
-    const raw = await SherpaOnnx.detectTtsModel('', id, 'auto');
-    const modelType =
-      typeof raw.modelType === 'string' && raw.modelType.length > 0
-        ? raw.modelType
-        : 'unknown';
-    const rawLangs = Array.isArray(raw.languages)
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-    const languageRows = resolvePublicLanguageHints({
-      domain: ModelCategory.Tts,
-      modelType: modelType !== 'unknown' ? modelType : undefined,
-      rawFromNative: rawLangs,
-    });
-    const languages = languageRows.map((r) => r.iso6391Hint);
-    const quantization =
-      typeof raw.quantization === 'string' && raw.quantization.length > 0
-        ? raw.quantization
-        : 'unknown';
-    const sizeTier =
-      typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
-        ? raw.sizeTier
-        : 'unknown';
-    map.set(id, {
-      modelId: id,
-      modelType,
-      languages,
-      quantization,
-      sizeTier,
-    });
-  }
-  return map;
-}
-
-function collectTtsModelIdsFromAssets(assets: ReleaseAsset[]): string[] {
-  const out: string[] = [];
-  for (const asset of assets) {
-    const archiveExt = getAssetExtension(asset.name);
-    if (archiveExt !== 'tar.bz2') {
-      continue;
-    }
-    if (
-      !isAssetSupportedForCategory(ModelCategory.Tts, asset.name, archiveExt)
-    ) {
-      continue;
-    }
-    out.push(stripAssetExtension(asset.name, archiveExt));
-  }
-  return out;
-}
-
 function getAssetExtension(name: string): 'tar.bz2' | 'onnx' | null {
   if (name.endsWith(MODEL_ARCHIVE_EXT)) return 'tar.bz2';
   if (name.endsWith(MODEL_ONNX_EXT)) return 'onnx';
@@ -247,32 +182,70 @@ function parseDigestSha256(value?: string): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
-function toTtsModelMeta(
+function collectModelIdsFromAssets(
+  category: ModelCategory,
+  assets: ReleaseAsset[]
+): string[] {
+  const out: string[] = [];
+  for (const asset of assets) {
+    const archiveExt = getAssetExtension(asset.name);
+    if (!archiveExt) {
+      continue;
+    }
+    if (!isAssetSupportedForCategory(category, asset.name, archiveExt)) {
+      continue;
+    }
+    out.push(stripAssetExtension(asset.name, archiveExt));
+  }
+  return out;
+}
+
+function applyCatalogHintToMeta(
+  meta: ModelMeta,
+  hint: CatalogDetectHint,
+  options?: { supportsQnn?: boolean }
+): ModelMeta {
+  return {
+    ...meta,
+    modelType: hint.modelType,
+    languages: [...hint.languages],
+    quantization: hint.quantization,
+    sizeTier: hint.sizeTier,
+    isStreaming: hint.isStreaming,
+    ...(options?.supportsQnn === true ? { supportsQnn: true } : {}),
+    ...(hint.isHardwareSpecificUnsupported === true
+      ? { isHardwareSpecificUnsupported: true }
+      : {}),
+  };
+}
+
+function toDetectModelMeta(
+  category: CatalogDetectCategory,
   asset: ReleaseAsset,
-  archiveExt: 'tar.bz2',
-  hints: Map<string, NativeTtsCatalogHint>
+  archiveExt: 'tar.bz2' | 'onnx',
+  hints: Map<string, CatalogDetectHint>
 ): ModelMeta {
   const id = stripAssetExtension(asset.name, archiveExt);
   const hint = hints.get(id);
   if (!hint) {
     throw new Error(
-      `Missing native TTS catalog hints for "${id}" — detectTtsModel did not produce metadata for this id.`
+      `Missing native catalog hints for "${id}" (${category}) — detect did not produce metadata for this id.`
     );
   }
 
-  return {
+  const base: ModelMeta = {
     id,
     displayName: deriveDisplayName(id),
     downloadUrl: asset.browser_download_url,
     archiveExt,
     bytes: asset.size,
     sha256: parseDigestSha256(asset.digest),
-    category: ModelCategory.Tts,
-    type: hint.modelType as TtsModelType,
-    languages: [...hint.languages],
-    quantization: hint.quantization as Quantization,
-    sizeTier: hint.sizeTier as SizeTier,
+    category,
   };
+
+  return applyCatalogHintToMeta(base, hint, {
+    supportsQnn: category === ModelCategory.Qnn,
+  });
 }
 
 function toGenericModelMeta(
@@ -296,7 +269,7 @@ function toGenericModelMeta(
 function toModelMeta(
   category: ModelCategory,
   asset: ReleaseAsset,
-  ttsHints: Map<string, NativeTtsCatalogHint>
+  hints: Map<string, CatalogDetectHint>
 ): ModelMeta | null {
   const archiveExt = getAssetExtension(asset.name);
   if (!archiveExt) {
@@ -307,8 +280,8 @@ function toModelMeta(
     return null;
   }
 
-  if (category === ModelCategory.Tts && archiveExt === 'tar.bz2') {
-    return toTtsModelMeta(asset, archiveExt, ttsHints);
+  if (categoryUsesCatalogDetect(category)) {
+    return toDetectModelMeta(category, asset, archiveExt, hints);
   }
 
   return toGenericModelMeta(category, asset, archiveExt);
@@ -390,15 +363,16 @@ export async function refreshModels(
       ? (body.assets as ReleaseAsset[])
       : [];
 
-    let ttsHints = new Map<string, NativeTtsCatalogHint>();
-    if (category === ModelCategory.Tts) {
-      const ttsIds = collectTtsModelIdsFromAssets(assets);
-      ttsHints = await buildTtsCatalogHintsMap(ttsIds);
+    let hints = new Map<string, CatalogDetectHint>();
+    if (categoryUsesCatalogDetect(category)) {
+      const ids = collectModelIdsFromAssets(category, assets);
+      hints = await buildCatalogHintsMap(category, ids);
     }
 
     const models = assets
-      .map((asset) => toModelMeta(category, asset, ttsHints))
-      .filter((model): model is ModelMeta => model != null);
+      .map((asset) => toModelMeta(category, asset, hints))
+      .filter((model): model is ModelMeta => model != null)
+      .filter((model) => model.isHardwareSpecificUnsupported !== true);
 
     const checksums = await fetchChecksumsFromRelease(category);
     for (const model of models) {

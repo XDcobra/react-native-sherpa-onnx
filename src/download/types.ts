@@ -25,11 +25,18 @@ export type ModelMeta = {
   bytes: number;
   sha256?: string;
   category: ModelCategory;
-  type?: TtsModelType;
+  /** Primary kind from native name-only detect at registry refresh. */
+  modelType?: string;
   /** Normalized primary language hints (mostly ISO 639-1), not raw release-id tokens. */
   languages?: string[];
   quantization?: Quantization;
   sizeTier?: SizeTier;
+  /** Online/live-capable layout (STT, punctuation CNN, enhancement streaming, etc.). */
+  isStreaming?: boolean;
+  /** QNN binary ASR pack (ModelCategory.Qnn only). */
+  supportsQnn?: boolean;
+  /** RKNN/Ascend/CANN etc.; excluded from generic STT catalog surfaces. */
+  isHardwareSpecificUnsupported?: boolean;
 };
 
 export type ProgressPhase =
