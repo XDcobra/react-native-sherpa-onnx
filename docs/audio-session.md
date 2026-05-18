@@ -6,6 +6,8 @@ Global audio session and route coordination for mic capture + PCM playback.
 
 Import from `react-native-sherpa-onnx/audio`.
 
+Other exports from the same path: [save / encode / duration probe](./audio-conversion.md).
+
 ## Why this exists
 
 Microphone capture and playback can run at the same time. Instead of configuring route/session per mic/player call, the SDK now uses a central coordinator per platform.

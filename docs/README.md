@@ -100,7 +100,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [audio-session.md](./audio-session.md) | Global audio session policy and route preference (mic + PCM) |
 | [pcm-player.md](./pcm-player.md) | Built-in PCM player — play pipeline buffer output |
-| [audio-conversion.md](./audio-conversion.md) | Audio format conversion utilities |
+| [audio-conversion.md](./audio-conversion.md) | Save / encode and duration probe (`react-native-sherpa-onnx/audio`) |
 
 ---
 

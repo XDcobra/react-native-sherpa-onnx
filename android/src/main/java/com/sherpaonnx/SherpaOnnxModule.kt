@@ -1197,6 +1197,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeAudioFileDuration(source: ReadableMap, promise: Promise) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
+
+        val result = nativeProbeFileDuration(sourcePath, sourceFd)
+          ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native probe returned null")
+
+        if (result.size < 2) {
+          throw RuntimeException("PROBE_INTERNAL_ERROR: Invalid native probe result")
+        }
+
+        val durationMs = result[0]
+        if (durationMs < 0) {
+          throw RuntimeException("PROBE_DURATION_UNKNOWN: Could not determine duration")
+        }
+
+        val map = Arguments.createMap()
+        map.putDouble("durationMs", durationMs.toDouble())
+        map.putBoolean("isExact", result[1] != 0L)
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("PROBE_")) msg.substringBefore(":").trim() else "PROBE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("PROBE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
   override fun startFileIngestToLiveBuffer(
     liveBufferId: String,
     source: ReadableMap,
@@ -4487,6 +4532,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeEncodeSessionRelease(
       sessionPtr: Long
     )
+
+    /** Probe duration: returns long[2]{durationMs, isExact}. */
+    @JvmStatic
+    external fun nativeProbeFileDuration(
+      path: String?,
+      inputFd: Int,
+    ): LongArray?
 
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic

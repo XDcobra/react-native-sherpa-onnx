@@ -565,6 +565,67 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     }
 }
 
+/**
+ * Probe audio file duration from container metadata (no decode).
+ * Returns long[2]: { durationMs, isExact (1 or 0) }.
+ */
+JNIEXPORT jlongArray JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileDuration(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd
+) {
+    const char* path = nullptr;
+    if (jPath) {
+        path = env->GetStringUTFChars(jPath, nullptr);
+        if (!path) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to get path string");
+            return nullptr;
+        }
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_NOT_FOUND: Empty file path and invalid fd");
+        return nullptr;
+    }
+
+    try {
+        auto result = sherpa::probeFileDuration(path, (int)inputFd);
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+
+        jlongArray arr = env->NewLongArray(2);
+        if (!arr) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to allocate result array");
+            return nullptr;
+        }
+        jlong values[2] = {result.durationMs, result.isExact ? 1L : 0L};
+        env->SetLongArrayRegion(arr, 0, 2, values);
+        return arr;
+    } catch (const std::exception& e) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+        return nullptr;
+    } catch (...) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_INTERNAL_ERROR: Unknown error during duration probe");
+        return nullptr;
+    }
+}
+
 // ==================== Cancel Flag Lifecycle ====================
 
 /**

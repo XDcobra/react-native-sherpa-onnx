@@ -228,6 +228,16 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Probe audio file duration from container metadata (no decode).
+   * JS wrapper: `probeAudioFileDuration` from `react-native-sherpa-onnx/audio`.
+   * @param source - Serialized FileSource (same format as decodeFileToOfflineBuffer)
+   */
+  probeAudioFileDuration(source: Object): Promise<{
+    durationMs: number;
+    isExact: boolean;
+  }>;
+
+  /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
    * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).

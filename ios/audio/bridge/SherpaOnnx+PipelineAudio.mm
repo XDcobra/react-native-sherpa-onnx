@@ -1362,6 +1362,98 @@ static bool pa_populate_offline_from_source_if_empty(
   });
 }
 
+// ---- Duration probe (container metadata only, no decode) ----
+- (void)probeAudioFileDuration:(NSDictionary *)source
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject
+{
+  if (!source || [source count] == 0) {
+    reject(kPAErrInvalidArgument, @"source is required", nil);
+    return;
+  }
+
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: kPAErrFileNotFound, errMsg ?: @"Failed to resolve audio source", nil);
+    return;
+  }
+
+  NSString *sourcePath = nil;
+  NSString *tmpPath = nil;
+  if (readHandle.isFilePath) {
+    sourcePath = readHandle.filePath;
+  } else {
+    tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+               [NSString stringWithFormat:@"fileio_probe_%@", [[NSUUID UUID] UUIDString]]];
+    NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+    [out open];
+    [readHandle.stream open];
+    uint8_t buf[65536];
+    NSInteger bytesRead;
+    while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+      [out write:buf maxLength:bytesRead];
+    }
+    [out close];
+    sourcePath = tmpPath;
+  }
+
+  std::string path = [sourcePath UTF8String];
+  NSString *tmpPathCleanup = tmpPath;
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    @autoreleasepool {
+      try {
+        auto result = sherpa::probeFileDuration(path.c_str());
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+
+        if (result.durationMs < 0) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(@"PROBE_DURATION_UNKNOWN", @"Could not determine duration", nil);
+          });
+          return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(@{
+            @"durationMs": @(result.durationMs),
+            @"isExact": @(result.isExact),
+          });
+        });
+      } catch (const std::runtime_error &e) {
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"PROBE_INTERNAL_ERROR";
+        if (msg.find("PROBE_") == 0) {
+          auto colonPos = msg.find(':');
+          if (colonPos != std::string::npos) {
+            nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
+          }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"PROBE_INTERNAL_ERROR", @"Unknown error during duration probe", nil);
+        });
+      }
+    }
+  });
+}
+
 // ---- Offline: from live ----
 - (void)createOfflineAudioBufferFromLive:(NSString *)liveBufferId
                                     mode:(NSString *)mode

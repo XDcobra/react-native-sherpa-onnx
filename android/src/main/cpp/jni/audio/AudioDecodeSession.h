@@ -19,6 +19,11 @@ struct AudioDecodeResult {
   int sourceChannels = 0;
 };
 
+struct AudioFileProbeResult {
+  int64_t durationMs = -1;  // -1 = unknown
+  bool isExact = false;     // true when container/stream duration is reliable
+};
+
 using DecodeChunkCallback =
     std::function<void(const float* samples, int frameCount)>;
 
@@ -59,6 +64,18 @@ inline AudioDecodeResult decodeFile(
     std::atomic<bool>& cancelFlag
 ) {
     return decodeFile(pathOrFd, -1, config, onChunk, onProgress, onStreamInfo, cancelFlag);
+}
+
+/**
+ * Probe audio file duration from container metadata only (no decode).
+ *
+ * WAV: exact duration from fmt/data chunks. Other formats: FFmpeg demux when available.
+ * Throws std::runtime_error with PROBE_* error code prefix on failure.
+ */
+AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd = -1);
+
+inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
+  return probeFileDuration(pathOrFd, -1);
 }
 
 } // namespace sherpa

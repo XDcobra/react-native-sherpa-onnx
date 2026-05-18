@@ -6,7 +6,7 @@
 
 **Import path:** `react-native-sherpa-onnx/audiobuffer`
 
-For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For live/ring-buffer workflows, see [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md).
+For decode/save helpers, see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For live/ring-buffer workflows, see [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md).
 
 Practical default policy: buffers are `16000` Hz unless you explicitly choose a different rate (`targetSampleRateHz: 0` to keep source/native rate, or `targetSampleRateHz > 0` for an explicit target).
 
@@ -151,6 +151,8 @@ const decoded = await createOfflineAudioBufferFromFile(
 ```
 
 The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
+
+When you only need **duration** (usage UI, planners) and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer.
 
 Options:
 

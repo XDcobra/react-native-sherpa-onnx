@@ -265,3 +265,5 @@ export async function listAvailableOutputDevices(): Promise<
     canSelect: Boolean(device.canSelect),
   }));
 }
+
+export { probeAudioFileDuration, type AudioFileDurationProbe } from './probe';

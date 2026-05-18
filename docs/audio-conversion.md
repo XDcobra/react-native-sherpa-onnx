@@ -1,15 +1,16 @@
-# Audio save (`react-native-sherpa-onnx/audio`)
+# Audio (`react-native-sherpa-onnx/audio`)
 
 ## Introduction
 
-This module saves audio buffers or source files to encoded output files.
+Import from `react-native-sherpa-onnx/audio`. This page documents **save/encode** and **duration probe**. Session/route coordination is in [audio-session.md](./audio-session.md).
 
-Input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
+Save/encode input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
 
 ## Overview
 
 Exports:
 
+- `probeAudioFileDuration(source)` → `Promise<AudioFileDurationProbe | null>`
 - `saveAudioAsFile(input, output, format, options?)` → `Promise<ResolvedFileRef>`
 - `saveAudioAsWav16k(input, output)` → `Promise<ResolvedFileRef>`
 - `AudioOutputFormat`
@@ -186,6 +187,25 @@ saveAudioAsFile(input, output, 'wav', { outputSampleRateHz: 16000 })
 
 Use this for STT-ready 16 kHz mono WAV output.
 
+### `probeAudioFileDuration(source)`
+
+Read file duration from container metadata only (WAV header or FFmpeg demux) — no PCM decode, no offline buffer. Use for usage estimates or planners before `createOfflineAudioBufferFromFile`.
+
+```ts
+export type AudioFileDurationProbe = {
+  durationMs: number;
+  isExact: boolean;
+};
+
+export async function probeAudioFileDuration(
+  source: FileSource
+): Promise<AudioFileDurationProbe | null>;
+```
+
+- `source`: `FileSource` from `react-native-sherpa-onnx/fileio` (`fs`, `contentUri`, … — same resolver as decode).
+- Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
+- `isExact`: `true` for WAV header math or stream/container duration; `false` when estimated from file size + bitrate.
+
 ## Sample-rate semantics
 
 - `wav`: `0` uses the source sample rate; explicit values resample.
@@ -205,17 +225,19 @@ Use this for STT-ready 16 kHz mono WAV output.
 
 ```ts
 import {
-  saveAudioAsFile, // save audio buffer or file source to encoded file destination
-  saveAudioAsWav16k, // convenience shortcut for WAV 16 kHz conversion
-  AudioSaveErrorCode, // runtime constants for AUDIO_SAVE_* error handling
+  probeAudioFileDuration,
+  saveAudioAsFile,
+  saveAudioAsWav16k,
+  AudioSaveErrorCode,
 } from 'react-native-sherpa-onnx/audio';
 
 import type {
-  AudioOutputFormat, // supported output codec/format union
-  AudioSaveInput, // input union: pipeline audio buffer id source or FileSource
-  SaveAudioOptions, // conversion options (sample rate, quality, bitrate, signal, progress)
-  AudioSaveProgressEvent, // progress payload emitted during save operations
-  AudioSaveErrorCodeValue, // string union of AUDIO_SAVE_* codes
+  AudioFileDurationProbe,
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+  AudioSaveErrorCodeValue,
 } from 'react-native-sherpa-onnx/audio';
 ```
 
@@ -250,6 +272,7 @@ Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable compar
 
 ## Related
 
+- [audio-session.md](audio-session.md)
 - [audiobuffer-offline.md](audiobuffer-offline.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
 - [fileio.md](fileio.md)
