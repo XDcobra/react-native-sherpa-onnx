@@ -4,21 +4,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-
-function toFileSource(pathOrUri: string): FileSource {
-  const trimmed = pathOrUri.trim();
-
-  if (trimmed.startsWith('content://')) {
-    return { kind: 'contentUri', uri: trimmed };
-  }
-
-  if (trimmed.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(trimmed.replace(/^file:\/\//, '')) };
-  }
-
-  return { kind: 'fs', path: trimmed };
-}
+import { toFileSource } from './fileSourceFromUri';
 
 export type ActivePcmFilePlayback = {
   stop: () => Promise<void>;

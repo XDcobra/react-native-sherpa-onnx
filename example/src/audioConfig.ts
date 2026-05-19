@@ -1,9 +1,52 @@
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { fileSourceFromBundledPath } from './utils/fileSourceFromUri';
+
 /**
  * Configuration for test audio files.
  * Audio files should be placed in:
  * - Android: example/android/app/src/main/assets/test_wavs/
  * - iOS: example/ios/sherpa_models/test_wavs/ (copied into the app bundle at build time)
  */
+
+/**
+ * Codec round-trip samples for the File I/O example screen.
+ * - Android: example/android/app/src/main/assets/test_codec/
+ * - iOS: example/ios/sherpa_models/test_codec/ (copied at build time)
+ */
+export const TEST_CODEC_FILES = {
+  wav: 'test_codec/sample.wav',
+  mp3: 'test_codec/sample.mp3',
+  flac: 'test_codec/sample.flac',
+  aac: 'test_codec/sample.aac',
+  m4a: 'test_codec/sample.m4a',
+  opus: 'test_codec/sample.opus',
+  webm: 'test_codec/sample.webm',
+  mkv: 'test_codec/sample.mkv',
+  ogg: 'test_codec/sample.ogg',
+} as const;
+
+export type CodecAssetFormat = keyof typeof TEST_CODEC_FILES;
+
+export const CODEC_ASSET_ENTRIES: {
+  format: CodecAssetFormat;
+  label: string;
+}[] = [
+  { format: 'wav', label: 'WAV' },
+  { format: 'mp3', label: 'MP3' },
+  { format: 'flac', label: 'FLAC' },
+  { format: 'm4a', label: 'M4A' },
+  { format: 'aac', label: 'AAC' },
+  { format: 'opus', label: 'Opus' },
+  { format: 'ogg', label: 'OGG' },
+  { format: 'webm', label: 'WebM' },
+  { format: 'mkv', label: 'MKV' },
+];
+
+export function fileSourceFromBundledCodecFormat(
+  format: CodecAssetFormat
+): FileSource {
+  return fileSourceFromBundledPath(TEST_CODEC_FILES[format]);
+}
 
 export const TEST_AUDIO_FILES = {
   // English test files (for Zipformer model)

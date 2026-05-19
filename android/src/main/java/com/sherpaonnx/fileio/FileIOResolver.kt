@@ -74,7 +74,11 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'base' in app source")
         val path = source.getString("path")
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'path' in app source")
-        val file = resolveAppPath(base, path)
+        val file = if (base == "apkAsset") {
+          resolveApkAssetFile(path)
+        } else {
+          resolveAppPath(base, path)
+        }
         if (!file.exists()) throw FileIOException(FileIOErrorCodes.NOT_FOUND, "Source file not found: ${file.absolutePath}")
         if (!file.canRead()) throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "Cannot read file: ${file.absolutePath}")
         ReadHandle.FilePath(file)
@@ -279,6 +283,10 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       "tmp" -> File(context.cacheDir, "tmp")
       "externalFiles" -> context.getExternalFilesDir(null)
         ?: throw FileIOException(FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM, "No external files directory available")
+      "apkAsset" -> throw FileIOException(
+        FileIOErrorCodes.INVALID_ARGUMENT,
+        "apkAsset must be resolved via resolveApkAssetFile(), not resolveAppPath()"
+      )
       else -> throw FileIOException(FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND, "Unknown AppBaseDir: $base")
     }
     val resolved = File(baseDir, relativePath).canonicalFile
@@ -286,6 +294,52 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "Path escapes base directory")
     }
     return resolved
+  }
+
+  /**
+   * Materialize a path under `android/app/src/main/assets/` to a readable cache file.
+   * Used for {@code app} + {@code apkAsset} {@link FileSource} reads (probe/decode/encode/copy).
+   */
+  private fun resolveApkAssetFile(relativePath: String): File {
+    val assetPath = relativePath.trim().removePrefix("/")
+    if (assetPath.isEmpty() || assetPath.contains("..")) {
+      throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "Invalid apkAsset path: $relativePath")
+    }
+    val cacheRoot = File(context.cacheDir, "fileio_apkasset").canonicalFile
+    val outFile = File(cacheRoot, assetPath.replace('/', File.separatorChar)).canonicalFile
+    if (!outFile.path.startsWith(cacheRoot.path)) {
+      throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "apkAsset path escapes cache root")
+    }
+    if (outFile.exists() && outFile.isFile) {
+      return outFile
+    }
+    outFile.parentFile?.mkdirs()
+    try {
+      context.assets.open(assetPath).use { input ->
+        outFile.outputStream().use { output ->
+          input.copyTo(output)
+        }
+      }
+    } catch (e: java.io.FileNotFoundException) {
+      throw FileIOException(
+        FileIOErrorCodes.NOT_FOUND,
+        "APK asset not found: $assetPath (expected under app/src/main/assets/)",
+        e,
+      )
+    } catch (e: java.io.IOException) {
+      throw FileIOException(
+        FileIOErrorCodes.WRITE_ERROR,
+        "Failed to materialize APK asset to cache: $assetPath — ${e.message}",
+        e,
+      )
+    } catch (e: Exception) {
+      throw FileIOException(
+        FileIOErrorCodes.READ_ERROR,
+        "Failed to read APK asset: $assetPath — ${e.message}",
+        e,
+      )
+    }
+    return outFile
   }
 
   private fun queryContentLength(uri: Uri): Long? {

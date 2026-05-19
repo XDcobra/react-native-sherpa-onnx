@@ -11,6 +11,7 @@
  */
 
 #include "AudioDecodeSession.h"
+#include "FfmpegFormatGuard.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -403,16 +404,18 @@ AudioDecodeResult decodeFileFFmpeg(
     fmtCtx->pb = avioCtx;
     fmtCtx->flags |= AVFMT_FLAG_CUSTOM_IO;
 
-    if (avformat_open_input(&fmtCtx, nullptr, nullptr, nullptr) < 0) {
-      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input fd");
+    const auto openResult = openGuardedFdFormatInput(&fmtCtx, path, "DECODE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
     }
   } else {
     if (!path || path[0] == '\0') {
       throw std::runtime_error("DECODE_NOT_FOUND: Empty file path");
     }
 
-    if (avformat_open_input(&fmtCtx, path, nullptr, nullptr) < 0) {
-      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input file");
+    const auto openResult = openGuardedFormatInput(&fmtCtx, path, "DECODE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
     }
   }
 
@@ -659,13 +662,14 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
     }
     fmtCtx->pb = avioCtx;
 
-    if (avformat_open_input(&fmtCtx, nullptr, nullptr, nullptr) < 0) {
-      throw std::runtime_error("PROBE_OPEN_FAILED: Cannot open input from fd");
+    const auto openResult = openGuardedFdFormatInput(&fmtCtx, path, "PROBE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
     }
   } else {
-    if (avformat_open_input(&fmtCtx, path, nullptr, nullptr) < 0) {
-      throw std::runtime_error(
-          std::string("PROBE_OPEN_FAILED: Cannot open file: ") + (path ? path : ""));
+    const auto openResult = openGuardedFormatInput(&fmtCtx, path, "PROBE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
     }
   }
 

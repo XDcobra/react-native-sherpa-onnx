@@ -37,6 +37,8 @@ Pod::Spec.new do |s|
     # Shared audio decode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioDecodeSession.cpp",
     "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.cpp",
+    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
     # Shared audio encode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioEncodeSession.cpp",
     "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
