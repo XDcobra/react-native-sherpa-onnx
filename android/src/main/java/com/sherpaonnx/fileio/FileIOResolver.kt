@@ -320,10 +320,22 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           input.copyTo(output)
         }
       }
-    } catch (e: Exception) {
+    } catch (e: java.io.FileNotFoundException) {
       throw FileIOException(
         FileIOErrorCodes.NOT_FOUND,
         "APK asset not found: $assetPath (expected under app/src/main/assets/)",
+        e,
+      )
+    } catch (e: java.io.IOException) {
+      throw FileIOException(
+        FileIOErrorCodes.WRITE_ERROR,
+        "Failed to materialize APK asset to cache: $assetPath — ${e.message}",
+        e,
+      )
+    } catch (e: Exception) {
+      throw FileIOException(
+        FileIOErrorCodes.READ_ERROR,
+        "Failed to read APK asset: $assetPath — ${e.message}",
         e,
       )
     }

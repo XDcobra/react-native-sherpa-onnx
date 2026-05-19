@@ -1,6 +1,15 @@
 import { Platform } from 'react-native';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
+/** decodeURI that never throws (malformed % sequences from pickers). */
+function safeDecodeUri(encoded: string): string {
+  try {
+    return decodeURI(encoded);
+  } catch {
+    return encoded;
+  }
+}
+
 /** Map a filesystem path or content URI to a {@link FileSource}. */
 export function toFileSource(pathOrUri: string): FileSource {
   const trimmed = pathOrUri.trim();
@@ -10,7 +19,10 @@ export function toFileSource(pathOrUri: string): FileSource {
   }
 
   if (trimmed.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(trimmed.replace(/^file:\/\//, '')) };
+    return {
+      kind: 'fs',
+      path: safeDecodeUri(trimmed.replace(/^file:\/\//, '')),
+    };
   }
 
   return { kind: 'fs', path: trimmed };

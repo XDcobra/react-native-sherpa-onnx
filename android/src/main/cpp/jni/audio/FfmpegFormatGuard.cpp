@@ -175,7 +175,8 @@ FfmpegFormatGuardResult checkPathFormatSupported(
 
 #ifndef HAVE_FFMPEG
   result.ok = false;
-  result.errorMessage = std::string(errorPrefix) + "_UNSUPPORTED: FFmpeg not available in this build";
+  result.errorMessage = std::string(errorPrefix ? errorPrefix : "FFMPEG") +
+                        "_UNSUPPORTED: FFmpeg not available in this build";
   return result;
 #else
   if (!errorPrefix || errorPrefix[0] == '\0') {
