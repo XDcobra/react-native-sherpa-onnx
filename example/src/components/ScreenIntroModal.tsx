@@ -63,7 +63,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   FileIO: {
     title: 'File I/O sandbox',
-    body: 'Use this screen to experiment with FileDestination kinds, audio source selection, and document-picker flows in isolation from other features.',
+    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec assets or a picked file, then export via saveAudioAsFile to fs, app, contentUri, and other destination kinds.',
   },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',

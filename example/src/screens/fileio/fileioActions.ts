@@ -13,7 +13,9 @@ import {
   unlink,
 } from '@dr.pogodin/react-native-fs';
 import {
+  probeAudioFileDuration,
   saveAudioAsFile,
+  type AudioOutputFormat,
   type AudioSaveInput,
 } from 'react-native-sherpa-onnx/audio';
 import type {
@@ -30,20 +32,52 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 
 import { formatResolvedLocation } from '../../components/audioSaveUtils';
-import { TEST_AUDIO_FILES } from '../../audioConfig';
+import { describeFileSource } from '../../utils/fileSourceFromUri';
+import type { FileioInputSource } from './fileioInputChannels';
 
-/** Matches the “Audio source” cards on {@link FileIOScreen}. */
+export type { FileioInputSource } from './fileioInputChannels';
+export {
+  listFileioInputChannels,
+  pickFileioInputForChannel,
+  pickFileioInputSource,
+  resolveBundledCodecSource,
+  resolveBundledWavLegacy,
+  resolveFileioInputSource,
+} from './fileioInputChannels';
+export type {
+  FileioInputChannelId,
+  FileioInputChannelMeta,
+  FileioSampleSelection,
+} from './fileioInputChannels';
+
+/** Matches the “Audio source” cards on {@link FileIOScreen} (encode only). */
 export type AudioSourceChoice =
   | 'liveAudioBuffer'
   | 'offlineAudioBuffer'
   | 'assetAudioFile';
 
-/** Payload when the user taps Copy on the File I/O screen. */
+export type FileioOperation = 'probe' | 'decode' | 'encode';
+
+export const FILEIO_OUTPUT_FORMATS: AudioOutputFormat[] = [
+  'wav',
+  'mp3',
+  'flac',
+  'aac',
+  'm4a',
+  'opus',
+  'webm',
+  'mkv',
+  'ogg',
+];
+
+/** Payload when the user runs encode (Copy) on the File I/O screen. */
 export type FileioCopyInput = {
-  /** Selected discriminant from {@link FileDestination}. */
   destinationKind: FileDestination['kind'];
-  /** Live / offline buffer vs bundled asset path. */
   audioSource: AudioSourceChoice;
+  inputSource: FileSource;
+  inputLabel: string;
+  outputFormat: AudioOutputFormat;
+  outputSampleRateHz?: number;
 };
 
 export type FileioCopyResult =
@@ -51,11 +85,21 @@ export type FileioCopyResult =
   | { status: 'canceled' }
   | { status: 'error'; message: string };
 
-/** Same test clip as `example/android/.../assets/test_wavs/0-en.wav` (see {@link TEST_AUDIO_FILES}). */
-const DEMO_SOURCE_RELATIVE_PATH = TEST_AUDIO_FILES.EN_1;
+export type FileioProbeResult =
+  | { status: 'success'; durationMs: number; isExact: boolean; detail: string }
+  | { status: 'error'; message: string };
 
-const SAVE_FORMAT = 'wav' as const;
-const SAVE_OPTIONS = { outputSampleRateHz: 16000 } as const;
+export type FileioDecodeResult =
+  | {
+      status: 'success';
+      bufferId: string;
+      sampleRate: number;
+      channelCount: number;
+      numSamples: number;
+      durationMs: number;
+      detail: string;
+    }
+  | { status: 'error'; message: string };
 
 const FS_EXPORT_DIR = `${DocumentDirectoryPath}/SherpaOnnxFileIO/exports`;
 const APP_EXPORT_RELATIVE = 'SherpaOnnxFileIO/exports';
@@ -67,21 +111,71 @@ function isPickCanceled(err: unknown): boolean {
   return false;
 }
 
-async function resolveBundledTestWavAsFileSource(): Promise<FileSource> {
-  return {
-    kind: 'app',
-    base: 'files',
-    path: DEMO_SOURCE_RELATIVE_PATH,
-  };
+export function defaultSampleRateForFormat(format: AudioOutputFormat): number {
+  return format === 'wav' ? 16000 : 0;
 }
 
-function mimeTypeForWav(): string {
-  return 'audio/wav';
+export function mimeTypeForFormat(format: AudioOutputFormat): string {
+  switch (format) {
+    case 'wav':
+      return 'audio/wav';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'flac':
+      return 'audio/flac';
+    case 'aac':
+      return 'audio/aac';
+    case 'm4a':
+      return 'audio/mp4';
+    case 'opus':
+      return 'audio/opus';
+    case 'ogg':
+      return 'audio/ogg';
+    case 'webm':
+      return 'audio/webm';
+    case 'mkv':
+      return 'video/x-matroska';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function exportFilename(
+  format: AudioOutputFormat,
+  prefix = 'fileio-copy'
+): string {
+  return `${prefix}-${Date.now()}.${format}`;
+}
+
+function formatFileioNativeError(
+  source: FileSource,
+  bundledPath: string | undefined,
+  err: unknown
+): string {
+  const base = err instanceof Error ? err.message : String(err);
+  const rel =
+    bundledPath ??
+    (source.kind === 'app' && source.base === 'files'
+      ? source.path
+      : undefined);
+  if (rel?.startsWith('test_codec/') || rel?.startsWith('test_wavs/')) {
+    return [
+      `Missing bundled file: ${rel}`,
+      Platform.OS === 'android'
+        ? 'Android: place under example/android/app/src/main/assets/ and use app/apkAsset (not app/files).'
+        : 'iOS: place under example/ios/sherpa_models/ and rebuild.',
+      'See test_codec/README in assets and sherpa_models.',
+      '',
+      `Native: ${base}`,
+    ].join('\n');
+  }
+  return base;
 }
 
 function buildContentTreeDestination(
   treeOrFolderUri: string,
-  filename: string
+  filename: string,
+  mimeType: string
 ): FileDestination {
   const trimmed = treeOrFolderUri.trim();
   if (trimmed.startsWith('content://')) {
@@ -89,7 +183,7 @@ function buildContentTreeDestination(
       kind: 'contentTree',
       treeUri: trimmed,
       filename,
-      mimeType: mimeTypeForWav(),
+      mimeType,
     };
   }
   if (trimmed.startsWith('file://')) {
@@ -101,14 +195,16 @@ function buildContentTreeDestination(
   );
 }
 
-async function pickContentTreeDestination(): Promise<FileDestination> {
+async function pickContentTreeDestination(
+  format: AudioOutputFormat
+): Promise<FileDestination> {
   const picked = await pickDirectory({ requestLongTermAccess: false });
   const uri = picked.uri?.trim();
   if (!uri) {
     throw new Error('Folder picker did not return a URI.');
   }
-  const filename = `fileio-copy-${Date.now()}.wav`;
-  return buildContentTreeDestination(uri, filename);
+  const filename = exportFilename(format);
+  return buildContentTreeDestination(uri, filename, mimeTypeForFormat(format));
 }
 
 async function pickSecurityScopedDestination(): Promise<FileDestination> {
@@ -130,11 +226,11 @@ async function pickSecurityScopedDestination(): Promise<FileDestination> {
   return { kind: 'securityScoped', uri };
 }
 
-/** Fixed sandbox paths for blueprint demos (no picker). */
 async function fixedDestinationForKind(
-  kind: 'fs' | 'app'
+  kind: 'fs' | 'app',
+  format: AudioOutputFormat
 ): Promise<FileDestination> {
-  const filename = `fileio-copy-${Date.now()}.wav`;
+  const filename = exportFilename(format);
   if (kind === 'fs') {
     await mkdir(FS_EXPORT_DIR, { NSURLIsExcludedFromBackupKey: false }).catch(
       () => {}
@@ -153,24 +249,19 @@ type PreparedInput = {
   dispose: () => Promise<void>;
 };
 
-/**
- * Always starts from the bundled example WAV, then exposes it either as a
- * {@link FileSource} (asset path) or as a pipeline buffer (offline / live ingest).
- */
 async function prepareAudioSaveInput(
-  audioSource: AudioSourceChoice
+  audioSource: AudioSourceChoice,
+  fileSource: FileSource
 ): Promise<PreparedInput> {
-  const wavSource = await resolveBundledTestWavAsFileSource();
-
   if (audioSource === 'assetAudioFile') {
     return {
-      input: wavSource,
+      input: fileSource,
       dispose: async () => {},
     };
   }
 
   if (audioSource === 'offlineAudioBuffer') {
-    const ref = await createOfflineAudioBufferFromFile(wavSource, {
+    const ref = await createOfflineAudioBufferFromFile(fileSource, {
       forceMono: true,
     });
     return {
@@ -188,7 +279,7 @@ async function prepareAudioSaveInput(
   let ingest: Awaited<ReturnType<typeof ingestFileToLiveAudioBuffer>> | null =
     null;
   try {
-    ingest = await ingestFileToLiveAudioBuffer(live.bufferId, wavSource, {
+    ingest = await ingestFileToLiveAudioBuffer(live.bufferId, fileSource, {
       forceMono: true,
       autoFinalize: false,
     });
@@ -208,27 +299,21 @@ async function prepareAudioSaveInput(
   };
 }
 
-/**
- * `contentUri` is awkward from JS alone (you usually need a “Save as” dialog).
- * We encode with {@link saveAudioAsFile} into app cache, then use {@link saveDocuments}
- * so the user picks the final `content://` location — same UX as other Android apps.
- */
 async function saveViaStagingAndSaveDocuments(
-  input: PreparedInput['input']
+  input: PreparedInput['input'],
+  format: AudioOutputFormat,
+  outputSampleRateHz: number
 ): Promise<ResolvedFileRef> {
-  const stagingRel = `fileio-staging/fileio-temp-${Date.now()}.wav`;
+  const stagingRel = `fileio-staging/fileio-temp-${Date.now()}.${format}`;
   const stagingDest: FileDestination = {
     kind: 'app',
     base: 'cache',
     path: stagingRel,
   };
+  const saveOptions =
+    outputSampleRateHz > 0 ? { outputSampleRateHz } : undefined;
 
-  const staged = await saveAudioAsFile(
-    input,
-    stagingDest,
-    SAVE_FORMAT,
-    SAVE_OPTIONS
-  );
+  const staged = await saveAudioAsFile(input, stagingDest, format, saveOptions);
   if (staged.kind !== 'fs') {
     throw new Error(
       'Expected a filesystem path from app cache staging; got content URI.'
@@ -240,11 +325,12 @@ async function saveViaStagingAndSaveDocuments(
     fsPath.startsWith('file://') ? fsPath : `file://${fsPath}`
   );
 
+  const outName = exportFilename(format);
   try {
     const responses = await saveDocuments({
       sourceUris: [sourceUri],
-      mimeType: mimeTypeForWav(),
-      fileName: `fileio-copy-${Date.now()}.wav`,
+      mimeType: mimeTypeForFormat(format),
+      fileName: outName,
     });
     const first = responses[0];
     if (first?.error) {
@@ -262,45 +348,127 @@ async function saveViaStagingAndSaveDocuments(
   }
 }
 
-/**
- * Invoked when the user presses **Copy** on the File I/O screen.
- *
- * Source is always the bundled `0-en.wav` ({@link DEMO_SOURCE_RELATIVE_PATH}).
- * Destination follows {@link FileioCopyInput.destinationKind} (fixed paths vs pickers).
- */
+export async function runFileioProbe(
+  input: FileioInputSource
+): Promise<FileioProbeResult> {
+  const bundledPath = input.bundledPath;
+  try {
+    const probe = await probeAudioFileDuration(input.fileSource);
+    if (!probe) {
+      return {
+        status: 'error',
+        message: formatFileioNativeError(
+          input.fileSource,
+          bundledPath,
+          new Error('probeAudioFileDuration returned null')
+        ),
+      };
+    }
+    const detail = [
+      `Duration: ${probe.durationMs.toFixed(1)} ms`,
+      `Exact: ${probe.isExact ? 'yes' : 'no'}`,
+      `Input: ${input.label}`,
+      describeFileSource(input.fileSource),
+    ].join('\n');
+    return {
+      status: 'success',
+      durationMs: probe.durationMs,
+      isExact: probe.isExact,
+      detail,
+    };
+  } catch (e) {
+    return {
+      status: 'error',
+      message: formatFileioNativeError(input.fileSource, bundledPath, e),
+    };
+  }
+}
+
+export async function runFileioDecode(
+  input: FileioInputSource
+): Promise<FileioDecodeResult> {
+  const bundledPath = input.bundledPath;
+  try {
+    const ref = await createOfflineAudioBufferFromFile(input.fileSource, {
+      forceMono: true,
+    });
+    const { info, bufferId } = ref;
+    await releasePipelineAudioBuffer(bufferId).catch(() => {});
+    const detail = [
+      `bufferId: ${String(bufferId)}`,
+      `sampleRate: ${info.sampleRate} Hz`,
+      `channels: ${info.channelCount}`,
+      `samples: ${info.numSamples}`,
+      `duration: ${info.durationMs.toFixed(1)} ms`,
+      `storage: ${info.storageKind ?? 'ram'}`,
+      `Input: ${input.label}`,
+      describeFileSource(input.fileSource),
+    ].join('\n');
+    return {
+      status: 'success',
+      bufferId: String(bufferId),
+      sampleRate: info.sampleRate,
+      channelCount: info.channelCount,
+      numSamples: info.numSamples,
+      durationMs: info.durationMs,
+      detail,
+    };
+  } catch (e) {
+    return {
+      status: 'error',
+      message: formatFileioNativeError(input.fileSource, bundledPath, e),
+    };
+  }
+}
+
 export async function runFileioCopy(
   input: FileioCopyInput
 ): Promise<FileioCopyResult> {
   let prepared: PreparedInput | null = null;
+  const outputSampleRateHz =
+    input.outputSampleRateHz ?? defaultSampleRateForFormat(input.outputFormat);
+  const saveOptions =
+    outputSampleRateHz > 0 ? { outputSampleRateHz } : undefined;
+
   try {
-    prepared = await prepareAudioSaveInput(input.audioSource);
+    prepared = await prepareAudioSaveInput(
+      input.audioSource,
+      input.inputSource
+    );
 
     let resolved: ResolvedFileRef;
 
     switch (input.destinationKind) {
       case 'fs':
       case 'app': {
-        const dest = await fixedDestinationForKind(input.destinationKind);
+        const dest = await fixedDestinationForKind(
+          input.destinationKind,
+          input.outputFormat
+        );
         resolved = await saveAudioAsFile(
           prepared.input,
           dest,
-          SAVE_FORMAT,
-          SAVE_OPTIONS
+          input.outputFormat,
+          saveOptions
         );
         break;
       }
       case 'contentTree': {
-        const dest = await pickContentTreeDestination();
+        const dest = await pickContentTreeDestination(input.outputFormat);
         resolved = await saveAudioAsFile(
           prepared.input,
           dest,
-          SAVE_FORMAT,
-          SAVE_OPTIONS
+          input.outputFormat,
+          saveOptions
         );
         break;
       }
       case 'contentUri': {
-        resolved = await saveViaStagingAndSaveDocuments(prepared.input);
+        resolved = await saveViaStagingAndSaveDocuments(
+          prepared.input,
+          input.outputFormat,
+          outputSampleRateHz
+        );
         break;
       }
       case 'securityScoped': {
@@ -308,8 +476,8 @@ export async function runFileioCopy(
         resolved = await saveAudioAsFile(
           prepared.input,
           dest,
-          SAVE_FORMAT,
-          SAVE_OPTIONS
+          input.outputFormat,
+          saveOptions
         );
         break;
       }
@@ -318,8 +486,13 @@ export async function runFileioCopy(
     const location = formatResolvedLocation(resolved);
     const detail = [
       `Output: ${location}`,
-      `Source card: ${input.audioSource}`,
-      `Bundled WAV: ${DEMO_SOURCE_RELATIVE_PATH}`,
+      `Format: ${input.outputFormat}`,
+      outputSampleRateHz > 0
+        ? `Sample rate: ${outputSampleRateHz} Hz`
+        : 'Sample rate: source',
+      `Encode source card: ${input.audioSource}`,
+      `File input: ${input.inputLabel}`,
+      describeFileSource(input.inputSource),
     ].join('\n');
 
     return { status: 'success', resolved, detail };
@@ -327,27 +500,13 @@ export async function runFileioCopy(
     if (isPickCanceled(e)) {
       return { status: 'canceled' };
     }
-    const message = e instanceof Error ? e.message : String(e);
+    const bundledPath =
+      input.inputSource.kind === 'app' && input.inputSource.base === 'files'
+        ? input.inputSource.path
+        : undefined;
+    const message = formatFileioNativeError(input.inputSource, bundledPath, e);
     return { status: 'error', message };
   } finally {
     await prepared?.dispose();
-  }
-}
-
-/**
- * Opens the system document picker ({@code ACTION_OPEN_DOCUMENT} / iOS open panel).
- * Resolves with the first picked file’s metadata; no-op if the user cancels.
- */
-export async function openFileioDocumentPicker(): Promise<void> {
-  try {
-    await pick({
-      mode: 'open',
-      type: types.allFiles,
-    });
-  } catch (e) {
-    if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
-      return;
-    }
-    throw e;
   }
 }
