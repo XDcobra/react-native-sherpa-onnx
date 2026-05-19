@@ -147,6 +147,23 @@ function exportFilename(
   return `${prefix}-${Date.now()}.${format}`;
 }
 
+function isBundledTestPath(rel: string | undefined): rel is string {
+  return (
+    !!rel && (rel.startsWith('test_codec/') || rel.startsWith('test_wavs/'))
+  );
+}
+
+function looksLikeMissingBundledAsset(nativeMessage: string): boolean {
+  const lower = nativeMessage.toLowerCase();
+  return (
+    lower.includes('apk asset not found') ||
+    lower.includes('probe_open_failed') ||
+    lower.includes('probe_not_found') ||
+    lower.includes('source file not found') ||
+    lower.includes('cannot open file')
+  );
+}
+
 function formatFileioNativeError(
   source: FileSource,
   bundledPath: string | undefined,
@@ -158,7 +175,12 @@ function formatFileioNativeError(
     (source.kind === 'app' && source.base === 'files'
       ? source.path
       : undefined);
-  if (rel?.startsWith('test_codec/') || rel?.startsWith('test_wavs/')) {
+
+  if (!isBundledTestPath(rel)) {
+    return base;
+  }
+
+  if (looksLikeMissingBundledAsset(base)) {
     return [
       `Missing bundled file: ${rel}`,
       Platform.OS === 'android'
@@ -169,7 +191,26 @@ function formatFileioNativeError(
       `Native: ${base}`,
     ].join('\n');
   }
-  return base;
+
+  return [
+    `Failed for: ${rel}`,
+    describeFileSource(source),
+    '',
+    `Native: ${base}`,
+  ].join('\n');
+}
+
+function formatProbeNullError(
+  input: FileioInputSource,
+  bundledPath: string | undefined
+): string {
+  if (isBundledTestPath(bundledPath)) {
+    return `Probe returned no duration: ${bundledPath}`;
+  }
+  return [
+    `Probe returned no duration for: ${input.label}`,
+    describeFileSource(input.fileSource),
+  ].join('\n');
 }
 
 function buildContentTreeDestination(
@@ -357,11 +398,7 @@ export async function runFileioProbe(
     if (!probe) {
       return {
         status: 'error',
-        message: formatFileioNativeError(
-          input.fileSource,
-          bundledPath,
-          new Error('probeAudioFileDuration returned null')
-        ),
+        message: formatProbeNullError(input, bundledPath),
       };
     }
     const detail = [
