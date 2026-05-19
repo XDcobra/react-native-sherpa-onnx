@@ -2,7 +2,7 @@
 
 Place short audio samples here for the File I/O codec sandbox. Paths match `TEST_CODEC_FILES` in `example/src/audioConfig.ts`.
 
-Runtime access: `{ kind: 'app', base: 'files', path: 'test_codec/<filename>' }`.
+Runtime access (File I/O): `{ kind: 'app', base: 'apkAsset', path: 'test_codec/<filename>' }`.
 
 ## Required files
 

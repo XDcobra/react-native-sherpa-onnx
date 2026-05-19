@@ -127,9 +127,15 @@ static NSString *resolveAppPath(NSString *base, NSString *relativePath, NSString
     if (!resolved) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:resolved]) {
-      if (errorCode) *errorCode = kFIOErrNotFound;
-      if (errorMessage) *errorMessage = [NSString stringWithFormat:@"Source file not found: %@", resolved];
-      return nil;
+      // Example app copies test_wavs/test_codec into the bundle Resources folder at build time.
+      NSString *bundlePath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:path];
+      if ([fm fileExistsAtPath:bundlePath]) {
+        resolved = bundlePath;
+      } else {
+        if (errorCode) *errorCode = kFIOErrNotFound;
+        if (errorMessage) *errorMessage = [NSString stringWithFormat:@"Source file not found: %@ (also checked bundle: %@)", resolved, bundlePath];
+        return nil;
+      }
     }
     FileIOReadHandle *handle = [[FileIOReadHandle alloc] init];
     handle.isFilePath = YES;
