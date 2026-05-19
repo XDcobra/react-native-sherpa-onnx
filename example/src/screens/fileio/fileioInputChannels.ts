@@ -93,6 +93,25 @@ export function canonicalBundledFileSource(
   return fileSourceFromBundledPath(path);
 }
 
+export function listAllSampleSelections(): FileioSampleSelection[] {
+  return [
+    ...CODEC_ASSET_ENTRIES.map(
+      (entry): FileioSampleSelection => ({
+        kind: 'codec',
+        format: entry.format,
+      })
+    ),
+    { kind: 'legacy' },
+  ];
+}
+
+/** Automatic FileSource channels included in batch runs (excludes Pick channels). */
+export function listAutomaticInputChannelIds(): FileioInputChannelId[] {
+  return listFileioInputChannels()
+    .filter((ch) => ch.automatic && ch.supported)
+    .map((ch) => ch.id);
+}
+
 export function listFileioInputChannels(): FileioInputChannelMeta[] {
   const isAndroid = Platform.OS === 'android';
   const isIos = Platform.OS === 'ios';

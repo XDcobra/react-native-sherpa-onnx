@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -31,6 +32,11 @@ import {
   runFileioDecode,
   runFileioProbe,
 } from './fileioActions';
+import {
+  buildFileioBatchMatrix,
+  describeFileioActiveInputSummary,
+  runFileioBatch,
+} from './fileioBatch';
 
 const FILE_DESTINATION_OPTIONS: {
   kind: FileDestination['kind'];
@@ -96,10 +102,18 @@ export default function FileIOScreen() {
     useState<AudioSourceChoice>('liveAudioBuffer');
   const [outputFormat, setOutputFormat] = useState<AudioOutputFormat>('wav');
 
+  const [batchAllSamples, setBatchAllSamples] = useState(false);
+  const [batchAllChannels, setBatchAllChannels] = useState(false);
+
   const [busy, setBusy] = useState(false);
   const [resultText, setResultText] = useState(
     'Choose a sample and FileSource channel, then run Probe, Decode, or Encode.'
   );
+
+  const showResult = useCallback((text: string) => {
+    console.log('[FileIO]', text);
+    setResultText(text);
+  }, []);
 
   const inputChannels = useMemo(() => listFileioInputChannels(), []);
   const activeChannelMeta = inputChannels.find((c) => c.id === inputChannel)!;
@@ -201,7 +215,17 @@ export default function FileIOScreen() {
   }, [inputChannel]);
 
   const runPrimary = useCallback(async () => {
-    if (!inputSource || resolvingInput) {
+    const isBatch = batchAllSamples || batchAllChannels;
+
+    if (batchAllSamples && !batchAllChannels && !activeChannelMeta.automatic) {
+      Alert.alert(
+        'Batch all samples',
+        'Requires an automatic FileSource channel (not Pick). Turn on “Run all channels” or select an automatic channel.'
+      );
+      return;
+    }
+
+    if (!isBatch && (!inputSource || resolvingInput)) {
       Alert.alert(
         'Input not ready',
         inputResolveError ??
@@ -214,22 +238,48 @@ export default function FileIOScreen() {
 
     setBusy(true);
     try {
+      if (isBatch) {
+        const { samples, channelIds } = buildFileioBatchMatrix({
+          batchAllSamples,
+          batchAllChannels,
+          currentSample: sample,
+          currentChannelId: inputChannel,
+        });
+        const { text } = await runFileioBatch({
+          operation,
+          samples,
+          channelIds,
+          padPackName,
+          destinationKind,
+          audioSource,
+          outputFormat,
+        });
+        showResult(text);
+        if (operation === 'encode') {
+          Alert.alert(
+            'Batch encode finished',
+            'See Result for per-item status.'
+          );
+        }
+        return;
+      }
+
       if (operation === 'probe') {
-        const result = await runFileioProbe(inputSource);
+        const result = await runFileioProbe(inputSource!);
         if (result.status === 'success') {
-          setResultText(result.detail);
+          showResult(result.detail);
         } else {
-          setResultText(`Error\n\n${result.message}`);
+          showResult(`Error\n\n${result.message}`);
         }
         return;
       }
 
       if (operation === 'decode') {
-        const result = await runFileioDecode(inputSource);
+        const result = await runFileioDecode(inputSource!);
         if (result.status === 'success') {
-          setResultText(result.detail);
+          showResult(result.detail);
         } else {
-          setResultText(`Error\n\n${result.message}`);
+          showResult(`Error\n\n${result.message}`);
         }
         return;
       }
@@ -237,53 +287,94 @@ export default function FileIOScreen() {
       const copyResult = await runFileioCopy({
         destinationKind,
         audioSource,
-        inputSource: inputSource.fileSource,
-        inputLabel: inputSource.label,
+        inputSource: inputSource!.fileSource,
+        inputLabel: inputSource!.label,
         outputFormat,
       });
 
       if (copyResult.status === 'canceled') {
-        setResultText('Encode canceled.');
+        showResult('Encode canceled.');
         return;
       }
       if (copyResult.status === 'success') {
-        setResultText(copyResult.detail);
+        showResult(copyResult.detail);
         Alert.alert('Encode complete', copyResult.detail);
         return;
       }
-      setResultText(`Error\n\n${copyResult.message}`);
+      showResult(`Error\n\n${copyResult.message}`);
       Alert.alert('Encode failed', copyResult.message);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      setResultText(`Error\n\n${message}`);
+      showResult(`Error\n\n${message}`);
       Alert.alert('Failed', message);
     } finally {
       setBusy(false);
     }
   }, [
+    showResult,
     operation,
     inputSource,
     resolvingInput,
     inputResolveError,
     activeChannelMeta.automatic,
+    batchAllSamples,
+    batchAllChannels,
+    sample,
+    inputChannel,
+    padPackName,
     destinationKind,
     audioSource,
     outputFormat,
   ]);
 
-  const primaryDisabled = busy || resolvingInput || !inputSource;
+  const isBatch = batchAllSamples || batchAllChannels;
+
+  const activeInputBatchSummary = useMemo(() => {
+    if (!isBatch) {
+      return null;
+    }
+    return describeFileioActiveInputSummary({
+      batchAllSamples,
+      batchAllChannels,
+      currentSample: sample,
+      currentChannelId: inputChannel,
+      operation,
+    });
+  }, [
+    isBatch,
+    batchAllSamples,
+    batchAllChannels,
+    sample,
+    inputChannel,
+    operation,
+  ]);
+
+  const primaryDisabled =
+    busy || (!isBatch && (resolvingInput || !inputSource));
 
   const primaryLabel =
     operation === 'probe'
       ? busy
-        ? 'Probing…'
+        ? isBatch
+          ? 'Batch probing…'
+          : 'Probing…'
+        : isBatch
+        ? 'Run batch probe'
         : 'Run probe'
       : operation === 'decode'
       ? busy
-        ? 'Decoding…'
+        ? isBatch
+          ? 'Batch decoding…'
+          : 'Decoding…'
+        : isBatch
+        ? 'Run batch decode'
         : 'Run decode'
       : busy
-      ? 'Encoding…'
+      ? isBatch
+        ? 'Batch encoding…'
+        : 'Encoding…'
+      : isBatch
+      ? 'Run batch encode'
       : 'Run encode';
 
   return (
@@ -299,20 +390,51 @@ export default function FileIOScreen() {
             Format chips pick which bundled test_codec file automatic channels
             use.
           </Text>
-          <View style={styles.chipRow}>
+          <View style={styles.batchToggleRow}>
+            <View style={styles.batchToggleTextCol}>
+              <Text style={styles.batchToggleLabel}>Run all samples</Text>
+              <Text style={styles.batchToggleHint}>
+                On Run: every format chip (+ Legacy), current FileSource channel
+              </Text>
+            </View>
+            <Switch
+              value={batchAllSamples}
+              onValueChange={setBatchAllSamples}
+              accessibilityLabel="Run all sample formats on Run"
+            />
+          </View>
+          <View
+            style={[
+              styles.chipRow,
+              batchAllSamples && styles.selectionGroupDisabled,
+            ]}
+            pointerEvents={batchAllSamples ? 'none' : 'auto'}
+          >
             {CODEC_ASSET_ENTRIES.map((entry) => {
               const active =
                 sample.kind === 'codec' && sample.format === entry.format;
               return (
                 <Pressable
                   key={entry.format}
-                  style={[styles.chip, active && styles.chipActive]}
+                  style={[
+                    styles.chip,
+                    active && styles.chipActive,
+                    batchAllSamples && styles.chipDisabled,
+                  ]}
                   onPress={() => selectCodecSample(entry.format)}
+                  disabled={batchAllSamples}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
+                  accessibilityState={{
+                    selected: active,
+                    disabled: batchAllSamples,
+                  }}
                 >
                   <Text
-                    style={[styles.chipText, active && styles.chipTextActive]}
+                    style={[
+                      styles.chipText,
+                      active && styles.chipTextActive,
+                      batchAllSamples && styles.chipTextDisabled,
+                    ]}
                   >
                     {entry.label}
                   </Text>
@@ -323,14 +445,18 @@ export default function FileIOScreen() {
               style={[
                 styles.chip,
                 sample.kind === 'legacy' && styles.chipActive,
+                batchAllSamples && styles.chipDisabled,
               ]}
               onPress={selectLegacySample}
+              disabled={batchAllSamples}
               accessibilityRole="button"
+              accessibilityState={{ disabled: batchAllSamples }}
             >
               <Text
                 style={[
                   styles.chipText,
                   sample.kind === 'legacy' && styles.chipTextActive,
+                  batchAllSamples && styles.chipTextDisabled,
                 ]}
               >
                 Legacy
@@ -345,73 +471,95 @@ export default function FileIOScreen() {
             How the sample is exposed as a FileSource. Copied channels stage the
             chip file first; pick channels need a file from the system.
           </Text>
-          {inputChannels.map((ch) => {
-            const active = ch.id === inputChannel;
-            const disabled = !ch.supported;
-            return (
-              <Pressable
-                key={ch.id}
-                style={[
-                  styles.channelRow,
-                  active && styles.channelRowActive,
-                  disabled && styles.channelRowDisabled,
-                ]}
-                onPress={() => {
-                  if (!disabled) {
-                    selectInputChannel(ch.id);
-                  }
-                }}
-                disabled={disabled}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled }}
-              >
-                <View style={styles.channelRowMain}>
-                  <Text
-                    style={[
-                      styles.channelTitle,
-                      active && styles.channelTitleActive,
-                      disabled && styles.channelTitleDisabled,
-                    ]}
-                  >
-                    {ch.title}
-                  </Text>
-                  <Text style={styles.channelHint} numberOfLines={2}>
-                    {disabled ? ch.unsupportedReason : ch.hint}
-                  </Text>
-                </View>
-                <View style={styles.channelBadges}>
-                  <Text
-                    style={[
-                      styles.channelBadge,
-                      ch.automatic
-                        ? styles.channelBadgeAuto
-                        : styles.channelBadgePick,
-                    ]}
-                  >
-                    {ch.automatic ? 'Auto' : 'Pick'}
-                  </Text>
-                  {active && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={22}
-                      color="#007AFF"
-                    />
-                  )}
-                </View>
-              </Pressable>
-            );
-          })}
+          <View style={styles.batchToggleRow}>
+            <View style={styles.batchToggleTextCol}>
+              <Text style={styles.batchToggleLabel}>Run all channels</Text>
+              <Text style={styles.batchToggleHint}>
+                On Run: every automatic channel (excludes Pick), current sample
+              </Text>
+            </View>
+            <Switch
+              value={batchAllChannels}
+              onValueChange={setBatchAllChannels}
+              accessibilityLabel="Run all automatic FileSource channels on Run"
+            />
+          </View>
+          <View
+            pointerEvents={batchAllChannels ? 'none' : 'auto'}
+            style={batchAllChannels ? styles.selectionGroupDisabled : undefined}
+          >
+            {inputChannels.map((ch) => {
+              const active = ch.id === inputChannel;
+              const disabled = !ch.supported || batchAllChannels;
+              return (
+                <Pressable
+                  key={ch.id}
+                  style={[
+                    styles.channelRow,
+                    active && styles.channelRowActive,
+                    disabled && styles.channelRowDisabled,
+                  ]}
+                  onPress={() => {
+                    if (!disabled) {
+                      selectInputChannel(ch.id);
+                    }
+                  }}
+                  disabled={disabled}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active, disabled }}
+                >
+                  <View style={styles.channelRowMain}>
+                    <Text
+                      style={[
+                        styles.channelTitle,
+                        active && styles.channelTitleActive,
+                        disabled && styles.channelTitleDisabled,
+                      ]}
+                    >
+                      {ch.title}
+                    </Text>
+                    <Text style={styles.channelHint} numberOfLines={2}>
+                      {disabled ? ch.unsupportedReason : ch.hint}
+                    </Text>
+                  </View>
+                  <View style={styles.channelBadges}>
+                    <Text
+                      style={[
+                        styles.channelBadge,
+                        ch.automatic
+                          ? styles.channelBadgeAuto
+                          : styles.channelBadgePick,
+                      ]}
+                    >
+                      {ch.automatic ? 'Auto' : 'Pick'}
+                    </Text>
+                    {active && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color="#007AFF"
+                      />
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
 
           {inputChannel === 'pad' && activeChannelMeta.supported && (
             <View style={styles.padField}>
               <Text style={styles.padLabel}>PAD pack name</Text>
               <TextInput
-                style={styles.padInput}
+                style={[
+                  styles.padInput,
+                  batchAllChannels && styles.padInputDisabled,
+                ]}
                 value={padPackName}
                 onChangeText={setPadPackName}
                 placeholder={DEFAULT_PAD_PACK}
                 autoCapitalize="none"
                 autoCorrect={false}
+                editable={!batchAllChannels}
               />
             </View>
           )}
@@ -420,9 +568,11 @@ export default function FileIOScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.pickFileButton,
-                pressed && styles.pickFileButtonPressed,
+                pressed && !batchAllChannels && styles.pickFileButtonPressed,
+                batchAllChannels && styles.pickFileButtonDisabled,
               ]}
               onPress={pickInputForChannel}
+              disabled={batchAllChannels}
               accessibilityRole="button"
               accessibilityLabel="Choose audio file"
             >
@@ -433,12 +583,23 @@ export default function FileIOScreen() {
 
           <View style={styles.inputCard}>
             <View style={styles.inputCardHeader}>
-              <Text style={styles.inputCardTitle}>Active FileSource</Text>
-              {resolvingInput && (
+              <Text style={styles.inputCardTitle}>
+                {isBatch ? 'Batch input' : 'Active FileSource'}
+              </Text>
+              {!isBatch && resolvingInput && (
                 <ActivityIndicator size="small" color="#007AFF" />
               )}
             </View>
-            {inputSource ? (
+            {activeInputBatchSummary ? (
+              <>
+                <Text style={styles.inputCardLabel}>
+                  {activeInputBatchSummary.label}
+                </Text>
+                <Text style={styles.inputCardPath} selectable>
+                  {activeInputBatchSummary.detail}
+                </Text>
+              </>
+            ) : inputSource ? (
               <>
                 <Text style={styles.inputCardLabel}>{inputSource.label}</Text>
                 <Text style={styles.inputCardPath} selectable>
@@ -797,6 +958,36 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     lineHeight: 18,
   },
+  batchToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  batchToggleTextCol: {
+    flex: 1,
+    marginRight: 12,
+  },
+  batchToggleLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  batchToggleHint: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  selectionGroupDisabled: {
+    opacity: 0.45,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -815,6 +1006,9 @@ const styles = StyleSheet.create({
     borderColor: '#007AFF',
     backgroundColor: 'rgba(0, 122, 255, 0.08)',
   },
+  chipDisabled: {
+    opacity: 0.55,
+  },
   chipText: {
     fontSize: 14,
     fontWeight: '600',
@@ -822,6 +1016,9 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#007AFF',
+  },
+  chipTextDisabled: {
+    color: '#8E8E93',
   },
   channelRow: {
     flexDirection: 'row',
@@ -902,6 +1099,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#000000',
   },
+  padInputDisabled: {
+    opacity: 0.45,
+  },
   pickFileButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -914,6 +1114,9 @@ const styles = StyleSheet.create({
   },
   pickFileButtonPressed: {
     opacity: 0.88,
+  },
+  pickFileButtonDisabled: {
+    opacity: 0.45,
   },
   pickFileButtonText: {
     fontSize: 17,
