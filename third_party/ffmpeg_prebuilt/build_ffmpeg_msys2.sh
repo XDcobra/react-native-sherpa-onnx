@@ -130,7 +130,7 @@ PC
         --extra-ldflags="$LDFLAGS" \
         --disable-avdevice --disable-swscale --disable-everything \
         --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8 \
-        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,libshine,aac,alac \
+        --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac --enable-muxer=wav,mp3,flac,mp4,ogg,matroska --enable-encoder=pcm_s16le,flac,libshine,aac,alac \
         --enable-parser=aac,mpegaudio,vorbis,flac --enable-protocol=file --enable-swresample \
         --enable-avcodec --enable-avformat --enable-avutil \
         --target-os=android --enable-cross-compile \
