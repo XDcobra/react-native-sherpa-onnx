@@ -299,11 +299,7 @@ export default function FileIOScreen() {
             Format chips pick which bundled test_codec file automatic channels
             use.
           </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
+          <View style={styles.chipRow}>
             {CODEC_ASSET_ENTRIES.map((entry) => {
               const active =
                 sample.kind === 'codec' && sample.format === entry.format;
@@ -340,7 +336,7 @@ export default function FileIOScreen() {
                 Legacy
               </Text>
             </Pressable>
-          </ScrollView>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -803,6 +799,7 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     paddingBottom: 10,
   },
