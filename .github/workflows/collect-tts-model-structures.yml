@@ -1,5 +1,5 @@
 # Collect TTS model archive structures from k2-fsa/sherpa-onnx tts-models release.
-# Tree-cache skips an asset only when already processed and GitHub asset updated_at is unchanged.
+# Skip policy: stored "# updated_at:" in *-structure.txt must match the GitHub asset (see collect_one_sherpa_release_stream.sh).
 # Streams are defined in scripts/ci/sherpa_tts_model_release_streams.json (same pipeline as ASR: see
 # scripts/ci/collect_one_sherpa_release_stream.sh). CSV model_type values include zipvoice_rejected and unsupported
 # (see test/cpp/model_detect/model_detect_test.cpp).
