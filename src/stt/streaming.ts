@@ -41,6 +41,9 @@ function normalizeToOnlineType(
   switch (t) {
     case 'transducer':
       return 'transducer';
+    case 'nemo_transducer':
+      // NeMo/Nemotron streaming transducers use OnlineTransducer + NeMo impl (decoder outputs > 1).
+      return 'nemo_transducer';
     case 'paraformer':
       return 'paraformer';
     case 'nemo_ctc':
@@ -52,7 +55,7 @@ function normalizeToOnlineType(
       return 'tone_ctc';
     default:
       throw new Error(
-        `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
+        `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
       );
   }
 }
@@ -137,7 +140,7 @@ export async function createStreamingSTT(
     }
     effectiveModelType = normalizeToOnlineType(detectResult.modelType);
   } else {
-    effectiveModelType = options.modelType;
+    effectiveModelType = normalizeToOnlineType(options.modelType);
   }
 
   const optionsWithResolvedType = { ...options, modelType: effectiveModelType };

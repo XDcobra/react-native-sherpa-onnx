@@ -33,7 +33,7 @@ Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- Streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
+- Streaming-capable model types: `transducer`, `nemo_transducer` (NeMo/Nemotron streaming transducers), `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
 - If your model is offline-only (for example Whisper), you can still use it for live consumption via the **[Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)** pattern.
 - Model setup details: [model-setup.md](model-setup.md)
 

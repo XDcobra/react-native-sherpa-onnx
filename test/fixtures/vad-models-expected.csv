@@ -385,10 +385,10 @@ sherpa-onnx-moonshine-base-ar-quantized-2026-02-27.tar.bz2,unsupported
 sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2,unsupported
 sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2,unsupported
 sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2,unsupported
-sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25.tar.bz2,
-sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2,
-sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2,
-sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25.tar.bz2,
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25.tar.bz2,unsupported
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2,unsupported
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2,unsupported
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25.tar.bz2,unsupported
 sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2,
 sherpa-onnx-rk3588-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported
 sherpa-onnx-rk3576-streaming-zipformer-en-2023-06-26.tar.bz2,unsupported

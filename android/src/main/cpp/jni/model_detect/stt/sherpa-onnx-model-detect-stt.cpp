@@ -204,7 +204,8 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
         add(SttModelKind::kWhisper);
     if (lower.find("paraformer") != std::string::npos)
         add(SttModelKind::kParaformer);
-    if (lower.find("nemo") != std::string::npos || lower.find("parakeet") != std::string::npos) {
+    if (lower.find("nemo") != std::string::npos || lower.find("parakeet") != std::string::npos ||
+        lower.find("nemotron") != std::string::npos) {
         add(SttModelKind::kNemoTransducer);
         add(SttModelKind::kNemoCtc);
     }
@@ -355,7 +356,8 @@ static SttPathHints GetSttPathHints(const std::string& modelDir) {
     using namespace model_detect;
     SttPathHints h;
     std::string lower = ToLower(modelDir);
-    h.isLikelyNemo = lower.find("nemo") != std::string::npos || lower.find("parakeet") != std::string::npos;
+    h.isLikelyNemo = lower.find("nemo") != std::string::npos || lower.find("parakeet") != std::string::npos ||
+                     lower.find("nemotron") != std::string::npos;
     h.isLikelyTdt = lower.find("tdt") != std::string::npos;
     h.isLikelyWenetCtc = lower.find("wenet") != std::string::npos;
     h.isLikelySenseVoice = lower.find("sense") != std::string::npos || lower.find("sensevoice") != std::string::npos;
