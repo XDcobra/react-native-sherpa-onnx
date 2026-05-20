@@ -2265,16 +2265,6 @@ sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-1040ms-int8/test_wavs/tr
 ./sherpa-onnx-nemo-fast-conformer-ctc-en-24500-int8/test_wavs/en-english.wav
 ./sherpa-onnx-nemo-fast-conformer-ctc-en-24500-int8/test_wavs/0.wav
 
-# Asset: sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000.tar.bz2
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/decoder.onnx
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/joiner.onnx
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/tokens.txt
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/encoder.onnx
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/en-english.wav
-./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/0.wav
-
 # Asset: sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k.tar.bz2
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k/
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k/tokens.txt
@@ -2290,15 +2280,6 @@ sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-1040ms-int8/test_wavs/tr
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/hr-croatian.wav
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/es-spanish.wav
 
-# Asset: sherpa-onnx-nemo-fast-conformer-transducer-es-1424.tar.bz2
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/decoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/joiner.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/tokens.txt
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/encoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/test_wavs/
-./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/test_wavs/es-spanish.wav
-
 # Asset: sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8.tar.bz2
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/model.int8.onnx
@@ -2313,45 +2294,6 @@ sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-1040ms-int8/test_wavs/tr
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/po-polish.wav
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/hr-croatian.wav
 ./sherpa-onnx-nemo-fast-conformer-ctc-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/es-spanish.wav
-
-# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288.tar.bz2
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/decoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/joiner.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/tokens.txt
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/encoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/en-english.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/de-german.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/fr-french.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/es-spanish.wav
-
-# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-24500.tar.bz2
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/decoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/joiner.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/tokens.txt
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/encoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/en-english.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/0.wav
-
-# Asset: sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k.tar.bz2
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/decoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/joiner.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/tokens.txt
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/encoder.onnx
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/uk-ukrainian.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/en-english.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/it-italian.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/ru-russian.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/de-german.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/fr-french.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/po-polish.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/hr-croatian.wav
-./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/es-spanish.wav
 
 # Asset: sherpa-onnx-nemo-parakeet-tdt_ctc-0.6b-ja-35000-int8.tar.bz2
 sherpa-onnx-nemo-parakeet-tdt_ctc-0.6b-ja-35000-int8/
@@ -2401,42 +2343,6 @@ single file: ten-vad.int8.onnx
 ./sherpa-onnx-nemo-stt_de_fastconformer_hybrid_large_pc-int8/tokens.txt
 ./sherpa-onnx-nemo-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/
 ./sherpa-onnx-nemo-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/de.wav
-
-# Asset: sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc.tar.bz2
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/decoder.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/joiner.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/tokens.txt
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/encoder.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/test_wavs/
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/test_wavs/pt_br.wav
-
-# Asset: sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8.tar.bz2
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/tokens.txt
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/joiner.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/decoder.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/encoder.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/test_wavs/
-./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/test_wavs/pt_br.wav
-
-# Asset: sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc.tar.bz2
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/decoder.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/joiner.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/tokens.txt
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/encoder.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/test_wavs/
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/test_wavs/de.wav
-
-# Asset: sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8.tar.bz2
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/tokens.txt
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/joiner.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/decoder.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/encoder.int8.onnx
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/
-./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/de.wav
 
 # Asset: sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16.tar.bz2
 sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16/
@@ -6231,43 +6137,6 @@ sherpa-onnx-sense-voice-funasr-nano-2025-12-17/model.onnx
 sherpa-onnx-sense-voice-funasr-nano-2025-12-17/README.md
 sherpa-onnx-sense-voice-funasr-nano-2025-12-17/tokens.txt
 
-# Asset: sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2
-sherpa-onnx-funasr-nano-int8-2025-12-30/
-sherpa-onnx-funasr-nano-int8-2025-12-30/embedding.int8.onnx
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_2.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_5.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_history.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_3.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_math.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_chemistry.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_3.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_biochemistry.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/ja_en_codeswitch.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_1.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/noise_en.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/README.md
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_2.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_sh.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_medical.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/vietnamese.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/ja.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_3.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_minnan.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_physics.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_yue.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_hunan.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_2.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_4.wav
-sherpa-onnx-funasr-nano-int8-2025-12-30/README.md
-sherpa-onnx-funasr-nano-int8-2025-12-30/llm.int8.onnx
-sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/
-sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/tokenizer.json
-sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/merges.txt
-sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/vocab.json
-sherpa-onnx-funasr-nano-int8-2025-12-30/encoder_adaptor.int8.onnx
-
 # Asset: sherpa-onnx-funasr-nano-fp16-2025-12-30.tar.bz2
 sherpa-onnx-funasr-nano-fp16-2025-12-30/
 sherpa-onnx-funasr-nano-fp16-2025-12-30/embedding.int8.onnx
@@ -6654,6 +6523,148 @@ sherpa-onnx-moonshine-base-ar-quantized-2026-02-27/test_wavs/
 sherpa-onnx-moonshine-base-ar-quantized-2026-02-27/encoder_model.ort
 sherpa-onnx-moonshine-base-ar-quantized-2026-02-27/test_wavs/0.wav
 
+# Asset: sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/en.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ja.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/de.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/es.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ko.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/vi.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/zh.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ar.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/fr.wav
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/decoder.int8.onnx
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx.data
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/tokens.txt
+sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/README.md
+# Asset: sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise1-en.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/README.md
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/f1_noise.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/raokouling.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ru1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise2.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ar1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fast1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/transcript.txt
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/qiqiu1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ja1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/de.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/es1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/cantonese.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/codeswitch.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fr1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/rap1.wav
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/README.md
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/encoder.int8.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/decoder.int8.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/conv_frontend.onnx
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/vocab.json
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/merges.txt
+sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/tokenizer_config.json
+# Asset: sherpa-onnx-funasr-nano-int8-2025-12-30.tar.bz2
+sherpa-onnx-funasr-nano-int8-2025-12-30/
+sherpa-onnx-funasr-nano-int8-2025-12-30/embedding.int8.onnx
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_2.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_5.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_history.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_3.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_math.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_chemistry.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_3.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_biochemistry.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/ja_en_codeswitch.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_1.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/noise_en.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/README.md
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_en_2.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_sh.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_medical.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/vietnamese.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/ja.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_3.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_minnan.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/rag_physics.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_yue.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/dia_hunan.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/lyrics_2.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/test_wavs/far_4.wav
+sherpa-onnx-funasr-nano-int8-2025-12-30/README.md
+sherpa-onnx-funasr-nano-int8-2025-12-30/llm.int8.onnx
+sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/
+sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/tokenizer.json
+sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/merges.txt
+sherpa-onnx-funasr-nano-int8-2025-12-30/Qwen3-0.6B/vocab.json
+sherpa-onnx-funasr-nano-int8-2025-12-30/encoder_adaptor.int8.onnx
+
+# Asset: sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25.tar.bz2
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/tokens.txt
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/README.md
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/joiner.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/decoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/encoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/test_wavs/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/test_wavs/8k.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/test_wavs/0.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/test_wavs/1.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-80ms-int8-2026-04-25/test_wavs/trans.txt
+# Asset: sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/tokens.txt
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/README.md
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/joiner.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/decoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/encoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/test_wavs/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/test_wavs/8k.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/test_wavs/0.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/test_wavs/1.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25/test_wavs/trans.txt
+# Asset: sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25.tar.bz2
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/tokens.txt
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/README.md
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/joiner.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/decoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/encoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/test_wavs/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/test_wavs/8k.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/test_wavs/0.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/test_wavs/1.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25/test_wavs/trans.txt
+# Asset: sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25.tar.bz2
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/tokens.txt
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/README.md
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/joiner.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/decoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/encoder.int8.onnx
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/test_wavs/
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/test_wavs/8k.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/test_wavs/0.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/test_wavs/1.wav
+sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25/test_wavs/trans.txt
+# Asset: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming.tar.bz2
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/privacy.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/safety.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/tokens.txt
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/explainability.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/joiner.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/decoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/bias.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/encoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/test_wavs/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/test_wavs/0.wav
 # Asset: sherpa-onnx-rk3588-streaming-zipformer-en-2023-06-26.tar.bz2
 sherpa-onnx-rk3588-streaming-zipformer-en-2023-06-26/
 sherpa-onnx-rk3588-streaming-zipformer-en-2023-06-26/test_wavs/
@@ -6709,34 +6720,6 @@ sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/decoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/encoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-en-2023-06-26/tokens.txt
 
-# Asset: sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise1-en.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/README.md
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/f1_noise.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/raokouling.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ru1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/noise2.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ar1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fast1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/transcript.txt
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/qiqiu1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ja1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/de.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/es1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/cantonese.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/codeswitch.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/fr1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/rap1.wav
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/README.md
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/encoder.int8.onnx
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/decoder.int8.onnx
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/conv_frontend.onnx
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/vocab.json
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/merges.txt
-sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/tokenizer/tokenizer_config.json
 # Asset: sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16.tar.bz2
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16/
 sherpa-onnx-rk3588-streaming-zipformer-small-bilingual-zh-en-2023-02-16/test_wavs/
@@ -6867,20 +6850,186 @@ sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/decoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/encoder.rknn
 sherpa-onnx-rk3562-streaming-zipformer-bilingual-zh-en-2023-02-20/tokens.txt
 
-# Asset: sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/en.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ja.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/de.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/es.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ko.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/vi.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/zh.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/ar.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/test_wavs/fr.wav
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/decoder.int8.onnx
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/encoder.int8.onnx.data
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/tokens.txt
-sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01/README.md
+# Asset: sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc.tar.bz2
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/decoder.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/joiner.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/tokens.txt
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/encoder.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/test_wavs/
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc/test_wavs/pt_br.wav
+
+# Asset: sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8.tar.bz2
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/tokens.txt
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/test_wavs/
+./sherpa-onnx-nemo-transducer-stt_pt_fastconformer_hybrid_large_pc-int8/test_wavs/pt_br.wav
+
+# Asset: sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc.tar.bz2
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/decoder.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/joiner.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/tokens.txt
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/encoder.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/test_wavs/
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc/test_wavs/de.wav
+
+# Asset: sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8.tar.bz2
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/tokens.txt
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/
+./sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8/test_wavs/de.wav
+
+# Asset: sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000.tar.bz2
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/decoder.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/joiner.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/tokens.txt
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/encoder.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/en-english.wav
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000/test_wavs/0.wav
+
+# Asset: sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8.tar.bz2
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/tokens.txt
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/test_wavs/
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/test_wavs/en-english.wav
+./sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8/test_wavs/0.wav
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-es-1424.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/decoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/joiner.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/encoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424/test_wavs/es-spanish.wav
+
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-es-1424-int8/test_wavs/es-spanish.wav
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/decoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/joiner.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/encoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/de-german.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/fr-french.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288/test_wavs/es-spanish.wav
+
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/test_wavs/de-german.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/test_wavs/fr-french.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-de-es-fr-14288-int8/test_wavs/es-spanish.wav
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-24500.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/decoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/joiner.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/encoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500/test_wavs/0.wav
+
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-en-24500-int8/test_wavs/0.wav
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/decoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/joiner.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/encoder.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/uk-ukrainian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/it-italian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/ru-russian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/de-german.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/fr-french.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/po-polish.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/hr-croatian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k/test_wavs/es-spanish.wav
+
+# Asset: sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8.tar.bz2
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/tokens.txt
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/joiner.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/decoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/encoder.int8.onnx
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/uk-ukrainian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/en-english.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/it-italian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/ru-russian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/de-german.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/fr-french.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/po-polish.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/hr-croatian.wav
+./sherpa-onnx-nemo-fast-conformer-transducer-be-de-en-es-fr-hr-it-pl-ru-uk-20k-int8/test_wavs/es-spanish.wav
+# Asset: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms.tar.bz2
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/privacy.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/safety.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/tokens.txt
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/explainability.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/joiner.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/decoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/bias.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/encoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/test_wavs/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/test_wavs/0.wav
+# Asset: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms.tar.bz2
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/privacy.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/safety.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/tokens.txt
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/explainability.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/joiner.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/decoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/bias.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/encoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/test_wavs/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms/test_wavs/0.wav
+# Asset: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms.tar.bz2
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/privacy.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/safety.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/tokens.txt
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/explainability.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/joiner.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/decoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/bias.md
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/encoder.int8.onnx
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/test_wavs/
+sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms/test_wavs/0.wav
