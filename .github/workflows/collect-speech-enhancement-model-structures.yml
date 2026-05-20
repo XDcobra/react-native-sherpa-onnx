@@ -1,4 +1,5 @@
 # Collect speech enhancement model assets from k2-fsa/sherpa-onnx speech-enhancement-models release.
+# Tree-cache skips an asset only when already processed and GitHub asset updated_at is unchanged.
 # Mostly standalone .onnx files; streams are defined in scripts/ci/sherpa_speech_enhancement_model_release_streams.json
 # (same pipeline as TTS: scripts/ci/collect_one_sherpa_release_stream.sh).
 #

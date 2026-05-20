@@ -2,6 +2,11 @@
 # Fetch one GitHub release from k2-fsa/sherpa-onnx (or --github-repo), refresh tree listings,
 # aggregate structure + expected CSV, optionally run update_model_license_csv.sh (in this directory).
 # Paths are relative to repository root (--repo-root).
+#
+# Tree-cache skip policy: an asset is skipped only when tree-cache/<safe>.txt exists AND
+# tree-cache/<safe>.updated_at matches the release asset's GitHub updated_at (re-uploads with the
+# same filename get a new updated_at and are re-downloaded). Cache without .updated_at is backfilled
+# once from the API without re-downloading (migration from older runs).
 set -euo pipefail
 
 GITHUB_REPO="k2-fsa/sherpa-onnx"
@@ -66,7 +71,7 @@ fi
 
 RESP="$(curl -sSL "${API_AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}")"
 if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
-  LIST="$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)"')"
+  LIST="$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)|\(.updated_at)"')"
   if [[ -z "$_ASSET_LIMIT" || "$_ASSET_LIMIT" == "0" ]]; then
     printf '%s\n' "$LIST" > "$ASSET_LIST"
     echo "  Asset list: no limit ($(wc -l < "$ASSET_LIST" | tr -d ' ') lines)"
@@ -101,16 +106,30 @@ else
 fi
 
 mkdir -p "$WORK/dl"
-while IFS='|' read -r name url; do
+while IFS='|' read -r name url asset_updated_at; do
   [[ -z "$name" ]] && continue
   name="${name%$'\r'}"
   url="${url%$'\r'}"
+  asset_updated_at="${asset_updated_at%$'\r'}"
   safe="${name//\//-}"
   safe="${safe//\\/-}"
   cache_file="${_abs_tree}/${safe}.txt"
-  if [[ -f "$cache_file" ]]; then
-    echo "  Skip (cache hit): $name"
-    continue
+  meta_file="${_abs_tree}/${safe}.updated_at"
+  if [[ -f "$cache_file" && -n "$asset_updated_at" ]]; then
+    if [[ -f "$meta_file" ]] && [[ "$(cat "$meta_file")" == "$asset_updated_at" ]]; then
+      echo "  Skip (unchanged): $name"
+      continue
+    fi
+    if [[ ! -f "$meta_file" ]]; then
+      printf '%s' "$asset_updated_at" > "$meta_file"
+      echo "  Skip (cache hit, recorded updated_at): $name"
+      continue
+    fi
+    echo "  Re-process (asset updated on release): $name"
+    rm -f "$cache_file" "$meta_file"
+  elif [[ -f "$cache_file" ]]; then
+    echo "  Re-process (no updated_at from API): $name"
+    rm -f "$cache_file" "$meta_file"
   fi
   echo "  Download: $name"
   dl="$WORK/dl/$safe"
@@ -137,6 +156,9 @@ while IFS='|' read -r name url; do
     echo "::warning::Unexpected asset $name" >&2
     rm -f "$dl"
     continue
+  fi
+  if [[ -n "$asset_updated_at" ]]; then
+    printf '%s' "$asset_updated_at" > "$meta_file"
   fi
   rm -f "$dl"
 done < "$ASSET_LIST"

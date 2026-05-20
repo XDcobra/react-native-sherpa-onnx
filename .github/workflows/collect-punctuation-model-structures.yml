@@ -1,4 +1,5 @@
 # Collect punctuation model assets from k2-fsa/sherpa-onnx punctuation-models release.
+# Tree-cache skips an asset only when already processed and GitHub asset updated_at is unchanged.
 # Streams are defined in scripts/ci/sherpa_punctuation_model_release_streams.json
 # (same pipeline as TTS/enhancement: scripts/ci/collect_one_sherpa_release_stream.sh).
 #
