@@ -277,9 +277,17 @@ export async function detectTtsModel(
     Array.isArray(raw.languages) && raw.languages.length > 0
       ? raw.languages.filter((x): x is string => typeof x === 'string')
       : [];
+  const modelKey =
+    resolved.assetName?.trim() ||
+    resolved.modelDir
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .pop() ||
+    undefined;
   const resolvedLanguages = resolvePublicLanguageHints({
     domain: ModelCategory.Tts,
     modelType,
+    modelKey,
     rawFromNative: rawLanguageStrings,
   });
   const quantization =

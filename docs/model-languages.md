@@ -37,6 +37,7 @@ for (const row of rows) {
 function resolvePublicLanguageHints(input: {
   domain: ModelCategory;
   modelType?: string;
+  modelKey?: string;
   rawFromNative?: readonly string[];
 }): Array<{
   iso6391Hint: string;
@@ -77,7 +78,10 @@ These getters return static language tables from the package and are suitable fo
 ### Hint helpers for TTS and alignment
 
 ```ts
-function iso6391HintsForTtsModelType(modelType?: string): readonly string[];
+function iso6391HintsForTtsModelType(
+  modelType?: string,
+  modelKey?: string
+): readonly string[];
 function iso6391HintsForAlignmentModelType(modelType?: string): readonly string[];
 ```
 
@@ -112,7 +116,9 @@ import {
   QWEN3_ASR_LANGUAGES, // Qwen3 ASR language constants
   DOLPHIN_INFO_LANGUAGES, // Dolphin informational language constants
   POCKET_TTS_ISO6391_HINTS, // Pocket TTS ISO639-1 hints
-  SUPERTONIC_TTS_ISO6391_HINTS, // Supertonic TTS ISO639-1 hints
+  SUPERTONIC_TTS_ISO6391_HINTS, // Supertonic (legacy) TTS ISO639-1 hints
+  SUPERTONIC3_TTS_ISO6391_HINTS, // Supertonic 3 multilingual + na
+  isSupertonic3ModelKey, // true when catalog/folder id denotes Supertonic 3
 } from 'react-native-sherpa-onnx/model-languages';
 
 import type {

@@ -46,11 +46,13 @@ function normalizeModelType(raw: string | undefined): string {
 function languagesFromNative(
   domain: ModelCategory,
   modelType: string,
+  modelKey: string,
   rawLangs: string[]
 ): string[] {
   const rows = resolvePublicLanguageHints({
     domain,
     modelType: modelType !== 'unknown' ? modelType : undefined,
+    modelKey,
     rawFromNative: rawLangs,
   });
   return rows.map((r) => r.iso6391Hint);
@@ -65,6 +67,7 @@ function readRawLanguages(raw: { languages?: unknown }): string[] {
 
 function hintFromRaw(
   domain: ModelCategory,
+  modelKey: string,
   raw: {
     modelType?: string;
     languages?: unknown;
@@ -78,7 +81,12 @@ function hintFromRaw(
   const modelType = normalizeModelType(raw.modelType);
   return {
     modelType,
-    languages: languagesFromNative(domain, modelType, readRawLanguages(raw)),
+    languages: languagesFromNative(
+      domain,
+      modelType,
+      modelKey,
+      readRawLanguages(raw)
+    ),
     quantization: normalizeQuantization(raw.quantization),
     sizeTier: normalizeSizeTier(raw.sizeTier),
     isStreaming:
@@ -91,7 +99,7 @@ function hintFromRaw(
 
 async function detectTtsCatalogHint(id: string): Promise<CatalogDetectHint> {
   const raw = await SherpaOnnx.detectTtsModel('', id, 'auto');
-  return hintFromRaw(ModelCategory.Tts, raw, { defaultIsStreaming: true });
+  return hintFromRaw(ModelCategory.Tts, id, raw, { defaultIsStreaming: true });
 }
 
 async function detectSttCatalogHint(id: string): Promise<CatalogDetectHint> {
@@ -102,33 +110,33 @@ async function detectSttCatalogHint(id: string): Promise<CatalogDetectHint> {
     undefined,
     undefined
   );
-  return hintFromRaw(ModelCategory.Stt, raw);
+  return hintFromRaw(ModelCategory.Stt, id, raw);
 }
 
 async function detectVadCatalogHint(id: string): Promise<CatalogDetectHint> {
   const raw = await SherpaOnnx.detectVadModel('', id, 'auto');
-  return hintFromRaw(ModelCategory.Vad, raw);
+  return hintFromRaw(ModelCategory.Vad, id, raw);
 }
 
 async function detectPunctuationCatalogHint(
   id: string
 ): Promise<CatalogDetectHint> {
   const raw = await SherpaOnnx.detectPunctuationModel('', id, 'auto');
-  return hintFromRaw(ModelCategory.Punctuation, raw);
+  return hintFromRaw(ModelCategory.Punctuation, id, raw);
 }
 
 async function detectEnhancementCatalogHint(
   id: string
 ): Promise<CatalogDetectHint> {
   const raw = await SherpaOnnx.detectEnhancementModel('', id, 'auto');
-  return hintFromRaw(ModelCategory.Enhancement, raw);
+  return hintFromRaw(ModelCategory.Enhancement, id, raw);
 }
 
 async function detectAlignmentCatalogHint(
   id: string
 ): Promise<CatalogDetectHint> {
   const raw = await SherpaOnnx.detectAlignmentModel(id, 'auto');
-  return hintFromRaw(ModelCategory.Alignment, raw);
+  return hintFromRaw(ModelCategory.Alignment, id, raw);
 }
 
 async function detectCatalogHintForCategory(
