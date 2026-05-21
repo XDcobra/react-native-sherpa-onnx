@@ -59,7 +59,11 @@ export interface ModelDetectResultBase {
 export interface TtsDetectModelResult extends ModelDetectResultBase {
   /** tiny, small, medium, large, unknown — from name heuristics. */
   sizeTier?: string;
-  /** Language ids from detected lexicon files (Kokoro/Kitten). */
+  /**
+   * Language ids from detected lexicon files (`lexicon.txt`, `lexicon-*.txt`).
+   * Use with init `lexiconLanguageId` (vits/matcha/kokoro/zipvoice). Not used by kitten
+   * (espeak-ng-data only). Not the same as `languages` (catalog hints).
+   */
   lexiconLanguageCandidates?: string[];
 }
 

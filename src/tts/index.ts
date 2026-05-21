@@ -228,7 +228,11 @@ async function synthesizeLiveOverload(
 /**
  * Detect TTS model type and structure without initializing the engine.
  * Uses the same native file-based detection as createTTS. Stateless; no instance required.
- * For Kokoro/Kitten multi-language models, the result includes lexiconLanguageCandidates (e.g. ["default"] or ["us-en", "gb-en", "zh"]) derived from lexicon.txt and lexicon-*.txt; use these for a language selection dropdown (language change requires re-initialization).
+ * Lexicon files: `lexiconLanguageCandidates` (ids from `lexicon.txt` / `lexicon-*.txt`) — use with
+ * init `lexiconLanguageId` on vits/matcha/kokoro/zipvoice (re-init to change). Not for kitten.
+ * Catalog hints: `languages` — UI/download metadata only, not an engine switch.
+ * Runtime language: `tts.synthesize({ lang })` — effective for kokoro and supertonic only; see
+ * `supportsSynthesisLang` in `./languagePolicy`.
  *
  * @param source - FileSource describing where to find the model
  * @param options - Optional modelType (default: 'auto')
@@ -239,7 +243,7 @@ async function synthesizeLiveOverload(
  * const result = await detectTtsModel({ kind: 'fs', path: '/path/to/vits-piper-en' });
  * if (result.success) console.log('Detected type:', result.modelType, result.detectedModels);
  * if (result.lexiconLanguageCandidates?.length) {
- *   // Kokoro/Kitten multi-lang: show language dropdown (e.g. "us-en", "zh")
+ *   // Lexicon bundles: pass id to createTTS({ lexiconLanguageId: 'zh' })
  * }
  * ```
  */
@@ -639,6 +643,15 @@ export type {
   TtsLivePipelineOptions,
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';
+export {
+  runtimeLangDoesNotReplaceLexiconFile,
+  resolveTtsLanguageMechanisms,
+  supportsKokoroInitLang,
+  supportsLexiconLanguageId,
+  supportsSynthesisLang,
+  synthesisLangIgnoredByUpstream,
+  type TtsLanguageMechanism,
+} from './languagePolicy';
 export {
   DETECTION_SOURCES,
   isDetectionSource,
