@@ -16,6 +16,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
   - [Play Asset Delivery (PAD)](#play-asset-delivery-pad)
   - [Model Detection](#model-detection)
   - [Model detection internals](#model-detection-internals)
+- [SDK init bridge (create* vs initialize*)](#sdk-init-bridge)
 - [Model Sources at a Glance](#model-sources-at-a-glance)
 - [Detailed Examples](#detailed-examples)
 - [Troubleshooting & Tuning](#troubleshooting--tuning)
@@ -228,7 +229,7 @@ function detectTtsModel(
   error?: string;
   detectedModels: Array<{ type: string; modelDir: string }>;
   modelType?: string;
-  lexiconLanguageCandidates?: string[];
+  lexiconLanguages?: Array<{ id: string; path: string }>;
   /** Always `true` for TTS models. */
   isStreaming: boolean;
 }>;
@@ -238,7 +239,7 @@ Returns `success: false` when required files are missing or validation fails; us
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors (for example `FILEIO_UNSUPPORTED_ON_PLATFORM`, `FILEIO_PATH_TRAVERSAL_BLOCKED`, `FILEIO_PERMISSION_DENIED`, `FILEIO_NOT_FOUND`, `FILEIO_RESOLVE_ERROR`).
 
-`lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
+`lexiconLanguages` lists detected lexicon files (`id` + absolute `path`) for vits, matcha, kokoro, and zipvoice. Pass `lexiconLanguageId` to `createTTS` to select one; re-init to change. Not the same as catalog `languages` hints.
 
 ### Model detection internals
 
@@ -297,10 +298,18 @@ const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/tts-pack
 });
 
 // Same pattern as STT: use modelType: 'auto' on createTTS unless the user picked a candidate from
-// det.detectedModels. detectTtsModel is still useful for cheap checks + lexiconLanguageCandidates.
-// Kokoro/Kitten: optional language ids from lexicon files for a dropdown (e.g. "us-en", "zh", "default").
-const langs = det.lexiconLanguageCandidates;
+// det.detectedModels. detectTtsModel is still useful for cheap checks + lexiconLanguages.
+// Multi-lexicon packs: use lexiconLanguages for a dropdown; pass id via createTTS({ lexiconLanguageId: 'zh' }).
+const lexicons = det.lexiconLanguages;
 ```
+
+---
+
+## SDK init bridge
+
+Public factories (`createTTS`, `createSTT`, `createStreamingSTT`) use typed options. Native TurboModule methods take a single flat options map per instance: `initializeTts`, `initializeStt`, `initializeOnlineStt` (no positional-arg overloads, no `*WithOptions` suffix).
+
+See [sdk-init-bridge.md](./sdk-init-bridge.md) for the two-layer pattern, bridge type names, and mapping builders.
 
 ---
 
@@ -428,6 +437,7 @@ if (!detection.success) {
 - [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
 - [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts-offline.md) — Text-to-Speech API
+- [SDK init bridge](sdk-init-bridge.md) — `create*` public API vs `initialize*` TurboModule maps
 - [Download Manager](download-manager.md) — Download models in-app
 - [Execution Providers](execution-providers.md) — QNN, NNAPI, XNNPACK, Core ML
 - [Issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) — When TTS init fails due to long `data_dir` path (phontab /usr/share error)
