@@ -23,6 +23,7 @@
 
 #include "model_detect_test_utils.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
@@ -894,3 +895,15 @@ TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
 }
 
 }  // namespace
+
+TEST(ModelDetectTest, ResolveLexiconPathSelectsByLanguageId) {
+    std::vector<sherpaonnx::model_detect::LexiconCandidate> candidates = {
+        {"/models/lexicon.txt", "default"},
+        {"/models/lexicon-zh.txt", "zh"},
+        {"/models/lexicon-us-en.txt", "us-en"},
+    };
+    EXPECT_EQ(sherpaonnx::model_detect::ResolveLexiconPath(candidates, ""), "/models/lexicon.txt");
+    EXPECT_EQ(sherpaonnx::model_detect::ResolveLexiconPath(candidates, "zh"), "/models/lexicon-zh.txt");
+    EXPECT_EQ(sherpaonnx::model_detect::ResolveLexiconPath(candidates, "missing"), "");
+    EXPECT_TRUE(sherpaonnx::model_detect::ResolveLexiconPath({}, "zh").empty());
+}
