@@ -2,6 +2,77 @@ import { TurboModuleRegistry, type TurboModule } from 'react-native';
 import type { AccelerationSupport } from './provider';
 import type { ExtractArchiveResult } from './extraction/types';
 
+/**
+ * TurboModule init bridge option shapes (flat ReadableMap / NSDictionary).
+ * Must live in this file — React Native codegen does not resolve imported type aliases.
+ * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`.
+ */
+
+/** `initializeStt(instanceId, options)` — offline STT. */
+export type SttInitBridgeOptions = {
+  modelDir: string;
+  preferInt8?: boolean;
+  modelType?: string;
+  debug?: boolean;
+  hotwordsFile?: string;
+  hotwordsScore?: number;
+  numThreads?: number;
+  provider?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+  dither?: number;
+  /** Model-specific blocks (whisper, senseVoice, …); passed through as ReadableMap. */
+  modelOptions?: Object;
+  modelingUnit?: string;
+  bpeVocab?: string;
+};
+
+/** `initializeOnlineStt(instanceId, options)` — streaming STT (endpoint rules flattened). */
+export type OnlineSttInitBridgeOptions = {
+  modelDir: string;
+  modelType: string;
+  enableEndpoint?: boolean;
+  decodingMethod?: string;
+  maxActivePaths?: number;
+  hotwordsFile?: string;
+  hotwordsScore?: number;
+  numThreads?: number;
+  provider?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+  dither?: number;
+  blankPenalty?: number;
+  debug?: boolean;
+  rule1MustContainNonSilence?: boolean;
+  rule1MinTrailingSilence?: number;
+  rule1MinUtteranceLength?: number;
+  rule2MustContainNonSilence?: boolean;
+  rule2MinTrailingSilence?: number;
+  rule2MinUtteranceLength?: number;
+  rule3MustContainNonSilence?: boolean;
+  rule3MinTrailingSilence?: number;
+  rule3MinUtteranceLength?: number;
+};
+
+/** `initializeTts(instanceId, options)` — offline TTS. */
+export type TtsInitBridgeOptions = {
+  modelDir: string;
+  modelType: string;
+  numThreads?: number;
+  debug?: boolean;
+  noiseScale?: number;
+  noiseScaleW?: number;
+  lengthScale?: number;
+  ruleFsts?: string;
+  ruleFars?: string;
+  maxNumSentences?: number;
+  silenceScale?: number;
+  provider?: string;
+  lexiconLanguageId?: string;
+  /** Bridge-only: from public `modelOptions.kokoro.lang`. */
+  kokoroLang?: string;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -18,40 +89,12 @@ export interface Spec extends TurboModule {
 
   /**
    * Initialize Speech-to-Text (STT) with model directory.
-   * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param instanceId - Unique ID for this engine instance (from createSTT)
-   * @param modelDir - Absolute path to model directory
-   * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'qwen3_asr', 'cohere_transcribe', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
-   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
-   * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
-   * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
-   * @param numThreads - Optional: number of threads for inference (default in Kotlin: 1)
-   * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
-   * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
-   * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
-   * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
-   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano, qwen3Asr, cohereTranscribe). Only the block for the loaded model type is applied.
-   * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
-   * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
-   * @returns Object with success boolean, array of detected models (each with type and modelDir), and optional error when success is false.
+   * @param options - Flat init options (see `buildSttInitBridgeOptions` in sttNativeBridge.ts)
    */
   initializeStt(
     instanceId: string,
-    modelDir: string,
-    preferInt8?: boolean,
-    modelType?: string,
-    debug?: boolean,
-    hotwordsFile?: string,
-    hotwordsScore?: number,
-    numThreads?: number,
-    provider?: string,
-    ruleFsts?: string,
-    ruleFars?: string,
-    dither?: number,
-    modelOptions?: Object,
-    modelingUnit?: string,
-    bpeVocab?: string
+    options: SttInitBridgeOptions
   ): Promise<{
     success: boolean;
     /** Present when success is false (native structured failure). */
@@ -129,34 +172,9 @@ export interface Spec extends TurboModule {
    *   `options.dither`: **Android** only; **iOS** ignores it (native `FeatureConfig` has no dither field).
    * @returns `{ success: true }` on success, or `{ success: false, error?: string }` on structured native failure.
    */
-  initializeOnlineSttWithOptions(
+  initializeOnlineStt(
     instanceId: string,
-    options: {
-      modelDir: string;
-      modelType: string;
-      enableEndpoint?: boolean;
-      decodingMethod?: string;
-      maxActivePaths?: number;
-      hotwordsFile?: string;
-      hotwordsScore?: number;
-      numThreads?: number;
-      provider?: string;
-      ruleFsts?: string;
-      ruleFars?: string;
-      /** Feature dither. Android: applied. iOS: ignored. */
-      dither?: number;
-      blankPenalty?: number;
-      debug?: boolean;
-      rule1MustContainNonSilence?: boolean;
-      rule1MinTrailingSilence?: number;
-      rule1MinUtteranceLength?: number;
-      rule2MustContainNonSilence?: boolean;
-      rule2MinTrailingSilence?: number;
-      rule2MinUtteranceLength?: number;
-      rule3MustContainNonSilence?: boolean;
-      rule3MinTrailingSilence?: number;
-      rule3MinUtteranceLength?: number;
-    }
+    options: OnlineSttInitBridgeOptions
   ): Promise<{ success: boolean; error?: string }>;
 
   /** Start native streaming STT pipeline: live audio buffer -> live text buffer. */
@@ -1022,34 +1040,12 @@ export interface Spec extends TurboModule {
   /**
    * Initialize Text-to-Speech (TTS) with model directory.
    * @param instanceId - Unique ID for this engine instance (from createTTS)
-   * @param modelDir - Absolute path to model directory
-   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'supertonic', 'auto')
-   * @param numThreads - Number of threads for inference (default: 2)
-   * @param debug - Enable debug logging (default: false)
-   * @param noiseScale - Optional noise scale (VITS/Matcha)
-   * @param noiseScaleW - Optional noise scale W (VITS)
-   * @param lengthScale - Optional length scale (VITS/Matcha/Kokoro/Kitten)
-   * @param ruleFsts - Optional path(s) to rule FSTs for TTS (OfflineTtsConfig)
-   * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
-   * @param maxNumSentences - Optional max sentences per callback (default: 1)
-   * @param silenceScale - Optional silence scale on config (default: 0.2)
-   * @param provider - Optional execution provider (e.g. 'cpu', 'coreml', 'xnnpack'; default: 'cpu')
+   * @param options - Flat init options (see `buildTtsInitBridgeOptions` in ttsNativeBridge.ts). `kokoroLang` is bridge-only.
    * @returns Object with success boolean, array of detected models (each with type and modelDir), sampleRate/numSpeakers on success, and optional error when success is false.
    */
   initializeTts(
     instanceId: string,
-    modelDir: string,
-    modelType: string,
-    numThreads: number,
-    debug: boolean,
-    noiseScale?: number,
-    noiseScaleW?: number,
-    lengthScale?: number,
-    ruleFsts?: string,
-    ruleFars?: string,
-    maxNumSentences?: number,
-    silenceScale?: number,
-    provider?: string
+    options: TtsInitBridgeOptions
   ): Promise<{
     success: boolean;
     /** Present when success is false (native structured failure). */
@@ -1062,12 +1058,12 @@ export interface Spec extends TurboModule {
   /**
    * Detect TTS model type and structure without initializing the engine.
    * Uses the same native file-based detection as initializeTts.
-   * For Kokoro/Kitten multi-language models, also returns lexiconLanguageCandidates (e.g. ["default"], ["us-en", "gb-en", "zh"]) from detected lexicon.txt / lexicon-*.txt files.
+   * For Kokoro multi-language models, also returns `lexiconLanguages` (`{ id, path }[]`) from detected lexicon files.
    * Note: this is the raw native bridge shape; JS facade `tts/detectTtsModel` narrows `modelType` to `TTSModelType`.
    * @param modelDir - Absolute path to extracted model directory, or empty string when using `assetName` only (catalog hints).
    * @param assetName - Release asset stem / folder basename (e.g. vits-piper-en_US-lessac-medium), or null/empty when scanning `modelDir` only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels, modelType, optional lexiconLanguageCandidates, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
+   * @returns Object with success, detectedModels, modelType, optional lexiconLanguages, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
    */
   detectTtsModel(
     modelDir: string,
@@ -1079,8 +1075,8 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
-    lexiconLanguageCandidates?: string[];
+    /** Detected lexicon files (`lexicon.txt`, `lexicon-*.txt`). Use ids with init `lexiconLanguageId`. */
+    lexiconLanguages?: Array<{ id: string; path: string }>;
     /** Raw heuristic language tags from asset/folder name (catalog); not from lexicon files. JS `detectTtsModel` / download catalog normalize these for the public API. */
     languages?: string[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */

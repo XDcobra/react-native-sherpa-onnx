@@ -225,7 +225,6 @@ export type TTSInitializeOptionsBase = {
 
   /**
    * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`
-   * (or legacy `lexiconLanguageCandidates`). Maps to native `config.model.*.lexicon` path.
    *
    * Supported model types: `vits`, `matcha`, `kokoro`, `zipvoice`. No-op for `kitten` (no lexicon
    * field), `pocket`, `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
@@ -438,6 +437,11 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
   sid?: number;
   /** Speed multiplier. Default 1.0. Overridable per-segment via `segment.meta.speed`. */
   speed?: number;
+  /**
+   * Runtime language override (`extra["lang"]`). Effective for kokoro and supertonic only.
+   * Applied to every segment in the pipeline.
+   */
+  lang?: string;
   /**
    * Voice cloning configuration. Initialized once per pipeline.
    * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).

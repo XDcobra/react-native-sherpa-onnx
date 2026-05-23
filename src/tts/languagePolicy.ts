@@ -1,4 +1,5 @@
 import type { TTSModelType } from './types';
+import type { TtsLexiconLanguage } from '../types/modelDetect';
 
 /**
  * TTS language mechanisms (compact reference for app/UI code).
@@ -94,4 +95,44 @@ export function resolveTtsLanguageMechanisms(
     mechanisms.push('synthesisLang');
   }
   return mechanisms;
+}
+
+export function resolveLexiconPath(
+  lexiconLanguages: ReadonlyArray<TtsLexiconLanguage> | undefined,
+  lexiconLanguageId?: string
+): string | undefined {
+  if (!lexiconLanguages?.length) return undefined;
+  if (lexiconLanguageId != null && lexiconLanguageId.length > 0) {
+    return lexiconLanguages.find((l) => l.id === lexiconLanguageId)?.path;
+  }
+  return lexiconLanguages[0]?.path;
+}
+
+const SUPERTONIC_SYNTHESIS_LANG_CODES = ['en', 'ko', 'es', 'pt', 'fr'] as const;
+
+export type TtsLanguagePolicy = {
+  mechanisms: TtsLanguageMechanism[];
+  lexiconLanguages: ReadonlyArray<TtsLexiconLanguage>;
+  synthesisLangCodes?: ReadonlyArray<
+    (typeof SUPERTONIC_SYNTHESIS_LANG_CODES)[number]
+  >;
+  runtimeLangDoesNotReplaceLexiconFile: boolean;
+  synthesisLangIgnored: boolean;
+};
+
+export function resolveTtsLanguagePolicy(
+  modelType: TTSModelType | undefined,
+  detection?: { lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage> }
+): TtsLanguagePolicy {
+  const lexiconLanguages = detection?.lexiconLanguages ?? [];
+  return {
+    mechanisms: resolveTtsLanguageMechanisms(modelType, {
+      hasLexiconLanguages: lexiconLanguages.length > 0,
+    }),
+    lexiconLanguages,
+    synthesisLangCodes:
+      modelType === 'supertonic' ? SUPERTONIC_SYNTHESIS_LANG_CODES : undefined,
+    runtimeLangDoesNotReplaceLexiconFile: modelType === 'kokoro',
+    synthesisLangIgnored: synthesisLangIgnoredByUpstream(modelType),
+  };
 }
