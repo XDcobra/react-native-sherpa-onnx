@@ -842,23 +842,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeStt(
     instanceId: String,
-    modelDir: String,
-    preferInt8: Boolean?,
-    modelType: String?,
-    debug: Boolean?,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    dither: Double?,
-    modelOptions: ReadableMap?,
-    modelingUnit: String?,
-    bpeVocab: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    sttHelper.initializeStt(instanceId, modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
+    sttHelper.initializeStt(instanceId, options, promise)
   }
 
   /**
@@ -870,7 +857,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Online (streaming) STT Methods ====================
 
-  override fun initializeOnlineSttWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
+  override fun initializeOnlineStt(instanceId: String, options: ReadableMap, promise: Promise) {
     val modelDir = options.getString("modelDir")
     if (modelDir.isNullOrEmpty()) {
       promise.reject("INIT_ERROR", "modelDir is required")
@@ -3711,36 +3698,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    commonTtsHelper.initializeTts(
-      instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      debug,
-      noiseScale,
-      noiseScaleW,
-      lengthScale,
-      ruleFsts,
-      ruleFars,
-      maxNumSentences,
-      silenceScale,
-      provider,
-      promise
-    )
+    commonTtsHelper.initializeTts(instanceId, options, promise)
   }
 
   /**

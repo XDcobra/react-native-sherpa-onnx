@@ -11,6 +11,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.stt.config.SttInitOptionsParser
 import com.sherpaonnx.stt.core.OfflineSttRecognizerConfigFactory
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
@@ -54,6 +55,36 @@ internal class SherpaOnnxSttHelper(
   private val configFactory = OfflineSttRecognizerConfigFactory()
 
   fun initializeStt(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    val parsed = SttInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(SttErrorCodes.INIT_FAILED, "modelDir is required")
+      return
+    }
+    initializeSttInternal(
+      instanceId,
+      parsed.modelDir,
+      parsed.preferInt8,
+      parsed.modelType,
+      parsed.debug,
+      parsed.hotwordsFile,
+      parsed.hotwordsScore,
+      parsed.numThreads,
+      parsed.provider,
+      parsed.ruleFsts,
+      parsed.ruleFars,
+      parsed.dither,
+      parsed.modelOptions,
+      parsed.modelingUnit,
+      parsed.bpeVocab,
+      promise
+    )
+  }
+
+  private fun initializeSttInternal(
     instanceId: String,
     modelDir: String,
     preferInt8: Boolean?,

@@ -1,6 +1,7 @@
 package com.sherpaonnx.tts.facade
 
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 
 /**
@@ -11,35 +12,9 @@ internal class SherpaOnnxCommonTtsHelper(
 ) {
   fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
-  ) = core.initializeTts(
-    instanceId,
-    modelDir,
-    modelType,
-    numThreads,
-    debug,
-    noiseScale,
-    noiseScaleW,
-    lengthScale,
-    ruleFsts,
-    ruleFars,
-    maxNumSentences,
-    silenceScale,
-    provider,
-    promise
-  )
+  ) = core.initializeTts(instanceId, options, promise)
 
   fun shutdown() = core.shutdown()
 
