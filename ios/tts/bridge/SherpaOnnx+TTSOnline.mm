@@ -175,6 +175,12 @@ static std::mutex g_tts_pipeline_mutex;
     NSNumber *speedVal = options[@"speed"];
     if ([speedVal isKindOfClass:[NSNumber class]]) defaultSpeed = [speedVal floatValue];
 
+    std::optional<std::string> defaultLang;
+    NSString *langVal = options[@"lang"];
+    if ([langVal isKindOfClass:[NSString class]] && [langVal length] > 0) {
+        defaultLang = std::string([langVal UTF8String]);
+    }
+
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone;
     NSString *refBufferId = options[@"referenceAudioBufferId"];
     if ([refBufferId isKindOfClass:[NSString class]] && [refBufferId length] > 0) {
@@ -215,7 +221,8 @@ static std::mutex g_tts_pipeline_mutex;
           inst->wrapper.get(),
           defaultSid,
           defaultSpeed,
-          std::move(voiceClone)
+          std::move(voiceClone),
+          std::move(defaultLang)
         );
 
         {

@@ -13,7 +13,8 @@ public:
     sherpaonnx::TtsWrapper *wrapper,
     int32_t defaultSid,
     float defaultSpeed,
-    std::optional<sherpaonnx::VoiceCloneOptions> voiceClone
+    std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
+    std::optional<std::string> defaultLang = std::nullopt
   );
 
 protected:
@@ -25,4 +26,5 @@ private:
   int32_t defaultSid_ = 0;
   float defaultSpeed_ = 1.0f;
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone_;
+  std::optional<std::string> defaultLang_;
 };

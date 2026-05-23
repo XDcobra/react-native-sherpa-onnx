@@ -53,7 +53,9 @@ public:
         const std::optional<std::string>& ruleFars = std::nullopt,
         const std::optional<int32_t>& maxNumSentences = std::nullopt,
         const std::optional<float>& silenceScale = std::nullopt,
-        const std::optional<std::string>& provider = std::nullopt
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& lexiconLanguageId = std::nullopt,
+        const std::optional<std::string>& kokoroLang = std::nullopt
     );
 
     struct AudioResult {

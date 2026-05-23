@@ -6,6 +6,7 @@
  * sherpa-onnx-tts-wrapper.
  */
 #include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-model-detect-helper.h"
 
 namespace sherpaonnx {
 
@@ -102,6 +103,46 @@ jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings) {
       env->DeleteLocalRef(jval);
     }
   }
+  return list;
+}
+
+jobject BuildLexiconLanguagesList(
+    JNIEnv* env,
+    const std::vector<model_detect::LexiconCandidate>& languages) {
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  if (!listClass) return nullptr;
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+  jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  if (!listInit || !listAdd) {
+    env->DeleteLocalRef(listClass);
+    return nullptr;
+  }
+  jobject list = env->NewObject(listClass, listInit);
+  env->DeleteLocalRef(listClass);
+  if (!list) return nullptr;
+
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) {
+    env->DeleteLocalRef(list);
+    return nullptr;
+  }
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(mapClass, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    env->DeleteLocalRef(list);
+    return nullptr;
+  }
+
+  for (const auto& lang : languages) {
+    jobject entry = env->NewObject(mapClass, mapInit);
+    if (!entry) continue;
+    PutString(env, entry, mapPut, "id", lang.languageId);
+    PutString(env, entry, mapPut, "path", lang.path);
+    env->CallBooleanMethod(list, listAdd, entry);
+    env->DeleteLocalRef(entry);
+  }
+  env->DeleteLocalRef(mapClass);
   return list;
 }
 

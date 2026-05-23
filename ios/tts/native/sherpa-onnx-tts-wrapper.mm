@@ -7,6 +7,7 @@
 
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-detect-helper.h"
 #include <cctype>
 #include <cstring>
 #include <optional>
@@ -61,7 +62,9 @@ TtsInitializeResult TtsWrapper::initialize(
     const std::optional<std::string>& ruleFars,
     const std::optional<int32_t>& maxNumSentences,
     const std::optional<float>& silenceScale,
-    const std::optional<std::string>& provider
+    const std::optional<std::string>& provider,
+    const std::optional<std::string>& lexiconLanguageId,
+    const std::optional<std::string>& kokoroLang
 ) {
     TtsInitializeResult result;
     result.success = false;
@@ -88,6 +91,17 @@ TtsInitializeResult TtsWrapper::initialize(
         if (!detect.ok) {
             result.error = detect.error;
             LOGE("%s", detect.error.c_str());
+            return result;
+        }
+
+        std::string lexiconPath = ResolveLexiconPath(
+            detect.lexiconLanguages,
+            lexiconLanguageId.value_or(""));
+        if (!lexiconPath.empty()) {
+            detect.paths.lexicon = lexiconPath;
+        } else if (lexiconLanguageId.has_value() && !lexiconLanguageId->empty()) {
+            result.error = "lexiconLanguageId '" + *lexiconLanguageId + "' not found in detected lexiconLanguages";
+            LOGE("%s", result.error.c_str());
             return result;
         }
 
@@ -131,6 +145,9 @@ TtsInitializeResult TtsWrapper::initialize(
                 }
                 if (lengthScale.has_value()) {
                     config.model.kokoro.length_scale = *lengthScale;
+                }
+                if (kokoroLang.has_value() && !kokoroLang->empty()) {
+                    config.model.kokoro.lang = *kokoroLang;
                 }
                 break;
             case TtsModelKind::kKitten:
@@ -299,6 +316,39 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     float speed,
     const std::optional<VoiceCloneOptions>& cloning
 ) {
+    if (cloning.has_value() && !cloning->extra.empty() &&
+        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0)) {
+        AudioResult result;
+        result.sampleRate = 0;
+
+        if (!pImpl->initialized || !pImpl->tts.has_value()) {
+            LOGE("TTS: Not initialized. Call initialize() first.");
+            return result;
+        }
+
+        if (text.empty()) {
+            LOGE("TTS: Input text is empty");
+            return result;
+        }
+
+        try {
+            sherpa_onnx::cxx::GenerationConfig gc;
+            gc.speed = speed;
+            gc.sid = sid;
+            gc.extra = cloning->extra;
+            auto audio = pImpl->tts.value().Generate(text, gc);
+            result.samples = std::move(audio.samples);
+            result.sampleRate = audio.sample_rate;
+            return result;
+        } catch (const std::exception& e) {
+            LOGE("TTS: Exception during generation (extra): %s", e.what());
+            return result;
+        } catch (...) {
+            LOGE("TTS: Unknown exception during generation (extra)");
+            return result;
+        }
+    }
+
     if (!cloning.has_value() || cloning->reference_audio.empty() ||
         cloning->reference_sample_rate <= 0) {
         return generate(text, sid, speed);

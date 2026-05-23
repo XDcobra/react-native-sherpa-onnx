@@ -81,20 +81,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 @implementation SherpaOnnx (STT)
 
 - (void)initializeStt:(NSString *)instanceId
-            modelDir:(NSString *)modelDir
-         preferInt8:(NSNumber *)preferInt8
-          modelType:(NSString *)modelType
-              debug:(NSNumber *)debug
-       hotwordsFile:(NSString *)hotwordsFile
-      hotwordsScore:(NSNumber *)hotwordsScore
-         numThreads:(NSNumber *)numThreads
-           provider:(NSString *)provider
-           ruleFsts:(NSString *)ruleFsts
-           ruleFars:(NSString *)ruleFars
-             dither:(NSNumber *)dither
-        modelOptions:(NSDictionary *)modelOptions
-        modelingUnit:(NSString *)modelingUnit
-             bpeVocab:(NSString *)bpeVocab
+              options:(NSDictionary *)options
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -102,6 +89,28 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         reject(kSttErrInitFailed, @"instanceId is required", nil);
         return;
     }
+    if (options == nil || ![options isKindOfClass:[NSDictionary class]]) {
+        reject(kSttErrInitFailed, @"options is required", nil);
+        return;
+    }
+    NSString *modelDir = options[@"modelDir"];
+    if (modelDir == nil || ![modelDir isKindOfClass:[NSString class]] || [modelDir length] == 0) {
+        reject(kSttErrInitFailed, @"modelDir is required", nil);
+        return;
+    }
+    NSNumber *preferInt8 = options[@"preferInt8"];
+    NSString *modelType = options[@"modelType"];
+    NSNumber *debug = options[@"debug"];
+    NSString *hotwordsFile = options[@"hotwordsFile"];
+    NSNumber *hotwordsScore = options[@"hotwordsScore"];
+    NSNumber *numThreads = options[@"numThreads"];
+    NSString *provider = options[@"provider"];
+    NSString *ruleFsts = options[@"ruleFsts"];
+    NSString *ruleFars = options[@"ruleFars"];
+    NSNumber *dither = options[@"dither"];
+    NSDictionary *modelOptions = options[@"modelOptions"];
+    NSString *modelingUnit = options[@"modelingUnit"];
+    NSString *bpeVocab = options[@"bpeVocab"];
     std::string instanceIdStr = [instanceId UTF8String];
     RCTLogInfo(@"Initializing STT instance %@ with modelDir: %@", instanceId, modelDir);
 

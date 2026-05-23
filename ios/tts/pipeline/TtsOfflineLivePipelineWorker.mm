@@ -10,7 +10,8 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
   sherpaonnx::TtsWrapper *wrapper,
   int32_t defaultSid,
   float defaultSpeed,
-  std::optional<sherpaonnx::VoiceCloneOptions> voiceClone
+  std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
+  std::optional<std::string> defaultLang
 )
   : OfflineLivePipelineWorker(
       std::move(pipelineId),
@@ -23,7 +24,8 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
     wrapper_(wrapper),
     defaultSid_(defaultSid),
     defaultSpeed_(defaultSpeed),
-    voiceClone_(std::move(voiceClone))
+    voiceClone_(std::move(voiceClone)),
+    defaultLang_(std::move(defaultLang))
 {}
 
 void TtsOfflineLivePipelineWorker::onSegmentCommitted(
@@ -50,11 +52,18 @@ void TtsOfflineLivePipelineWorker::onSegmentCommitted(
     }
   }
 
+  std::optional<sherpaonnx::VoiceCloneOptions> genOpt = voiceClone_;
+  if (!genOpt.has_value() && defaultLang_.has_value() && !defaultLang_->empty()) {
+    sherpaonnx::VoiceCloneOptions extraOnly;
+    extraOnly.extra["lang"] = *defaultLang_;
+    genOpt = std::move(extraOnly);
+  }
+
   auto audio = wrapper_->generate(
     textSeg.text,
     effectiveSid,
     effectiveSpeed,
-    voiceClone_
+    genOpt
   );
   if (audio.samples.empty() || audio.sampleRate <= 0) return;
 

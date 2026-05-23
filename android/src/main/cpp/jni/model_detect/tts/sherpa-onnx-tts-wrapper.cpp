@@ -52,12 +52,12 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
     env->DeleteLocalRef(detectedList);
   }
 
-  jobject langCandidatesList = BuildStringList(env, result.lexiconLanguageCandidates);
-  if (langCandidatesList) {
-    jstring keyLangCandidates = env->NewStringUTF("lexiconLanguageCandidates");
-    env->CallObjectMethod(map, mapPut, keyLangCandidates, langCandidatesList);
-    env->DeleteLocalRef(keyLangCandidates);
-    env->DeleteLocalRef(langCandidatesList);
+  jobject lexiconLanguagesList = BuildLexiconLanguagesList(env, result.lexiconLanguages);
+  if (lexiconLanguagesList) {
+    jstring keyLexiconLanguages = env->NewStringUTF("lexiconLanguages");
+    env->CallObjectMethod(map, mapPut, keyLexiconLanguages, lexiconLanguagesList);
+    env->DeleteLocalRef(keyLexiconLanguages);
+    env->DeleteLocalRef(lexiconLanguagesList);
   }
 
   std::vector<std::string> detectionSourceStrings;
