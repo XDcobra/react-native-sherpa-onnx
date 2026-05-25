@@ -168,3 +168,8 @@ Before releasing your app with on-device speech:
 - [ ] **Use file-based input** for large audio files — avoids double-buffering PCM in RAM.
 - [ ] **Stream when possible** for long sessions — streaming audio/text buffers are ring-bounded; offline buffers are unbounded.
 - [ ] **If you must use offline-only models on low RAM**, plan **segmentation** (smaller chunks + offline engine per chunk) — see [Segmentation engine, offline-only models, and OOM mitigation](#segmentation-engine-offline-only-models-and-oom-mitigation) and [segmentation-engine.md](./segmentation-engine.md).
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

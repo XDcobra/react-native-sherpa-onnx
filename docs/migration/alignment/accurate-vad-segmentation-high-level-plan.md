@@ -387,4 +387,3 @@ None.
 1. Implement phases 2-8 in order.
 
 This keeps the cold-cut release deterministic and reviewable.
-

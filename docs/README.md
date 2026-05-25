@@ -16,6 +16,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
 | [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |
+| [native-diagnostics.md](./native-diagnostics.md) | Native crash ring buffer, signal-handler dumps (`SherpaNativeDiag`), snapshot API |
 
 ---
 

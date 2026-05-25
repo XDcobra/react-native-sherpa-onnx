@@ -107,4 +107,3 @@ Keep runtime capability claims explicit and honest:
 2. Adapt TTS incremental to consume Segmentation Engine
 3. Build Alignment fake streaming orchestration on Segmentation Engine
 4. Extend docs/examples and add parity/behavior matrix tests
-

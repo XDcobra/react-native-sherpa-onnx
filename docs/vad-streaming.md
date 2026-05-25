@@ -652,3 +652,8 @@ try {
 - [Offline STT](stt-offline.md)
 - [Pipeline audio buffers — streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
 - [Pipeline segment buffers — live / streaming](segmentbuffer-streaming.md)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+
