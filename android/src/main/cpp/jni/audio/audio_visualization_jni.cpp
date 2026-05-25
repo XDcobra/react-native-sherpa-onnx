@@ -35,7 +35,8 @@ sherpa::AudioVisualizationConfig makeVisualizationConfig(
   bool includeTimeline,
   int frameCount,
   double frameDurationMs,
-  double maxAnalysisDurationMs) {
+  double maxAnalysisDurationMs,
+  int levelsMaxStftFrames) {
   sherpa::AudioVisualizationConfig cfg;
   cfg.sampleRate = std::max(1, sampleRate);
   cfg.barCount = barCount;
@@ -53,6 +54,8 @@ sherpa::AudioVisualizationConfig makeVisualizationConfig(
       ? static_cast<int64_t>(
         (cfg.sampleRate * maxAnalysisDurationMs) / 1000.0)
       : 0;
+  cfg.levels.maxStftFrames =
+    includeTimeline ? 0 : std::max(0, levelsMaxStftFrames);
   return cfg;
 }
 
@@ -183,7 +186,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeCreateVisualizationAccumulator(
     jboolean includeTimeline,
     jint frameCount,
     jdouble frameDurationMs,
-    jdouble maxAnalysisDurationMs) {
+    jdouble maxAnalysisDurationMs,
+    jint levelsMaxStftFrames) {
   auto cfg = makeVisualizationConfig(
       static_cast<int>(sampleRate),
       static_cast<int>(barCount),
@@ -195,10 +199,24 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeCreateVisualizationAccumulator(
       static_cast<bool>(includeTimeline),
       static_cast<int>(frameCount),
       static_cast<double>(frameDurationMs),
-      static_cast<double>(maxAnalysisDurationMs));
+      static_cast<double>(maxAnalysisDurationMs),
+      static_cast<int>(levelsMaxStftFrames));
 
   auto *handle = new JniVisualizationAccumulator(cfg);
   return reinterpret_cast<jlong>(handle);
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeSetVisualizationExpectedTotalSamples(
+    JNIEnv * /* env */,
+    jclass /* clazz */,
+    jlong accumulatorPtr,
+    jlong totalSamples) {
+  auto *handle = fromPtr(accumulatorPtr);
+  if (!handle) {
+    return;
+  }
+  handle->accumulator.setExpectedTotalSamples(static_cast<int64_t>(totalSamples));
 }
 
 JNIEXPORT void JNICALL
@@ -237,6 +255,18 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeFeedVisualizationAccumulator(
 
   handle->accumulator.feed(values, count);
   env->ReleaseFloatArrayElements(samples, values, JNI_ABORT);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeIsVisualizationAnalysisCapReached(
+    JNIEnv * /* env */,
+    jclass /* clazz */,
+    jlong accumulatorPtr) {
+  auto *handle = fromPtr(accumulatorPtr);
+  if (!handle) {
+    return JNI_FALSE;
+  }
+  return handle->accumulator.isAnalysisCapReached() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jobject JNICALL
@@ -284,7 +314,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
     jboolean includeTimeline,
     jint frameCount,
     jdouble frameDurationMs,
-    jdouble maxAnalysisDurationMs) {
+    jdouble maxAnalysisDurationMs,
+    jint levelsMaxStftFrames) {
   const char *path = nullptr;
   if (jPath) {
     path = env->GetStringUTFChars(jPath, nullptr);
@@ -304,6 +335,15 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
         env->FindClass("java/lang/RuntimeException"),
         "VISUALIZATION_INVALID_INPUT: Empty file path and invalid fd");
     return nullptr;
+  }
+
+  int64_t probedDurationMs = -1;
+  try {
+    const auto probeResult =
+        sherpa::probeFileDuration(path, static_cast<int>(inputFd));
+    probedDurationMs = probeResult.durationMs;
+  } catch (...) {
+    probedDurationMs = -1;
   }
 
   sherpa::AudioDecodeConfig decodeConfig;
@@ -329,8 +369,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
       static_cast<bool>(includeTimeline),
       static_cast<int>(frameCount),
       static_cast<double>(frameDurationMs),
-      static_cast<double>(maxAnalysisDurationMs));
+      static_cast<double>(maxAnalysisDurationMs),
+      static_cast<int>(levelsMaxStftFrames));
     accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+    if (probedDurationMs > 0 && !includeTimeline) {
+      const int64_t expectedSamples =
+          (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
+      accumulator->setExpectedTotalSamples(expectedSamples);
+    }
   };
 
   auto onChunk = [&](const float *samples, int frameCount) {
@@ -346,10 +392,19 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
           static_cast<bool>(includeTimeline),
           static_cast<int>(frameCount),
           static_cast<double>(frameDurationMs),
-          static_cast<double>(maxAnalysisDurationMs));
+          static_cast<double>(maxAnalysisDurationMs),
+          static_cast<int>(levelsMaxStftFrames));
       accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+      if (probedDurationMs > 0 && !includeTimeline) {
+        const int64_t expectedSamples =
+            (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
+        accumulator->setExpectedTotalSamples(expectedSamples);
+      }
     }
     accumulator->feed(samples, frameCount);
+    if (accumulator->isAnalysisCapReached()) {
+      cancelFlag.store(true, std::memory_order_relaxed);
+    }
   };
 
   try {
@@ -376,7 +431,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
           static_cast<bool>(includeTimeline),
           static_cast<int>(frameCount),
           static_cast<double>(frameDurationMs),
-          static_cast<double>(maxAnalysisDurationMs));
+          static_cast<double>(maxAnalysisDurationMs),
+          static_cast<int>(levelsMaxStftFrames));
       accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
     }
 

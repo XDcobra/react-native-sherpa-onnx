@@ -161,6 +161,10 @@ Parameters:
   - `frameCount?: number`
   - `frameDurationMs?: number`
   - `maxAnalysisDurationMs?: number`
+  - `levelsMaxStftFrames?: number` (static `levels` only; default `1024`)
+  - `analysisSampleRateHz?: number` (file / live-spool decode only; default `0` = source rate)
+    - e.g. `8000` forces mono decode at 8 kHz before STFT — less resample/decode work for viz-only previews
+    - range `4000..96000`; does **not** re-decode existing `off_*` offline buffers
 
 Returns:
 
@@ -204,7 +208,7 @@ This avoids serializing large `frames` arrays through bridge numbers/`NSNumber` 
 
 ## Native algorithm
 
-- STFT with `fftSize=2048`, `hopSize=1024`, Hann window.
+- STFT with `fftSize=2048`, Hann window; `hopSize` default 1024 for timeline, or **dynamic** for static `levels` (see Performance).
 - Local shared C++ radix-2 FFT implementation.
 - Log-spaced bar mapping from `minHz` to `maxHz`.
 - `levels`: aggregate over full analyzed range using `timeAggregate`.
@@ -215,8 +219,40 @@ This avoids serializing large `frames` arrays through bridge numbers/`NSNumber` 
 ## Input-path behavior
 
 - `offline`: reads chunks from `OfflineEntry` (mmap-friendly).
-- `file`: decodes in streaming callbacks; no offline buffer registration required.
-- `live`: reads finalized live data from spool/ring according to live buffer state.
+- `file`: decodes in streaming callbacks; no offline buffer registration required. Honors `analysisSampleRateHz` on the decode path.
+- `live`: reads finalized live data from spool/ring according to live buffer state. Spool file decode honors `analysisSampleRateHz`.
+- `offline`: reads PCM at the buffer’s native sample rate (`analysisSampleRateHz` ignored).
+
+## Performance (static `levels` vs timeline)
+
+### Static `levels` (no timeline)
+
+Native STFT already works as **window → hop → window → hop** across the PCM stream: each step advances by `hopSize` samples (default 1024 at 48 kHz ≈ 21 ms per window). For a long file, cost scales with the number of hops, not only wall-clock duration.
+
+For static-only requests (`includeTimeline: false`), the implementation sizes the hop from the **full** input length:
+
+```text
+hopSize ≈ totalSamples / levelsMaxStftFrames   (default levelsMaxStftFrames = 1024, min hop 2048)
+```
+
+Example: 30 minutes at 48 kHz → ~86M samples → hop ≈ 84k → ~1024 FFTs over the **entire** file instead of ~84k. The returned `levels` are still a **max_hold / mean aggregate over the whole file**; time resolution is coarser, which is appropriate for a single preview waveform.
+
+Set `levelsMaxStftFrames` lower (e.g. `512`) for faster previews, or higher (e.g. `2048`) for more detail.
+
+For **`kind: 'file'`** (and finalized live spool paths), the dominant cost is often **full-file decode**, not FFT count. Use `analysisSampleRateHz` (e.g. `8000`) to downsample during decode — waveform shape is still useful for previews; keep `maxHz` at or below Nyquist (`sampleRate / 2`). Playback buffers (`createOfflineAudioBufferFromFile`) are unchanged unless you pass the same rate there.
+
+Prefer `kind: 'offline'` with an existing `off_*` buffer when the pipeline already decoded once — no second decode.
+
+### Timeline (`frames`)
+
+| Goal | Options | Cost |
+| --- | --- | --- |
+| Animated / heatmap / scrub | `includeTimeline: true` + `frameDurationMs` or `frameCount` | One spectrum row per timeline bucket; use timeline only when needed |
+| Hard time cap (optional) | `maxAnalysisDurationMs` | Stops decode/analysis after the first N ms — **not** required for static previews when using `levelsMaxStftFrames` |
+
+### Optional truncate
+
+`maxAnalysisDurationMs` caps how much audio is decoded and analyzed (first N ms only). Use this when you explicitly want a partial preview, not when you need a full-file static waveform (prefer `levelsMaxStftFrames` instead).
 
 ## Limits
 

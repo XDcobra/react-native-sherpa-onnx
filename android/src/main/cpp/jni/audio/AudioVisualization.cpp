@@ -21,6 +21,8 @@ constexpr double kMinFrameDurationMs = 50.0;
 constexpr double kMaxFrameDurationMs = 10000.0;
 constexpr int64_t kMaxFramePayloadFloats = 131072;
 constexpr double kDefaultFrameDurationMs = 500.0;
+constexpr int kDefaultLevelsMaxStftFrames = 1024;
+constexpr int kMinLevelsHopSize = 2048;
 constexpr float kSpectrumDisplayRangeDb = 40.0F;
 constexpr float kSpectrumDisplayGamma = 1.65F;
 
@@ -112,7 +114,13 @@ AudioVisualizationAccumulator::AudioVisualizationAccumulator(
           config.timeline.frameDurationMs > 0.0),
       timelineFrameCountHint_(config.timeline.frameCount),
       timelineFrameDurationMsHint_(config.timeline.frameDurationMs),
-      maxAnalysisSamples_(std::max<int64_t>(0, config.timeline.maxAnalysisSamples)) {
+      maxAnalysisSamples_(std::max<int64_t>(0, config.timeline.maxAnalysisSamples)),
+      levelsMaxStftFrames_(
+          config.timeline.enabled
+              ? 0
+              : (config.levels.maxStftFrames > 0
+                     ? config.levels.maxStftFrames
+                     : kDefaultLevelsMaxStftFrames)) {
   if (fftSize_ < 256) {
     fftSize_ = 256;
   }
@@ -166,6 +174,7 @@ AudioVisualizationAccumulator::AudioVisualizationAccumulator(
   if (!timelineEnabled_) {
     timelineFrameCountHint_ = 0;
     timelineFrameDurationMsHint_ = 0.0;
+    applyLevelsHopFromExpectedSamples();
     return;
   }
 
@@ -192,6 +201,34 @@ AudioVisualizationAccumulator::AudioVisualizationAccumulator(
           "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameDurationMs must be between 50 and 10000");
     }
   }
+}
+
+bool AudioVisualizationAccumulator::isAnalysisCapReached() const {
+  return maxAnalysisSamples_ > 0 && analyzedSamples_ >= maxAnalysisSamples_;
+}
+
+void AudioVisualizationAccumulator::applyLevelsHopFromExpectedSamples() {
+  if (timelineEnabled_ || levelsMaxStftFrames_ <= 0 ||
+      expectedTotalSamples_ <= 0) {
+    hopSize_ = clampInt(std::max(hopSize_, kMinLevelsHopSize), 1, fftSize_);
+    return;
+  }
+
+  const int64_t computedHop =
+      (expectedTotalSamples_ + static_cast<int64_t>(levelsMaxStftFrames_) - 1) /
+      static_cast<int64_t>(levelsMaxStftFrames_);
+  const int maxHop = std::max(kMinLevelsHopSize, fftSize_ * 32);
+  hopSize_ = clampInt(
+      static_cast<int>(std::max<int64_t>(
+          kMinLevelsHopSize,
+          std::min(computedHop, static_cast<int64_t>(maxHop)))),
+      1,
+      fftSize_);
+}
+
+void AudioVisualizationAccumulator::setExpectedTotalSamples(int64_t totalSamples) {
+  expectedTotalSamples_ = std::max<int64_t>(0, totalSamples);
+  applyLevelsHopFromExpectedSamples();
 }
 
 void AudioVisualizationAccumulator::feed(const float *samples, int sampleCount) {
@@ -248,8 +285,10 @@ AudioVisualizationProfile AudioVisualizationAccumulator::finish() {
 
   AudioVisualizationProfile profile;
   profile.sampleRate = sampleRate_;
-  profile.durationMs =
-      static_cast<int64_t>((totalSamples_ * 1000LL) / std::max(1, sampleRate_));
+  const int64_t durationSamples =
+      expectedTotalSamples_ > 0 ? expectedTotalSamples_ : totalSamples_;
+  profile.durationMs = static_cast<int64_t>(
+      (durationSamples * 1000LL) / std::max(1, sampleRate_));
   profile.barCount = barCount_;
   profile.levels = std::move(levels);
 

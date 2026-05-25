@@ -18,6 +18,11 @@ struct AudioVisualizationTimelineConfig {
   int64_t maxAnalysisSamples = 0;  // 0 = full input.
 };
 
+/** Static `levels` only: target STFT windows across the full file (hop sized from duration). */
+struct AudioVisualizationLevelsConfig {
+  int maxStftFrames = 1024;  // 0 = use default hop only.
+};
+
 struct AudioVisualizationConfig {
   int sampleRate = 16000;
   int fftSize = 2048;
@@ -30,6 +35,7 @@ struct AudioVisualizationConfig {
   float minDb = -82.0F;
   float maxDb = -20.0F;
   AudioVisualizationTimelineConfig timeline;
+  AudioVisualizationLevelsConfig levels;
 };
 
 struct AudioVisualizationProfile {
@@ -47,11 +53,15 @@ class AudioVisualizationAccumulator {
   explicit AudioVisualizationAccumulator(const AudioVisualizationConfig &config);
 
   void feed(const float *samples, int sampleCount);
+  /** Hint total mono samples (offline buffer, probe, etc.) to size hop for static `levels`. */
+  void setExpectedTotalSamples(int64_t totalSamples);
   AudioVisualizationProfile finish();
 
   int sampleRate() const { return sampleRate_; }
   int barCount() const { return barCount_; }
   int64_t totalSamples() const { return totalSamples_; }
+  /** True when maxAnalysisSamples is set and the cap has been reached. */
+  bool isAnalysisCapReached() const;
 
  private:
   struct BinRange {
@@ -59,6 +69,7 @@ class AudioVisualizationAccumulator {
     int end = 1;
   };
 
+  void applyLevelsHopFromExpectedSamples();
   void processAvailableFrames();
   void processPaddedFrameIfNeeded();
   void processFrame(const float *frame);
@@ -86,6 +97,8 @@ class AudioVisualizationAccumulator {
   int timelineFrameCountHint_ = 0;
   double timelineFrameDurationMsHint_ = 0.0;
   int64_t maxAnalysisSamples_ = 0;
+  int levelsMaxStftFrames_ = 0;
+  int64_t expectedTotalSamples_ = 0;
   int64_t analyzedSamples_ = 0;
   int64_t frameWindowIndex_ = 0;
   int64_t processedFrameCount_ = 0;

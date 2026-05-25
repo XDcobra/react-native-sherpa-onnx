@@ -1133,7 +1133,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val frameCount: Int,
     val frameDurationMs: Double,
     val maxAnalysisDurationMs: Double,
+    val levelsMaxStftFrames: Int,
+    val analysisSampleRateHz: Double,
   )
+
+  private fun visualizationDecodeTargetSampleRate(options: VisualizationOptions): Int {
+    val rate = options.analysisSampleRateHz.toInt()
+    return if (rate > 0) rate else 0
+  }
 
   private fun parseOptionalNumber(options: ReadableMap, key: String): Double? {
     if (!options.hasKey(key) || options.isNull(key)) {
@@ -1228,6 +1235,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val maxAnalysisDurationMs =
       (parseOptionalNumber(options, "maxAnalysisDurationMs") ?: 0.0).coerceAtLeast(0.0)
 
+    val levelsMaxStftFrames =
+      if (!includeTimeline) {
+        val raw =
+          if (options.hasKey("levelsMaxStftFrames") && !options.isNull("levelsMaxStftFrames")) {
+            parseOptionalNumber(options, "levelsMaxStftFrames")?.toInt() ?: 1024
+          } else {
+            1024
+          }
+        raw.coerceIn(64, 4096)
+      } else {
+        0
+      }
+
+    val analysisSampleRateHz =
+      if (options.hasKey("analysisSampleRateHz") && !options.isNull("analysisSampleRateHz")) {
+        val raw = parseOptionalNumber(options, "analysisSampleRateHz") ?: 0.0
+        when {
+          raw == 0.0 -> 0.0
+          raw in 4000.0..96000.0 -> raw
+          else ->
+            throw IllegalArgumentException(
+              "AUDIO_VISUALIZATION_INVALID_OPTIONS: analysisSampleRateHz must be 0 or between 4000 and 96000"
+            )
+        }
+      } else {
+        0.0
+      }
+
     return VisualizationOptions(
       barCount = barCount,
       minHz = minHz,
@@ -1239,6 +1274,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       frameCount = frameCount,
       frameDurationMs = frameDurationMs,
       maxAnalysisDurationMs = maxAnalysisDurationMs,
+      levelsMaxStftFrames = levelsMaxStftFrames,
+      analysisSampleRateHz = analysisSampleRateHz,
     )
   }
 
@@ -1320,6 +1357,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       options.frameCount,
       options.frameDurationMs,
       options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
     )
 
     if (accumulatorPtr == 0L) {
@@ -1327,6 +1365,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
 
     try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(accumulatorPtr, entry.numSamples.toLong())
+      }
       val chunk = FloatArray(8192)
       when (entry) {
         is OfflineEntry.MmapBacked -> {
@@ -1338,6 +1379,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             if (count <= 0) break
             nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
             start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
           }
         }
 
@@ -1349,6 +1393,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             System.arraycopy(source, start, chunk, 0, count)
             nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
             start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
           }
         }
       }
@@ -1388,7 +1435,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       return nativeComputeVisualizationProfileFromFile(
         spoolPath,
         -1,
-        0,
+        visualizationDecodeTargetSampleRate(options),
         true,
         8192,
         true,
@@ -1402,6 +1449,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         options.frameCount,
         options.frameDurationMs,
         options.maxAnalysisDurationMs,
+        options.levelsMaxStftFrames,
       ) as? HashMap<String, Any>
         ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
     }
@@ -1418,12 +1466,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       options.frameCount,
       options.frameDurationMs,
       options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
     )
     if (accumulatorPtr == 0L) {
       throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
     }
 
     try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(
+          accumulatorPtr,
+          live.totalSamplesWritten.toLong()
+        )
+      }
       val snapshot = live.snapshotRing()
       if (snapshot.isNotEmpty()) {
         val chunk = FloatArray(8192)
@@ -1433,6 +1488,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           System.arraycopy(snapshot, start, chunk, 0, count)
           nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
           start += count
+          if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+            break
+          }
         }
       }
 
@@ -1494,7 +1552,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             nativeComputeVisualizationProfileFromFile(
               nativePathArg(decodableSource),
               decodableSource.fd,
-              0,
+              visualizationDecodeTargetSampleRate(normalizedOptions),
               true,
               8192,
               true,
@@ -1508,6 +1566,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               normalizedOptions.frameCount,
               normalizedOptions.frameDurationMs,
               normalizedOptions.maxAnalysisDurationMs,
+              normalizedOptions.levelsMaxStftFrames,
             ) as? HashMap<String, Any>
               ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
           }
@@ -5117,7 +5176,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       frameCount: Int,
       frameDurationMs: Double,
       maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
     ): Long
+
+    @JvmStatic
+    external fun nativeSetVisualizationExpectedTotalSamples(
+      accumulatorPtr: Long,
+      totalSamples: Long,
+    )
 
     /** Feed mono float32 samples into a visualization accumulator. */
     @JvmStatic
@@ -5126,6 +5192,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       samples: FloatArray,
       sampleCount: Int,
     )
+
+    @JvmStatic
+    external fun nativeIsVisualizationAnalysisCapReached(accumulatorPtr: Long): Boolean
 
     /** Finalize and get visualization profile HashMap{sampleRate,durationMs,barCount,levels,frameCount,frameDurationMs,framesTransferId?}. */
     @JvmStatic
@@ -5158,6 +5227,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       frameCount: Int,
       frameDurationMs: Double,
       maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
     ): HashMap<String, Any>?
 
     /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */

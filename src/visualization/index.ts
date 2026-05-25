@@ -184,9 +184,14 @@ type NativeVisualizationOptions = {
   timeAggregate: AudioVisualizationTimeAggregate;
   includeTimeline: boolean;
   maxAnalysisDurationMs: number;
+  levelsMaxStftFrames: number;
+  analysisSampleRateHz: number;
   frameCount?: number;
   frameDurationMs?: number;
 };
+
+const MIN_ANALYSIS_SAMPLE_RATE_HZ = 4000;
+const MAX_ANALYSIS_SAMPLE_RATE_HZ = 96000;
 
 function normalizeOptions(
   options: AudioVisualizationOptions | undefined
@@ -275,6 +280,35 @@ function normalizeOptions(
     0
   );
 
+  const levelsMaxStftFrames = includeTimeline
+    ? 0
+    : Math.max(
+        64,
+        Math.min(
+          4096,
+          options?.levelsMaxStftFrames != null
+            ? Math.trunc(
+                normalizePositiveNumber(options.levelsMaxStftFrames, 1024, 1)
+              )
+            : 1024
+        )
+      );
+
+  const analysisSampleRateHzRaw = options?.analysisSampleRateHz;
+  const analysisSampleRateHz =
+    analysisSampleRateHzRaw == null || analysisSampleRateHzRaw === 0
+      ? 0
+      : Math.trunc(normalizePositiveNumber(analysisSampleRateHzRaw, 0, 1));
+  if (
+    analysisSampleRateHz > 0 &&
+    (analysisSampleRateHz < MIN_ANALYSIS_SAMPLE_RATE_HZ ||
+      analysisSampleRateHz > MAX_ANALYSIS_SAMPLE_RATE_HZ)
+  ) {
+    throw new Error(
+      `AUDIO_VISUALIZATION_INVALID_OPTIONS: analysisSampleRateHz must be 0 (source rate) or between ${MIN_ANALYSIS_SAMPLE_RATE_HZ} and ${MAX_ANALYSIS_SAMPLE_RATE_HZ}`
+    );
+  }
+
   const nativeOptions: Record<string, unknown> = {
     kind,
     barCount,
@@ -283,6 +317,8 @@ function normalizeOptions(
     timeAggregate,
     includeTimeline,
     maxAnalysisDurationMs,
+    levelsMaxStftFrames,
+    analysisSampleRateHz,
   };
   if (frameCount != null) {
     nativeOptions.frameCount = frameCount;

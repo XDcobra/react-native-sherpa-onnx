@@ -346,6 +346,8 @@ struct PaVisualizationOptions {
   int frameCount = 0;
   double frameDurationMs = 0.0;
   double maxAnalysisDurationMs = 0.0;
+  int levelsMaxStftFrames = 1024;
+  int analysisSampleRateHz = 0;
   sherpa::AudioVisualizationAggregateMode aggregateMode =
       sherpa::AudioVisualizationAggregateMode::MAX_HOLD;
 };
@@ -428,6 +430,25 @@ static bool pa_parseVisualizationOptions(
     out.maxAnalysisDurationMs = std::max(0.0, [maxAnalysisDurationMs doubleValue]);
   }
 
+  NSNumber *levelsMaxStftFrames = options[@"levelsMaxStftFrames"];
+  if (levelsMaxStftFrames != nil) {
+    out.levelsMaxStftFrames = std::max(64, std::min(4096, [levelsMaxStftFrames intValue]));
+  }
+
+  NSNumber *analysisSampleRateHz = options[@"analysisSampleRateHz"];
+  if (analysisSampleRateHz != nil) {
+    const int raw = [analysisSampleRateHz intValue];
+    if (raw == 0) {
+      out.analysisSampleRateHz = 0;
+    } else if (raw >= 4000 && raw <= 96000) {
+      out.analysisSampleRateHz = raw;
+    } else {
+      if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+      if (errMsg) *errMsg = @"analysisSampleRateHz must be 0 or between 4000 and 96000";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -450,6 +471,8 @@ static sherpa::AudioVisualizationConfig pa_makeVisualizationConfig(
     options.maxAnalysisDurationMs > 0.0
       ? static_cast<int64_t>((cfg.sampleRate * options.maxAnalysisDurationMs) / 1000.0)
       : 0;
+  cfg.levels.maxStftFrames =
+    cfg.timeline.enabled ? 0 : std::max(0, options.levelsMaxStftFrames);
   return cfg;
 }
 
@@ -461,6 +484,9 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromSamples(
 ) {
   auto cfg = pa_makeVisualizationConfig(sampleRate, options);
   sherpa::AudioVisualizationAccumulator accumulator(cfg);
+  if (!options.includeTimeline && sampleCount > 0) {
+    accumulator.setExpectedTotalSamples(static_cast<int64_t>(sampleCount));
+  }
   if (samples != nullptr && sampleCount > 0) {
     accumulator.feed(samples, sampleCount);
   }
@@ -472,19 +498,35 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
   const PaVisualizationOptions &options
 ) {
   sherpa::AudioDecodeConfig decodeConfig;
-  decodeConfig.targetSampleRate = 0;
+  decodeConfig.targetSampleRate =
+    options.analysisSampleRateHz > 0 ? options.analysisSampleRateHz : 0;
   decodeConfig.forceMono = true;
   decodeConfig.chunkSize = 8192;
   decodeConfig.allowDemuxerAutoProbe = true;
+
+  int64_t probedDurationMs = -1;
+  try {
+    const auto probeResult = sherpa::probeFileDuration(path.c_str());
+    probedDurationMs = probeResult.durationMs;
+  } catch (...) {
+    probedDurationMs = -1;
+  }
 
   std::atomic<bool> cancelFlag(false);
   std::unique_ptr<sherpa::AudioVisualizationAccumulator> accumulator;
   int outputSampleRate = 16000;
 
   auto onStreamInfo = [&](int sourceSampleRate, int /* sourceChannels */) {
-    outputSampleRate = sourceSampleRate > 0 ? sourceSampleRate : 16000;
+    outputSampleRate = options.analysisSampleRateHz > 0
+      ? options.analysisSampleRateHz
+      : (sourceSampleRate > 0 ? sourceSampleRate : 16000);
     auto cfg = pa_makeVisualizationConfig(outputSampleRate, options);
     accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+    if (probedDurationMs > 0 && !options.includeTimeline) {
+      const int64_t expectedSamples =
+          (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
+      accumulator->setExpectedTotalSamples(expectedSamples);
+    }
   };
 
   auto onChunk = [&](const float *samples, int frameCount) {
@@ -493,6 +535,9 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
       accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
     }
     accumulator->feed(samples, frameCount);
+    if (accumulator->isAnalysisCapReached()) {
+      cancelFlag.store(true, std::memory_order_relaxed);
+    }
   };
 
   auto decodeResult = sherpa::decodeFile(
