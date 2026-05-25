@@ -104,11 +104,22 @@ const AVInputFormat* findDemuxerByShortName(const char* shortName) {
 }
 
 void appendFfmpegError(std::string& msg, int err) {
+  if (err == 0) {
+    msg += ": demuxer open failed (no FFmpeg error code; often missing extension in name hint "
+           "or strict demuxer with allowAutoProbe=false)";
+    return;
+  }
   char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
   av_strerror(err, errbuf, sizeof(errbuf));
   if (errbuf[0] != '\0') {
     msg += ": ";
     msg += errbuf;
+    msg += " (";
+    msg += std::to_string(err);
+    msg += ")";
+  } else {
+    msg += ": FFmpeg error ";
+    msg += std::to_string(err);
   }
 }
 
@@ -137,26 +148,45 @@ FfmpegFormatGuardResult makeOpenFailed(
     int err) {
   FfmpegFormatGuardResult result;
   result.ok = false;
+  const std::string ext = extractExtensionLower(path);
+  const bool hasExt = !ext.empty();
+
   result.errorMessage = std::string(errorPrefix) + "_OPEN_FAILED: Cannot open";
   if (path && path[0] != '\0') {
-    result.errorMessage += " file: ";
-    result.errorMessage += path;
+    if (hasExt) {
+      result.errorMessage += " file: ";
+      result.errorMessage += path;
+    } else {
+      result.errorMessage += " input (name hint \"";
+      result.errorMessage += path;
+      result.errorMessage += "\" has no extension)";
+    }
   } else {
-    result.errorMessage += " input";
+    result.errorMessage += " input (no path hint)";
   }
+
   if (demuxerShortName && demuxerShortName[0] != '\0') {
     result.errorMessage += " (demuxer ";
     result.errorMessage += demuxerShortName;
     result.errorMessage += ")";
+  } else if (!hasExt) {
+    result.errorMessage += " (no demuxer: extension required in name hint)";
+  } else {
+    result.errorMessage += " (demuxer .";
+    result.errorMessage += ext;
+    result.errorMessage += " not available or container mismatch)";
   }
+
   appendFfmpegError(result.errorMessage, err);
   LOGW("%s", result.errorMessage.c_str());
-  char detail[64];
+
+  char detail[96];
   std::snprintf(
       detail,
       sizeof(detail),
-      "demuxer=%s err=%d",
-      demuxerShortName ? demuxerShortName : "?",
+      "demuxer=%s ext=%s err=%d",
+      demuxerShortName ? demuxerShortName : "none",
+      hasExt ? ext.c_str() : "none",
       err);
   SHERPA_DIAG_D("audio.decode", "guard_open_fail", detail);
   return result;
@@ -247,9 +277,14 @@ FfmpegFormatGuardResult openGuardedFormatInput(
       result.ok = true;
       return result;
     }
+    if (demuxer && err == 0) {
+      err = AVERROR_INVALIDDATA;
+    }
     if (demuxer) {
       LOGW("explicit demuxer %s failed for %s, trying auto-probe", entry->demuxerShortName, path);
     }
+  } else if (!allowDemuxerAutoProbe) {
+    return makeOpenFailed(errorPrefix, path, nullptr, 0);
   }
 
   if (allowDemuxerAutoProbe && tryOpenInput(fmtCtx, path, nullptr, &err)) {
@@ -295,6 +330,10 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
   const std::string ext = extractExtensionLower(pathHint);
   const ExtensionDemuxerEntry* entry = lookupExtension(ext);
 
+  if (!allowDemuxerAutoProbe && !entry) {
+    return makeOpenFailed(errorPrefix, pathHint, nullptr, 0);
+  }
+
   int err = 0;
   if (entry) {
     const AVInputFormat* demuxer = findDemuxerByShortName(entry->demuxerShortName);
@@ -303,6 +342,10 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
       FfmpegFormatGuardResult result;
       result.ok = true;
       return result;
+    }
+    if (demuxer && err == 0) {
+      // avformat_open_input failed without setting a negative AVERROR on some fd/hint paths.
+      err = AVERROR_INVALIDDATA;
     }
   }
 
