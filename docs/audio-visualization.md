@@ -223,6 +223,35 @@ This avoids serializing large `frames` arrays through bridge numbers/`NSNumber` 
 - `live`: reads finalized live data from spool/ring according to live buffer state. Spool file decode honors `analysisSampleRateHz`.
 - `offline`: reads PCM at the buffer’s native sample rate (`analysisSampleRateHz` ignored).
 
+## Progress (`onProgress`)
+
+Long files benefit from a two-phase progress callback on `computeAudioVisualizationProfile`:
+
+| Phase | Meaning | Typical input |
+| --- | --- | --- |
+| `decode` | Container decode + resample to analysis rate | `kind: 'file'`, live spool path |
+| `analysis` | STFT windows / bar aggregation | All paths |
+
+```ts
+await computeAudioVisualizationProfile(
+  { kind: 'file', source: fileSource },
+  {
+    analysisSampleRateHz: 8000,
+    onProgress: ({ phase, phasePercent, framesDecoded, stftWindowsDone }) => {
+      if (phase === 'decode') {
+        console.log('decode', phasePercent, framesDecoded);
+      } else {
+        console.log('analysis', phasePercent, stftWindowsDone);
+      }
+    },
+  }
+);
+```
+
+Events are delivered on the `visualizationProgress` native event (filtered by an internal `operationId`, same pattern as `decodeProgress` on `createOfflineAudioBufferFromFile`). For `kind: 'file'`, decode and analysis can both advance while PCM chunks stream — use `phase` to drive separate UI indicators.
+
+`kind: 'offline'` reports **`analysis` only** (PCM is already decoded).
+
 ## Performance (static `levels` vs timeline)
 
 ### Static `levels` (no timeline)
@@ -272,6 +301,8 @@ import type {
   AudioVisualizationOptions,
   AudioVisualizationProfile,
   AudioVisualizationTimeAggregate,
+  VisualizationProgressEvent,
+  VisualizationProgressPhase,
 } from 'react-native-sherpa-onnx/visualization';
 ```
 

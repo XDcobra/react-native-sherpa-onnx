@@ -11,12 +11,122 @@
 
 namespace {
 
+class VisualizationProgressBridge {
+ public:
+  VisualizationProgressBridge(JNIEnv *env, jobject callback) : env_(env) {
+    jclass cls = env->GetObjectClass(callback);
+    method_ = env->GetMethodID(
+        cls,
+        "onVisualizationProgress",
+        "(Ljava/lang/String;DJJJJ)V");
+    env->DeleteLocalRef(cls);
+    if (!method_) {
+      throw std::runtime_error(
+          "VISUALIZATION_INTERNAL_ERROR: Progress callback missing "
+          "onVisualizationProgress(String,double,long,long,long,long)");
+    }
+    global_ = env->NewGlobalRef(callback);
+  }
+
+  ~VisualizationProgressBridge() {
+    if (global_ && env_) {
+      env_->DeleteGlobalRef(global_);
+    }
+  }
+
+  VisualizationProgressBridge(const VisualizationProgressBridge &) = delete;
+  VisualizationProgressBridge &operator=(const VisualizationProgressBridge &) =
+      delete;
+
+  void emitDecode(int64_t framesDecoded, int64_t totalEstimate, int percent) {
+    if (!global_ || !method_) {
+      return;
+    }
+    if (percent == lastDecodePercent_) {
+      return;
+    }
+    lastDecodePercent_ = percent;
+    const double phasePercent =
+        std::max(0.0, std::min(1.0, static_cast<double>(percent) / 100.0));
+    jstring phase = env_->NewStringUTF("decode");
+    env_->CallVoidMethod(
+        global_,
+        method_,
+        phase,
+        static_cast<jdouble>(phasePercent),
+        static_cast<jlong>(framesDecoded),
+        static_cast<jlong>(totalEstimate),
+        static_cast<jlong>(0),
+        static_cast<jlong>(0));
+    env_->DeleteLocalRef(phase);
+    if (env_->ExceptionCheck()) {
+      env_->ExceptionClear();
+    }
+  }
+
+  void emitAnalysis(int64_t stftDone, int64_t stftTotal) {
+    if (!global_ || !method_) {
+      return;
+    }
+    const int64_t denom = std::max<int64_t>(1, stftTotal);
+    const int percent = static_cast<int>((stftDone * 100) / denom);
+    if (percent == lastAnalysisPercent_) {
+      return;
+    }
+    lastAnalysisPercent_ = percent;
+    const double phasePercent =
+        std::max(0.0, std::min(1.0, static_cast<double>(stftDone) / static_cast<double>(denom)));
+    jstring phase = env_->NewStringUTF("analysis");
+    env_->CallVoidMethod(
+        global_,
+        method_,
+        phase,
+        static_cast<jdouble>(phasePercent),
+        static_cast<jlong>(0),
+        static_cast<jlong>(0),
+        static_cast<jlong>(stftDone),
+        static_cast<jlong>(stftTotal));
+    env_->DeleteLocalRef(phase);
+    if (env_->ExceptionCheck()) {
+      env_->ExceptionClear();
+    }
+  }
+
+ private:
+  JNIEnv *env_ = nullptr;
+  jobject global_ = nullptr;
+  jmethodID method_ = nullptr;
+  int lastDecodePercent_ = -1;
+  int lastAnalysisPercent_ = -1;
+};
+
+std::unique_ptr<VisualizationProgressBridge> makeProgressBridge(
+    JNIEnv *env,
+    jobject callback) {
+  if (!callback) {
+    return nullptr;
+  }
+  return std::make_unique<VisualizationProgressBridge>(env, callback);
+}
+
 struct JniVisualizationAccumulator {
   explicit JniVisualizationAccumulator(const sherpa::AudioVisualizationConfig &cfg)
       : accumulator(cfg) {}
 
   sherpa::AudioVisualizationAccumulator accumulator;
+  std::unique_ptr<VisualizationProgressBridge> progress;
 };
+
+void attachAnalysisProgress(JniVisualizationAccumulator *handle) {
+  if (!handle || !handle->progress) {
+    return;
+  }
+  auto *bridge = handle->progress.get();
+  handle->accumulator.setAnalysisProgressCallback(
+      [bridge](int64_t stftDone, int64_t stftTotal) {
+        bridge->emitAnalysis(stftDone, stftTotal);
+      });
+}
 
 sherpa::AudioVisualizationAggregateMode toAggregateMode(int aggregateMode) {
   return aggregateMode == 1
@@ -220,6 +330,20 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeSetVisualizationExpectedTotalSamples(
 }
 
 JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeAttachVisualizationProgressCallback(
+    JNIEnv *env,
+    jclass /* clazz */,
+    jlong accumulatorPtr,
+    jobject progressCallback) {
+  auto *handle = fromPtr(accumulatorPtr);
+  if (!handle) {
+    return;
+  }
+  handle->progress = makeProgressBridge(env, progressCallback);
+  attachAnalysisProgress(handle);
+}
+
+JNIEXPORT void JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeFeedVisualizationAccumulator(
     JNIEnv *env,
     jclass /* clazz */,
@@ -315,7 +439,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
     jint frameCount,
     jdouble frameDurationMs,
     jdouble maxAnalysisDurationMs,
-    jint levelsMaxStftFrames) {
+    jint levelsMaxStftFrames,
+    jobject progressCallback) {
   const char *path = nullptr;
   if (jPath) {
     path = env->GetStringUTFChars(jPath, nullptr);
@@ -355,6 +480,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
   std::atomic<bool> cancelFlag(false);
   std::unique_ptr<sherpa::AudioVisualizationAccumulator> accumulator;
   int outputSampleRate = targetSampleRate > 0 ? static_cast<int>(targetSampleRate) : 16000;
+  auto progressBridge = makeProgressBridge(env, progressCallback);
 
   auto onStreamInfo = [&](int sourceSampleRate, int /* sourceChannels */) {
     outputSampleRate = targetSampleRate > 0 ? static_cast<int>(targetSampleRate) : sourceSampleRate;
@@ -376,6 +502,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
       const int64_t expectedSamples =
           (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
       accumulator->setExpectedTotalSamples(expectedSamples);
+    }
+    if (progressBridge) {
+      auto *bridge = progressBridge.get();
+      accumulator->setAnalysisProgressCallback(
+          [bridge](int64_t stftDone, int64_t stftTotal) {
+            bridge->emitAnalysis(stftDone, stftTotal);
+          });
     }
   };
 
@@ -400,6 +533,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
             (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
         accumulator->setExpectedTotalSamples(expectedSamples);
       }
+      if (progressBridge) {
+        auto *bridge = progressBridge.get();
+        accumulator->setAnalysisProgressCallback(
+            [bridge](int64_t stftDone, int64_t stftTotal) {
+              bridge->emitAnalysis(stftDone, stftTotal);
+            });
+      }
     }
     accumulator->feed(samples, frameCount);
     if (accumulator->isAnalysisCapReached()) {
@@ -407,13 +547,21 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
     }
   };
 
+  sherpa::DecodeProgressCallback onDecodeProgress = nullptr;
+  if (progressBridge) {
+    auto *bridge = progressBridge.get();
+    onDecodeProgress = [bridge](int64_t framesDecoded, int64_t totalEstimate, int percent) {
+      bridge->emitDecode(framesDecoded, totalEstimate, percent);
+    };
+  }
+
   try {
     auto decodeResult = sherpa::decodeFile(
         path,
         static_cast<int>(inputFd),
         decodeConfig,
         onChunk,
-        nullptr,
+        onDecodeProgress,
         onStreamInfo,
         cancelFlag);
 

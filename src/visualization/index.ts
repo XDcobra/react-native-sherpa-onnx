@@ -1,3 +1,4 @@
+import { NativeEventEmitter } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   resolvePipelineAudioBufferId,
@@ -10,6 +11,8 @@ import type {
   AudioVisualizationOptions,
   AudioVisualizationProfile,
   AudioVisualizationTimeAggregate,
+  VisualizationProgressEvent,
+  VisualizationProgressPhase,
 } from './types';
 import { takeVisualizationFrames } from './jsi';
 
@@ -34,6 +37,61 @@ const MIN_FRAME_DURATION_MS = 50;
 const MAX_FRAME_DURATION_MS = 10_000;
 const DEFAULT_FRAME_DURATION_MS = 500;
 const MAX_FRAME_PAYLOAD_FLOATS = 131_072;
+
+let visualizationProgressOpCounter = 0;
+
+type NativeSubscription = { remove: () => void };
+
+function parseVisualizationProgressPhase(
+  value: unknown
+): VisualizationProgressPhase | null {
+  if (value === 'decode' || value === 'analysis') {
+    return value;
+  }
+  return null;
+}
+
+function mapNativeVisualizationProgressEvent(
+  raw: Record<string, unknown>
+): VisualizationProgressEvent | null {
+  const phase = parseVisualizationProgressPhase(raw.phase);
+  if (!phase) {
+    return null;
+  }
+  const phasePercent =
+    typeof raw.phasePercent === 'number' && Number.isFinite(raw.phasePercent)
+      ? Math.max(0, Math.min(1, raw.phasePercent))
+      : 0;
+  const event: VisualizationProgressEvent = { phase, phasePercent };
+  if (
+    typeof raw.framesDecoded === 'number' &&
+    Number.isFinite(raw.framesDecoded)
+  ) {
+    event.framesDecoded = Math.max(0, Math.trunc(raw.framesDecoded));
+  }
+  if (
+    typeof raw.totalFramesEstimate === 'number' &&
+    Number.isFinite(raw.totalFramesEstimate)
+  ) {
+    event.totalFramesEstimate = Math.max(
+      0,
+      Math.trunc(raw.totalFramesEstimate)
+    );
+  }
+  if (
+    typeof raw.stftWindowsDone === 'number' &&
+    Number.isFinite(raw.stftWindowsDone)
+  ) {
+    event.stftWindowsDone = Math.max(0, Math.trunc(raw.stftWindowsDone));
+  }
+  if (
+    typeof raw.stftWindowsTotal === 'number' &&
+    Number.isFinite(raw.stftWindowsTotal)
+  ) {
+    event.stftWindowsTotal = Math.max(0, Math.trunc(raw.stftWindowsTotal));
+  }
+  return event;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
@@ -335,132 +393,176 @@ export async function computeAudioVisualizationProfile(
 ): Promise<AudioVisualizationProfile> {
   const normalizedInput = normalizeInput(input);
   const normalizedOptions = normalizeOptions(options);
+  const onProgress = options?.onProgress;
 
-  const nativeResult = await SherpaOnnx.computeAudioVisualizationProfile(
-    normalizedInput as Object,
-    normalizedOptions as Object
-  );
+  const progressOperationId = onProgress
+    ? `viz_${Date.now()}_${++visualizationProgressOpCounter}`
+    : undefined;
 
-  const barCount =
-    typeof nativeResult?.barCount === 'number' &&
-    Number.isFinite(nativeResult.barCount)
-      ? Math.max(1, Math.trunc(nativeResult.barCount))
-      : normalizedOptions.barCount;
+  let progressSubscription: NativeSubscription | null = null;
 
-  const sourceLevels = Array.isArray(nativeResult?.levels)
-    ? nativeResult.levels
-    : [];
-
-  if (typeof __DEV__ !== 'undefined' && __DEV__ && sourceLevels.length > 0) {
-    let rawMin = Number.POSITIVE_INFINITY;
-    let rawMax = Number.NEGATIVE_INFINITY;
-    let rawAtOne = 0;
-    for (const raw of sourceLevels) {
-      if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-        continue;
-      }
-      rawMin = Math.min(rawMin, raw);
-      rawMax = Math.max(rawMax, raw);
-      if (raw >= 0.999) {
-        rawAtOne += 1;
-      }
-    }
-    console.log('[AudioVizDebug] native bridge levels (pre JS clamp)', {
-      count: sourceLevels.length,
-      min: rawMin,
-      max: rawMax,
-      atOne: rawAtOne,
-      head: sourceLevels.slice(0, 8),
-      tail: sourceLevels.slice(-8),
-    });
-  }
-
-  const levels = Array.from({ length: barCount }, (_, i) =>
-    toUnitFloat(sourceLevels[i])
-  );
-
-  const sampleRate =
-    typeof nativeResult?.sampleRate === 'number' &&
-    Number.isFinite(nativeResult.sampleRate)
-      ? Math.max(0, Math.trunc(nativeResult.sampleRate))
-      : 0;
-
-  const durationMs =
-    typeof nativeResult?.durationMs === 'number' &&
-    Number.isFinite(nativeResult.durationMs)
-      ? Math.max(0, nativeResult.durationMs)
-      : 0;
-
-  const nativeFrameCount =
-    typeof nativeResult?.frameCount === 'number' &&
-    Number.isFinite(nativeResult.frameCount)
-      ? Math.max(0, Math.trunc(nativeResult.frameCount))
-      : 0;
-
-  const frameCount = nativeFrameCount;
-
-  const frameDurationMs =
-    frameCount > 0 &&
-    typeof nativeResult?.frameDurationMs === 'number' &&
-    Number.isFinite(nativeResult.frameDurationMs)
-      ? Math.max(0, nativeResult.frameDurationMs)
-      : 0;
-
-  const expectedFramesLength = frameCount * barCount;
-  let frames: Float32Array | undefined;
-
-  const framesTransferId =
-    typeof nativeResult?.framesTransferId === 'string'
-      ? nativeResult.framesTransferId.trim()
-      : '';
-
-  if (frameCount > 0 && framesTransferId.length > 0) {
-    const buffer = takeVisualizationFrames(framesTransferId);
-    let data = new Float32Array(buffer);
-    if (data.length !== expectedFramesLength) {
-      if (data.length > expectedFramesLength) {
-        data = data.slice(0, expectedFramesLength);
-      } else {
-        const padded = new Float32Array(expectedFramesLength);
-        padded.set(data);
-        data = padded;
-      }
+  try {
+    if (onProgress && progressOperationId) {
+      const emitter = new NativeEventEmitter();
+      progressSubscription = emitter.addListener(
+        'visualizationProgress',
+        (event: {
+          operationId?: string;
+          phase?: string;
+          phasePercent?: number;
+          framesDecoded?: number;
+          totalFramesEstimate?: number;
+          stftWindowsDone?: number;
+          stftWindowsTotal?: number;
+        }) => {
+          if (event?.operationId !== progressOperationId) {
+            return;
+          }
+          const mapped = mapNativeVisualizationProgressEvent(
+            event as Record<string, unknown>
+          );
+          if (mapped) {
+            onProgress(mapped);
+          }
+        }
+      );
     }
 
-    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    const nativeOptions: Record<string, unknown> = {
+      ...normalizedOptions,
+    };
+    if (progressOperationId) {
+      nativeOptions.progressOperationId = progressOperationId;
+    }
+
+    const nativeResult = await SherpaOnnx.computeAudioVisualizationProfile(
+      normalizedInput as Object,
+      nativeOptions as Object
+    );
+
+    const barCount =
+      typeof nativeResult?.barCount === 'number' &&
+      Number.isFinite(nativeResult.barCount)
+        ? Math.max(1, Math.trunc(nativeResult.barCount))
+        : normalizedOptions.barCount;
+
+    const sourceLevels = Array.isArray(nativeResult?.levels)
+      ? nativeResult.levels
+      : [];
+
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && sourceLevels.length > 0) {
       let rawMin = Number.POSITIVE_INFINITY;
       let rawMax = Number.NEGATIVE_INFINITY;
-      for (let i = 0; i < data.length; i += 1) {
-        const raw = data[i] ?? 0;
+      let rawAtOne = 0;
+      for (const raw of sourceLevels) {
+        if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+          continue;
+        }
         rawMin = Math.min(rawMin, raw);
         rawMax = Math.max(rawMax, raw);
+        if (raw >= 0.999) {
+          rawAtOne += 1;
+        }
       }
-      console.log('[AudioVizDebug] native JSI frames (pre JS clamp)', {
-        length: data.length,
-        frameCount,
-        barCount,
+      console.log('[AudioVizDebug] native bridge levels (pre JS clamp)', {
+        count: sourceLevels.length,
         min: rawMin,
         max: rawMax,
-        frame0Head: Array.from(data.slice(0, Math.min(8, barCount))),
+        atOne: rawAtOne,
+        head: sourceLevels.slice(0, 8),
+        tail: sourceLevels.slice(-8),
       });
     }
 
-    for (let i = 0; i < data.length; i += 1) {
-      data[i] = toUnitFloat(data[i]);
-    }
-    frames = data;
-  }
+    const levels = Array.from({ length: barCount }, (_, i) =>
+      toUnitFloat(sourceLevels[i])
+    );
 
-  return {
-    kind: DEFAULT_KIND,
-    sampleRate,
-    durationMs,
-    barCount,
-    levels,
-    frameCount,
-    frameDurationMs,
-    frames,
-  };
+    const sampleRate =
+      typeof nativeResult?.sampleRate === 'number' &&
+      Number.isFinite(nativeResult.sampleRate)
+        ? Math.max(0, Math.trunc(nativeResult.sampleRate))
+        : 0;
+
+    const durationMs =
+      typeof nativeResult?.durationMs === 'number' &&
+      Number.isFinite(nativeResult.durationMs)
+        ? Math.max(0, nativeResult.durationMs)
+        : 0;
+
+    const nativeFrameCount =
+      typeof nativeResult?.frameCount === 'number' &&
+      Number.isFinite(nativeResult.frameCount)
+        ? Math.max(0, Math.trunc(nativeResult.frameCount))
+        : 0;
+
+    const frameCount = nativeFrameCount;
+
+    const frameDurationMs =
+      frameCount > 0 &&
+      typeof nativeResult?.frameDurationMs === 'number' &&
+      Number.isFinite(nativeResult.frameDurationMs)
+        ? Math.max(0, nativeResult.frameDurationMs)
+        : 0;
+
+    const expectedFramesLength = frameCount * barCount;
+    let frames: Float32Array | undefined;
+
+    const framesTransferId =
+      typeof nativeResult?.framesTransferId === 'string'
+        ? nativeResult.framesTransferId.trim()
+        : '';
+
+    if (frameCount > 0 && framesTransferId.length > 0) {
+      const buffer = takeVisualizationFrames(framesTransferId);
+      let data = new Float32Array(buffer);
+      if (data.length !== expectedFramesLength) {
+        if (data.length > expectedFramesLength) {
+          data = data.slice(0, expectedFramesLength);
+        } else {
+          const padded = new Float32Array(expectedFramesLength);
+          padded.set(data);
+          data = padded;
+        }
+      }
+
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        let rawMin = Number.POSITIVE_INFINITY;
+        let rawMax = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < data.length; i += 1) {
+          const raw = data[i] ?? 0;
+          rawMin = Math.min(rawMin, raw);
+          rawMax = Math.max(rawMax, raw);
+        }
+        console.log('[AudioVizDebug] native JSI frames (pre JS clamp)', {
+          length: data.length,
+          frameCount,
+          barCount,
+          min: rawMin,
+          max: rawMax,
+          frame0Head: Array.from(data.slice(0, Math.min(8, barCount))),
+        });
+      }
+
+      for (let i = 0; i < data.length; i += 1) {
+        data[i] = toUnitFloat(data[i]);
+      }
+      frames = data;
+    }
+
+    return {
+      kind: DEFAULT_KIND,
+      sampleRate,
+      durationMs,
+      barCount,
+      levels,
+      frameCount,
+      frameDurationMs,
+      frames,
+    };
+  } finally {
+    progressSubscription?.remove();
+  }
 }
 
 export type {
@@ -469,4 +571,6 @@ export type {
   AudioVisualizationOptions,
   AudioVisualizationProfile,
   AudioVisualizationTimeAggregate,
+  VisualizationProgressEvent,
+  VisualizationProgressPhase,
 } from './types';

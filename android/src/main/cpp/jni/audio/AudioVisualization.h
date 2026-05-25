@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <cstdint>
 #include <vector>
@@ -38,6 +39,10 @@ struct AudioVisualizationConfig {
   AudioVisualizationLevelsConfig levels;
 };
 
+/** Invoked during STFT analysis (phase `analysis`). */
+using AudioVisualizationAnalysisProgressCallback =
+    std::function<void(int64_t stftWindowsDone, int64_t stftWindowsTotal)>;
+
 struct AudioVisualizationProfile {
   int sampleRate = 0;
   int64_t durationMs = 0;
@@ -55,6 +60,8 @@ class AudioVisualizationAccumulator {
   void feed(const float *samples, int sampleCount);
   /** Hint total mono samples (offline buffer, probe, etc.) to size hop for static `levels`. */
   void setExpectedTotalSamples(int64_t totalSamples);
+  void setAnalysisProgressCallback(
+      AudioVisualizationAnalysisProgressCallback callback);
   AudioVisualizationProfile finish();
 
   int sampleRate() const { return sampleRate_; }
@@ -102,6 +109,10 @@ class AudioVisualizationAccumulator {
   int64_t analyzedSamples_ = 0;
   int64_t frameWindowIndex_ = 0;
   int64_t processedFrameCount_ = 0;
+  int64_t estimatedStftWindowsTotal_ = 0;
+  int lastReportedAnalysisPercent_ = -1;
+
+  AudioVisualizationAnalysisProgressCallback analysisProgressCallback_;
 
   int64_t totalSamples_ = 0;
 

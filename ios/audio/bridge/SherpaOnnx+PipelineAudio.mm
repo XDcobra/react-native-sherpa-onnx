@@ -348,9 +348,40 @@ struct PaVisualizationOptions {
   double maxAnalysisDurationMs = 0.0;
   int levelsMaxStftFrames = 1024;
   int analysisSampleRateHz = 0;
+  NSString *progressOperationId = nil;
   sherpa::AudioVisualizationAggregateMode aggregateMode =
       sherpa::AudioVisualizationAggregateMode::MAX_HOLD;
 };
+
+static void pa_emitVisualizationProgress(
+  __weak SherpaOnnx *weakEmitter,
+  NSString *operationId,
+  NSString *phase,
+  double phasePercent,
+  int64_t framesDecoded,
+  int64_t totalFramesEstimate,
+  int64_t stftWindowsDone,
+  int64_t stftWindowsTotal
+) {
+  if (!operationId || operationId.length == 0) {
+    return;
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    SherpaOnnx *emitter = weakEmitter;
+    if (!emitter) {
+      return;
+    }
+    [emitter sendEventWithName:@"visualizationProgress" body:@{
+      @"operationId": operationId,
+      @"phase": phase ?: @"analysis",
+      @"phasePercent": @(std::max(0.0, std::min(1.0, phasePercent))),
+      @"framesDecoded": @((double)framesDecoded),
+      @"totalFramesEstimate": @((double)totalFramesEstimate),
+      @"stftWindowsDone": @((double)stftWindowsDone),
+      @"stftWindowsTotal": @((double)stftWindowsTotal),
+    }];
+  });
+}
 
 static bool pa_parseVisualizationOptions(
   NSDictionary *options,
@@ -449,6 +480,15 @@ static bool pa_parseVisualizationOptions(
     }
   }
 
+  NSString *progressOperationId = options[@"progressOperationId"];
+  if (progressOperationId != nil) {
+    NSString *trimmed = [progressOperationId stringByTrimmingCharactersInSet:
+      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length > 0) {
+      out.progressOperationId = trimmed;
+    }
+  }
+
   return true;
 }
 
@@ -480,12 +520,30 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromSamples(
   const float *samples,
   int sampleCount,
   int sampleRate,
-  const PaVisualizationOptions &options
+  const PaVisualizationOptions &options,
+  __weak SherpaOnnx *progressEmitter
 ) {
   auto cfg = pa_makeVisualizationConfig(sampleRate, options);
   sherpa::AudioVisualizationAccumulator accumulator(cfg);
   if (!options.includeTimeline && sampleCount > 0) {
     accumulator.setExpectedTotalSamples(static_cast<int64_t>(sampleCount));
+  }
+  if (options.progressOperationId.length > 0) {
+    NSString *opId = options.progressOperationId;
+    accumulator.setAnalysisProgressCallback(
+      [progressEmitter, opId](int64_t stftDone, int64_t stftTotal) {
+        const double pct = static_cast<double>(stftDone) /
+          static_cast<double>(std::max<int64_t>(1, stftTotal));
+        pa_emitVisualizationProgress(
+          progressEmitter,
+          opId,
+          @"analysis",
+          pct,
+          0,
+          0,
+          stftDone,
+          stftTotal);
+      });
   }
   if (samples != nullptr && sampleCount > 0) {
     accumulator.feed(samples, sampleCount);
@@ -495,7 +553,8 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromSamples(
 
 static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
   const std::string &path,
-  const PaVisualizationOptions &options
+  const PaVisualizationOptions &options,
+  __weak SherpaOnnx *progressEmitter
 ) {
   sherpa::AudioDecodeConfig decodeConfig;
   decodeConfig.targetSampleRate =
@@ -515,6 +574,28 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
   std::atomic<bool> cancelFlag(false);
   std::unique_ptr<sherpa::AudioVisualizationAccumulator> accumulator;
   int outputSampleRate = 16000;
+  const bool hasProgress = options.progressOperationId.length > 0;
+  NSString *progressOpId = options.progressOperationId;
+
+  auto attachAnalysisProgress = [&](sherpa::AudioVisualizationAccumulator &acc) {
+    if (!hasProgress) {
+      return;
+    }
+    acc.setAnalysisProgressCallback(
+      [progressEmitter, progressOpId](int64_t stftDone, int64_t stftTotal) {
+        const double pct = static_cast<double>(stftDone) /
+          static_cast<double>(std::max<int64_t>(1, stftTotal));
+        pa_emitVisualizationProgress(
+          progressEmitter,
+          progressOpId,
+          @"analysis",
+          pct,
+          0,
+          0,
+          stftDone,
+          stftTotal);
+      });
+  };
 
   auto onStreamInfo = [&](int sourceSampleRate, int /* sourceChannels */) {
     outputSampleRate = options.analysisSampleRateHz > 0
@@ -527,12 +608,14 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
           (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
       accumulator->setExpectedTotalSamples(expectedSamples);
     }
+    attachAnalysisProgress(*accumulator);
   };
 
   auto onChunk = [&](const float *samples, int frameCount) {
     if (!accumulator) {
       auto cfg = pa_makeVisualizationConfig(outputSampleRate, options);
       accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+      attachAnalysisProgress(*accumulator);
     }
     accumulator->feed(samples, frameCount);
     if (accumulator->isAnalysisCapReached()) {
@@ -540,11 +623,27 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
     }
   };
 
+  sherpa::DecodeProgressCallback onDecodeProgress = nullptr;
+  if (hasProgress) {
+    onDecodeProgress = [progressEmitter, progressOpId](
+        int64_t framesDecoded, int64_t totalEstimate, int percent) {
+      pa_emitVisualizationProgress(
+        progressEmitter,
+        progressOpId,
+        @"decode",
+        static_cast<double>(percent) / 100.0,
+        framesDecoded,
+        totalEstimate,
+        0,
+        0);
+    };
+  }
+
   auto decodeResult = sherpa::decodeFile(
     path.c_str(),
     decodeConfig,
     onChunk,
-    nullptr,
+    onDecodeProgress,
     onStreamInfo,
     cancelFlag
   );
@@ -1854,6 +1953,7 @@ static bool pa_populate_offline_from_source_if_empty(
 
   NSDictionary *inputCopy = [input copy];
   NSString *kindCopy = [kind copy];
+  __weak SherpaOnnx *weakSelf = self;
 
   dispatch_async(SherpaAudioDecodeQueue(), ^{
     @autoreleasepool {
@@ -1882,7 +1982,8 @@ static bool pa_populate_offline_from_source_if_empty(
             samples,
             sampleCount,
             entry->sampleRate,
-            parsedOptions
+            parsedOptions,
+            weakSelf
           );
         } else if ([kindCopy isEqualToString:@"live"]) {
           NSString *handle = inputCopy[@"handle"];
@@ -1908,14 +2009,18 @@ static bool pa_populate_offline_from_source_if_empty(
           }
 
           if (liveEntry->hasActiveSpool && !liveEntry->spoolPath.empty()) {
-            profile = pa_computeVisualizationFromFile(liveEntry->spoolPath, parsedOptions);
+            profile = pa_computeVisualizationFromFile(
+              liveEntry->spoolPath,
+              parsedOptions,
+              weakSelf);
           } else {
             auto snapshot = liveEntry->snapshotRing();
             profile = pa_computeVisualizationFromSamples(
               snapshot.empty() ? nullptr : snapshot.data(),
               (int)snapshot.size(),
               liveEntry->sampleRate,
-              parsedOptions
+              parsedOptions,
+              weakSelf
             );
           }
         } else if ([kindCopy isEqualToString:@"file"]) {
@@ -1957,7 +2062,7 @@ static bool pa_populate_offline_from_source_if_empty(
             }
 
             std::string path = [sourcePath UTF8String];
-            profile = pa_computeVisualizationFromFile(path, parsedOptions);
+            profile = pa_computeVisualizationFromFile(path, parsedOptions, weakSelf);
           } catch (...) {
             if (readHandle) {
               [readHandle cleanup];

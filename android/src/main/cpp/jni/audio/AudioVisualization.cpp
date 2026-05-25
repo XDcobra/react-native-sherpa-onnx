@@ -229,6 +229,24 @@ void AudioVisualizationAccumulator::applyLevelsHopFromExpectedSamples() {
 void AudioVisualizationAccumulator::setExpectedTotalSamples(int64_t totalSamples) {
   expectedTotalSamples_ = std::max<int64_t>(0, totalSamples);
   applyLevelsHopFromExpectedSamples();
+  if (expectedTotalSamples_ > 0 && hopSize_ > 0) {
+    estimatedStftWindowsTotal_ = std::max<int64_t>(
+        1,
+        (expectedTotalSamples_ - static_cast<int64_t>(fftSize_)) /
+                static_cast<int64_t>(hopSize_) +
+            1);
+  } else if (levelsMaxStftFrames_ > 0) {
+    estimatedStftWindowsTotal_ = static_cast<int64_t>(levelsMaxStftFrames_);
+  } else {
+    estimatedStftWindowsTotal_ = 0;
+  }
+  lastReportedAnalysisPercent_ = -1;
+}
+
+void AudioVisualizationAccumulator::setAnalysisProgressCallback(
+    AudioVisualizationAnalysisProgressCallback callback) {
+  analysisProgressCallback_ = std::move(callback);
+  lastReportedAnalysisPercent_ = -1;
 }
 
 void AudioVisualizationAccumulator::feed(const float *samples, int sampleCount) {
@@ -262,6 +280,10 @@ void AudioVisualizationAccumulator::feed(const float *samples, int sampleCount) 
 }
 
 AudioVisualizationProfile AudioVisualizationAccumulator::finish() {
+  if (analysisProgressCallback_ && estimatedStftWindowsTotal_ > 0) {
+    analysisProgressCallback_(
+        processedFrameCount_, estimatedStftWindowsTotal_);
+  }
   processAvailableFrames();
   processPaddedFrameIfNeeded();
 
@@ -528,6 +550,17 @@ void AudioVisualizationAccumulator::processFrame(const float *frame) {
   }
 
   ++processedFrameCount_;
+
+  if (analysisProgressCallback_ && estimatedStftWindowsTotal_ > 0) {
+    const int64_t done = processedFrameCount_;
+    const int64_t total = estimatedStftWindowsTotal_;
+    const int percent =
+        static_cast<int>((done * 100) / std::max<int64_t>(1, total));
+    if (percent != lastReportedAnalysisPercent_) {
+      lastReportedAnalysisPercent_ = percent;
+      analysisProgressCallback_(done, total);
+    }
+  }
 }
 
 void AudioVisualizationAccumulator::ensureWorkBuffers() {

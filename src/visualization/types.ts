@@ -8,6 +8,21 @@ export type AudioVisualizationKind = 'spectrum_bars';
 
 export type AudioVisualizationTimeAggregate = 'max_hold' | 'mean';
 
+/** Decode (file/spool ingest) vs STFT spectrum analysis. */
+export type VisualizationProgressPhase = 'decode' | 'analysis';
+
+export type VisualizationProgressEvent = {
+  phase: VisualizationProgressPhase;
+  /** Progress within the current phase, 0..1. */
+  phasePercent: number;
+  /** Set during `decode` (PCM frames decoded). */
+  framesDecoded?: number;
+  totalFramesEstimate?: number;
+  /** Set during `analysis` (STFT windows processed). */
+  stftWindowsDone?: number;
+  stftWindowsTotal?: number;
+};
+
 export type AudioVisualizationOptions = {
   kind?: AudioVisualizationKind;
   barCount?: number;
@@ -29,6 +44,12 @@ export type AudioVisualizationOptions = {
    * Does not apply to existing `off_*` offline buffers (already decoded).
    */
   analysisSampleRateHz?: number;
+  /**
+   * Optional progress for long-running visualization.
+   * `decode` = container decode/resample; `analysis` = STFT / bar aggregation.
+   * For `kind: 'file'`, both phases may advance while chunks are streamed.
+   */
+  onProgress?: (event: VisualizationProgressEvent) => void;
 };
 
 export type AudioVisualizationProfile = {

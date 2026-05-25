@@ -1122,6 +1122,61 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return decodable.path ?: decodable.pathHint
   }
 
+  private fun emitVisualizationProgress(
+    operationId: String,
+    phase: String,
+    phasePercent: Double,
+    framesDecoded: Long = 0,
+    totalFramesEstimate: Long = 0,
+    stftWindowsDone: Long = 0,
+    stftWindowsTotal: Long = 0,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putString("phase", phase)
+      payload.putDouble("phasePercent", phasePercent.coerceIn(0.0, 1.0))
+      payload.putDouble("framesDecoded", framesDecoded.toDouble())
+      payload.putDouble("totalFramesEstimate", totalFramesEstimate.toDouble())
+      payload.putDouble("stftWindowsDone", stftWindowsDone.toDouble())
+      payload.putDouble("stftWindowsTotal", stftWindowsTotal.toDouble())
+      eventEmitter.emit("visualizationProgress", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures (e.g. bridge teardown)
+    }
+  }
+
+  private fun makeVisualizationProgressCallback(
+    operationId: String?,
+  ): VisualizationProgressCallback? {
+    val opId = operationId?.trim().orEmpty()
+    if (opId.isEmpty()) {
+      return null
+    }
+    return object : VisualizationProgressCallback {
+      override fun onVisualizationProgress(
+        phase: String,
+        phasePercent: Double,
+        framesDecoded: Long,
+        totalFramesEstimate: Long,
+        stftWindowsDone: Long,
+        stftWindowsTotal: Long,
+      ) {
+        emitVisualizationProgress(
+          opId,
+          phase,
+          phasePercent,
+          framesDecoded,
+          totalFramesEstimate,
+          stftWindowsDone,
+          stftWindowsTotal,
+        )
+      }
+    }
+  }
+
   private data class VisualizationOptions(
     val barCount: Int,
     val minHz: Double,
@@ -1135,6 +1190,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val maxAnalysisDurationMs: Double,
     val levelsMaxStftFrames: Int,
     val analysisSampleRateHz: Double,
+    val progressOperationId: String? = null,
   )
 
   private fun visualizationDecodeTargetSampleRate(options: VisualizationOptions): Int {
@@ -1263,6 +1319,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         0.0
       }
 
+    val progressOperationId =
+      options.getString("progressOperationId")?.trim()?.takeIf { it.isNotEmpty() }
+
     return VisualizationOptions(
       barCount = barCount,
       minHz = minHz,
@@ -1276,6 +1335,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       maxAnalysisDurationMs = maxAnalysisDurationMs,
       levelsMaxStftFrames = levelsMaxStftFrames,
       analysisSampleRateHz = analysisSampleRateHz,
+      progressOperationId = progressOperationId,
     )
   }
 
@@ -1341,6 +1401,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private fun computeVisualizationFromOffline(
     bufferId: String,
     options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
   ): HashMap<String, Any> {
     val entry = PipelineAudioRegistry.getOffline(bufferId)
       ?: throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Offline buffer not found: $bufferId")
@@ -1367,6 +1428,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       if (!options.includeTimeline) {
         nativeSetVisualizationExpectedTotalSamples(accumulatorPtr, entry.numSamples.toLong())
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
       }
       val chunk = FloatArray(8192)
       when (entry) {
@@ -1412,6 +1476,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private fun computeVisualizationFromLive(
     liveBufferId: String,
     options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
   ): HashMap<String, Any> {
     val live = PipelineAudioRegistry.getLive(liveBufferId)
     if (live == null) {
@@ -1450,6 +1515,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         options.frameDurationMs,
         options.maxAnalysisDurationMs,
         options.levelsMaxStftFrames,
+        progressCallback,
       ) as? HashMap<String, Any>
         ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
     }
@@ -1478,6 +1544,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           accumulatorPtr,
           live.totalSamplesWritten.toLong()
         )
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
       }
       val snapshot = live.snapshotRing()
       if (snapshot.isNotEmpty()) {
@@ -1517,6 +1586,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           ?: throw IllegalArgumentException("VISUALIZATION_INVALID_INPUT: input.kind is required")
 
         val normalizedOptions = parseVisualizationOptions(options)
+        val progressCallback =
+          makeVisualizationProgressCallback(normalizedOptions.progressOperationId)
 
         val nativeResult = when (kind) {
           "offline" -> {
@@ -1524,7 +1595,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               ?: throw IllegalArgumentException(
                 "VISUALIZATION_INVALID_INPUT: offline input requires bufferId"
               )
-            computeVisualizationFromOffline(bufferId, normalizedOptions)
+            computeVisualizationFromOffline(bufferId, normalizedOptions, progressCallback)
           }
 
           "live" -> {
@@ -1532,7 +1603,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               ?: throw IllegalArgumentException(
                 "VISUALIZATION_INVALID_INPUT: live input requires handle"
               )
-            computeVisualizationFromLive(handle, normalizedOptions)
+            computeVisualizationFromLive(handle, normalizedOptions, progressCallback)
           }
 
           "file" -> {
@@ -1567,6 +1638,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               normalizedOptions.frameDurationMs,
               normalizedOptions.maxAnalysisDurationMs,
               normalizedOptions.levelsMaxStftFrames,
+              progressCallback,
             ) as? HashMap<String, Any>
               ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
           }
@@ -5185,6 +5257,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalSamples: Long,
     )
 
+    @JvmStatic
+    external fun nativeAttachVisualizationProgressCallback(
+      accumulatorPtr: Long,
+      progressCallback: VisualizationProgressCallback,
+    )
+
     /** Feed mono float32 samples into a visualization accumulator. */
     @JvmStatic
     external fun nativeFeedVisualizationAccumulator(
@@ -5228,6 +5306,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       frameDurationMs: Double,
       maxAnalysisDurationMs: Double,
       levelsMaxStftFrames: Int,
+      progressCallback: VisualizationProgressCallback?,
     ): HashMap<String, Any>?
 
     /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */

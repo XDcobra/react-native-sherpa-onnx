@@ -41,6 +41,8 @@ describe('visualization timeline option resolution', () => {
         timeAggregate: 'max_hold',
         includeTimeline: false,
         maxAnalysisDurationMs: 0,
+        levelsMaxStftFrames: 1024,
+        analysisSampleRateHz: 0,
       }
     );
   });
