@@ -2,10 +2,16 @@
 
 ## Introduction
 
-Import from `react-native-sherpa-onnx/visualization`. This page documents both visualization outputs:
+Import from `react-native-sherpa-onnx/visualization`. The SDK computes spectrum data natively and returns normalized numbers — **no built-in React Native widgets**. Your app draws bars, heatmaps, scrubbers, or custom Skia views from:
 
 - `levels`: one global spectrum (2D preview/thumbnail)
-- `frames`: timeline spectrum series (animation/scrub/3D)
+- `frames`: timeline spectrum series (animation/scrub/heatmap/3D-style UI)
+
+| ![Static spectrum bars](./images/example/vis_static_cut.png) | ![Timeline heatmap](./images/example/vis_heatmap_cut.png) | ![Pseudo-3D spectrum (example app)](./images/example/vis_3d_cut.png) |
+| --- | --- | --- |
+| Static · `levels` | Heatmap · `frames` | 3D tab · example Skia UI from `frames` |
+
+The screenshots are from the [example app](../example/README.md#audio-visualization-showcase) (`AudioVisualizationScreen`). The 3D view is **demo UI only** — isometric bars rendered with `@shopify/react-native-skia` from timeline frame data, not a native 3D API.
 
 Input can be one of:
 
@@ -54,6 +60,78 @@ const profile = await computeAudioVisualizationProfile(
 
 console.log(profile.frameCount, profile.frameDurationMs, profile.frames?.length);
 ```
+
+## Rendering patterns (app-side)
+
+Use one profile per asset, then branch on what you need to draw. The example app (`example/src/screens/audio-visualization/`) uses a single timeline-enabled compute and switches views in JS.
+
+### Static bars (`levels`)
+
+![Static spectrum bars](./images/example/vis_static_cut.png)
+
+Global `levels` are enough for thumbnails, list rows, or a whole-file waveform. No timeline allocation.
+
+```tsx
+const profile = await computeAudioVisualizationProfile(fileInput, {
+  barCount: 96,
+  timeAggregate: 'mean',
+});
+
+// Render: map profile.levels[b] (0..1) to bar height
+profile.levels.map((level, b) => (
+  <View key={b} style={{ height: `${level * 100}%` }} />
+));
+```
+
+Reference: `example/src/components/SpectrumBarsView.tsx` (mirrored bars, optional resampling).
+
+### Heatmap (`frames`)
+
+![Timeline heatmap](./images/example/vis_heatmap_cut.png)
+
+With `includeTimeline: true`, read the row-major tensor: `frames[t * barCount + b]`. Color each cell by magnitude; downsample rows/columns in UI if `frameCount` or `barCount` is large.
+
+```tsx
+const { frames, frameCount, barCount } = profile;
+if (!frames) return null;
+
+const valueAt = (t: number, b: number) => frames[t * barCount + b] ?? 0;
+
+// Nested loops: t in [0, frameCount), b in [0, barCount)
+```
+
+Reference: `example/src/components/SpectrumHeatmapView.tsx`.
+
+### Timeline playback and pseudo-3D (`frames`)
+
+![Pseudo-3D spectrum](./images/example/vis_3d_cut.png)
+
+**Animated** bars and the example **3D** tab both index into `frames` by time (playback position or auto-advance). Reuse the same `frameAt` helper for any per-frame view:
+
+```ts
+const frameAt = (positionMs: number): Float32Array | null => {
+  if (!profile.frames || profile.frameCount <= 0) return null;
+  const index = Math.max(
+    0,
+    Math.min(
+      profile.frameCount - 1,
+      Math.floor(positionMs / profile.frameDurationMs)
+    )
+  );
+  const offset = index * profile.barCount;
+  return profile.frames.subarray(offset, offset + profile.barCount);
+};
+```
+
+```tsx
+// Animated bars or pseudo-3D: pass frameAt(playheadMs) to your renderer
+const frameLevels = frameAt(playheadMs);
+if (frameLevels) {
+  <SpectrumBarsView levels={frameLevels} />;
+}
+```
+
+Reference: `SpectrumBarsView` (animated tab), `Spectrum3DView` (Skia isometric bars — not an SDK feature).
 
 ## API reference
 

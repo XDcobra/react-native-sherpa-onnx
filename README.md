@@ -330,7 +330,22 @@ Every active engine keeps its model weights resident in native memory for its en
 
 ## Audio visualization
 
-The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-onnx/visualization`) — static bars and optional timeline data for previews and animation, without sending PCM through JS. See [Audio visualization](./docs/audio-visualization.md).
+The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-onnx/visualization`) — static `levels` and optional timeline `frames` for previews and animation, without sending PCM through JS. You render the UI in your app; the [example app](./example/README.md#audio-visualization-showcase) shows Static, Heatmap, and pseudo-3D patterns.
+
+<table>
+<tr>
+<td align="center"><img src="./docs/images/example/vis_static_cut.png" alt="Static spectrum bars" width="180" /></td>
+<td align="center"><img src="./docs/images/example/vis_heatmap_cut.png" alt="Timeline heatmap" width="180" /></td>
+<td align="center"><img src="./docs/images/example/vis_3d_cut.png" alt="Pseudo-3D spectrum (example UI)" width="180" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Static · <code>levels</code></sub></td>
+<td align="center"><sub>Heatmap · <code>frames</code></sub></td>
+<td align="center"><sub>3D demo · app Skia UI</sub></td>
+</tr>
+</table>
+
+Full guide: [Audio visualization](./docs/audio-visualization.md).
 
 ## Documentation
 
