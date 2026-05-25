@@ -45,6 +45,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 ### Playback & utilities
 
 - Playback: [PCM Player](./docs/pcm-player.md)
+- Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
 - Runtime acceleration: [Execution providers](./docs/execution-providers.md)
 - Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
 - Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md)
@@ -131,6 +132,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 - [Known issues](#known-issues)
 - [Supported Model Types](#supported-model-types)
 - [Memory and models](#memory-and-models)
+- [Audio visualization](#audio-visualization)
 - [Documentation](#documentation)
 - [Requirements](#requirements)
   - [Platform Support Status](#platform-support-status)
@@ -326,6 +328,10 @@ Every active engine keeps its model weights resident in native memory for its en
 
 → Full planning guide: [docs/memory-and-models.md](./docs/memory-and-models.md)
 
+## Audio visualization
+
+The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-onnx/visualization`) — static bars and optional timeline data for previews and animation, without sending PCM through JS. See [Audio visualization](./docs/audio-visualization.md).
+
 ## Documentation
 
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
@@ -342,6 +348,7 @@ Every active engine keeps its model weights resident in native memory for its en
 - **Pipeline segment buffers:** [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
 - [Pipeline Audio Session](./docs/audio-session.md) – Global audio session policy and route preference for mic + PCM
 - [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
+- [Audio visualization](./docs/audio-visualization.md) – `computeAudioVisualizationProfile` — static `levels` and timeline `frames` for spectrum UI
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Source Separation](./docs/separation.md)
