@@ -170,6 +170,12 @@ This screen validates file and conversion workflows, including loading local ass
 
 **Codec sandbox (`test_codec/`):** bundled samples for probe/decode/encode round-trips. Add files listed in `example/android/app/src/main/assets/test_codec/README.md` (Android) and `example/ios/sherpa_models/test_codec/README.md` (iOS), then rebuild. Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }` (APK `assets/`, not sandbox `files/`).
 
+## Audio visualization showcase
+
+This screen demonstrates the public visualization API end to end: choose audio, run one `computeAudioVisualizationProfile` call with timeline enabled, and render from returned `levels`/`frames`. The tabs include Static, Animated, Heatmap, and a pseudo-3D animation.
+
+The 3D tab is demo UI only. It uses a Skia canvas renderer fed by SDK timeline frames and does not indicate any native 3D rendering capability in the SDK.
+
 ## Segmentation showcase
 
 

@@ -111,7 +111,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Pipelines & Demos',
     title: 'Audio Visualization',
     description:
-      'SDK supplies spectrum data (`levels` / `frames`); example app renders its own UI',
+      'SDK supplies spectrum data (`levels` / `frames`); example UI renders Static, Animated, Heatmap, and pseudo-3D views',
     icon: 'bar-chart-outline',
     screen: 'AudioVisualization',
     implemented: true,

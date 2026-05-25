@@ -67,7 +67,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   AudioVisualization: {
     title: 'Audio visualization API',
-    body: 'The public SDK (`react-native-sherpa-onnx/visualization`) computes spectrum data in native code and returns `levels` plus optional timeline `frames` — it does not ship any UI widgets. Your app is responsible for drawing bars, heatmaps, scrubbers, or 3D views from that data. This screen demonstrates the API: pick audio, call `computeAudioVisualizationProfile`, then render the result yourself. The Static, Animated, and Heatmap tabs here are example UI only, built for this demo app.',
+    body: 'The public SDK (`react-native-sherpa-onnx/visualization`) computes spectrum data in native code and returns `levels` plus optional timeline `frames` — it does not ship any UI widgets. Your app is responsible for drawing bars, heatmaps, scrubbers, or 3D views from that data. This screen demonstrates the API: pick audio, call `computeAudioVisualizationProfile`, then render the result yourself. The Static, Animated, Heatmap, and Skia-based 3D tabs here are example UI only, built for this demo app.',
   },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',
