@@ -1,0 +1,407 @@
+#include <jni.h>
+
+#include <algorithm>
+#include <atomic>
+#include <memory>
+#include <stdexcept>
+#include <string>
+
+#include "AudioDecodeSession.h"
+#include "AudioVisualization.h"
+
+namespace {
+
+struct JniVisualizationAccumulator {
+  explicit JniVisualizationAccumulator(const sherpa::AudioVisualizationConfig &cfg)
+      : accumulator(cfg) {}
+
+  sherpa::AudioVisualizationAccumulator accumulator;
+};
+
+sherpa::AudioVisualizationAggregateMode toAggregateMode(int aggregateMode) {
+  return aggregateMode == 1
+      ? sherpa::AudioVisualizationAggregateMode::MEAN
+      : sherpa::AudioVisualizationAggregateMode::MAX_HOLD;
+}
+
+sherpa::AudioVisualizationConfig makeVisualizationConfig(
+    int sampleRate,
+    int barCount,
+    double minHz,
+    double maxHz,
+    int fftSize,
+    int hopSize,
+  int aggregateMode,
+  bool includeTimeline,
+  int frameCount,
+  double frameDurationMs,
+  double maxAnalysisDurationMs) {
+  sherpa::AudioVisualizationConfig cfg;
+  cfg.sampleRate = std::max(1, sampleRate);
+  cfg.barCount = barCount;
+  cfg.minHz = static_cast<float>(minHz);
+  cfg.maxHz = static_cast<float>(maxHz);
+  cfg.fftSize = fftSize;
+  cfg.hopSize = hopSize;
+  cfg.aggregateMode = toAggregateMode(aggregateMode);
+  cfg.timeline.enabled =
+    includeTimeline || frameCount > 0 || frameDurationMs > 0.0;
+  cfg.timeline.frameCount = frameCount;
+  cfg.timeline.frameDurationMs = frameDurationMs;
+  cfg.timeline.maxAnalysisSamples =
+    maxAnalysisDurationMs > 0.0
+      ? static_cast<int64_t>(
+        (cfg.sampleRate * maxAnalysisDurationMs) / 1000.0)
+      : 0;
+  return cfg;
+}
+
+jobject profileToHashMap(
+    JNIEnv *env,
+  sherpa::AudioVisualizationProfile profile) {
+  jclass hashMapClass = env->FindClass("java/util/HashMap");
+  jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+  jmethodID hashMapPut = env->GetMethodID(
+      hashMapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+
+  jobject map = env->NewObject(hashMapClass, hashMapInit);
+
+  auto putEntry = [&](const char *key, jobject value) {
+    jstring jKey = env->NewStringUTF(key);
+    jobject prev = env->CallObjectMethod(map, hashMapPut, jKey, value);
+    if (prev) {
+      env->DeleteLocalRef(prev);
+    }
+    env->DeleteLocalRef(jKey);
+  };
+
+  jclass intClass = env->FindClass("java/lang/Integer");
+  jmethodID intValueOf = env->GetStaticMethodID(
+      intClass,
+      "valueOf",
+      "(I)Ljava/lang/Integer;");
+
+  jobject sampleRateValue = env->CallStaticObjectMethod(
+      intClass,
+      intValueOf,
+      static_cast<jint>(profile.sampleRate));
+  putEntry("sampleRate", sampleRateValue);
+  env->DeleteLocalRef(sampleRateValue);
+
+  jobject barCountValue = env->CallStaticObjectMethod(
+      intClass,
+      intValueOf,
+      static_cast<jint>(profile.barCount));
+  putEntry("barCount", barCountValue);
+  env->DeleteLocalRef(barCountValue);
+
+  jclass longClass = env->FindClass("java/lang/Long");
+  jmethodID longValueOf = env->GetStaticMethodID(
+      longClass,
+      "valueOf",
+      "(J)Ljava/lang/Long;");
+
+  jobject durationValue = env->CallStaticObjectMethod(
+      longClass,
+      longValueOf,
+      static_cast<jlong>(profile.durationMs));
+  putEntry("durationMs", durationValue);
+  env->DeleteLocalRef(durationValue);
+
+  jobject frameCountValue = env->CallStaticObjectMethod(
+      intClass,
+      intValueOf,
+      static_cast<jint>(profile.frameCount));
+  putEntry("frameCount", frameCountValue);
+  env->DeleteLocalRef(frameCountValue);
+
+  jclass doubleClass = env->FindClass("java/lang/Double");
+  jmethodID doubleValueOf = env->GetStaticMethodID(
+      doubleClass,
+      "valueOf",
+      "(D)Ljava/lang/Double;");
+  jobject frameDurationValue = env->CallStaticObjectMethod(
+      doubleClass,
+      doubleValueOf,
+      static_cast<jdouble>(profile.frameDurationMs));
+  putEntry("frameDurationMs", frameDurationValue);
+  env->DeleteLocalRef(frameDurationValue);
+
+  if (profile.frameCount > 0 && !profile.frames.empty()) {
+    std::string transferId =
+        sherpa::storeVisualizationFramesForTransfer(std::move(profile.frames));
+    if (!transferId.empty()) {
+      jstring jTransferId = env->NewStringUTF(transferId.c_str());
+      putEntry("framesTransferId", jTransferId);
+      env->DeleteLocalRef(jTransferId);
+    }
+  }
+
+  jfloatArray levelsArray = env->NewFloatArray(
+      static_cast<jsize>(profile.levels.size()));
+  if (levelsArray && !profile.levels.empty()) {
+    env->SetFloatArrayRegion(
+        levelsArray,
+        0,
+        static_cast<jsize>(profile.levels.size()),
+        profile.levels.data());
+  }
+  putEntry("levels", levelsArray);
+  if (levelsArray) {
+    env->DeleteLocalRef(levelsArray);
+  }
+
+  env->DeleteLocalRef(intClass);
+  env->DeleteLocalRef(longClass);
+  env->DeleteLocalRef(doubleClass);
+  env->DeleteLocalRef(hashMapClass);
+
+  return map;
+}
+
+JniVisualizationAccumulator *fromPtr(jlong ptr) {
+  return reinterpret_cast<JniVisualizationAccumulator *>(ptr);
+}
+
+}  // namespace
+
+extern "C" {
+
+JNIEXPORT jlong JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeCreateVisualizationAccumulator(
+    JNIEnv * /* env */,
+    jclass /* clazz */,
+    jint sampleRate,
+    jint barCount,
+    jdouble minHz,
+    jdouble maxHz,
+    jint fftSize,
+    jint hopSize,
+    jint aggregateMode,
+    jboolean includeTimeline,
+    jint frameCount,
+    jdouble frameDurationMs,
+    jdouble maxAnalysisDurationMs) {
+  auto cfg = makeVisualizationConfig(
+      static_cast<int>(sampleRate),
+      static_cast<int>(barCount),
+      static_cast<double>(minHz),
+      static_cast<double>(maxHz),
+      static_cast<int>(fftSize),
+      static_cast<int>(hopSize),
+      static_cast<int>(aggregateMode),
+      static_cast<bool>(includeTimeline),
+      static_cast<int>(frameCount),
+      static_cast<double>(frameDurationMs),
+      static_cast<double>(maxAnalysisDurationMs));
+
+  auto *handle = new JniVisualizationAccumulator(cfg);
+  return reinterpret_cast<jlong>(handle);
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeFeedVisualizationAccumulator(
+    JNIEnv *env,
+    jclass /* clazz */,
+    jlong accumulatorPtr,
+    jfloatArray samples,
+    jint sampleCount) {
+  auto *handle = fromPtr(accumulatorPtr);
+  if (!handle) {
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Invalid accumulator pointer");
+    return;
+  }
+
+  if (!samples || sampleCount <= 0) {
+    return;
+  }
+
+  const jsize arrayLength = env->GetArrayLength(samples);
+  const int count = std::min(static_cast<int>(arrayLength), static_cast<int>(sampleCount));
+  if (count <= 0) {
+    return;
+  }
+
+  jboolean isCopy = JNI_FALSE;
+  jfloat *values = env->GetFloatArrayElements(samples, &isCopy);
+  if (!values) {
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Failed to access sample array");
+    return;
+  }
+
+  handle->accumulator.feed(values, count);
+  env->ReleaseFloatArrayElements(samples, values, JNI_ABORT);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeFinishVisualizationAccumulator(
+    JNIEnv *env,
+    jclass /* clazz */,
+    jlong accumulatorPtr) {
+  auto *handle = fromPtr(accumulatorPtr);
+  if (!handle) {
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Invalid accumulator pointer");
+    return nullptr;
+  }
+
+  auto profile = handle->accumulator.finish();
+  return profileToHashMap(env, profile);
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeReleaseVisualizationAccumulator(
+    JNIEnv * /* env */,
+    jclass /* clazz */,
+    jlong accumulatorPtr) {
+  auto *handle = fromPtr(accumulatorPtr);
+  delete handle;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
+    JNIEnv *env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd,
+    jint targetSampleRate,
+    jboolean forceMono,
+    jint chunkSize,
+    jboolean allowDemuxerAutoProbe,
+    jint barCount,
+    jdouble minHz,
+    jdouble maxHz,
+    jint fftSize,
+    jint hopSize,
+    jint aggregateMode,
+    jboolean includeTimeline,
+    jint frameCount,
+    jdouble frameDurationMs,
+    jdouble maxAnalysisDurationMs) {
+  const char *path = nullptr;
+  if (jPath) {
+    path = env->GetStringUTFChars(jPath, nullptr);
+    if (!path) {
+      env->ThrowNew(
+          env->FindClass("java/lang/RuntimeException"),
+          "VISUALIZATION_INTERNAL_ERROR: Failed to access path");
+      return nullptr;
+    }
+  }
+
+  if ((!path || path[0] == '\0') && inputFd < 0) {
+    if (path && jPath) {
+      env->ReleaseStringUTFChars(jPath, path);
+    }
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INVALID_INPUT: Empty file path and invalid fd");
+    return nullptr;
+  }
+
+  sherpa::AudioDecodeConfig decodeConfig;
+  decodeConfig.targetSampleRate = static_cast<int>(targetSampleRate);
+  decodeConfig.forceMono = static_cast<bool>(forceMono);
+  decodeConfig.chunkSize = chunkSize > 0 ? static_cast<int>(chunkSize) : 8192;
+  decodeConfig.allowDemuxerAutoProbe = static_cast<bool>(allowDemuxerAutoProbe);
+
+  std::atomic<bool> cancelFlag(false);
+  std::unique_ptr<sherpa::AudioVisualizationAccumulator> accumulator;
+  int outputSampleRate = targetSampleRate > 0 ? static_cast<int>(targetSampleRate) : 16000;
+
+  auto onStreamInfo = [&](int sourceSampleRate, int /* sourceChannels */) {
+    outputSampleRate = targetSampleRate > 0 ? static_cast<int>(targetSampleRate) : sourceSampleRate;
+    auto cfg = makeVisualizationConfig(
+        outputSampleRate,
+        static_cast<int>(barCount),
+        static_cast<double>(minHz),
+        static_cast<double>(maxHz),
+        static_cast<int>(fftSize),
+        static_cast<int>(hopSize),
+      static_cast<int>(aggregateMode),
+      static_cast<bool>(includeTimeline),
+      static_cast<int>(frameCount),
+      static_cast<double>(frameDurationMs),
+      static_cast<double>(maxAnalysisDurationMs));
+    accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+  };
+
+  auto onChunk = [&](const float *samples, int frameCount) {
+    if (!accumulator) {
+      auto cfg = makeVisualizationConfig(
+          outputSampleRate,
+          static_cast<int>(barCount),
+          static_cast<double>(minHz),
+          static_cast<double>(maxHz),
+          static_cast<int>(fftSize),
+          static_cast<int>(hopSize),
+          static_cast<int>(aggregateMode),
+          static_cast<bool>(includeTimeline),
+          static_cast<int>(frameCount),
+          static_cast<double>(frameDurationMs),
+          static_cast<double>(maxAnalysisDurationMs));
+      accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+    }
+    accumulator->feed(samples, frameCount);
+  };
+
+  try {
+    auto decodeResult = sherpa::decodeFile(
+        path,
+        static_cast<int>(inputFd),
+        decodeConfig,
+        onChunk,
+        nullptr,
+        onStreamInfo,
+        cancelFlag);
+
+    if (!accumulator) {
+      outputSampleRate =
+          targetSampleRate > 0 ? static_cast<int>(targetSampleRate) : decodeResult.sourceSampleRate;
+      auto cfg = makeVisualizationConfig(
+          outputSampleRate,
+          static_cast<int>(barCount),
+          static_cast<double>(minHz),
+          static_cast<double>(maxHz),
+          static_cast<int>(fftSize),
+          static_cast<int>(hopSize),
+          static_cast<int>(aggregateMode),
+          static_cast<bool>(includeTimeline),
+          static_cast<int>(frameCount),
+          static_cast<double>(frameDurationMs),
+          static_cast<double>(maxAnalysisDurationMs));
+      accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+    }
+
+    auto profile = accumulator->finish();
+
+    if (path && jPath) {
+      env->ReleaseStringUTFChars(jPath, path);
+    }
+
+    return profileToHashMap(env, profile);
+  } catch (const std::runtime_error &e) {
+    if (path && jPath) {
+      env->ReleaseStringUTFChars(jPath, path);
+    }
+    env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    return nullptr;
+  } catch (...) {
+    if (path && jPath) {
+      env->ReleaseStringUTFChars(jPath, path);
+    }
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Unknown error during file visualization");
+    return nullptr;
+  }
+}
+
+}  // extern "C"

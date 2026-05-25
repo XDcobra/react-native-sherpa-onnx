@@ -279,6 +279,30 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Compute a static frequency-spectrum visualization profile.
+   *
+   * Input payload is a discriminated object:
+   * - `{ kind: 'file', source: FileSource }`
+   * - `{ kind: 'offline', bufferId: 'off_...' }`
+   * - `{ kind: 'live', handle: 'live_...' }` (must be finalized)
+   *
+   * Options are flattened for TurboModule codegen.
+   */
+  computeAudioVisualizationProfile(
+    input: Object,
+    options: Object
+  ): Promise<{
+    kind: string;
+    sampleRate: number;
+    durationMs: number;
+    barCount: number;
+    levels: number[];
+    frameCount: number;
+    frameDurationMs: number;
+    framesTransferId?: string;
+  }>;
+
+  /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
    * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).

@@ -16,6 +16,7 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
@@ -1119,6 +1120,422 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
   private fun nativePathArg(decodable: DecodableSource): String? {
     return decodable.path ?: decodable.pathHint
+  }
+
+  private data class VisualizationOptions(
+    val barCount: Int,
+    val minHz: Double,
+    val maxHz: Double,
+    val fftSize: Int,
+    val hopSize: Int,
+    val aggregateCode: Int,
+    val includeTimeline: Boolean,
+    val frameCount: Int,
+    val frameDurationMs: Double,
+    val maxAnalysisDurationMs: Double,
+  )
+
+  private fun parseOptionalNumber(options: ReadableMap, key: String): Double? {
+    if (!options.hasKey(key) || options.isNull(key)) {
+      return null
+    }
+    val value = options.getDouble(key)
+    if (!value.isFinite()) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: $key must be a finite number"
+      )
+    }
+    return value
+  }
+
+  private fun parseVisualizationOptions(options: ReadableMap): VisualizationOptions {
+    val kind = options.getString("kind") ?: "spectrum_bars"
+    if (kind != "spectrum_bars") {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: kind must be 'spectrum_bars'"
+      )
+    }
+
+    val timeAggregate = options.getString("timeAggregate") ?: "max_hold"
+    val aggregateCode = when (timeAggregate) {
+      "max_hold" -> 0
+      "mean" -> 1
+      else -> -1
+    }
+    if (aggregateCode < 0) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: timeAggregate must be 'max_hold' or 'mean'"
+      )
+    }
+
+    val requestedBars = if (options.hasKey("barCount") && !options.isNull("barCount")) {
+      options.getDouble("barCount").toInt()
+    } else {
+      96
+    }
+    val barCount = requestedBars.coerceIn(8, 512)
+
+    val minHz = if (options.hasKey("minHz") && !options.isNull("minHz")) {
+      options.getDouble("minHz").coerceAtLeast(10.0)
+    } else {
+      60.0
+    }
+
+    val maxHz = if (options.hasKey("maxHz") && !options.isNull("maxHz")) {
+      options.getDouble("maxHz")
+    } else {
+      0.0
+    }
+
+    val hasFrameCount = options.hasKey("frameCount") && !options.isNull("frameCount")
+    val hasFrameDuration =
+      options.hasKey("frameDurationMs") && !options.isNull("frameDurationMs")
+    val includeTimeline =
+      (options.hasKey("includeTimeline") && !options.isNull("includeTimeline") &&
+        options.getBoolean("includeTimeline")) || hasFrameCount || hasFrameDuration
+
+    var frameCount = 0
+    if (hasFrameCount) {
+      val raw = parseOptionalNumber(options, "frameCount") ?: 0.0
+      frameCount = raw.toInt()
+      if (frameCount < 8 || frameCount > 512) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512"
+        )
+      }
+    }
+
+    var frameDurationMs = 0.0
+    if (frameCount <= 0 && hasFrameDuration) {
+      val raw = parseOptionalNumber(options, "frameDurationMs") ?: 0.0
+      frameDurationMs = raw
+      if (frameDurationMs < 50.0 || frameDurationMs > 10000.0) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameDurationMs must be between 50 and 10000"
+        )
+      }
+    }
+
+    if (includeTimeline && frameCount <= 0 && frameDurationMs <= 0.0) {
+      frameDurationMs = 500.0
+    }
+
+    val maxAnalysisDurationMs =
+      (parseOptionalNumber(options, "maxAnalysisDurationMs") ?: 0.0).coerceAtLeast(0.0)
+
+    return VisualizationOptions(
+      barCount = barCount,
+      minHz = minHz,
+      maxHz = maxHz,
+      fftSize = 2048,
+      hopSize = 1024,
+      aggregateCode = aggregateCode,
+      includeTimeline = includeTimeline,
+      frameCount = frameCount,
+      frameDurationMs = frameDurationMs,
+      maxAnalysisDurationMs = maxAnalysisDurationMs,
+    )
+  }
+
+  private fun normalizeVisualizationNativeResult(
+    nativeResult: HashMap<String, Any>,
+    fallbackBarCount: Int,
+  ): com.facebook.react.bridge.WritableMap {
+    val sampleRate = (nativeResult["sampleRate"] as? Int) ?: 0
+    val durationMs = when (val value = nativeResult["durationMs"]) {
+      is Long -> value.toDouble()
+      is Int -> value.toDouble()
+      is Double -> value
+      is Float -> value.toDouble()
+      else -> 0.0
+    }
+    val nativeBarCount = ((nativeResult["barCount"] as? Int) ?: fallbackBarCount)
+      .coerceAtLeast(1)
+    val frameCount = ((nativeResult["frameCount"] as? Int) ?: 0)
+      .coerceAtLeast(0)
+    val frameDurationMs = when (val value = nativeResult["frameDurationMs"]) {
+      is Double -> value
+      is Float -> value.toDouble()
+      is Int -> value.toDouble()
+      is Long -> value.toDouble()
+      else -> 0.0
+    }.coerceAtLeast(0.0)
+    val framesTransferId = nativeResult["framesTransferId"] as? String
+
+    val rawLevels = nativeResult["levels"]
+    val levels = when (rawLevels) {
+      is FloatArray -> rawLevels.map { it.toDouble() }
+      is DoubleArray -> rawLevels.toList()
+      is IntArray -> rawLevels.map { it.toDouble() }
+      is ArrayList<*> -> rawLevels.map {
+        when (it) {
+          is Number -> it.toDouble()
+          else -> 0.0
+        }
+      }
+      else -> emptyList()
+    }
+
+    val map = Arguments.createMap()
+    map.putString("kind", "spectrum_bars")
+    map.putInt("sampleRate", sampleRate.coerceAtLeast(0))
+    map.putDouble("durationMs", durationMs.coerceAtLeast(0.0))
+    map.putInt("barCount", nativeBarCount)
+    map.putInt("frameCount", frameCount)
+    map.putDouble("frameDurationMs", frameDurationMs)
+    if (!framesTransferId.isNullOrBlank()) {
+      map.putString("framesTransferId", framesTransferId)
+    }
+
+    val levelArray = Arguments.createArray()
+    for (i in 0 until nativeBarCount) {
+      val raw = if (i < levels.size) levels[i] else 0.0
+      levelArray.pushDouble(raw.coerceIn(0.0, 1.0))
+    }
+    map.putArray("levels", levelArray)
+    return map
+  }
+
+  private fun computeVisualizationFromOffline(
+    bufferId: String,
+    options: VisualizationOptions,
+  ): HashMap<String, Any> {
+    val entry = PipelineAudioRegistry.getOffline(bufferId)
+      ?: throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Offline buffer not found: $bufferId")
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      entry.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+    )
+
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      val chunk = FloatArray(8192)
+      when (entry) {
+        is OfflineEntry.MmapBacked -> {
+          var start = 0
+          val total = entry.numSamples
+          while (start < total) {
+            val maxSamples = minOf(chunk.size, total - start)
+            val count = entry.readInto(start, chunk, 0, maxSamples)
+            if (count <= 0) break
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+          }
+        }
+
+        is OfflineEntry.InMemory -> {
+          var start = 0
+          val source = entry.samples
+          while (start < source.size) {
+            val count = minOf(chunk.size, source.size - start)
+            System.arraycopy(source, start, chunk, 0, count)
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+          }
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  private fun computeVisualizationFromLive(
+    liveBufferId: String,
+    options: VisualizationOptions,
+  ): HashMap<String, Any> {
+    val live = PipelineAudioRegistry.getLive(liveBufferId)
+    if (live == null) {
+      if (PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+        throw IllegalArgumentException(
+          "BUFFER_INVALIDATED: Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      }
+      throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Live buffer not found: $liveBufferId")
+    }
+
+    if (live.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED) {
+      throw IllegalStateException(
+        "AUDIO_INVALID_STATE: Live buffer must be finalized before visualization"
+      )
+    }
+
+    val spoolPath = live.spoolFilePath
+    if (live.hasActiveSpool && !spoolPath.isNullOrBlank()) {
+      @Suppress("UNCHECKED_CAST")
+      return nativeComputeVisualizationProfileFromFile(
+        spoolPath,
+        -1,
+        0,
+        true,
+        8192,
+        true,
+        options.barCount,
+        options.minHz,
+        options.maxHz,
+        options.fftSize,
+        options.hopSize,
+        options.aggregateCode,
+        options.includeTimeline,
+        options.frameCount,
+        options.frameDurationMs,
+        options.maxAnalysisDurationMs,
+      ) as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    }
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      live.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+    )
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      val snapshot = live.snapshotRing()
+      if (snapshot.isNotEmpty()) {
+        val chunk = FloatArray(8192)
+        var start = 0
+        while (start < snapshot.size) {
+          val count = minOf(chunk.size, snapshot.size - start)
+          System.arraycopy(snapshot, start, chunk, 0, count)
+          nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+          start += count
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  override fun computeAudioVisualizationProfile(
+    input: ReadableMap,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        val kind = input.getString("kind")
+          ?: throw IllegalArgumentException("VISUALIZATION_INVALID_INPUT: input.kind is required")
+
+        val normalizedOptions = parseVisualizationOptions(options)
+
+        val nativeResult = when (kind) {
+          "offline" -> {
+            val bufferId = input.getString("bufferId")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: offline input requires bufferId"
+              )
+            computeVisualizationFromOffline(bufferId, normalizedOptions)
+          }
+
+          "live" -> {
+            val handle = input.getString("handle")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: live input requires handle"
+              )
+            computeVisualizationFromLive(handle, normalizedOptions)
+          }
+
+          "file" -> {
+            val source = input.getMap("source")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: file input requires source"
+              )
+
+            readHandle = fileIOHelper.resolveSource(source)
+            val decodableSource = resolveDecodableSource(
+              readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+              source,
+            )
+            tempSourceFile = decodableSource.tempFile
+
+            @Suppress("UNCHECKED_CAST")
+            nativeComputeVisualizationProfileFromFile(
+              nativePathArg(decodableSource),
+              decodableSource.fd,
+              0,
+              true,
+              8192,
+              true,
+              normalizedOptions.barCount,
+              normalizedOptions.minHz,
+              normalizedOptions.maxHz,
+              normalizedOptions.fftSize,
+              normalizedOptions.hopSize,
+              normalizedOptions.aggregateCode,
+              normalizedOptions.includeTimeline,
+              normalizedOptions.frameCount,
+              normalizedOptions.frameDurationMs,
+              normalizedOptions.maxAnalysisDurationMs,
+            ) as? HashMap<String, Any>
+              ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+          }
+
+          else -> {
+            throw IllegalArgumentException(
+              "VISUALIZATION_INVALID_INPUT: unsupported input kind '$kind'"
+            )
+          }
+        }
+
+        promise.resolve(
+          normalizeVisualizationNativeResult(nativeResult, normalizedOptions.barCount)
+        )
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "VISUALIZATION_INTERNAL_ERROR: Unknown visualization error"
+        val code = when {
+          msg.startsWith("VISUALIZATION_") -> msg.substringBefore(":").trim()
+          msg.startsWith("AUDIO_") -> msg.substringBefore(":").trim()
+          msg.startsWith("BUFFER_") -> msg.substringBefore(":").trim()
+          msg.startsWith("DECODE_") -> msg.substringBefore(":").trim()
+          else -> "VISUALIZATION_INTERNAL_ERROR"
+        }
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("VISUALIZATION_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
   }
 
   override fun decodeFileToOfflineBuffer(
@@ -4679,6 +5096,63 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       cancelFlagPtr: Long,
       chunkCallback: Any,
       progressCallback: Any?
+    ): HashMap<String, Any>?
+
+    /** Create a shared C++ visualization accumulator for chunked processing. */
+    @JvmStatic
+    external fun nativeCreateVisualizationAccumulator(
+      sampleRate: Int,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
+    ): Long
+
+    /** Feed mono float32 samples into a visualization accumulator. */
+    @JvmStatic
+    external fun nativeFeedVisualizationAccumulator(
+      accumulatorPtr: Long,
+      samples: FloatArray,
+      sampleCount: Int,
+    )
+
+    /** Finalize and get visualization profile HashMap{sampleRate,durationMs,barCount,levels,frameCount,frameDurationMs,framesTransferId?}. */
+    @JvmStatic
+    external fun nativeFinishVisualizationAccumulator(
+      accumulatorPtr: Long,
+    ): HashMap<String, Any>?
+
+    /** Release visualization accumulator pointer. */
+    @JvmStatic
+    external fun nativeReleaseVisualizationAccumulator(
+      accumulatorPtr: Long,
+    )
+
+    /** Compute visualization profile directly from a file source (path/fd) in native C++. */
+    @JvmStatic
+    external fun nativeComputeVisualizationProfileFromFile(
+      path: String?,
+      inputFd: Int,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
     ): HashMap<String, Any>?
 
     /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */

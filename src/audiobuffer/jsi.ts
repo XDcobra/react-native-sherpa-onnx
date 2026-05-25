@@ -22,6 +22,7 @@ type SherpaOnnxJSI = {
     samples: ArrayBuffer,
     sampleRate: number
   ): void;
+  takeVisualizationFrames(transferId: string): ArrayBuffer;
 };
 
 declare global {
