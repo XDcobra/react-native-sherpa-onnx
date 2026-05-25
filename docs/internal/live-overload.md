@@ -214,7 +214,7 @@ The subscription is automatically cleaned up when `handle.completed` settles (re
 | Segmentation domain | `speech` |
 | Supported policies | Any speech-domain evaluator (`speech_energy_silence`, `speech_vad_model`, etc.) |
 | Bridge call | `startSttOfflineLivePipeline` |
-| Options type | `SttLivePipelineOptions` — extends `LiveOfflinePipelineBaseOptions` + `chunkSize?`, `onSegment?` |
+| Options type | `SttLivePipelineOptions` — extends `LiveOfflinePipelineBaseOptions` + `onSegment?` |
 | Pipeline handle | `SttPipelineHandle` extends `StreamingPipelineHandle` |
 
 ### TTS (`createTTS().synthesize(LiveText, LiveAudio, options)`)

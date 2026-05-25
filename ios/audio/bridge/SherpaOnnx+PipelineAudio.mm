@@ -395,7 +395,7 @@ static bool pa_parseVisualizationOptions(
   NSNumber *frameDurationMs = options[@"frameDurationMs"];
   NSNumber *includeTimeline = options[@"includeTimeline"];
 
-  const bool hasFrameCount = frameCount != nil;
+  const bool hasFrameCount = frameCount != nil && [frameCount intValue] > 0;
   const bool hasFrameDuration = frameDurationMs != nil;
   out.includeTimeline =
     (includeTimeline != nil && [includeTimeline boolValue]) ||

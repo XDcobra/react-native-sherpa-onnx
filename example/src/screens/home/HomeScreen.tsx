@@ -107,6 +107,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'audio_visualization',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Audio Visualization',
+    description:
+      'SDK supplies spectrum data (`levels` / `frames`); example app renders its own UI',
+    icon: 'bar-chart-outline',
+    screen: 'AudioVisualization',
+    implemented: true,
+  },
+  {
     id: 'generate_timestamp',
     sectionTitle: 'Alignment & Subtitles',
     title: 'Alignment (Subtitles/Timestamps)',

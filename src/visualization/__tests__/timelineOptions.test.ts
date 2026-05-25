@@ -40,8 +40,6 @@ describe('visualization timeline option resolution', () => {
         maxHz: 0,
         timeAggregate: 'max_hold',
         includeTimeline: false,
-        frameCount: 0,
-        frameDurationMs: 0,
         maxAnalysisDurationMs: 0,
       }
     );
@@ -54,10 +52,12 @@ describe('visualization timeline option resolution', () => {
       { kind: 'file', source },
       expect.objectContaining({
         includeTimeline: true,
-        frameCount: 0,
         frameDurationMs: 500,
       })
     );
+    expect(
+      mockNative.computeAudioVisualizationProfile.mock.calls[0][1]
+    ).not.toHaveProperty('frameCount');
   });
 
   test('frameCount has priority when both frameCount and frameDurationMs are set', async () => {
@@ -86,7 +86,6 @@ describe('visualization timeline option resolution', () => {
       { kind: 'file', source },
       expect.objectContaining({
         includeTimeline: true,
-        frameCount: 0,
         frameDurationMs: 250,
       })
     );

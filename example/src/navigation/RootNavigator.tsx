@@ -20,6 +20,7 @@ import EnhancementStreamingScreen from '../screens/enhancement-streaming/Enhance
 import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import FileIOScreen from '../screens/fileio/FileIOScreen';
+import AudioVisualizationScreen from '../screens/audio-visualization/AudioVisualizationScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -168,6 +169,13 @@ export default function RootNavigator() {
         component={FileIOScreen}
         options={{
           title: 'File I/O',
+        }}
+      />
+      <Stack.Screen
+        name="AudioVisualization"
+        component={AudioVisualizationScreen}
+        options={{
+          title: 'Audio Visualization',
         }}
       />
     </Stack.Navigator>

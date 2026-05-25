@@ -345,14 +345,6 @@ export async function pickFileioInputForChannel(
   }
 }
 
-/** @deprecated Use {@link pickFileioInputForChannel} — kept for any external imports */
-export async function pickFileioInputSource(): Promise<FileioInputSource | null> {
-  if (Platform.OS === 'ios') {
-    return pickFileioInputForChannel('securityScoped');
-  }
-  return pickFileioInputForChannel('contentUri');
-}
-
 export function resolveBundledCodecSource(
   format: CodecAssetFormat
 ): FileioInputSource {

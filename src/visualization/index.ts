@@ -176,17 +176,21 @@ function toUnitFloat(value: unknown): number {
   return value;
 }
 
-function normalizeOptions(options: AudioVisualizationOptions | undefined): {
+type NativeVisualizationOptions = {
   kind: AudioVisualizationKind;
   barCount: number;
   minHz: number;
   maxHz: number;
   timeAggregate: AudioVisualizationTimeAggregate;
   includeTimeline: boolean;
-  frameCount: number;
-  frameDurationMs: number;
   maxAnalysisDurationMs: number;
-} {
+  frameCount?: number;
+  frameDurationMs?: number;
+};
+
+function normalizeOptions(
+  options: AudioVisualizationOptions | undefined
+): NativeVisualizationOptions {
   const kind = options?.kind ?? DEFAULT_KIND;
   if (kind !== DEFAULT_KIND) {
     throw new Error(
@@ -221,19 +225,24 @@ function normalizeOptions(options: AudioVisualizationOptions | undefined): {
     );
   }
 
-  const hasFrameCount = options?.frameCount != null;
+  const requestedFrameCount =
+    options?.frameCount != null
+      ? Math.trunc(normalizeFiniteNonNegative(options.frameCount, 0))
+      : null;
+  const hasExplicitFrameCount =
+    requestedFrameCount != null && requestedFrameCount > 0;
   const hasFrameDuration = options?.frameDurationMs != null;
   const includeTimeline =
-    options?.includeTimeline === true || hasFrameCount || hasFrameDuration;
+    options?.includeTimeline === true ||
+    hasExplicitFrameCount ||
+    hasFrameDuration;
 
-  let frameCount = 0;
-  let frameDurationMs = 0;
+  let frameCount: number | undefined;
+  let frameDurationMs: number | undefined;
 
   if (includeTimeline) {
-    if (hasFrameCount) {
-      frameCount = Math.trunc(
-        normalizeFiniteNonNegative(options?.frameCount, 0)
-      );
+    if (hasExplicitFrameCount) {
+      frameCount = requestedFrameCount!;
       if (frameCount < MIN_FRAME_COUNT || frameCount > MAX_FRAME_COUNT) {
         throw new Error(
           'AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512'
@@ -266,17 +275,22 @@ function normalizeOptions(options: AudioVisualizationOptions | undefined): {
     0
   );
 
-  return {
+  const nativeOptions: Record<string, unknown> = {
     kind,
     barCount,
     minHz,
     maxHz,
     timeAggregate,
     includeTimeline,
-    frameCount,
-    frameDurationMs,
     maxAnalysisDurationMs,
   };
+  if (frameCount != null) {
+    nativeOptions.frameCount = frameCount;
+    nativeOptions.frameDurationMs = 0;
+  } else if (frameDurationMs != null) {
+    nativeOptions.frameDurationMs = frameDurationMs;
+  }
+  return nativeOptions as NativeVisualizationOptions;
 }
 
 export async function computeAudioVisualizationProfile(

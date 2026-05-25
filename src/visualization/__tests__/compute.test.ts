@@ -45,8 +45,6 @@ describe('computeAudioVisualizationProfile', () => {
         maxHz: 0,
         timeAggregate: 'max_hold',
         includeTimeline: false,
-        frameCount: 0,
-        frameDurationMs: 0,
         maxAnalysisDurationMs: 0,
       }
     );
@@ -84,8 +82,6 @@ describe('computeAudioVisualizationProfile', () => {
         maxHz: 12000,
         timeAggregate: 'max_hold',
         includeTimeline: false,
-        frameCount: 0,
-        frameDurationMs: 0,
         maxAnalysisDurationMs: 0,
       }
     );
@@ -117,8 +113,6 @@ describe('computeAudioVisualizationProfile', () => {
         maxHz: 0,
         timeAggregate: 'max_hold',
         includeTimeline: false,
-        frameCount: 0,
-        frameDurationMs: 0,
         maxAnalysisDurationMs: 0,
       }
     );
@@ -153,8 +147,6 @@ describe('computeAudioVisualizationProfile', () => {
         maxHz: 0,
         timeAggregate: 'mean',
         includeTimeline: false,
-        frameCount: 0,
-        frameDurationMs: 0,
         maxAnalysisDurationMs: 0,
       }
     );

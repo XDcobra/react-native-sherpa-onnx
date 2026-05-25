@@ -1187,7 +1187,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       0.0
     }
 
-    val hasFrameCount = options.hasKey("frameCount") && !options.isNull("frameCount")
+    val frameCountRaw =
+      if (options.hasKey("frameCount") && !options.isNull("frameCount")) {
+        parseOptionalNumber(options, "frameCount") ?: 0.0
+      } else {
+        0.0
+      }
+    val hasFrameCount = frameCountRaw > 0.0
     val hasFrameDuration =
       options.hasKey("frameDurationMs") && !options.isNull("frameDurationMs")
     val includeTimeline =
@@ -1196,8 +1202,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     var frameCount = 0
     if (hasFrameCount) {
-      val raw = parseOptionalNumber(options, "frameCount") ?: 0.0
-      frameCount = raw.toInt()
+      frameCount = frameCountRaw.toInt()
       if (frameCount < 8 || frameCount > 512) {
         throw IllegalArgumentException(
           "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512"

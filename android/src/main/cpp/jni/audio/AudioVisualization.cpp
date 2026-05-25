@@ -232,9 +232,25 @@ AudioVisualizationProfile AudioVisualizationAccumulator::finish() {
     return profile;
   }
 
-  if (resolvedFrameCount < kMinFrameCount || resolvedFrameCount > kMaxFrameCount) {
+  const bool explicitFrameCount = timelineFrameCountHint_ > 0;
+  if (!explicitFrameCount && resolvedFrameCount > kMaxFrameCount) {
+    resolvedFrameCount = kMaxFrameCount;
+    if (profile.durationMs > 0) {
+      resolvedFrameDurationMs =
+          static_cast<double>(profile.durationMs) /
+          static_cast<double>(resolvedFrameCount);
+    }
+  }
+
+  if (explicitFrameCount) {
+    if (resolvedFrameCount < kMinFrameCount ||
+        resolvedFrameCount > kMaxFrameCount) {
+      throw std::runtime_error(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512");
+    }
+  } else if (resolvedFrameCount > kMaxFrameCount) {
     throw std::runtime_error(
-        "AUDIO_VISUALIZATION_INVALID_OPTIONS: resolved frameCount must be between 8 and 512");
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: resolved frameCount exceeds 512");
   }
 
   if (static_cast<int64_t>(resolvedFrameCount) *
