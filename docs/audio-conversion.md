@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Import from `react-native-sherpa-onnx/audio`. This page documents **save/encode** and **duration probe**. Session/route coordination is in [audio-session.md](./audio-session.md).
+Import from `react-native-sherpa-onnx/audio`. This page documents **save/encode**, **duration probe**, and **container probe**. Session/route coordination is in [audio-session.md](./audio-session.md).
 
 Save/encode input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
 
@@ -11,6 +11,7 @@ Save/encode input can be either a pipeline audio buffer reference or a `FileSour
 Exports:
 
 - `probeAudioFileDuration(source)` → `Promise<AudioFileDurationProbe | null>`
+- `probeAudioFileContainer(source)` → `Promise<AudioFileContainerProbe | null>`
 - `saveAudioAsFile(input, output, format, options?)` → `Promise<ResolvedFileRef>`
 - `saveAudioAsWav16k(input, output)` → `Promise<ResolvedFileRef>`
 - `AudioOutputFormat`
@@ -206,6 +207,42 @@ export async function probeAudioFileDuration(
 - Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
 - `isExact`: `true` for WAV header math or stream/container duration; `false` when estimated from file size + bitrate.
 
+### `probeAudioFileContainer(source)`
+
+Read the detected **container format** and **primary audio codec** from file content (WAV header or FFmpeg demux). No PCM decode and no offline buffer allocation.
+
+Use this to compare probe results against a filename extension, an allowlist, or other rules **in your app** — the SDK only returns neutral metadata (`inputFormatName`, `codecName`).
+
+```ts
+export type AudioFileContainerProbe = {
+  /** FFmpeg `iformat->name`, e.g. `ogg`, `mp3`, `mov`, `matroska`, `wav`. */
+  inputFormatName: string;
+  /** Primary audio codec short name, e.g. `opus`, `aac`, `mp3`, `pcm_s16le`. */
+  codecName: string;
+};
+
+export async function probeAudioFileContainer(
+  source: FileSource
+): Promise<AudioFileContainerProbe | null>;
+```
+
+- `source`: `FileSource` from `react-native-sherpa-onnx/fileio` (`fs`, `contentUri`, … — same resolver as decode).
+- Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
+- Probe uses FFmpeg **auto-probe** when needed so content is identified from bytes, not only from the path extension.
+- Common result pairs (illustrative, not exhaustive): `wav` + `pcm_s16le`; `mp3` + `mp3`; `ogg` + `opus`; `mov` + `aac`; `matroska` + `opus`.
+
+For `contentUri` / `securityScoped` sources, optional `displayName` on `FileSource` supplies a path extension hint when the resolved temp path has none:
+
+```ts
+await probeAudioFileContainer({
+  kind: 'contentUri',
+  uri: contentUri,
+  displayName: 'recording.mp3',
+});
+```
+
+Related decode option (optional, default `true`): `allowDemuxerAutoProbe` on `AudioDecodeOptions` / `FileIngestOptions`. When `false`, `avformat_open_input` does not fall back to auto-probe after the extension-specific demuxer fails (stricter open behavior; may reject files that only open via content sniffing).
+
 ## Sample-rate semantics
 
 - `wav`: `0` uses the source sample rate; explicit values resample.
@@ -226,6 +263,7 @@ export async function probeAudioFileDuration(
 ```ts
 import {
   probeAudioFileDuration,
+  probeAudioFileContainer,
   saveAudioAsFile,
   saveAudioAsWav16k,
   AudioSaveErrorCode,
@@ -233,6 +271,7 @@ import {
 
 import type {
   AudioFileDurationProbe,
+  AudioFileContainerProbe,
   AudioOutputFormat,
   AudioSaveInput,
   SaveAudioOptions,

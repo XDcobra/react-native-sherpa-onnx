@@ -1022,20 +1022,46 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val path: String?,
     val fd: Int,
     val tempFile: File? = null,
+    /** FFmpeg demuxer hint (e.g. original display name when path is extensionless). */
+    val pathHint: String? = null,
   )
 
+  private fun sourcePathHint(source: ReadableMap): String? {
+    if (!source.hasKey("displayName")) {
+      return null
+    }
+    return source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
+  }
+
+  private fun extensionFromFileName(fileName: String): String? {
+    val dot = fileName.lastIndexOf('.')
+    if (dot < 0 || dot == fileName.length - 1) {
+      return null
+    }
+    val ext = fileName.substring(dot + 1).lowercase(Locale.US)
+    return ext.takeIf { it.isNotEmpty() && ext.length <= 8 }
+  }
+
+  private fun decodeTempFileName(displayName: String?): String {
+    val base = "decode_stream_${java.util.UUID.randomUUID()}"
+    val ext = displayName?.let { extensionFromFileName(it) }
+    return if (ext != null) "$base.$ext" else base
+  }
+
   private fun resolveDecodableSource(
-    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle,
+    source: ReadableMap? = null,
   ): DecodableSource {
+    val displayName = source?.let { sourcePathHint(it) }
     return when (handle) {
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
-        DecodableSource(path = handle.file.absolutePath, fd = -1)
+        DecodableSource(path = handle.file.absolutePath, fd = -1, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
-        DecodableSource(path = null, fd = handle.pfd.fd)
+        DecodableSource(path = null, fd = handle.pfd.fd, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
         val tmpFile = File(
           reactApplicationContext.cacheDir,
-          "decode_stream_${java.util.UUID.randomUUID()}"
+          decodeTempFileName(displayName)
         )
         try {
           tmpFile.outputStream().use { out ->
@@ -1049,12 +1075,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             e
           )
         }
-        DecodableSource(path = tmpFile.absolutePath, fd = -1, tempFile = tmpFile)
+        DecodableSource(
+          path = tmpFile.absolutePath,
+          fd = -1,
+          tempFile = tmpFile,
+          pathHint = displayName,
+        )
       }
     }
   }
 
-  override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
+  /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
+  private fun nativePathArg(decodable: DecodableSource): String? {
+    return decodable.path ?: decodable.pathHint
+  }
+
+  override fun decodeFileToOfflineBuffer(
+    source: ReadableMap,
+    targetSampleRateHz: Double,
+    forceMono: Boolean,
+    allowDemuxerAutoProbe: Boolean,
+    operationId: String,
+    promise: Promise,
+  ) {
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
 
@@ -1065,11 +1108,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         readHandle = fileIOHelper.resolveSource(source)
         val decodableSource = resolveDecodableSource(
-          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
         )
         val sourcePath = decodableSource.path
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
+        val nativePath = nativePathArg(decodableSource)
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -1118,11 +1163,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToMmapFile(
-            sourcePath,
+            nativePath,
             sourceFd,
             targetRate,
             forceMono,
             8192,
+            allowDemuxerAutoProbe,
             cancelFlagAddr,
             tmpF32.absolutePath,
             progressCallback,
@@ -1184,6 +1230,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeAudioFileContainer(source: ReadableMap, promise: Promise) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
+
+        @Suppress("UNCHECKED_CAST")
+        val result = nativeProbeFileContainer(nativePathArg(decodableSource), sourceFd)
+          as? HashMap<String, String>
+          ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native container probe returned null")
+
+        val inputFormatName = result["inputFormatName"]
+        val codecName = result["codecName"]
+        if (inputFormatName.isNullOrBlank() || codecName.isNullOrBlank()) {
+          throw RuntimeException("PROBE_INTERNAL_ERROR: Invalid native container probe result")
+        }
+
+        val map = Arguments.createMap()
+        map.putString("inputFormatName", inputFormatName)
+        map.putString("codecName", codecName)
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("PROBE_")) msg.substringBefore(":").trim() else "PROBE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("PROBE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
   override fun probeAudioFileDuration(source: ReadableMap, promise: Promise) {
     decodeExecutor.execute {
       var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
@@ -1192,13 +1283,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         readHandle = fileIOHelper.resolveSource(source)
         val decodableSource = resolveDecodableSource(
-          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
         )
         val sourcePath = decodableSource.path
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
 
-        val result = nativeProbeFileDuration(sourcePath, sourceFd)
+        val result = nativeProbeFileDuration(nativePathArg(decodableSource), sourceFd)
           ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native probe returned null")
 
         if (result.size < 2) {
@@ -1236,6 +1328,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     forceMono: Boolean,
     autoFinalize: Boolean,
     backpressure: String,
+    allowDemuxerAutoProbe: Boolean,
     operationId: String,
     promise: Promise
   ) {
@@ -1296,12 +1389,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     var sourcePath: String? = null
     var sourceFd: Int = -1
     var tempSourceFile: File? = null
+    var nativePath: String? = null
     try {
       readHandle = fileIOHelper.resolveSource(source)
-      val decodableSource = resolveDecodableSource(readHandle)
+      val decodableSource = resolveDecodableSource(readHandle, source)
       sourcePath = decodableSource.path
       sourceFd = decodableSource.fd
       tempSourceFile = decodableSource.tempFile
+      nativePath = nativePathArg(decodableSource)
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       decodeCancelFlags.remove(operationId)
       fileIngestStatuses.remove(ingestId)
@@ -1375,11 +1470,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
         @Suppress("UNCHECKED_CAST")
         val result = nativeDecodeFileStreaming(
-          sourcePath,
+          nativePath,
           sourceFd,
           targetRate,
           forceMono,
           8192,
+          allowDemuxerAutoProbe,
           cancelFlagAddr,
           chunkCallback,
           progressCallback
@@ -1910,6 +2006,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         0, // keep source sample rate
         true, // force mono
         8192,
+        true, // allowDemuxerAutoProbe
         cancelFlagAddr,
         object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
@@ -4501,6 +4598,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       inputFd: Int,
     ): LongArray?
 
+    /** Container probe: returns HashMap{inputFormatName, codecName}. */
+    @JvmStatic
+    external fun nativeProbeFileContainer(
+      path: String?,
+      inputFd: Int,
+    ): HashMap<String, String>?
+
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic
     external fun nativeDecodeFileToBuffer(
@@ -4520,6 +4624,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
       outputPath: String,
       progressCallback: Any?,
@@ -4533,6 +4638,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
       chunkCallback: Any,
       progressCallback: Any?

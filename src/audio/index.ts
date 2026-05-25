@@ -266,4 +266,9 @@ export async function listAvailableOutputDevices(): Promise<
   }));
 }
 
-export { probeAudioFileDuration, type AudioFileDurationProbe } from './probe';
+export {
+  probeAudioFileDuration,
+  probeAudioFileContainer,
+  type AudioFileDurationProbe,
+  type AudioFileContainerProbe,
+} from './probe';

@@ -619,6 +619,7 @@ export async function createOfflineAudioBufferFromFile(
     DEFAULT_PIPELINE_SAMPLE_RATE_HZ
   );
   const forceMono = options?.forceMono ?? true;
+  const allowDemuxerAutoProbe = options?.allowDemuxerAutoProbe ?? true;
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;
@@ -659,6 +660,7 @@ export async function createOfflineAudioBufferFromFile(
       source as any,
       targetSampleRateHz,
       forceMono,
+      allowDemuxerAutoProbe,
       operationId
     );
     const info = result as unknown as OfflineAudioBufferInfo;
@@ -1079,6 +1081,7 @@ export async function ingestFileToLiveAudioBuffer(
   const forceMono = options?.forceMono ?? true;
   const autoFinalize = options?.autoFinalize ?? false;
   const backpressure = options?.backpressure ?? 'block';
+  const allowDemuxerAutoProbe = options?.allowDemuxerAutoProbe ?? true;
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;
@@ -1124,6 +1127,7 @@ export async function ingestFileToLiveAudioBuffer(
     forceMono,
     autoFinalize,
     backpressure,
+    allowDemuxerAutoProbe,
     operationId
   );
 

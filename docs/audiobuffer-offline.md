@@ -152,7 +152,7 @@ const decoded = await createOfflineAudioBufferFromFile(
 
 The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
 
-When you only need **duration** (usage UI, planners) and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer.
+When you only need **duration** and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer. To read **container format and codec** from file content before decode, use [`probeAudioFileContainer`](./audio-conversion.md#probeaudiofilecontainersource).
 
 Options:
 

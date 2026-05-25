@@ -234,6 +234,7 @@ export interface Spec extends TurboModule {
     source: Object,
     targetSampleRateHz: number,
     forceMono: boolean,
+    allowDemuxerAutoProbe: boolean,
     operationId: string
   ): Promise<{
     bufferId: string;
@@ -253,6 +254,15 @@ export interface Spec extends TurboModule {
   probeAudioFileDuration(source: Object): Promise<{
     durationMs: number;
     isExact: boolean;
+  }>;
+
+  /**
+   * Probe container format and primary audio codec (no PCM decode).
+   * JS wrapper: `probeAudioFileContainer` from `react-native-sherpa-onnx/audio`.
+   */
+  probeAudioFileContainer(source: Object): Promise<{
+    inputFormatName: string;
+    codecName: string;
   }>;
 
   /**
@@ -431,6 +441,7 @@ export interface Spec extends TurboModule {
     forceMono: boolean,
     autoFinalize: boolean,
     backpressure: string,
+    allowDemuxerAutoProbe: boolean,
     operationId: string
   ): Promise<{ ingestId: string }>;
 

@@ -6,7 +6,7 @@ Global audio session and route coordination for mic capture + PCM playback.
 
 Import from `react-native-sherpa-onnx/audio`.
 
-Other exports from the same path: [save / encode / duration probe](./audio-conversion.md).
+Other exports from the same path: [save / encode / duration & container probe](./audio-conversion.md).
 
 ## Why this exists
 

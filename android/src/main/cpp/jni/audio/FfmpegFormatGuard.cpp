@@ -200,7 +200,8 @@ FfmpegFormatGuardResult checkPathFormatSupported(
 FfmpegFormatGuardResult openGuardedFormatInput(
     AVFormatContext** fmtCtx,
     const char* path,
-    const char* errorPrefix) {
+    const char* errorPrefix,
+    bool allowDemuxerAutoProbe) {
 #ifndef HAVE_FFMPEG
   FfmpegFormatGuardResult result;
   result.ok = false;
@@ -240,7 +241,7 @@ FfmpegFormatGuardResult openGuardedFormatInput(
     }
   }
 
-  if (tryOpenInput(fmtCtx, path, nullptr, &err)) {
+  if (allowDemuxerAutoProbe && tryOpenInput(fmtCtx, path, nullptr, &err)) {
     FfmpegFormatGuardResult result;
     result.ok = true;
     return result;
@@ -254,7 +255,8 @@ FfmpegFormatGuardResult openGuardedFormatInput(
 FfmpegFormatGuardResult openGuardedFdFormatInput(
     AVFormatContext** fmtCtx,
     const char* pathHint,
-    const char* errorPrefix) {
+    const char* errorPrefix,
+    bool allowDemuxerAutoProbe) {
 #ifndef HAVE_FFMPEG
   FfmpegFormatGuardResult result;
   result.ok = false;
@@ -293,7 +295,7 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
     }
   }
 
-  if (tryOpenInput(fmtCtx, nullptr, nullptr, &err)) {
+  if (allowDemuxerAutoProbe && tryOpenInput(fmtCtx, nullptr, nullptr, &err)) {
     FfmpegFormatGuardResult result;
     result.ok = true;
     return result;

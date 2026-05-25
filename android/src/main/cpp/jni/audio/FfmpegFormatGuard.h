@@ -35,7 +35,8 @@ FfmpegFormatGuardResult checkPathFormatSupported(
 FfmpegFormatGuardResult openGuardedFormatInput(
     AVFormatContext** fmtCtx,
     const char* path,
-    const char* errorPrefix);
+    const char* errorPrefix,
+    bool allowDemuxerAutoProbe = true);
 
 /**
  * Open an input from a custom AVIO context (fd). fmtCtx->pb must already be set.
@@ -46,6 +47,7 @@ FfmpegFormatGuardResult openGuardedFormatInput(
 FfmpegFormatGuardResult openGuardedFdFormatInput(
     AVFormatContext** fmtCtx,
     const char* pathHint,
-    const char* errorPrefix);
+    const char* errorPrefix,
+    bool allowDemuxerAutoProbe = true);
 
 } // namespace sherpa

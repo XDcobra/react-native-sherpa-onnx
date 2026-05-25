@@ -1,0 +1,82 @@
+# SDK init: public API vs TurboModule bridge
+
+The React Native package uses two layers for engine initialization:
+
+| Layer | Examples | Shape |
+|-------|----------|--------|
+| **Public** | `createTTS`, `createSTT`, `createStreamingSTT` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`) |
+| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
+
+## Why two layers?
+
+- **TypeScript** — public unions and JSDoc stay ergonomic for app developers.
+- **TurboModule / iOS** — many positional arguments can crash React Native marshalling; a single options object is safe and extensible.
+- **Mapping** — dedicated builders flatten nested public fields before calling native code.
+
+## TurboModule init methods (breaking clean cut)
+
+| Bridge method | Public entry | Options type | Builder |
+|---------------|--------------|--------------|---------|
+| `initializeTts(instanceId, options)` | `createTTS` | `TtsInitBridgeOptions` | `buildTtsInitBridgeOptions` in `src/tts/ttsNativeBridge.ts` |
+| `initializeStt(instanceId, options)` | `createSTT` | `SttInitBridgeOptions` | `buildSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
+| `initializeOnlineStt(instanceId, options)` | `createStreamingSTT` | `OnlineSttInitBridgeOptions` | `buildOnlineSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
+
+Bridge option types are defined in `src/NativeSherpaOnnx.ts` (required for React Native codegen) and re-exported from `src/nativeBridge/initBridgeTypes.ts` for builders.
+
+There is **no** legacy positional overload and **no** `*WithOptions` suffix on the TurboModule names.
+
+## Mapping examples
+
+**TTS — Kokoro init lang (bridge-only key):**
+
+```ts
+// Public
+createTTS({
+  modelType: 'kokoro',
+  modelOptions: { kokoro: { lang: 'us-en' } },
+});
+
+// Bridge map (internal)
+{ modelDir, modelType: 'kokoro', kokoroLang: 'us-en' }
+```
+
+**STT — nested model options:**
+
+```ts
+// Public
+createSTT({
+  modelType: 'whisper',
+  modelOptions: { whisper: { language: 'en', task: 'transcribe' } },
+});
+
+// Bridge map (internal) — modelOptions passed as nested map
+{ modelDir, modelType: 'whisper', modelOptions: { whisper: { language: 'en', task: 'transcribe' } } }
+```
+
+**Streaming STT — endpoint rules flattened:**
+
+```ts
+// Public
+createStreamingSTT({
+  endpointConfig: { rule1: { minTrailingSilence: 2.4, ... } },
+});
+
+// Bridge map (internal)
+{ modelDir, modelType, rule1MinTrailingSilence: 2.4, ... }
+```
+
+## TTS language fields (bridge)
+
+| Public | Bridge key | Notes |
+|--------|------------|--------|
+| `lexiconLanguageId` | `lexiconLanguageId` | Same name |
+| `modelOptions.kokoro.lang` | `kokoroLang` | Bridge-only; do not use in app code |
+| `synthesize({ lang })` | `lang` on synthesis map | Runtime; effective for kokoro + supertonic |
+
+## Codegen
+
+After changing `src/NativeSherpaOnnx.ts`, run React Native codegen so Android `NativeSherpaOnnxSpec` and iOS `SherpaOnnxSpec` stubs stay in sync:
+
+```bash
+yarn react-native codegen
+```

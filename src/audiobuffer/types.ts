@@ -325,6 +325,12 @@ export interface AudioDecodeOptions {
    * does not declare duration).
    */
   onProgress?: (event: DecodeProgressEvent) => void;
+
+  /**
+   * When `false`, FFmpeg will not fall back to `avformat_open_input` auto-probe
+   * after the extension-specific demuxer fails. Default: `true`.
+   */
+  allowDemuxerAutoProbe?: boolean;
 }
 
 /** Options for `createOfflineAudioBufferFromSamples`. */

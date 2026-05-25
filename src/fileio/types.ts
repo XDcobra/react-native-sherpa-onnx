@@ -30,8 +30,12 @@ export type AppBaseDir =
 export type FileSource =
   | { kind: 'fs'; path: string }
   | { kind: 'app'; base: AppBaseDir; path: string }
-  | { kind: 'contentUri'; uri: string }
-  | { kind: 'securityScoped'; uri: string }
+  | {
+      kind: 'contentUri';
+      uri: string;
+      /** Optional file name hint for demuxer selection (extension). */ displayName?: string;
+    }
+  | { kind: 'securityScoped'; uri: string; displayName?: string }
   | { kind: 'pad'; packName: string; path: string };
 
 /**
