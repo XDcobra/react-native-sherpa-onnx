@@ -88,7 +88,7 @@ inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
 
 /**
  * Probe container format and primary audio codec (no PCM decode).
- * Uses FFmpeg auto-probe when needed so mislabeled extensions are detected.
+ * Sniffs container/codec from file content (auto-probe only; ignores extension demuxer).
  * Throws std::runtime_error with PROBE_* error code prefix on failure.
  */
 AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd = -1);

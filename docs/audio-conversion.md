@@ -228,7 +228,7 @@ export async function probeAudioFileContainer(
 
 - `source`: `FileSource` from `react-native-sherpa-onnx/fileio` (`fs`, `contentUri`, … — same resolver as decode).
 - Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
-- Probe uses FFmpeg **auto-probe** when needed so content is identified from bytes, not only from the path extension.
+- Container probe uses FFmpeg **content sniffing only** (auto-probe); it does **not** open via the filename extension demuxer first, so a mislabeled `.mp3` that is really Ogg/Opus is reported as `ogg` + `opus`, not `mp3` + `mp3`.
 - Common result pairs (illustrative, not exhaustive): `wav` + `pcm_s16le`; `mp3` + `mp3`; `ogg` + `opus`; `mov` + `aac`; `matroska` + `opus`.
 
 For `contentUri` / `securityScoped` sources, optional `displayName` on `FileSource` supplies a path extension hint when the resolved temp path has none:

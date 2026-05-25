@@ -806,7 +806,10 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
   };
   ProbeCleanup cleanup{&fmtCtx, &avioCtx, &ownedFd};
 
+  // Sniff container from bytes only — do not open via extension demuxer first
+  // (mislabeled .mp3 + Ogg/Opus would otherwise report mp3/mp3).
   constexpr bool kAllowDemuxerAutoProbe = true;
+  constexpr bool kTryExtensionDemuxerFirst = false;
 
   if (inputFd >= 0) {
     ownedFd = dup(inputFd);
@@ -834,14 +837,14 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
     }
     fmtCtx->pb = avioCtx;
 
-    const auto openResult =
-        openGuardedFdFormatInput(&fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe);
+    const auto openResult = openGuardedFdFormatInput(
+        &fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe, kTryExtensionDemuxerFirst);
     if (!openResult.ok) {
       throw std::runtime_error(openResult.errorMessage);
     }
   } else {
-    const auto openResult =
-        openGuardedFormatInput(&fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe);
+    const auto openResult = openGuardedFormatInput(
+        &fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe, kTryExtensionDemuxerFirst);
     if (!openResult.ok) {
       throw std::runtime_error(openResult.errorMessage);
     }

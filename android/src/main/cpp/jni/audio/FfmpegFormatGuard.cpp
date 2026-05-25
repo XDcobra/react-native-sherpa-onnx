@@ -242,7 +242,8 @@ FfmpegFormatGuardResult openGuardedFormatInput(
     AVFormatContext** fmtCtx,
     const char* path,
     const char* errorPrefix,
-    bool allowDemuxerAutoProbe) {
+    bool allowDemuxerAutoProbe,
+    bool tryExtensionDemuxerFirst) {
 #ifndef HAVE_FFMPEG
   FfmpegFormatGuardResult result;
   result.ok = false;
@@ -269,7 +270,7 @@ FfmpegFormatGuardResult openGuardedFormatInput(
   const ExtensionDemuxerEntry* entry = lookupExtension(ext);
 
   int err = 0;
-  if (entry) {
+  if (tryExtensionDemuxerFirst && entry) {
     const AVInputFormat* demuxer = findDemuxerByShortName(entry->demuxerShortName);
     if (demuxer && tryOpenInput(fmtCtx, path, demuxer, &err)) {
       LOGI("opened %s with demuxer %s", path, entry->demuxerShortName);
@@ -283,7 +284,7 @@ FfmpegFormatGuardResult openGuardedFormatInput(
     if (demuxer) {
       LOGW("explicit demuxer %s failed for %s, trying auto-probe", entry->demuxerShortName, path);
     }
-  } else if (!allowDemuxerAutoProbe) {
+  } else if (!allowDemuxerAutoProbe && (tryExtensionDemuxerFirst || entry)) {
     return makeOpenFailed(errorPrefix, path, nullptr, 0);
   }
 
@@ -302,7 +303,8 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
     AVFormatContext** fmtCtx,
     const char* pathHint,
     const char* errorPrefix,
-    bool allowDemuxerAutoProbe) {
+    bool allowDemuxerAutoProbe,
+    bool tryExtensionDemuxerFirst) {
 #ifndef HAVE_FFMPEG
   FfmpegFormatGuardResult result;
   result.ok = false;
@@ -335,7 +337,7 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
   }
 
   int err = 0;
-  if (entry) {
+  if (tryExtensionDemuxerFirst && entry) {
     const AVInputFormat* demuxer = findDemuxerByShortName(entry->demuxerShortName);
     if (demuxer && tryOpenInput(fmtCtx, nullptr, demuxer, &err)) {
       LOGI("opened fd input with demuxer %s", entry->demuxerShortName);
@@ -347,6 +349,8 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
       // avformat_open_input failed without setting a negative AVERROR on some fd/hint paths.
       err = AVERROR_INVALIDDATA;
     }
+  } else if (!allowDemuxerAutoProbe && (tryExtensionDemuxerFirst || entry)) {
+    return makeOpenFailed(errorPrefix, pathHint, nullptr, 0);
   }
 
   if (allowDemuxerAutoProbe && tryOpenInput(fmtCtx, nullptr, nullptr, &err)) {

@@ -36,18 +36,22 @@ FfmpegFormatGuardResult openGuardedFormatInput(
     AVFormatContext** fmtCtx,
     const char* path,
     const char* errorPrefix,
-    bool allowDemuxerAutoProbe = true);
+    bool allowDemuxerAutoProbe = true,
+    bool tryExtensionDemuxerFirst = true);
 
 /**
  * Open an input from a custom AVIO context (fd). fmtCtx->pb must already be set.
  * When path is non-null, known extensions are checked the same way as path open.
  *
  * @param errorPrefix e.g. "PROBE" or "DECODE"
+ * @param tryExtensionDemuxerFirst When false, skip extension demuxer and sniff content
+ *        (used by container probe so mislabeled filenames do not bias detection).
  */
 FfmpegFormatGuardResult openGuardedFdFormatInput(
     AVFormatContext** fmtCtx,
     const char* pathHint,
     const char* errorPrefix,
-    bool allowDemuxerAutoProbe = true);
+    bool allowDemuxerAutoProbe = true,
+    bool tryExtensionDemuxerFirst = true);
 
 } // namespace sherpa
