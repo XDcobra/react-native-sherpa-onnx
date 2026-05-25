@@ -12,6 +12,7 @@
 
 #include "AudioDecodeSession.h"
 #include "FfmpegFormatGuard.h"
+#include "../diagnostic/NativeDiagnostic.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -373,6 +374,14 @@ AudioDecodeResult decodeFileFFmpeg(
     DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
+  char diagDetail[64];
+  std::snprintf(
+      diagDetail,
+      sizeof(diagDetail),
+      "allowAutoProbe=%d",
+      config.allowDemuxerAutoProbe ? 1 : 0);
+  SHERPA_DIAG_D("audio.decode", "ffmpeg_start", diagDetail);
+
   AVFormatContext* fmtCtx = nullptr;
   AVIOContext* avioCtx = nullptr;
   int ownedFd = -1;
@@ -445,6 +454,7 @@ AudioDecodeResult decodeFileFFmpeg(
     const auto openResult = openGuardedFdFormatInput(
         &fmtCtx, path, "DECODE", config.allowDemuxerAutoProbe);
     if (!openResult.ok) {
+      SHERPA_DIAG_D("audio.decode", "open_fail", diagDetail);
       throw std::runtime_error(openResult.errorMessage);
     }
   } else {
@@ -455,6 +465,7 @@ AudioDecodeResult decodeFileFFmpeg(
     const auto openResult = openGuardedFormatInput(
         &fmtCtx, path, "DECODE", config.allowDemuxerAutoProbe);
     if (!openResult.ok) {
+      SHERPA_DIAG_D("audio.decode", "open_fail", diagDetail);
       throw std::runtime_error(openResult.errorMessage);
     }
   }
@@ -652,6 +663,7 @@ AudioDecodeResult decodeFileFFmpeg(
   result.totalFramesDecoded = totalFramesDecoded;
   result.sourceSampleRate = srcSampleRate;
   result.sourceChannels = srcChannels;
+  SHERPA_DIAG("audio.decode", "ffmpeg_end");
   return result;
 }
 

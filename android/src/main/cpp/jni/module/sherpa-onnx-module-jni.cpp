@@ -25,11 +25,13 @@
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
+#include "../diagnostic/NativeDiagnostic.h"
 
 extern "C" {
 
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(JNIEnv* env, jobject /* this */) {
+  SHERPA_DIAG("module.init", "libs_loaded");
   return env->NewStringUTF("sherpa-onnx native (libsherpaonnx) loaded");
 }
 
@@ -178,12 +180,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
   if (j_has_prefer_int8) prefer_int8 = (j_prefer_int8 == JNI_TRUE);
   if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
+  SHERPA_DIAG("stt.detect", "start");
   sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(
       model_dir,
       asset_name,
       model_type,
       prefer_int8,
       (j_debug == JNI_TRUE));
+  SHERPA_DIAG("stt.detect", "end");
   return sherpaonnx::SttDetectResultToJava(env, result);
 }
 

@@ -41,6 +41,15 @@
 #include <unistd.h>
 
 // ==================== Error Codes ====================
+static dispatch_queue_t SherpaAudioDecodeQueue(void) {
+  static dispatch_once_t onceToken;
+  static dispatch_queue_t queue;
+  dispatch_once(&onceToken, ^{
+    queue = dispatch_queue_create("com.sherpaonnx.audio-decode", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
+
 static NSString *const kPAErrBufferNotFound   = @"AUDIO_BUFFER_NOT_FOUND";
 static NSString *const kPAErrInvalidArgument  = @"AUDIO_INVALID_ARGUMENT";
 static NSString *const kPAErrInvalidState     = @"AUDIO_INVALID_STATE";
@@ -1148,7 +1157,7 @@ static bool pa_populate_offline_from_source_if_empty(
   NSString *tmpPathCleanup = tmpPath;
   int targetRate = (int)targetSampleRateHz;
 
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
     @autoreleasepool {
       NSString *outF32 = [NSTemporaryDirectory() stringByAppendingPathComponent:
         [NSString stringWithFormat:@"pa_off_decode_%@.f32", [[NSUUID UUID] UUIDString]]];
@@ -2381,7 +2390,7 @@ static std::string pa_encodeViaDecodeFile(
   __weak SherpaOnnx *weakSelf = self;
   std::string path = [sourcePath UTF8String];
 
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
     int srcSampleRate = 0;
     int srcChannels = 0;
 

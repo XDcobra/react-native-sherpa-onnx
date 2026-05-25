@@ -85,6 +85,11 @@
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
     },
+    "./diagnostics": {
+      "source": "./src/diagnostics/index.ts",
+      "types": "./lib/typescript/src/diagnostics/index.d.ts",
+      "default": "./lib/module/diagnostics/index.js"
+    },
     "./fileio": {
       "source": "./src/fileio/index.ts",
       "types": "./lib/typescript/src/fileio/index.d.ts",

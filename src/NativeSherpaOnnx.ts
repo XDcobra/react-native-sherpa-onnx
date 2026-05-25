@@ -80,6 +80,19 @@ export interface Spec extends TurboModule {
   testSherpaInit(): Promise<string>;
 
   /**
+   * Last native activity ring buffer as JSON (see `parseNativeDiagnosticSnapshot`).
+   */
+  getNativeDiagnosticSnapshot(): Promise<string>;
+
+  /**
+   * Opt-out for native diagnostics. Omit call to keep defaults (enabled + signal handler).
+   */
+  configureNativeDiagnostics(config?: {
+    enabled?: boolean;
+    installSignalHandler?: boolean;
+  }): Promise<void>;
+
+  /**
    * Install JSI bindings for high-performance sample transport.
    * Normally auto-installed during module init. Exposed as fallback.
    */

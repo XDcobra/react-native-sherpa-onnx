@@ -7,6 +7,9 @@
  */
 
 #include "FfmpegFormatGuard.h"
+#include "../diagnostic/NativeDiagnostic.h"
+
+#include <cstdio>
 
 #include <cctype>
 #include <cstring>
@@ -148,6 +151,14 @@ FfmpegFormatGuardResult makeOpenFailed(
   }
   appendFfmpegError(result.errorMessage, err);
   LOGW("%s", result.errorMessage.c_str());
+  char detail[64];
+  std::snprintf(
+      detail,
+      sizeof(detail),
+      "demuxer=%s err=%d",
+      demuxerShortName ? demuxerShortName : "?",
+      err);
+  SHERPA_DIAG_D("audio.decode", "guard_open_fail", detail);
   return result;
 }
 

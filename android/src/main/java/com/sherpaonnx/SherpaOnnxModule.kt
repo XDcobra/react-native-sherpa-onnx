@@ -368,6 +368,35 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun getNativeDiagnosticSnapshot(promise: Promise) {
+    try {
+      val json = nativeGetDiagnosticSnapshot()
+      promise.resolve(json)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
+    }
+  }
+
+  override fun configureNativeDiagnostics(config: ReadableMap?, promise: Promise) {
+    try {
+      val enabled = if (config != null && config.hasKey("enabled") && !config.isNull("enabled")) {
+        config.getBoolean("enabled")
+      } else {
+        true
+      }
+      val installSignalHandler =
+        if (config != null && config.hasKey("installSignalHandler") && !config.isNull("installSignalHandler")) {
+          config.getBoolean("installSignalHandler")
+        } else {
+          true
+        }
+      nativeInitDiagnostics(enabled, installSignalHandler)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
+    }
+  }
+
   /** Asset path for embedded QNN test model (ORT testdata: qnn_multi_ctx_embed). */
   private val qnnTestModelAsset = "testModels/qnn_multi_ctx_embed.onnx"
 
@@ -956,7 +985,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val decodeCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
   // Map of ingestId → ingest status for active file ingest operations
   private val fileIngestStatuses = java.util.concurrent.ConcurrentHashMap<String, FileIngestStatus>()
-  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool()
+  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "sherpa-audio-decode").apply { isDaemon = true }
+  }
 
   private data class FileIngestStatus(
     @Volatile var isRunning: Boolean = true,
@@ -4502,6 +4533,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Native JNI methods
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
+
+    @JvmStatic
+    private external fun nativeInitDiagnostics(enabled: Boolean, installSignalHandler: Boolean)
+
+    @JvmStatic
+    private external fun nativeGetDiagnosticSnapshot(): String
 
     /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
     @JvmStatic

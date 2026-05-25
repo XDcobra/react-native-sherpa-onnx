@@ -126,6 +126,9 @@ set(SOURCES
     jni/audio/audio_decode_jni.cpp
     jni/audio/AudioEncodeSession.cpp
     jni/audio/audio_encode_jni.cpp
+    jni/diagnostic/NativeDiagnostic.cpp
+    jni/diagnostic/NativeDiagnosticAndroid.cpp
+    jni/diagnostic/native_diagnostic_jni.cpp
     crypto/sha256.cpp
 )
 
