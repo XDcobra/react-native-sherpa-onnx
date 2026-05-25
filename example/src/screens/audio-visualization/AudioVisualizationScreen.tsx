@@ -25,6 +25,10 @@ import {
   resolveBundledCodecSource,
   type FileioInputSource,
 } from '../fileio/fileioInputChannels';
+import {
+  debugLogComputedProfile,
+  debugLogDisplayPipeline,
+} from './audioVisualizationDebug';
 import { styles } from './AudioVisualizationScreen.styles';
 
 type ViewMode = 'static' | 'animated' | 'heatmap';
@@ -34,7 +38,8 @@ const SAMPLE_FORMATS: CodecAssetFormat[] = ['wav', 'mp3', 'm4a'];
 const COMPUTE_OPTIONS = {
   kind: 'spectrum_bars' as const,
   barCount: 96,
-  timeAggregate: 'max_hold' as const,
+  // mean across timeline frames for static levels; per-frame rows still use max_hold buckets
+  timeAggregate: 'mean' as const,
   includeTimeline: true,
   frameDurationMs: 500,
   maxAnalysisDurationMs: 120_000,
@@ -182,6 +187,9 @@ export default function AudioVisualizationScreen() {
           return;
         }
 
+        debugLogComputedProfile(nextProfile, {
+          sourceLabel: selectedSource.label,
+        });
         setProfile(nextProfile);
       } catch (computeError) {
         if (cancelled || requestId !== requestIdRef.current) {
@@ -259,10 +267,32 @@ export default function AudioVisualizationScreen() {
     return frameLevels(profile, activeFrameIndex);
   }, [activeFrameIndex, profile, timelineAvailable]);
 
-  const displayLevels =
-    viewMode === 'animated' && timelineAvailable
-      ? currentFrameLevels
-      : profile?.levels ?? [];
+  const displayLevels = useMemo(() => {
+    if (viewMode === 'animated' && timelineAvailable) {
+      return currentFrameLevels;
+    }
+    return profile?.levels ?? [];
+  }, [currentFrameLevels, profile?.levels, timelineAvailable, viewMode]);
+
+  useEffect(() => {
+    if (!profile || loading) {
+      return;
+    }
+    debugLogDisplayPipeline({
+      viewMode,
+      profile,
+      displayLevels,
+      activeFrameIndex,
+      timelineAvailable,
+    });
+  }, [
+    activeFrameIndex,
+    displayLevels,
+    loading,
+    profile,
+    timelineAvailable,
+    viewMode,
+  ]);
 
   const frameProgressPct =
     profile && profile.frameCount > 1

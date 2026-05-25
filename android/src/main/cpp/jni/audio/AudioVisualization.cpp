@@ -21,6 +21,8 @@ constexpr double kMinFrameDurationMs = 50.0;
 constexpr double kMaxFrameDurationMs = 10000.0;
 constexpr int64_t kMaxFramePayloadFloats = 131072;
 constexpr double kDefaultFrameDurationMs = 500.0;
+constexpr float kSpectrumDisplayRangeDb = 40.0F;
+constexpr float kSpectrumDisplayGamma = 1.65F;
 
 int clampInt(int value, int minValue, int maxValue) {
   return std::max(minValue, std::min(maxValue, value));
@@ -28,6 +30,51 @@ int clampInt(int value, int minValue, int maxValue) {
 
 float clampFloat(float value, float minValue, float maxValue) {
   return std::max(minValue, std::min(maxValue, value));
+}
+
+float linearPowerToDb(float power) {
+  const double safe = std::max(static_cast<double>(power), 1.0e-18);
+  return static_cast<float>(10.0 * std::log10(safe));
+}
+
+float percentileDb(std::vector<float> &dbs, float quantile01) {
+  if (dbs.empty()) {
+    return -100.0F;
+  }
+  const float q = clampFloat(quantile01, 0.0F, 1.0F);
+  const size_t index = static_cast<size_t>(
+      std::floor(q * static_cast<float>(dbs.size() - 1)));
+  std::nth_element(
+      dbs.begin(),
+      dbs.begin() + static_cast<std::ptrdiff_t>(index),
+      dbs.end());
+  return dbs[index];
+}
+
+// Map one spectrum row (linear power per bar) to 0..1 with percentile dB + gamma.
+void normalizePowerRowToUnit(float *row, int count, float displayRangeDb) {
+  if (row == nullptr || count <= 0) {
+    return;
+  }
+
+  std::vector<float> dbs(static_cast<size_t>(count));
+  for (int i = 0; i < count; ++i) {
+    dbs[static_cast<size_t>(i)] = linearPowerToDb(row[i]);
+  }
+
+  std::vector<float> sorted = dbs;
+  const float lowDb = percentileDb(sorted, 0.08F);
+  sorted = dbs;
+  const float highDb = percentileDb(sorted, 0.92F);
+  const float configuredSpan = std::max(12.0F, displayRangeDb);
+  const float span = std::max(
+      6.0F,
+      std::min(configuredSpan, std::max(6.0F, highDb - lowDb)));
+
+  for (int i = 0; i < count; ++i) {
+    const float norm = clampFloat((dbs[static_cast<size_t>(i)] - lowDb) / span, 0.0F, 1.0F);
+    row[i] = std::pow(norm, kSpectrumDisplayGamma);
+  }
 }
 
 int64_t nowMs() {
@@ -181,15 +228,22 @@ AudioVisualizationProfile AudioVisualizationAccumulator::finish() {
   processAvailableFrames();
   processPaddedFrameIfNeeded();
 
+  const float displayRangeDb = std::min(
+      kSpectrumDisplayRangeDb,
+      std::max(12.0F, maxDb_ - minDb_));
+
   std::vector<float> levels(static_cast<size_t>(barCount_), 0.0F);
-  if (processedFrameCount_ > 0) {
+  const bool deriveLevelsFromTimeline = timelineEnabled_;
+
+  if (!deriveLevelsFromTimeline && processedFrameCount_ > 0) {
     for (int i = 0; i < barCount_; ++i) {
       float power = aggregateLevels_[static_cast<size_t>(i)];
       if (aggregateMode_ == AudioVisualizationAggregateMode::MEAN) {
         power /= static_cast<float>(processedFrameCount_);
       }
-      levels[static_cast<size_t>(i)] = powerToUnit(power);
+      levels[static_cast<size_t>(i)] = power;
     }
+    normalizePowerRowToUnit(levels.data(), barCount_, displayRangeDb);
   }
 
   AudioVisualizationProfile profile;
@@ -300,8 +354,30 @@ AudioVisualizationProfile AudioVisualizationAccumulator::finish() {
     }
   }
 
-  for (float &power : profile.frames) {
-    power = powerToUnit(power);
+  for (int t = 0; t < resolvedFrameCount; ++t) {
+    float *row = profile.frames.data() + static_cast<size_t>(t * barCount_);
+    normalizePowerRowToUnit(row, barCount_, displayRangeDb);
+  }
+
+  profile.levels.assign(static_cast<size_t>(barCount_), 0.0F);
+  for (int b = 0; b < barCount_; ++b) {
+    if (aggregateMode_ == AudioVisualizationAggregateMode::MEAN) {
+      double sum = 0.0;
+      for (int t = 0; t < resolvedFrameCount; ++t) {
+        sum += static_cast<double>(
+            profile.frames[static_cast<size_t>(t * barCount_ + b)]);
+      }
+      profile.levels[static_cast<size_t>(b)] =
+          static_cast<float>(sum / static_cast<double>(resolvedFrameCount));
+    } else {
+      float peak = 0.0F;
+      for (int t = 0; t < resolvedFrameCount; ++t) {
+        peak = std::max(
+            peak,
+            profile.frames[static_cast<size_t>(t * barCount_ + b)]);
+      }
+      profile.levels[static_cast<size_t>(b)] = peak;
+    }
   }
 
   return profile;
@@ -514,15 +590,6 @@ void AudioVisualizationAccumulator::fftRadix2(
       }
     }
   }
-}
-
-float AudioVisualizationAccumulator::powerToUnit(float power) const {
-  const double safePower = std::max<double>(power, 1.0e-18);
-  const double db = 10.0 * std::log10(safePower);
-  const double norm =
-      (db - static_cast<double>(minDb_)) /
-      static_cast<double>(std::max(1.0F, maxDb_ - minDb_));
-  return clampFloat(static_cast<float>(norm), 0.0F, 1.0F);
 }
 
 AudioVisualizationProfile computeAudioVisualizationProfile(

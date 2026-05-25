@@ -70,7 +70,6 @@ class AudioVisualizationAccumulator {
   static bool isPowerOfTwo(int value);
   static int hzToBin(double hz, int sampleRate, int fftSize);
   static void fftRadix2(std::vector<double> &re, std::vector<double> &im);
-  float powerToUnit(float power) const;
 
   int sampleRate_;
   int fftSize_;

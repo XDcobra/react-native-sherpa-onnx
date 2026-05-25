@@ -131,7 +131,8 @@ This avoids serializing large `frames` arrays through bridge numbers/`NSNumber` 
 - Log-spaced bar mapping from `minHz` to `maxHz`.
 - `levels`: aggregate over full analyzed range using `timeAggregate`.
 - `frames`: per-timeline-bucket `max_hold` aggregation.
-- dB clamp + normalization to `0..1`.
+- Per-row normalization (`levels` and each timeline frame): linear power → dB, then map between the 8th and 92nd percentile of that row (~40 dB span), then gamma (~1.65) for display contrast. Avoids clipping loud audio to all `1.0`.
+- When `includeTimeline` is enabled, `levels` are derived from the normalized timeline frames (`mean` or `max_hold` across time per bar, per `timeAggregate`), not a separate whole-file max-hold that can flatten low-frequency bars.
 
 ## Input-path behavior
 

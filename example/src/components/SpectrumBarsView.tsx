@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 type SpectrumBarsViewProps = {
@@ -57,6 +57,28 @@ export function SpectrumBarsView({
     () => resampleMean(levels, Math.max(1, barCount)),
     [barCount, levels]
   );
+
+  useEffect(() => {
+    if (!__DEV__ || displayLevels.length === 0) {
+      return;
+    }
+    let min = 1;
+    let max = 0;
+    for (const level of displayLevels) {
+      const v = clamp01(level);
+      min = Math.min(min, v);
+      max = Math.max(max, v);
+    }
+    console.log('[AudioVizDebug] SpectrumBarsView resampled bars', {
+      inputLen: levels.length,
+      displayLen: displayLevels.length,
+      barCount,
+      min,
+      max,
+      first4: displayLevels.slice(0, 4).map(clamp01),
+      last4: displayLevels.slice(-4).map(clamp01),
+    });
+  }, [barCount, displayLevels, levels]);
 
   const centerHeight = Math.max(0, height - 12) / 2;
 
