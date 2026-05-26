@@ -32,6 +32,7 @@ import type {
   OfflineAudioBufferRef,
   LiveAudioBufferInfo,
   LiveAudioBufferRef,
+  LiveAudioBufferFinishedRef,
   PipelineAudioBufferInfo,
   OfflineBufferHandle,
   LiveBufferHandleRecording,
@@ -940,15 +941,25 @@ export async function appendOfflineToLiveAudioBuffer(
 
 /**
  * Finalize a live audio buffer (recording → finished).
- * Returns a finished handle. No more appends allowed after this.
+ * Returns the finished handle plus fresh `info` from native (authoritative duration, etc.).
+ * No more appends allowed after this.
  */
 export async function finalizeLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource
-): Promise<LiveBufferHandleFinished> {
+): Promise<LiveAudioBufferFinishedRef> {
   const id = resolveLiveAudioBufferId(liveBufferId);
   await commitFinalizeSegmentIfNeeded(id);
   await getNative().finalizeLiveAudioBuffer(id);
-  return id as LiveBufferHandleFinished;
+  const info = await refreshLiveAudioBufferInfo(id);
+  if (__DEV__ && info.state !== 'finished') {
+    console.warn(
+      `[audiobuffer] finalizeLiveAudioBuffer: expected state 'finished', got '${info.state}'`
+    );
+  }
+  return {
+    bufferId: id as LiveBufferHandleFinished,
+    info,
+  };
 }
 
 // ==================== Info / Release ====================
@@ -962,6 +973,38 @@ export async function getPipelineAudioBufferInfo(
   const id = resolvePipelineAudioBufferId(bufferId);
   const result = await getNative().getPipelineAudioBufferInfo(id);
   return result as unknown as PipelineAudioBufferInfo;
+}
+
+/**
+ * Re-query native metadata for a live buffer (recording or finished).
+ *
+ * While `state === 'recording'`, `numSamples` reflects the ring window, not always
+ * total session length — use `onFramesAppended` → `totalSamplesWritten` for live timers.
+ */
+export async function refreshLiveAudioBufferInfo(
+  source: LiveAudioBufferIdSource
+): Promise<LiveAudioBufferInfo> {
+  const info = await getPipelineAudioBufferInfo(source);
+  if (info.kind !== 'livePcmBuffer') {
+    throw new Error(
+      `${PipelineAudioErrorCode.BUFFER_KIND_MISMATCH}: refreshLiveAudioBufferInfo requires a live buffer`
+    );
+  }
+  return info;
+}
+
+/**
+ * Same as {@link refreshLiveAudioBufferInfo}, merged into a recording ref (handle unchanged).
+ */
+export async function refreshLiveAudioBufferRef(
+  ref: LiveAudioBufferRef
+): Promise<LiveAudioBufferRef> {
+  const info = await refreshLiveAudioBufferInfo(ref);
+  return {
+    ...ref,
+    info,
+    bufferId: ref.bufferId,
+  };
 }
 
 /**
@@ -1190,6 +1233,8 @@ export type {
   OfflineAudioBufferRef,
   LiveAudioBufferInfo,
   LiveAudioBufferRef,
+  LiveAudioBufferRecordingRef,
+  LiveAudioBufferFinishedRef,
   PipelineAudioBufferInfo,
   OfflineAudioBufferIdSource,
   LiveAudioBufferIdSource,

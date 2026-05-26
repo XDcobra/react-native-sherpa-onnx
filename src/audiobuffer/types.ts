@@ -49,12 +49,30 @@ export interface OfflineAudioBufferRef {
 /**
  * Strongly-typed reference returned by `createEmptyLiveAudioBuffer` (recording state).
  * Includes metadata, branded recording handle, and event unsubscribe.
+ *
+ * `info` is a snapshot from buffer creation (or from your last call to
+ * `refreshLiveAudioBufferInfo` / `refreshLiveAudioBufferRef`). It is not updated
+ * when samples are appended. After finalize, use the return value of
+ * `finalizeLiveAudioBuffer` (`LiveAudioBufferFinishedRef.info`), not this snapshot.
+ *
+ * For live duration while recording, prefer `onFramesAppended` → `totalSamplesWritten`.
  */
 export interface LiveAudioBufferRef {
   info: LiveAudioBufferInfo;
   bufferId: LiveBufferHandleRecording;
   unsubscribeEvents: () => void;
 }
+
+/** Alias for a live buffer still in `recording` state (before finalize). */
+export type LiveAudioBufferRecordingRef = LiveAudioBufferRef;
+
+/**
+ * Authoritative metadata after `finalizeLiveAudioBuffer` (`state === 'finished'`).
+ */
+export type LiveAudioBufferFinishedRef = {
+  bufferId: LiveBufferHandleFinished;
+  info: LiveAudioBufferInfo;
+};
 
 /** Argument that resolves to an offline audio buffer native id. */
 export type OfflineAudioBufferIdSource =

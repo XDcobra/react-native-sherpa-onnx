@@ -82,7 +82,7 @@ describe('audiobuffer segment event wiring', () => {
     mockNative.getPipelineAudioBufferInfo.mockResolvedValue({
       bufferId: liveBufferId,
       kind: 'livePcmBuffer',
-      state: 'recording',
+      state: 'finished',
       sampleRate: 16000,
       channelCount: 1,
       numSamples: 32000,
@@ -153,8 +153,10 @@ describe('audiobuffer segment event wiring', () => {
       segmentation: { mode: 'manual' },
     });
 
-    await finalizeLiveAudioBuffer(ref.bufferId);
+    const finished = await finalizeLiveAudioBuffer(ref.bufferId);
 
+    expect(finished.info.state).toBe('finished');
+    expect(finished.info.durationMs).toBe(2000);
     expect(mockNative.createLiveSegmentBuffer).toHaveBeenCalled();
     expect(mockNative.appendLiveSegment).toHaveBeenCalledWith(
       'seg_live_11111111-1111-1111-1111-111111111111',

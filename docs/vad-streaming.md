@@ -78,13 +78,16 @@ pipeline.onSpeechStateChanged = (e) => {
 // Feed mic/appended audio into `audioIn` from your audio pipeline.
 // For a graceful/natural completion, finalize the live input buffer and wait for completion.
 // Do not call pipeline.flush() after finalize; finalize already triggers terminal draining.
-await finalizeLiveAudioBuffer(audioIn);
+const finished = await finalizeLiveAudioBuffer(audioIn);
+console.log(finished.info.durationMs);
 await pipeline.completed;
 
 await vad.destroy();
 await releasePipelineSegmentBuffer(segmentOut);
 await releasePipelineAudioBuffer(audioIn);
 ```
+
+`finalizeLiveAudioBuffer` returns **`LiveAudioBufferFinishedRef`** (`bufferId` + authoritative `info`). See [audiobuffer-streaming — info lifecycle](audiobuffer-streaming.md#info-lifecycle-live-buffers).
 
 ### 2) Typical VAD + Streaming STT pipeline
 
@@ -536,7 +539,7 @@ const pipeline = await vad.process({
 pipeline.onSpeechStateChanged = (e) => console.log('speech:', e.isSpeechDetected);
 
 // Feed mic audio into audioIn; graceful teardown:
-await finalizeLiveAudioBuffer(audioIn);
+const finished = await finalizeLiveAudioBuffer(audioIn);
 await pipeline.completed;
 
 const count = await getLiveSegmentBufferSegmentCount(segmentOut);

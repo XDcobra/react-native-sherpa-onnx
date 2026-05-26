@@ -273,7 +273,7 @@ Stops any active pipeline and unloads the native online engine instance.
 
 ### Pipeline handle (`SttPipelineHandle`)
 
-`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`). The handle is the only way to **coordinate** the STT worker with **buffer lifecycle** (mic stopped, optional `finalizeLiveAudioBuffer`, then tail decode).
+`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`). The handle is the only way to **coordinate** the STT worker with **buffer lifecycle** (mic stopped, optional `finalizeLiveAudioBuffer` — returns **`LiveAudioBufferFinishedRef`** with fresh `info` — then tail decode).
 
 #### `pipeline.stop()`
 

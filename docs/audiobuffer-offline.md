@@ -103,6 +103,8 @@ const info = await getPipelineAudioBufferInfo(offline);
 console.log(info.kind, info.state);
 ```
 
+Works for **live** buffers too (`kind: 'livePcmBuffer'`). For live buffers, `ref.info` from `createEmptyLiveAudioBuffer` is only a creation snapshot — see [`info` lifecycle](audiobuffer-streaming.md#info-lifecycle-live-buffers) and use `finalizeLiveAudioBuffer` / `refreshLiveAudioBufferInfo`.
+
 `OfflineAudioBufferInfo` includes an optional `storageKind?: 'ram' | 'mmap'`.
 - Default: `'ram'` (when `storageKind` is omitted / `undefined`)
 - `storageKind: 'mmap'` indicates a file-backed / memory-mapped backing strategy.

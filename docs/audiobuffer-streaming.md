@@ -31,6 +31,21 @@ Live audio buffers are the usual **operand** for native workers (STT, enhancemen
 
 ---
 
+## `info` lifecycle (live buffers)
+
+`LiveAudioBufferRef.info` is **not** a live view of native state.
+
+| When | What `info` means |
+| --- | --- |
+| **`createEmptyLiveAudioBuffer`** | Snapshot at creation (`state: 'recording'`, usually `durationMs: 0`). |
+| **While recording** | Stale unless you call `refreshLiveAudioBufferInfo` / `refreshLiveAudioBufferRef`. For timers and meters, prefer **`onFramesAppended`** → `totalSamplesWritten` (and `sampleRate`). |
+| **`finalizeLiveAudioBuffer`** | Returns **`LiveAudioBufferFinishedRef`** with **fresh** `info` (`state: 'finished'`, full-session `durationMs` / `numSamples`). Use this — not the recording ref’s cached `info`. |
+| **Any time** | `getPipelineAudioBufferInfo` or `refreshLiveAudioBufferInfo` re-query native metadata. |
+
+While `state === 'recording'`, `info.numSamples` reflects the **ring window** (`min(totalSamplesWritten, windowCapacity)`), not always total session length.
+
+---
+
 ## Live buffer callbacks: `onFramesAppended` vs `onSegment`
 
 Both are **optional**, **push-based** callbacks on `createEmptyLiveAudioBuffer` (or `subscribeLiveAudioBufferEvents`). They answer different questions:
@@ -246,13 +261,13 @@ await releasePipelineAudioBuffer(live);
 
 ### General
 
-- `getPipelineAudioBufferInfo`, `releasePipelineAudioBuffer`
+- `getPipelineAudioBufferInfo`, `refreshLiveAudioBufferInfo`, `refreshLiveAudioBufferRef`, `releasePipelineAudioBuffer`
 
 ### Live buffer
 
 - `createEmptyLiveAudioBuffer`, `subscribeLiveAudioBufferEvents`
 - `startMicToLiveAudioBuffer`, `stopMicToLiveAudioBuffer`
-- `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer`
+- `appendSamplesToLiveAudioBuffer`, `appendOfflineToLiveAudioBuffer`, `ingestFileToLiveAudioBuffer`, `finalizeLiveAudioBuffer` (returns `LiveAudioBufferFinishedRef`)
 - `getLiveAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 - Callbacks: `onFramesAppended` / **`onSegment`** / `onError` on `createEmptyLiveAudioBuffer`, or `subscribeLiveAudioBufferEvents` (see [Live buffer callbacks](#live-buffer-callbacks-onframesappended-vs-onsegment))
@@ -260,7 +275,7 @@ await releasePipelineAudioBuffer(live);
 
 Device routing belongs to `react-native-sherpa-onnx/audio`: use `listAvailableInputDevices()`, `listAvailableOutputDevices()`, and `setPipelineAudioRoutePreference(...)`.
 
-Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createEmptyLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` + `LiveBufferHandleRecording` + `unsubscribeEvents`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id.
+Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). **`createEmptyLiveAudioBuffer`** returns **`LiveAudioBufferRef`** (`info` snapshot + `LiveBufferHandleRecording` + `unsubscribeEvents`). **`finalizeLiveAudioBuffer`** returns **`LiveAudioBufferFinishedRef`** (`bufferId` + authoritative `info`). Buffer parameters use **`LiveAudioBufferIdSource`**, **`LiveAudioBufferRecordingSource`**, or **`PipelineAudioBufferIdSource`**: pass the ref, last **`PipelineAudioBufferInfo`**, a branded handle, or a raw string id. See [`info` lifecycle](#info-lifecycle-live-buffers).
 
 ---
 
@@ -284,6 +299,18 @@ function getPipelineAudioBufferInfo(
 const info = await getPipelineAudioBufferInfo(live);
 console.log(info.kind, info.state);
 ```
+
+#### `refreshLiveAudioBufferInfo(source)` / `refreshLiveAudioBufferRef(ref)`
+
+```ts
+function refreshLiveAudioBufferInfo(
+  source: LiveAudioBufferIdSource
+): Promise<LiveAudioBufferInfo>;
+
+function refreshLiveAudioBufferRef(ref: LiveAudioBufferRef): Promise<LiveAudioBufferRef>;
+```
+
+Re-query native metadata for a live buffer. Prefer **`finalizeLiveAudioBuffer`** for authoritative post-recording `info`. While recording, use **`onFramesAppended.totalSamplesWritten`** for live duration UI when possible.
 
 #### `releasePipelineAudioBuffer(buffer)`
 
@@ -378,7 +405,8 @@ ingest.cancel();
 await ingest.done.catch(() => {
   // DECODE_CANCELLED is expected after cancel
 });
-await finalizeLiveAudioBuffer(live);
+const finished = await finalizeLiveAudioBuffer(live);
+console.log(finished.info.durationMs);
 ```
 
 Call `finalizeLiveAudioBuffer` only after ingest reached a terminal state. This avoids
@@ -446,11 +474,13 @@ appendSamplesToLiveAudioBuffer(live, new Float32Array([0.0, 0.1, 0.2]), 16000);
 ```ts
 function finalizeLiveAudioBuffer(
   liveBuffer: LiveAudioBufferRecordingSource
-): Promise<LiveBufferHandleFinished>;
+): Promise<LiveAudioBufferFinishedRef>;
 ```
 
 ```ts
-const finishedId = await finalizeLiveAudioBuffer(live);
+const finished = await finalizeLiveAudioBuffer(live);
+console.log(finished.info.durationMs, finished.info.state); // 'finished'
+// finished.bufferId — same native id, branded as LiveBufferHandleFinished
 ```
 
 #### `getLiveAudioBufferSamplesSlice(liveBuffer, startFrame, frameCount)`
@@ -474,11 +504,11 @@ After `finalizeLiveAudioBuffer`, use `react-native-sherpa-onnx/audio`:
 ```ts
 import { saveAudioAsFile, saveAudioAsWav16k } from 'react-native-sherpa-onnx/audio';
 
-await finalizeLiveAudioBuffer(live);
-await saveAudioAsFile(live, { kind: 'fs', path: '/tmp/live.opus' }, 'opus', {
+const finished = await finalizeLiveAudioBuffer(live);
+await saveAudioAsFile(finished.bufferId, { kind: 'fs', path: '/tmp/live.opus' }, 'opus', {
   outputSampleRateHz: 16000,
 });
-await saveAudioAsWav16k(live, { kind: 'fs', path: '/tmp/live_16k.wav' });
+await saveAudioAsWav16k(finished.bufferId, { kind: 'fs', path: '/tmp/live_16k.wav' });
 ```
 
 ### Conversion: Online buffer <--> Offline buffer
@@ -532,6 +562,8 @@ See [segmentation-engine.md](segmentation-engine.md) for the shared policy model
 ```ts
 import type {
   LiveAudioBufferRef, // live buffer ref with info + recording handle
+  LiveAudioBufferFinishedRef, // bufferId + info after finalizeLiveAudioBuffer
+  LiveAudioBufferRecordingRef, // alias for LiveAudioBufferRef (recording state)
   LiveAudioBufferInfo, // metadata for live ring/spool buffer
   LiveAudioBufferIdSource, // ref/handle/id accepted by live APIs
   LiveAudioBufferRecordingSource, // recording-only source accepted by append/finalize APIs
@@ -625,7 +657,8 @@ await pipeline.stop();
 const offline = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/clip.wav' });
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 await appendOfflineToLiveAudioBuffer(live, offline);
-await finalizeLiveAudioBuffer(live);
+const finished = await finalizeLiveAudioBuffer(live);
+console.log(finished.info.durationMs);
 ```
 
 </details>

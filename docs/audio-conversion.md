@@ -85,7 +85,8 @@ const live = await createEmptyLiveAudioBuffer({ sampleRate: 44100 });
 await startMicToLiveAudioBuffer(live);
 // recording...
 await stopMicToLiveAudioBuffer();
-await finalizeLiveAudioBuffer(live);
+const finished = await finalizeLiveAudioBuffer(live);
+console.log(finished.info.durationMs);
 
 try {
   await saveAudioAsFile(live, { kind: 'fs', path: '/tmp/recording.flac' }, 'flac');
