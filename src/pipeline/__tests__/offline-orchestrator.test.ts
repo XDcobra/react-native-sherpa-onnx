@@ -938,6 +938,47 @@ describe('offline orchestrator', () => {
     expect(result.failedSegment?.error).toContain('requires channels=1 (mono)');
   });
 
+  it('prefers materialized segment text over buffer slice offsets', async () => {
+    segment.getSegments.mockResolvedValue([
+      {
+        segmentId: 'txt_seg_de',
+        domain: 'text',
+        startOffset: 500,
+        endOffset: 600,
+        reason: 'length_limit',
+        source: 'segmentation_engine',
+        createdAtMs: Date.now(),
+        segmentIndex: 0,
+        text: 'Grüße aus München.',
+        utf16Length: 18,
+      },
+    ]);
+
+    audio.getPipelineAudioBufferInfo.mockResolvedValue({
+      bufferId: 'off_tmp_out',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 4,
+      durationMs: 0.25,
+    });
+
+    await runOfflineTextToAudioPipeline(
+      'txt_in',
+      jest.fn().mockResolvedValue(undefined),
+      {
+        segmentation: { mode: 'auto' },
+        sampleRate: 16000,
+      }
+    );
+
+    expect(text.getOfflineTextBufferTextSlice).not.toHaveBeenCalled();
+    expect(text.createOfflineTextBufferFromText).toHaveBeenCalledWith(
+      'Grüße aus München.'
+    );
+  });
+
   it('runs offline text->audio orchestration and returns segment mappings', async () => {
     segment.getSegments.mockResolvedValue([
       {

@@ -271,6 +271,48 @@ function formatError(err: unknown): string {
   return String(err);
 }
 
+function hasSynthesizableText(text: string): boolean {
+  return text.trim().length > 0;
+}
+
+/**
+ * Prefer materialized segment text from `segmentOfflineBuffer()` — it matches
+ * native chunking. Re-slicing via `getOfflineTextBufferTextSlice` with
+ * `startOffset`/`endOffset` breaks on iOS when those offsets were UTF-8 bytes.
+ */
+async function resolveOfflineTextSegmentInput(
+  input: OfflineTextBufferIdSource,
+  seg: TextSegment,
+  options: {
+    overlapChars: number;
+    segmentIndex: number;
+    previousSegment?: TextSegment;
+  }
+): Promise<string> {
+  const materialized =
+    typeof seg.text === 'string' && seg.text.length > 0 ? seg.text : null;
+
+  if (options.overlapChars > 0 && options.segmentIndex > 0) {
+    const prevText = options.previousSegment?.text ?? '';
+    const tail = prevText.slice(-options.overlapChars);
+    if (materialized != null) {
+      return tail.length > 0 ? tail + materialized : materialized;
+    }
+  } else if (materialized != null) {
+    return materialized;
+  }
+
+  const overlapStart =
+    options.overlapChars > 0 && options.segmentIndex > 0
+      ? Math.max(0, seg.startOffset - options.overlapChars)
+      : seg.startOffset;
+  const span = Math.max(0, seg.endOffset - overlapStart);
+  if (span <= 0) {
+    return '';
+  }
+  return getOfflineTextBufferTextSlice(input, overlapStart, span);
+}
+
 function reportProgress(
   session: OrchestrationSession,
   config: OrchestrationConfig,
@@ -820,37 +862,38 @@ export async function runOfflineTextPipeline(
         let tempIn: OfflineTextBufferRef | undefined;
         let tempOut: OfflineTextBufferRef | undefined;
         try {
-          const overlapStart =
-            overlapChars > 0 && i > 0
-              ? Math.max(0, seg.startOffset - overlapChars)
-              : seg.startOffset;
-          const span = Math.max(0, seg.endOffset - overlapStart);
-          const segText =
-            span > 0
-              ? await getOfflineTextBufferTextSlice(input, overlapStart, span)
-              : '';
+          const segText = await resolveOfflineTextSegmentInput(input, seg, {
+            overlapChars,
+            segmentIndex: i,
+            previousSegment: i > 0 ? segments[i - 1] : undefined,
+          });
 
-          tempIn = await createOfflineTextBufferFromText(segText);
-          tempOut = await createEmptyOfflineTextBuffer();
+          if (!hasSynthesizableText(segText)) {
+            session.addCompletedSegment();
+            completed = true;
+          } else {
+            tempIn = await createOfflineTextBufferFromText(segText);
+            tempOut = await createEmptyOfflineTextBuffer();
 
-          await consumer(tempIn, tempOut);
-          const outInfo = await getPipelineTextBufferInfo(tempOut.bufferId);
-          if (outInfo.kind !== 'offlineTextBuffer') {
-            throw new Error(
-              'ORCHESTRATION_CONSUMER_ERROR: offline text consumer must write to an offline text output buffer'
-            );
+            await consumer(tempIn, tempOut);
+            const outInfo = await getPipelineTextBufferInfo(tempOut.bufferId);
+            if (outInfo.kind !== 'offlineTextBuffer') {
+              throw new Error(
+                'ORCHESTRATION_CONSUMER_ERROR: offline text consumer must write to an offline text output buffer'
+              );
+            }
+            const outText =
+              outInfo.utf16Length > 0
+                ? await getOfflineTextBufferTextSlice(
+                    tempOut.bufferId,
+                    0,
+                    outInfo.utf16Length
+                  )
+                : '';
+            chunks.push(outText);
+            session.addCompletedSegment();
+            completed = true;
           }
-          const outText =
-            outInfo.utf16Length > 0
-              ? await getOfflineTextBufferTextSlice(
-                  tempOut.bufferId,
-                  0,
-                  outInfo.utf16Length
-                )
-              : '';
-          chunks.push(outText);
-          session.addCompletedSegment();
-          completed = true;
         } catch (err) {
           const error = formatError(err);
           session.markRecovering();
@@ -1112,48 +1155,55 @@ export async function runOfflineTextToAudioPipeline(
         let tempIn: OfflineTextBufferRef | undefined;
         let tempOut: OfflineAudioBufferRef | undefined;
         try {
-          const overlapStart =
-            overlapChars > 0 && i > 0
-              ? Math.max(0, seg.startOffset - overlapChars)
-              : seg.startOffset;
-          const span = Math.max(0, seg.endOffset - overlapStart);
-          const segText =
-            span > 0
-              ? await getOfflineTextBufferTextSlice(input, overlapStart, span)
-              : '';
-
-          tempIn = await createOfflineTextBufferFromText(segText);
-          tempOut = await createEmptyOfflineAudioBuffer(
-            sampleRate,
-            monoChannels
-          );
-
-          await consumer(tempIn, tempOut);
-
-          const outInfo = await getPipelineAudioBufferInfo(tempOut.bufferId);
-          if (outInfo.kind !== 'offlinePcmBuffer') {
-            throw new Error(
-              'ORCHESTRATION_CONSUMER_ERROR: offline text-to-audio consumer must write to an offline audio output buffer'
-            );
-          }
-
-          if (outInfo.numSamples > 0) {
-            await appendOfflineToLiveAudioBuffer(
-              accumulator.bufferId,
-              tempOut.bufferId
-            );
-            totalSamplesAppended += outInfo.numSamples;
-          }
-
-          segmentMappings.push({
-            textSegmentId: seg.segmentId,
-            speechSegmentId: `speech_tts_${session.sessionId}_${seg.segmentIndex}`,
-            segmentIndex: seg.segmentIndex,
-            text: segText,
+          const segText = await resolveOfflineTextSegmentInput(input, seg, {
+            overlapChars,
+            segmentIndex: i,
+            previousSegment: i > 0 ? segments[i - 1] : undefined,
           });
 
-          session.addCompletedSegment();
-          completed = true;
+          if (!hasSynthesizableText(segText)) {
+            segmentMappings.push({
+              textSegmentId: seg.segmentId,
+              speechSegmentId: `speech_tts_${session.sessionId}_${seg.segmentIndex}`,
+              segmentIndex: seg.segmentIndex,
+              text: segText,
+            });
+            session.addCompletedSegment();
+            completed = true;
+          } else {
+            tempIn = await createOfflineTextBufferFromText(segText);
+            tempOut = await createEmptyOfflineAudioBuffer(
+              sampleRate,
+              monoChannels
+            );
+
+            await consumer(tempIn, tempOut);
+
+            const outInfo = await getPipelineAudioBufferInfo(tempOut.bufferId);
+            if (outInfo.kind !== 'offlinePcmBuffer') {
+              throw new Error(
+                'ORCHESTRATION_CONSUMER_ERROR: offline text-to-audio consumer must write to an offline audio output buffer'
+              );
+            }
+
+            if (outInfo.numSamples > 0) {
+              await appendOfflineToLiveAudioBuffer(
+                accumulator.bufferId,
+                tempOut.bufferId
+              );
+              totalSamplesAppended += outInfo.numSamples;
+            }
+
+            segmentMappings.push({
+              textSegmentId: seg.segmentId,
+              speechSegmentId: `speech_tts_${session.sessionId}_${seg.segmentIndex}`,
+              segmentIndex: seg.segmentIndex,
+              text: segText,
+            });
+
+            session.addCompletedSegment();
+            completed = true;
+          }
         } catch (err) {
           const error = formatError(err);
           session.markRecovering();

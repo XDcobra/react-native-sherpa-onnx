@@ -1287,7 +1287,15 @@ object SegmentationEngineRegistry {
             }
           }
           if (split <= 0) {
-            split = minOf(policy.maxLengthChars.coerceAtLeast(1), remaining.length)
+            val maxLen = policy.maxLengthChars.coerceAtLeast(1)
+            split = minOf(maxLen, remaining.length)
+            if (split < remaining.length) {
+              val prefix = remaining.substring(0, split)
+              val spaceAt = prefix.lastIndexOf(' ')
+              if (spaceAt > 0) {
+                split = spaceAt + 1
+              }
+            }
           }
           val chunk = remaining.substring(0, split)
           val end = index + chunk.length
