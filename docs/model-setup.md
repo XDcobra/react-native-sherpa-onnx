@@ -190,6 +190,8 @@ if (padPath) {
 
 ### Model Detection
 
+Cross-feature unified detection (`detectModel`, batch, QNN): [model-detect.md](model-detect.md). The APIs below are STT/TTS-specific.
+
 #### `detectSttModel(source, options?)`
 
 Detect the STT model type and validate required files without loading the model.

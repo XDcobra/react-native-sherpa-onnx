@@ -14,6 +14,10 @@ import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
+## Model detection
+
+`detectTtsModel` is the TTS-specific pre-check before `createTTS` (family, lexicons, quantization). When the feature category is not known yet (model library, multi-category folders), use unified [`detectModel`](model-detect.md) from `react-native-sherpa-onnx/detect` — see [model-detect.md](model-detect.md).
+
 ## Quick start
 
 All buffer parameters accept refs directly. Prefer refs over raw string ids. If you pass raw ids, malformed values are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.
@@ -144,7 +148,7 @@ try {
 
 ### `detectTtsModel(source, options?)`
 
-File-based detection **without** initializing the engine. Use before `createTTS` to get `modelType` and init the right `modelOptions`.
+File-based detection **without** initializing the engine. Use before `createTTS` to get `modelType` and init the right `modelOptions`. Unified cross-feature detection: [model-detect.md](model-detect.md).
 
 For `FileSource` resolution problems, this promise can reject with `FILEIO_*` errors before native model detection runs.
 

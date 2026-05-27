@@ -16,7 +16,7 @@ For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
 - In-app model downloads: [download-manager.md](download-manager.md) with category `ModelCategory.Stt`
-- Model detection without engine init: `detectSttModel(...)`
+- Model detection without engine init: `detectSttModel(...)` — see [model-detect.md](model-detect.md) for unified `detectModel` when category is unknown
 - Model setup and expected files: [model-setup.md](model-setup.md)
 - Hotwords details: [hotwords.md](hotwords.md)
 
@@ -207,6 +207,8 @@ Use **`getPipelineTextBufferInfo(textOut)`** to obtain `utf16Length`, `tokenCoun
 Signatures below are exported from **`react-native-sherpa-onnx/stt`**. Reading transcript data is documented under **`react-native-sherpa-onnx/textbuffer`** ([textbuffer-offline.md](textbuffer-offline.md)).
 
 ### Detection and factory
+
+For cross-feature catalog scans use unified detection: [model-detect.md](model-detect.md). The APIs below are STT-specific (required files, `detectedModels`, `paths`).
 
 #### `detectSttModel(source, options?)`
 

@@ -87,7 +87,7 @@ Each active engine holds its model weights in native memory independently. Runni
 **Guidelines:**
 - Do not load more engines than your UX needs simultaneously. Lazy-load and release eagerly.
 - If pipeline stages are sequential (e.g., transcribe file → generate speech), release the first engine before creating the second whenever latency allows.
-- Use `detectSttModel()` / `detectTtsModel()` before `createSTT()` / `createTTS()` — detection is stateless and does not load model weights.
+- Use `detectSttModel()` / `detectTtsModel()` (or unified [`detectModel`](model-detect.md) for category-unknown folders) before `createSTT()` / `createTTS()` — detection is stateless and does not load model weights. See [model-detect.md](model-detect.md).
 - On low-memory devices (< 3 GB) avoid Whisper base/large, Kokoro, and Zipvoice simultaneously with other engines.
 
 ---

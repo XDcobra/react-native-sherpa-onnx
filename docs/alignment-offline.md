@@ -266,6 +266,12 @@ const subtitleRows = alignmentSegments.map((segment) => ({
 }));
 ```
 
+## Model detection
+
+Unified cross-feature detection: [model-detect.md](model-detect.md).
+
+`detectAlignmentModel` checks wav2vec2 alignment packs before `createAlignment` or per-call `modelSource` in `accurate` mode. See [`detectAlignmentModel`](#detectalignmentmodelsource-options) below.
+
 ## API reference
 
 ### `createAlignment(options?)`
@@ -285,6 +291,8 @@ function createAlignment(options?: object): {
 `segmentOut` must be an existing offline segment buffer (`seg_off_*`). The API does not auto-create output buffers.
 
 ### `detectAlignmentModel(source, options?)`
+
+Alignment-specific layout detection. For category-unknown library scans, use [`detectModel`](model-detect.md) instead.
 
 ```ts
 function detectAlignmentModel(

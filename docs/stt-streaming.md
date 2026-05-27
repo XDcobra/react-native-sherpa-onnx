@@ -182,7 +182,7 @@ const engine = await createStreamingSTT({
 
 ## API reference
 
-All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`detectSttModel`** from the same package for model detection before creating a streaming engine (see [Offline STT — Detection and factory](stt-offline.md#detection-and-factory)).
+All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`detectSttModel`** from the same package for model detection before creating a streaming engine (see [Offline STT — Detection and factory](stt-offline.md#detection-and-factory)). For category-unknown library scans, see [model-detect.md](model-detect.md).
 
 ### Detection and initialization
 

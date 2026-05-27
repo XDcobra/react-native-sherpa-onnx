@@ -18,8 +18,12 @@ Import path: `react-native-sherpa-onnx/vad`
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- Model detection without engine init: `detectVadModel(...)`
+- Model detection without engine init: `detectVadModel(...)` — unified category detect: [model-detect.md](model-detect.md)
 - Supported model families: `silero_vad`, `ten_vad`
+
+## Model detection
+
+`detectVadModel` validates Silero / Ten VAD layouts before `createStreamingVAD`. For library rows where the Sherpa category is unknown, use unified detection in [model-detect.md](model-detect.md).
 
 ## Quick start
 

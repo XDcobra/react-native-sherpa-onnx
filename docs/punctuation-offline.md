@@ -20,6 +20,8 @@ Live-overload contract references:
 
 ## Model detection
 
+Unified cross-feature detection: [model-detect.md](model-detect.md).
+
 `detectPunctuationModel` = **pre-check** only (no engine load). Splits **ct_transformer** vs **cnn_bilstm**+bpe; `modelType` = `auto` | `ct_transformer` | `cnn_bilstm`. Optional `assetName` for catalog hints. Returns `paths.*`, `isStreaming` (reserved), `detectionSources`; vocabs come from **ONNX**, not a separate tokens arg.
 
 `detectPunctuationModel` with `auto` can succeed while **still** not CT-only — `createOfflinePunctuation` only accepts a valid **CT offline** directory. `FILEIO_*` if `FileSource` resolution fails.
