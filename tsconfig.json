@@ -10,6 +10,7 @@
       "react-native-sherpa-onnx/utils": ["./src/utils.ts"],
       "react-native-sherpa-onnx/licenses": ["./src/licenses.ts"],
       "react-native-sherpa-onnx/download": ["./src/download/index.ts"],
+      "react-native-sherpa-onnx/detect": ["./src/detect/index.ts"],
       "react-native-sherpa-onnx/audio": ["./src/audio/index.ts"],
       "react-native-sherpa-onnx/visualization": ["./src/visualization/index.ts"],
       "react-native-sherpa-onnx/pcm": ["./src/pcm/index.ts"],

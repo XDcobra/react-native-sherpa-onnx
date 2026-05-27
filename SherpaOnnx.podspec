@@ -57,6 +57,7 @@ Pod::Spec.new do |s|
     "ios/model_detect/**/*",
     # Android JNI only (jni.h / JNIEnv). iOS compiles ObjC++ wrappers under ios/ instead.
     "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
+    "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-unified-detect-wrapper.cpp",
     "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp",
     "android/src/main/cpp/jni/audio/audio_decode_jni.cpp",
     "android/src/main/cpp/jni/audio/audio_encode_jni.cpp",

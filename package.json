@@ -70,6 +70,11 @@
       "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
     },
+    "./detect": {
+      "source": "./src/detect/index.ts",
+      "types": "./lib/typescript/src/detect/index.d.ts",
+      "default": "./lib/module/detect/index.js"
+    },
     "./download": {
       "source": "./src/download/index.ts",
       "types": "./lib/typescript/src/download/index.d.ts",

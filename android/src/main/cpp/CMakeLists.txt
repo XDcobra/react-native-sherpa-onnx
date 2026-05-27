@@ -87,6 +87,8 @@ set(SOURCES
     jni/archive/sherpa-onnx-archive-jni.cpp
     jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
+    jni/model_detect/common/sherpa-onnx-model-detect-unified.cpp
+    jni/model_detect/common/sherpa-onnx-unified-detect-wrapper.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
     jni/model_detect/common/sherpa-onnx-ort-guard-utils.cpp
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
