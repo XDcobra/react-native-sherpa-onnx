@@ -40,6 +40,10 @@ All paths under `docs/migration/downloadManager/`:
 | [sub-07-registry-and-cache-rework.md](./sub-07-registry-and-cache-rework.md) | **Source-aware registry + cache + paths** — cache namespaced per source, `ModelMeta` gains `sourceId` + `layout`, paths rework (`getModelDir`, `getArchivePath` source-aware), deterministic disk layout. |
 | [sub-08-cleanup-and-test-harness.md](./sub-08-cleanup-and-test-harness.md) | **Cleanup, parity audit, test matrix, example app + docs** — update `docs/download-manager.md`, extend `example/src/screens/download-showcase/DownloadShowcaseScreen.tsx` with a source-picker, Jest matrix per source, CHANGELOG breaking entry. |
 | [execution-prompt.md](./execution-prompt.md) | **Execution prompt** — the prompt to feed the implementing agent. Self-contained: cross-references, all relevant files, the start-to-finish rule, the per-phase IST/SOLL check rule. |
+| [voicelab-source-picker-implementation-prompt.md](./voicelab-source-picker-implementation-prompt.md) | **VoiceLab app integration** — UX spec + implementation prompt for per-category source picker (GitHub / Hugging Face / Custom) in `voicelab-app`. |
+| [voicelab-huggingface-github-mirror-crossmatch-prompt.md](./voicelab-huggingface-github-mirror-crossmatch-prompt.md) | **VoiceLab Hugging Face cross-match** — prompt for deriving HF availability from GitHub assets via HF existence probing + caching + progress UI (VoiceLab-only, no SDK helper). |
+| [voicelab-custom-huggingface-import-prompt.md](./voicelab-custom-huggingface-import-prompt.md) | **VoiceLab Custom Hugging Face import** — prompt for importing a single HF model by URL into a chosen category and serving it via a local custom provider. |
+| [voicelab-final-execution-prompt.md](./voicelab-final-execution-prompt.md) | **VoiceLab final execution** — one prompt that executes all VoiceLab integration docs end-to-end (source picker + HF mirror + HF import + custom URL). |
 
 ---
 

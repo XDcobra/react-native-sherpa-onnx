@@ -1,11 +1,13 @@
 # Sub-Plan 08: Cleanup, Cross-Source Parity Audit, Test Matrix, Example App & Docs
 
 ## Status
+
 - Phase: **8** (final)
 - Depends on: sub-01 … sub-07.
 - Prerequisite for: nothing — this sub-plan closes the rework.
 
 ## Cross-references
+
 - Overview: [`download_manager_overview.md`](./download_manager_overview.md)
 - Public docs to refresh: [`docs/download-manager.md`](../../download-manager.md)
 - Example showcase: [`example/src/screens/download-showcase/DownloadShowcaseScreen.tsx`](../../../example/src/screens/download-showcase/DownloadShowcaseScreen.tsx).
@@ -57,23 +59,36 @@ Audit checklist anchored to the overview's "Definition of done":
 
 The audit lives in this sub-plan as a markdown table once executed (rather than as a separate file) since the rework surface is small enough to track inline.
 
+### IST/SOLL Audit Log
+
+| Phase  | Status                | Code references                                                                                                                                                                                                                                                                                           | Deviation                                                                                                                  | Classification          |
+| ------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| sub-01 | implemented           | `src/download/sources/types.ts`, `src/download/sources/errors.ts`, `src/download/sources/index.ts`, `src/download/index.ts`                                                                                                                                                                               | none                                                                                                                       | acceptable              |
+| sub-02 | implemented           | `src/download/sources/registry.ts`, `src/download/sources/github-common.ts`, `src/download/sources/builtin/github-k2-fsa.ts`, `src/download/sources/builtin/github-xdcobra.ts`, `src/download/sources/builtin/index.ts`, `src/download/registry.ts`, `src/download/paths.ts`, `src/download/constants.ts` | none                                                                                                                       | acceptable              |
+| sub-03 | implemented           | `src/download/sources/fetch.ts`, `src/download/sources/builtin/github-k2-fsa.ts`, `src/download/sources/builtin/github-xdcobra.ts`, `src/download/registry.ts`, `src/download/retry.ts` (deleted)                                                                                                         | none                                                                                                                       | acceptable              |
+| sub-04 | implemented           | `src/download/types.ts`, `src/download/paths.ts`, `src/download/downloadTask.ts`, `src/download/modelExtraction.ts`, `src/download/ensureModel.ts`, `src/download/bulkPurge.ts`, `src/download/registry.ts`, `src/download/sources/formats.ts`                                                            | `SUPPORTED_ARCHIVE_FORMATS` parity audit against native/build scripts still needs explicit automated parity guard          | must-fix-before-release |
+| sub-05 | implemented           | `src/download/sources/builtin/huggingface.ts`, `src/download/sources/builtin/huggingface-defaults.ts`, `src/download/sources/builtin/index.ts`                                                                                                                                                            | default curated HF allow-list intentionally left empty until final curation pass                                           | acceptable-deviation    |
+| sub-06 | implemented           | `src/download/downloadTask.ts`, `src/download/postDownloadProcessing.ts`, `src/download/paths.ts`, `src/download/__tests__/downloadTask.multi-asset.test.ts`                                                                                                                                              | none                                                                                                                       | acceptable              |
+| sub-07 | implemented           | `src/download/types.ts`, `src/download/paths.ts`, `src/download/registry.ts`, `src/download/modelExtraction.ts`, `src/download/localModels.ts`, `src/download/protectedModelKeys.ts`, `src/download/bulkPurge.ts`                                                                                         | none                                                                                                                       | acceptable              |
+| sub-08 | partially implemented | `docs/migration/downloadManager/sub-08-cleanup-and-test-harness.md`, `docs/download-manager.md`                                                                                                                                                                                                           | changelog entry intentionally skipped per request; example source-picker UI and cross-source parity harness remain pending | acceptable-deviation    |
+
 ---
 
 ## Workstream 2 — Cross-source test matrix (Jest)
 
 A focused set of cross-source tests verifies uniform contract behaviour beyond the per-sub-plan suites. Co-located in `src/download/__tests__/crossSource.test.ts`.
 
-| # | Test | What it verifies |
-|---|---|---|
-| X-1 | **Error code parity**: trigger `DOWNLOAD_HTTP_STATUS` via mock `sourceFetch` failure for `github_k2_fsa`, `github_xdcobra`, `huggingface`, and a registered custom provider. Assert all four throw `DownloadError` with `code === 'DOWNLOAD_HTTP_STATUS'` and the right `source` field. | One error code, one shape, no per-source string drift. |
-| X-2 | **Header propagation parity**: `configureSource(s, { token: 'tok' })` for each source; assert outgoing `Authorization: Bearer tok` in the mocked fetch. | Header merge logic is source-agnostic. |
-| X-3 | **`ensureModel` parity**: each source with a mocked happy-path provider + mocked BG downloader; assert `ready.localPath` resolves under `<base>/sherpa-onnx/models/<sourceId>/...`. | Disk layout is source-aware. |
-| X-4 | **`pauseDownload` / `resumeDownload` parity**: archive happy path (`github_k2_fsa`) + folder happy path (`huggingface`) — pause mid-fetch, assert temp dir kept, resume, assert commit. | Pause/resume works across layouts. |
-| X-5 | **`deleteIncompleteDownload` parity**: cancel mid-fetch for both layouts; assert temp dir removed. | Cleanup parity. |
-| X-6 | **Default routing**: invoke each public API without `source`. Verify they hit `getDefaultSourceForCategory`. | Backward compatibility of default callers. |
-| X-7 | **Custom source happy path**: register a tiny `{ id: 'custom_mirror', listModels, defaultHeaders }` provider, configure with `{ headers: { 'X-Mirror-Key': 'k' } }`, run `ensureModel`. Verify the model ends up at `models/custom_mirror/...`. | Custom sources are first-class. |
-| X-8 | **Format gate**: register a custom provider returning `format: 'zip'`. `downloadModel` for that model throws `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` synchronously. | Format gate fires at planning time. |
-| X-9 | **Archive-as-root invariant cross-source**: register a custom folder-layout provider returning `assets: [{ relativePath: 'model.onnx' }, { relativePath: 'weights/legacy.tar.bz2' }]`. Spy on `SherpaOnnx.extractArchive`. Run `ensureModel` end-to-end. | Both files committed under `models/<sourceId>/<category>/<id>/`; the `.tar.bz2` lives on disk as a plain file; `extractArchive` spy is invoked **zero** times. Repeat with `huggingface` provider mocked to return the same shape — same assertion holds. |
+| #   | Test                                                                                                                                                                                                                                                                                    | What it verifies                                                                                                                                                                                                                                          |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| X-1 | **Error code parity**: trigger `DOWNLOAD_HTTP_STATUS` via mock `sourceFetch` failure for `github_k2_fsa`, `github_xdcobra`, `huggingface`, and a registered custom provider. Assert all four throw `DownloadError` with `code === 'DOWNLOAD_HTTP_STATUS'` and the right `source` field. | One error code, one shape, no per-source string drift.                                                                                                                                                                                                    |
+| X-2 | **Header propagation parity**: `configureSource(s, { token: 'tok' })` for each source; assert outgoing `Authorization: Bearer tok` in the mocked fetch.                                                                                                                                 | Header merge logic is source-agnostic.                                                                                                                                                                                                                    |
+| X-3 | **`ensureModel` parity**: each source with a mocked happy-path provider + mocked BG downloader; assert `ready.localPath` resolves under `<base>/sherpa-onnx/models/<sourceId>/...`.                                                                                                     | Disk layout is source-aware.                                                                                                                                                                                                                              |
+| X-4 | **`pauseDownload` / `resumeDownload` parity**: archive happy path (`github_k2_fsa`) + folder happy path (`huggingface`) — pause mid-fetch, assert temp dir kept, resume, assert commit.                                                                                                 | Pause/resume works across layouts.                                                                                                                                                                                                                        |
+| X-5 | **`deleteIncompleteDownload` parity**: cancel mid-fetch for both layouts; assert temp dir removed.                                                                                                                                                                                      | Cleanup parity.                                                                                                                                                                                                                                           |
+| X-6 | **Default routing**: invoke each public API without `source`. Verify they hit `getDefaultSourceForCategory`.                                                                                                                                                                            | Backward compatibility of default callers.                                                                                                                                                                                                                |
+| X-7 | **Custom source happy path**: register a tiny `{ id: 'custom_mirror', listModels, defaultHeaders }` provider, configure with `{ headers: { 'X-Mirror-Key': 'k' } }`, run `ensureModel`. Verify the model ends up at `models/custom_mirror/...`.                                         | Custom sources are first-class.                                                                                                                                                                                                                           |
+| X-8 | **Format gate**: register a custom provider returning `format: 'zip'`. `downloadModel` for that model throws `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` synchronously.                                                                                                                       | Format gate fires at planning time.                                                                                                                                                                                                                       |
+| X-9 | **Archive-as-root invariant cross-source**: register a custom folder-layout provider returning `assets: [{ relativePath: 'model.onnx' }, { relativePath: 'weights/legacy.tar.bz2' }]`. Spy on `SherpaOnnx.extractArchive`. Run `ensureModel` end-to-end.                                | Both files committed under `models/<sourceId>/<category>/<id>/`; the `.tar.bz2` lives on disk as a plain file; `extractArchive` spy is invoked **zero** times. Repeat with `huggingface` provider mocked to return the same shape — same assertion holds. |
 
 These tests are kept lean — they verify **uniformity**, not source-specific behaviour (already covered by sub-02 / sub-05 suites).
 
@@ -114,16 +129,25 @@ Rewrite `docs/download-manager.md` so each section reflects the source-aware API
 
 - **Quick start §1** ("One call: ensure model is ready"): keep today's example, with one sentence after the snippet noting `ensureModel(..., { source })` is the way to switch sources.
 - **Quick start §2** add a new "Switch source per category" block:
+
   ```ts
-  import { setDefaultSourceForCategory, configureSource, BUILTIN_SOURCE_IDS } from 'react-native-sherpa-onnx/download';
+  import {
+    setDefaultSourceForCategory,
+    configureSource,
+    BUILTIN_SOURCE_IDS,
+  } from 'react-native-sherpa-onnx/download';
 
   configureSource(BUILTIN_SOURCE_IDS.HUGGINGFACE, {
     token: process.env.HF_TOKEN,
   });
-  setDefaultSourceForCategory(ModelCategory.Stt, BUILTIN_SOURCE_IDS.HUGGINGFACE);
+  setDefaultSourceForCategory(
+    ModelCategory.Stt,
+    BUILTIN_SOURCE_IDS.HUGGINGFACE
+  );
 
   // …Subsequent ensureModel(...) calls without { source } now hit Hugging Face.
   ```
+
 - **Quick start §3** add a "Register a custom source" example with a 20-line `SourceProvider` implementation that talks to a self-hosted mirror.
 - **Setup** add a "Headers and tokens" subsection explaining `configureSource(sourceId, { headers, token, tokenScheme })` and the merge order from sub-03.
 - **API reference**: every function gets a new optional `{ source }` field on its options type. New functions documented: `registerSource`, `unregisterSource`, `getSource`, `tryGetSource`, `listSources`, `listBuiltinSources`, `configureSource`, `getSourceConfig`, `setDefaultSourceForCategory`, `getDefaultSourceForCategory`, `sourceFetch`, `configureHuggingFaceSource`.
@@ -145,6 +169,7 @@ A short "Migration from <pre-rework>" section at the bottom describes:
 Add an `[Unreleased]` block with a single breaking entry:
 
 > ### Breaking
+>
 > - **Download manager rework.** `react-native-sherpa-onnx/download` is now source-aware. `ModelMeta.archiveExt` and `ModelMeta.downloadUrl` are replaced by `ModelMeta.layout` + `ModelMeta.assets[]`. The new `SourceProvider` abstraction adds first-class Hugging Face support and per-source headers/tokens. The internal `retryWithBackoff` helper is removed; retries are now opt-in via `requestPolicy`. See [`docs/download-manager.md`](docs/download-manager.md) for the new API and migration notes.
 
 ---

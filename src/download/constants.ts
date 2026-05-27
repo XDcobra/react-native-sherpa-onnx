@@ -1,1 +1,1 @@
-export const CACHE_TTL_MINUTES = 30 * 24 * 60;
+export const CACHE_TTL_MINUTES = 24 * 60;
