@@ -161,7 +161,7 @@ export default function DownloadShowcaseScreen() {
       setRunPhase('idle');
       activeKeyRef.current = null;
       setDownloadPct(100);
-      if (meta.archiveExt === 'tar.bz2') {
+      if (meta.layout.kind === 'archive' && meta.layout.extract) {
         setExtractPct(100);
       }
       await loadDownloaded();
