@@ -218,12 +218,7 @@ export async function refreshModels(
   const ttl = options?.cacheTtlMinutes ?? CACHE_TTL_MINUTES;
   const cached = await loadCacheFromDisk(category, sourceId);
 
-  if (
-    !options?.forceRefresh &&
-    cached &&
-    isCacheFresh(cached, ttl) &&
-    cached.models.length > 0
-  ) {
+  if (!options?.forceRefresh && cached && isCacheFresh(cached, ttl)) {
     return cached.models;
   }
 
