@@ -70,6 +70,7 @@ export { ensureModel } from './ensureModel';
 
 export {
   buildCatalogHintsMap,
+  catalogDetectHintMatchesCategory,
   categoryUsesCatalogDetect,
   type CatalogDetectCategory,
   type CatalogDetectHint,
@@ -95,7 +96,6 @@ export {
 export {
   buildFolderAssetsFromHfSiblings,
   buildSourceModelsFromHfAuthorRepoNames,
-  catalogDetectHintMatchesCategory,
   hfRepoResolveUrl,
   isIncludedHfModelPath,
   type BuildHfAuthorSourceModelsOptions,

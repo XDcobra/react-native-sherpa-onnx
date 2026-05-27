@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
-import { resolveFileSourceForModelInit } from '../detect';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import {
   attachSegmentationEngine,

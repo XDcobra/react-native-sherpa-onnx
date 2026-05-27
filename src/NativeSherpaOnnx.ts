@@ -73,6 +73,22 @@ export type TtsInitBridgeOptions = {
   kokoroLang?: string;
 };
 
+/** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
+export type UnifiedDetectNativeResult = {
+  matched: boolean;
+  success: boolean;
+  category?: string;
+  modelType?: string;
+  languages?: string[];
+  quantization?: string;
+  sizeTier?: string;
+  isStreaming?: boolean;
+  isHardwareSpecificUnsupported?: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  detectionSources?: string[];
+  error?: string;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -1409,6 +1425,23 @@ export interface Spec extends TurboModule {
       bpe_vocab?: string;
     };
   }>;
+
+  /**
+   * Unified model detection: runs TTS→STT→VAD→Punctuation→Enhancement→Alignment
+   * in one native call (first hit wins). Used by `detectModel` in JS.
+   */
+  detectModel(
+    modelDir: string,
+    assetName: string | null
+  ): Promise<UnifiedDetectNativeResult>;
+
+  /** Batch unified detection; one native round-trip for all inputs. */
+  detectModelsBatch(
+    inputs: ReadonlyArray<{
+      modelDir?: string;
+      assetName?: string | null;
+    }>
+  ): Promise<UnifiedDetectNativeResult[]>;
 
   /**
    * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with

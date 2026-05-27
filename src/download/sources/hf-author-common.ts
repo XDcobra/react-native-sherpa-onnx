@@ -1,86 +1,27 @@
-import { buildCatalogHintsMap, type CatalogDetectHint } from '../catalogHints';
+import {
+  detectModelsBatch,
+  detectModelResultMatchesCategory,
+  type DetectModelMatchedResult,
+} from '../../detect';
 import { categoryUsesCatalogDetect } from '../catalogDetectCategories';
+import type { CatalogDetectHint } from '../catalogHints';
 import { ModelCategory, type Quantization, type SizeTier } from '../types';
 import type { SourceAssetEntry, SourceModel } from './types';
 import { deriveDisplayName } from './github-common';
-import { filterHfRepoNamesForCategory } from './hf-author-filter';
 
-export {
-  filterHfRepoNamesForCategory,
-  isHfRepoNameSupportedForCategory,
-} from './hf-author-filter';
-
-const TTS_DETECT_MODEL_TYPES = new Set([
-  'vits',
-  'matcha',
-  'kokoro',
-  'kitten',
-  'pocket',
-  'zipvoice',
-  'supertonic',
-]);
-
-const STT_DETECT_MODEL_TYPES = new Set([
-  'transducer',
-  'nemo_transducer',
-  'paraformer',
-  'nemo_ctc',
-  'wenet_ctc',
-  'sense_voice',
-  'zipformer_ctc',
-  'ctc',
-  'whisper',
-  'funasr_nano',
-  'qwen3_asr',
-  'cohere_transcribe',
-  'fire_red_asr',
-  'moonshine',
-  'dolphin',
-  'canary',
-  'omnilingual',
-  'medasr',
-  'telespeech_ctc',
-]);
-
-/**
- * GitHub releases are per-category; the HF author index is flat. After the shared
- * filename filter, use the category-specific `detect*Model` `modelType` to keep
- * only rows that belong in the requested catalog slice.
- */
-export function catalogDetectHintMatchesCategory(
-  category: ModelCategory,
-  hint: CatalogDetectHint
-): boolean {
-  if (hint.modelType === 'unknown') {
-    return true;
-  }
-
-  const mt = hint.modelType.toLowerCase();
-
-  switch (category) {
-    case ModelCategory.Tts:
-      return TTS_DETECT_MODEL_TYPES.has(mt);
-    case ModelCategory.Stt:
-    case ModelCategory.Qnn:
-      return STT_DETECT_MODEL_TYPES.has(mt);
-    case ModelCategory.Vad:
-      return mt.includes('vad') || mt.includes('silero');
-    case ModelCategory.Punctuation:
-      return mt.includes('punct') || mt.includes('ct-transformer');
-    case ModelCategory.Enhancement:
-      return (
-        mt.includes('gtcrn') ||
-        mt.includes('nsnet') ||
-        mt.includes('enhancement')
-      );
-    case ModelCategory.Alignment:
-      return mt.includes('align');
-    case ModelCategory.Diarization:
-    case ModelCategory.Separation:
-      return true;
-    default:
-      return true;
-  }
+function matchedResultToCatalogHint(
+  result: DetectModelMatchedResult
+): CatalogDetectHint {
+  return {
+    modelType: result.modelType,
+    languages: [...result.languages],
+    quantization: result.quantization as Quantization,
+    sizeTier: result.sizeTier as SizeTier,
+    isStreaming: result.isStreaming,
+    ...(result.isHardwareSpecificUnsupported === true
+      ? { isHardwareSpecificUnsupported: true }
+      : {}),
+  };
 }
 
 function applyCatalogHint(
@@ -117,32 +58,33 @@ export type BuildHfAuthorSourceModelsOptions = {
 };
 
 /**
- * Same pipeline as {@link buildSourceModelsFromGithubReleaseAssets}: filter ids by
- * name rules, enrich with native `detect*Model` catalog hints, build `SourceModel`.
+ * Build HF author source models using unified {@link detectModelsBatch} category
+ * resolution (single native detect pass per repo).
  */
 export async function buildSourceModelsFromHfAuthorRepoNames(
   category: ModelCategory,
   repoNames: Iterable<string>,
   options: BuildHfAuthorSourceModelsOptions
 ): Promise<SourceModel[]> {
-  const supported = filterHfRepoNamesForCategory(category, repoNames);
-
-  let hints = new Map<string, CatalogDetectHint>();
-  if (categoryUsesCatalogDetect(category)) {
-    hints = await buildCatalogHintsMap(category, supported);
-  }
+  const repoNameList = [...repoNames];
+  const detectResults =
+    categoryUsesCatalogDetect(category) && repoNameList.length > 0
+      ? await detectModelsBatch(
+          repoNameList.map((repoName) => ({ assetName: repoName }))
+        )
+      : [];
 
   const models: SourceModel[] = [];
 
-  for (const repoName of supported) {
-    const hint = hints.get(repoName);
-    if (hint?.isHardwareSpecificUnsupported === true) {
-      continue;
-    }
+  for (let index = 0; index < repoNameList.length; index += 1) {
+    const repoName = repoNameList[index]!;
+    const detect = detectResults[index];
+
     if (
-      hint &&
       categoryUsesCatalogDetect(category) &&
-      !catalogDetectHintMatchesCategory(category, hint)
+      (!detect?.matched ||
+        !detectModelResultMatchesCategory(category, detect) ||
+        detect.isHardwareSpecificUnsupported === true)
     ) {
       continue;
     }
@@ -167,11 +109,12 @@ export async function buildSourceModelsFromHfAuthorRepoNames(
       bytes,
     };
 
-    const enriched = hint
-      ? applyCatalogHint(base, hint, {
-          supportsQnn: category === ModelCategory.Qnn,
-        })
-      : base;
+    const enriched =
+      detect?.matched === true
+        ? applyCatalogHint(base, matchedResultToCatalogHint(detect), {
+            supportsQnn: detect.supportsQnn === true,
+          })
+        : base;
 
     if (enriched.isHardwareSpecificUnsupported === true) {
       continue;
@@ -252,3 +195,11 @@ export function buildFolderAssetsFromHfSiblings(
 
   return assets;
 }
+
+export {
+  filterHfRepoNamesForCategory,
+  isHfRepoNameSupportedForCategory,
+} from './hf-author-filter';
+
+/** @deprecated Use {@link detectModelResultMatchesCategory} from the SDK root detect API. */
+export { catalogDetectHintMatchesCategory } from '../catalogHints';
