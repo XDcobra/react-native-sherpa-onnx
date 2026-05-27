@@ -925,6 +925,14 @@ TEST(UnifiedModelDetectTest, NameOnlyTtsAssetMatchesTtsCategory) {
     EXPECT_TRUE(result.isStreaming);
 }
 
+TEST(UnifiedModelDetectTest, NameOnlySupertonicRepoMatchesTtsCategory) {
+    auto result = sherpaonnx::DetectModel(
+        std::nullopt, std::optional<std::string>("supertonic-3"));
+    EXPECT_TRUE(result.matched);
+    EXPECT_EQ(result.category, "tts");
+    EXPECT_EQ(result.modelType, "supertonic");
+}
+
 TEST(UnifiedModelDetectTest, BatchPreservesOrderAndLength) {
     std::vector<sherpaonnx::UnifiedModelDetectInput> inputs = {
         {std::nullopt, std::optional<std::string>("vits-piper-en")},

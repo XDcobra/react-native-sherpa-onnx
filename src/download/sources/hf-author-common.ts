@@ -2,6 +2,7 @@ import {
   detectModelsBatch,
   detectModelResultMatchesCategory,
   type DetectModelMatchedResult,
+  type DetectModelResult,
 } from '../../detect';
 import { categoryUsesCatalogDetect } from '../catalogDetectCategories';
 import type { CatalogDetectHint } from '../catalogHints';
@@ -55,6 +56,11 @@ export type BuildHfAuthorSourceModelsOptions = {
     fullRepo: string,
     repoName: string
   ) => Promise<SourceAssetEntry[]>;
+  /**
+   * When set, skips an internal {@link detectModelsBatch} call. Length must match
+   * `repoNames` order (one result per repo).
+   */
+  detectResults?: readonly DetectModelResult[];
 };
 
 /**
@@ -68,11 +74,12 @@ export async function buildSourceModelsFromHfAuthorRepoNames(
 ): Promise<SourceModel[]> {
   const repoNameList = [...repoNames];
   const detectResults =
-    categoryUsesCatalogDetect(category) && repoNameList.length > 0
+    options.detectResults ??
+    (categoryUsesCatalogDetect(category) && repoNameList.length > 0
       ? await detectModelsBatch(
           repoNameList.map((repoName) => ({ assetName: repoName }))
         )
-      : [];
+      : []);
 
   const models: SourceModel[] = [];
 

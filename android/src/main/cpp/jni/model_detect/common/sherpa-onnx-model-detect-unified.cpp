@@ -7,6 +7,8 @@
 
 #include "sherpa-onnx-model-detect.h"
 
+#include <algorithm>
+
 namespace sherpaonnx {
 namespace {
 
@@ -104,6 +106,25 @@ bool IsHit(const std::string& modelType) {
     return !modelType.empty() && modelType != "unknown";
 }
 
+bool HasNameOnlyDetectionSource(const std::vector<DetectionSource>& sources) {
+    return std::find(sources.begin(), sources.end(), DetectionSource::kNameOnly) !=
+           sources.end();
+}
+
+/** Full file scan: ok=true. Name-only catalog hints: ok=false but kind inferred. */
+bool IsCatalogDetectHit(
+    bool ok,
+    const std::string& modelType,
+    const std::vector<DetectionSource>& sources) {
+    if (!IsHit(modelType)) {
+        return false;
+    }
+    if (ok) {
+        return true;
+    }
+    return HasNameOnlyDetectionSource(sources);
+}
+
 UnifiedModelDetectResult MakeHit(
     const char* category,
     const std::string& modelType,
@@ -143,7 +164,7 @@ UnifiedModelDetectResult DetectModelInternal(
 
     TtsDetectResult tts = DetectTtsModel(model_dir, asset_name, modelType);
     const std::string ttsType = TtsModelKindToString(tts.selectedKind);
-    if (tts.ok && IsHit(ttsType)) {
+    if (IsCatalogDetectHit(tts.ok, ttsType, tts.detectionSources)) {
         return MakeHit(
             "tts",
             ttsType,
@@ -160,7 +181,7 @@ UnifiedModelDetectResult DetectModelInternal(
     SttDetectResult stt = DetectSttModel(
         model_dir, asset_name, modelType, std::nullopt, false);
     const std::string sttType = SttModelKindToString(stt.selectedKind);
-    if (stt.ok && IsHit(sttType)) {
+    if (IsCatalogDetectHit(stt.ok, sttType, stt.detectionSources)) {
         return MakeHit(
             "stt",
             sttType,
@@ -176,7 +197,7 @@ UnifiedModelDetectResult DetectModelInternal(
 
     VadDetectResult vad = DetectVadModel(model_dir, asset_name, modelType);
     const std::string vadType = VadModelKindToString(vad.selectedKind);
-    if (vad.ok && IsHit(vadType)) {
+    if (IsCatalogDetectHit(vad.ok, vadType, vad.detectionSources)) {
         return MakeHit(
             "vad",
             vadType,
@@ -194,7 +215,8 @@ UnifiedModelDetectResult DetectModelInternal(
         DetectPunctuationModel(model_dir, asset_name, modelType);
     const std::string punctuationType =
         PunctuationModelKindToString(punctuation.selectedKind);
-    if (punctuation.ok && IsHit(punctuationType)) {
+    if (IsCatalogDetectHit(
+            punctuation.ok, punctuationType, punctuation.detectionSources)) {
         return MakeHit(
             "punctuation",
             punctuationType,
@@ -212,7 +234,8 @@ UnifiedModelDetectResult DetectModelInternal(
         DetectEnhancementModel(model_dir, asset_name, modelType);
     const std::string enhancementType =
         EnhancementModelKindToString(enhancement.selectedKind);
-    if (enhancement.ok && IsHit(enhancementType)) {
+    if (IsCatalogDetectHit(
+            enhancement.ok, enhancementType, enhancement.detectionSources)) {
         return MakeHit(
             "enhancement",
             enhancementType,
@@ -237,7 +260,8 @@ UnifiedModelDetectResult DetectModelInternal(
             DetectAlignmentModel(alignmentKey, modelType);
         const std::string alignmentType =
             AlignmentModelKindToString(alignment.selectedKind);
-        if (alignment.ok && IsHit(alignmentType)) {
+        if (IsCatalogDetectHit(
+                alignment.ok, alignmentType, alignment.detectionSources)) {
             return MakeHit(
                 "alignment",
                 alignmentType,
