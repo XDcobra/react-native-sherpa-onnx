@@ -5195,7 +5195,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectModel(
       modelDir: String,
       assetName: String?
-    ): HashMap<String, Any>?
+    ): HashMap<String, Any?>?
 
     @JvmStatic
     private external fun nativeDetectModelsBatch(
@@ -5203,7 +5203,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): ArrayList<HashMap<String, Any?>>
 
     @JvmStatic
-    internal fun unifiedDetectHashMapToWritableMap(result: HashMap<String, Any?>): WritableMap {
+    internal fun unifiedDetectHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
       val map = Arguments.createMap()
       map.putBoolean("matched", result["matched"] as? Boolean ?: false)
       map.putBoolean("success", result["success"] as? Boolean ?: false)
