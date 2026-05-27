@@ -49,7 +49,8 @@ std::string GetSnapshotJson();
 
 /**
  * Writes a human-readable crash dump into buf (newline-separated lines).
- * Signal-handler safe: no heap allocation. Returns bytes written (excl. NUL).
+ * Best-effort in signal handlers (no heap allocation), but not async-signal-safe.
+ * Returns bytes written (excl. NUL).
  */
 size_t WriteCrashDumpToBuffer(char* buf, size_t bufSize);
 

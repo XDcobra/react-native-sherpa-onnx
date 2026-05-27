@@ -1,12 +1,13 @@
 # Native diagnostics
 
-SDK-wide **last-activity ring buffer** with **POSIX signal handlers** on Android and iOS. When the process receives `SIGSEGV`, `SIGABRT`, or `SIGBUS`, the buffer is dumped to the platform log before chaining to any previously installed handler (e.g. Firebase Crashlytics).
+SDK-wide **last-activity ring buffer** with **POSIX signal handlers** on Android and iOS. When the process receives `SIGSEGV`, `SIGABRT`, `SIGBUS`, or `SIGFPE`, the buffer is dumped to the platform log before chaining to any previously installed handler (e.g. Firebase Crashlytics).
 
 ## Defaults
 
 - **On by default** when `libsherpaonnx` / the SherpaOnnx pod loads (no JS init required).
 - Ring buffer records native activity from instrumented paths (`audio.decode`, `stt.detect`, `module.init`, …).
-- Opt-out: `configureNativeDiagnostics({ enabled: false })` or `{ installSignalHandler: false }`.
+- `configureNativeDiagnostics({ enabled: false })` disables new `Record()` entries.
+- Signal handler install is decided during native init. Current Android/iOS builds auto-init with handlers enabled in a library constructor, and there is no uninstall path.
 
 ## Platform parity
 
@@ -46,7 +47,7 @@ import {
 const snap = await getNativeDiagnosticSnapshot();
 // { enabled, signalHandlerInstalled, entries: [{ seq, domain, phase, threadName, ... }] }
 
-await configureNativeDiagnostics({ installSignalHandler: false }); // opt-out
+await configureNativeDiagnostics({ enabled: false }); // stop recording new entries
 ```
 
 ## Domain convention
@@ -65,7 +66,7 @@ Call `getNativeDiagnosticSnapshot()` after a non-fatal or on next launch and att
 
 - **Mach exceptions** on iOS are not handled in v1 (POSIX signals only).
 - `.ips` / Play Console stacks may still show UI/GPU threads; use device logs for the `SherpaNativeDiag` block.
-- Handler chaining: init SherpaOnnx before or alongside other crash SDKs; disabling ours: `configureNativeDiagnostics({ installSignalHandler: false })`.
+- Handler chaining: init SherpaOnnx before or alongside other crash SDKs; current builds do not support uninstalling handlers after library load.
 
 ## Privacy
 

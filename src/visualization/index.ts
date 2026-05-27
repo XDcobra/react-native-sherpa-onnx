@@ -450,30 +450,6 @@ export async function computeAudioVisualizationProfile(
       ? nativeResult.levels
       : [];
 
-    if (typeof __DEV__ !== 'undefined' && __DEV__ && sourceLevels.length > 0) {
-      let rawMin = Number.POSITIVE_INFINITY;
-      let rawMax = Number.NEGATIVE_INFINITY;
-      let rawAtOne = 0;
-      for (const raw of sourceLevels) {
-        if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-          continue;
-        }
-        rawMin = Math.min(rawMin, raw);
-        rawMax = Math.max(rawMax, raw);
-        if (raw >= 0.999) {
-          rawAtOne += 1;
-        }
-      }
-      console.log('[AudioVizDebug] native bridge levels (pre JS clamp)', {
-        count: sourceLevels.length,
-        min: rawMin,
-        max: rawMax,
-        atOne: rawAtOne,
-        head: sourceLevels.slice(0, 8),
-        tail: sourceLevels.slice(-8),
-      });
-    }
-
     const levels = Array.from({ length: barCount }, (_, i) =>
       toUnitFloat(sourceLevels[i])
     );
@@ -524,24 +500,6 @@ export async function computeAudioVisualizationProfile(
           padded.set(data);
           data = padded;
         }
-      }
-
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        let rawMin = Number.POSITIVE_INFINITY;
-        let rawMax = Number.NEGATIVE_INFINITY;
-        for (let i = 0; i < data.length; i += 1) {
-          const raw = data[i] ?? 0;
-          rawMin = Math.min(rawMin, raw);
-          rawMax = Math.max(rawMax, raw);
-        }
-        console.log('[AudioVizDebug] native JSI frames (pre JS clamp)', {
-          length: data.length,
-          frameCount,
-          barCount,
-          min: rawMin,
-          max: rawMax,
-          frame0Head: Array.from(data.slice(0, Math.min(8, barCount))),
-        });
       }
 
       for (let i = 0; i < data.length; i += 1) {

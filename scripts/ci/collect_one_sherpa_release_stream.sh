@@ -173,6 +173,7 @@ while IFS='|' read -r name _; do
   safe="${name//\//-}"
   safe="${safe//\\/-}"
   cache_file="${_abs_tree}/${safe}.txt"
+  meta_file="${_abs_tree}/${safe}.updated_at"
   [[ -f "$cache_file" ]] || continue
   echo "# Asset: $name" >> "$_abs_structure"
   if [[ -f "$meta_file" ]]; then

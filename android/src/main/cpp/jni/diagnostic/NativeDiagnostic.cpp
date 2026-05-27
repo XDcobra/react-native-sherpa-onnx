@@ -29,6 +29,16 @@ std::atomic<uint32_t> g_head{0};
 
 DiagnosticEntry g_ring[kRingCapacity];
 std::atomic<bool> g_crashDumping{false};
+std::atomic_flag g_ringLock = ATOMIC_FLAG_INIT;
+
+bool TryAcquireRingLock() { return !g_ringLock.test_and_set(std::memory_order_acquire); }
+
+void AcquireRingLock() {
+  while (!TryAcquireRingLock()) {
+  }
+}
+
+void ReleaseRingLock() { g_ringLock.clear(std::memory_order_release); }
 
 void CopyTrunc(char* dst, size_t dstSize, const char* src) {
   if (!dst || dstSize == 0) {
@@ -152,6 +162,7 @@ void Record(const char* domain, const char* phase, const char* detail) {
   char detailScratch[kDetailMax];
   const char* safeDetail = SanitizeDetail(detail, detailScratch, sizeof(detailScratch));
 
+  AcquireRingLock();
   const uint32_t slot = g_head.fetch_add(1, std::memory_order_relaxed) % kRingCapacity;
   DiagnosticEntry& e = g_ring[slot];
 
@@ -166,8 +177,8 @@ void Record(const char* domain, const char* phase, const char* detail) {
   } else {
     e.detail[0] = '\0';
   }
-
   LogRecordTrail(e.domain, e.phase, e.detail[0] != '\0' ? e.detail : nullptr);
+  ReleaseRingLock();
 }
 
 static int CompareEntriesBySeq(const void* a, const void* b) {
@@ -182,15 +193,25 @@ static int CompareEntriesBySeq(const void* a, const void* b) {
   return 0;
 }
 
-DiagnosticSnapshot GetSnapshot() {
+DiagnosticSnapshot GetSnapshotWithLockMode(bool tryNoWait) {
   DiagnosticSnapshot snap;
   snap.enabled = g_enabled.load();
   snap.signalHandlerInstalled = g_signalHandlerInstalled.load();
+  snap.entryCount = 0;
+
+  if (tryNoWait) {
+    if (!TryAcquireRingLock()) {
+      return snap;
+    }
+  } else {
+    AcquireRingLock();
+  }
 
   DiagnosticEntry tmp[kRingCapacity];
   for (int i = 0; i < kRingCapacity; ++i) {
     tmp[i] = g_ring[i];
   }
+  ReleaseRingLock();
   qsort(tmp, kRingCapacity, sizeof(DiagnosticEntry), CompareEntriesBySeq);
 
   int count = 0;
@@ -203,6 +224,8 @@ DiagnosticSnapshot GetSnapshot() {
   snap.entryCount = count;
   return snap;
 }
+
+DiagnosticSnapshot GetSnapshot() { return GetSnapshotWithLockMode(false); }
 
 namespace {
 
@@ -279,7 +302,7 @@ size_t WriteCrashDumpToBuffer(char* buf, size_t bufSize) {
   };
 
   appendLine("=== SherpaNativeDiag crash activity dump ===");
-  const DiagnosticSnapshot snap = GetSnapshot();
+  const DiagnosticSnapshot snap = GetSnapshotWithLockMode(true);
   char header[128];
   std::snprintf(
       header,
