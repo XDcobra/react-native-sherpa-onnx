@@ -10,12 +10,17 @@ import SherpaOnnx from '../NativeSherpaOnnx';
 import { makeModelOperationKey } from './activeModelOperations';
 import { listDownloadedModels, getModelPath } from './localModels';
 import {
+  DownloadError,
+  DOWNLOAD_ERROR_CODES,
+  assertSupportedLayout,
+} from './sources';
+import {
   getArchivePath,
   getExtractionStatePath,
   getModelDir,
-  getModelsBaseDir,
   getNativeAssetExtractedModelDir,
   getReadyMarkerPath,
+  getSourceModelsBaseDir,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
 import { getModelById } from './registry';
@@ -41,16 +46,27 @@ const pendingExplicitPauseRequests = new Set<string>();
 
 function makeExtractionOperationId(
   category: ModelCategory,
-  id: string
+  id: string,
+  sourceId: string
 ): string {
-  return `extract:${category}:${id}`;
+  return `extract:${makeModelOperationKey(category, id, sourceId)}`;
+}
+
+function resolveSourceId(source?: string | 'default'): string {
+  if (!source || source === 'default') {
+    return 'default';
+  }
+
+  return source;
 }
 
 export function consumePausedExtractionRequest(
   category: ModelCategory,
-  id: string
+  id: string,
+  source = 'default'
 ): boolean {
-  const key = makeModelOperationKey(category, id);
+  const sourceId = resolveSourceId(source);
+  const key = makeModelOperationKey(category, id, sourceId);
   const hasRequest = pendingExplicitPauseRequests.has(key);
   if (hasRequest) {
     pendingExplicitPauseRequests.delete(key);
@@ -70,10 +86,11 @@ function createAbortError(): Error {
 
 async function cleanupCancelledExtraction(
   category: ModelCategory,
-  id: string
+  id: string,
+  sourceId: string
 ): Promise<void> {
-  const statePath = getExtractionStatePath(category, id);
-  const modelDir = getModelDir(category, id);
+  const statePath = getExtractionStatePath(category, id, sourceId);
+  const modelDir = getModelDir(category, id, sourceId);
 
   try {
     if (await exists(statePath)) {
@@ -100,21 +117,32 @@ async function runExtraction(
   opts?: ExtractOptions,
   resumeState?: ExtractionState
 ): Promise<DownloadResult> {
-  const model = await getModelById(category, id);
+  const requestedSourceId = resolveSourceId(opts?.source);
+  const sourceId = resolveSourceId(
+    resumeState?.model.sourceId ?? requestedSourceId
+  );
+
+  const model = await getModelById(category, id, {
+    source: sourceId,
+  });
   if (!model) {
     throw new Error(`Unknown model id: ${id}`);
   }
 
-  if (model.archiveExt !== 'tar.bz2') {
-    throw new Error(
-      `Model ${id} is not a tar.bz2 archive; extraction is only for archived models.`
+  if (model.layout.kind !== 'archive') {
+    throw new DownloadError(
+      DOWNLOAD_ERROR_CODES.INVALID_LAYOUT,
+      `Model ${id} is not archive-layout; extraction is only for archive models.`
     );
   }
 
+  assertSupportedLayout(model.layout);
+
   const downloadPath =
-    resumeState?.archivePath ?? getArchivePath(category, id, model.archiveExt);
-  const modelDir = resumeState?.modelDir ?? getModelDir(category, id);
-  const statePath = getExtractionStatePath(category, id);
+    resumeState?.archivePath ??
+    getArchivePath(category, id, model.layout, model.assets, sourceId);
+  const modelDir = resumeState?.modelDir ?? getModelDir(category, id, sourceId);
+  const statePath = getExtractionStatePath(category, id, sourceId);
 
   if (!(await exists(downloadPath))) {
     throw new Error(
@@ -129,12 +157,12 @@ async function runExtraction(
     );
   }
 
-  await mkdir(getModelsBaseDir(category));
+  await mkdir(getSourceModelsBaseDir(category, sourceId));
 
-  const key = makeModelOperationKey(category, id);
+  const key = makeModelOperationKey(category, id, sourceId);
   pendingExplicitPauseRequests.delete(key);
   const activeOperation: ActiveExtractionOperation = {
-    operationId: makeExtractionOperationId(category, id),
+    operationId: makeExtractionOperationId(category, id, sourceId),
     pauseRequested: false,
   };
   activeExtractionOperations.set(key, activeOperation);
@@ -158,18 +186,19 @@ async function runExtraction(
       onChecksumMismatch: opts?.onChecksumMismatch,
       deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
       onProgress: opts?.onProgress,
-      getDownloadedList: () => listDownloadedModels(category),
+      getDownloadedList: () =>
+        listDownloadedModels(category, { source: sourceId }),
       extractionOperationId: activeOperation.operationId,
       extractionSkipEntries,
     });
   } catch (error) {
     if (activeOperation.pauseRequested) {
-      consumePausedExtractionRequest(category, id);
+      consumePausedExtractionRequest(category, id, sourceId);
       throw new PauseError(category, id, 'Extraction paused');
     }
 
     if (isAbortError(error) || opts?.signal?.aborted) {
-      await cleanupCancelledExtraction(category, id);
+      await cleanupCancelledExtraction(category, id, sourceId);
       throw createAbortError();
     }
 
@@ -192,14 +221,16 @@ export async function extractModel(
 
 export async function pauseExtraction(
   category: ModelCategory,
-  id: string
+  id: string,
+  source = 'default'
 ): Promise<void> {
-  const key = makeModelOperationKey(category, id);
+  const sourceId = resolveSourceId(source);
+  const key = makeModelOperationKey(category, id, sourceId);
   pendingExplicitPauseRequests.add(key);
 
   const operation = activeExtractionOperations.get(key);
   const operationId =
-    operation?.operationId ?? makeExtractionOperationId(category, id);
+    operation?.operationId ?? makeExtractionOperationId(category, id, sourceId);
 
   if (operation) {
     operation.pauseRequested = true;
@@ -216,9 +247,11 @@ export async function pauseExtraction(
  * Returns models with incomplete extractions in the given category.
  */
 export async function getIncompleteExtractions(
-  category: ModelCategory
+  category: ModelCategory,
+  options?: { source?: string | 'default' }
 ): Promise<ExtractionState[]> {
-  const baseDir = getModelsBaseDir(category);
+  const sourceId = resolveSourceId(options?.source);
+  const baseDir = getSourceModelsBaseDir(category, sourceId);
   if (!(await exists(baseDir))) {
     return [];
   }
@@ -245,7 +278,7 @@ export async function getIncompleteExtractions(
       EXTRACTION_STATE_PREFIX.length,
       name.length - EXTRACTION_STATE_SUFFIX.length
     );
-    const statePath = getExtractionStatePath(category, modelId);
+    const statePath = getExtractionStatePath(category, modelId, sourceId);
 
     let state: ExtractionState;
     try {
@@ -255,7 +288,7 @@ export async function getIncompleteExtractions(
       continue;
     }
 
-    const readyPath = getReadyMarkerPath(category, modelId);
+    const readyPath = getReadyMarkerPath(category, modelId, sourceId);
     if (await exists(readyPath)) {
       continue;
     }
@@ -287,7 +320,8 @@ export async function resumeExtraction(
   id: string,
   opts?: ExtractOptions
 ): Promise<DownloadResult> {
-  const statePath = getExtractionStatePath(category, id);
+  const sourceId = resolveSourceId(opts?.source);
+  const statePath = getExtractionStatePath(category, id, sourceId);
   if (!(await exists(statePath))) {
     return extractModel(category, id, opts);
   }
@@ -304,7 +338,7 @@ export async function resumeExtraction(
     return extractModel(category, id, opts);
   }
 
-  const readyPath = getReadyMarkerPath(category, id);
+  const readyPath = getReadyMarkerPath(category, id, sourceId);
   if (await exists(readyPath)) {
     try {
       await unlink(statePath);
@@ -313,7 +347,7 @@ export async function resumeExtraction(
     }
 
     const localPath =
-      (await getModelPath(category, id)) ??
+      (await getModelPath(category, id, { source: sourceId })) ??
       (await resolveActualModelDir(state.modelDir));
 
     return {
@@ -330,9 +364,11 @@ export async function resumeExtraction(
  */
 export async function deleteIncompleteExtraction(
   category: ModelCategory,
-  id: string
+  id: string,
+  source = 'default'
 ): Promise<void> {
-  const statePath = getExtractionStatePath(category, id);
+  const sourceId = resolveSourceId(source);
+  const statePath = getExtractionStatePath(category, id, sourceId);
   if (await exists(statePath)) {
     try {
       await unlink(statePath);
@@ -341,7 +377,7 @@ export async function deleteIncompleteExtraction(
     }
   }
 
-  const modelDir = getModelDir(category, id);
+  const modelDir = getModelDir(category, id, sourceId);
   if (await exists(modelDir)) {
     try {
       await unlink(modelDir);

@@ -135,14 +135,15 @@ export type RunPostDownloadProcessingOptions = {
 export async function runPostDownloadProcessing(
   options: RunPostDownloadProcessingOptions
 ): Promise<DownloadResult> {
-  const { category, id } = options;
+  const { category, id, model } = options;
+  const sourceId = model.sourceId;
 
-  registerActivePostProcess(category, id);
+  registerActivePostProcess(category, id, sourceId);
 
   try {
     return await runPostDownloadProcessingBody(options);
   } finally {
-    unregisterActivePostProcess(category, id);
+    unregisterActivePostProcess(category, id, sourceId);
   }
 }
 
@@ -171,6 +172,7 @@ async function runPostDownloadProcessingBody(
   } = options;
 
   const isAborted = (): boolean => Boolean(signal?.aborted);
+  const sourceId = model.sourceId;
 
   const createAbortError = (): Error => {
     const abortError = new Error('Operation aborted');
@@ -206,7 +208,7 @@ async function runPostDownloadProcessingBody(
 
     await mkdir(modelDir);
 
-    const extractionStatePath = getExtractionStatePath(category, id);
+    const extractionStatePath = getExtractionStatePath(category, id, sourceId);
     const isResumeExtract =
       typeof extractionSkipEntries === 'number' && extractionSkipEntries > 0;
 
@@ -358,7 +360,7 @@ async function runPostDownloadProcessingBody(
     );
   }
 
-  await writeFile(getReadyMarkerPath(category, id), 'ready', 'utf8');
+  await writeFile(getReadyMarkerPath(category, id, sourceId), 'ready', 'utf8');
 
   const now = new Date().toISOString();
   let sizeOnDisk: number | undefined;
@@ -366,16 +368,23 @@ async function runPostDownloadProcessingBody(
   if (isArchive && extractedTotalBytes > 0) {
     sizeOnDisk = extractedTotalBytes;
   } else if (!isArchive) {
-    try {
-      const sourceStat = await stat(downloadPath);
-      sizeOnDisk = sourceStat.size;
-    } catch {
-      // ignore
+    if (model.assets.length > 1) {
+      sizeOnDisk = model.assets.reduce(
+        (sum, asset) => sum + (asset.bytes ?? 0),
+        0
+      );
+    } else {
+      try {
+        const sourceStat = await stat(downloadPath);
+        sizeOnDisk = sourceStat.size;
+      } catch {
+        // ignore
+      }
     }
   }
 
   await writeFile(
-    getManifestPath(category, id),
+    getManifestPath(category, id, sourceId),
     JSON.stringify({
       downloadedAt: now,
       lastUsed: now,
@@ -395,7 +404,11 @@ async function runPostDownloadProcessingBody(
 
   if (isArchive) {
     try {
-      const extractionStatePath = getExtractionStatePath(category, id);
+      const extractionStatePath = getExtractionStatePath(
+        category,
+        id,
+        sourceId
+      );
       if (
         extractionStatePath !== statePath &&
         (await exists(extractionStatePath))

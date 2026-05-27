@@ -29,21 +29,32 @@ export async function ensureModel(
   id: string,
   opts?: EnsureModelOptions
 ): Promise<EnsureModelResult> {
-  const model = await getModelById(category, id);
+  const sourceId = opts?.source ?? 'default';
+
+  const model = await getModelById(category, id, {
+    source: sourceId,
+  });
   if (!model) {
     throw new Error(`Unknown model id: ${id}`);
   }
 
-  const isArchive = model.archiveExt === 'tar.bz2';
+  const modelSourceId = model.sourceId;
+
+  const isArchive = model.layout.kind === 'archive';
 
   if (opts?.overwrite) {
-    await deleteModel(category, id);
-    await deleteIncompleteExtraction(category, id);
-    await deleteIncompleteDownload(category, id);
+    await deleteModel(category, id, modelSourceId);
+    await deleteIncompleteExtraction(category, id, modelSourceId);
+    await deleteIncompleteDownload(category, id, modelSourceId);
   }
 
-  if (!opts?.overwrite && (await isModelDownloaded(category, id))) {
-    const localPath = await getModelPath(category, id);
+  if (
+    !opts?.overwrite &&
+    (await isModelDownloaded(category, id, { source: modelSourceId }))
+  ) {
+    const localPath = await getModelPath(category, id, {
+      source: modelSourceId,
+    });
     if (localPath) {
       return {
         modelId: id,
@@ -53,13 +64,16 @@ export async function ensureModel(
   }
 
   if (isArchive) {
-    const incompleteExtractions = await getIncompleteExtractions(category);
+    const incompleteExtractions = await getIncompleteExtractions(category, {
+      source: modelSourceId,
+    });
     const extractionState = incompleteExtractions.find(
       (state) => state.modelId === id
     );
 
     if (extractionState) {
       return resumeExtraction(category, id, {
+        source: modelSourceId,
         onProgress: opts?.onProgress,
         signal: opts?.signal,
         verifyChecksum: opts?.verifyChecksum,
@@ -69,16 +83,18 @@ export async function ensureModel(
     }
   }
 
-  const incompleteDownloads = await getIncompleteDownloads(category);
+  const incompleteDownloads = await getIncompleteDownloads(category, {
+    source: modelSourceId,
+  });
   const downloadState = incompleteDownloads.find(
     (state) => state.modelId === id
   );
 
   if (downloadState) {
     return resumeDownload(category, id, {
+      source: modelSourceId,
       onProgress: opts?.onProgress,
       signal: opts?.signal,
-      maxRetries: 0,
       verifyChecksum: opts?.verifyChecksum,
       onChecksumMismatch: opts?.onChecksumMismatch,
       deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
@@ -86,13 +102,20 @@ export async function ensureModel(
   }
 
   if (isArchive) {
-    const downloadPath = getArchivePath(category, id, model.archiveExt);
+    const downloadPath = getArchivePath(
+      category,
+      id,
+      model.layout,
+      model.assets,
+      modelSourceId
+    );
 
     if (await exists(downloadPath)) {
       try {
         const sourceStat = await stat(downloadPath);
         if (model.bytes <= 0 || sourceStat.size >= model.bytes) {
           return extractModel(category, id, {
+            source: modelSourceId,
             onProgress: opts?.onProgress,
             signal: opts?.signal,
             verifyChecksum: opts?.verifyChecksum,
@@ -107,10 +130,10 @@ export async function ensureModel(
   }
 
   return downloadModel(category, id, {
+    source: modelSourceId,
     onProgress: opts?.onProgress,
     overwrite: opts?.overwrite ?? false,
     signal: opts?.signal,
-    maxRetries: 2,
     verifyChecksum: opts?.verifyChecksum,
     onChecksumMismatch: opts?.onChecksumMismatch,
     deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
