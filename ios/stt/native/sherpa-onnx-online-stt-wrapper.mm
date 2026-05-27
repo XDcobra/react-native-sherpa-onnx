@@ -41,7 +41,7 @@ std::unordered_map<std::string, std::string> scanOnlineModelPaths(const std::str
     };
     std::string tokensPath = FindFileEndingWith(files, "tokens.txt");
 
-    if (modelType == "transducer") {
+    if (modelType == "transducer" || modelType == "nemo_transducer") {
         std::string enc = firstOnnx({"encoder"});
         std::string dec = firstOnnx({"decoder"});
         std::string join = firstOnnx({"joiner"});
@@ -164,6 +164,11 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
         config.model_config.transducer.decoder = paths["decoder"];
         config.model_config.transducer.joiner = paths["joiner"];
         config.model_config.model_type = "zipformer";
+    } else if (modelType == "nemo_transducer") {
+        config.model_config.transducer.encoder = paths["encoder"];
+        config.model_config.transducer.decoder = paths["decoder"];
+        config.model_config.transducer.joiner = paths["joiner"];
+        config.model_config.model_type = "";
     } else if (modelType == "paraformer") {
         config.model_config.paraformer.encoder = paths["encoder"];
         config.model_config.paraformer.decoder = paths["decoder"];

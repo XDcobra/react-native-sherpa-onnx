@@ -56,11 +56,20 @@ export interface ModelDetectResultBase {
 
 // ─── TTS extension ──────────────────────────────────────────────────────
 
+export type TtsLexiconLanguage = {
+  id: string;
+  path: string;
+};
+
 export interface TtsDetectModelResult extends ModelDetectResultBase {
   /** tiny, small, medium, large, unknown — from name heuristics. */
   sizeTier?: string;
-  /** Language ids from detected lexicon files (Kokoro/Kitten). */
-  lexiconLanguageCandidates?: string[];
+  /**
+   * Lexicon files detected on disk (`lexicon.txt`, `lexicon-*.txt`).
+   * Use with init `lexiconLanguageId` (vits/matcha/kokoro/zipvoice). Not kitten/pocket/supertonic.
+   * Not the same as catalog `languages` hints.
+   */
+  lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage>;
 }
 
 // ─── STT extension ──────────────────────────────────────────────────────

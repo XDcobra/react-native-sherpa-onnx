@@ -20,6 +20,7 @@
 #include "../pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "AudioDecodeSession.h"
 #include "AudioEncodeSession.h"
+#include "AudioVisualization.h"
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,12 +36,23 @@
 #include <cstring>
 #include <cerrno>
 #include <thread>
+#include <memory>
+#include <stdexcept>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 
 // ==================== Error Codes ====================
+static dispatch_queue_t SherpaAudioDecodeQueue(void) {
+  static dispatch_once_t onceToken;
+  static dispatch_queue_t queue;
+  dispatch_once(&onceToken, ^{
+    queue = dispatch_queue_create("com.sherpaonnx.audio-decode", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
+
 static NSString *const kPAErrBufferNotFound   = @"AUDIO_BUFFER_NOT_FOUND";
 static NSString *const kPAErrInvalidArgument  = @"AUDIO_INVALID_ARGUMENT";
 static NSString *const kPAErrInvalidState     = @"AUDIO_INVALID_STATE";
@@ -323,6 +335,363 @@ struct PaFileIngestStatus {
   int percent = 0;
   std::string error;
 };
+
+struct PaVisualizationOptions {
+  int barCount = 96;
+  double minHz = 60.0;
+  double maxHz = 0.0;
+  int fftSize = 2048;
+  int hopSize = 1024;
+  bool includeTimeline = false;
+  int frameCount = 0;
+  double frameDurationMs = 0.0;
+  double maxAnalysisDurationMs = 0.0;
+  int levelsMaxStftFrames = 1024;
+  int analysisSampleRateHz = 0;
+  NSString *progressOperationId = nil;
+  sherpa::AudioVisualizationAggregateMode aggregateMode =
+      sherpa::AudioVisualizationAggregateMode::MAX_HOLD;
+};
+
+static void pa_emitVisualizationProgress(
+  __weak SherpaOnnx *weakEmitter,
+  NSString *operationId,
+  NSString *phase,
+  double phasePercent,
+  int64_t framesDecoded,
+  int64_t totalFramesEstimate,
+  int64_t stftWindowsDone,
+  int64_t stftWindowsTotal
+) {
+  if (!operationId || operationId.length == 0) {
+    return;
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    SherpaOnnx *emitter = weakEmitter;
+    if (!emitter) {
+      return;
+    }
+    [emitter sendEventWithName:@"visualizationProgress" body:@{
+      @"operationId": operationId,
+      @"phase": phase ?: @"analysis",
+      @"phasePercent": @(std::max(0.0, std::min(1.0, phasePercent))),
+      @"framesDecoded": @((double)framesDecoded),
+      @"totalFramesEstimate": @((double)totalFramesEstimate),
+      @"stftWindowsDone": @((double)stftWindowsDone),
+      @"stftWindowsTotal": @((double)stftWindowsTotal),
+    }];
+  });
+}
+
+static bool pa_parseVisualizationOptions(
+  NSDictionary *options,
+  PaVisualizationOptions &out,
+  NSString **errCode,
+  NSString **errMsg
+) {
+  NSString *kind = options[@"kind"];
+  if (kind != nil && ![kind isEqualToString:@"spectrum_bars"]) {
+    if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+    if (errMsg) *errMsg = @"kind must be 'spectrum_bars'";
+    return false;
+  }
+
+  NSString *timeAggregate = options[@"timeAggregate"];
+  if (timeAggregate != nil) {
+    if ([timeAggregate isEqualToString:@"max_hold"]) {
+      out.aggregateMode = sherpa::AudioVisualizationAggregateMode::MAX_HOLD;
+    } else if ([timeAggregate isEqualToString:@"mean"]) {
+      out.aggregateMode = sherpa::AudioVisualizationAggregateMode::MEAN;
+    } else {
+      if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+      if (errMsg) *errMsg = @"timeAggregate must be 'max_hold' or 'mean'";
+      return false;
+    }
+  }
+
+  NSNumber *barCount = options[@"barCount"];
+  if (barCount != nil) {
+    out.barCount = std::max(8, std::min(512, [barCount intValue]));
+  }
+
+  NSNumber *minHz = options[@"minHz"];
+  if (minHz != nil) {
+    out.minHz = std::max(10.0, [minHz doubleValue]);
+  }
+
+  NSNumber *maxHz = options[@"maxHz"];
+  if (maxHz != nil) {
+    out.maxHz = [maxHz doubleValue];
+  }
+
+  NSNumber *frameCount = options[@"frameCount"];
+  NSNumber *frameDurationMs = options[@"frameDurationMs"];
+  NSNumber *includeTimeline = options[@"includeTimeline"];
+
+  const bool hasFrameCount = frameCount != nil && [frameCount intValue] > 0;
+  const bool hasFrameDuration = frameDurationMs != nil;
+  out.includeTimeline =
+    (includeTimeline != nil && [includeTimeline boolValue]) ||
+    hasFrameCount ||
+    hasFrameDuration;
+
+  if (hasFrameCount) {
+    out.frameCount = [frameCount intValue];
+    if (out.frameCount < 8 || out.frameCount > 512) {
+      if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+      if (errMsg) *errMsg = @"frameCount must be between 8 and 512";
+      return false;
+    }
+    out.frameDurationMs = 0.0;
+  } else if (hasFrameDuration) {
+    out.frameDurationMs = [frameDurationMs doubleValue];
+    if (out.frameDurationMs < 50.0 || out.frameDurationMs > 10000.0) {
+      if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+      if (errMsg) *errMsg = @"frameDurationMs must be between 50 and 10000";
+      return false;
+    }
+  }
+
+  if (out.includeTimeline && out.frameCount <= 0 && out.frameDurationMs <= 0.0) {
+    out.frameDurationMs = 500.0;
+  }
+
+  NSNumber *maxAnalysisDurationMs = options[@"maxAnalysisDurationMs"];
+  if (maxAnalysisDurationMs != nil) {
+    out.maxAnalysisDurationMs = std::max(0.0, [maxAnalysisDurationMs doubleValue]);
+  }
+
+  NSNumber *levelsMaxStftFrames = options[@"levelsMaxStftFrames"];
+  if (levelsMaxStftFrames != nil) {
+    out.levelsMaxStftFrames = std::max(64, std::min(4096, [levelsMaxStftFrames intValue]));
+  }
+
+  NSNumber *analysisSampleRateHz = options[@"analysisSampleRateHz"];
+  if (analysisSampleRateHz != nil) {
+    const int raw = [analysisSampleRateHz intValue];
+    if (raw == 0) {
+      out.analysisSampleRateHz = 0;
+    } else if (raw >= 4000 && raw <= 96000) {
+      out.analysisSampleRateHz = raw;
+    } else {
+      if (errCode) *errCode = @"AUDIO_VISUALIZATION_INVALID_OPTIONS";
+      if (errMsg) *errMsg = @"analysisSampleRateHz must be 0 or between 4000 and 96000";
+      return false;
+    }
+  }
+
+  NSString *progressOperationId = options[@"progressOperationId"];
+  if (progressOperationId != nil) {
+    NSString *trimmed = [progressOperationId stringByTrimmingCharactersInSet:
+      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length > 0) {
+      out.progressOperationId = trimmed;
+    }
+  }
+
+  return true;
+}
+
+static sherpa::AudioVisualizationConfig pa_makeVisualizationConfig(
+  int sampleRate,
+  const PaVisualizationOptions &options
+) {
+  sherpa::AudioVisualizationConfig cfg;
+  cfg.sampleRate = std::max(1, sampleRate);
+  cfg.barCount = options.barCount;
+  cfg.minHz = static_cast<float>(options.minHz);
+  cfg.maxHz = static_cast<float>(options.maxHz);
+  cfg.fftSize = options.fftSize;
+  cfg.hopSize = options.hopSize;
+  cfg.aggregateMode = options.aggregateMode;
+  cfg.timeline.enabled = options.includeTimeline || options.frameCount > 0 || options.frameDurationMs > 0.0;
+  cfg.timeline.frameCount = options.frameCount;
+  cfg.timeline.frameDurationMs = options.frameDurationMs;
+  cfg.timeline.maxAnalysisSamples =
+    options.maxAnalysisDurationMs > 0.0
+      ? static_cast<int64_t>((cfg.sampleRate * options.maxAnalysisDurationMs) / 1000.0)
+      : 0;
+  cfg.levels.maxStftFrames =
+    cfg.timeline.enabled ? 0 : std::max(0, options.levelsMaxStftFrames);
+  return cfg;
+}
+
+static sherpa::AudioVisualizationProfile pa_computeVisualizationFromSamples(
+  const float *samples,
+  int sampleCount,
+  int sampleRate,
+  const PaVisualizationOptions &options,
+  __weak SherpaOnnx *progressEmitter
+) {
+  auto cfg = pa_makeVisualizationConfig(sampleRate, options);
+  sherpa::AudioVisualizationAccumulator accumulator(cfg);
+  if (!options.includeTimeline && sampleCount > 0) {
+    accumulator.setExpectedTotalSamples(static_cast<int64_t>(sampleCount));
+  }
+  if (options.progressOperationId.length > 0) {
+    NSString *opId = options.progressOperationId;
+    accumulator.setAnalysisProgressCallback(
+      [progressEmitter, opId](int64_t stftDone, int64_t stftTotal) {
+        const double pct = static_cast<double>(stftDone) /
+          static_cast<double>(std::max<int64_t>(1, stftTotal));
+        pa_emitVisualizationProgress(
+          progressEmitter,
+          opId,
+          @"analysis",
+          pct,
+          0,
+          0,
+          stftDone,
+          stftTotal);
+      });
+  }
+  if (samples != nullptr && sampleCount > 0) {
+    accumulator.feed(samples, sampleCount);
+  }
+  return accumulator.finish();
+}
+
+static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
+  const std::string &path,
+  const PaVisualizationOptions &options,
+  __weak SherpaOnnx *progressEmitter
+) {
+  sherpa::AudioDecodeConfig decodeConfig;
+  decodeConfig.targetSampleRate =
+    options.analysisSampleRateHz > 0 ? options.analysisSampleRateHz : 0;
+  decodeConfig.forceMono = true;
+  decodeConfig.chunkSize = 8192;
+  decodeConfig.allowDemuxerAutoProbe = true;
+
+  int64_t probedDurationMs = -1;
+  try {
+    const auto probeResult = sherpa::probeFileDuration(path.c_str());
+    probedDurationMs = probeResult.durationMs;
+  } catch (...) {
+    probedDurationMs = -1;
+  }
+
+  std::atomic<bool> cancelFlag(false);
+  std::unique_ptr<sherpa::AudioVisualizationAccumulator> accumulator;
+  int outputSampleRate = 16000;
+  const bool hasProgress = options.progressOperationId.length > 0;
+  NSString *progressOpId = options.progressOperationId;
+
+  auto attachAnalysisProgress = [&](sherpa::AudioVisualizationAccumulator &acc) {
+    if (!hasProgress) {
+      return;
+    }
+    acc.setAnalysisProgressCallback(
+      [progressEmitter, progressOpId](int64_t stftDone, int64_t stftTotal) {
+        const double pct = static_cast<double>(stftDone) /
+          static_cast<double>(std::max<int64_t>(1, stftTotal));
+        pa_emitVisualizationProgress(
+          progressEmitter,
+          progressOpId,
+          @"analysis",
+          pct,
+          0,
+          0,
+          stftDone,
+          stftTotal);
+      });
+  };
+
+  auto onStreamInfo = [&](int sourceSampleRate, int /* sourceChannels */) {
+    outputSampleRate = options.analysisSampleRateHz > 0
+      ? options.analysisSampleRateHz
+      : (sourceSampleRate > 0 ? sourceSampleRate : 16000);
+    auto cfg = pa_makeVisualizationConfig(outputSampleRate, options);
+    accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+    if (probedDurationMs > 0 && !options.includeTimeline) {
+      const int64_t expectedSamples =
+          (probedDurationMs * static_cast<int64_t>(outputSampleRate)) / 1000;
+      accumulator->setExpectedTotalSamples(expectedSamples);
+    }
+    attachAnalysisProgress(*accumulator);
+  };
+
+  auto onChunk = [&](const float *samples, int frameCount) {
+    if (!accumulator) {
+      auto cfg = pa_makeVisualizationConfig(outputSampleRate, options);
+      accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+      attachAnalysisProgress(*accumulator);
+    }
+    accumulator->feed(samples, frameCount);
+    if (accumulator->isAnalysisCapReached()) {
+      cancelFlag.store(true, std::memory_order_relaxed);
+    }
+  };
+
+  sherpa::DecodeProgressCallback onDecodeProgress = nullptr;
+  if (hasProgress) {
+    onDecodeProgress = [progressEmitter, progressOpId](
+        int64_t framesDecoded, int64_t totalEstimate, int percent) {
+      pa_emitVisualizationProgress(
+        progressEmitter,
+        progressOpId,
+        @"decode",
+        static_cast<double>(percent) / 100.0,
+        framesDecoded,
+        totalEstimate,
+        0,
+        0);
+    };
+  }
+
+  auto decodeResult = sherpa::decodeFile(
+    path.c_str(),
+    decodeConfig,
+    onChunk,
+    onDecodeProgress,
+    onStreamInfo,
+    cancelFlag
+  );
+
+  if (!accumulator) {
+    auto cfg = pa_makeVisualizationConfig(
+      decodeResult.sourceSampleRate > 0 ? decodeResult.sourceSampleRate : 16000,
+      options
+    );
+    accumulator = std::make_unique<sherpa::AudioVisualizationAccumulator>(cfg);
+  }
+
+  return accumulator->finish();
+}
+
+static NSDictionary *pa_visualizationProfileToDict(
+  sherpa::AudioVisualizationProfile profile
+) {
+  NSMutableArray *levels = [NSMutableArray arrayWithCapacity:profile.levels.size()];
+  for (float raw : profile.levels) {
+    double clamped = std::max(0.0, std::min(1.0, static_cast<double>(raw)));
+    [levels addObject:@(clamped)];
+  }
+
+  NSString *framesTransferId = nil;
+  if (profile.frameCount > 0 && !profile.frames.empty()) {
+    std::string transferId = sherpa::storeVisualizationFramesForTransfer(std::move(profile.frames));
+    if (!transferId.empty()) {
+      framesTransferId = [NSString stringWithUTF8String:transferId.c_str()];
+    }
+  }
+
+  NSMutableDictionary *out = [@{
+    @"kind": @"spectrum_bars",
+    @"sampleRate": @(std::max(0, profile.sampleRate)),
+    @"durationMs": @(std::max<int64_t>(0, profile.durationMs)),
+    @"barCount": @(profile.barCount),
+    @"levels": levels,
+    @"frameCount": @(std::max(0, profile.frameCount)),
+    @"frameDurationMs": @(std::max(0.0, profile.frameDurationMs)),
+  } mutableCopy];
+
+  if (framesTransferId != nil && framesTransferId.length > 0) {
+    out[@"framesTransferId"] = framesTransferId;
+  }
+
+  return out;
+}
 
 static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
 static std::mutex g_pa_fileIngestMutex;
@@ -1148,7 +1517,7 @@ static bool pa_populate_offline_from_source_if_empty(
   NSString *tmpPathCleanup = tmpPath;
   int targetRate = (int)targetSampleRateHz;
 
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
     @autoreleasepool {
       NSString *outF32 = [NSTemporaryDirectory() stringByAppendingPathComponent:
         [NSString stringWithFormat:@"pa_off_decode_%@.f32", [[NSUUID UUID] UUIDString]]];
@@ -1448,6 +1817,298 @@ static bool pa_populate_offline_from_source_if_empty(
         }
         dispatch_async(dispatch_get_main_queue(), ^{
           reject(@"PROBE_INTERNAL_ERROR", @"Unknown error during duration probe", nil);
+        });
+      }
+    }
+  });
+}
+
+// ---- Container format probe (no PCM decode) ----
+- (void)probeAudioFileContainer:(NSDictionary *)source
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+  if (!source || [source count] == 0) {
+    reject(kPAErrInvalidArgument, @"source is required", nil);
+    return;
+  }
+
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: kPAErrFileNotFound, errMsg ?: @"Failed to resolve audio source", nil);
+    return;
+  }
+
+  NSString *displayName = nil;
+  if ([source[@"displayName"] isKindOfClass:[NSString class]]) {
+    displayName = source[@"displayName"];
+  }
+
+  NSString *sourcePath = nil;
+  NSString *tmpPath = nil;
+  if (readHandle.isFilePath) {
+    sourcePath = readHandle.filePath;
+  } else {
+    NSString *ext = @"";
+    if (displayName.length > 0) {
+      NSString *candidate = [displayName pathExtension];
+      if (candidate.length > 0 && candidate.length <= 8) {
+        ext = [NSString stringWithFormat:@".%@", candidate.lowercaseString];
+      }
+    }
+    tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+               [NSString stringWithFormat:@"fileio_probe_%@%@", [[NSUUID UUID] UUIDString], ext]];
+    NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+    [out open];
+    [readHandle.stream open];
+    uint8_t buf[65536];
+    NSInteger bytesRead;
+    while ((bytesRead = [readHandle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+      [out write:buf maxLength:bytesRead];
+    }
+    [out close];
+    sourcePath = tmpPath;
+  }
+
+  NSString *pathHint = displayName.length > 0 ? displayName : sourcePath;
+  NSString *probePath = readHandle.isFilePath ? sourcePath : pathHint;
+  std::string path = [probePath UTF8String];
+  NSString *tmpPathCleanup = tmpPath;
+
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    @autoreleasepool {
+      try {
+        auto result = sherpa::probeFileContainer(path.c_str());
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(@{
+            @"inputFormatName": [NSString stringWithUTF8String:result.inputFormatName.c_str()],
+            @"codecName": [NSString stringWithUTF8String:result.codecName.c_str()],
+          });
+        });
+      } catch (const std::runtime_error &e) {
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"PROBE_INTERNAL_ERROR";
+        if (msg.find("PROBE_") == 0) {
+          auto colonPos = msg.find(':');
+          if (colonPos != std::string::npos) {
+            nsCode = [NSString stringWithUTF8String:msg.substr(0, colonPos).c_str()];
+          }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        [readHandle cleanup];
+        if (tmpPathCleanup) {
+          [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"PROBE_INTERNAL_ERROR", @"Unknown error during container probe", nil);
+        });
+      }
+    }
+  });
+}
+
+- (void)computeAudioVisualizationProfile:(NSDictionary *)input
+                                 options:(NSDictionary *)options
+                                 resolve:(RCTPromiseResolveBlock)resolve
+                                  reject:(RCTPromiseRejectBlock)reject
+{
+  if (!input || ![input isKindOfClass:[NSDictionary class]]) {
+    reject(@"VISUALIZATION_INVALID_INPUT", @"input object is required", nil);
+    return;
+  }
+
+  if (!options || ![options isKindOfClass:[NSDictionary class]]) {
+    reject(@"VISUALIZATION_INVALID_OPTIONS", @"options object is required", nil);
+    return;
+  }
+
+  NSString *kind = input[@"kind"];
+  if (![kind isKindOfClass:[NSString class]] || kind.length == 0) {
+    reject(@"VISUALIZATION_INVALID_INPUT", @"input.kind is required", nil);
+    return;
+  }
+
+  PaVisualizationOptions parsedOptions;
+  NSString *optionsErrCode = nil;
+  NSString *optionsErrMsg = nil;
+  if (!pa_parseVisualizationOptions(options, parsedOptions, &optionsErrCode, &optionsErrMsg)) {
+    reject(optionsErrCode ?: @"VISUALIZATION_INVALID_OPTIONS", optionsErrMsg ?: @"Invalid visualization options", nil);
+    return;
+  }
+
+  NSDictionary *inputCopy = [input copy];
+  NSString *kindCopy = [kind copy];
+  __weak SherpaOnnx *weakSelf = self;
+
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
+    @autoreleasepool {
+      try {
+        sherpa::AudioVisualizationProfile profile;
+
+        if ([kindCopy isEqualToString:@"offline"]) {
+          NSString *bufferId = inputCopy[@"bufferId"];
+          if (![bufferId isKindOfClass:[NSString class]] || bufferId.length == 0) {
+            throw std::runtime_error("VISUALIZATION_INVALID_INPUT: offline input requires bufferId");
+          }
+
+          std::shared_ptr<PaOfflineEntry> entry;
+          {
+            std::lock_guard<std::mutex> lock(g_pa_mutex);
+            auto it = g_pa_offline.find([bufferId UTF8String]);
+            if (it == g_pa_offline.end()) {
+              throw std::runtime_error("AUDIO_BUFFER_NOT_FOUND: Offline buffer not found");
+            }
+            entry = it->second;
+          }
+
+          const float *samples = entry->floatPtr();
+          int sampleCount = entry->numSamples();
+          profile = pa_computeVisualizationFromSamples(
+            samples,
+            sampleCount,
+            entry->sampleRate,
+            parsedOptions,
+            weakSelf
+          );
+        } else if ([kindCopy isEqualToString:@"live"]) {
+          NSString *handle = inputCopy[@"handle"];
+          if (![handle isKindOfClass:[NSString class]] || handle.length == 0) {
+            throw std::runtime_error("VISUALIZATION_INVALID_INPUT: live input requires handle");
+          }
+
+          std::shared_ptr<PaLiveEntry> liveEntry;
+          {
+            std::lock_guard<std::mutex> lock(g_pa_mutex);
+            auto it = g_pa_live.find([handle UTF8String]);
+            if (it == g_pa_live.end()) {
+              if (g_pa_invalidated_live_ids.find([handle UTF8String]) != g_pa_invalidated_live_ids.end()) {
+                throw std::runtime_error("BUFFER_INVALIDATED: Live buffer is invalidated after transfer");
+              }
+              throw std::runtime_error("AUDIO_BUFFER_NOT_FOUND: Live buffer not found");
+            }
+            liveEntry = it->second;
+          }
+
+          if (liveEntry->state != PaLiveEntry::FINISHED) {
+            throw std::runtime_error("AUDIO_INVALID_STATE: Live buffer must be finalized before visualization");
+          }
+
+          if (liveEntry->hasActiveSpool && !liveEntry->spoolPath.empty()) {
+            profile = pa_computeVisualizationFromFile(
+              liveEntry->spoolPath,
+              parsedOptions,
+              weakSelf);
+          } else {
+            auto snapshot = liveEntry->snapshotRing();
+            profile = pa_computeVisualizationFromSamples(
+              snapshot.empty() ? nullptr : snapshot.data(),
+              (int)snapshot.size(),
+              liveEntry->sampleRate,
+              parsedOptions,
+              weakSelf
+            );
+          }
+        } else if ([kindCopy isEqualToString:@"file"]) {
+          NSDictionary *source = inputCopy[@"source"];
+          if (![source isKindOfClass:[NSDictionary class]] || source.count == 0) {
+            throw std::runtime_error("VISUALIZATION_INVALID_INPUT: file input requires source");
+          }
+
+          NSString *errCode = nil;
+          NSString *errMsg = nil;
+          FileIOReadHandle *readHandle = nil;
+          NSString *tmpPath = nil;
+
+          try {
+            readHandle = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+            if (!readHandle) {
+              std::string code = errCode ? [errCode UTF8String] : "AUDIO_FILE_NOT_FOUND";
+              std::string message = errMsg ? [errMsg UTF8String] : "Failed to resolve audio source";
+              throw std::runtime_error(code + ": " + message);
+            }
+
+            NSString *sourcePath = nil;
+            if (readHandle.isFilePath) {
+              sourcePath = readHandle.filePath;
+            } else {
+              tmpPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                [NSString stringWithFormat:@"fileio_viz_%@", [[NSUUID UUID] UUIDString]]];
+              NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+              [out open];
+              [readHandle.stream open];
+
+              uint8_t buffer[65536];
+              NSInteger bytesRead = 0;
+              while ((bytesRead = [readHandle.stream read:buffer maxLength:sizeof(buffer)]) > 0) {
+                [out write:buffer maxLength:bytesRead];
+              }
+              [out close];
+              sourcePath = tmpPath;
+            }
+
+            std::string path = [sourcePath UTF8String];
+            profile = pa_computeVisualizationFromFile(path, parsedOptions, weakSelf);
+          } catch (...) {
+            if (readHandle) {
+              [readHandle cleanup];
+            }
+            if (tmpPath) {
+              [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+            }
+            throw;
+          }
+
+          if (readHandle) {
+            [readHandle cleanup];
+          }
+          if (tmpPath) {
+            [[NSFileManager defaultManager] removeItemAtPath:tmpPath error:nil];
+          }
+        } else {
+          throw std::runtime_error("VISUALIZATION_INVALID_INPUT: unsupported input kind");
+        }
+
+        NSDictionary *result = pa_visualizationProfileToDict(profile);
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(result);
+        });
+      } catch (const std::runtime_error &e) {
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"VISUALIZATION_INTERNAL_ERROR";
+
+        if (
+          msg.rfind("VISUALIZATION_", 0) == 0 ||
+          msg.rfind("AUDIO_", 0) == 0 ||
+          msg.rfind("BUFFER_", 0) == 0 ||
+          msg.rfind("DECODE_", 0) == 0
+        ) {
+          auto colonPos = msg.find(':');
+          std::string code = colonPos == std::string::npos ? msg : msg.substr(0, colonPos);
+          nsCode = [NSString stringWithUTF8String:code.c_str()];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"VISUALIZATION_INTERNAL_ERROR", @"Unknown visualization error", nil);
         });
       }
     }
@@ -2282,7 +2943,7 @@ static std::string pa_encodeViaDecodeFile(
   __weak SherpaOnnx *weakSelf = self;
   std::string path = [sourcePath UTF8String];
 
-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
     int srcSampleRate = 0;
     int srcChannels = 0;
 

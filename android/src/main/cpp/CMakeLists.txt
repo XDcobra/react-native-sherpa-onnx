@@ -122,10 +122,15 @@ set(SOURCES
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
+    jni/audio/AudioVisualization.cpp
     jni/audio/FfmpegFormatGuard.cpp
     jni/audio/audio_decode_jni.cpp
+    jni/audio/audio_visualization_jni.cpp
     jni/audio/AudioEncodeSession.cpp
     jni/audio/audio_encode_jni.cpp
+    jni/diagnostic/NativeDiagnostic.cpp
+    jni/diagnostic/NativeDiagnosticAndroid.cpp
+    jni/diagnostic/native_diagnostic_jni.cpp
     crypto/sha256.cpp
 )
 

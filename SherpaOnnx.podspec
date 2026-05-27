@@ -37,11 +37,17 @@ Pod::Spec.new do |s|
     # Shared audio decode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioDecodeSession.cpp",
     "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    "android/src/main/cpp/jni/audio/AudioVisualization.cpp",
+    "android/src/main/cpp/jni/audio/AudioVisualization.h",
     "android/src/main/cpp/jni/audio/FfmpegFormatGuard.cpp",
     "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
     # Shared audio encode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioEncodeSession.cpp",
-    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
+    # Native crash diagnostics (shared ring buffer + iOS signal handler).
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.cpp",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnosticIOS.mm"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -53,7 +59,9 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
     "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp",
     "android/src/main/cpp/jni/audio/audio_decode_jni.cpp",
-    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp"
+    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnosticAndroid.cpp",
+    "android/src/main/cpp/jni/diagnostic/native_diagnostic_jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -61,7 +69,9 @@ Pod::Spec.new do |s|
   # Also mark shared C++ headers from android/ as private to prevent Clang module issues.
   private_headers += [
     "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
-    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
+    "android/src/main/cpp/jni/audio/AudioVisualization.h",
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h"
   ]
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 

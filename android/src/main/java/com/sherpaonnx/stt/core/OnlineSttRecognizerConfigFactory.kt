@@ -74,6 +74,18 @@ internal class OnlineSttRecognizerConfigFactory(
         provider = provider ?: "cpu",
         modelType = "zipformer"
       )
+      "nemo_transducer" -> OnlineModelConfig(
+        transducer = OnlineTransducerModelConfig(
+          encoder = paths["encoder"] ?: "",
+          decoder = paths["decoder"] ?: "",
+          joiner = paths["joiner"] ?: ""
+        ),
+        tokens = paths["tokens"] ?: "",
+        numThreads = numThreads ?: 1,
+        debug = debug ?: false,
+        provider = provider ?: "cpu",
+        modelType = ""
+      )
       "paraformer" -> OnlineModelConfig(
         paraformer = OnlineParaformerModelConfig(
           encoder = paths["encoder"] ?: "",
@@ -159,7 +171,7 @@ internal class OnlineSttRecognizerConfigFactory(
     val tokensPath = files.firstOrNull { it.name == "tokens.txt" }?.absolutePath ?: ""
 
     return when (modelType) {
-      "transducer" -> mapOf(
+      "transducer", "nemo_transducer" -> mapOf(
         "encoder" to firstFile("encoder"),
         "decoder" to firstFile("decoder"),
         "joiner" to firstFile("joiner"),
@@ -174,10 +186,10 @@ internal class OnlineSttRecognizerConfigFactory(
         "model" to firstFile("model"),
         "tokens" to tokensPath
       )
-      else -> throw IllegalArgumentException("Unsupported online STT model type: $modelType. Use: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc")
+      else -> throw IllegalArgumentException("Unsupported online STT model type: $modelType. Use: transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc")
     }.also { paths ->
       when (modelType) {
-        "transducer" -> {
+        "transducer", "nemo_transducer" -> {
           if ((paths["encoder"]?.isEmpty() != false) || (paths["decoder"]?.isEmpty() != false) || (paths["joiner"]?.isEmpty() != false)) {
             throw IllegalArgumentException("Transducer model requires encoder, decoder, and joiner .onnx files in $modelDir")
           }

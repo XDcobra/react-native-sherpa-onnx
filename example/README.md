@@ -170,6 +170,23 @@ This screen validates file and conversion workflows, including loading local ass
 
 **Codec sandbox (`test_codec/`):** bundled samples for probe/decode/encode round-trips. Add files listed in `example/android/app/src/main/assets/test_codec/README.md` (Android) and `example/ios/sherpa_models/test_codec/README.md` (iOS), then rebuild. Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }` (APK `assets/`, not sandbox `files/`).
 
+## Audio visualization showcase
+
+
+| ![Audio visualization — static bars](../docs/images/example/vis_static.png) | ![Audio visualization — heatmap](../docs/images/example/vis_heatmap.png) | ![Audio visualization — pseudo-3D](../docs/images/example/vis_3d.png) |
+| --- | --- | --- |
+| Static (`levels`) | Heatmap (`frames`) | Pseudo-3D (`frames`, Skia) |
+
+
+Open **Audio visualization** from Home. The screen runs one `computeAudioVisualizationProfile` call (timeline enabled), then renders SDK data in four tabs: **Static**, **Animated**, **Heatmap**, and **3D**.
+
+- **Static** — mirrored bar chart from global `levels`.
+- **Animated** — same bars driven by timeline frame index (playback scrub).
+- **Heatmap** — time × frequency grid from `frames`.
+- **3D** — example UI only: isometric bars in Skia from per-frame levels; not a native SDK 3D feature.
+
+Implementation: `example/src/screens/audio-visualization/AudioVisualizationScreen.tsx` and `example/src/components/SpectrumBarsView.tsx`, `SpectrumHeatmapView.tsx`, `Spectrum3DView.tsx`. API reference: [docs/audio-visualization.md](../docs/audio-visualization.md).
+
 ## Segmentation showcase
 
 

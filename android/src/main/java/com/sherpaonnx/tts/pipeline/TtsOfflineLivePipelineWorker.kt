@@ -31,6 +31,7 @@ internal class TtsOfflineLivePipelineWorker(
   private val audioOutputEntry: LiveEntry,
   private val defaultSid: Int = 0,
   private val defaultSpeed: Float = 1.0f,
+  private val defaultLang: String? = null,
   private val voiceClone: TtsVoiceCloneConfig? = null,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
@@ -57,6 +58,13 @@ internal class TtsOfflineLivePipelineWorker(
         referenceText = voiceClone.referenceText,
         silenceScale = voiceClone.silenceScale,
         numSteps = voiceClone.numSteps,
+      )
+      tts.generateWithConfig(text.text, config)
+    } else if (!defaultLang.isNullOrBlank()) {
+      val config = com.k2fsa.sherpa.onnx.GenerationConfig(
+        sid = effectiveSid,
+        speed = effectiveSpeed,
+        extra = mapOf("lang" to defaultLang),
       )
       tts.generateWithConfig(text.text, config)
     } else {

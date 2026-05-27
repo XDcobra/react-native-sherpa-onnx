@@ -54,35 +54,9 @@ internal class SherpaOnnxTtsCoordinator(
 
   fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
-  ) = initializationService.initializeTts(
-    instanceId,
-    modelDir,
-    modelType,
-    numThreads,
-    debug,
-    noiseScale,
-    noiseScaleW,
-    lengthScale,
-    ruleFsts,
-    ruleFars,
-    maxNumSentences,
-    silenceScale,
-    provider,
-    promise
-  )
+  ) = initializationService.initializeTts(instanceId, options, promise)
 
   fun updateTtsParams(
     instanceId: String,
@@ -184,6 +158,7 @@ internal class SherpaOnnxTtsCoordinator(
 
       val defaultSid = if (options.hasKey("sid")) options.getDouble("sid").toInt() else 0
       val defaultSpeed = if (options.hasKey("speed")) options.getDouble("speed").toFloat() else 1.0f
+      val defaultLang = options.getString("lang")?.trim()?.takeIf { it.isNotEmpty() }
 
       var voiceCloneConfig: TtsVoiceCloneConfig? = null
       val refBufferId = options.getString("referenceAudioBufferId")?.trim().orEmpty()
@@ -214,6 +189,7 @@ internal class SherpaOnnxTtsCoordinator(
         audioOutputEntry = audioOutEntry,
         defaultSid = defaultSid,
         defaultSpeed = defaultSpeed,
+        defaultLang = defaultLang,
         voiceClone = voiceCloneConfig,
       )
 

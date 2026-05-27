@@ -197,4 +197,3 @@ Vorgehen (Phase 7):
 - Critical segment/link APIs have automated tests covering happy path + edge cases.
 - Migration docs and real implementation are aligned.
 - Jest läuft in GitHub Actions wie in Workstream 6 beschrieben (bestehenden Workflow pflegen oder neuen anlegen).
-

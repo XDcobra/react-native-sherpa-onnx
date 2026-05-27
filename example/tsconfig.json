@@ -8,6 +8,7 @@
       "react-native-sherpa-onnx/provider": ["../src/provider.ts"],
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],
+      "react-native-sherpa-onnx/visualization": ["../src/visualization/index.ts"],
       "react-native-sherpa-onnx/pcm": ["../src/pcm/index.ts"],
       "react-native-sherpa-onnx/audiobuffer": ["../src/audiobuffer/index.ts"],
       "react-native-sherpa-onnx/segment": ["../src/segment/index.ts"],

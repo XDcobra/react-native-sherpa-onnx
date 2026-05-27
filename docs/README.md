@@ -16,6 +16,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
 | [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |
+| [native-diagnostics.md](./native-diagnostics.md) | Native crash ring buffer, signal-handler dumps (`SherpaNativeDiag`), snapshot API |
 
 ---
 
@@ -101,6 +102,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [audio-session.md](./audio-session.md) | Global audio session policy and route preference (mic + PCM) |
 | [pcm-player.md](./pcm-player.md) | Built-in PCM player — play pipeline buffer output |
 | [audio-conversion.md](./audio-conversion.md) | Save / encode and duration probe (`react-native-sherpa-onnx/audio`) |
+| [audio-visualization.md](./audio-visualization.md) | Spectrum profiles — `levels` (2D) and timeline `frames` (`react-native-sherpa-onnx/visualization`) |
 
 ---
 

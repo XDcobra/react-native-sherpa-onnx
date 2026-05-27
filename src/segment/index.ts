@@ -743,10 +743,13 @@ export async function segmentOfflineBuffer(
 
     const createdAtMs = Date.now();
     const nativeSegments = Array.isArray(out.segments) ? out.segments : [];
+    let utf16Offset = 0;
     const materialized: TextSegment[] = nativeSegments.map((segment, index) => {
       const text = segment.text;
-      const startOffset = Math.max(0, Math.trunc(segment.startOffset));
-      const endOffset = Math.max(startOffset, Math.trunc(segment.endOffset));
+      const utf16Length = text.length;
+      const startOffset = utf16Offset;
+      const endOffset = utf16Offset + utf16Length;
+      utf16Offset = endOffset;
       return {
         segmentId: segment.segmentId,
         domain: 'text',
@@ -757,7 +760,7 @@ export async function segmentOfflineBuffer(
         createdAtMs,
         segmentIndex: index,
         text,
-        utf16Length: text.length,
+        utf16Length,
       };
     });
     setOfflineTextSegments(bufferId, materialized);

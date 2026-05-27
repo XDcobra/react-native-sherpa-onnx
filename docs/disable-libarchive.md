@@ -102,3 +102,8 @@ The [Model Download Manager](download-manager.md) uses native `extractTarBz2` / 
 |--------|--------|
 | **Android:** `sherpaOnnxDisableLibarchive=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_LIBARCHIVE=1 pod install` | No libarchive linked or shipped (`libarchive.so` or `libarchive.xcframework`); build succeeds without libarchive prebuilts; `extractTarBz2`/`extractTarZst` reject with an error at runtime; `cancelExtractTarBz2`/`cancelExtractTarZst` are no-ops; `computeFileSha256` still works. **Download Manager:** only single-file models (`.onnx`) can be downloaded and used; archive models (`.tar.bz2`, `.tar.zst`) fail at extraction. Use when you have another libarchive in the app or do not need archive extraction. |
 | **Default (Flag unset / false)** | libarchive is required; prebuilts, AAR, or XCFramework must provide libarchive; `extractTarBz2` and `cancelExtractTarBz2` work; Download Manager supports both archive and single-file models. Do not combine with another libarchive in the same process unless you accept the risk of clashes. |
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

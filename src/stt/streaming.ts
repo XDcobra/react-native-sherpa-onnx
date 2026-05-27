@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../detect';
+import { buildOnlineSttInitBridgeOptions } from './sttNativeBridge';
 import type {
   OnlineSTTModelType,
   LiveSttEngine,
@@ -41,6 +42,9 @@ function normalizeToOnlineType(
   switch (t) {
     case 'transducer':
       return 'transducer';
+    case 'nemo_transducer':
+      // NeMo/Nemotron streaming transducers use OnlineTransducer + NeMo impl (decoder outputs > 1).
+      return 'nemo_transducer';
     case 'paraformer':
       return 'paraformer';
     case 'nemo_ctc':
@@ -52,62 +56,9 @@ function normalizeToOnlineType(
       return 'tone_ctc';
     default:
       throw new Error(
-        `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
+        `Model type "${t}" is not supported for streaming STT. Use createSTT() for offline recognition, or pass a supported modelType: transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc.`
       );
   }
-}
-
-function flattenInitOptionsForNative(options: StreamingSttInitOptions): {
-  modelDir: string;
-  modelType: string;
-  enableEndpoint: boolean;
-  decodingMethod: string;
-  maxActivePaths: number;
-  hotwordsFile?: string;
-  hotwordsScore?: number;
-  numThreads?: number;
-  provider?: string;
-  ruleFsts?: string;
-  ruleFars?: string;
-  dither?: number;
-  blankPenalty?: number;
-  debug?: boolean;
-  rule1MustContainNonSilence?: boolean;
-  rule1MinTrailingSilence?: number;
-  rule1MinUtteranceLength?: number;
-  rule2MustContainNonSilence?: boolean;
-  rule2MinTrailingSilence?: number;
-  rule2MinUtteranceLength?: number;
-  rule3MustContainNonSilence?: boolean;
-  rule3MinTrailingSilence?: number;
-  rule3MinUtteranceLength?: number;
-} {
-  const ep = options.endpointConfig;
-  return {
-    modelDir: '',
-    modelType: options.modelType,
-    enableEndpoint: options.enableEndpoint ?? true,
-    decodingMethod: options.decodingMethod ?? 'greedy_search',
-    maxActivePaths: options.maxActivePaths ?? 4,
-    hotwordsFile: options.hotwordsFile,
-    hotwordsScore: options.hotwordsScore,
-    numThreads: options.numThreads,
-    provider: options.provider,
-    ruleFsts: options.ruleFsts,
-    ruleFars: options.ruleFars,
-    dither: options.dither,
-    blankPenalty: options.blankPenalty,
-    debug: options.debug,
-    rule1MustContainNonSilence: ep?.rule1?.mustContainNonSilence,
-    rule1MinTrailingSilence: ep?.rule1?.minTrailingSilence,
-    rule1MinUtteranceLength: ep?.rule1?.minUtteranceLength,
-    rule2MustContainNonSilence: ep?.rule2?.mustContainNonSilence,
-    rule2MinTrailingSilence: ep?.rule2?.minTrailingSilence,
-    rule2MinUtteranceLength: ep?.rule2?.minUtteranceLength,
-    rule3MustContainNonSilence: ep?.rule3?.mustContainNonSilence,
-    rule3MinTrailingSilence: ep?.rule3?.minTrailingSilence,
-    rule3MinUtteranceLength: ep?.rule3?.minUtteranceLength,
-  };
 }
 
 export async function createStreamingSTT(
@@ -137,56 +88,18 @@ export async function createStreamingSTT(
     }
     effectiveModelType = normalizeToOnlineType(detectResult.modelType);
   } else {
-    effectiveModelType = options.modelType;
+    effectiveModelType = normalizeToOnlineType(options.modelType);
   }
 
   const optionsWithResolvedType = { ...options, modelType: effectiveModelType };
-  const flat = flattenInitOptionsForNative(optionsWithResolvedType);
-  flat.modelDir = resolvedPath;
+  const bridgeOptions = buildOnlineSttInitBridgeOptions(
+    resolvedPath,
+    optionsWithResolvedType
+  );
 
-  const nativeOptions: Parameters<
-    typeof SherpaOnnx.initializeOnlineSttWithOptions
-  >[1] = {
-    modelDir: flat.modelDir,
-    modelType: flat.modelType,
-    enableEndpoint: flat.enableEndpoint,
-    decodingMethod: flat.decodingMethod,
-    maxActivePaths: flat.maxActivePaths,
-  };
-  if (flat.hotwordsFile !== undefined)
-    nativeOptions.hotwordsFile = flat.hotwordsFile;
-  if (flat.hotwordsScore !== undefined)
-    nativeOptions.hotwordsScore = flat.hotwordsScore;
-  if (flat.numThreads !== undefined) nativeOptions.numThreads = flat.numThreads;
-  if (flat.provider !== undefined) nativeOptions.provider = flat.provider;
-  if (flat.ruleFsts !== undefined) nativeOptions.ruleFsts = flat.ruleFsts;
-  if (flat.ruleFars !== undefined) nativeOptions.ruleFars = flat.ruleFars;
-  if (flat.dither !== undefined) nativeOptions.dither = flat.dither;
-  if (flat.blankPenalty !== undefined)
-    nativeOptions.blankPenalty = flat.blankPenalty;
-  if (flat.debug !== undefined) nativeOptions.debug = flat.debug;
-  if (flat.rule1MustContainNonSilence !== undefined)
-    nativeOptions.rule1MustContainNonSilence = flat.rule1MustContainNonSilence;
-  if (flat.rule1MinTrailingSilence !== undefined)
-    nativeOptions.rule1MinTrailingSilence = flat.rule1MinTrailingSilence;
-  if (flat.rule1MinUtteranceLength !== undefined)
-    nativeOptions.rule1MinUtteranceLength = flat.rule1MinUtteranceLength;
-  if (flat.rule2MustContainNonSilence !== undefined)
-    nativeOptions.rule2MustContainNonSilence = flat.rule2MustContainNonSilence;
-  if (flat.rule2MinTrailingSilence !== undefined)
-    nativeOptions.rule2MinTrailingSilence = flat.rule2MinTrailingSilence;
-  if (flat.rule2MinUtteranceLength !== undefined)
-    nativeOptions.rule2MinUtteranceLength = flat.rule2MinUtteranceLength;
-  if (flat.rule3MustContainNonSilence !== undefined)
-    nativeOptions.rule3MustContainNonSilence = flat.rule3MustContainNonSilence;
-  if (flat.rule3MinTrailingSilence !== undefined)
-    nativeOptions.rule3MinTrailingSilence = flat.rule3MinTrailingSilence;
-  if (flat.rule3MinUtteranceLength !== undefined)
-    nativeOptions.rule3MinUtteranceLength = flat.rule3MinUtteranceLength;
-
-  const result = await SherpaOnnx.initializeOnlineSttWithOptions(
+  const result = await SherpaOnnx.initializeOnlineStt(
     instanceId,
-    nativeOptions
+    bridgeOptions
   );
 
   if (!result.success) {

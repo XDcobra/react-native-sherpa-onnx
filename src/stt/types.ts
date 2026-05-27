@@ -365,14 +365,6 @@ export interface SttTranscribeResult {
  */
 export interface SttLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
   /**
-   * Ignored for live-offline STT. Each committed speech segment is decoded in one shot (full
-   * waveform per segment). Kept on the type so existing call sites that pass `chunkSize` keep
-   * compiling. For **streaming** online STT, use `chunkSize` on `LiveSttEngine.transcribe`
-   * options (`SttPipelineOptions` in `streamingTypes.ts`).
-   */
-  chunkSize?: number;
-
-  /**
    * Optional per-segment mirror callback. Fires once per committed text segment with the
    * recognised text. Executes on the worker thread — do not block.
    * No `onPartial` is available; the live-offline path is commit-only by design

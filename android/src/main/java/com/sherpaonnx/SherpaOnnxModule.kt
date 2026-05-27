@@ -16,6 +16,7 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
@@ -365,6 +366,35 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       android.util.Log.e(NAME, "INIT_ERROR: Failed to test sherpa-onnx initialization", e)
       promise.reject("INIT_ERROR", "Failed to test sherpa-onnx initialization", e)
+    }
+  }
+
+  override fun getNativeDiagnosticSnapshot(promise: Promise) {
+    try {
+      val json = nativeGetDiagnosticSnapshot()
+      promise.resolve(json)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
+    }
+  }
+
+  override fun configureNativeDiagnostics(config: ReadableMap?, promise: Promise) {
+    try {
+      val enabled = if (config != null && config.hasKey("enabled") && !config.isNull("enabled")) {
+        config.getBoolean("enabled")
+      } else {
+        true
+      }
+      val installSignalHandler =
+        if (config != null && config.hasKey("installSignalHandler") && !config.isNull("installSignalHandler")) {
+          config.getBoolean("installSignalHandler")
+        } else {
+          true
+        }
+      nativeInitDiagnostics(enabled, installSignalHandler)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
     }
   }
 
@@ -842,23 +872,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeStt(
     instanceId: String,
-    modelDir: String,
-    preferInt8: Boolean?,
-    modelType: String?,
-    debug: Boolean?,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    dither: Double?,
-    modelOptions: ReadableMap?,
-    modelingUnit: String?,
-    bpeVocab: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    sttHelper.initializeStt(instanceId, modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
+    sttHelper.initializeStt(instanceId, options, promise)
   }
 
   /**
@@ -870,7 +887,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Online (streaming) STT Methods ====================
 
-  override fun initializeOnlineSttWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
+  override fun initializeOnlineStt(instanceId: String, options: ReadableMap, promise: Promise) {
     val modelDir = options.getString("modelDir")
     if (modelDir.isNullOrEmpty()) {
       promise.reject("INIT_ERROR", "modelDir is required")
@@ -969,7 +986,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val decodeCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
   // Map of ingestId → ingest status for active file ingest operations
   private val fileIngestStatuses = java.util.concurrent.ConcurrentHashMap<String, FileIngestStatus>()
-  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool()
+  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "sherpa-audio-decode").apply { isDaemon = true }
+  }
 
   private data class FileIngestStatus(
     @Volatile var isRunning: Boolean = true,
@@ -1035,20 +1054,46 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val path: String?,
     val fd: Int,
     val tempFile: File? = null,
+    /** FFmpeg demuxer hint (e.g. original display name when path is extensionless). */
+    val pathHint: String? = null,
   )
 
+  private fun sourcePathHint(source: ReadableMap): String? {
+    if (!source.hasKey("displayName")) {
+      return null
+    }
+    return source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
+  }
+
+  private fun extensionFromFileName(fileName: String): String? {
+    val dot = fileName.lastIndexOf('.')
+    if (dot < 0 || dot == fileName.length - 1) {
+      return null
+    }
+    val ext = fileName.substring(dot + 1).lowercase(Locale.US)
+    return ext.takeIf { it.isNotEmpty() && ext.length <= 8 }
+  }
+
+  private fun decodeTempFileName(displayName: String?): String {
+    val base = "decode_stream_${java.util.UUID.randomUUID()}"
+    val ext = displayName?.let { extensionFromFileName(it) }
+    return if (ext != null) "$base.$ext" else base
+  }
+
   private fun resolveDecodableSource(
-    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle,
+    source: ReadableMap? = null,
   ): DecodableSource {
+    val displayName = source?.let { sourcePathHint(it) }
     return when (handle) {
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
-        DecodableSource(path = handle.file.absolutePath, fd = -1)
+        DecodableSource(path = handle.file.absolutePath, fd = -1, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
-        DecodableSource(path = null, fd = handle.pfd.fd)
+        DecodableSource(path = null, fd = handle.pfd.fd, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
         val tmpFile = File(
           reactApplicationContext.cacheDir,
-          "decode_stream_${java.util.UUID.randomUUID()}"
+          decodeTempFileName(displayName)
         )
         try {
           tmpFile.outputStream().use { out ->
@@ -1062,12 +1107,581 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             e
           )
         }
-        DecodableSource(path = tmpFile.absolutePath, fd = -1, tempFile = tmpFile)
+        DecodableSource(
+          path = tmpFile.absolutePath,
+          fd = -1,
+          tempFile = tmpFile,
+          pathHint = displayName,
+        )
       }
     }
   }
 
-  override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
+  /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
+  private fun nativePathArg(decodable: DecodableSource): String? {
+    return decodable.path ?: decodable.pathHint
+  }
+
+  private fun emitVisualizationProgress(
+    operationId: String,
+    phase: String,
+    phasePercent: Double,
+    framesDecoded: Long = 0,
+    totalFramesEstimate: Long = 0,
+    stftWindowsDone: Long = 0,
+    stftWindowsTotal: Long = 0,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putString("phase", phase)
+      payload.putDouble("phasePercent", phasePercent.coerceIn(0.0, 1.0))
+      payload.putDouble("framesDecoded", framesDecoded.toDouble())
+      payload.putDouble("totalFramesEstimate", totalFramesEstimate.toDouble())
+      payload.putDouble("stftWindowsDone", stftWindowsDone.toDouble())
+      payload.putDouble("stftWindowsTotal", stftWindowsTotal.toDouble())
+      eventEmitter.emit("visualizationProgress", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures (e.g. bridge teardown)
+    }
+  }
+
+  private fun makeVisualizationProgressCallback(
+    operationId: String?,
+  ): VisualizationProgressCallback? {
+    val opId = operationId?.trim().orEmpty()
+    if (opId.isEmpty()) {
+      return null
+    }
+    return object : VisualizationProgressCallback {
+      override fun onVisualizationProgress(
+        phase: String,
+        phasePercent: Double,
+        framesDecoded: Long,
+        totalFramesEstimate: Long,
+        stftWindowsDone: Long,
+        stftWindowsTotal: Long,
+      ) {
+        emitVisualizationProgress(
+          opId,
+          phase,
+          phasePercent,
+          framesDecoded,
+          totalFramesEstimate,
+          stftWindowsDone,
+          stftWindowsTotal,
+        )
+      }
+    }
+  }
+
+  private data class VisualizationOptions(
+    val barCount: Int,
+    val minHz: Double,
+    val maxHz: Double,
+    val fftSize: Int,
+    val hopSize: Int,
+    val aggregateCode: Int,
+    val includeTimeline: Boolean,
+    val frameCount: Int,
+    val frameDurationMs: Double,
+    val maxAnalysisDurationMs: Double,
+    val levelsMaxStftFrames: Int,
+    val analysisSampleRateHz: Double,
+    val progressOperationId: String? = null,
+  )
+
+  private fun visualizationDecodeTargetSampleRate(options: VisualizationOptions): Int {
+    val rate = options.analysisSampleRateHz.toInt()
+    return if (rate > 0) rate else 0
+  }
+
+  private fun parseOptionalNumber(options: ReadableMap, key: String): Double? {
+    if (!options.hasKey(key) || options.isNull(key)) {
+      return null
+    }
+    val value = options.getDouble(key)
+    if (!value.isFinite()) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: $key must be a finite number"
+      )
+    }
+    return value
+  }
+
+  private fun parseVisualizationOptions(options: ReadableMap): VisualizationOptions {
+    val kind = options.getString("kind") ?: "spectrum_bars"
+    if (kind != "spectrum_bars") {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: kind must be 'spectrum_bars'"
+      )
+    }
+
+    val timeAggregate = options.getString("timeAggregate") ?: "max_hold"
+    val aggregateCode = when (timeAggregate) {
+      "max_hold" -> 0
+      "mean" -> 1
+      else -> -1
+    }
+    if (aggregateCode < 0) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: timeAggregate must be 'max_hold' or 'mean'"
+      )
+    }
+
+    val requestedBars = if (options.hasKey("barCount") && !options.isNull("barCount")) {
+      options.getDouble("barCount").toInt()
+    } else {
+      96
+    }
+    val barCount = requestedBars.coerceIn(8, 512)
+
+    val minHz = if (options.hasKey("minHz") && !options.isNull("minHz")) {
+      options.getDouble("minHz").coerceAtLeast(10.0)
+    } else {
+      60.0
+    }
+
+    val maxHz = if (options.hasKey("maxHz") && !options.isNull("maxHz")) {
+      options.getDouble("maxHz")
+    } else {
+      0.0
+    }
+
+    val frameCountRaw =
+      if (options.hasKey("frameCount") && !options.isNull("frameCount")) {
+        parseOptionalNumber(options, "frameCount") ?: 0.0
+      } else {
+        0.0
+      }
+    val hasFrameCount = frameCountRaw > 0.0
+    val hasFrameDuration =
+      options.hasKey("frameDurationMs") && !options.isNull("frameDurationMs")
+    val includeTimeline =
+      (options.hasKey("includeTimeline") && !options.isNull("includeTimeline") &&
+        options.getBoolean("includeTimeline")) || hasFrameCount || hasFrameDuration
+
+    var frameCount = 0
+    if (hasFrameCount) {
+      frameCount = frameCountRaw.toInt()
+      if (frameCount < 8 || frameCount > 512) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512"
+        )
+      }
+    }
+
+    var frameDurationMs = 0.0
+    if (frameCount <= 0 && hasFrameDuration) {
+      val raw = parseOptionalNumber(options, "frameDurationMs") ?: 0.0
+      frameDurationMs = raw
+      if (frameDurationMs < 50.0 || frameDurationMs > 10000.0) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameDurationMs must be between 50 and 10000"
+        )
+      }
+    }
+
+    if (includeTimeline && frameCount <= 0 && frameDurationMs <= 0.0) {
+      frameDurationMs = 500.0
+    }
+
+    val maxAnalysisDurationMs =
+      (parseOptionalNumber(options, "maxAnalysisDurationMs") ?: 0.0).coerceAtLeast(0.0)
+
+    val levelsMaxStftFrames =
+      if (!includeTimeline) {
+        val raw =
+          if (options.hasKey("levelsMaxStftFrames") && !options.isNull("levelsMaxStftFrames")) {
+            parseOptionalNumber(options, "levelsMaxStftFrames")?.toInt() ?: 1024
+          } else {
+            1024
+          }
+        raw.coerceIn(64, 4096)
+      } else {
+        0
+      }
+
+    val analysisSampleRateHz =
+      if (options.hasKey("analysisSampleRateHz") && !options.isNull("analysisSampleRateHz")) {
+        val raw = parseOptionalNumber(options, "analysisSampleRateHz") ?: 0.0
+        when {
+          raw == 0.0 -> 0.0
+          raw in 4000.0..96000.0 -> raw
+          else ->
+            throw IllegalArgumentException(
+              "AUDIO_VISUALIZATION_INVALID_OPTIONS: analysisSampleRateHz must be 0 or between 4000 and 96000"
+            )
+        }
+      } else {
+        0.0
+      }
+
+    val progressOperationId =
+      options.getString("progressOperationId")?.trim()?.takeIf { it.isNotEmpty() }
+
+    return VisualizationOptions(
+      barCount = barCount,
+      minHz = minHz,
+      maxHz = maxHz,
+      fftSize = 2048,
+      hopSize = 1024,
+      aggregateCode = aggregateCode,
+      includeTimeline = includeTimeline,
+      frameCount = frameCount,
+      frameDurationMs = frameDurationMs,
+      maxAnalysisDurationMs = maxAnalysisDurationMs,
+      levelsMaxStftFrames = levelsMaxStftFrames,
+      analysisSampleRateHz = analysisSampleRateHz,
+      progressOperationId = progressOperationId,
+    )
+  }
+
+  private fun normalizeVisualizationNativeResult(
+    nativeResult: HashMap<String, Any>,
+    fallbackBarCount: Int,
+  ): com.facebook.react.bridge.WritableMap {
+    val sampleRate = (nativeResult["sampleRate"] as? Int) ?: 0
+    val durationMs = when (val value = nativeResult["durationMs"]) {
+      is Long -> value.toDouble()
+      is Int -> value.toDouble()
+      is Double -> value
+      is Float -> value.toDouble()
+      else -> 0.0
+    }
+    val nativeBarCount = ((nativeResult["barCount"] as? Int) ?: fallbackBarCount)
+      .coerceAtLeast(1)
+    val frameCount = ((nativeResult["frameCount"] as? Int) ?: 0)
+      .coerceAtLeast(0)
+    val frameDurationMs = when (val value = nativeResult["frameDurationMs"]) {
+      is Double -> value
+      is Float -> value.toDouble()
+      is Int -> value.toDouble()
+      is Long -> value.toDouble()
+      else -> 0.0
+    }.coerceAtLeast(0.0)
+    val framesTransferId = nativeResult["framesTransferId"] as? String
+
+    val rawLevels = nativeResult["levels"]
+    val levels = when (rawLevels) {
+      is FloatArray -> rawLevels.map { it.toDouble() }
+      is DoubleArray -> rawLevels.toList()
+      is IntArray -> rawLevels.map { it.toDouble() }
+      is ArrayList<*> -> rawLevels.map {
+        when (it) {
+          is Number -> it.toDouble()
+          else -> 0.0
+        }
+      }
+      else -> emptyList()
+    }
+
+    val map = Arguments.createMap()
+    map.putString("kind", "spectrum_bars")
+    map.putInt("sampleRate", sampleRate.coerceAtLeast(0))
+    map.putDouble("durationMs", durationMs.coerceAtLeast(0.0))
+    map.putInt("barCount", nativeBarCount)
+    map.putInt("frameCount", frameCount)
+    map.putDouble("frameDurationMs", frameDurationMs)
+    if (!framesTransferId.isNullOrBlank()) {
+      map.putString("framesTransferId", framesTransferId)
+    }
+
+    val levelArray = Arguments.createArray()
+    for (i in 0 until nativeBarCount) {
+      val raw = if (i < levels.size) levels[i] else 0.0
+      levelArray.pushDouble(raw.coerceIn(0.0, 1.0))
+    }
+    map.putArray("levels", levelArray)
+    return map
+  }
+
+  private fun computeVisualizationFromOffline(
+    bufferId: String,
+    options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
+  ): HashMap<String, Any> {
+    val entry = PipelineAudioRegistry.getOffline(bufferId)
+      ?: throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Offline buffer not found: $bufferId")
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      entry.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
+    )
+
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(accumulatorPtr, entry.numSamples.toLong())
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
+      }
+      val chunk = FloatArray(8192)
+      when (entry) {
+        is OfflineEntry.MmapBacked -> {
+          var start = 0
+          val total = entry.numSamples
+          while (start < total) {
+            val maxSamples = minOf(chunk.size, total - start)
+            val count = entry.readInto(start, chunk, 0, maxSamples)
+            if (count <= 0) break
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
+          }
+        }
+
+        is OfflineEntry.InMemory -> {
+          var start = 0
+          val source = entry.samples
+          while (start < source.size) {
+            val count = minOf(chunk.size, source.size - start)
+            System.arraycopy(source, start, chunk, 0, count)
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
+          }
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  private fun computeVisualizationFromLive(
+    liveBufferId: String,
+    options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
+  ): HashMap<String, Any> {
+    val live = PipelineAudioRegistry.getLive(liveBufferId)
+    if (live == null) {
+      if (PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+        throw IllegalArgumentException(
+          "BUFFER_INVALIDATED: Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      }
+      throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Live buffer not found: $liveBufferId")
+    }
+
+    if (live.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED) {
+      throw IllegalStateException(
+        "AUDIO_INVALID_STATE: Live buffer must be finalized before visualization"
+      )
+    }
+
+    val spoolPath = live.spoolFilePath
+    if (live.hasActiveSpool && !spoolPath.isNullOrBlank()) {
+      @Suppress("UNCHECKED_CAST")
+      return nativeComputeVisualizationProfileFromFile(
+        spoolPath,
+        -1,
+        visualizationDecodeTargetSampleRate(options),
+        true,
+        8192,
+        true,
+        options.barCount,
+        options.minHz,
+        options.maxHz,
+        options.fftSize,
+        options.hopSize,
+        options.aggregateCode,
+        options.includeTimeline,
+        options.frameCount,
+        options.frameDurationMs,
+        options.maxAnalysisDurationMs,
+        options.levelsMaxStftFrames,
+        progressCallback,
+      ) as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    }
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      live.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
+    )
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(
+          accumulatorPtr,
+          live.totalSamplesWritten.toLong()
+        )
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
+      }
+      val snapshot = live.snapshotRing()
+      if (snapshot.isNotEmpty()) {
+        val chunk = FloatArray(8192)
+        var start = 0
+        while (start < snapshot.size) {
+          val count = minOf(chunk.size, snapshot.size - start)
+          System.arraycopy(snapshot, start, chunk, 0, count)
+          nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+          start += count
+          if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+            break
+          }
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  override fun computeAudioVisualizationProfile(
+    input: ReadableMap,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        val kind = input.getString("kind")
+          ?: throw IllegalArgumentException("VISUALIZATION_INVALID_INPUT: input.kind is required")
+
+        val normalizedOptions = parseVisualizationOptions(options)
+        val progressCallback =
+          makeVisualizationProgressCallback(normalizedOptions.progressOperationId)
+
+        val nativeResult = when (kind) {
+          "offline" -> {
+            val bufferId = input.getString("bufferId")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: offline input requires bufferId"
+              )
+            computeVisualizationFromOffline(bufferId, normalizedOptions, progressCallback)
+          }
+
+          "live" -> {
+            val handle = input.getString("handle")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: live input requires handle"
+              )
+            computeVisualizationFromLive(handle, normalizedOptions, progressCallback)
+          }
+
+          "file" -> {
+            val source = input.getMap("source")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: file input requires source"
+              )
+
+            readHandle = fileIOHelper.resolveSource(source)
+            val decodableSource = resolveDecodableSource(
+              readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+              source,
+            )
+            tempSourceFile = decodableSource.tempFile
+
+            @Suppress("UNCHECKED_CAST")
+            nativeComputeVisualizationProfileFromFile(
+              nativePathArg(decodableSource),
+              decodableSource.fd,
+              visualizationDecodeTargetSampleRate(normalizedOptions),
+              true,
+              8192,
+              true,
+              normalizedOptions.barCount,
+              normalizedOptions.minHz,
+              normalizedOptions.maxHz,
+              normalizedOptions.fftSize,
+              normalizedOptions.hopSize,
+              normalizedOptions.aggregateCode,
+              normalizedOptions.includeTimeline,
+              normalizedOptions.frameCount,
+              normalizedOptions.frameDurationMs,
+              normalizedOptions.maxAnalysisDurationMs,
+              normalizedOptions.levelsMaxStftFrames,
+              progressCallback,
+            ) as? HashMap<String, Any>
+              ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+          }
+
+          else -> {
+            throw IllegalArgumentException(
+              "VISUALIZATION_INVALID_INPUT: unsupported input kind '$kind'"
+            )
+          }
+        }
+
+        promise.resolve(
+          normalizeVisualizationNativeResult(nativeResult, normalizedOptions.barCount)
+        )
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "VISUALIZATION_INTERNAL_ERROR: Unknown visualization error"
+        val code = when {
+          msg.startsWith("VISUALIZATION_") -> msg.substringBefore(":").trim()
+          msg.startsWith("AUDIO_") -> msg.substringBefore(":").trim()
+          msg.startsWith("BUFFER_") -> msg.substringBefore(":").trim()
+          msg.startsWith("DECODE_") -> msg.substringBefore(":").trim()
+          else -> "VISUALIZATION_INTERNAL_ERROR"
+        }
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("VISUALIZATION_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
+  override fun decodeFileToOfflineBuffer(
+    source: ReadableMap,
+    targetSampleRateHz: Double,
+    forceMono: Boolean,
+    allowDemuxerAutoProbe: Boolean,
+    operationId: String,
+    promise: Promise,
+  ) {
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
 
@@ -1078,11 +1692,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         readHandle = fileIOHelper.resolveSource(source)
         val decodableSource = resolveDecodableSource(
-          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
         )
         val sourcePath = decodableSource.path
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
+        val nativePath = nativePathArg(decodableSource)
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -1131,11 +1747,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToMmapFile(
-            sourcePath,
+            nativePath,
             sourceFd,
             targetRate,
             forceMono,
             8192,
+            allowDemuxerAutoProbe,
             cancelFlagAddr,
             tmpF32.absolutePath,
             progressCallback,
@@ -1197,6 +1814,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeAudioFileContainer(source: ReadableMap, promise: Promise) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
+
+        @Suppress("UNCHECKED_CAST")
+        val result = nativeProbeFileContainer(nativePathArg(decodableSource), sourceFd)
+          as? HashMap<String, String>
+          ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native container probe returned null")
+
+        val inputFormatName = result["inputFormatName"]
+        val codecName = result["codecName"]
+        if (inputFormatName.isNullOrBlank() || codecName.isNullOrBlank()) {
+          throw RuntimeException("PROBE_INTERNAL_ERROR: Invalid native container probe result")
+        }
+
+        val map = Arguments.createMap()
+        map.putString("inputFormatName", inputFormatName)
+        map.putString("codecName", codecName)
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("PROBE_")) msg.substringBefore(":").trim() else "PROBE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("PROBE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
   override fun probeAudioFileDuration(source: ReadableMap, promise: Promise) {
     decodeExecutor.execute {
       var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
@@ -1205,13 +1867,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         readHandle = fileIOHelper.resolveSource(source)
         val decodableSource = resolveDecodableSource(
-          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
         )
         val sourcePath = decodableSource.path
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
 
-        val result = nativeProbeFileDuration(sourcePath, sourceFd)
+        val result = nativeProbeFileDuration(nativePathArg(decodableSource), sourceFd)
           ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native probe returned null")
 
         if (result.size < 2) {
@@ -1249,6 +1912,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     forceMono: Boolean,
     autoFinalize: Boolean,
     backpressure: String,
+    allowDemuxerAutoProbe: Boolean,
     operationId: String,
     promise: Promise
   ) {
@@ -1309,12 +1973,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     var sourcePath: String? = null
     var sourceFd: Int = -1
     var tempSourceFile: File? = null
+    var nativePath: String? = null
     try {
       readHandle = fileIOHelper.resolveSource(source)
-      val decodableSource = resolveDecodableSource(readHandle)
+      val decodableSource = resolveDecodableSource(readHandle, source)
       sourcePath = decodableSource.path
       sourceFd = decodableSource.fd
       tempSourceFile = decodableSource.tempFile
+      nativePath = nativePathArg(decodableSource)
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       decodeCancelFlags.remove(operationId)
       fileIngestStatuses.remove(ingestId)
@@ -1388,11 +2054,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
         @Suppress("UNCHECKED_CAST")
         val result = nativeDecodeFileStreaming(
-          sourcePath,
+          nativePath,
           sourceFd,
           targetRate,
           forceMono,
           8192,
+          allowDemuxerAutoProbe,
           cancelFlagAddr,
           chunkCallback,
           progressCallback
@@ -1923,6 +2590,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         0, // keep source sample rate
         true, // force mono
         8192,
+        true, // allowDemuxerAutoProbe
         cancelFlagAddr,
         object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
@@ -3711,36 +4379,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    commonTtsHelper.initializeTts(
-      instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      debug,
-      noiseScale,
-      noiseScaleW,
-      lengthScale,
-      ruleFsts,
-      ruleFars,
-      maxNumSentences,
-      silenceScale,
-      provider,
-      promise
-    )
+    commonTtsHelper.initializeTts(instanceId, options, promise)
   }
 
   /**
@@ -4445,6 +5087,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
+    @JvmStatic
+    private external fun nativeInitDiagnostics(enabled: Boolean, installSignalHandler: Boolean)
+
+    @JvmStatic
+    private external fun nativeGetDiagnosticSnapshot(): String
+
     /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
     @JvmStatic
     private external fun nativeCanInitQnnHtp(): Boolean
@@ -4540,6 +5188,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       inputFd: Int,
     ): LongArray?
 
+    /** Container probe: returns HashMap{inputFormatName, codecName}. */
+    @JvmStatic
+    external fun nativeProbeFileContainer(
+      path: String?,
+      inputFd: Int,
+    ): HashMap<String, String>?
+
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic
     external fun nativeDecodeFileToBuffer(
@@ -4559,6 +5214,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
       outputPath: String,
       progressCallback: Any?,
@@ -4572,9 +5228,85 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
       chunkCallback: Any,
       progressCallback: Any?
+    ): HashMap<String, Any>?
+
+    /** Create a shared C++ visualization accumulator for chunked processing. */
+    @JvmStatic
+    external fun nativeCreateVisualizationAccumulator(
+      sampleRate: Int,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
+    ): Long
+
+    @JvmStatic
+    external fun nativeSetVisualizationExpectedTotalSamples(
+      accumulatorPtr: Long,
+      totalSamples: Long,
+    )
+
+    @JvmStatic
+    external fun nativeAttachVisualizationProgressCallback(
+      accumulatorPtr: Long,
+      progressCallback: VisualizationProgressCallback,
+    )
+
+    /** Feed mono float32 samples into a visualization accumulator. */
+    @JvmStatic
+    external fun nativeFeedVisualizationAccumulator(
+      accumulatorPtr: Long,
+      samples: FloatArray,
+      sampleCount: Int,
+    )
+
+    @JvmStatic
+    external fun nativeIsVisualizationAnalysisCapReached(accumulatorPtr: Long): Boolean
+
+    /** Finalize and get visualization profile HashMap{sampleRate,durationMs,barCount,levels,frameCount,frameDurationMs,framesTransferId?}. */
+    @JvmStatic
+    external fun nativeFinishVisualizationAccumulator(
+      accumulatorPtr: Long,
+    ): HashMap<String, Any>?
+
+    /** Release visualization accumulator pointer. */
+    @JvmStatic
+    external fun nativeReleaseVisualizationAccumulator(
+      accumulatorPtr: Long,
+    )
+
+    /** Compute visualization profile directly from a file source (path/fd) in native C++. */
+    @JvmStatic
+    external fun nativeComputeVisualizationProfileFromFile(
+      path: String?,
+      inputFd: Int,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
+      progressCallback: VisualizationProgressCallback?,
     ): HashMap<String, Any>?
 
     /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */

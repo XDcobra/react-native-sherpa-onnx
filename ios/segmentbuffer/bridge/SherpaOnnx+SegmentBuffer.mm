@@ -2208,25 +2208,57 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
           return;
         }
       }
+      NSString *full = [NSString stringWithUTF8String:text.c_str()] ?: @"";
       NSMutableArray *segments = [NSMutableArray array];
       int index = 0;
-      while (index < (int)text.size()) {
-        int split = -1;
-        bool foundBoundary = false;
-        std::string remaining = text.substr((size_t)index);
+      const int totalLen = (int)full.length;
+      const int maxLen = std::max(1, p.maxLengthChars);
+      while (index < totalLen) {
+        const int remainingLen = totalLen - index;
+        NSString *remaining = [full substringWithRange:NSMakeRange((NSUInteger)index, (NSUInteger)remainingLen)];
+        int split = 0;
+        BOOL foundBoundary = NO;
         if (p.sentenceBoundary) {
-          size_t prefixLen = p.sentenceBoundaryChars.empty()
-            ? seg_utf8_sentence_boundary_prefix_len_first(remaining)
-            : seg_utf8_custom_delimiter_prefix_len_first(remaining, p.sentenceBoundaryChars);
-          if (prefixLen != std::string::npos && prefixLen > 0) {
-            split = (int)prefixLen;
-            foundBoundary = true;
+          if (p.sentenceBoundaryChars.empty()) {
+            NSRange boundaryRange = [remaining rangeOfCharacterFromSet:seg_text_sentence_boundary_charset()
+                                                               options:0
+                                                                 range:NSMakeRange(0, remaining.length)];
+            if (boundaryRange.location != NSNotFound) {
+              split = (int)(boundaryRange.location + boundaryRange.length);
+              foundBoundary = YES;
+            }
+          } else {
+            NSData *remainingUtf8 = [remaining dataUsingEncoding:NSUTF8StringEncoding];
+            if (remainingUtf8 != nil) {
+              std::string remainingStd((const char *)remainingUtf8.bytes, remainingUtf8.length);
+              const size_t byteLen =
+                seg_utf8_custom_delimiter_prefix_len_first(remainingStd, p.sentenceBoundaryChars);
+              if (byteLen != std::string::npos && byteLen > 0) {
+                NSString *prefixNs = [[NSString alloc] initWithBytes:remainingStd.data()
+                                                               length:byteLen
+                                                             encoding:NSUTF8StringEncoding];
+                if (prefixNs != nil) {
+                  split = (int)prefixNs.length;
+                  foundBoundary = YES;
+                }
+              }
+            }
           }
         }
-        if (split <= 0) split = std::min(std::max(1, p.maxLengthChars), (int)remaining.size());
-        std::string chunk = remaining.substr(0, (size_t)split);
-        int end = index + split;
-        BOOL isFinalChunk = split >= (int)remaining.size();
+        if (split <= 0) {
+          split = std::min(maxLen, remainingLen);
+          if (split < remainingLen) {
+            NSRange spaceRange = [remaining rangeOfString:@" "
+                                                  options:NSBackwardsSearch
+                                                    range:NSMakeRange(0, (NSUInteger)split)];
+            if (spaceRange.location != NSNotFound && spaceRange.location > 0) {
+              split = (int)(spaceRange.location + 1);
+            }
+          }
+        }
+        NSString *chunk = [remaining substringToIndex:(NSUInteger)split];
+        const int end = index + split;
+        const BOOL isFinalChunk = split >= remainingLen;
         NSString *reason = isFinalChunk ? @"finalize" : (foundBoundary ? @"punctuation" : @"length_limit");
         [segments addObject:@{
           @"segmentId": [NSString stringWithFormat:@"txtseg_%@_%ld", bufferId ?: @"", (long)segments.count],
@@ -2234,9 +2266,9 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
           @"endOffset": @(end),
           @"reason": reason,
           @"source": @"segmentation_engine",
-          @"text": [NSString stringWithUTF8String:chunk.c_str()] ?: @"",
+          @"text": chunk ?: @"",
         }];
-        index += split;
+        index = end;
       }
       resolve(@{
         @"bufferId": bufferId ?: @"",

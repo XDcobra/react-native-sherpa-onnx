@@ -26,7 +26,6 @@ import type {
   STTModelType,
   SttEngine,
   SttLivePipelineOptions,
-  SttModelOptions,
   SttTranscribeResult,
   SttTranscribeOptions,
   SttRuntimeConfig,
@@ -53,6 +52,7 @@ import {
   type DetectedModelEntry,
   type SttDetectModelResult,
 } from '../types/modelDetect';
+import { buildSttInitBridgeOptions } from './sttNativeBridge';
 import { runOfflineAudioToTextPipeline } from '../pipeline/offlineOrchestrator';
 import { addSegmentLink, createSegmentLinkMap } from '../segment';
 import type { TextSegment } from '../segment/segment';
@@ -319,54 +319,10 @@ export async function createSTT(
   options: STTInitializeOptions
 ): Promise<SttEngine> {
   const instanceId = `stt_${++sttInstanceCounter}`;
+  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
+  const bridgeOptions = buildSttInitBridgeOptions(resolvedPath, options);
 
-  const modelSource = options.modelSource;
-  let preferInt8: boolean | undefined;
-  let modelType: STTModelType | undefined;
-  let hotwordsFile: string | undefined;
-  let hotwordsScore: number | undefined;
-  let numThreads: number | undefined;
-  let provider: string | undefined;
-  let ruleFsts: string | undefined;
-  let ruleFars: string | undefined;
-  let dither: number | undefined;
-  let modelOptions: SttModelOptions | undefined;
-  let modelingUnit: string | undefined;
-  let bpeVocab: string | undefined;
-
-  preferInt8 = options.preferInt8;
-  modelType = options.modelType;
-  hotwordsFile = options.hotwordsFile;
-  hotwordsScore = options.hotwordsScore;
-  numThreads = options.numThreads;
-  provider = options.provider;
-  ruleFsts = options.ruleFsts;
-  ruleFars = options.ruleFars;
-  dither = options.dither;
-  modelOptions = options.modelOptions;
-  modelingUnit = options.modelingUnit;
-  bpeVocab = options.bpeVocab;
-
-  const debug = options.debug;
-  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
-
-  const result = await SherpaOnnx.initializeStt(
-    instanceId,
-    resolvedPath,
-    preferInt8,
-    modelType,
-    debug,
-    hotwordsFile,
-    hotwordsScore,
-    numThreads,
-    provider,
-    ruleFsts,
-    ruleFars,
-    dither,
-    modelOptions,
-    modelingUnit,
-    bpeVocab
-  );
+  const result = await SherpaOnnx.initializeStt(instanceId, bridgeOptions);
 
   if (!result.success) {
     const nativeError =

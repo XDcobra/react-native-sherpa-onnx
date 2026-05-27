@@ -180,6 +180,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
+    jboolean allowDemuxerAutoProbe,
     jlong cancelFlagPtr,
     jstring jOutputPath,
     jobject jProgressCallback
@@ -217,6 +218,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
     config.targetSampleRate = (int)targetSampleRate;
     config.forceMono = (bool)forceMono;
     config.chunkSize = chunkSize > 0 ? (int)chunkSize : 8192;
+    config.allowDemuxerAutoProbe = (bool)allowDemuxerAutoProbe;
 
     auto& cancelFlag = *reinterpret_cast<std::atomic<bool>*>(cancelFlagPtr);
 
@@ -389,6 +391,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
+    jboolean allowDemuxerAutoProbe,
     jlong cancelFlagPtr,
     jobject jChunkCallback,
     jobject jProgressCallback
@@ -422,6 +425,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     config.targetSampleRate = (int)targetSampleRate;
     config.forceMono = (bool)forceMono;
     config.chunkSize = chunkSize > 0 ? (int)chunkSize : 8192;
+    config.allowDemuxerAutoProbe = (bool)allowDemuxerAutoProbe;
 
     auto& cancelFlag = *reinterpret_cast<std::atomic<bool>*>(cancelFlagPtr);
 
@@ -622,6 +626,74 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileDuration(
         }
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                       "PROBE_INTERNAL_ERROR: Unknown error during duration probe");
+        return nullptr;
+    }
+}
+
+/**
+ * Probe container format and primary audio codec (no PCM decode).
+ * Returns HashMap{inputFormatName, codecName}.
+ */
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileContainer(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd
+) {
+    const char* path = nullptr;
+    if (jPath) {
+        path = env->GetStringUTFChars(jPath, nullptr);
+        if (!path) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to get path string");
+            return nullptr;
+        }
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_NOT_FOUND: Empty file path and invalid fd");
+        return nullptr;
+    }
+
+    try {
+        auto result = sherpa::probeFileContainer(path, (int)inputFd);
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+
+        jobject map = env->NewObject(hashMapClass, hashMapInit);
+        auto putString = [&](const char* key, const std::string& value) {
+            jstring jKey = env->NewStringUTF(key);
+            jstring jVal = env->NewStringUTF(value.c_str());
+            env->CallObjectMethod(map, hashMapPut, jKey, jVal);
+            env->DeleteLocalRef(jKey);
+            env->DeleteLocalRef(jVal);
+        };
+        putString("inputFormatName", result.inputFormatName);
+        putString("codecName", result.codecName);
+        return map;
+    } catch (const std::exception& e) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+        return nullptr;
+    } catch (...) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_INTERNAL_ERROR: Unknown error during container probe");
         return nullptr;
     }
 }

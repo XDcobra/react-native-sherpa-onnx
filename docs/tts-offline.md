@@ -159,7 +159,7 @@ function detectTtsModel(
 const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' });
 // det.modelType       → e.g. 'kokoro'
 // det.isStreaming     → true
-// det.lexiconLanguageCandidates → ['us-en', 'gb-en', 'zh'] (Kokoro/Kitten only)
+// det.lexiconLanguages → [{ id: 'us-en', path: '.../lexicon-us-en.txt' }, ...] (vits/matcha/kokoro/zipvoice)
 // det.languages       → [{ iso6391Hint: 'en', id: 'us-en' }, ...]
 // det.quantization    → 'int8' | 'fp32' | ...
 // det.sizeTier        → 'small' | 'medium' | 'large'
@@ -597,4 +597,9 @@ await tts.destroy();
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)
 - [model-languages.md](model-languages.md) — language hint helpers and `detectTtsModel(...).languages`
 - [README — Breaking changes](../README.md#breaking-changes-upgrading-to-100)
+
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
 

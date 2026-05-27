@@ -11,6 +11,8 @@ struct AudioDecodeConfig {
   int targetSampleRate = 0;  // 0 = keep source rate
   bool forceMono = true;
   int chunkSize = 8192;      // output frames per callback
+  /** When false, avformat_open_input will not fall back to auto-probe after explicit demuxer failure. */
+  bool allowDemuxerAutoProbe = true;
 };
 
 struct AudioDecodeResult {
@@ -22,6 +24,12 @@ struct AudioDecodeResult {
 struct AudioFileProbeResult {
   int64_t durationMs = -1;  // -1 = unknown
   bool isExact = false;     // true when container/stream duration is reliable
+};
+
+/** Container + primary audio codec detected by FFmpeg (or WAV header). No PCM decode. */
+struct AudioContainerProbeResult {
+  std::string inputFormatName;  // iformat->name, e.g. "ogg", "mp3", "mov"
+  std::string codecName;        // avcodec_get_name, e.g. "opus", "aac"
 };
 
 using DecodeChunkCallback =
@@ -76,6 +84,17 @@ AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd = -1);
 
 inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
   return probeFileDuration(pathOrFd, -1);
+}
+
+/**
+ * Probe container format and primary audio codec (no PCM decode).
+ * Sniffs container/codec from file content (auto-probe only; ignores extension demuxer).
+ * Throws std::runtime_error with PROBE_* error code prefix on failure.
+ */
+AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd = -1);
+
+inline AudioContainerProbeResult probeFileContainer(const char* pathOrFd) {
+  return probeFileContainer(pathOrFd, -1);
 }
 
 } // namespace sherpa

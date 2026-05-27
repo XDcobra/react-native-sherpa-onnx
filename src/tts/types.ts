@@ -89,6 +89,15 @@ export type TtsExecutionProvider =
   | 'qnn'
   | (string & {});
 
+// ========== TTS language (init vs synthesize) ==========
+//
+// See `languagePolicy.ts`: lexicon file at init (`lexiconLanguageId`), Kokoro init lang
+// (`modelOptions.kokoro.lang`), runtime lang (`synthesize({ lang })` → extra["lang"]).
+//
+// Lexikon-Wechsel ⇒ re-init. eSpeak (data_dir) is init-only — not synthesize.lang. Runtime lang
+// is effective for kokoro + supertonic only; vits/matcha/kitten ignore extra["lang"]. Detect
+// `languages` is catalog metadata only. synthesize.lang does not replace lexicon file selection.
+
 // ========== Model-specific options (only applied when that model type is loaded) ==========
 
 /** Options for VITS models. Applied only when modelType is 'vits'. Kotlin OfflineTtsVitsModelConfig. */
@@ -109,10 +118,25 @@ export interface TtsMatchaModelOptions {
   lengthScale?: number;
 }
 
-/** Options for Kokoro models. Applied only when modelType is 'kokoro'. Kotlin OfflineTtsKokoroModelConfig. */
+/**
+ * Options for Kokoro models. Applied only when modelType is 'kokoro'.
+ * Kotlin OfflineTtsKokoroModelConfig.
+ *
+ * Init `lang` is separate from {@link TTSInitializeOptionsBase.lexiconLanguageId} (lexicon file)
+ * and from {@link TtsSynthesisOptions.lang} (per-synthesis override).
+ */
 export interface TtsKokoroModelOptions {
   /** Length scale. If omitted, model default is used. */
   lengthScale?: number;
+  /**
+   * Kokoro init language / voice hint (`config.model.kokoro.lang`).
+   * Multi-Kokoro v2+: satisfies init when no lexicon path is set (upstream: lexicon or lang).
+   * Default for synthesis unless overridden by `tts.synthesize({ lang })`.
+   *
+   * No-op for non-kokoro model types. Does not load a different lexicon file — use
+   * `lexiconLanguageId` on the init options and re-initialize to switch lexicon-*.txt.
+   */
+  lang?: string;
 }
 
 /** Options for KittenTTS models. Applied only when modelType is 'kitten'. Kotlin OfflineTtsKittenModelConfig. */
@@ -198,6 +222,17 @@ export type TTSInitializeOptionsBase = {
    * Default: 0.2.
    */
   silenceScale?: number;
+
+  /**
+   * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`
+   *
+   * Supported model types: `vits`, `matcha`, `kokoro`, `zipvoice`. No-op for `kitten` (no lexicon
+   * field), `pocket`, `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
+   *
+   * Not the same as catalog `languages` hints or `synthesize({ lang })`. For VITS Piper, if the
+   * bundle uses `espeak-ng-data` (`data_dir`), upstream may ignore `lexicon` when `data_dir` is set.
+   */
+  lexiconLanguageId?: string;
 };
 
 /** `modelType` omitted or `'auto'`: no `modelOptions` (set an explicit `modelType` to pass scales). */
@@ -339,15 +374,30 @@ export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
  * Options for buffer-to-buffer TTS synthesis via `tts.synthesize()`.
  * No subtitle/alignment options — those are separate modules.
  *
- * Note: `silenceScale` and `numSteps` are only applied when `voiceClone` is
- * provided. They are ignored for non-cloning synthesis (native code only reads
- * them inside the voice-clone config).
+ * **Language:** `lang` is forwarded as `GenerationConfig.extra["lang"]` when the native batch path
+ * uses `generateWithConfig`. Upstream **honors** it only for `kokoro` and `supertonic`. For `vits`,
+ * `matcha`, and `kitten` it is ignored (eSpeak is init-only via `data_dir`, not per-synthesis `lang`).
+ * For `zipvoice` / `pocket`, use `voiceClone` and model-specific `extra` keys — not `lang`.
+ * Use {@link supportsSynthesisLang} from `./languagePolicy` before UI promises.
+ *
+ * `lang` does **not** switch the lexicon file loaded at init; use `lexiconLanguageId` + re-init.
+ *
+ * `silenceScale` and `numSteps` apply only with `voiceClone` (ignored otherwise).
  */
 export type TtsSynthesisOptions = {
   sid?: number;
   speed?: number;
   silenceScale?: number;
   numSteps?: number;
+  /**
+   * Runtime language hint. Prefer this over `extra.lang` (same native key; this wins on conflict).
+   *
+   * **Effective:** `kokoro` (overrides `modelOptions.kokoro.lang`), `supertonic` (upstream: `en`, `ko`, `es`, `pt`, `fr`).
+   * **Ignored (no-op):** `vits`, `matcha`, `kitten` — passing `lang` does not change output language.
+   * **Not applicable:** `zipvoice`, `pocket` (voice-clone models).
+   */
+  lang?: string;
+  /** Additional generation extras. For `lang`, prefer the `lang` property above. */
   extra?: Record<string, string>;
   voiceClone?: TtsVoiceClone;
   segmentation?: {
@@ -387,6 +437,11 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
   sid?: number;
   /** Speed multiplier. Default 1.0. Overridable per-segment via `segment.meta.speed`. */
   speed?: number;
+  /**
+   * Runtime language override (`extra["lang"]`). Effective for kokoro and supertonic only.
+   * Applied to every segment in the pipeline.
+   */
+  lang?: string;
   /**
    * Voice cloning configuration. Initialized once per pipeline.
    * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).

@@ -6,10 +6,11 @@ import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTy
 /**
  * Online (streaming) STT model types.
  * These models use OnlineRecognizer + OnlineStream in sherpa-onnx.
- * Must match the native OnlineRecognizer model config (transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc).
+ * Must match the native OnlineRecognizer model config (transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc).
  */
 export type OnlineSTTModelType =
   | 'transducer'
+  | 'nemo_transducer'
   | 'paraformer'
   | 'zipformer2_ctc'
   | 'wenet_ctc'
@@ -19,6 +20,7 @@ export type OnlineSTTModelType =
 /** Runtime list of supported online STT model types. */
 export const ONLINE_STT_MODEL_TYPES: readonly OnlineSTTModelType[] = [
   'transducer',
+  'nemo_transducer',
   'paraformer',
   'zipformer2_ctc',
   'wenet_ctc',

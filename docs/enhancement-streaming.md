@@ -286,7 +286,7 @@ stop(): Promise<void>;
 flush(): Promise<void>;
 ```
 
-**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run (worker auto-completes), but useful if you must force a **mid-session** tail without finalizing the input.
+**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run (returns **`LiveAudioBufferFinishedRef`**; worker auto-completes), but useful if you must force a **mid-session** tail without finalizing the input.
 
 ---
 
@@ -541,4 +541,9 @@ console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.u
 ```
 
 </details>
+
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
 

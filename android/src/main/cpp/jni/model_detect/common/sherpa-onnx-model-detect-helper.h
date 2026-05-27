@@ -89,6 +89,15 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
 );
 
 /**
+ * Pick lexicon path from detected candidates. When \p languageId is non-empty, returns the
+ * matching candidate path or empty if not found. Otherwise returns the first sorted candidate.
+ */
+std::string ResolveLexiconPath(
+    const std::vector<LexiconCandidate>& candidates,
+    const std::string& languageId = ""
+);
+
+/**
  * True if `dir` contains vocab.json and merges.txt: listed in `files` (fixture / synthetic trees)
  * or present on disk. Used for Qwen3-ASR tokenizer directory detection.
  */

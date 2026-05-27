@@ -3,7 +3,6 @@ import {
   isTtsModelType,
   type TTSInitializeOptions,
   type TTSModelType,
-  type TtsModelOptions,
   type TtsUpdateOptions,
   type TtsSynthesisOptions,
   type TtsSynthesisResult,
@@ -16,6 +15,7 @@ import {
   isDetectionSource,
   type DetectionSource,
   type TtsDetectModelResult,
+  type TtsLexiconLanguage,
   type DetectedModelEntry,
 } from '../types/modelDetect';
 import type { FileSource } from '../fileio/types';
@@ -24,6 +24,7 @@ import {
   resolveFileSourceForModelInit,
 } from '../detect';
 import {
+  buildTtsInitBridgeOptions,
   expandTtsInitializeOptions,
   expandTtsUpdateOptions,
   flattenTtsModelOptionsForNative,
@@ -125,6 +126,9 @@ function toNativeOfflineLivePipelineOptions(
   const out: Record<string, unknown> = {};
   if (options.sid !== undefined) out.sid = options.sid;
   if (options.speed !== undefined) out.speed = options.speed;
+  if (options.lang !== undefined && options.lang.length > 0) {
+    out.lang = options.lang;
+  }
   if (options.voiceClone != null) {
     const vc = options.voiceClone;
     out.referenceAudioBufferId = resolvePipelineAudioBufferId(
@@ -228,18 +232,22 @@ async function synthesizeLiveOverload(
 /**
  * Detect TTS model type and structure without initializing the engine.
  * Uses the same native file-based detection as createTTS. Stateless; no instance required.
- * For Kokoro/Kitten multi-language models, the result includes lexiconLanguageCandidates (e.g. ["default"] or ["us-en", "gb-en", "zh"]) derived from lexicon.txt and lexicon-*.txt; use these for a language selection dropdown (language change requires re-initialization).
+ * Lexicon files: `lexiconLanguages` (`{ id, path }` from `lexicon.txt` / `lexicon-*.txt`) — use with
+ * init `lexiconLanguageId` on vits/matcha/kokoro/zipvoice (re-init to change). Not for kitten.
+ * Catalog hints: `languages` — UI/download metadata only, not an engine switch.
+ * Runtime language: `tts.synthesize({ lang })` — effective for kokoro and supertonic only; see
+ * `supportsSynthesisLang` in `./languagePolicy`.
  *
  * @param source - FileSource describing where to find the model
  * @param options - Optional modelType (default: 'auto')
  * @returns Object with success, detectedModels, modelType, isStreaming (always true for TTS),
- * optional error, lexiconLanguageCandidates, languages, quantization, sizeTier
+ * optional error, lexiconLanguages, languages, quantization, sizeTier
  * @example
  * ```typescript
  * const result = await detectTtsModel({ kind: 'fs', path: '/path/to/vits-piper-en' });
  * if (result.success) console.log('Detected type:', result.modelType, result.detectedModels);
- * if (result.lexiconLanguageCandidates?.length) {
- *   // Kokoro/Kitten multi-lang: show language dropdown (e.g. "us-en", "zh")
+ * if (result.lexiconLanguages?.length) {
+ *   // Lexicon bundles: pass id to createTTS({ lexiconLanguageId: 'zh' })
  * }
  * ```
  */
@@ -277,9 +285,17 @@ export async function detectTtsModel(
     Array.isArray(raw.languages) && raw.languages.length > 0
       ? raw.languages.filter((x): x is string => typeof x === 'string')
       : [];
+  const modelKey =
+    resolved.assetName?.trim() ||
+    resolved.modelDir
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .pop() ||
+    undefined;
   const resolvedLanguages = resolvePublicLanguageHints({
     domain: ModelCategory.Tts,
     modelType,
+    modelKey,
     rawFromNative: rawLanguageStrings,
   });
   const quantization =
@@ -290,16 +306,30 @@ export async function detectTtsModel(
     typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
       ? raw.sizeTier
       : undefined;
+  const lexiconLanguages: TtsLexiconLanguage[] = [];
+  const rawLex = raw.lexiconLanguages;
+  if (Array.isArray(rawLex)) {
+    for (const entry of rawLex) {
+      if (
+        entry != null &&
+        typeof entry === 'object' &&
+        typeof (entry as { id?: unknown }).id === 'string' &&
+        typeof (entry as { path?: unknown }).path === 'string'
+      ) {
+        lexiconLanguages.push({
+          id: (entry as { id: string }).id,
+          path: (entry as { path: string }).path,
+        });
+      }
+    }
+  }
   return {
     success: raw.success,
     isStreaming: true,
     ...(err.length > 0 ? { error: err } : {}),
     detectedModels,
     ...(modelType != null ? { modelType } : {}),
-    ...(raw.lexiconLanguageCandidates != null &&
-    raw.lexiconLanguageCandidates.length > 0
-      ? { lexiconLanguageCandidates: raw.lexiconLanguageCandidates }
-      : {}),
+    ...(lexiconLanguages.length > 0 ? { lexiconLanguages } : {}),
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(sizeTier != null ? { sizeTier } : {}),
@@ -334,45 +364,15 @@ export async function createTTS(
   const instanceId = `tts_${++ttsInstanceCounter}`;
 
   const modelSource = options.modelSource;
-  let modelType: TTSModelType | undefined;
-  let provider: string | undefined;
-  let numThreads: number | undefined;
-  let debug: boolean | undefined;
-  let modelOptions: TtsModelOptions | undefined;
-  let ruleFsts: string | undefined;
-  let ruleFars: string | undefined;
-  let maxNumSentences: number | undefined;
-  let silenceScale: number | undefined;
-
   const expanded = expandTtsInitializeOptions(options);
-  modelType = expanded.modelType;
-  provider = expanded.provider;
-  numThreads = expanded.numThreads;
-  debug = expanded.debug;
-  modelOptions = expanded.modelOptions;
-  ruleFsts = expanded.ruleFsts;
-  ruleFars = expanded.ruleFars;
-  maxNumSentences = expanded.maxNumSentences;
-  silenceScale = expanded.silenceScale;
-
-  const flat = flattenTtsModelOptionsForNative(modelType, modelOptions);
-  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
-
-  const result = await SherpaOnnx.initializeTts(
-    instanceId,
-    resolvedPath,
-    modelType ?? 'auto',
-    numThreads ?? 2,
-    debug ?? false,
-    flat.noiseScale,
-    flat.noiseScaleW,
-    flat.lengthScale,
-    ruleFsts,
-    ruleFars,
-    maxNumSentences,
-    silenceScale,
-    provider
+  const flat = flattenTtsModelOptionsForNative(
+    expanded.modelType,
+    expanded.modelOptions
   );
+  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
+  const bridgeOptions = buildTtsInitBridgeOptions(resolvedPath, expanded, flat);
+
+  const result = await SherpaOnnx.initializeTts(instanceId, bridgeOptions);
 
   if (!result.success) {
     const nativeError =
@@ -387,8 +387,8 @@ export async function createTTS(
 
   const firstDetected = result.detectedModels?.[0];
   const effectiveModelType: TTSModelType | undefined =
-    modelType && modelType !== 'auto'
-      ? modelType
+    expanded.modelType && expanded.modelType !== 'auto'
+      ? expanded.modelType
       : (firstDetected?.type as TTSModelType);
 
   let destroyed = false;
@@ -632,11 +632,24 @@ export type {
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';
 export {
+  resolveLexiconPath,
+  resolveTtsLanguagePolicy,
+  runtimeLangDoesNotReplaceLexiconFile,
+  resolveTtsLanguageMechanisms,
+  supportsKokoroInitLang,
+  supportsLexiconLanguageId,
+  supportsSynthesisLang,
+  synthesisLangIgnoredByUpstream,
+  type TtsLanguageMechanism,
+  type TtsLanguagePolicy,
+} from './languagePolicy';
+export {
   DETECTION_SOURCES,
   isDetectionSource,
   type DetectionSource,
   type DetectedModelEntry,
   type ModelDetectResultBase,
   type TtsDetectModelResult,
+  type TtsLexiconLanguage,
   type AlignmentDetectModelResult,
 } from '../types/modelDetect';

@@ -1,5 +1,7 @@
 #include "SherpaOnnxJSI.h"
 
+#include "../audio/AudioVisualization.h"
+
 #include <cstring>
 #include <memory>
 #include <string>
@@ -333,6 +335,30 @@ jsi::Value jsiAppendSamplesToLive(jsi::Runtime &rt, const jsi::Value &,
   return jsi::Value::undefined();
 }
 
+jsi::Value jsiTakeVisualizationFrames(jsi::Runtime &rt, const jsi::Value &,
+                                      const jsi::Value *args, size_t count) {
+  if (count < 1) {
+    throw jsi::JSError(
+        rt, "[INVALID_ARGS] takeVisualizationFrames requires 1 argument");
+  }
+
+  const std::string transfer_id = requireStringArg(rt, args, 0, "transferId");
+
+  std::vector<float> frames;
+  if (!sherpa::takeVisualizationFramesTransfer(transfer_id, &frames)) {
+    throw jsi::JSError(
+        rt,
+        "[AUDIO_VISUALIZATION_TRANSFER_NOT_FOUND] Visualization frame transfer not found or already consumed");
+  }
+
+  auto out =
+      std::make_shared<sherpa::OwnedBuffer>(frames.size() * sizeof(float));
+  if (!frames.empty()) {
+    std::memcpy(out->data(), frames.data(), frames.size() * sizeof(float));
+  }
+  return jsi::ArrayBuffer(rt, std::move(out));
+}
+
 }  // namespace
 
 namespace sherpa {
@@ -407,6 +433,12 @@ void installJSIBindings(jsi::Runtime &rt) {
       jsi::Function::createFromHostFunction(
           rt, jsi::PropNameID::forAscii(rt, "appendSamplesToLive"), 3,
           jsiAppendSamplesToLive));
+
+  obj.setProperty(
+      rt, "takeVisualizationFrames",
+      jsi::Function::createFromHostFunction(
+          rt, jsi::PropNameID::forAscii(rt, "takeVisualizationFrames"), 1,
+          jsiTakeVisualizationFrames));
 
   rt.global().setProperty(rt, "__SherpaOnnxJSI", std::move(obj));
 }

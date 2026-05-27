@@ -22,6 +22,29 @@ BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options) {
     return refId != nil && [refId isKindOfClass:[NSString class]] && [refId length] > 0;
 }
 
+std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options) {
+    if (options == nil) return std::nullopt;
+    std::unordered_map<std::string, std::string> extra;
+    id extraDict = options[@"extra"];
+    if ([extraDict isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *ex = (NSDictionary *)extraDict;
+        for (NSString *k in ex) {
+            id v = ex[k];
+            if ([v isKindOfClass:[NSString class]]) {
+                extra[std::string([k UTF8String])] = std::string([(NSString *)v UTF8String]);
+            }
+        }
+    }
+    NSString *lang = options[@"lang"];
+    if ([lang isKindOfClass:[NSString class]] && [lang length] > 0) {
+        extra["lang"] = std::string([lang UTF8String]);
+    }
+    if (extra.empty()) return std::nullopt;
+    sherpaonnx::VoiceCloneOptions vo;
+    vo.extra = std::move(extra);
+    return vo;
+}
+
 std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     NSDictionary *options,
     const std::vector<float> &refSamples,

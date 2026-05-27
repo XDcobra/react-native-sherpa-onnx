@@ -25,7 +25,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 
 **`completed` typing:** Pipeline handles expose **`Promise<StreamingPipelineCompletion>`** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`).
 
-**Ordering (rule of thumb):** finish feeding **buffers** (stop mic, **`finalizeLive*Buffer`** on inputs that define end-of-stream), then call **`pipeline.flush()`** so workers can process **tails**, then **`pipeline.stop()`** if you still need an explicit cancel, then **`await pipeline.completed`** when you care about the completion payload. **VAD** and **streaming enhancement** document **exceptions** (e.g. finalize already triggers terminal drain — do not double-flush blindly).
+**Ordering (rule of thumb):** finish feeding **buffers** (stop mic, **`finalizeLive*Buffer`** on inputs that define end-of-stream — for live audio, `finalizeLiveAudioBuffer` returns **`LiveAudioBufferFinishedRef`** with fresh `info`), then call **`pipeline.flush()`** so workers can process **tails**, then **`pipeline.stop()`** if you still need an explicit cancel, then **`await pipeline.completed`** when you care about the completion payload. **VAD** and **streaming enhancement** document **exceptions** (e.g. finalize already triggers terminal drain — do not double-flush blindly).
 
 **Punctuation streaming** documents a **stricter** post-finalize `flush()` barrier on the punctuation worker; read [punctuation-streaming.md](punctuation-streaming.md).
 
@@ -43,3 +43,8 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | Live segments as pipeline operand | [segmentbuffer-streaming.md](segmentbuffer-streaming.md) |
 
 Internal design notes (overload, registry): [internal/live-overload.md](internal/live-overload.md).
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

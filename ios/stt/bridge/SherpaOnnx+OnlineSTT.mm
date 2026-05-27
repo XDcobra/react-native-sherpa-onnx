@@ -2,7 +2,7 @@
  * SherpaOnnx+OnlineSTT.mm
  *
  * Pipeline-only online STT bridge:
- * - initializeOnlineSttWithOptions
+ * - initializeOnlineStt
  * - startSttPipeline (live audio -> live text)
  * - unloadOnlineStt
  */
@@ -38,8 +38,8 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
 
 @implementation SherpaOnnx (OnlineSTT)
 
-- (void)initializeOnlineSttWithOptions:(NSString *)instanceId
-                               options:(JS::NativeSherpaOnnx::SpecInitializeOnlineSttWithOptionsOptions &)options
+- (void)initializeOnlineStt:(NSString *)instanceId
+                               options:(JS::NativeSherpaOnnx::SpecInitializeOnlineSttOptions &)options
                                resolve:(RCTPromiseResolveBlock)resolve
                                 reject:(RCTPromiseRejectBlock)reject
 {

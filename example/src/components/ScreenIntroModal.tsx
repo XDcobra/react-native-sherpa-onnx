@@ -65,6 +65,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'File I/O sandbox',
     body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec assets or a picked file, then export via saveAudioAsFile to fs, app, contentUri, and other destination kinds.',
   },
+  AudioVisualization: {
+    title: 'Audio visualization API',
+    body: 'The public SDK (`react-native-sherpa-onnx/visualization`) computes spectrum data in native code and returns `levels` plus optional timeline `frames` — it does not ship any UI widgets. Your app is responsible for drawing bars, heatmaps, scrubbers, or 3D views from that data. This screen demonstrates the API: pick audio, call `computeAudioVisualizationProfile`, then render the result yourself. The Static, Animated, Heatmap, and Skia-based 3D tabs here are example UI only, built for this demo app.',
+  },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',
     body: 'This screen demonstrates how audio and text are aligned into timestamps. It is useful for understanding the subtitle and alignment APIs before exporting results.',

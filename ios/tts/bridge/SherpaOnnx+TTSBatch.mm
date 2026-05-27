@@ -154,6 +154,8 @@ static NSString *const kOfflineTtsOomMessage =
         } else if (kind == Kind::kPocket) {
             reject(@"TTS_GENERATE_ERROR", @"Pocket TTS requires reference audio for voice cloning. Pass voiceClone in options.", nil);
             return;
+        } else {
+            cloneOpt = GenerationExtraFromOptions(options);
         }
 
         auto result = wrapper->generate(

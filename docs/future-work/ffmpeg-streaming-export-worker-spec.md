@@ -112,4 +112,3 @@ For now, keep conversion semantics strict:
 - reject active live buffers in batch conversion
 
 Then add streaming export as a dedicated API in a follow-up iteration.
-

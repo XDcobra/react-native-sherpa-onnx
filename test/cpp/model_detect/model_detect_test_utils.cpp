@@ -51,6 +51,11 @@ std::vector<AssetBlock> ParseAsrStructureFile(const std::string& filePath, std::
         line = Trim(line);
         if (line.empty()) continue;
         const std::string assetPrefix = "# Asset:";
+        const std::string updatedAtPrefix = "# updated_at:";
+        if (line.size() >= updatedAtPrefix.size() &&
+            line.compare(0, updatedAtPrefix.size(), updatedAtPrefix) == 0) {
+            continue;
+        }
         if (line.size() >= assetPrefix.size() &&
             line.compare(0, assetPrefix.size(), assetPrefix) == 0) {
             std::string assetName = Trim(line.substr(assetPrefix.size()));

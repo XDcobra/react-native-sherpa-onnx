@@ -103,6 +103,8 @@ const info = await getPipelineAudioBufferInfo(offline);
 console.log(info.kind, info.state);
 ```
 
+Works for **live** buffers too (`kind: 'livePcmBuffer'`). For live buffers, `ref.info` from `createEmptyLiveAudioBuffer` is only a creation snapshot — see [`info` lifecycle](audiobuffer-streaming.md#info-lifecycle-live-buffers) and use `finalizeLiveAudioBuffer` / `refreshLiveAudioBufferInfo`.
+
 `OfflineAudioBufferInfo` includes an optional `storageKind?: 'ram' | 'mmap'`.
 - Default: `'ram'` (when `storageKind` is omitted / `undefined`)
 - `storageKind: 'mmap'` indicates a file-backed / memory-mapped backing strategy.
@@ -152,7 +154,7 @@ const decoded = await createOfflineAudioBufferFromFile(
 
 The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
 
-When you only need **duration** (usage UI, planners) and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer.
+When you only need **duration** and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer. To read **container format and codec** from file content before decode, use [`probeAudioFileContainer`](./audio-conversion.md#probeaudiofilecontainersource).
 
 Options:
 
@@ -332,3 +334,8 @@ await releasePipelineAudioBuffer(snapshot);
 ```
 
 </details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

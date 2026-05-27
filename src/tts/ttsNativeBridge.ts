@@ -9,6 +9,7 @@ import type {
   TtsUpdateOptions,
   TtsVitsModelOptions,
 } from './types';
+import type { TtsInitBridgeOptions } from '../nativeBridge/initBridgeTypes';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 
@@ -118,7 +119,51 @@ export type ExpandedTtsInitFields = {
   ruleFars: string | undefined;
   maxNumSentences: number | undefined;
   silenceScale: number | undefined;
+  lexiconLanguageId: string | undefined;
 };
+
+export type { TtsInitBridgeOptions };
+
+export function buildTtsInitBridgeOptions(
+  modelDir: string,
+  expanded: ExpandedTtsInitFields,
+  flat: FlattenedTtsModelNativeOptions
+): TtsInitBridgeOptions {
+  const kokoroLang =
+    expanded.modelOptions?.kokoro?.lang !== undefined &&
+    typeof expanded.modelOptions.kokoro.lang === 'string' &&
+    expanded.modelOptions.kokoro.lang.length > 0
+      ? expanded.modelOptions.kokoro.lang
+      : undefined;
+  return {
+    modelDir,
+    modelType: expanded.modelType ?? 'auto',
+    ...(expanded.numThreads !== undefined
+      ? { numThreads: expanded.numThreads }
+      : {}),
+    ...(expanded.debug !== undefined ? { debug: expanded.debug } : {}),
+    ...(flat.noiseScale !== undefined ? { noiseScale: flat.noiseScale } : {}),
+    ...(flat.noiseScaleW !== undefined
+      ? { noiseScaleW: flat.noiseScaleW }
+      : {}),
+    ...(flat.lengthScale !== undefined
+      ? { lengthScale: flat.lengthScale }
+      : {}),
+    ...(expanded.ruleFsts !== undefined ? { ruleFsts: expanded.ruleFsts } : {}),
+    ...(expanded.ruleFars !== undefined ? { ruleFars: expanded.ruleFars } : {}),
+    ...(expanded.maxNumSentences !== undefined
+      ? { maxNumSentences: expanded.maxNumSentences }
+      : {}),
+    ...(expanded.silenceScale !== undefined
+      ? { silenceScale: expanded.silenceScale }
+      : {}),
+    ...(expanded.provider !== undefined ? { provider: expanded.provider } : {}),
+    ...(expanded.lexiconLanguageId !== undefined
+      ? { lexiconLanguageId: expanded.lexiconLanguageId }
+      : {}),
+    ...(kokoroLang !== undefined ? { kokoroLang } : {}),
+  };
+}
 
 export function expandTtsInitializeOptions(
   options: TTSInitializeOptions
@@ -135,6 +180,7 @@ export function expandTtsInitializeOptions(
     ruleFars: options.ruleFars,
     maxNumSentences: options.maxNumSentences,
     silenceScale: options.silenceScale,
+    lexiconLanguageId: options.lexiconLanguageId,
   };
 }
 
@@ -193,6 +239,9 @@ export function toNativeSynthesisOptions(
     out.silenceScale = options.silenceScale;
   }
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.lang !== undefined && options.lang.length > 0) {
+    out.lang = options.lang;
+  }
   if (options.extra != null && Object.keys(options.extra).length > 0) {
     out.extra = options.extra;
   }

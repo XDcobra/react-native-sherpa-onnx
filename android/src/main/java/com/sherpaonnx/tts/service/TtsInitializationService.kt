@@ -6,8 +6,10 @@ import android.os.Handler
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.k2fsa.sherpa.onnx.OfflineTts
+import com.sherpaonnx.tts.config.TtsInitOptionsParser
 import com.sherpaonnx.tts.config.TtsOfflineConfigBuilder
 import com.sherpaonnx.tts.core.TtsEngineInstance
 import com.sherpaonnx.tts.core.TtsEngineRepository
@@ -33,22 +35,40 @@ internal class TtsInitializationService(
     }
   }
 
+  private fun pathsWithLexiconOverride(
+    paths: Map<String, String>,
+    lexiconLanguages: ArrayList<*>?,
+    lexiconLanguageId: String?
+  ): Map<String, String> {
+    val resolved = TtsInitOptionsParser.resolveLexiconPathFromDetect(lexiconLanguages, lexiconLanguageId)
+      ?: return paths
+    return paths + ("lexicon" to resolved)
+  }
+
   fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
+    val modelDir = TtsInitOptionsParser.modelDir(options)
+    if (modelDir == null) {
+      rejectOnUiThread(promise, "TTS_INIT_ERROR", "modelDir is required")
+      return
+    }
+  val modelType = TtsInitOptionsParser.modelType(options)
+    val numThreads = TtsInitOptionsParser.numThreads(options)
+    val debug = TtsInitOptionsParser.debug(options)
+    val noiseScale = TtsInitOptionsParser.optionalDouble(options, "noiseScale")
+    val noiseScaleW = TtsInitOptionsParser.optionalDouble(options, "noiseScaleW")
+    val lengthScale = TtsInitOptionsParser.optionalDouble(options, "lengthScale")
+    val ruleFsts = TtsInitOptionsParser.optionalString(options, "ruleFsts")
+    val ruleFars = TtsInitOptionsParser.optionalString(options, "ruleFars")
+    val maxNumSentences = TtsInitOptionsParser.optionalDouble(options, "maxNumSentences")
+    val silenceScale = TtsInitOptionsParser.optionalDouble(options, "silenceScale")
+    val provider = TtsInitOptionsParser.optionalString(options, "provider")
+    val lexiconLanguageId = TtsInitOptionsParser.lexiconLanguageId(options)
+    val kokoroLang = TtsInitOptionsParser.kokoroLang(options)
+
     ttsInitExecutor.execute init@{
       try {
         val result = detectTtsModel(modelDir, null, modelType)
@@ -64,7 +84,20 @@ internal class TtsInitializationService(
           rejectOnUiThread(promise, "TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
           return@init
         }
-        val paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
+        var paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
+        val lexiconLanguages = result["lexiconLanguages"] as? ArrayList<*>
+        if (!lexiconLanguageId.isNullOrBlank()) {
+          val resolvedLexicon = TtsInitOptionsParser.resolveLexiconPathFromDetect(lexiconLanguages, lexiconLanguageId)
+          if (resolvedLexicon.isNullOrBlank()) {
+            val msg = "lexiconLanguageId '$lexiconLanguageId' not found in detected lexiconLanguages"
+            Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
+            rejectOnUiThread(promise, "TTS_INIT_ERROR", msg)
+            return@init
+          }
+          paths = paths + ("lexicon" to resolvedLexicon)
+        } else {
+          paths = pathsWithLexiconOverride(paths, lexiconLanguages, null)
+        }
         val modelTypeStr = result["modelType"] as? String ?: "vits"
         val detectedModels = result["detectedModels"] as? ArrayList<*>
 
@@ -133,7 +166,8 @@ internal class TtsInitializationService(
             paths, modelTypeStr, numThreads.toInt(), debug,
             noiseScale, noiseScaleW, lengthScale,
             ruleFsts, ruleFars, maxNumSentences?.toInt(), silenceScale,
-            provider
+            provider,
+            kokoroLang
           )
           inst.tts = OfflineTts(config = config)
           sampleRate = inst.tts!!.sampleRate()

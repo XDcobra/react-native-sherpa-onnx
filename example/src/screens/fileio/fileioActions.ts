@@ -39,7 +39,6 @@ export type { FileioInputSource } from './fileioInputChannels';
 export {
   listFileioInputChannels,
   pickFileioInputForChannel,
-  pickFileioInputSource,
   resolveBundledCodecSource,
   resolveBundledWavLegacy,
   resolveFileioInputSource,

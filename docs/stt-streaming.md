@@ -33,7 +33,7 @@ Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are
 ## Models and paths
 
 - `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- Streaming-capable model types: `transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
+- Streaming-capable model types: `transducer`, `nemo_transducer` (NeMo/Nemotron streaming transducers), `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
 - If your model is offline-only (for example Whisper), you can still use it for live consumption via the **[Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)** pattern.
 - Model setup details: [model-setup.md](model-setup.md)
 
@@ -273,7 +273,7 @@ Stops any active pipeline and unloads the native online engine instance.
 
 ### Pipeline handle (`SttPipelineHandle`)
 
-`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`). The handle is the only way to **coordinate** the STT worker with **buffer lifecycle** (mic stopped, optional `finalizeLiveAudioBuffer`, then tail decode).
+`SttPipelineHandle` extends generic **`StreamingPipelineHandle`** (import from **`react-native-sherpa-onnx/audiobuffer`**). Adds **`instanceId`** for correlation with the parent engine (`LiveSttEngine`). The handle is the only way to **coordinate** the STT worker with **buffer lifecycle** (mic stopped, optional `finalizeLiveAudioBuffer` — returns **`LiveAudioBufferFinishedRef`** with fresh `info` — then tail decode).
 
 #### `pipeline.stop()`
 
@@ -528,3 +528,8 @@ await releasePipelineAudioBuffer(audioIn);
 - [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

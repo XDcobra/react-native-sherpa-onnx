@@ -17,26 +17,45 @@
 
 @implementation SherpaOnnx (TTSInit)
 
+static NSString *TtsOptString(NSDictionary *options, NSString *key) {
+    id v = options[key];
+    if (![v isKindOfClass:[NSString class]]) return nil;
+    NSString *s = [(NSString *)v stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [s length] > 0 ? s : nil;
+}
+
 - (void)so_initializeTts:(NSString *)instanceId
-            modelDir:(NSString *)modelDir
-            modelType:(NSString *)modelType
-           numThreads:(double)numThreads
-                debug:(BOOL)debug
-           noiseScale:(NSNumber *)noiseScale
-          noiseScaleW:(NSNumber *)noiseScaleW
-           lengthScale:(NSNumber *)lengthScale
-              ruleFsts:(NSString *)ruleFsts
-              ruleFars:(NSString *)ruleFars
-       maxNumSentences:(NSNumber *)maxNumSentences
-         silenceScale:(NSNumber *)silenceScale
-            provider:(NSString *)provider
-         resolve:(RCTPromiseResolveBlock)resolve
-         reject:(RCTPromiseRejectBlock)reject
+                 options:(NSDictionary *)options
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_INIT_ERROR", @"instanceId is required", nil);
         return;
     }
+    if (options == nil || ![options isKindOfClass:[NSDictionary class]]) {
+        reject(@"TTS_INIT_ERROR", @"options is required", nil);
+        return;
+    }
+    NSString *modelDir = TtsOptString(options, @"modelDir");
+    if (modelDir == nil) {
+        reject(@"TTS_INIT_ERROR", @"modelDir is required", nil);
+        return;
+    }
+    NSString *modelType = TtsOptString(options, @"modelType") ?: @"auto";
+    double numThreads = options[@"numThreads"] != nil ? [options[@"numThreads"] doubleValue] : 2.0;
+    BOOL debug = options[@"debug"] != nil ? [options[@"debug"] boolValue] : NO;
+    NSNumber *noiseScale = options[@"noiseScale"];
+    NSNumber *noiseScaleW = options[@"noiseScaleW"];
+    NSNumber *lengthScale = options[@"lengthScale"];
+    NSString *ruleFsts = TtsOptString(options, @"ruleFsts");
+    NSString *ruleFars = TtsOptString(options, @"ruleFars");
+    NSNumber *maxNumSentences = options[@"maxNumSentences"];
+    NSNumber *silenceScale = options[@"silenceScale"];
+    NSString *provider = TtsOptString(options, @"provider");
+    NSString *lexiconLanguageId = TtsOptString(options, @"lexiconLanguageId");
+    NSString *kokoroLang = TtsOptString(options, @"kokoroLang");
+
     std::string instanceIdStr = [instanceId UTF8String];
     RCTLogInfo(@"Initializing TTS instance %@ with modelDir: %@, modelType: %@", instanceId, modelDir, modelType);
 
@@ -71,10 +90,10 @@
         std::optional<std::string> ruleFarsOpt = std::nullopt;
         std::optional<int32_t> maxNumSentencesOpt = std::nullopt;
         std::optional<float> silenceScaleOpt = std::nullopt;
-        if (ruleFsts != nil && [ruleFsts length] > 0) {
+        if (ruleFsts != nil) {
             ruleFstsOpt = std::string([ruleFsts UTF8String]);
         }
-        if (ruleFars != nil && [ruleFars length] > 0) {
+        if (ruleFars != nil) {
             ruleFarsOpt = std::string([ruleFars UTF8String]);
         }
         if (maxNumSentences != nil && [maxNumSentences intValue] >= 1) {
@@ -84,8 +103,16 @@
             silenceScaleOpt = [silenceScale floatValue];
         }
         std::optional<std::string> providerOpt = std::nullopt;
-        if (provider != nil && [provider length] > 0) {
+        if (provider != nil) {
             providerOpt = std::string([provider UTF8String]);
+        }
+        std::optional<std::string> lexiconLanguageIdOpt = std::nullopt;
+        if (lexiconLanguageId != nil) {
+            lexiconLanguageIdOpt = std::string([lexiconLanguageId UTF8String]);
+        }
+        std::optional<std::string> kokoroLangOpt = std::nullopt;
+        if (kokoroLang != nil) {
+            kokoroLangOpt = std::string([kokoroLang UTF8String]);
         }
 
         sherpaonnx::TtsInitializeResult result = inst->wrapper->initialize(
@@ -100,7 +127,9 @@
             ruleFarsOpt,
             maxNumSentencesOpt,
             silenceScaleOpt,
-            providerOpt
+            providerOpt,
+            lexiconLanguageIdOpt,
+            kokoroLangOpt
         );
 
         if (result.success) {
@@ -113,11 +142,11 @@
             inst->noiseScale = noiseScale ? [noiseScale copy] : nil;
             inst->noiseScaleW = noiseScaleW ? [noiseScaleW copy] : nil;
             inst->lengthScale = lengthScale ? [lengthScale copy] : nil;
-            inst->ruleFsts = (ruleFsts != nil && [ruleFsts length] > 0) ? [ruleFsts copy] : nil;
-            inst->ruleFars = (ruleFars != nil && [ruleFars length] > 0) ? [ruleFars copy] : nil;
+            inst->ruleFsts = ruleFsts ? [ruleFsts copy] : nil;
+            inst->ruleFars = ruleFars ? [ruleFars copy] : nil;
             inst->maxNumSentences = (maxNumSentences != nil && [maxNumSentences intValue] >= 1) ? [maxNumSentences copy] : nil;
             inst->silenceScale = silenceScale ? [silenceScale copy] : nil;
-            inst->provider = (provider != nil && [provider length] > 0) ? [provider copy] : nil;
+            inst->provider = provider ? [provider copy] : nil;
 
             NSMutableArray *detectedModelsArray = [NSMutableArray array];
             for (const auto& model : result.detectedModels) {
@@ -183,12 +212,15 @@
         }
         resultDict[@"detectedModels"] = detectedModelsArray;
         resultDict[@"modelType"] = TtsModelKindToNSString(result.selectedKind);
-        if (!result.lexiconLanguageCandidates.empty()) {
-            NSMutableArray *langCandidates = [NSMutableArray array];
-            for (const auto& id : result.lexiconLanguageCandidates) {
-                [langCandidates addObject:[NSString stringWithUTF8String:id.c_str()]];
+        if (!result.lexiconLanguages.empty()) {
+            NSMutableArray *lexiconLanguages = [NSMutableArray array];
+            for (const auto& lang : result.lexiconLanguages) {
+                [lexiconLanguages addObject:@{
+                    @"id": [NSString stringWithUTF8String:lang.languageId.c_str()],
+                    @"path": [NSString stringWithUTF8String:lang.path.c_str()]
+                }];
             }
-            resultDict[@"lexiconLanguageCandidates"] = langCandidates;
+            resultDict[@"lexiconLanguages"] = lexiconLanguages;
         }
         if (!result.derivedLanguages.empty()) {
             NSMutableArray *derivedLangs = [NSMutableArray array];

@@ -281,8 +281,8 @@ struct TtsDetectResult {
     std::vector<DetectedModel> detectedModels;
     TtsModelKind selectedKind = TtsModelKind::kUnknown;
     TtsModelPaths paths;
-    /** Language ids from detected lexicon files (e.g. "default", "us-en", "zh") for multi-lang Kokoro/Kitten. Empty when not applicable. */
-    std::vector<std::string> lexiconLanguageCandidates;
+    /** Lexicon files detected on disk (id + path). Empty when not applicable. */
+    std::vector<model_detect::LexiconCandidate> lexiconLanguages;
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name (release id stem); not from lexicon files. */
