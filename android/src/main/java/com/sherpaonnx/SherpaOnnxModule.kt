@@ -4703,6 +4703,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun detectModel(
+    modelDir: String,
+    assetName: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectModel(modelDir, assetName)
+      if (result == null) {
+        promise.reject("DETECT_ERROR", "Unified model detection returned null")
+        return
+      }
+      promise.resolve(Companion.unifiedDetectHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified model detection failed: ${e.message}", e)
+    }
+  }
+
+  override fun detectModelsBatch(inputs: ReadableArray, promise: Promise) {
+    try {
+      val nativeInputs = ArrayList<HashMap<String, String?>>()
+      for (i in 0 until inputs.size()) {
+        val entry = inputs.getMap(i) ?: continue
+        val item = HashMap<String, String?>()
+        if (entry.hasKey("modelDir") && !entry.isNull("modelDir")) {
+          item["modelDir"] = entry.getString("modelDir")
+        }
+        if (entry.hasKey("assetName") && !entry.isNull("assetName")) {
+          item["assetName"] = entry.getString("assetName")
+        }
+        nativeInputs.add(item)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val results = Companion.nativeDetectModelsBatch(nativeInputs)
+        as? ArrayList<HashMap<String, Any?>>
+        ?: arrayListOf()
+      val out = Arguments.createArray()
+      for (result in results) {
+        out.pushMap(Companion.unifiedDetectHashMapToWritableMap(result))
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified batch model detection failed: ${e.message}", e)
+    }
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -5145,6 +5190,72 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
     private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectModel(
+      modelDir: String,
+      assetName: String?
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectModelsBatch(
+      inputs: ArrayList<HashMap<String, String?>>
+    ): ArrayList<HashMap<String, Any?>>
+
+    @JvmStatic
+    internal fun unifiedDetectHashMapToWritableMap(result: HashMap<String, Any?>): WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("matched", result["matched"] as? Boolean ?: false)
+      map.putBoolean("success", result["success"] as? Boolean ?: false)
+      map.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
+      val isHardwareSpecificUnsupported = result["isHardwareSpecificUnsupported"] as? Boolean ?: false
+      if (isHardwareSpecificUnsupported) {
+        map.putBoolean("isHardwareSpecificUnsupported", true)
+      }
+      val category = result["category"] as? String
+      if (!category.isNullOrBlank()) map.putString("category", category)
+      val modelType = result["modelType"] as? String
+      if (!modelType.isNullOrBlank()) map.putString("modelType", modelType)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      val quantization = result["quantization"] as? String
+      if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+      val sizeTier = result["sizeTier"] as? String
+      if (!sizeTier.isNullOrBlank()) map.putString("sizeTier", sizeTier)
+
+      val modelsArray = Arguments.createArray()
+      @Suppress("UNCHECKED_CAST")
+      val detectedModels = result["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+      for (entry in detectedModels) {
+        val m = Arguments.createMap()
+        m.putString("type", entry["type"] ?: "")
+        m.putString("modelDir", entry["modelDir"] ?: "")
+        modelsArray.pushMap(m)
+      }
+      map.putArray("detectedModels", modelsArray)
+
+      val languages = result["languages"] as? ArrayList<*>
+      if (!languages.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in languages) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("languages", arr)
+      }
+
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (!detectionSources.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in detectionSources) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("detectionSources", arr)
+      }
+
+      return map
+    }
 
     // -- AudioEncodeSession JNI --
     @JvmStatic
