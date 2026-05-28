@@ -15,7 +15,7 @@ import {
   createForegroundDownloadTask,
   type ForegroundDownloadTask,
 } from './foregroundDownload';
-import { emitDownloadProgress } from './downloadEvents';
+import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
 import { listDownloadedModels } from './localModels';
 import { consumePausedExtractionRequest } from './modelExtraction';
 import {
@@ -1207,6 +1207,13 @@ export async function deleteIncompleteDownload(
   }
 
   await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
+
+  try {
+    const list = await listDownloadedModels(category, { source: sourceId });
+    emitModelsListUpdated(category, list);
+  } catch {
+    emitModelsListUpdated(category, []);
+  }
 }
 
 /** Task ids in the form `category:sourceId:modelId` for downloads currently tracked in JS. */
