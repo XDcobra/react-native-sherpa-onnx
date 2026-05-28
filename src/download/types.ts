@@ -53,6 +53,10 @@ export type Progress = {
   phase: ProgressPhase;
   /** When native reports it: 0-based archive entry ordinal for this extract pass. */
   archiveEntryIndex?: number;
+  /** 0-based index of the asset currently being downloaded (multi-asset layouts). */
+  assetIndex?: number;
+  /** Total assets in a multi-asset model layout. */
+  assetCount?: number;
   speed?: number;
   eta?: number;
 };
@@ -159,6 +163,11 @@ export type EnsureModelOptions = SourceSelectorOptions & {
   verifyChecksum?: boolean;
   onChecksumMismatch?: (info: ChecksumMismatchInfo) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
+  /**
+   * When false, native Android extraction progress notifications are suppressed.
+   * Use when the host app shows its own unified download notification.
+   */
+  showExtractionNotifications?: boolean;
 };
 
 export type DownloadOptions = EnsureModelOptions;

@@ -16,7 +16,9 @@ Core goals:
 
 ## Peer dependency
 
-`react-native-sherpa-onnx` declares **`@kesha-antonov/react-native-background-downloader` (^4.5.4)** as a peer dependency. Install it in your app to use download manager APIs.
+`react-native-sherpa-onnx` declares **`@dr.pogodin/react-native-fs`** as a peer dependency (file I/O for downloads and model storage).
+
+Model downloads run in the **foreground** (while the app process is active). Interrupted downloads resume via HTTP **Range** from partial files on disk and `.download-state-*.json` state files. No separate background-downloader package is required.
 
 ## Model ids
 
@@ -213,28 +215,18 @@ registerSource(customMirror);
 
 ## Setup (iOS & Android)
 
-| Topic       | Requirement                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| Android     | Foreground service permissions are merged by dependency           |
-| Android 13+ | Request `POST_NOTIFICATIONS` at runtime for visible notifications |
-| iOS         | Forward background URL session completion in AppDelegate          |
+| Topic   | Requirement                                      |
+| ------- | ------------------------------------------------ |
+| Android | No extra download permissions beyond network     |
+| iOS     | Downloads run in-process while the app is active |
 
-### Configure background downloader (optional)
+### Configure download manager (optional)
 
 ```ts
-import { configureBackgroundDownloader } from 'react-native-sherpa-onnx/download';
+import { configureDownloadManager } from 'react-native-sherpa-onnx/download';
 
-configureBackgroundDownloader({
-  showNotificationsEnabled: true,
-  notificationsGrouping: {
-    enabled: false,
-    mode: 'individual',
-    texts: {
-      downloadTitle: 'Model download',
-      downloadStarting: 'Starting...',
-      downloadProgress: 'Downloading... {progress}% ',
-    },
-  },
+configureDownloadManager({
+  maxParallelDownloads: 3, // multi-asset HF folder layouts
 });
 ```
 
@@ -649,15 +641,15 @@ Subscribes to registry updates; returns unsubscribe function.
 
 ## Configuration & Utilities
 
-### `configureBackgroundDownloader(options)`
+### `configureDownloadManager(options)`
 
 ```ts
-function configureBackgroundDownloader(
-  options: BackgroundDownloaderSetConfigOptions
-): void;
+function configureDownloadManager(options?: {
+  maxParallelDownloads?: number;
+}): void;
 ```
 
-Applies downloader runtime config before first download.
+Sets parallel download limit for multi-asset folder layouts.
 
 ### `checkDiskSpace(requiredBytes)`
 

@@ -79,6 +79,7 @@ export async function ensureModel(
         verifyChecksum: opts?.verifyChecksum,
         onChecksumMismatch: opts?.onChecksumMismatch,
         deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
+        showExtractionNotifications: opts?.showExtractionNotifications,
       });
     }
   }
@@ -98,6 +99,7 @@ export async function ensureModel(
       verifyChecksum: opts?.verifyChecksum,
       onChecksumMismatch: opts?.onChecksumMismatch,
       deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
+      showExtractionNotifications: opts?.showExtractionNotifications,
     });
   }
 
@@ -121,6 +123,7 @@ export async function ensureModel(
             verifyChecksum: opts?.verifyChecksum,
             onChecksumMismatch: opts?.onChecksumMismatch,
             deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
+            showExtractionNotifications: opts?.showExtractionNotifications,
           });
         }
       } catch {
@@ -137,5 +140,6 @@ export async function ensureModel(
     verifyChecksum: opts?.verifyChecksum,
     onChecksumMismatch: opts?.onChecksumMismatch,
     deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
+    showExtractionNotifications: opts?.showExtractionNotifications,
   });
 }

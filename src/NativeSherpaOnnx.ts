@@ -1906,6 +1906,28 @@ export interface Spec extends TurboModule {
 
   /** Get a snapshot of the current pipeline audio session state. */
   getPipelineAudioSessionState(): Promise<Object>;
+
+  // ── Foreground model file download (HTTP Range resume) ─────────────────
+
+  /**
+   * Start downloading a file to [destination]. Emits sherpaForegroundDownload* events.
+   * If [destination] already exists, resumes with HTTP Range from file size on disk.
+   */
+  startForegroundDownload(
+    id: string,
+    url: string,
+    destination: string,
+    headers?: Object
+  ): Promise<void>;
+
+  /** Pause an active download; partial file is kept for resume. */
+  pauseForegroundDownload(id: string): Promise<boolean>;
+
+  /** Resume a download paused in the same app session (in-memory state). */
+  resumeForegroundDownload(id: string): Promise<boolean>;
+
+  /** Cancel network activity; does not delete the partial file. */
+  cancelForegroundDownload(id: string): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

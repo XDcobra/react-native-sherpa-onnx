@@ -14,4 +14,6 @@
 
 @interface SherpaOnnx : RCTEventEmitter <NativeSherpaOnnxSpec>
 
++ (void)removeForegroundDownloadState:(NSString *)downloadId;
+
 @end

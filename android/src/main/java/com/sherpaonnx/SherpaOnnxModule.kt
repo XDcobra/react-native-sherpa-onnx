@@ -23,6 +23,7 @@ import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
 import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
+import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
@@ -112,6 +113,74 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       maybeEmitLiveTextPartial(entry, source)
     }
     tryInstallJsiBindings()
+    installForegroundDownloadEvents()
+  }
+
+  private fun installForegroundDownloadEvents() {
+    ForegroundDownloader.eventListener =
+      object : ForegroundDownloader.EventListener {
+        override fun onBegin(
+          id: String,
+          expectedBytes: Long,
+          headers: Map<String, String>,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadBegin") { map ->
+            map.putString("id", id)
+            map.putDouble("expectedBytes", expectedBytes.toDouble())
+            val headersMap = Arguments.createMap()
+            for ((k, v) in headers) {
+              headersMap.putString(k, v)
+            }
+            map.putMap("headers", headersMap)
+          }
+        }
+
+        override fun onProgress(id: String, bytesDownloaded: Long, bytesTotal: Long) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadProgress") { map ->
+            map.putString("id", id)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onComplete(
+          id: String,
+          location: String,
+          bytesDownloaded: Long,
+          bytesTotal: Long,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadComplete") { map ->
+            map.putString("id", id)
+            map.putString("location", location)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onError(id: String, error: String, errorCode: Int) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadError") { map ->
+            map.putString("id", id)
+            map.putString("error", error)
+            map.putInt("errorCode", errorCode)
+          }
+        }
+      }
+  }
+
+  private fun emitForegroundDownloadEvent(
+    eventName: String,
+    block: (com.facebook.react.bridge.WritableMap) -> Unit,
+  ) {
+    try {
+      val eventEmitter =
+        reactApplicationContext.getJSModule(
+          DeviceEventManagerModule.RCTDeviceEventEmitter::class.java
+        )
+      val payload = Arguments.createMap()
+      block(payload)
+      eventEmitter.emit(eventName, payload)
+    } catch (_: Exception) {
+    }
   }
 
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
@@ -741,6 +810,71 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
+  }
+
+  override fun startForegroundDownload(
+    id: String,
+    url: String,
+    destination: String,
+    headers: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val headerMap = readableMapToStringMap(headers)
+      val started =
+        ForegroundDownloader.start(
+          id = id,
+          url = url,
+          destination = destination,
+          headers = headerMap,
+        )
+      if (started) {
+        promise.resolve(null)
+      } else {
+        promise.reject("DOWNLOAD_START_FAILED", "Failed to start download $id")
+      }
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_START_ERROR", e.message, e)
+    }
+  }
+
+  override fun pauseForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.pause(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_PAUSE_ERROR", e.message, e)
+    }
+  }
+
+  override fun resumeForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.resume(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_RESUME_ERROR", e.message, e)
+    }
+  }
+
+  override fun cancelForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.cancel(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_CANCEL_ERROR", e.message, e)
+    }
+  }
+
+  private fun readableMapToStringMap(map: ReadableMap?): Map<String, String> {
+    if (map == null) {
+      return emptyMap()
+    }
+    val out = mutableMapOf<String, String>()
+    val iterator = map.keySetIterator()
+    while (iterator.hasNextKey()) {
+      val key = iterator.nextKey()
+      if (map.getType(key) == com.facebook.react.bridge.ReadableType.String) {
+        map.getString(key)?.let { out[key] = it }
+      }
+    }
+    return out
   }
 
   private fun emitExtractProgress(

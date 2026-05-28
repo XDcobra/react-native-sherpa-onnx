@@ -102,19 +102,15 @@ bundle exec pod install
 
 #### Model download (optional)
 
-If you use the [download manager](docs/download-manager.md) to fetch models at runtime, add the following to your **AppDelegate** so background downloads can finish when the app is in the background or after it was terminated. Without it, downloads only work reliably while the app is in the foreground.
+If you use the [download manager](docs/download-manager.md) to fetch models at runtime, install the peer dependency:
 
-- **Swift (RN 0.77+):** In your bridging header add `#import <RNBackgroundDownloader.h>`. In `AppDelegate.swift`, implement:
-  ```swift
-  func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
-    RNBackgroundDownloader.setCompletionHandlerWithIdentifier(identifier, completionHandler: completionHandler)
-  }
-  ```
-- **Objective-C:** In `AppDelegate.m` add `#import <RNBackgroundDownloader.h>` and the `application:handleEventsForBackgroundURLSession:completionHandler:` implementation that calls `[RNBackgroundDownloader setCompletionHandlerWithIdentifier:identifier completionHandler:completionHandler]`.
+```sh
+npm install @dr.pogodin/react-native-fs
+```
 
-Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android). Expo users can use the library’s config plugin to apply this automatically.
+Downloads run **in the foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again.
 
-**Android:** Foreground service permissions (Play Console), visible download notifications, and **`POST_NOTIFICATIONS` (API 33+)** are covered in [Download manager – Android: foreground service & notifications](docs/download-manager.md#android-foreground-service--notifications).
+Setup, resume behavior, and optional `configureDownloadManager`: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android).
 
 ## Table of contents
 

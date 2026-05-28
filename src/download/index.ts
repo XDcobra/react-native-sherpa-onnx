@@ -50,13 +50,16 @@ export {
 } from './localModels';
 
 export {
-  configureBackgroundDownloader,
+  configureDownloadManager,
   downloadModel,
   pauseDownload,
   resumeDownload,
   getIncompleteDownloads,
   deleteIncompleteDownload,
+  type DownloadManagerConfig,
 } from './downloadTask';
+
+export { runAssetIndicesWithConcurrency } from './downloadConcurrency';
 
 export {
   extractModel,
@@ -107,8 +110,6 @@ export { getProtectedKeys } from './protectedModelKeys';
 export { purgeAll, type PurgeAllResult } from './bulkPurge';
 
 export { checkDiskSpace } from './validation';
-
-export type { BackgroundDownloaderSetConfigOptions } from './background-downloader-types';
 
 export {
   BUILTIN_SOURCE_IDS,

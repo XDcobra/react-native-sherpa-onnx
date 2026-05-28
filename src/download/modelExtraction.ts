@@ -186,6 +186,7 @@ async function runExtraction(
       onChecksumMismatch: opts?.onChecksumMismatch,
       deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
       onProgress: opts?.onProgress,
+      showExtractionNotifications: opts?.showExtractionNotifications,
       getDownloadedList: () =>
         listDownloadedModels(category, { source: sourceId }),
       extractionOperationId: activeOperation.operationId,

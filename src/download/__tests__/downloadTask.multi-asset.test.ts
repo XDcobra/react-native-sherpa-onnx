@@ -1,4 +1,5 @@
 import {
+  configureDownloadManager,
   deleteIncompleteDownload,
   downloadModel,
   pauseDownload,
@@ -271,30 +272,36 @@ jest.mock('@dr.pogodin/react-native-fs', () => ({
   }),
 }));
 
-jest.mock('@kesha-antonov/react-native-background-downloader', () => ({
+jest.mock('../foregroundDownload', () => ({
   __esModule: true,
-  setConfig: jest.fn(),
-  completeHandler: jest.fn((taskId: string) => {
-    const idx = mockCreatedTasks.findIndex((task) => task.id === taskId);
-    if (idx >= 0) {
-      mockCreatedTasks.splice(idx, 1);
-    }
-  }),
-  getExistingDownloadTasks: jest.fn(async () =>
-    mockCreatedTasks.filter((task) => !task.stopped)
-  ),
-  createDownloadTask: jest.fn(
+  cancelForegroundDownload: jest.fn(async () => {}),
+  createForegroundDownloadTask: jest.fn(
     (args: {
       id: string;
       url: string;
       destination: string;
-      metadata: Record<string, unknown>;
+      headers?: Record<string, string>;
     }) => {
-      const task = new MockDownloadTask(args);
+      const task = new MockDownloadTask({
+        ...args,
+        metadata: args.headers ?? {},
+      });
       mockCreatedTasks.push(task);
       return task;
     }
   ),
+}));
+
+jest.mock('../sources/registry', () => ({
+  __esModule: true,
+  getSource: jest.fn(() => ({
+    defaultHeaders: () => ({}),
+  })),
+  buildSourceFetchContext: jest.fn(() => ({
+    headers: {},
+    token: undefined,
+    tokenScheme: 'Bearer',
+  })),
 }));
 
 jest.mock('../registry', () => ({
@@ -379,6 +386,7 @@ describe('downloadTask multi-asset folder flow', () => {
   const statePath = `${sourceBase}/.download-state-${modelId}.json`;
 
   beforeEach(() => {
+    configureDownloadManager({ maxParallelDownloads: 1 });
     mockFsEntries.clear();
     mockCreatedTasks.splice(0, mockCreatedTasks.length);
     taskStartBehaviors = [];
@@ -424,6 +432,7 @@ describe('downloadTask multi-asset folder flow', () => {
     expect(mockFsEntries.has(`${modelDir}/tokens.txt`)).toBe(true);
     expect(mockFsEntries.has(statePath)).toBe(false);
     expect(mockValidateChecksum).toHaveBeenCalledTimes(3);
+    expect(mockCreatedTasks.length).toBe(3);
   });
 
   it('skips per-asset checksum validation when verifyChecksum is false', async () => {
