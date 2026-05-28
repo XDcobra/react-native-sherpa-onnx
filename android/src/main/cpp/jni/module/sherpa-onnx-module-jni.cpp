@@ -331,6 +331,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
   return sherpaonnx::AlignmentDetectResultToJava(env, result);
 }
 
+}  // extern "C"
+
 namespace {
 
 std::optional<std::string> OptionalJstring(JNIEnv* env, jstring value) {
@@ -361,6 +363,8 @@ std::optional<std::string> HashMapGetString(
 }
 
 }  // namespace
+
+extern "C" {
 
 // Unified model detection (TTS→STT→VAD→Punctuation→Enhancement→Alignment). Returns HashMap.
 JNIEXPORT jobject JNICALL
