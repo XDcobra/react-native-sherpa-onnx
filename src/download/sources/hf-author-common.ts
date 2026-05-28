@@ -147,19 +147,19 @@ export function hfRepoResolveUrl(
 
 /** Paths included when building HF folder download asset lists. */
 export function isIncludedHfModelPath(relativePath: string): boolean {
-  const lower = relativePath.toLowerCase();
-  const basename = lower.split('/').pop() ?? lower;
-
-  if (lower.endsWith('.onnx')) return true;
-  if (basename === 'tokens.txt') return true;
-  if (basename.startsWith('vocab') && basename.endsWith('.txt')) return true;
-  if (basename.startsWith('lexicon') && basename.endsWith('.txt')) return true;
-  if (lower.endsWith('.bin')) return true;
-  if (basename.startsWith('config') && basename.endsWith('.json')) return true;
-  if (basename.startsWith('readme')) return true;
-  if (basename.startsWith('license')) return true;
-
-  return false;
+  const normalized = relativePath
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+  if (!normalized || normalized.endsWith('/')) {
+    return false;
+  }
+  // Keep full repo file trees for HF folder models (e.g. espeak-ng-data/**),
+  // but avoid VCS metadata paths.
+  if (normalized.startsWith('.git/')) {
+    return false;
+  }
+  return true;
 }
 
 export type HfSiblingLike = {
