@@ -441,7 +441,7 @@ describe('downloadTask multi-asset folder flow', () => {
     expect(mockValidateChecksum).not.toHaveBeenCalled();
   });
 
-  it('throws DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH when an asset checksum is rejected', async () => {
+  it('skips checksum-failed asset and persists failed index for retry', async () => {
     taskStartBehaviors = [
       completeTaskWithBytes(11),
       completeTaskWithBytes(22),
@@ -458,13 +458,18 @@ describe('downloadTask multi-asset folder flow', () => {
 
     await expect(
       downloadModel(category, modelId, { source: sourceId })
-    ).rejects.toMatchObject({
-      code: 'DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH',
-    });
+    ).rejects.toThrow('Download incomplete: 1 file(s) failed');
 
-    expect(mockFsEntries.has(tempDir)).toBe(false);
+    const rawState = mockFsEntries.get(statePath);
+    expect(rawState?.type).toBe('file');
+    const stateJson = JSON.parse(rawState?.content ?? '{}') as {
+      nextAssetIndex?: number;
+      failedAssetIndices?: number[];
+    };
+    expect(stateJson.nextAssetIndex).toBe(3);
+    expect(stateJson.failedAssetIndices).toEqual([1]);
+    expect(mockFsEntries.has(tempDir)).toBe(true);
     expect(mockFsEntries.has(modelDir)).toBe(false);
-    expect(mockFsEntries.has(statePath)).toBe(false);
   });
 
   it('keeps asset on checksum mismatch when onChecksumMismatch returns true', async () => {
@@ -551,15 +556,32 @@ describe('downloadTask multi-asset folder flow', () => {
     expect(mockFsEntries.has(statePath)).toBe(false);
   });
 
-  it('cleans temp/model/state artifacts on task failure', async () => {
+  it('continues other assets and retries only failed ones', async () => {
     taskStartBehaviors = [completeTaskWithBytes(11), failTask('asset failed')];
 
     await expect(
       downloadModel(category, modelId, { source: sourceId })
-    ).rejects.toBeInstanceOf(Error);
+    ).rejects.toThrow('Download incomplete: 1 file(s) failed');
 
-    expect(mockFsEntries.has(tempDir)).toBe(false);
-    expect(mockFsEntries.has(modelDir)).toBe(false);
+    const firstStateRaw = mockFsEntries.get(statePath);
+    expect(firstStateRaw?.type).toBe('file');
+    const firstState = JSON.parse(firstStateRaw?.content ?? '{}') as {
+      nextAssetIndex?: number;
+      failedAssetIndices?: number[];
+    };
+    expect(firstState.nextAssetIndex).toBe(3);
+    expect(firstState.failedAssetIndices).toEqual([1]);
+
+    taskStartBehaviors = [completeTaskWithBytes(22)];
+    const resumed = await resumeDownload(category, modelId, {
+      source: sourceId,
+    });
+
+    expect(resumed.modelId).toBe(modelId);
+    expect(resumed.localPath).toBe(modelDir);
+    expect(mockFsEntries.has(`${modelDir}/encoder.onnx`)).toBe(true);
+    expect(mockFsEntries.has(`${modelDir}/decoder.onnx`)).toBe(true);
+    expect(mockFsEntries.has(`${modelDir}/tokens.txt`)).toBe(true);
     expect(mockFsEntries.has(statePath)).toBe(false);
   });
 

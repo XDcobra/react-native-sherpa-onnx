@@ -67,6 +67,7 @@ type DownloadStateFile = {
   model: ModelMeta;
   nextAssetIndex?: number;
   totalBytes?: number;
+  failedAssetIndices?: number[];
 };
 
 type ActiveDownloadOperation = {
@@ -743,6 +744,7 @@ async function downloadModelOnce(
   const isMultiAssetFolder = !isArchive && model.assets.length > 1;
 
   let resumeNextAssetIndex = 0;
+  let resumeFailedAssetIndices: number[] = [];
   if (isMultiAssetFolder && !opts?.overwrite && (await exists(statePath))) {
     try {
       const raw = await readFile(statePath, 'utf8');
@@ -755,12 +757,22 @@ async function downloadModelOnce(
         sameModel &&
         typeof nextIndex === 'number' &&
         nextIndex >= 0 &&
-        nextIndex < model.assets.length
+        nextIndex <= model.assets.length
       ) {
         resumeNextAssetIndex = nextIndex;
       }
+      const failed = state.failedAssetIndices;
+      if (Array.isArray(failed)) {
+        resumeFailedAssetIndices = failed
+          .filter(
+            (idx): idx is number =>
+              typeof idx === 'number' && idx >= 0 && idx < model.assets.length
+          )
+          .sort((a, b) => a - b);
+      }
     } catch {
       resumeNextAssetIndex = 0;
+      resumeFailedAssetIndices = [];
     }
   }
 
@@ -805,11 +817,27 @@ async function downloadModelOnce(
     }
 
     try {
-      for (
-        let index = resumeNextAssetIndex;
-        index < model.assets.length;
-        index += 1
-      ) {
+      const failedIndices = new Set<number>(resumeFailedAssetIndices);
+      const retryFailedOnly =
+        resumeNextAssetIndex >= model.assets.length && failedIndices.size > 0;
+      const pendingIndices = retryFailedOnly
+        ? [...failedIndices].sort((a, b) => a - b)
+        : Array.from(
+            new Set<number>([
+              ...Array.from(
+                {
+                  length: Math.max(
+                    0,
+                    model.assets.length - resumeNextAssetIndex
+                  ),
+                },
+                (_unused, offset) => resumeNextAssetIndex + offset
+              ),
+              ...failedIndices,
+            ])
+          ).sort((a, b) => a - b);
+
+      for (const index of pendingIndices) {
         const asset = model.assets[index];
         if (!asset) {
           continue;
@@ -836,48 +864,57 @@ async function downloadModelOnce(
           metadata: {},
         });
 
-        await trackAssetDownloadTask({
-          category,
-          id,
-          sourceId,
-          task,
-          signal: opts?.signal,
-          onProgress: (bytesDownloaded, bytesTotal) => {
-            const currentTotal =
-              totalBytes > 0
-                ? totalBytes
-                : completedBytes +
-                  (bytesTotal > 0 ? bytesTotal : bytesDownloaded);
-            const processed = completedBytes + bytesDownloaded;
-            const percent =
-              currentTotal > 0 ? (processed / currentTotal) * 100 : 0;
-            const progress = {
-              bytesProcessed: processed,
-              totalBytes: currentTotal,
-              percent,
-              phase: 'downloading' as const,
-            };
-
-            opts?.onProgress?.(progress);
-            emitDownloadProgress(category, id, progress);
-          },
-        });
-
-        await verifyDownloadedAssetChecksum({
-          category,
-          modelId: id,
-          sourceId,
-          relativePath,
-          filePath: destination,
-          expectedSha256: asset.sha256,
-          verifyChecksum: opts?.verifyChecksum,
-          onChecksumMismatch: opts?.onChecksumMismatch,
-        });
-
         try {
-          const fileStat = await stat(destination);
-          completedBytes += fileStat.size ?? asset.bytes ?? 0;
-        } catch {
+          await trackAssetDownloadTask({
+            category,
+            id,
+            sourceId,
+            task,
+            signal: opts?.signal,
+            onProgress: (bytesDownloaded, bytesTotal) => {
+              const currentTotal =
+                totalBytes > 0
+                  ? totalBytes
+                  : completedBytes +
+                    (bytesTotal > 0 ? bytesTotal : bytesDownloaded);
+              const processed = completedBytes + bytesDownloaded;
+              const percent =
+                currentTotal > 0 ? (processed / currentTotal) * 100 : 0;
+              const progress = {
+                bytesProcessed: processed,
+                totalBytes: currentTotal,
+                percent,
+                phase: 'downloading' as const,
+              };
+
+              opts?.onProgress?.(progress);
+              emitDownloadProgress(category, id, progress);
+            },
+          });
+
+          await verifyDownloadedAssetChecksum({
+            category,
+            modelId: id,
+            sourceId,
+            relativePath,
+            filePath: destination,
+            expectedSha256: asset.sha256,
+            verifyChecksum: opts?.verifyChecksum,
+            onChecksumMismatch: opts?.onChecksumMismatch,
+          });
+
+          failedIndices.delete(index);
+          try {
+            const fileStat = await stat(destination);
+            completedBytes += fileStat.size ?? asset.bytes ?? 0;
+          } catch {
+            completedBytes += asset.bytes ?? 0;
+          }
+        } catch (error) {
+          if (error instanceof PauseError || isAbortError(error)) {
+            throw error;
+          }
+          failedIndices.add(index);
           completedBytes += asset.bytes ?? 0;
         }
 
@@ -887,8 +924,24 @@ async function downloadModelOnce(
             ...downloadState,
             downloadPath: destination,
             nextAssetIndex: index + 1,
+            failedAssetIndices: [...failedIndices].sort((a, b) => a - b),
           }),
           'utf8'
+        );
+      }
+
+      if (failedIndices.size > 0) {
+        await writeFile(
+          statePath,
+          JSON.stringify({
+            ...downloadState,
+            nextAssetIndex: model.assets.length,
+            failedAssetIndices: [...failedIndices].sort((a, b) => a - b),
+          }),
+          'utf8'
+        );
+        throw new Error(
+          `Download incomplete: ${failedIndices.size} file(s) failed. Tap retry to download only failed files.`
         );
       }
 
