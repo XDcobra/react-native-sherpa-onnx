@@ -331,7 +331,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 - (void)startPunctuationOfflineLivePipeline:(NSString *)instanceId
                           textInLiveBufferId:(NSString *)textInLiveBufferId
                          textOutLiveBufferId:(NSString *)textOutLiveBufferId
-                                     options:(NSDictionary *)options
+                                     options:(JS::NativeSherpaOnnx::SpecStartPunctuationOfflineLivePipelineOptions &)options
                                      resolve:(RCTPromiseResolveBlock)resolve
                                       reject:(RCTPromiseRejectBlock)reject
 {
@@ -348,14 +348,14 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     return;
   }
 
-  NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
-  if (![attachedSegmentationEngineId isKindOfClass:[NSString class]] || [attachedSegmentationEngineId length] == 0) {
+  NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+  if (attachedSegmentationEngineId == nil || [attachedSegmentationEngineId length] == 0) {
     reject(kInvalidArg, @"options.attachedSegmentationEngineId is required", nil);
     return;
   }
 
-  NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
-  if (![segmentLiveBufferId isKindOfClass:[NSString class]] || [segmentLiveBufferId length] == 0) {
+  NSString *segmentLiveBufferId = options.segmentLiveBufferId();
+  if (segmentLiveBufferId == nil || [segmentLiveBufferId length] == 0) {
     reject(kInvalidArg, @"options.segmentLiveBufferId is required", nil);
     return;
   }

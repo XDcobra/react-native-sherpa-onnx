@@ -17,15 +17,14 @@
 
 @implementation SherpaOnnx (TTSInit)
 
-static NSString *TtsOptString(NSDictionary *options, NSString *key) {
-    id v = options[key];
-    if (![v isKindOfClass:[NSString class]]) return nil;
-    NSString *s = [(NSString *)v stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+static NSString *TtsTrimmedString(NSString *value) {
+    if (value == nil) return nil;
+    NSString *s = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     return [s length] > 0 ? s : nil;
 }
 
 - (void)so_initializeTts:(NSString *)instanceId
-                 options:(NSDictionary *)options
+                 options:(JS::NativeSherpaOnnx::TtsInitBridgeOptions &)options
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
@@ -33,28 +32,31 @@ static NSString *TtsOptString(NSDictionary *options, NSString *key) {
         reject(@"TTS_INIT_ERROR", @"instanceId is required", nil);
         return;
     }
-    if (options == nil || ![options isKindOfClass:[NSDictionary class]]) {
-        reject(@"TTS_INIT_ERROR", @"options is required", nil);
-        return;
-    }
-    NSString *modelDir = TtsOptString(options, @"modelDir");
+    NSString *modelDir = TtsTrimmedString(options.modelDir());
     if (modelDir == nil) {
         reject(@"TTS_INIT_ERROR", @"modelDir is required", nil);
         return;
     }
-    NSString *modelType = TtsOptString(options, @"modelType") ?: @"auto";
-    double numThreads = options[@"numThreads"] != nil ? [options[@"numThreads"] doubleValue] : 2.0;
-    BOOL debug = options[@"debug"] != nil ? [options[@"debug"] boolValue] : NO;
-    NSNumber *noiseScale = options[@"noiseScale"];
-    NSNumber *noiseScaleW = options[@"noiseScaleW"];
-    NSNumber *lengthScale = options[@"lengthScale"];
-    NSString *ruleFsts = TtsOptString(options, @"ruleFsts");
-    NSString *ruleFars = TtsOptString(options, @"ruleFars");
-    NSNumber *maxNumSentences = options[@"maxNumSentences"];
-    NSNumber *silenceScale = options[@"silenceScale"];
-    NSString *provider = TtsOptString(options, @"provider");
-    NSString *lexiconLanguageId = TtsOptString(options, @"lexiconLanguageId");
-    NSString *kokoroLang = TtsOptString(options, @"kokoroLang");
+    NSString *modelType = TtsTrimmedString(options.modelType()) ?: @"auto";
+    auto numThreadsOpt = options.numThreads();
+    double numThreads = numThreadsOpt.has_value() ? numThreadsOpt.value() : 2.0;
+    auto debugOpt = options.debug();
+    BOOL debug = debugOpt.has_value() ? debugOpt.value() : NO;
+    NSNumber *noiseScale = nil;
+    if (auto v = options.noiseScale()) noiseScale = @(v.value());
+    NSNumber *noiseScaleW = nil;
+    if (auto v = options.noiseScaleW()) noiseScaleW = @(v.value());
+    NSNumber *lengthScale = nil;
+    if (auto v = options.lengthScale()) lengthScale = @(v.value());
+    NSString *ruleFsts = TtsTrimmedString(options.ruleFsts());
+    NSString *ruleFars = TtsTrimmedString(options.ruleFars());
+    NSNumber *maxNumSentences = nil;
+    if (auto v = options.maxNumSentences()) maxNumSentences = @(static_cast<int>(v.value()));
+    NSNumber *silenceScale = nil;
+    if (auto v = options.silenceScale()) silenceScale = @(v.value());
+    NSString *provider = TtsTrimmedString(options.provider());
+    NSString *lexiconLanguageId = TtsTrimmedString(options.lexiconLanguageId());
+    NSString *kokoroLang = TtsTrimmedString(options.kokoroLang());
 
     std::string instanceIdStr = [instanceId UTF8String];
     RCTLogInfo(@"Initializing TTS instance %@ with modelDir: %@, modelType: %@", instanceId, modelDir, modelType);

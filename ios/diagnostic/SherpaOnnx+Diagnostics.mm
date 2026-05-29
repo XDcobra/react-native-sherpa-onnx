@@ -26,16 +26,16 @@ void sherpa_diag_init(int installSignalHandler);
   }
 }
 
-- (void)configureNativeDiagnostics:(NSDictionary*)config
+- (void)configureNativeDiagnostics:(JS::NativeSherpaOnnx::SpecConfigureNativeDiagnosticsConfig &)config
                           resolve:(RCTPromiseResolveBlock)resolve
                            reject:(RCTPromiseRejectBlock)reject
 {
   @try {
-    NSNumber* enabledNum = config[@"enabled"];
-    NSNumber* installHandlerNum = config[@"installSignalHandler"];
-    const BOOL enabled = enabledNum != nil ? enabledNum.boolValue : YES;
+    auto enabledOpt = config.enabled();
+    auto installHandlerOpt = config.installSignalHandler();
+    const BOOL enabled = enabledOpt.has_value() ? enabledOpt.value() : YES;
     const BOOL installHandler =
-        installHandlerNum != nil ? installHandlerNum.boolValue : YES;
+        installHandlerOpt.has_value() ? installHandlerOpt.value() : YES;
     sherpa_diag_set_enabled(enabled ? 1 : 0);
     sherpa_diag_set_install_signal_handler(installHandler ? 1 : 0);
     sherpa_diag_init(installHandler ? 1 : 0);

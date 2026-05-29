@@ -146,7 +146,7 @@ static void paMicAQInputCallback(
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
 
 - (void)startMicToLiveAudioBuffer:(NSString *)liveBufferId
-                          options:(NSDictionary *)options
+                          options:(JS::NativeSherpaOnnx::SpecStartMicToLiveAudioBufferOptions &)options
                           resolve:(RCTPromiseResolveBlock)resolve
                            reject:(RCTPromiseRejectBlock)reject
 {
@@ -176,9 +176,9 @@ static void paMicAQInputCallback(
     g_pa_mic_live_entry = live;
 
     // Compatibility option: emitToJs now toggles centralized append-event emission.
-    if (options[@"emitToJs"] != nil) {
-      bool emitToJs = [options[@"emitToJs"] boolValue];
-      live->configureAppendEvents(emitToJs, live->appendEventMinIntervalMs);
+    auto emitToJsOpt = options.emitToJs();
+    if (emitToJsOpt.has_value()) {
+      live->configureAppendEvents(emitToJsOpt.value(), live->appendEventMinIntervalMs);
     }
 
     // Register mic intent with coordinator (handles AVAudioSession category/activation)

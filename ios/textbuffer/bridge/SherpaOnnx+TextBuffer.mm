@@ -592,7 +592,7 @@ static std::string txt_generateId(const char *prefix) {
     }
 }
 
-- (void)createLiveTextBuffer:(NSDictionary *)options
+- (void)createLiveTextBuffer:(JS::NativeSherpaOnnx::SpecCreateLiveTextBufferOptions &)options
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
@@ -606,20 +606,19 @@ static std::string txt_generateId(const char *prefix) {
         std::string spoolingPath;
         bool spoolingTemporary = true;
 
-        if (options[@"windowMaxChars"]) {
-            windowMaxChars = [options[@"windowMaxChars"] intValue];
+        if (auto windowMaxCharsOpt = options.windowMaxChars()) {
+            windowMaxChars = static_cast<int>(windowMaxCharsOpt.value());
         }
-        if (options[@"maxSegments"]) {
-            maxSegments = [options[@"maxSegments"] intValue];
+        if (auto maxSegmentsOpt = options.maxSegments()) {
+            maxSegments = static_cast<int>(maxSegmentsOpt.value());
         }
-        if (options[@"emitPartialEvents"]) {
-            emitPartialEvents = [options[@"emitPartialEvents"] boolValue];
+        if (auto emitPartialEventsOpt = options.emitPartialEvents()) {
+            emitPartialEvents = emitPartialEventsOpt.value();
         }
-        if (options[@"partialEventMinIntervalMs"]) {
-            partialEventMinIntervalMs = [options[@"partialEventMinIntervalMs"] longLongValue];
+        if (auto partialEventMinIntervalMsOpt = options.partialEventMinIntervalMs()) {
+            partialEventMinIntervalMs = static_cast<int64_t>(partialEventMinIntervalMsOpt.value());
         }
-        if ([options[@"spoolingMode"] isKindOfClass:[NSString class]]) {
-            NSString *rawMode = (NSString *)options[@"spoolingMode"];
+        if (NSString *rawMode = options.spoolingMode()) {
             if ([rawMode isEqualToString:@"off"]) {
                 spoolingMode = TxtLiveEntry::SPOOL_OFF;
             } else if ([rawMode isEqualToString:@"auto"]) {
@@ -633,17 +632,16 @@ static std::string txt_generateId(const char *prefix) {
                 return;
             }
         }
-        if (options[@"spoolingThresholdBytes"]) {
-            spoolingThresholdBytes = [options[@"spoolingThresholdBytes"] longLongValue];
+        if (auto spoolingThresholdBytesOpt = options.spoolingThresholdBytes()) {
+            spoolingThresholdBytes = static_cast<int64_t>(spoolingThresholdBytesOpt.value());
         }
-        if ([options[@"spoolingPath"] isKindOfClass:[NSString class]]) {
-            NSString *path = (NSString *)options[@"spoolingPath"];
+        if (NSString *path = options.spoolingPath()) {
             if (path.length > 0) {
                 spoolingPath = [path UTF8String] ?: "";
             }
         }
-        if (options[@"spoolingTemporary"]) {
-            spoolingTemporary = [options[@"spoolingTemporary"] boolValue];
+        if (auto spoolingTemporaryOpt = options.spoolingTemporary()) {
+            spoolingTemporary = spoolingTemporaryOpt.value();
         } else {
             spoolingTemporary = spoolingPath.empty();
         }
@@ -1248,7 +1246,7 @@ static std::string txt_generateId(const char *prefix) {
 - (void)getLiveTextBufferSegments:(NSString *)liveBufferId
                         startIndex:(double)startIndex
                           maxCount:(double)maxCount
-                           options:(NSDictionary *)options
+                           options:(JS::NativeSherpaOnnx::SpecGetLiveTextBufferSegmentsOptions &)options
                            resolve:(RCTPromiseResolveBlock)resolve
                             reject:(RCTPromiseRejectBlock)reject
 {
@@ -1280,15 +1278,12 @@ static std::string txt_generateId(const char *prefix) {
             entry = it->second;
         }
 
-        BOOL includeTokens = options != nil && options[@"includeTokens"] != nil
-            ? [options[@"includeTokens"] boolValue]
-            : NO;
-        BOOL includeTimestamps = options != nil && options[@"includeTimestamps"] != nil
-            ? [options[@"includeTimestamps"] boolValue]
-            : NO;
-        BOOL includeMeta = options != nil && options[@"includeMeta"] != nil
-            ? [options[@"includeMeta"] boolValue]
-            : NO;
+        auto includeTokensOpt = options.includeTokens();
+        BOOL includeTokens = includeTokensOpt.has_value() ? includeTokensOpt.value() : NO;
+        auto includeTimestampsOpt = options.includeTimestamps();
+        BOOL includeTimestamps = includeTimestampsOpt.has_value() ? includeTimestampsOpt.value() : NO;
+        auto includeMetaOpt = options.includeMeta();
+        BOOL includeMeta = includeMetaOpt.has_value() ? includeMetaOpt.value() : NO;
 
         auto segments = entry->getSegments(s, m);
         NSMutableArray *segmentArray = [NSMutableArray arrayWithCapacity:segments.size()];

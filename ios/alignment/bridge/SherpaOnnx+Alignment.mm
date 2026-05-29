@@ -196,6 +196,18 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
   return out;
 }
 
+static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
+    NSString *audioBufferId,
+    double startSample,
+    double sampleCount) {
+  sherpaonnx::alignment::bridge::PcmSliceDescriptor descriptor;
+  descriptor.audioBufferId =
+      (audioBufferId != nil) ? std::string([audioBufferId UTF8String]) : std::string();
+  descriptor.startSample = static_cast<int32_t>(startSample);
+  descriptor.sampleCount = static_cast<int32_t>(sampleCount);
+  return descriptor;
+}
+
 }  // namespace
 
 @implementation SherpaOnnx (Alignment)
@@ -681,7 +693,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
 
 - (void)alignAccurateFromPcm:(NSString *)modelPath
                          text:(NSString *)text
-                          pcm:(NSDictionary *)pcm
+                          pcm:(JS::NativeSherpaOnnx::SpecAlignAccurateFromPcmPcm &)pcm
                    sampleRate:(double)sampleRate
                   granularity:(NSString *)granularity
                      language:(NSString *)language
@@ -719,7 +731,10 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
         return;
       }
 
-      const auto descriptor = sherpaonnx::alignment::bridge::ParsePcmSliceDescriptor(pcm);
+      const auto descriptor = pcmSliceFromCodegen(
+          pcm.audioBufferId(),
+          pcm.startSample(),
+          pcm.sampleCount());
       if (descriptor.audioBufferId.rfind("off_", 0) != 0) {
         reject(kAlignmentErrAnchorOutOfRange,
                @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId must reference an offline audio buffer.",
@@ -829,7 +844,7 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
 
 - (void)alignAccurateForcedCtcFromPcm:(NSString *)modelPath
                            windowText:(NSString *)windowText
-                                  pcm:(NSDictionary *)pcm
+                                  pcm:(JS::NativeSherpaOnnx::SpecAlignAccurateForcedCtcFromPcmPcm &)pcm
                            sampleRate:(double)sampleRate
                           granularity:(NSString *)granularity
                              language:(NSString *)language
@@ -866,7 +881,10 @@ static std::vector<std::vector<std::string>> mapUnitsToAnchorsMonotonicWeight(
         return;
       }
 
-      const auto descriptor = sherpaonnx::alignment::bridge::ParsePcmSliceDescriptor(pcm);
+      const auto descriptor = pcmSliceFromCodegen(
+          pcm.audioBufferId(),
+          pcm.startSample(),
+          pcm.sampleCount());
       if (descriptor.audioBufferId.rfind("off_", 0) != 0) {
         reject(kAlignmentErrAnchorOutOfRange,
                @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm.audioBufferId must reference an offline audio buffer.",

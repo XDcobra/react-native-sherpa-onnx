@@ -170,14 +170,14 @@ static std::string slmPairTypeKey(
 
 @implementation SherpaOnnx (SegmentLinkMap)
 
-- (void)createSegmentLinkMap:(NSDictionary *)options
+- (void)createSegmentLinkMap:(JS::NativeSherpaOnnx::SpecCreateSegmentLinkMapOptions &)options
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   @try {
-    NSString *textBufferId = [options isKindOfClass:[NSDictionary class]] ? options[@"textBufferId"] : nil;
-    NSString *audioBufferId = [options isKindOfClass:[NSDictionary class]] ? options[@"audioBufferId"] : nil;
+    NSString *textBufferId = options.textBufferId();
+    NSString *audioBufferId = options.audioBufferId();
 
     PaSegmentLinkMapStore store;
     store.linkMapId = slmNewId("lnkmap");
@@ -203,18 +203,20 @@ static std::string slmPairTypeKey(
 }
 
 - (void)addSegmentLink:(NSString *)linkMapId
-                  link:(NSDictionary *)link
+                  link:(JS::NativeSherpaOnnx::SpecAddSegmentLinkLink &)link
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   @try {
     std::string mapId = linkMapId.UTF8String ?: "";
-    std::string textSegmentId = [link[@"textSegmentId"] isKindOfClass:[NSString class]]
-      ? std::string([(NSString *)link[@"textSegmentId"] UTF8String] ?: "")
+    NSString *textSegmentIdRaw = link.textSegmentId();
+    NSString *speechSegmentIdRaw = link.speechSegmentId();
+    std::string textSegmentId = textSegmentIdRaw != nil
+      ? std::string([textSegmentIdRaw UTF8String] ?: "")
       : std::string();
-    std::string speechSegmentId = [link[@"speechSegmentId"] isKindOfClass:[NSString class]]
-      ? std::string([(NSString *)link[@"speechSegmentId"] UTF8String] ?: "")
+    std::string speechSegmentId = speechSegmentIdRaw != nil
+      ? std::string([speechSegmentIdRaw UTF8String] ?: "")
       : std::string();
 
     if (textSegmentId.empty()) {
@@ -227,7 +229,7 @@ static std::string slmPairTypeKey(
     }
 
     PaSegmentLinkType linkType;
-    if (!slmParseLinkType([link[@"linkType"] isKindOfClass:[NSString class]] ? link[@"linkType"] : @"", &linkType)) {
+    if (!slmParseLinkType(link.linkType(), &linkType)) {
       reject(@"SEGMENT_LINK_INVALID", @"linkType is invalid", nil);
       return;
     }
@@ -252,12 +254,12 @@ static std::string slmPairTypeKey(
     created.speechSegmentId = speechSegmentId;
     created.linkType = linkType;
 
-    id confidenceObj = link[@"confidence"];
-    if ([confidenceObj isKindOfClass:[NSNumber class]]) {
-      created.confidence = [(NSNumber *)confidenceObj floatValue];
+    auto confidenceOpt = link.confidence();
+    if (confidenceOpt.has_value()) {
+      created.confidence = static_cast<float>(confidenceOpt.value());
     }
 
-    NSString *metaJson = slmMetaJsonFromObject(link[@"meta"]);
+    NSString *metaJson = slmMetaJsonFromObject(link.meta());
     if (metaJson.length > 0) {
       created.metaJson = std::string(metaJson.UTF8String ?: "");
     }

@@ -81,7 +81,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 @implementation SherpaOnnx (STT)
 
 - (void)initializeStt:(NSString *)instanceId
-              options:(NSDictionary *)options
+              options:(JS::NativeSherpaOnnx::SttInitBridgeOptions &)options
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -89,28 +89,24 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         reject(kSttErrInitFailed, @"instanceId is required", nil);
         return;
     }
-    if (options == nil || ![options isKindOfClass:[NSDictionary class]]) {
-        reject(kSttErrInitFailed, @"options is required", nil);
-        return;
-    }
-    NSString *modelDir = options[@"modelDir"];
-    if (modelDir == nil || ![modelDir isKindOfClass:[NSString class]] || [modelDir length] == 0) {
+    NSString *modelDir = options.modelDir();
+    if (modelDir == nil || [modelDir length] == 0) {
         reject(kSttErrInitFailed, @"modelDir is required", nil);
         return;
     }
-    NSNumber *preferInt8 = options[@"preferInt8"];
-    NSString *modelType = options[@"modelType"];
-    NSNumber *debug = options[@"debug"];
-    NSString *hotwordsFile = options[@"hotwordsFile"];
-    NSNumber *hotwordsScore = options[@"hotwordsScore"];
-    NSNumber *numThreads = options[@"numThreads"];
-    NSString *provider = options[@"provider"];
-    NSString *ruleFsts = options[@"ruleFsts"];
-    NSString *ruleFars = options[@"ruleFars"];
-    NSNumber *dither = options[@"dither"];
-    NSDictionary *modelOptions = options[@"modelOptions"];
-    NSString *modelingUnit = options[@"modelingUnit"];
-    NSString *bpeVocab = options[@"bpeVocab"];
+    auto preferInt8 = options.preferInt8();
+    NSString *modelType = options.modelType();
+    auto debug = options.debug();
+    NSString *hotwordsFile = options.hotwordsFile();
+    auto hotwordsScore = options.hotwordsScore();
+    auto numThreads = options.numThreads();
+    NSString *provider = options.provider();
+    NSString *ruleFsts = options.ruleFsts();
+    NSString *ruleFars = options.ruleFars();
+    auto dither = options.dither();
+    id modelOptionsRaw = options.modelOptions();
+    NSDictionary *modelOptions =
+        [modelOptionsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)modelOptionsRaw : nil;
     std::string instanceIdStr = [instanceId UTF8String];
     RCTLogInfo(@"Initializing STT instance %@ with modelDir: %@", instanceId, modelDir);
 
@@ -128,8 +124,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         std::string modelDirStr = [modelDir UTF8String];
 
         std::optional<bool> preferInt8Opt = std::nullopt;
-        if (preferInt8 != nil) {
-            preferInt8Opt = [preferInt8 boolValue];
+        if (preferInt8.has_value()) {
+            preferInt8Opt = preferInt8.value();
         }
 
         std::optional<std::string> modelTypeOpt = std::nullopt;
@@ -137,7 +133,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             modelTypeOpt = [modelType UTF8String];
         }
 
-        bool debugVal = (debug != nil && [debug boolValue]);
+        bool debugVal = debug.has_value() && debug.value();
 
         std::optional<std::string> hotwordsFileOpt = std::nullopt;
         if (hotwordsFile != nil && [hotwordsFile length] > 0) {
@@ -145,13 +141,13 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         }
 
         std::optional<float> hotwordsScoreOpt = std::nullopt;
-        if (hotwordsScore != nil) {
-            hotwordsScoreOpt = [hotwordsScore floatValue];
+        if (hotwordsScore.has_value()) {
+            hotwordsScoreOpt = (float)hotwordsScore.value();
         }
 
         std::optional<int32_t> numThreadsOpt = std::nullopt;
-        if (numThreads != nil) {
-            numThreadsOpt = [numThreads intValue];
+        if (numThreads.has_value()) {
+            numThreadsOpt = (int32_t)numThreads.value();
         }
 
         std::optional<std::string> providerOpt = std::nullopt;
@@ -170,8 +166,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         }
 
         std::optional<float> ditherOpt = std::nullopt;
-        if (dither != nil) {
-            ditherOpt = [dither floatValue];
+        if (dither.has_value()) {
+            ditherOpt = (float)dither.value();
         }
 
         // Parse model-specific options (only the block for the loaded model type is applied in C++).
@@ -420,7 +416,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 - (void)startSttOfflineLivePipeline:(NSString *)instanceId
                   audioInLiveBufferId:(NSString *)audioInLiveBufferId
                  textOutLiveBufferId:(NSString *)textOutLiveBufferId
-                             options:(NSDictionary *)options
+                             options:(JS::NativeSherpaOnnx::SpecStartSttOfflineLivePipelineOptions &)options
                              resolve:(RCTPromiseResolveBlock)resolve
                               reject:(RCTPromiseRejectBlock)reject
 {
@@ -437,14 +433,14 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         return;
     }
 
-    NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
-    if (![attachedSegmentationEngineId isKindOfClass:[NSString class]] || [attachedSegmentationEngineId length] == 0) {
+    NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+    if (attachedSegmentationEngineId == nil || [attachedSegmentationEngineId length] == 0) {
         reject(kSttErrInvalidArgument, @"options.attachedSegmentationEngineId is required", nil);
         return;
     }
 
-    NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
-    if (![segmentLiveBufferId isKindOfClass:[NSString class]] || [segmentLiveBufferId length] == 0) {
+    NSString *segmentLiveBufferId = options.segmentLiveBufferId();
+    if (segmentLiveBufferId == nil || [segmentLiveBufferId length] == 0) {
         reject(kSttErrInvalidArgument, @"options.segmentLiveBufferId is required", nil);
         return;
     }

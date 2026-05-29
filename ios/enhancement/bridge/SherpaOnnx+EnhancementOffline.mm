@@ -226,7 +226,7 @@ static NSString *const kOfflineEnhancementOomMessage =
 - (void)startEnhancementOfflineLivePipeline:(NSString *)instanceId
                         audioInLiveBufferId:(NSString *)audioInLiveBufferId
                        audioOutLiveBufferId:(NSString *)audioOutLiveBufferId
-                                    options:(NSDictionary *)options
+                                    options:(JS::NativeSherpaOnnx::SpecStartEnhancementOfflineLivePipelineOptions &)options
                                     resolve:(RCTPromiseResolveBlock)resolve
                                      reject:(RCTPromiseRejectBlock)reject
 {
@@ -261,8 +261,8 @@ static NSString *const kOfflineEnhancementOomMessage =
     return;
   }
 
-  NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
-  NSString *segmentLiveBufferId = options[@"segmentLiveBufferId"];
+  NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+  NSString *segmentLiveBufferId = options.segmentLiveBufferId();
 
   if (!attachedSegmentationEngineId || !segmentLiveBufferId) {
     reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Missing attachedSegmentationEngineId or segmentLiveBufferId", nil);

@@ -47,7 +47,7 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)startTtsOfflineLivePipeline:(NSString *)instanceId
                 textInLiveBufferId:(NSString *)textInLiveBufferId
                audioOutLiveBufferId:(NSString *)audioOutLiveBufferId
-                            options:(NSDictionary *)options
+                            options:(JS::NativeSherpaOnnx::SpecStartTtsOfflineLivePipelineOptions &)options
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject
 {
@@ -64,17 +64,12 @@ static std::mutex g_tts_pipeline_mutex;
         return;
     }
 
-    NSString *attachedSegmentationEngineId = options[@"attachedSegmentationEngineId"];
-    if (![attachedSegmentationEngineId isKindOfClass:[NSString class]] || [attachedSegmentationEngineId length] == 0) {
+    NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+    if (attachedSegmentationEngineId == nil || [attachedSegmentationEngineId length] == 0) {
         reject(@"TTS_INVALID_ARGUMENT", @"options.attachedSegmentationEngineId is required", nil);
         return;
     }
-    NSString *segmentLiveBufferIdRaw = options[@"segmentLiveBufferId"];
-    NSString *segmentLiveBufferId =
-      ([segmentLiveBufferIdRaw isKindOfClass:[NSString class]] &&
-       [segmentLiveBufferIdRaw length] > 0)
-        ? segmentLiveBufferIdRaw
-        : nil;
+    NSString *segmentLiveBufferId = options.segmentLiveBufferId();
 
     std::string instanceKey = [instanceId UTF8String];
     std::string textBufferKey = [textInLiveBufferId UTF8String];
@@ -170,20 +165,14 @@ static std::mutex g_tts_pipeline_mutex;
 
     int32_t defaultSid = 0;
     float defaultSpeed = 1.0f;
-    NSNumber *sidVal = options[@"sid"];
-    if ([sidVal isKindOfClass:[NSNumber class]]) defaultSid = [sidVal intValue];
-    NSNumber *speedVal = options[@"speed"];
-    if ([speedVal isKindOfClass:[NSNumber class]]) defaultSpeed = [speedVal floatValue];
+    if (auto sidOpt = options.sid()) defaultSid = static_cast<int32_t>(sidOpt.value());
+    if (auto speedOpt = options.speed()) defaultSpeed = static_cast<float>(speedOpt.value());
 
     std::optional<std::string> defaultLang;
-    NSString *langVal = options[@"lang"];
-    if ([langVal isKindOfClass:[NSString class]] && [langVal length] > 0) {
-        defaultLang = std::string([langVal UTF8String]);
-    }
 
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone;
-    NSString *refBufferId = options[@"referenceAudioBufferId"];
-    if ([refBufferId isKindOfClass:[NSString class]] && [refBufferId length] > 0) {
+    NSString *refBufferId = options.referenceAudioBufferId();
+    if (refBufferId != nil && [refBufferId length] > 0) {
         auto modelKind = inst->wrapper->getModelKind();
         if (modelKind != sherpaonnx::TtsModelKind::kPocket) {
             reject(@"TTS_PIPELINE_VOICE_CLONE_UNSUPPORTED",
@@ -201,10 +190,8 @@ static std::mutex g_tts_pipeline_mutex;
         sherpaonnx::VoiceCloneOptions clone;
         clone.reference_audio = std::move(refSamples);
         clone.reference_sample_rate = static_cast<int32_t>(refSampleRate);
-        NSString *refText = options[@"referenceText"];
-        clone.reference_text = [refText isKindOfClass:[NSString class]]
-          ? std::string([refText UTF8String] ?: "")
-          : "";
+        NSString *refText = options.referenceText();
+        clone.reference_text = refText != nil ? std::string([refText UTF8String] ?: "") : "";
         clone.silence_scale = 0.2f;
         clone.num_steps = kDefaultVoiceCloneNumSteps;
         voiceClone = std::move(clone);

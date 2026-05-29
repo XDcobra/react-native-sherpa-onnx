@@ -2498,23 +2498,25 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
 #endif
 }
 
-- (void)createLiveSegmentBuffer:(NSDictionary *)options
+- (void)createLiveSegmentBuffer:(JS::NativeSherpaOnnx::SpecCreateLiveSegmentBufferOptions &)options
                         resolve:(RCTPromiseResolveBlock)resolve
                          reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   try {
-    NSDictionary *opts = [options isKindOfClass:[NSDictionary class]] ? options : @{};
     auto entry = std::make_shared<SegLiveEntry>();
     entry->bufferId = seg_new_id("seg_live");
-    entry->sourceAudioBufferId = [opts[@"sourceAudioBufferId"] isKindOfClass:[NSString class]] ? [opts[@"sourceAudioBufferId"] UTF8String] : "";
-    entry->maxSegments = [opts[@"maxSegments"] respondsToSelector:@selector(intValue)] ? std::max(1, [opts[@"maxSegments"] intValue]) : 4096;
-    NSString *modeRaw = [opts[@"spoolingMode"] isKindOfClass:[NSString class]] ? opts[@"spoolingMode"] : @"on";
+    NSString *sourceAudioBufferId = options.sourceAudioBufferId();
+    entry->sourceAudioBufferId = sourceAudioBufferId != nil ? [sourceAudioBufferId UTF8String] : "";
+    auto maxSegmentsOpt = options.maxSegments();
+    entry->maxSegments = maxSegmentsOpt.has_value() ? std::max(1, static_cast<int>(maxSegmentsOpt.value())) : 4096;
+    NSString *modeRaw = options.spoolingMode();
+    if (modeRaw == nil || modeRaw.length == 0) modeRaw = @"on";
     if ([modeRaw isEqualToString:@"off"]) entry->spoolingMode = SegLiveEntry::SPOOL_OFF;
     else if ([modeRaw isEqualToString:@"auto"]) entry->spoolingMode = SegLiveEntry::SPOOL_AUTO;
     else entry->spoolingMode = SegLiveEntry::SPOOL_ON;
 
-    NSString *spoolPath = [opts[@"spoolingPath"] isKindOfClass:[NSString class]] ? opts[@"spoolingPath"] : nil;
+    NSString *spoolPath = options.spoolingPath();
     if (entry->spoolingMode != SegLiveEntry::SPOOL_OFF) {
       if (spoolPath.length > 0) {
         entry->spoolPath = spoolPath.UTF8String;
@@ -2524,19 +2526,18 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
         entry->spoolPath = tmp.UTF8String;
       }
     }
-    if ([opts[@"spoolingTemporary"] respondsToSelector:@selector(boolValue)]) {
-      entry->spoolTemporary = [opts[@"spoolingTemporary"] boolValue];
+    if (auto spoolingTemporaryOpt = options.spoolingTemporary()) {
+      entry->spoolTemporary = spoolingTemporaryOpt.value();
     } else {
       entry->spoolTemporary = (spoolPath.length == 0);
     }
-    if ([opts[@"spoolingThresholdBytes"] respondsToSelector:@selector(longLongValue)]) {
-      entry->spoolThresholdBytes = [opts[@"spoolingThresholdBytes"] longLongValue];
+    if (auto spoolingThresholdBytesOpt = options.spoolingThresholdBytes()) {
+      entry->spoolThresholdBytes = static_cast<int64_t>(spoolingThresholdBytesOpt.value());
     }
-    entry->emitSegmentAppended =
-      [opts[@"emitSegmentAppendedEvents"] respondsToSelector:@selector(boolValue)] &&
-      [opts[@"emitSegmentAppendedEvents"] boolValue];
-    if ([opts[@"segmentEventMinIntervalMs"] respondsToSelector:@selector(longLongValue)]) {
-      entry->segmentEventMinIntervalMs = [opts[@"segmentEventMinIntervalMs"] longLongValue];
+    auto emitSegmentAppendedOpt = options.emitSegmentAppendedEvents();
+    entry->emitSegmentAppended = emitSegmentAppendedOpt.has_value() && emitSegmentAppendedOpt.value();
+    if (auto segmentEventMinIntervalMsOpt = options.segmentEventMinIntervalMs()) {
+      entry->segmentEventMinIntervalMs = static_cast<int64_t>(segmentEventMinIntervalMsOpt.value());
     }
     __weak SherpaOnnx *weakModule = self;
     entry->segmentAppendedEmitter = [weakModule](
@@ -2624,15 +2625,15 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
 #endif
 }
 
-- (void)createEmptyOfflineSegmentBuffer:(NSDictionary *)options
+- (void)createEmptyOfflineSegmentBuffer:(JS::NativeSherpaOnnx::SpecCreateEmptyOfflineSegmentBufferOptions &)options
                                 resolve:(RCTPromiseResolveBlock)resolve
                                  reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   auto entry = std::make_shared<SegOfflineEntry>();
   entry->bufferId = seg_new_id("seg_off");
-  if ([options[@"sourceAudioBufferId"] isKindOfClass:[NSString class]]) {
-    entry->sourceAudioBufferId = [options[@"sourceAudioBufferId"] UTF8String];
+  if (NSString *sourceAudioBufferId = options.sourceAudioBufferId()) {
+    entry->sourceAudioBufferId = [sourceAudioBufferId UTF8String];
   }
   {
     std::lock_guard<std::mutex> lock(g_seg_mutex);

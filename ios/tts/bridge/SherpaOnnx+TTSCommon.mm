@@ -2,7 +2,7 @@
 
 @interface SherpaOnnx (TTSCommonInternal)
 - (void)so_initializeTts:(NSString *)instanceId
-                 options:(NSDictionary *)options
+                 options:(JS::NativeSherpaOnnx::TtsInitBridgeOptions &)options
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject;
 - (void)so_detectTtsModel:(NSString *)modelDir
@@ -24,7 +24,7 @@
 @implementation SherpaOnnx (TTSCommon)
 
 - (void)initializeTts:(NSString *)instanceId
-              options:(NSDictionary *)options
+              options:(JS::NativeSherpaOnnx::TtsInitBridgeOptions &)options
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject {
   [self so_initializeTts:instanceId options:options resolve:resolve reject:reject];
