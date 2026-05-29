@@ -133,6 +133,7 @@ describe('offline punctuation live overload', () => {
       {
         attachedSegmentationEngineId: 'seg_txt_1',
         segmentLiveBufferId: 'seg_live_txt_1',
+        textInputNormalization: 'lower',
       }
     );
     expect(handle.pipelineId).toBe('punc_pipe_1');

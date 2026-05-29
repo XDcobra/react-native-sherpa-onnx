@@ -91,7 +91,8 @@ describe('offline punctuation segmentation', () => {
     expect(native.punctuateOfflineTextBuffers).toHaveBeenCalledWith(
       expect.stringMatching(/^punc_off_/),
       'txt_off_11111111-1111-1111-1111-111111111111',
-      'txt_off_22222222-2222-2222-2222-222222222222'
+      'txt_off_22222222-2222-2222-2222-222222222222',
+      'lower'
     );
     expect(runOfflineTextPipeline).not.toHaveBeenCalled();
   });

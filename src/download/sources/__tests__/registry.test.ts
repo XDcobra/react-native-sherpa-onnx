@@ -1,3 +1,8 @@
+jest.mock('../../../detect', () => ({
+  detectModelsBatch: jest.fn(async () => []),
+  detectModelResultMatchesCategory: jest.fn(() => true),
+}));
+
 import { ModelCategory } from '../../types';
 import {
   BUILTIN_SOURCE_IDS,
