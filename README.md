@@ -47,7 +47,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 - Playback: [PCM Player](./docs/pcm-player.md)
 - Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
 - Runtime acceleration: [Execution providers](./docs/execution-providers.md)
-- Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
+- Automatic Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
 - Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md)
 
 ### Planned / not yet
@@ -55,17 +55,31 @@ A React Native TurboModule that provides offline and streaming speech processing
 - Speaker diarization: [Diarization](./docs/diarization.md)
 - Source separation: [Separation](./docs/separation.md)
 
-## Read before use
+## Built for on-device memory
 
-- On-device models are loaded into native memory (C++), not the JS heap. Plan for peak usage, especially when multiple engines run concurrently. See [Memory and models](./docs/memory-and-models.md).
-- Many high-quality model bundles are offline-first or offline-only. Large offline jobs (long inputs, big buffers) can increase peak RAM and trigger OOM on mobile devices.
-- Use the [Segmentation engine](./docs/segmentation-engine.md) to split large offline work into bounded segments and run the offline engine per segment. This reduces peak RAM and is the main mitigation path for low-memory devices but may decrease result quality. See also [Memory and models - Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
-- **Long files on modest phones:** The same chunk-by-chunk design makes **multi-hour** recordings practical on device: you are not forced to hold an entire file in memory for one monolithic pass. That bounded-memory profile is a major reason these pipelines can still run on **mid-range or older smartphones**, not only flagships—provided you use segmentation (offline orchestration) and/or live buffers and policies suited to your feature. Details: [Segmentation engine](./docs/segmentation-engine.md), [Memory and models](./docs/memory-and-models.md).
-- Native errors use `OFFLINE_OOM` for this class of failures. The error guidance points to streaming alternatives (where available) and the segmentation documentation.
+*Sherpa-onnx loads weights natively - this wrapper minimizes how much you need in RAM at once.*
+
+**This SDK is built around that constraint.** Pipelines, buffers, and orchestration aim for a **low peak-RAM profile** so you can:
+
+- run **one feature** (STT, TTS, enhancement, punctuation, …) performantly on phones that are not flagships, and  
+- **chain features**—offline batch or live streaming—with **shared buffer contracts** and less duplicate loading than one-off native glue.
+
+**How the wrapper helps (without changing sherpa-onnx physics):**
+
+| Approach | What it buys you |
+| --- | --- |
+| **mmap & file-backed buffers** | Long offline audio stays on disk; native code reads slices instead of copying whole files into RAM. [Offline audio buffer](./docs/audiobuffer-offline.md) |
+| **Live ring + optional spool** | Streaming sessions keep a bounded window in memory; optional spool persists growth without a single giant buffer. [Live audio buffer](./docs/audiobuffer-streaming.md) |
+| **Pipeline & feature recipes** | Explicit stage lifetimes, live overloads, and composite flows (e.g. enhancement → STT → punctuation) with native workers on **bounded** units. [SDK pipeline logic](#sdk-pipeline-logic) · [Feature pipelines](./docs/feature-pipelines.md) |
+| **Segmentation engine** | Offline-only models run segment-by-segment so peak RAM stays predictable; multi-hour files become practical on modest devices (small quality trade-off vs. one monolithic pass). [Segmentation engine](./docs/segmentation-engine.md) |
+
+**Still plan like a mobile app:** many top-tier bundles are offline-first or offline-only; several engines at once multiply memory cost. See [Memory and models](./docs/memory-and-models.md). When limits are hit, native `OFFLINE_OOM` points to streaming alternatives (where they exist) and the segmentation docs.
+
+**Default mindset:** use buffers, segmentation, and pipeline APIs for large or chained work—treat “load everything into memory, run once” as the exception.
 
 ## Segmentation
 
-The segmentation engine is not only about “clean” boundaries—it is how the SDK keeps **peak native RAM** predictable for STT, TTS, enhancement, punctuation, and related flows. **Offline** jobs run the same model repeatedly on successive segments; **streaming** and **live-overload** APIs attach speech or text policies so workers process one bounded unit at a time. That is what makes **hour-scale** inputs and reasonable performance on **less powerful devices** achievable without custom app-level chunking. Start with [Segmentation engine](./docs/segmentation-engine.md), then [Feature pipelines](./docs/feature-pipelines.md) and [Memory and models](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
+Deep dive on policies, offline orchestration, and live overload hooks: [Segmentation engine](./docs/segmentation-engine.md). For how segmentation fits OOM planning, see [Memory and models — Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
 
 ## Installation
 
@@ -102,44 +116,15 @@ bundle exec pod install
 
 #### Model download (optional)
 
-If you use the [download manager](docs/download-manager.md) to fetch models at runtime, add the following to your **AppDelegate** so background downloads can finish when the app is in the background or after it was terminated. Without it, downloads only work reliably while the app is in the foreground.
+If you use the [download manager](docs/download-manager.md) to fetch models at runtime, install the peer dependency:
 
-- **Swift (RN 0.77+):** In your bridging header add `#import <RNBackgroundDownloader.h>`. In `AppDelegate.swift`, implement:
-  ```swift
-  func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
-    RNBackgroundDownloader.setCompletionHandlerWithIdentifier(identifier, completionHandler: completionHandler)
-  }
-  ```
-- **Objective-C:** In `AppDelegate.m` add `#import <RNBackgroundDownloader.h>` and the `application:handleEventsForBackgroundURLSession:completionHandler:` implementation that calls `[RNBackgroundDownloader setCompletionHandlerWithIdentifier:identifier completionHandler:completionHandler]`.
+```sh
+npm install @dr.pogodin/react-native-fs
+```
 
-Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android). Expo users can use the library’s config plugin to apply this automatically.
+Downloads run **in the foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again.
 
-**Android:** Foreground service permissions (Play Console), visible download notifications, and **`POST_NOTIFICATIONS` (API 33+)** are covered in [Download manager – Android: foreground service & notifications](docs/download-manager.md#android-foreground-service--notifications).
-
-## Table of contents
-
-- [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
-- [Feature Support](#feature-support)
-- [Read before use](#read-before-use)
-- [Segmentation](#segmentation)
-- [Installation](#installation)
-  - [Android](#android)
-  - [iOS](#ios)
-- [SDK pipeline logic](#sdk-pipeline-logic)
-  - [Offline pipeline (batch)](#offline-pipeline-batch)
-  - [Streaming pipeline (live)](#streaming-pipeline-live)
-  - [Decision guide: offline vs streaming](#decision-guide-offline-vs-streaming)
-- [Known issues](#known-issues)
-- [Supported Model Types](#supported-model-types)
-- [Memory and models](#memory-and-models)
-- [Audio visualization](#audio-visualization)
-- [Documentation](#documentation)
-- [Requirements](#requirements)
-  - [Platform Support Status](#platform-support-status)
-- [Example Apps](#example-apps)
-  - [Example App (Monorepo SDK Showcase)](#example-app-monorepo-sdk-showcase)
-- [Contributing](#contributing)
-- [License](#license)
+Setup, resume behavior, and optional `configureDownloadManager`: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android).
 
 ## SDK pipeline logic
 

@@ -24,6 +24,8 @@ For batch punctuation with offline text buffers, see [punctuation-offline.md](pu
 
 ## Model detection
 
+Unified cross-feature detection: [model-detect.md](model-detect.md).
+
 Use `detectPunctuationModel` as preflight before initialization:
 - `modelType: 'auto'` may detect either offline `ct_transformer` or online `cnn_bilstm`.
 - Streaming initialization requires `modelType === 'cnn_bilstm'` with `isStreaming === true`.

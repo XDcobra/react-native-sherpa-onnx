@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {

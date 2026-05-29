@@ -32,7 +32,7 @@ import type {
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
 import type { FileSource } from '../../fileio/types';
-import { resolveFileSourceForModelInit } from '../../detect';
+import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
 import { addSegmentLink, createSegmentLinkMap } from '../../segment';
 import type {
   AlignmentErrorCode,

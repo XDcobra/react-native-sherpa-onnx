@@ -43,7 +43,7 @@ import type { FileSource } from '../fileio/types';
 import {
   resolveFileSourceForDetect,
   resolveFileSourceForModelInit,
-} from '../detect';
+} from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {

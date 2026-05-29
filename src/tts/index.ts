@@ -22,7 +22,7 @@ import type { FileSource } from '../fileio/types';
 import {
   resolveFileSourceForDetect,
   resolveFileSourceForModelInit,
-} from '../detect';
+} from '../detect/resolveModelInput';
 import {
   buildTtsInitBridgeOptions,
   expandTtsInitializeOptions,

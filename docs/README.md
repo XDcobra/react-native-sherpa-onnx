@@ -13,6 +13,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [memory-and-models.md](./memory-and-models.md) | OOM awareness, model sizing, concurrent engine budgets, buffer planning |
 | [feature-pipelines.md](./feature-pipelines.md) | Named end-to-end pipeline recipes across offline/streaming features |
 | [model-setup.md](./model-setup.md) | Bundled assets, Play Asset Delivery (PAD), model discovery APIs, troubleshooting |
+| [model-detect.md](./model-detect.md) | Unified `detectModel` / `detectModelsBatch`, inputs, QNN, vs feature `detect*Model` |
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
 | [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |

@@ -26,7 +26,7 @@ import { resolveActualModelDir } from '../download/validation';
 import {
   resolveFileSourceForDetect,
   resolveFileSourceForModelInit,
-} from '../detect';
+} from '../detect/resolveModelInput';
 
 describe('detect resolver with app:apkAsset', () => {
   const mockNative = SherpaOnnx as unknown as {

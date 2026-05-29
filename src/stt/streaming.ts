@@ -1,5 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolveFileSourceForModelInit } from '../detect';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { buildOnlineSttInitBridgeOptions } from './sttNativeBridge';
 import type {
   OnlineSTTModelType,

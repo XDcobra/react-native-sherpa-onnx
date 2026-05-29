@@ -27,6 +27,8 @@ If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offli
 
 ## Model detection
 
+Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enhancement-specific rules for **`detectEnhancementModel`**.
+
 `detectEnhancementModel` does **not** load the denoiser — use it as a **pre-check** before **`createEnhancement`** (same idea as `detectTtsModel` / `detectSttModel`).
 
 **Rules (directory scan):**

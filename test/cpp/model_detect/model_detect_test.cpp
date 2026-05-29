@@ -23,6 +23,7 @@
 
 #include "model_detect_test_utils.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-tts.h"
@@ -906,4 +907,40 @@ TEST(ModelDetectTest, ResolveLexiconPathSelectsByLanguageId) {
     EXPECT_EQ(sherpaonnx::model_detect::ResolveLexiconPath(candidates, "zh"), "/models/lexicon-zh.txt");
     EXPECT_EQ(sherpaonnx::model_detect::ResolveLexiconPath(candidates, "missing"), "");
     EXPECT_TRUE(sherpaonnx::model_detect::ResolveLexiconPath({}, "zh").empty());
+}
+
+TEST(UnifiedModelDetectTest, EmptyInputReturnsNoMatch) {
+    auto result = sherpaonnx::DetectModel(std::nullopt, std::nullopt);
+    EXPECT_FALSE(result.matched);
+    EXPECT_FALSE(result.success);
+}
+
+TEST(UnifiedModelDetectTest, NameOnlyTtsAssetMatchesTtsCategory) {
+    auto result = sherpaonnx::DetectModel(
+        std::nullopt,
+        std::optional<std::string>("vits-piper-en_US-lessac-medium"));
+    EXPECT_TRUE(result.matched);
+    EXPECT_EQ(result.category, "tts");
+    EXPECT_EQ(result.modelType, "vits");
+    EXPECT_TRUE(result.isStreaming);
+}
+
+TEST(UnifiedModelDetectTest, NameOnlySupertonicRepoMatchesTtsCategory) {
+    auto result = sherpaonnx::DetectModel(
+        std::nullopt, std::optional<std::string>("supertonic-3"));
+    EXPECT_TRUE(result.matched);
+    EXPECT_EQ(result.category, "tts");
+    EXPECT_EQ(result.modelType, "supertonic");
+}
+
+TEST(UnifiedModelDetectTest, BatchPreservesOrderAndLength) {
+    std::vector<sherpaonnx::UnifiedModelDetectInput> inputs = {
+        {std::nullopt, std::optional<std::string>("vits-piper-en")},
+        {std::nullopt, std::optional<std::string>("not-a-real-model-name-xyz")},
+    };
+    auto results = sherpaonnx::DetectModelsBatch(inputs);
+    ASSERT_EQ(results.size(), 2u);
+    EXPECT_TRUE(results[0].matched);
+    EXPECT_EQ(results[0].category, "tts");
+    EXPECT_FALSE(results[1].matched);
 }

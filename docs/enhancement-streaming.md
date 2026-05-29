@@ -31,6 +31,8 @@ If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or i
 
 ## Model detection
 
+Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enhancement-specific rules for **`detectEnhancementModel`**.
+
 `detectEnhancementModel` does **not** load the denoiser — use it as a **pre-check** before **`createStreamingEnhancement`** (same idea as `detectTtsModel` / `detectSttModel`).
 
 **Rules (directory scan):**

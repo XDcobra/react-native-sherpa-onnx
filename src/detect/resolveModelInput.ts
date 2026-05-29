@@ -1,10 +1,13 @@
 /**
- * Shared utilities for resolving a {@link FileSource} into the inputs
- * required by the native `detectXxxModel` methods.
+ * Map {@link FileSource} (from `fileio`) to native detect/init inputs (`modelDir` + `assetName`).
+ *
+ * This is not part of `fileio`: `fileio` handles copy/save/share and defines source *types*.
+ * Model engines need a filesystem directory and/or a release-asset name for heuristics —
+ * that mapping lives here and is shared by `detectModel`, `detectSttModel`, `createTTS`, etc.
  */
-import SherpaOnnx from './NativeSherpaOnnx';
-import { FileIOErrorCode, type FileSource } from './fileio/types';
-import { resolveActualModelDir } from './download/validation';
+import SherpaOnnx from '../NativeSherpaOnnx';
+import { FileIOErrorCode, type FileSource } from '../fileio/types';
+import { resolveActualModelDir } from '../download/validation';
 import { Platform } from 'react-native';
 
 /** Resolved fields that every native detect method needs. */
@@ -21,10 +24,6 @@ export interface ResolvedDetectInput {
   assetName: string | null;
 }
 
-/**
- * Derive a bare asset/folder name from a path string by stripping to the
- * last segment and removing common archive suffixes.
- */
 function deriveAssetName(raw: string | undefined | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
@@ -38,10 +37,8 @@ function deriveAssetName(raw: string | undefined | null): string | null {
     .replace(/\.zip$/i, '');
 }
 
-/** Extract a human-readable file/path segment from a URI for name-only heuristics. */
 function deriveAssetNameFromUri(uri: string): string | null {
   try {
-    // Strip query/fragment, decode, grab last path segment
     const pathPart = uri.split('?')[0]!.split('#')[0]!;
     const decoded = decodeURIComponent(pathPart);
     return deriveAssetName(decoded);
@@ -67,7 +64,6 @@ function normalizeRelativePathForDetect(
 
   const normalized = trimmed.replace(/\\/g, '/');
 
-  // Keep app/pad paths relative to their native base location.
   if (normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized)) {
     createFileIOError(
       FileIOErrorCode.PATH_TRAVERSAL_BLOCKED,
@@ -95,7 +91,7 @@ function joinBaseAndRelativePath(
   if (relativePath.length === 0) {
     return baseDir;
   }
-  return `${baseDir.replace(/[\\/]+$/, '')}/${relativePath}`;
+  return `${baseDir.replace(/[/\\]+$/, '')}/${relativePath}`;
 }
 
 function toFileIOResolveError(error: unknown): Error {
@@ -121,12 +117,6 @@ function toFileIOResolveError(error: unknown): Error {
 /**
  * Resolve a {@link FileSource} into the `modelDir` + `assetName` required by
  * native detect methods.
- *
- * - **fs**: path used directly (with install-dir resolution).
- * - **app**: base dir resolved via native helper + path appended.
- * - **pad**: asset pack path resolved via native helper + path appended.
- * - **contentUri** / **securityScoped**: directory is empty (name-only mode),
- *   asset name is derived from the URI.
  */
 export async function resolveFileSourceForDetect(
   source: FileSource
@@ -171,7 +161,6 @@ export async function resolveFileSourceForDetect(
         );
         const packPath = await SherpaOnnx.getAssetPackPath(source.packName);
         if (!packPath) {
-          // Pack not available — fall back to name-only detection.
           return { modelDir: '', assetName: deriveAssetName(source.path) };
         }
         const fullPath = joinBaseAndRelativePath(packPath, safeRelativePath);
@@ -193,10 +182,6 @@ export async function resolveFileSourceForDetect(
 /**
  * Resolve a {@link FileSource} to a concrete local model directory for engine
  * initialization.
- *
- * Unlike detect resolution, init requires a real filesystem directory.
- * Name-only sources (for example content URIs) are rejected with explicit
- * FILEIO_* errors to keep failure modes deterministic.
  */
 export async function resolveFileSourceForModelInit(
   source: FileSource

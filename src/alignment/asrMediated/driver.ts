@@ -32,7 +32,7 @@ import type {
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
 import type { FileSource } from '../../fileio/types';
-import { resolveFileSourceForModelInit } from '../../detect';
+import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
 import { runLinker } from '../linker/linker';
 import type {
   AlignmentErrorCode,

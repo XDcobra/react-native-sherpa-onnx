@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolveFileSourceForModelInit } from '../detect';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,

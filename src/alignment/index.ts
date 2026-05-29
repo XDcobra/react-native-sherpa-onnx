@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import type { AlignmentModelType } from './types';
 import {
   isDetectionSource,

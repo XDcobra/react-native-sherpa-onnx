@@ -73,6 +73,22 @@ export type TtsInitBridgeOptions = {
   kokoroLang?: string;
 };
 
+/** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
+export type UnifiedDetectNativeResult = {
+  matched: boolean;
+  success: boolean;
+  category?: string;
+  modelType?: string;
+  languages?: string[];
+  quantization?: string;
+  sizeTier?: string;
+  isStreaming?: boolean;
+  isHardwareSpecificUnsupported?: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  detectionSources?: string[];
+  error?: string;
+};
+
 export interface Spec extends TurboModule {
   /**
    * Test method to verify sherpa-onnx native library is loaded.
@@ -1411,6 +1427,23 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Unified model detection: runs TTS→STT→VAD→Punctuation→Enhancement→Alignment
+   * in one native call (first hit wins). Used by `detectModel` in JS.
+   */
+  detectModel(
+    modelDir: string,
+    assetName: string | null
+  ): Promise<UnifiedDetectNativeResult>;
+
+  /** Batch unified detection; one native round-trip for all inputs. */
+  detectModelsBatch(
+    inputs: ReadonlyArray<{
+      modelDir?: string;
+      assetName?: string | null;
+    }>
+  ): Promise<UnifiedDetectNativeResult[]>;
+
+  /**
    * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with
    * `ct_transformer` only (no online/CNN auto-pick).
    */
@@ -1873,6 +1906,28 @@ export interface Spec extends TurboModule {
 
   /** Get a snapshot of the current pipeline audio session state. */
   getPipelineAudioSessionState(): Promise<Object>;
+
+  // ── Foreground model file download (HTTP Range resume) ─────────────────
+
+  /**
+   * Start downloading a file to [destination]. Emits sherpaForegroundDownload* events.
+   * If [destination] already exists, resumes with HTTP Range from file size on disk.
+   */
+  startForegroundDownload(
+    id: string,
+    url: string,
+    destination: string,
+    headers?: Object
+  ): Promise<void>;
+
+  /** Pause an active download; partial file is kept for resume. */
+  pauseForegroundDownload(id: string): Promise<boolean>;
+
+  /** Resume a download paused in the same app session (in-memory state). */
+  resumeForegroundDownload(id: string): Promise<boolean>;
+
+  /** Cancel network activity; does not delete the partial file. */
+  cancelForegroundDownload(id: string): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

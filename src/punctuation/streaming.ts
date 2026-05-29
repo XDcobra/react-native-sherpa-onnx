@@ -7,7 +7,7 @@ import {
   getPipelineTextBufferInfo,
   resolvePipelineTextBufferId,
 } from '../textbuffer';
-import { resolveFileSourceForModelInit } from '../detect';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { createOnlinePunctuationConfig } from './detect';
 import { resolveTextInputNormalization } from './textInputNormalization';
 import type {

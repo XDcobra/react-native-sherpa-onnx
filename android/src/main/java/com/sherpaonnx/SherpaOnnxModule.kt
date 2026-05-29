@@ -23,6 +23,7 @@ import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
 import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
+import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
@@ -112,6 +113,74 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       maybeEmitLiveTextPartial(entry, source)
     }
     tryInstallJsiBindings()
+    installForegroundDownloadEvents()
+  }
+
+  private fun installForegroundDownloadEvents() {
+    ForegroundDownloader.eventListener =
+      object : ForegroundDownloader.EventListener {
+        override fun onBegin(
+          id: String,
+          expectedBytes: Long,
+          headers: Map<String, String>,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadBegin") { map ->
+            map.putString("id", id)
+            map.putDouble("expectedBytes", expectedBytes.toDouble())
+            val headersMap = Arguments.createMap()
+            for ((k, v) in headers) {
+              headersMap.putString(k, v)
+            }
+            map.putMap("headers", headersMap)
+          }
+        }
+
+        override fun onProgress(id: String, bytesDownloaded: Long, bytesTotal: Long) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadProgress") { map ->
+            map.putString("id", id)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onComplete(
+          id: String,
+          location: String,
+          bytesDownloaded: Long,
+          bytesTotal: Long,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadComplete") { map ->
+            map.putString("id", id)
+            map.putString("location", location)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onError(id: String, error: String, errorCode: Int) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadError") { map ->
+            map.putString("id", id)
+            map.putString("error", error)
+            map.putInt("errorCode", errorCode)
+          }
+        }
+      }
+  }
+
+  private fun emitForegroundDownloadEvent(
+    eventName: String,
+    block: (com.facebook.react.bridge.WritableMap) -> Unit,
+  ) {
+    try {
+      val eventEmitter =
+        reactApplicationContext.getJSModule(
+          DeviceEventManagerModule.RCTDeviceEventEmitter::class.java
+        )
+      val payload = Arguments.createMap()
+      block(payload)
+      eventEmitter.emit(eventName, payload)
+    } catch (_: Exception) {
+    }
   }
 
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
@@ -741,6 +810,71 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
+  }
+
+  override fun startForegroundDownload(
+    id: String,
+    url: String,
+    destination: String,
+    headers: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val headerMap = readableMapToStringMap(headers)
+      val started =
+        ForegroundDownloader.start(
+          id = id,
+          url = url,
+          destination = destination,
+          headers = headerMap,
+        )
+      if (started) {
+        promise.resolve(null)
+      } else {
+        promise.reject("DOWNLOAD_START_FAILED", "Failed to start download $id")
+      }
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_START_ERROR", e.message, e)
+    }
+  }
+
+  override fun pauseForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.pause(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_PAUSE_ERROR", e.message, e)
+    }
+  }
+
+  override fun resumeForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.resume(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_RESUME_ERROR", e.message, e)
+    }
+  }
+
+  override fun cancelForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.cancel(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_CANCEL_ERROR", e.message, e)
+    }
+  }
+
+  private fun readableMapToStringMap(map: ReadableMap?): Map<String, String> {
+    if (map == null) {
+      return emptyMap()
+    }
+    val out = mutableMapOf<String, String>()
+    val iterator = map.keySetIterator()
+    while (iterator.hasNextKey()) {
+      val key = iterator.nextKey()
+      if (map.getType(key) == com.facebook.react.bridge.ReadableType.String) {
+        map.getString(key)?.let { out[key] = it }
+      }
+    }
+    return out
   }
 
   private fun emitExtractProgress(
@@ -4703,6 +4837,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun detectModel(
+    modelDir: String,
+    assetName: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectModel(modelDir, assetName)
+      if (result == null) {
+        promise.reject("DETECT_ERROR", "Unified model detection returned null")
+        return
+      }
+      promise.resolve(Companion.unifiedDetectHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified model detection failed: ${e.message}", e)
+    }
+  }
+
+  override fun detectModelsBatch(inputs: ReadableArray, promise: Promise) {
+    try {
+      val nativeInputs = ArrayList<HashMap<String, String?>>()
+      for (i in 0 until inputs.size()) {
+        val entry = inputs.getMap(i) ?: continue
+        val item = HashMap<String, String?>()
+        if (entry.hasKey("modelDir") && !entry.isNull("modelDir")) {
+          item["modelDir"] = entry.getString("modelDir")
+        }
+        if (entry.hasKey("assetName") && !entry.isNull("assetName")) {
+          item["assetName"] = entry.getString("assetName")
+        }
+        nativeInputs.add(item)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val results = Companion.nativeDetectModelsBatch(nativeInputs)
+        as? ArrayList<HashMap<String, Any?>>
+        ?: arrayListOf()
+      val out = Arguments.createArray()
+      for (result in results) {
+        out.pushMap(Companion.unifiedDetectHashMapToWritableMap(result))
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified batch model detection failed: ${e.message}", e)
+    }
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -5145,6 +5324,74 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
     private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectModel(
+      modelDir: String,
+      assetName: String?
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    private external fun nativeDetectModelsBatch(
+      inputs: ArrayList<HashMap<String, String?>>
+    ): ArrayList<HashMap<String, Any?>>
+
+    @JvmStatic
+    internal fun unifiedDetectHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("matched", result["matched"] as? Boolean ?: false)
+      map.putBoolean("success", result["success"] as? Boolean ?: false)
+      map.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
+      val isHardwareSpecificUnsupported = result["isHardwareSpecificUnsupported"] as? Boolean ?: false
+      if (isHardwareSpecificUnsupported) {
+        map.putBoolean("isHardwareSpecificUnsupported", true)
+      }
+      val category = result["category"] as? String
+      if (!category.isNullOrBlank()) map.putString("category", category)
+      val modelType = result["modelType"] as? String
+      if (!modelType.isNullOrBlank()) map.putString("modelType", modelType)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      val quantization = result["quantization"] as? String
+      if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+      val sizeTier = result["sizeTier"] as? String
+      if (!sizeTier.isNullOrBlank()) map.putString("sizeTier", sizeTier)
+
+      val modelsArray = Arguments.createArray()
+      @Suppress("UNCHECKED_CAST")
+      val detectedModels = result["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+      for (entry in detectedModels) {
+        val m = Arguments.createMap()
+        m.putString("type", entry["type"] ?: "")
+        m.putString("modelDir", entry["modelDir"] ?: "")
+        modelsArray.pushMap(m)
+      }
+      map.putArray("detectedModels", modelsArray)
+
+      val languages = result["languages"] as? ArrayList<*>
+      if (!languages.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in languages) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("languages", arr)
+      }
+
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (!detectionSources.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in detectionSources) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("detectionSources", arr)
+      }
+
+      return map
+    }
 
     // -- AudioEncodeSession JNI --
     @JvmStatic

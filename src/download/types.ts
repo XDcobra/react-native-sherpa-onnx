@@ -1,4 +1,5 @@
 import type { TTSModelType } from '../tts/types';
+import type { SourceAssetEntry, SourceAssetLayout } from './sources/types';
 
 export enum ModelCategory {
   Tts = 'tts',
@@ -15,13 +16,13 @@ export enum ModelCategory {
 export type TtsModelType = TTSModelType | 'unknown';
 export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
-export type ModelArchiveExt = 'tar.bz2' | 'onnx';
 
 export type ModelMeta = {
   id: string;
   displayName: string;
-  downloadUrl: string;
-  archiveExt: ModelArchiveExt;
+  sourceId: string;
+  layout: SourceAssetLayout;
+  assets: SourceAssetEntry[];
   bytes: number;
   sha256?: string;
   category: ModelCategory;
@@ -52,6 +53,10 @@ export type Progress = {
   phase: ProgressPhase;
   /** When native reports it: 0-based archive entry ordinal for this extract pass. */
   archiveEntryIndex?: number;
+  /** 0-based index of the asset currently being downloaded (multi-asset layouts). */
+  assetIndex?: number;
+  /** Total assets in a multi-asset model layout. */
+  assetCount?: number;
   speed?: number;
   eta?: number;
 };
@@ -75,7 +80,8 @@ export type DownloadState = {
   category: ModelCategory;
   phase: ProgressPhase;
   startedAt: string;
-  archivePath: string;
+  downloadPath: string;
+  layout: SourceAssetLayout;
   model: ModelMeta;
   bytesDownloaded?: number;
   totalBytes?: number;
@@ -146,18 +152,25 @@ export type CacheStatus = {
   source: 'cache' | 'remote';
 };
 
-export type EnsureModelOptions = {
+export type SourceSelectorOptions = {
+  source?: string | 'default';
+};
+
+export type EnsureModelOptions = SourceSelectorOptions & {
   onProgress?: (progress: Progress) => void;
   signal?: AbortSignal;
   overwrite?: boolean;
   verifyChecksum?: boolean;
   onChecksumMismatch?: (info: ChecksumMismatchInfo) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
+  /**
+   * When false, native Android extraction progress notifications are suppressed.
+   * Use when the host app shows its own unified download notification.
+   */
+  showExtractionNotifications?: boolean;
 };
 
-export type DownloadOptions = EnsureModelOptions & {
-  maxRetries?: number;
-};
+export type DownloadOptions = EnsureModelOptions;
 
 export type ExtractOptions = Omit<EnsureModelOptions, 'overwrite'>;
 
