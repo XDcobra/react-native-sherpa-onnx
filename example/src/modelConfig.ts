@@ -7,6 +7,7 @@
  */
 
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { bundledModelFileSource } from 'react-native-sherpa-onnx/utils';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
@@ -39,28 +40,25 @@ export function getModelDisplayName(modelFolder: string): string {
 }
 
 /**
- * Get model path with auto-detection (tries asset first, then file system).
- *
- * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
- * @returns Model path configuration
- *
- * @example
- * // Discover models first
- * const models = await listAssetModels();
- * const modelPath = getModelPath(models[0].folder);
+ * FileSource for a model folder shipped inside the app package.
+ * Delegates to SDK {@link bundledModelFileSource} from `react-native-sherpa-onnx/utils`.
  */
-export function getModelPath(modelName: string): FileSource {
-  return { kind: 'app', base: 'apkAsset', path: `models/${modelName}` };
+export function getBundledModelFileSource(modelName: string): FileSource {
+  return bundledModelFileSource(`models/${modelName}`.replace(/\/+/g, '/'));
 }
 
 /**
- * Get asset model path for a model folder name.
- *
- * @param modelName - Model folder name (e.g., 'sherpa-onnx-whisper-tiny-en')
- * @returns Model path configuration
+ * @deprecated Use {@link getBundledModelFileSource}; kept for call-site stability.
+ */
+export function getModelPath(modelName: string): FileSource {
+  return getBundledModelFileSource(modelName);
+}
+
+/**
+ * @deprecated Use {@link getBundledModelFileSource}; kept for call-site stability.
  */
 export function getAssetModelPath(modelName: string): FileSource {
-  return { kind: 'app', base: 'apkAsset', path: `models/${modelName}` };
+  return getBundledModelFileSource(modelName);
 }
 
 /**

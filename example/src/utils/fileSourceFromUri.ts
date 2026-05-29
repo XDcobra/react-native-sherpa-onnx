@@ -30,8 +30,8 @@ export function toFileSource(pathOrUri: string): FileSource {
 
 /**
  * Bundled example audio under the app package.
- * - Android: `app` + `apkAsset` → `src/main/assets/<relativePath>`
- * - iOS: `app` + `files` with bundle Resources fallback (see FileIOResolver)
+ * - Android: `app:apkAsset`
+ * - iOS: `app:appBundle`
  */
 export function fileSourceFromBundledPath(relativePath: string): FileSource {
   if (Platform.OS === 'android') {
@@ -43,7 +43,7 @@ export function fileSourceFromBundledPath(relativePath: string): FileSource {
   }
   return {
     kind: 'app',
-    base: 'files',
+    base: 'appBundle',
     path: relativePath,
   };
 }

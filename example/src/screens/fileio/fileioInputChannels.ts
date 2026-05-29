@@ -25,6 +25,7 @@ import {
 export type FileioInputChannelId =
   | 'app_files'
   | 'app_apkAsset'
+  | 'app_appBundle'
   | 'app_cache'
   | 'app_documents'
   | 'app_tmp'
@@ -128,11 +129,21 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       unsupportedReason: 'apkAsset is Android-only',
     },
     {
+      id: 'app_appBundle',
+      title: 'app / appBundle',
+      hint: isIos
+        ? 'Main bundle Resources (test_codec/sample.*) — default on iOS'
+        : 'iOS-only',
+      automatic: true,
+      supported: isIos,
+      unsupportedReason: 'appBundle is iOS-only',
+    },
+    {
       id: 'app_files',
       title: 'app / files',
       hint: isAndroid
         ? 'Sandbox files/ dir (sample copied from apkAsset)'
-        : 'Sandbox + bundle Resources fallback (sample copied on iOS)',
+        : 'Sandbox Application Support (sample copied)',
       automatic: true,
       supported: true,
     },
@@ -264,6 +275,10 @@ export async function resolveFileioInputSource(params: {
       fileSource = { kind: 'app', base: 'apkAsset', path: bundledPath };
       channelLabel = 'app/apkAsset';
       break;
+    case 'app_appBundle':
+      fileSource = { kind: 'app', base: 'appBundle', path: bundledPath };
+      channelLabel = 'app/appBundle';
+      break;
     case 'app_files':
       fileSource = await copySampleToAppBase(selection, 'files');
       channelLabel = 'app/files (copied)';
@@ -351,7 +366,7 @@ export function resolveBundledCodecSource(
   return {
     fileSource: fileSourceFromBundledCodecFormat(format),
     label: sampleLabel({ kind: 'codec', format }),
-    channelId: Platform.OS === 'android' ? 'app_apkAsset' : 'app_files',
+    channelId: Platform.OS === 'android' ? 'app_apkAsset' : 'app_appBundle',
     bundledPath: TEST_CODEC_FILES[format],
   };
 }
@@ -360,7 +375,7 @@ export function resolveBundledWavLegacy(): FileioInputSource {
   return {
     fileSource: fileSourceFromBundledPath(TEST_AUDIO_FILES.EN_1),
     label: sampleLabel({ kind: 'legacy' }),
-    channelId: Platform.OS === 'android' ? 'app_apkAsset' : 'app_files',
+    channelId: Platform.OS === 'android' ? 'app_apkAsset' : 'app_appBundle',
     bundledPath: TEST_AUDIO_FILES.EN_1,
   };
 }

@@ -14,6 +14,7 @@ import type {
 // Re-export all types
 export type {
   FileSource,
+  FileSourceAutoTryTarget,
   FileDestination,
   AppBaseDir,
   ResolvedFileRef,
@@ -63,6 +64,15 @@ export async function copyFile(
   output: FileDestination,
   options?: CopyFileOptions
 ): Promise<CopyFileResult> {
+  if (input.kind === 'auto') {
+    throw Object.assign(
+      new Error(
+        "FileSource kind 'auto' is for model path resolution only. Pass a concrete source to copyFile."
+      ),
+      { code: 'FILEIO_INVALID_ARGUMENT' }
+    );
+  }
+
   const operationId = generateOperationId();
   const overwrite = options?.overwrite ?? true;
   const createParentDirectories = options?.createParentDirectories ?? false;
@@ -154,6 +164,15 @@ export async function shareFile(
   input: FileSource,
   options?: ShareFileOptions
 ): Promise<void> {
+  if (input.kind === 'auto') {
+    throw Object.assign(
+      new Error(
+        "FileSource kind 'auto' is for model path resolution only. Pass a concrete source to shareFile."
+      ),
+      { code: 'FILEIO_INVALID_ARGUMENT' }
+    );
+  }
+
   await SherpaOnnx.shareFile(
     input as any,
     options?.mimeType ?? '',

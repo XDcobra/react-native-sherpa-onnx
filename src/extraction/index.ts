@@ -6,7 +6,7 @@
  *  - listBundledArchives(dirPath)    – any filesystem directory (cross-platform)
  *  - extractArchive(archive, target) – unified extraction (auto-selects path or asset-stream)
  *
- * After extraction, use listModelsAtPath / autoModelPath from the main package.
+ * After extraction, use listModelsAtPath and `{ kind: 'fs', path }` from the main package.
  */
 
 import { DeviceEventEmitter, Platform } from 'react-native';

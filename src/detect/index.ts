@@ -5,7 +5,7 @@
  * User guide: `docs/model-detect.md` in the package repo.
  *
  * - {@link detectModel} / {@link detectModelsBatch} — category + type (native C++)
- * - {@link resolveFileSourceForDetect} — `FileSource` → `modelDir` + `assetName` (not in `fileio`)
+ * - {@link resolveFileSourceForDetect} — `FileSource` → `modelDir` + `assetName` (supports `kind: 'auto'`)
  */
 
 export {

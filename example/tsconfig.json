@@ -5,6 +5,7 @@
     "paths": {
       "react-native-sherpa-onnx": ["../src/index.tsx"],
       "react-native-sherpa-onnx/provider": ["../src/provider.ts"],
+      "react-native-sherpa-onnx/utils": ["../src/utils.ts"],
       "react-native-sherpa-onnx/download": ["../src/download/index.ts"],
       "react-native-sherpa-onnx/detect": ["../src/detect/index.ts"],
       "react-native-sherpa-onnx/audio": ["../src/audio/index.ts"],

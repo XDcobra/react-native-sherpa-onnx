@@ -1,4 +1,35 @@
+import { Platform } from 'react-native';
 import SherpaOnnx from './NativeSherpaOnnx';
+import type { FileSource, FileSourceAutoTryTarget } from './fileio/types';
+/**
+ * {@link FileSource} for a model folder shipped inside the app package.
+ *
+ * - Android: `app:apkAsset` (APK `assets/<path>`, materialized to a readable dir)
+ * - iOS: `app:appBundle` (main bundle resources at `<path>`)
+ */
+export function bundledModelFileSource(relativePath: string): FileSource {
+  const path = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (Platform.OS === 'android') {
+    return { kind: 'app', base: 'apkAsset', path };
+  }
+  return { kind: 'app', base: 'appBundle', path };
+}
+
+/**
+ * {@link FileSource} that tries multiple location kinds in order until one resolves
+ * to an existing model directory. Requires an explicit {@link FileSourceAutoTryTarget} list.
+ */
+export function autoModelFileSource(
+  path: string,
+  tryOrder: FileSourceAutoTryTarget[]
+): FileSource {
+  return {
+    kind: 'auto',
+    path: path.replace(/\\/g, '/').trim(),
+    tryOrder,
+  };
+}
+
 /**
  * List all model folders in the assets/models directory.
  * Scans the platform-specific model directory and returns folder names.
@@ -15,11 +46,9 @@ import SherpaOnnx from './NativeSherpaOnnx';
  *
  * const models = await listAssetModels();
  * for (const model of models) {
- *   const result = await detectSttModel({
- *     kind: 'app',
- *     base: 'files',
- *     path: `models/${model.folder}`,
- *   });
+ *   const result = await detectSttModel(
+ *     bundledModelFileSource(`models/${model.folder}`)
+ *   );
  *   if (result.success) {
  *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
  *   }

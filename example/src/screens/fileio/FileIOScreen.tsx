@@ -86,7 +86,7 @@ export default function FileIOScreen() {
     format: 'wav',
   });
   const [inputChannel, setInputChannel] = useState<FileioInputChannelId>(
-    Platform.OS === 'android' ? 'app_apkAsset' : 'app_files'
+    Platform.OS === 'android' ? 'app_apkAsset' : 'app_appBundle'
   );
   const [manualPick, setManualPick] = useState<FileioInputSource | null>(null);
   const [padPackName, setPadPackName] = useState(DEFAULT_PAD_PACK);

@@ -21,11 +21,28 @@ export type AppBaseDir =
    * Android APK bundled assets (e.g. `android/app/src/main/assets/...`).
    * This is intentionally distinct from sandboxed `files`.
    */
-  | 'apkAsset';
+  | 'apkAsset'
+  /**
+   * iOS main bundle resources (e.g. Copy Bundle Resources in Xcode).
+   * Android: unsupported (`FILEIO_UNSUPPORTED_ON_PLATFORM`).
+   */
+  | 'appBundle';
+
+/**
+ * One location to try when resolving {@link FileSource} `kind: 'auto'`.
+ *
+ * - `'fs'` — treat `path` as an absolute filesystem directory path
+ * - `AppBaseDir` — `{ kind: 'app', base, path }` with the same relative `path`
+ * - `{ pad: packName }` — `{ kind: 'pad', packName, path }`
+ */
+export type FileSourceAutoTryTarget = 'fs' | AppBaseDir | { pad: string };
 
 /**
  * Discriminated union describing where to read a file from.
  * Native resolvers map each kind to platform-appropriate I/O.
+ *
+ * Use `kind: 'auto'` only for model detect/init resolution (see `resolveFileSourceForDetect`).
+ * It is not supported by `copyFile` / `shareFile` — resolve to a concrete source first.
  */
 export type FileSource =
   | { kind: 'fs'; path: string }
@@ -36,7 +53,14 @@ export type FileSource =
       /** Optional file name hint for demuxer selection (extension). */ displayName?: string;
     }
   | { kind: 'securityScoped'; uri: string; displayName?: string }
-  | { kind: 'pad'; packName: string; path: string };
+  | { kind: 'pad'; packName: string; path: string }
+  | {
+      kind: 'auto';
+      /** Relative (app/pad/bundled) or absolute (`fs`) path to probe at each try target. */
+      path: string;
+      /** Non-empty ordered list of locations to try; first existing directory wins. */
+      tryOrder: FileSourceAutoTryTarget[];
+    };
 
 /**
  * Discriminated union describing where to write a file to.

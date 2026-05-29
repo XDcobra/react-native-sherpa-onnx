@@ -1673,13 +1673,17 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Assets ====================
 
   /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
-   * Returns an absolute path that can be used by native code.
+   * Resolve a bundled app asset relative path to an absolute filesystem path.
+   * Android materializes APK assets into the app sandbox; iOS locates the bundle
+   * resource (or a cached copy under Documents/models).
    *
-   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
+   * Used internally when {@link FileSource} uses `app:apkAsset` or `app:appBundle`.
+   * Apps should pass {@link bundledModelFileSource} into feature APIs instead of
+   * calling this directly.
+   *
+   * @param relativePath - Relative path within bundled assets (e.g. `models/my-model`)
    */
-  resolveModelPath(config: { type: string; path: string }): Promise<string>;
+  resolveBundledAssetPath(relativePath: string): Promise<string>;
 
   /**
    * List all model folders in the assets/models directory.
@@ -1689,16 +1693,14 @@ export interface Spec extends TurboModule {
    *
    * @example
    * ```typescript
-   * const folders = await listAssetModels();
-   * // Returns: [{ folder: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', hint: 'stt' }, { folder: 'sherpa-onnx-matcha-icefall-en_US-ljspeech', hint: 'tts' }]
+   * import { bundledModelFileSource, detectSttModel } from 'react-native-sherpa-onnx/utils';
    *
-   * // Then use with resolveModelPath and initialize:
+   * const folders = await listAssetModels();
    * for (const model of folders) {
-   *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
-   *   const result = await initializeStt(path);
-   *   if (result.success) {
-   *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
-   *   }
+   *   const detection = await detectSttModel({
+   *     source: bundledModelFileSource(`models/${model.folder}`),
+   *   });
+   *   console.log(model.folder, detection);
    * }
    * ```
    */
@@ -1858,9 +1860,10 @@ export interface Spec extends TurboModule {
    *          tmp -> cacheDir/tmp, externalFiles -> getExternalFilesDir(null).
    * iOS:     cache -> NSCachesDirectory, documents -> NSDocumentDirectory,
    *          files -> NSApplicationSupportDirectory, tmp -> NSTemporaryDirectory.
+   *          appBundle -> iOS-only main bundle (not a sandbox base dir).
    *
-   * Note: `apkAsset` does not resolve via this method. Use `resolveModelPath`
-   * with `{ type: 'asset', path }` to materialize bundled APK assets.
+   * Note: `apkAsset` and `appBundle` do not resolve via this method. Use
+   * `bundledModelFileSource()` or FileSource `{ kind: 'app', base: 'apkAsset' | 'appBundle', path }`.
    *
    * Rejects with `FILEIO_*` errors (e.g. `FILEIO_UNSUPPORTED_ON_PLATFORM`,
    * `FILEIO_UNSUPPORTED_LOCATION_KIND`, `FILEIO_WRITE_ERROR`, `FILEIO_RESOLVE_ERROR`).
