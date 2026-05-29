@@ -11,7 +11,7 @@ jest.mock('react-native', () => ({
 jest.mock('../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
-    resolveModelPath: jest.fn(),
+    resolveBundledAssetPath: jest.fn(),
     resolveAppBaseDir: jest.fn(),
     getAssetPackPath: jest.fn(),
   },
@@ -28,10 +28,11 @@ import {
   resolveFileSourceForModelInit,
 } from '../detect/resolveModelInput';
 
-describe('detect resolver with app:apkAsset', () => {
+describe('detect resolver bundled and pad FileSources', () => {
   const mockNative = SherpaOnnx as unknown as {
-    resolveModelPath: jest.Mock;
+    resolveBundledAssetPath: jest.Mock;
     resolveAppBaseDir: jest.Mock;
+    getAssetPackPath: jest.Mock;
   };
   const mockResolveActualModelDir = resolveActualModelDir as jest.Mock;
 
@@ -39,9 +40,9 @@ describe('detect resolver with app:apkAsset', () => {
     jest.clearAllMocks();
   });
 
-  it('uses resolveModelPath for app:apkAsset on Android', async () => {
+  it('uses resolveBundledAssetPath for app:apkAsset on Android', async () => {
     mockPlatformOs = 'android';
-    mockNative.resolveModelPath.mockResolvedValue(
+    mockNative.resolveBundledAssetPath.mockResolvedValue(
       '/tmp/materialized/models/foo'
     );
     mockResolveActualModelDir.mockResolvedValue('/tmp/materialized/models/foo');
@@ -52,10 +53,9 @@ describe('detect resolver with app:apkAsset', () => {
       path: 'models/foo',
     });
 
-    expect(mockNative.resolveModelPath).toHaveBeenCalledWith({
-      type: 'asset',
-      path: 'models/foo',
-    });
+    expect(mockNative.resolveBundledAssetPath).toHaveBeenCalledWith(
+      'models/foo'
+    );
     expect(mockResolveActualModelDir).toHaveBeenCalledWith(
       '/tmp/materialized/models/foo'
     );
@@ -65,7 +65,7 @@ describe('detect resolver with app:apkAsset', () => {
 
   it('resolveFileSourceForModelInit returns materialized apk asset directory', async () => {
     mockPlatformOs = 'android';
-    mockNative.resolveModelPath.mockResolvedValue(
+    mockNative.resolveBundledAssetPath.mockResolvedValue(
       '/tmp/materialized/models/bar'
     );
     mockResolveActualModelDir.mockResolvedValue('/tmp/materialized/models/bar');
@@ -90,6 +90,93 @@ describe('detect resolver with app:apkAsset', () => {
       })
     ).rejects.toMatchObject({
       code: 'FILEIO_UNSUPPORTED_ON_PLATFORM',
+    });
+  });
+
+  it('uses resolveBundledAssetPath for app:appBundle on iOS', async () => {
+    mockPlatformOs = 'ios';
+    mockNative.resolveBundledAssetPath.mockResolvedValue(
+      '/var/containers/Bundle/Application/ABC/App.app/models/foo'
+    );
+    mockResolveActualModelDir.mockResolvedValue(
+      '/var/containers/Bundle/Application/ABC/App.app/models/foo'
+    );
+
+    const resolved = await resolveFileSourceForDetect({
+      kind: 'app',
+      base: 'appBundle',
+      path: 'models/foo',
+    });
+
+    expect(mockNative.resolveBundledAssetPath).toHaveBeenCalledWith(
+      'models/foo'
+    );
+    expect(resolved.modelDir).toBe(
+      '/var/containers/Bundle/Application/ABC/App.app/models/foo'
+    );
+  });
+
+  it('rejects app:appBundle on Android', async () => {
+    mockPlatformOs = 'android';
+
+    await expect(
+      resolveFileSourceForDetect({
+        kind: 'app',
+        base: 'appBundle',
+        path: 'models/foo',
+      })
+    ).rejects.toMatchObject({
+      code: 'FILEIO_UNSUPPORTED_ON_PLATFORM',
+    });
+  });
+
+  it('resolves app:files via sandbox only on iOS', async () => {
+    mockPlatformOs = 'ios';
+    mockNative.resolveAppBaseDir.mockResolvedValue(
+      '/var/mobile/Library/Application Support'
+    );
+    mockResolveActualModelDir.mockResolvedValue(
+      '/var/mobile/Library/Application Support/models/foo'
+    );
+
+    const resolved = await resolveFileSourceForDetect({
+      kind: 'app',
+      base: 'files',
+      path: 'models/foo',
+    });
+
+    expect(mockNative.resolveBundledAssetPath).not.toHaveBeenCalled();
+    expect(resolved.modelDir).toBe(
+      '/var/mobile/Library/Application Support/models/foo'
+    );
+  });
+
+  it('rejects pad on iOS', async () => {
+    mockPlatformOs = 'ios';
+
+    await expect(
+      resolveFileSourceForDetect({
+        kind: 'pad',
+        packName: 'sherpa_models',
+        path: 'models/foo',
+      })
+    ).rejects.toMatchObject({
+      code: 'FILEIO_UNSUPPORTED_ON_PLATFORM',
+    });
+  });
+
+  it('rejects pad on Android when pack is unavailable', async () => {
+    mockPlatformOs = 'android';
+    mockNative.getAssetPackPath.mockResolvedValue(null);
+
+    await expect(
+      resolveFileSourceForDetect({
+        kind: 'pad',
+        packName: 'missing_pack',
+        path: 'models/foo',
+      })
+    ).rejects.toMatchObject({
+      code: 'FILEIO_RESOLVE_ERROR',
     });
   });
 });

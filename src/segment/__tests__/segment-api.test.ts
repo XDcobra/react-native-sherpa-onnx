@@ -1,5 +1,7 @@
 jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async (c: { path: string }) => c.path),
+  resolveBundledAssetPath: jest.fn(
+    async (relativePath: string) => relativePath
+  ),
 }));
 
 jest.mock('react-native', () => {

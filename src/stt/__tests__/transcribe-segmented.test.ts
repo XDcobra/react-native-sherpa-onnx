@@ -9,7 +9,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
 }));
 
 jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(async () => '/models/stt'),
+  resolveBundledAssetPath: jest.fn(async () => '/models/stt'),
 }));
 
 jest.mock('../../detect', () => ({

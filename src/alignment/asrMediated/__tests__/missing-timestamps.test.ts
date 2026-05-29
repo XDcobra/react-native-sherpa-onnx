@@ -7,7 +7,9 @@ jest.mock('../../linker/linker', () => ({
 }));
 
 jest.mock('../../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/resolved/alignment-bundle'),
+  resolveBundledAssetPath: jest
+    .fn()
+    .mockResolvedValue('/resolved/alignment-bundle'),
 }));
 
 jest.mock('../../../audiobuffer', () => ({

@@ -10,7 +10,7 @@ jest.mock('../../detect', () => ({
 }));
 
 jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(),
+  resolveBundledAssetPath: jest.fn(),
 }));
 
 import * as alignment from '../index';

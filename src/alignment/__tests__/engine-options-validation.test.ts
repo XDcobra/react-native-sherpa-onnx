@@ -45,7 +45,7 @@ jest.mock('../../segmentbuffer', () => ({
 }));
 
 jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn().mockResolvedValue('/tmp/alignment-model'),
+  resolveBundledAssetPath: jest.fn().mockResolvedValue('/tmp/alignment-model'),
 }));
 
 jest.mock('../../detect', () => ({

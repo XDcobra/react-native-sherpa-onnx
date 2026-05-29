@@ -9,10 +9,6 @@ jest.mock('../../detect', () => ({
   resolveFileSourceForDetect: jest.fn(),
 }));
 
-jest.mock('../../utils', () => ({
-  resolveModelPath: jest.fn(),
-}));
-
 describe('alignment public surface snapshot', () => {
   it('locks exported keys from ../index', () => {
     const keys = Object.keys(
