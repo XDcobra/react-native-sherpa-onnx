@@ -583,7 +583,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           )
         "apkAsset" -> throw FileIOException(
           FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
-          "AppBaseDir 'apkAsset' does not map to a sandbox directory. Use resolveModelPath({ type: 'asset', path }) for APK assets."
+          "AppBaseDir 'apkAsset' does not map to a sandbox directory. Use FileSource app:apkAsset or resolveBundledAssetPath for APK assets."
+        )
+        "appBundle" -> throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+          "AppBaseDir 'appBundle' is iOS-only"
         )
         else -> throw FileIOException(
           FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
@@ -766,11 +770,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
+   * Resolve a bundled app asset relative path to an absolute filesystem path.
    */
-  override fun resolveModelPath(config: ReadableMap, promise: Promise) {
-    assetHelper.resolveModelPath(config, promise)
+  override fun resolveBundledAssetPath(relativePath: String, promise: Promise) {
+    assetHelper.resolveBundledAssetPath(relativePath, promise)
   }
 
   override fun extractArchive(

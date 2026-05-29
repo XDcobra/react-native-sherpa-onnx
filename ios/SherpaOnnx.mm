@@ -1,7 +1,7 @@
 /**
  * SherpaOnnx.mm
  *
- * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
+ * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveBundledAssetPath (delegates to
  * ios/assets/bridge), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
  * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
  * ios/assets/{bridge,core}; pipeline audio in ios/audio/{bridge,pipeline}; STT in ios/stt/bridge
@@ -88,32 +88,17 @@ extern "C" void slm_release_all_link_maps(void);
     return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError" ];
 }
 
-- (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
+- (void)resolveBundledAssetPath:(NSString *)relativePath
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
 {
-    NSString *type = config.type() ?: @"auto";
-    NSString *path = config.path();
-
-    if (!path) {
-        reject(@"PATH_REQUIRED", @"Path is required", nil);
+    if (!relativePath || relativePath.length == 0) {
+        reject(@"PATH_REQUIRED", @"Relative path is required", nil);
         return;
     }
 
     NSError *error = nil;
-    NSString *resolvedPath = nil;
-
-    if ([type isEqualToString:@"asset"]) {
-        resolvedPath = [self resolveAssetPath:path error:&error];
-    } else if ([type isEqualToString:@"file"]) {
-        resolvedPath = [self resolveFilePath:path error:&error];
-    } else if ([type isEqualToString:@"auto"]) {
-        resolvedPath = [self resolveAutoPath:path error:&error];
-    } else {
-        NSString *errorMsg = [NSString stringWithFormat:@"Unknown path type: %@", type];
-        reject(@"INVALID_TYPE", errorMsg, nil);
-        return;
-    }
+    NSString *resolvedPath = [self resolveAssetPath:relativePath error:&error];
 
     if (error) {
         reject(@"PATH_RESOLVE_ERROR", error.localizedDescription, error);
@@ -300,6 +285,11 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
     } else if ([base isEqualToString:@"apkAsset"]) {
         reject(kFIOErrUnsupportedOnPlatform,
                @"apkAsset is Android-only and does not map to an iOS app base directory",
+               nil);
+        return;
+    } else if ([base isEqualToString:@"appBundle"]) {
+        reject(kFIOErrUnsupportedOnPlatform,
+               @"appBundle does not map to an iOS sandbox directory. Use FileSource app:appBundle for reads.",
                nil);
         return;
     } else {

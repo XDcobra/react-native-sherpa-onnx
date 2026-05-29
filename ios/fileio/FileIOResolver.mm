@@ -47,6 +47,16 @@ NSString * const kFIOErrPathTraversalBlocked  = @"FILEIO_PATH_TRAVERSAL_BLOCKED"
 // ---- Helper: resolve AppBaseDir ----
 
 static NSString *resolveAppBaseDir(NSString *base, NSString * _Nullable * _Nullable errCode, NSString * _Nullable * _Nullable errMsg) {
+  if ([base isEqualToString:@"apkAsset"]) {
+    if (errCode) *errCode = kFIOErrUnsupportedOnPlatform;
+    if (errMsg) *errMsg = @"apkAsset is Android-only";
+    return nil;
+  }
+  if ([base isEqualToString:@"appBundle"]) {
+    if (errCode) *errCode = kFIOErrUnsupportedOnPlatform;
+    if (errMsg) *errMsg = @"appBundle does not map to a sandbox directory. Use FileSource app:appBundle for reads.";
+    return nil;
+  }
   if ([base isEqualToString:@"cache"]) {
     return NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
   } else if ([base isEqualToString:@"documents"]) {
@@ -79,6 +89,50 @@ static NSString *resolveAppPath(NSString *base, NSString *relativePath, NSString
     return nil;
   }
   return canonical;
+}
+
+static NSString *resolveAppBundleRelativePath(
+  NSString *relativePath,
+  NSString * _Nullable * _Nullable errCode,
+  NSString * _Nullable * _Nullable errMsg
+) {
+  if ([relativePath containsString:@".."] ||
+      [relativePath hasPrefix:@"/"] ||
+      [relativePath hasPrefix:@"\\"] ||
+      [relativePath containsString:@"\\"]) {
+    if (errCode) *errCode = kFIOErrPathTraversalBlocked;
+    if (errMsg) *errMsg = [NSString stringWithFormat:@"Invalid appBundle path: %@", relativePath];
+    return nil;
+  }
+
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSString *bundleResourcePath = [[NSBundle mainBundle] resourcePath];
+  NSString *sourcePath = [bundleResourcePath stringByAppendingPathComponent:relativePath];
+  if ([fm fileExistsAtPath:sourcePath]) {
+    return [sourcePath stringByStandardizingPath];
+  }
+
+  NSString *bundlePath = [[NSBundle mainBundle] pathForResource:relativePath ofType:nil];
+  if (bundlePath && [fm fileExistsAtPath:bundlePath]) {
+    return [bundlePath stringByStandardizingPath];
+  }
+
+  NSArray *pathComponents = [relativePath componentsSeparatedByString:@"/"];
+  if (pathComponents.count > 1) {
+    NSString *directory = pathComponents[0];
+    for (NSUInteger i = 1; i < pathComponents.count - 1; i++) {
+      directory = [directory stringByAppendingPathComponent:pathComponents[i]];
+    }
+    NSString *resourceName = pathComponents.lastObject;
+    bundlePath = [[NSBundle mainBundle] pathForResource:resourceName ofType:nil inDirectory:directory];
+    if (bundlePath && [fm fileExistsAtPath:bundlePath]) {
+      return [bundlePath stringByStandardizingPath];
+    }
+  }
+
+  if (errCode) *errCode = kFIOErrNotFound;
+  if (errMsg) *errMsg = [NSString stringWithFormat:@"appBundle resource not found: %@", relativePath];
+  return nil;
 }
 
 // ---- Resolver ----
@@ -123,19 +177,23 @@ static NSString *resolveAppPath(NSString *base, NSString *relativePath, NSString
       if (errorMessage) *errorMessage = @"Missing 'base' or 'path' in app source";
       return nil;
     }
-    NSString *resolved = resolveAppPath(base, path, errorCode, errorMessage);
+    if ([base isEqualToString:@"apkAsset"]) {
+      if (errorCode) *errorCode = kFIOErrUnsupportedOnPlatform;
+      if (errorMessage) *errorMessage = @"apkAsset is Android-only";
+      return nil;
+    }
+    NSString *resolved = nil;
+    if ([base isEqualToString:@"appBundle"]) {
+      resolved = resolveAppBundleRelativePath(path, errorCode, errorMessage);
+    } else {
+      resolved = resolveAppPath(base, path, errorCode, errorMessage);
+    }
     if (!resolved) return nil;
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:resolved]) {
-      // Example app copies test_wavs/test_codec into the bundle Resources folder at build time.
-      NSString *bundlePath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:path];
-      if ([fm fileExistsAtPath:bundlePath]) {
-        resolved = bundlePath;
-      } else {
-        if (errorCode) *errorCode = kFIOErrNotFound;
-        if (errorMessage) *errorMessage = [NSString stringWithFormat:@"Source file not found: %@ (also checked bundle: %@)", resolved, bundlePath];
-        return nil;
-      }
+      if (errorCode) *errorCode = kFIOErrNotFound;
+      if (errorMessage) *errorMessage = [NSString stringWithFormat:@"Source file not found: %@", resolved];
+      return nil;
     }
     FileIOReadHandle *handle = [[FileIOReadHandle alloc] init];
     handle.isFilePath = YES;
@@ -228,6 +286,11 @@ static NSString *resolveAppPath(NSString *base, NSString *relativePath, NSString
     if (!base || !path) {
       if (errorCode) *errorCode = kFIOErrInvalidArgument;
       if (errorMessage) *errorMessage = @"Missing 'base' or 'path' in app destination";
+      return nil;
+    }
+    if ([base isEqualToString:@"apkAsset"] || [base isEqualToString:@"appBundle"]) {
+      if (errorCode) *errorCode = kFIOErrUnsupportedOnPlatform;
+      if (errorMessage) *errorMessage = @"Bundled app sources are read-only";
       return nil;
     }
     NSString *resolved = resolveAppPath(base, path, errorCode, errorMessage);

@@ -1,11 +1,8 @@
-#import <Foundation/Foundation.h>
-
-@class SherpaOnnx;
+#import "../../SherpaOnnx.h"
 
 @interface SherpaOnnx (Assets)
 
+- (NSString *)canonicalModelsDir;
 - (nullable NSString *)resolveAssetPath:(NSString *)assetPath error:(NSError **)error;
-- (nullable NSString *)resolveFilePath:(NSString *)filePath error:(NSError **)error;
-- (nullable NSString *)resolveAutoPath:(NSString *)path error:(NSError **)error;
 
 @end

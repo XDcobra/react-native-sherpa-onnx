@@ -74,10 +74,13 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'base' in app source")
         val path = source.getString("path")
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'path' in app source")
-        val file = if (base == "apkAsset") {
-          resolveApkAssetFile(path)
-        } else {
-          resolveAppPath(base, path)
+        val file = when (base) {
+          "apkAsset" -> resolveApkAssetFile(path)
+          "appBundle" -> throw FileIOException(
+            FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+            "appBundle is iOS-only"
+          )
+          else -> resolveAppPath(base, path)
         }
         if (!file.exists()) throw FileIOException(FileIOErrorCodes.NOT_FOUND, "Source file not found: ${file.absolutePath}")
         if (!file.canRead()) throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "Cannot read file: ${file.absolutePath}")
@@ -286,6 +289,10 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       "apkAsset" -> throw FileIOException(
         FileIOErrorCodes.INVALID_ARGUMENT,
         "apkAsset must be resolved via resolveApkAssetFile(), not resolveAppPath()"
+      )
+      "appBundle" -> throw FileIOException(
+        FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+        "appBundle is iOS-only"
       )
       else -> throw FileIOException(FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND, "Unknown AppBaseDir: $base")
     }

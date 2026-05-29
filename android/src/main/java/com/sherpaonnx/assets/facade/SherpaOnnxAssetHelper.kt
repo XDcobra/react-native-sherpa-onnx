@@ -1,7 +1,6 @@
 package com.sherpaonnx.assets.facade
 
 import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.sherpaonnx.assets.core.AssetModelLister
 import com.sherpaonnx.assets.core.AssetPackLocator
@@ -15,8 +14,8 @@ internal class SherpaOnnxAssetHelper(
   private val modelLister = AssetModelLister(context, logTag)
   private val assetPackLocator = AssetPackLocator(context, logTag)
 
-  fun resolveModelPath(config: ReadableMap, promise: Promise) {
-    pathResolver.resolveModelPath(config, promise)
+  fun resolveBundledAssetPath(relativePath: String, promise: Promise) {
+    pathResolver.resolveBundledAssetPath(relativePath, promise)
   }
 
   fun listAssetModels(promise: Promise) {
