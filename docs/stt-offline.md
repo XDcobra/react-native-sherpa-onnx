@@ -226,6 +226,8 @@ console.log(det.success, det.modelType, det.detectedModels);
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
+For multi-location probing (bundled → sandbox → PAD → absolute path), use `kind: 'auto'` with an explicit `tryOrder` — see [model-setup.md — kind: auto](model-setup.md).
+
 #### `createSTT(options)`
 
 ```ts

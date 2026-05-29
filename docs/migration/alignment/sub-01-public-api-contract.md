@@ -225,7 +225,7 @@ export function createAlignment(
 | Needs | From | Why |
 |-------|------|-----|
 | Locked option matrix | `alignment-public-modes-plan.md` | Source of truth |
-| FileSource | `src/fileio/types.ts` (re-exported from `react-native-sherpa-onnx/fileio`); `resolveModelPath` in `src/utils` | Already in use |
+| FileSource | `src/fileio/types.ts` (re-exported from `react-native-sherpa-onnx/fileio`); `bundledModelFileSource` in `src/utils` | Already in use |
 
 | Blocks | Reason |
 |--------|--------|

@@ -46,7 +46,7 @@ import {
   type OfflineTextBufferInfo,
 } from 'react-native-sherpa-onnx/textbuffer';
 
-// Same directory, two path shapes: FileSource for detect, FileSource for init/resolveModelPath.
+// Same directory: FileSource for detect and for init.
 const modelDirFs = { kind: 'fs' as const, path: '/absolute/path/to/sherpa-onnx-punct-ct-en' };
 const modelPath = { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' };
 
@@ -57,7 +57,6 @@ if (!det.success) {
 }
 
 // Load the native OfflinePunctuation (ct_transformer only inside native).
-// resolveModelPath turns FileSource into an absolute path the native side can open.
 const punct = await createOfflinePunctuation({
   modelSource: modelPath,
   modelType: 'auto', // native init uses ct_transformer — never picks CNN for this engine
@@ -403,7 +402,7 @@ Typical **promise rejection `code`** strings (Android / iOS native). User-visibl
 | `TEXT_BUFFER_KIND_MISMATCH` | Not an **offline** buffer id (`txt_off_*` required). |
 | `TEXT_BUFFER_EMPTY` | `textIn` is not populated (input must have text). |
 | `TEXT_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
-| `FILEIO_*` | File / URI resolution for **`FileSource`** before or during `resolveModelPath` (if applicable to your `modelPath` kind). |
+| `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init (if applicable to your source kind). |
 
 ---
 

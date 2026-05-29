@@ -2,7 +2,7 @@
 
 Discover, resolve, and validate model paths across bundled assets, Play Asset Delivery (PAD), and downloaded models.
 
-**Import paths:** path helpers (`assetModelPath`, `resolveModelPath`, …) live in `react-native-sherpa-onnx/utils`. The **`FileSource`** type is exported from **`react-native-sherpa-onnx/fileio`**.
+**Import paths:** path helpers (`bundledModelFileSource`, `listAssetModels`, …) live in `react-native-sherpa-onnx/utils`. The **`FileSource`** type is exported from **`react-native-sherpa-onnx/fileio`**.
 
 ---
 
@@ -28,13 +28,11 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Asset model path | ✅ | `assetModelPath()` — bundled in app |
-| File model path | ✅ | `fileModelPath()` — absolute filesystem path |
-| Auto model path | ✅ | `autoModelPath()` — tries asset then filesystem |
-| Path resolution | ✅ | `resolveModelPath()` — returns native-usable absolute path |
+| Bundled model path | ✅ | `bundledModelFileSource()` — Android `apkAsset`, iOS `appBundle` |
+| Multi-source fallback | ✅ | `kind: 'auto'` + explicit `tryOrder` (model detect/init only) |
 | Asset listing | ✅ | `listAssetModels()` — scans `assets/models/` (Android) / bundle `models/` (iOS) |
 | Filesystem listing | ✅ | `listModelsAtPath()` — scans any directory |
-| PAD support | ✅ | See [Extraction API](extraction.md) for more details - Android only |
+| PAD support | ✅ | Android only — `pad` FileSource or `getAssetPackPath()` |
 | STT model detection | ✅ | `detectSttModel()` — file-based type detection + required-file validation |
 | TTS model detection | ✅ | `detectTtsModel()` — file-based type detection |
 
@@ -44,11 +42,10 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 
 ```typescript
 import {
-  assetModelPath,
+  bundledModelFileSource,
   listAssetModels,
-  resolveModelPath,
 } from 'react-native-sherpa-onnx/utils';
-import { detectSttModel } from 'react-native-sherpa-onnx/stt';
+import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 // 1) Discover bundled models
 const models = await listAssetModels();
@@ -60,9 +57,9 @@ console.log(detection.modelType);    // 'whisper'
 console.log(detection.isStreaming);   // false (whisper is offline-only)
 
 // 3) Create engine
-const modelPath = assetModelPath('models/sherpa-onnx-whisper-tiny-en');
+const modelSource = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
 const stt = await createSTT({
-  modelSource: modelPath,
+  modelSource,
   modelType: 'auto', // uses detected type
 });
 ```
@@ -73,64 +70,68 @@ const stt = await createSTT({
 
 ### Path Helpers
 
-#### `assetModelPath(assetPath)`
+#### `bundledModelFileSource(relativePath)`
 
-Create a `FileSource` pointing to a model bundled in app assets.
-
-```ts
-function assetModelPath(assetPath: string): FileSource;
-// Returns { kind: 'app', base: 'apkAsset', path: assetPath }
-```
-
-**Android:** relative to `assets/` (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
-**iOS:** relative to the app bundle (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
-
-#### `fileModelPath(filePath)`
-
-Create a `FileSource` pointing to a model on the filesystem.
+Create a {@link FileSource} for models shipped inside the app package. Resolution is deterministic per platform:
 
 ```ts
-function fileModelPath(filePath: string): FileSource;
-// Returns { kind: 'fs', path: filePath }
+function bundledModelFileSource(relativePath: string): FileSource;
+// Android: { kind: 'app', base: 'apkAsset', path }
+// iOS:     { kind: 'app', base: 'appBundle', path }
 ```
 
-Use absolute paths (e.g. from downloads or PAD). On iOS, use the Documents directory path.
+**Android:** relative to `assets/` (e.g. `'models/sherpa-onnx-whisper-tiny-en'`). Materialized to a readable directory under the app sandbox.
 
-#### `autoModelPath(path)`
+**iOS:** relative to the main app bundle (Copy Bundle Resources in Xcode).
 
-Create a `FileSource` that tries asset first, then filesystem.
+Use `{ kind: 'fs', path: absolutePath }` for downloaded or extracted models on disk.
+
+#### `autoModelFileSource(path, tryOrder)` / `kind: 'auto'`
+
+When a model folder name is the same across bundled assets, sandbox, PAD, and/or an absolute path, you can probe multiple locations **in a fixed order** instead of hardcoding one `FileSource` per platform.
 
 ```ts
-function autoModelPath(path: string): FileSource;
-// Returns { kind: 'app', base: 'apkAsset', path } (tries bundled assets)
+import { autoModelFileSource } from 'react-native-sherpa-onnx/utils';
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+
+// Equivalent to:
+// { kind: 'auto', path: 'models/my-pack', tryOrder: [...] }
+const modelSource = autoModelFileSource('models/my-pack', [
+  'apkAsset',   // Android APK assets/models/my-pack
+  'appBundle',  // iOS bundle models/my-pack (skipped on Android)
+  'files',      // app sandbox files/models/my-pack
+  { pad: 'sherpa_models' }, // Android PAD pack (skipped on iOS)
+  'fs',         // treat path as absolute FS directory (useful after download/extract)
+]);
+
+const stt = await createSTT({ modelSource, modelType: 'auto' });
 ```
 
-#### `resolveModelPath(config)`
+**Rules:**
 
-Resolve a `FileSource` to an absolute filesystem path that native code can use.
-
-```ts
-function resolveModelPath(config: FileSource): Promise<string>;
-```
-
-| `kind` | Resolution |
+| Rule | Detail |
 | --- | --- |
-| `'app'` + `base: 'apkAsset'` | Android: materializes bundled APK assets and returns an absolute filesystem path. iOS: unsupported for `apkAsset` |
-| `'app'` + sandbox base (`files`, `cache`, `documents`, `tmp`, `externalFiles`) | App sandbox directory resolution |
-| `'fs'` | Returns the path as-is |
-| `'pad'` | Reads from Play Asset Delivery pack |
-| `'contentUri'` | Resolves Android content URI (detect only, not init) |
-| `'securityScoped'` | Resolves iOS security-scoped bookmark (detect only, not init) |
+| **`tryOrder` required** | `{ kind: 'auto', path, tryOrder: [] }` or missing `tryOrder` → `FILEIO_INVALID_ARGUMENT` |
+| **Explicit order only** | First target that resolves to an **existing directory** wins; no hidden defaults |
+| **Same `path` string** | Relative for `app` / `pad` / bundled bases; absolute when `'fs'` is tried |
+| **Platform skips** | Unsupported targets (e.g. `appBundle` on Android) are skipped; resolution continues |
+| **Failure** | If nothing matches → `FILEIO_NOT_FOUND` with `tryOrder` and per-target errors in the message |
+| **Scope** | Model detect/init (`detectSttModel`, `createSTT`, …) — **not** `copyFile` / `shareFile` |
 
-#### `getDefaultModelPath()`
+**Typical Android try order:** `['apkAsset', 'files', { pad: 'sherpa_models' }, 'fs']`  
+**Typical iOS try order:** `['appBundle', 'files', 'fs']`
 
-Returns the platform-specific default model directory.
+Prefer **`bundledModelFileSource()`** when you know the model is shipped in the app package — it stays fully deterministic without probing.
 
-```ts
-function getDefaultModelPath(): string;
-// iOS: 'Documents/models'
-// Android: 'models'
-```
+#### Bundled bases (`apkAsset` vs `appBundle`)
+
+| `AppBaseDir` | Android | iOS |
+| --- | --- | --- |
+| `apkAsset` | APK `assets/<path>` | `FILEIO_UNSUPPORTED_ON_PLATFORM` |
+| `appBundle` | `FILEIO_UNSUPPORTED_ON_PLATFORM` | Main bundle `<path>` |
+| `files`, `cache`, … | App sandbox only | App sandbox only — **no** bundle fallback |
+
+`pad` (Play Asset Delivery) is Android-only; on iOS the SDK rejects with `FILEIO_UNSUPPORTED_ON_PLATFORM`.
 
 ---
 
@@ -319,18 +320,20 @@ See [sdk-init-bridge.md](./sdk-init-bridge.md) for the two-layer pattern, bridge
 
 | Source | Path Helper | Discovery | Use Case |
 | --- | --- | --- | --- |
-| Bundled assets | `assetModelPath()` | `listAssetModels()` | Ship models with the app |
-| Play Asset Delivery | `fileModelPath()` | `getAssetPackPath()` + `listModelsAtPath()` | Large models on Android (on-demand packs) |
-| PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `autoModelPath` |
-| Downloaded models | `fileModelPath()` | `listModelsAtPath()` or Download Manager | User-selected models at runtime |
-| Fallback / auto | `autoModelPath()` | — | Try asset first, then file |
+| Bundled assets | `bundledModelFileSource()` | `listAssetModels()` | Ship models with the app |
+| Multi-source probe | `autoModelFileSource(path, tryOrder)` | — | Same folder name in bundle, sandbox, PAD, or FS |
+| Play Asset Delivery | `{ kind: 'pad', … }` or `auto` `{ pad: … }` | `getAssetPackPath()` + `listModelsAtPath()` | Large models on Android (on-demand packs) |
+| PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `{ kind: 'fs', path }` |
+| Downloaded models | `{ kind: 'fs', path }` | Download Manager or `listModelsAtPath()` | User-selected models at runtime |
 
-`app:files` and `app:apkAsset` have different semantics and must not be mixed:
+`app:files`, `app:apkAsset`, and `app:appBundle` have different semantics and must not be mixed:
 
-| FileSource | Meaning | Typical resolved path behavior |
+| FileSource | Meaning | Platform |
 | --- | --- | --- |
-| `{ kind: 'app', base: 'files', path: 'models/foo' }` | App sandbox internal files directory | `/data/user/0/<pkg>/files/models/foo` on Android |
-| `{ kind: 'app', base: 'apkAsset', path: 'models/foo' }` | Bundled APK asset tree | Materialized from `assets/models/foo` to a readable local directory on Android |
+| `{ kind: 'app', base: 'files', path: 'models/foo' }` | App sandbox internal files directory | Both |
+| `{ kind: 'app', base: 'apkAsset', path: 'models/foo' }` | Bundled APK asset tree | Android only |
+| `{ kind: 'app', base: 'appBundle', path: 'models/foo' }` | Main bundle resources | iOS only |
+| `{ kind: 'auto', path: 'models/foo', tryOrder: ['apkAsset', 'files', …] }` | Try locations in order; first existing directory | Detect/init only |
 
 Combining multiple sources:
 
@@ -419,7 +422,7 @@ if (!detection.success) {
 | Issue | Solution |
 | --- | --- |
 | `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
-| `resolveModelPath()` fails | Check that the model directory exists at the expected location on the platform |
+| Bundled model resolution fails | Check that the model directory exists at the expected location on the platform; use `bundledModelFileSource('models/...')` with `app:apkAsset` (Android) or `app:appBundle` (iOS) |
 | PAD returns `null` | PAD requires `play-core` dependency and correct `build.gradle` asset pack config; iOS always returns `null` |
 | `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |

@@ -27,7 +27,7 @@ type FileDestination =
   | { kind: 'contentTree'; treeUri: string; filename: string; mimeType: string }
   | { kind: 'securityScoped'; uri: string };
 
-type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles';
+type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'apkAsset' | 'appBundle';
 ```
 
 ## Platform notes
@@ -35,7 +35,7 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles';
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset`; iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
 | `contentUri` | SAF document URI | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |

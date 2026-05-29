@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The `react-native-sherpa-onnx/extraction` subpath provides a unified API to **list** and **extract** compressed model archives (`.tar.zst` and `.tar.bz2`). After extraction to a target directory (e.g. `DocumentDirectoryPath/models`), use `listModelsAtPath` and `autoModelPath` from the main package to discover and use the extracted models.
+The `react-native-sherpa-onnx/extraction` subpath provides a unified API to **list** and **extract** compressed model archives (`.tar.zst` and `.tar.bz2`). After extraction to a target directory (e.g. `DocumentDirectoryPath/models`), use `listModelsAtPath` and `{ kind: 'fs', path }` from the main package to discover and use the extracted models.
 
 ---
 
@@ -250,7 +250,7 @@ import type {
 ```typescript
 import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { autoModelPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
+import { listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 
 const targetDir = `${DocumentDirectoryPath}/models`;
 
@@ -331,7 +331,7 @@ if (sttModel) {
  │  List archives       │     │  Extract            │     │  Use models          │
  │                      │     │                     │     │                      │
  │ getBundledArchives() │────▶│ extractArchive()    │────▶│ listModelsAtPath()   │
- │ listBundledArchives()│     │   (handles PAD +    │     │ autoModelPath()      │
+ │ listBundledArchives()│     │   (handles PAD +    │     │ listModelsAtPath()   │
  │                      │     │    filesystem)       │     │ createSTT / TTS()    │
  └─────────────────────┘     └────────────────────┘     └─────────────────────┘
 ```
@@ -344,7 +344,7 @@ if (sttModel) {
 
 ## See also
 
-- [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `autoModelPath`
+- [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `bundledModelFileSource`
 - [Download manager](download-manager.md) — downloading models from the network
 - [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts-offline.md) — Text-to-Speech API
