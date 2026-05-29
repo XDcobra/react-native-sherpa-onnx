@@ -80,7 +80,7 @@ inline AudioDecodeResult decodeFile(
  * WAV: exact duration from fmt/data chunks. Other formats: FFmpeg demux when available.
  * Throws std::runtime_error with PROBE_* error code prefix on failure.
  */
-AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd = -1);
+AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd);
 
 inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
   return probeFileDuration(pathOrFd, -1);
@@ -91,7 +91,7 @@ inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
  * Sniffs container/codec from file content (auto-probe only; ignores extension demuxer).
  * Throws std::runtime_error with PROBE_* error code prefix on failure.
  */
-AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd = -1);
+AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd);
 
 inline AudioContainerProbeResult probeFileContainer(const char* pathOrFd) {
   return probeFileContainer(pathOrFd, -1);

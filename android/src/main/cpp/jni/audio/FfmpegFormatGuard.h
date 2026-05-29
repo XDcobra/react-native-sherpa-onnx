@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef __cplusplus
+
 #include <string>
 
 struct AVFormatContext;
@@ -55,3 +57,5 @@ FfmpegFormatGuardResult openGuardedFdFormatInput(
     bool tryExtensionDemuxerFirst = true);
 
 } // namespace sherpa
+
+#endif // __cplusplus

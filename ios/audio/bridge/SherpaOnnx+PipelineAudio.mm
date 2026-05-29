@@ -565,7 +565,7 @@ static sherpa::AudioVisualizationProfile pa_computeVisualizationFromFile(
 
   int64_t probedDurationMs = -1;
   try {
-    const auto probeResult = sherpa::probeFileDuration(path.c_str());
+    const auto probeResult = sherpa::probeFileDuration(path.c_str(), -1);
     probedDurationMs = probeResult.durationMs;
   } catch (...) {
     probedDurationMs = -1;
@@ -1774,7 +1774,7 @@ static bool pa_populate_offline_from_source_if_empty(
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     @autoreleasepool {
       try {
-        auto result = sherpa::probeFileDuration(path.c_str());
+        auto result = sherpa::probeFileDuration(path.c_str(), -1);
         [readHandle cleanup];
         if (tmpPathCleanup) {
           [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];
@@ -1880,7 +1880,7 @@ static bool pa_populate_offline_from_source_if_empty(
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     @autoreleasepool {
       try {
-        auto result = sherpa::probeFileContainer(path.c_str());
+        auto result = sherpa::probeFileContainer(path.c_str(), -1);
         [readHandle cleanup];
         if (tmpPathCleanup) {
           [[NSFileManager defaultManager] removeItemAtPath:tmpPathCleanup error:nil];

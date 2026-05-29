@@ -39,7 +39,7 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
 @implementation SherpaOnnx (OnlineSTT)
 
 - (void)initializeOnlineStt:(NSString *)instanceId
-                               options:(JS::NativeSherpaOnnx::SpecInitializeOnlineSttOptions &)options
+                               options:(JS::NativeSherpaOnnx::OnlineSttInitBridgeOptions &)options
                                resolve:(RCTPromiseResolveBlock)resolve
                                 reject:(RCTPromiseRejectBlock)reject
 {

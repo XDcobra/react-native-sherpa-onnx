@@ -28,9 +28,9 @@ void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSeg
 
   const auto &speech = std::get<CommittedSegmentSpeech>(segment);
 
-  if (audioOutput_->getSampleRate() != speech.sampleRate) {
+  if (audioOutput_->sampleRate != speech.sampleRate) {
     throw std::runtime_error(
-      "ENHANCEMENT_SAMPLE_RATE_MISMATCH: live audio out is " + std::to_string(audioOutput_->getSampleRate()) +
+      "ENHANCEMENT_SAMPLE_RATE_MISMATCH: live audio out is " + std::to_string(audioOutput_->sampleRate) +
       " Hz; chunk is " + std::to_string(speech.sampleRate) + " Hz"
     );
   }
@@ -42,11 +42,15 @@ void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSeg
   if (samples.empty()) return;
 
   auto result = wrapper_->runSamples(samples, static_cast<int32_t>(speech.sampleRate));
-  
-  std::string errCode, errMsg;
-  if (!audioOutput_->appendSamples(result.samples, &errCode, &errMsg)) {
-    throw std::runtime_error("Failed to append to enhancement live output buffer: " + errMsg);
-  }
+
+  if (result.samples.empty()) return;
+
+  audioOutput_->appendSamples(
+    result.samples.data(),
+    result.samples.size(),
+    result.sampleRate,
+    kPaAppendSourceEnhancement
+  );
 
   addUnitsWritten(static_cast<int64_t>(result.samples.size()));
 }

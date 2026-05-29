@@ -5,9 +5,7 @@
 #include "../sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 #include "../EnhancementOfflineLivePipelineWorker.h"
-#include "../../segment/core/SherpaOnnx+SegmentationGlobals.h"
-#include "../../segment/engine/SegmentationEngineRegistry.h"
-#include "../../segment/pipeline/SegmentPipelineRegistry.h"
+#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 
@@ -274,7 +272,7 @@ static NSString *const kOfflineEnhancementOomMessage =
   std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
-  auto liveSegmentEntry = sherpaonnx::segmentation::SegmentPipelineRegistry::getInstance().getLiveEntry(segmentBufferIdStr);
+  auto liveSegmentEntry = seg_get_live_entry(segmentBufferIdStr);
   if (!liveSegmentEntry) {
     reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Segment buffer not found", nil);
     return;
