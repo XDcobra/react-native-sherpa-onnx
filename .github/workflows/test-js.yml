@@ -39,5 +39,12 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
+      - name: Install example dependencies (codegen)
+        run: yarn install --immutable
+        working-directory: example
+
+      - name: Check iOS TurboModule signatures
+        run: yarn check:ios-turbo-signatures
+
       - name: Run JS tests
         run: yarn test --ci

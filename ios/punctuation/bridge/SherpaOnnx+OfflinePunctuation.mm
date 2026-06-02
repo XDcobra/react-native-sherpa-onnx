@@ -69,7 +69,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 
 - (void)initializeOfflinePunctuation:(NSString *)instanceId
                             modelDir:(NSString *)modelDir
-                           modelType:(NSString *)modelType
+                           modelType:(NSString * _Nullable)modelType
                           numThreads:(NSNumber *)numThreads
                             provider:(NSString *)provider
                                debug:(NSNumber *)debug

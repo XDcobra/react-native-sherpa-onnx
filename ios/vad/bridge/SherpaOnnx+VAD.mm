@@ -92,8 +92,8 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 @implementation SherpaOnnx (VAD)
 
 - (void)detectVadModel:(NSString *)modelDir
-             assetName:(NSString *)assetName
-             modelType:(NSString *)modelType
+             assetName:(NSString * _Nullable)assetName
+             modelType:(NSString * _Nullable)modelType
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {

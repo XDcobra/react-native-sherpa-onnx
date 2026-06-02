@@ -1187,8 +1187,8 @@ static std::string txt_generateId(const char *prefix) {
 
 - (void)appendLiveTextSegment:(NSString *)liveBufferId
                           text:(NSString *)text
-                        tokens:(NSArray<NSString *> *)tokens
-                    timestamps:(NSArray<NSNumber *> *)timestamps
+                        tokens:(NSArray *)tokens
+                    timestamps:(NSArray *)timestamps
                           meta:(NSDictionary *)meta
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject

@@ -39,7 +39,7 @@ std::vector<sherpaonnx::UnifiedModelDetectInput> InputsFromNSArray(NSArray *inpu
 @implementation SherpaOnnx (ModelDetect)
 
 - (void)detectModel:(NSString *)modelDir
-          assetName:(NSString *)assetName
+          assetName:(NSString * _Nullable)assetName
             resolve:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject
 {

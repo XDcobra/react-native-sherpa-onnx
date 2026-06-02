@@ -21,8 +21,8 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 @implementation SherpaOnnx (Enhancement)
 
 - (void)detectEnhancementModel:(NSString *)modelDir
-                     assetName:(NSString *)assetName
-                     modelType:(NSString *)modelType
+                     assetName:(NSString * _Nullable)assetName
+                     modelType:(NSString * _Nullable)modelType
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {

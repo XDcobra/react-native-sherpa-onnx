@@ -43,6 +43,7 @@ local.properties
 android.iml
 app-voicelab-*.json
 android-codegen-out/
+.codegen/
 
 # AI
 .cursor/

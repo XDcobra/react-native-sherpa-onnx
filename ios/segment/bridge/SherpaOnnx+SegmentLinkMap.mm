@@ -481,15 +481,17 @@ static std::string slmPairTypeKey(
 }
 
 - (void)getAllSegmentLinks:(NSString *)linkMapId
-                startIndex:(double)startIndex
-                  maxCount:(double)maxCount
+                startIndex:(NSNumber *)startIndex
+                  maxCount:(NSNumber *)maxCount
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   @try {
-    int start = std::max(0, (int)startIndex);
-    int count = std::max(0, (int)maxCount);
+    const double startIndexVal = startIndex != nil ? startIndex.doubleValue : 0.0;
+    const double maxCountVal = maxCount != nil ? maxCount.doubleValue : 4096.0;
+    int start = std::max(0, (int)startIndexVal);
+    int count = std::max(0, (int)maxCountVal);
 
     NSMutableArray *out = [NSMutableArray array];
     std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);

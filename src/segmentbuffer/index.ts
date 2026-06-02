@@ -774,10 +774,14 @@ export async function getOfflineSegmentBufferSegments(
   maxCount = 4096
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
+  const sliceMaxCount =
+    maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
+      ? 4096
+      : maxCount;
   const raw = await getNative().getOfflineSegmentBufferSegments(
     id,
     start,
-    maxCount
+    sliceMaxCount
   );
   return raw.segments.map((segment) => {
     const kind = assertValidSegmentKind(segment.kind, 'segment.kind');
@@ -828,10 +832,14 @@ export async function getLiveSegmentBufferSegments(
   maxCount: number
 ): Promise<SegmentMeta[]> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
+  const sliceMaxCount =
+    maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
+      ? 4096
+      : maxCount;
   const raw = await getNative().getLiveSegmentBufferSegments(
     id,
     startIndex,
-    maxCount
+    sliceMaxCount
   );
   return raw.segments.map((segment) => {
     const kind = assertValidSegmentKind(segment.kind, 'segment.kind');

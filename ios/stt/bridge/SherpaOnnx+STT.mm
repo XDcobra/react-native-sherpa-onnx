@@ -285,8 +285,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 }
 
 - (void)detectSttModel:(NSString *)modelDir
-            assetName:(NSString *)assetName
-            modelType:(NSString *)modelType
+            assetName:(NSString * _Nullable)assetName
+            modelType:(NSString * _Nullable)modelType
            preferInt8:(NSNumber *)preferInt8
                 debug:(NSNumber *)debug
               resolve:(RCTPromiseResolveBlock)resolve

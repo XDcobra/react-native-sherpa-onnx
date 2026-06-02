@@ -19,8 +19,8 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 @implementation SherpaOnnx (Punctuation)
 
 - (void)detectPunctuationModel:(NSString *)modelDir
-                      assetName:(NSString *)assetName
-                      modelType:(NSString *)modelType
+                      assetName:(NSString * _Nullable)assetName
+                      modelType:(NSString * _Nullable)modelType
                         resolve:(RCTPromiseResolveBlock)resolve
                          reject:(RCTPromiseRejectBlock)reject
 {

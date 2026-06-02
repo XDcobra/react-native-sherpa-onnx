@@ -841,30 +841,64 @@ struct SegLiveEntry {
 
 namespace {
 
+static void seg_debug_log(NSString *message) {
+#if DEBUG
+  NSLog(@"[SegmentBuffer][iOS] %@", message ?: @"<nil>");
+#endif
+}
+
+static NSString *seg_nsstring_from_std(const std::string &value) {
+  if (value.empty()) {
+    return @"";
+  }
+  NSString *s = [[NSString alloc] initWithBytes:value.data()
+                                          length:value.size()
+                                        encoding:NSUTF8StringEncoding];
+  if (s) {
+    return s;
+  }
+  // Keep bridge stable even if native payload contains malformed UTF-8.
+  s = [[NSString alloc] initWithBytes:value.data()
+                               length:value.size()
+                             encoding:NSISOLatin1StringEncoding];
+  return s ?: @"";
+}
+
 static NSDictionary *segRecordToDict(const SegRecord &r) {
-  NSMutableDictionary *dict = [@{
-    @"id": [NSString stringWithUTF8String:r.id.c_str()],
-    @"kind": [NSString stringWithUTF8String:r.kind.c_str()],
-    @"sourceAudioBufferId": [NSString stringWithUTF8String:r.sourceAudioBufferId.c_str()],
-    @"startSample": @(r.startSample),
-    @"endSample": @(r.endSample),
-    @"sampleRate": @(r.sampleRate),
-    @"durationMs": @(r.durationMs),
-  } mutableCopy];
+#if DEBUG
+  seg_debug_log([NSString stringWithFormat:
+    @"segRecordToDict idLen=%lu kindLen=%lu srcLen=%lu payloadBytes=%lu",
+    (unsigned long)r.id.size(),
+    (unsigned long)r.kind.size(),
+    (unsigned long)r.sourceAudioBufferId.size(),
+    (unsigned long)r.payloadJson.size()]);
+#endif
+  NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:10];
+  dict[@"id"] = seg_nsstring_from_std(r.id);
+  dict[@"kind"] = seg_nsstring_from_std(r.kind);
+  dict[@"sourceAudioBufferId"] = seg_nsstring_from_std(r.sourceAudioBufferId);
+  dict[@"startSample"] = @(r.startSample);
+  dict[@"endSample"] = @(r.endSample);
+  dict[@"sampleRate"] = @(r.sampleRate);
+  dict[@"durationMs"] = @(r.durationMs);
   std::string annReason;
   std::string annSource;
   int64_t annCreatedAtMs = 0;
   int annSegmentIndex = 0;
   if (seg_engine_peek_annotation(r.id, &annReason, &annSource, &annCreatedAtMs, &annSegmentIndex)) {
-    dict[@"reason"] = [NSString stringWithUTF8String:annReason.c_str()] ?: @"manual_commit";
-    dict[@"source"] = [NSString stringWithUTF8String:annSource.c_str()] ?: @"manual";
+    dict[@"reason"] = seg_nsstring_from_std(annReason);
+    dict[@"source"] = seg_nsstring_from_std(annSource);
     dict[@"createdAtMs"] = @(annCreatedAtMs);
   }
   if (r.hasConfidence) dict[@"confidence"] = @(r.confidence);
-  if (!r.payloadJson.empty()) {
-    NSData *payloadData = [[NSString stringWithUTF8String:r.payloadJson.c_str()] dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *payloadObj = payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
-    if (payloadObj) dict[@"payload"] = payloadObj;
+  if (!r.payloadJson.empty() && r.payloadJson.size() <= NSUIntegerMax) {
+    NSData *payloadData = [NSData dataWithBytes:r.payloadJson.data()
+                                         length:(NSUInteger)r.payloadJson.size()];
+    id payloadObj =
+      payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
+    if ([payloadObj isKindOfClass:[NSDictionary class]]) {
+      dict[@"payload"] = (NSDictionary *)payloadObj;
+    }
   }
   return dict;
 }
@@ -2951,32 +2985,96 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
 }
 
 - (void)getOfflineSegmentBufferSegments:(NSString *)bufferId
-                                  start:(double)start
-                               maxCount:(double)maxCount
+                                  start:(NSNumber *)start
+                               maxCount:(NSNumber *)maxCount
                                 resolve:(RCTPromiseResolveBlock)resolve
                                  reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegOfflineEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_offline.find(bufferId.UTF8String);
-    if (it == g_seg_offline.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
+  // Codegen passes optional slice args as NSNumber* (see SherpaOnnxSpec.h). Using
+  // double here misaligns NSInvocation and corrupts resolve/reject (SIGSEGV).
+  const double startVal = start != nil ? start.doubleValue : 0.0;
+  const double maxCountVal = maxCount != nil ? maxCount.doubleValue : 4096.0;
+#if DEBUG
+  seg_debug_log([NSString stringWithFormat:
+    @"getOfflineSegmentBufferSegments enter bufferId=%@ start=%.3f maxCount=%.3f thread=%@",
+    bufferId ?: @"<nil>",
+    startVal,
+    maxCountVal,
+    [NSThread isMainThread] ? @"main" : @"background"]);
+#endif
+  @try {
+    if (!std::isfinite(startVal) || !std::isfinite(maxCountVal)) {
+      seg_debug_log(@"getOfflineSegmentBufferSegments reject invalid finite slice");
+      reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
       return;
     }
-    entry = it->second;
+    const int64_t s64 = static_cast<int64_t>(startVal);
+    const int64_t c64 = static_cast<int64_t>(maxCountVal);
+    if (s64 < 0 || c64 < 0) {
+      seg_debug_log(@"getOfflineSegmentBufferSegments reject negative slice");
+      reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
+      return;
+    }
+
+    std::vector<SegRecord> snap;
+    {
+      std::lock_guard<std::mutex> lock(g_seg_mutex);
+      const char *bufferKey = bufferId.UTF8String;
+      if (bufferKey == nullptr) {
+        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Offline segment buffer not found", nil);
+        return;
+      }
+      auto it = g_seg_offline.find(bufferKey);
+      if (it == g_seg_offline.end()) {
+        seg_debug_log([NSString stringWithFormat:
+          @"getOfflineSegmentBufferSegments reject not found bufferId=%@",
+          bufferId ?: @"<nil>"]);
+        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
+        return;
+      }
+      auto &segments = it->second->segments;
+      const int64_t total = static_cast<int64_t>(segments.size());
+      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
+#if DEBUG
+      seg_debug_log([NSString stringWithFormat:
+        @"getOfflineSegmentBufferSegments slice total=%lld s=%lld c=%lld end=%lld",
+        (long long)total,
+        (long long)s64,
+        (long long)c64,
+        (long long)end64]);
+#endif
+      if (s64 < total && end64 > s64) {
+        const size_t from = static_cast<size_t>(s64);
+        const size_t to = static_cast<size_t>(end64);
+        snap.assign(segments.begin() + from, segments.begin() + to);
+      }
+    }
+
+    NSArray *segmentsOut = nil;
+    if (snap.empty()) {
+      segmentsOut = @[];
+    } else {
+      NSMutableArray *arr = [NSMutableArray arrayWithCapacity:snap.size()];
+      seg_debug_log([NSString stringWithFormat:
+        @"getOfflineSegmentBufferSegments serializing snapCount=%lu",
+        (unsigned long)snap.size()]);
+      for (const auto &r : snap) {
+        [arr addObject:segRecordToDict(r)];
+      }
+      segmentsOut = [arr copy];
+    }
+    seg_debug_log([NSString stringWithFormat:
+      @"getOfflineSegmentBufferSegments resolve segments=%lu",
+      (unsigned long)segmentsOut.count]);
+    resolve(@{@"segments": segmentsOut});
+  } @catch (NSException *exception) {
+    seg_debug_log([NSString stringWithFormat:
+      @"getOfflineSegmentBufferSegments exception name=%@ reason=%@",
+      exception.name ?: @"<nil>",
+      exception.reason ?: @"<nil>"]);
+    reject(@"SEGMENT_INTERNAL_ERROR", exception.reason ?: @"Failed to read offline segments", nil);
   }
-  int s = (int)start;
-  int c = (int)maxCount;
-  if (s < 0 || c < 0) {
-    reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
-    return;
-  }
-  NSMutableArray *arr = [NSMutableArray array];
-  int end = std::min((int)entry->segments.size(), s + c);
-  for (int i = s; i < end; ++i) [arr addObject:segRecordToDict(entry->segments[i])];
-  resolve(@{@"segments": arr});
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2989,33 +3087,77 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
                               reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_live.find(liveBufferId.UTF8String);
-    if (it == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
+#if DEBUG
+  seg_debug_log([NSString stringWithFormat:
+    @"getLiveSegmentBufferSegments enter bufferId=%@ start=%.3f maxCount=%.3f thread=%@",
+    liveBufferId ?: @"<nil>",
+    startIndex,
+    maxCount,
+    [NSThread isMainThread] ? @"main" : @"background"]);
+#endif
+  @try {
+    std::shared_ptr<SegLiveEntry> entry;
+    {
+      std::lock_guard<std::mutex> lock(g_seg_mutex);
+      const char *bufferKey = liveBufferId.UTF8String;
+      if (bufferKey == nullptr) {
+        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Live segment buffer not found", nil);
+        return;
+      }
+      auto it = g_seg_live.find(bufferKey);
+      if (it == g_seg_live.end()) {
+        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
+        return;
+      }
+      entry = it->second;
+    }
+    if (!std::isfinite(startIndex) || !std::isfinite(maxCount)) {
+      seg_debug_log(@"getLiveSegmentBufferSegments reject invalid finite slice");
+      reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
       return;
     }
-    entry = it->second;
-  }
-  int s = (int)startIndex;
-  int c = (int)maxCount;
-  if (s < 0 || c < 0) {
-    reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
-    return;
-  }
-  std::vector<SegRecord> snap;
-  {
-    std::lock_guard<std::mutex> guard(entry->lock);
-    int end = std::min((int)entry->segments.size(), s + c);
-    if (s < (int)entry->segments.size() && end > s) {
-      snap.assign(entry->segments.begin() + s, entry->segments.begin() + end);
+    const int64_t s64 = static_cast<int64_t>(startIndex);
+    const int64_t c64 = static_cast<int64_t>(maxCount);
+    if (s64 < 0 || c64 < 0) {
+      seg_debug_log(@"getLiveSegmentBufferSegments reject negative slice");
+      reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
+      return;
     }
+    std::vector<SegRecord> snap;
+    {
+      std::lock_guard<std::mutex> guard(entry->lock);
+      const int64_t total = static_cast<int64_t>(entry->segments.size());
+      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
+      if (s64 < total && end64 > s64) {
+        const size_t from = static_cast<size_t>(s64);
+        const size_t to = static_cast<size_t>(end64);
+        snap.assign(entry->segments.begin() + from, entry->segments.begin() + to);
+      }
+    }
+    NSArray *segmentsOut = nil;
+    if (snap.empty()) {
+      segmentsOut = @[];
+    } else {
+      NSMutableArray *arr = [NSMutableArray arrayWithCapacity:snap.size()];
+      seg_debug_log([NSString stringWithFormat:
+        @"getLiveSegmentBufferSegments serializing snapCount=%lu",
+        (unsigned long)snap.size()]);
+      for (const auto &r : snap) {
+        [arr addObject:segRecordToDict(r)];
+      }
+      segmentsOut = [arr copy];
+    }
+    seg_debug_log([NSString stringWithFormat:
+      @"getLiveSegmentBufferSegments resolve segments=%lu",
+      (unsigned long)segmentsOut.count]);
+    resolve(@{@"segments": segmentsOut});
+  } @catch (NSException *exception) {
+    seg_debug_log([NSString stringWithFormat:
+      @"getLiveSegmentBufferSegments exception name=%@ reason=%@",
+      exception.name ?: @"<nil>",
+      exception.reason ?: @"<nil>"]);
+    reject(@"SEGMENT_INTERNAL_ERROR", exception.reason ?: @"Failed to read live segments", nil);
   }
-  NSMutableArray *arr = [NSMutableArray arrayWithCapacity:snap.size()];
-  for (const auto &r : snap) [arr addObject:segRecordToDict(r)];
-  resolve(@{@"segments": arr});
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
