@@ -2852,6 +2852,7 @@ static std::string pa_encodeViaDecodeFile(
                            forceMono:(BOOL)forceMono
                         autoFinalize:(BOOL)autoFinalize
                          backpressure:(NSString *)backpressure
+                allowDemuxerAutoProbe:(BOOL)allowDemuxerAutoProbe
                          operationId:(NSString *)operationId
                              resolve:(RCTPromiseResolveBlock)resolve
                               reject:(RCTPromiseRejectBlock)reject
@@ -2954,6 +2955,7 @@ static std::string pa_encodeViaDecodeFile(
       config.targetSampleRate = (int)targetSampleRateHz;
       config.forceMono = forceMono;
       config.chunkSize = 8192;
+      config.allowDemuxerAutoProbe = allowDemuxerAutoProbe;
 
       auto onChunk = [&liveEntry, &status, useBackpressure, cancelFlag](const float *samples, int count) {
         if (cancelFlag->load()) return;
