@@ -666,12 +666,14 @@ export async function createStreamingVAD(
                     continue;
                   }
 
+                  const segmentSampleRate =
+                    segment.sampleRate > 0 ? segment.sampleRate : sampleRate;
                   await appendLiveSegment(mergeTargetId, {
                     kind: 'speech',
                     sourceAudioBufferId: audioInBufferId,
                     startSample: startSample + segment.startSample,
                     endSample: startSample + segment.endSample,
-                    sampleRate: segment.sampleRate,
+                    sampleRate: segmentSampleRate,
                     durationMs: segment.durationMs,
                     confidence: segment.confidence,
                     ...(segment.payload != null

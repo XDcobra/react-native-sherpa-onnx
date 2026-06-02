@@ -628,36 +628,63 @@ struct SegLiveEntry {
     journalEventCount = 0;
   }
 
-  void maybeWriteSnapshotToSpool(const std::string &snapshot, bool mayActivateAuto) {
+  void activateSpoolIfNeeded() {
     if (!spoolEnabled()) return;
     std::lock_guard<std::mutex> lockGuard(spoolLock);
-    if (!spoolFailureCode.empty()) throw std::runtime_error(spoolFailureCode + ": " + spoolFailureMessage);
+    if (!spoolFailureCode.empty() || journalFile) return;
+    if (spoolingMode == SPOOL_ON) {
+      ensureSpoolWriterActivatedLocked(segment_records_to_json({}));
+    }
+  }
+
+  void maybeAppendSegmentToSpool(
+    const SegRecord &seg,
+    bool mayActivateAuto,
+    const std::string &checkpointSnapshot
+  ) {
+    if (!spoolEnabled()) return;
+    std::lock_guard<std::mutex> lockGuard(spoolLock);
+    if (!spoolFailureCode.empty()) {
+      throw std::runtime_error(spoolFailureCode + ": " + spoolFailureMessage);
+    }
     if (!journalFile) {
       switch (spoolingMode) {
-        case SPOOL_OFF: return;
-        case SPOOL_ON:
-          ensureSpoolWriterActivatedLocked(snapshot);
+        case SPOOL_OFF:
           return;
+        case SPOOL_ON:
+          ensureSpoolWriterActivatedLocked(checkpointSnapshot);
+          break;
         case SPOOL_AUTO: {
           if (!mayActivateAuto) return;
-          spoolEstimatedBytes += (int64_t)(kHeaderBytes + snapshot.size());
+          const std::vector<SegRecord> one = {seg};
+          const std::string estimated = segment_records_to_json(one);
+          spoolEstimatedBytes += (int64_t)(kHeaderBytes + estimated.size());
           if (spoolEstimatedBytes < std::max<int64_t>(0, spoolThresholdBytes)) {
             spoolReady = false;
             return;
           }
-          ensureSpoolWriterActivatedLocked(snapshot);
-          return;
+          ensureSpoolWriterActivatedLocked(checkpointSnapshot);
+          break;
         }
       }
     }
-    appendJournalRecordLocked(kRecordSegmentAppend, snapshot);
+    if (!journalFile) return;
+
+    const std::vector<SegRecord> one = {seg};
+    const std::string payload = segment_records_to_json(one);
+    appendJournalRecordLocked(kRecordSegmentAppend, payload);
     journalEventCount += 1;
-    journalBytesSinceCheckpoint += (kHeaderBytes + snapshot.size());
-    if (journalEventCount >= kCheckpointEveryEvents || journalBytesSinceCheckpoint >= kCheckpointEveryBytes) {
-      writeCheckpointSnapshotLocked(snapshotForSpoolLocked());
+    journalBytesSinceCheckpoint += (kHeaderBytes + payload.size());
+    if (journalEventCount >= kCheckpointEveryEvents ||
+        journalBytesSinceCheckpoint >= kCheckpointEveryBytes) {
+      writeCheckpointSnapshotLocked(checkpointSnapshot);
       fclose(journalFile);
       journalFile = fopen(journalPath().c_str(), "wb");
-      if (!journalFile) throwSpoolError("SEGMENT_SPOOL_WRITE_FAILED", "Failed to rotate segment journal for " + bufferId);
+      if (!journalFile) {
+        throwSpoolError(
+          "SEGMENT_SPOOL_WRITE_FAILED",
+          "Failed to rotate segment journal for " + bufferId);
+      }
       appendJournalRecordLocked(kRecordCheckpointMark, "{}");
       journalBytesSinceCheckpoint = 0;
       journalEventCount = 0;
@@ -802,7 +829,7 @@ struct SegLiveEntry {
 
         if (type == kRecordSegmentAppend) {
           auto parsed = segment_records_from_json(payload);
-          if (!parsed.empty()) result.push_back(parsed[0]);
+          result.insert(result.end(), parsed.begin(), parsed.end());
         }
       }
 
@@ -1018,11 +1045,6 @@ bool seg_live_append_segment(
     return false;
   }
   try {
-    std::lock_guard<std::mutex> lock(entry->lock);
-    if (entry->state == SegLiveEntry::FINISHED) {
-      if (error) *error = "SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized";
-      return false;
-    }
     SegRecord seg;
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.empty() ? "speech" : kind;
@@ -1044,6 +1066,12 @@ bool seg_live_append_segment(
         return false;
       }
     }
+    if (sampleRate <= 0) {
+      if (error) {
+        *error = "SEGMENT_INVALID_ARGUMENT: sampleRate must be > 0";
+      }
+      return false;
+    }
     seg.sourceAudioBufferId = sourceAudioBufferId.empty() ? entry->sourceAudioBufferId : sourceAudioBufferId;
     seg.startSample = startSample;
     seg.endSample = endSample;
@@ -1053,15 +1081,24 @@ bool seg_live_append_segment(
     if (hasConfidence) seg.confidence = confidence;
     seg.payloadJson = payloadJson;
 
-    const int idx = static_cast<int>(entry->evictedCount + static_cast<int64_t>(entry->segments.size()));
-    entry->segments.push_back(seg);
-    std::string snapshot = entry->snapshotForSpoolLocked();
-    if (static_cast<int>(entry->segments.size()) > entry->maxSegments) {
-      entry->segments.erase(entry->segments.begin());
-      entry->evictedCount++;
+    int idx = 0;
+    std::string checkpointSnapshot;
+    {
+      std::lock_guard<std::mutex> lock(entry->lock);
+      if (entry->state == SegLiveEntry::FINISHED) {
+        if (error) *error = "SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized";
+        return false;
+      }
+      idx = static_cast<int>(entry->evictedCount + static_cast<int64_t>(entry->segments.size()));
+      entry->segments.push_back(seg);
+      if (static_cast<int>(entry->segments.size()) > entry->maxSegments) {
+        entry->segments.erase(entry->segments.begin());
+        entry->evictedCount++;
+      }
+      entry->totalSegmentsWritten++;
+      checkpointSnapshot = entry->snapshotForSpoolLocked();
     }
-    entry->totalSegmentsWritten++;
-    entry->maybeWriteSnapshotToSpool(snapshot, true);
+    entry->maybeAppendSegmentToSpool(seg, true, checkpointSnapshot);
 
     seg_notify_segment_appended(entry, seg, idx);
     entry->notifyCommitListeners(seg.id, idx, seg);
@@ -2624,7 +2661,7 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
       });
     };
     if (entry->spoolingMode == SegLiveEntry::SPOOL_ON) {
-      entry->maybeWriteSnapshotToSpool(entry->snapshotForSpoolLocked(), false);
+      entry->activateSpoolIfNeeded();
     }
     {
       std::lock_guard<std::mutex> lock(g_seg_mutex);
@@ -2712,10 +2749,6 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
     entry = it->second;
   }
   try {
-    std::lock_guard<std::mutex> lock(entry->lock);
-    if (entry->state == SegLiveEntry::FINISHED) {
-      throw std::runtime_error("SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized");
-    }
     SegRecord seg;
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.length > 0 ? kind.UTF8String : "speech";
@@ -2730,6 +2763,10 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
         return;
       }
     }
+    if ((int)sampleRate <= 0) {
+      reject(@"SEGMENT_INVALID_ARGUMENT", @"sampleRate must be > 0", nil);
+      return;
+    }
     seg.sourceAudioBufferId = sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : entry->sourceAudioBufferId;
     seg.startSample = (int)startSample;
     seg.endSample = (int)endSample;
@@ -2743,15 +2780,23 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
       NSData *pd = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
       if (pd) seg.payloadJson = std::string((const char *)pd.bytes, pd.length);
     }
-    const int segmentIndex = (int)(entry->evictedCount + (int64_t)entry->segments.size());
-    entry->segments.push_back(seg);
-    std::string snapshot = entry->snapshotForSpoolLocked();
-    if ((int)entry->segments.size() > entry->maxSegments) {
-      entry->segments.erase(entry->segments.begin());
-      entry->evictedCount++;
+    std::string checkpointSnapshot;
+    int segmentIndex = 0;
+    {
+      std::lock_guard<std::mutex> lock(entry->lock);
+      if (entry->state == SegLiveEntry::FINISHED) {
+        throw std::runtime_error("SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized");
+      }
+      segmentIndex = (int)(entry->evictedCount + (int64_t)entry->segments.size());
+      entry->segments.push_back(seg);
+      if ((int)entry->segments.size() > entry->maxSegments) {
+        entry->segments.erase(entry->segments.begin());
+        entry->evictedCount++;
+      }
+      entry->totalSegmentsWritten++;
+      checkpointSnapshot = entry->snapshotForSpoolLocked();
     }
-    entry->totalSegmentsWritten++;
-    entry->maybeWriteSnapshotToSpool(snapshot, true);
+    entry->maybeAppendSegmentToSpool(seg, true, checkpointSnapshot);
 
     if ([payload isKindOfClass:[NSDictionary class]]) {
       NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
@@ -2909,9 +2954,11 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
 
   try {
     std::vector<SegRecord> records;
-    if ([mode isEqualToString:@"windowSnapshot"]) records = live->snapshotWindow();
-    else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) records = live->snapshotFullIfSpooled();
-    else {
+    if ([mode isEqualToString:@"windowSnapshot"]) {
+      records = live->snapshotWindow();
+    } else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) {
+      records = live->snapshotFullIfSpooled();
+    } else {
       reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
       return;
     }
