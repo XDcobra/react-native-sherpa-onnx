@@ -865,6 +865,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // Required by NativeEventEmitter contract.
+  override fun addListener(eventName: String) {
+    // No-op: RN keeps this for listener bookkeeping on JS side.
+  }
+
+  // Required by NativeEventEmitter contract.
+  override fun removeListeners(count: Double) {
+    // No-op.
+  }
+
   private fun readableMapToStringMap(map: ReadableMap?): Map<String, String> {
     if (map == null) {
       return emptyMap()

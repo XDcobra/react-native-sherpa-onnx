@@ -1,4 +1,4 @@
-import { NativeEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   resolvePipelineAudioBufferId,
@@ -403,7 +403,7 @@ export async function computeAudioVisualizationProfile(
 
   try {
     if (onProgress && progressOperationId) {
-      const emitter = new NativeEventEmitter();
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
       progressSubscription = emitter.addListener(
         'visualizationProgress',
         (event: {

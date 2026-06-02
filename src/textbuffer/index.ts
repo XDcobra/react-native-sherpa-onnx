@@ -9,7 +9,11 @@
  * future TTS will consume them as input.
  */
 
-import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import {
   getLiveTextSegmentation,
@@ -307,7 +311,7 @@ function ensureLiveTextEventSubscriptions(): void {
   if (partialSubscription && textErrorSubscription && textSegmentSubscription)
     return;
 
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
 
   if (!partialSubscription) {
     partialSubscription = emitter.addListener(

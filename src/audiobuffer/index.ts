@@ -8,7 +8,11 @@
  * Buffers are pipeline building blocks: pass handles to STT, TTS, Enhancement, Alignment, PCM Player.
  */
 
-import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import {
   advanceAudioCommitStart,
@@ -260,7 +264,7 @@ function toSegmentSource(
 function ensureLiveEventSubscriptions(): void {
   if (framesSubscription && errorSubscription && segmentSubscription) return;
 
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
 
   if (!framesSubscription) {
     framesSubscription = emitter.addListener(
@@ -627,7 +631,7 @@ export async function createOfflineAudioBufferFromFile(
 
   try {
     if (options?.onProgress) {
-      const emitter = new NativeEventEmitter();
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
@@ -1131,7 +1135,7 @@ export async function ingestFileToLiveAudioBuffer(
   const abortController = new AbortController();
 
   if (options?.onProgress) {
-    const emitter = new NativeEventEmitter();
+    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
     const onProgress = options.onProgress;
     progressSubscription = emitter.addListener(
       'decodeProgress',
@@ -1177,7 +1181,7 @@ export async function ingestFileToLiveAudioBuffer(
   // The done promise listens for the native completion event
   const done = new Promise<import('./types').FileIngestResult>(
     (resolve, reject) => {
-      const emitter = new NativeEventEmitter();
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
       const sub = emitter.addListener('decodeComplete', (event: any) => {
         if (event?.operationId !== operationId) return;
         sub.remove();

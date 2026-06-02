@@ -1,4 +1,4 @@
-import { NativeEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   StreamingPipelineCompletion,
@@ -131,7 +131,7 @@ function settlePendingCompletion(
 function ensureCompletionSubscription(): void {
   if (completionSubscription) return;
 
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
   completionSubscription = emitter.addListener(
     'streamingPipelineCompleted',
     (event: unknown) => {

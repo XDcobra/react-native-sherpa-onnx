@@ -1,4 +1,4 @@
-import { NativeEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   resolveFileSourceForDetect,
@@ -362,7 +362,7 @@ export async function createStreamingVAD(
         const pipelineId = started.pipelineId;
         activePipelineId = pipelineId;
 
-        const emitter = new NativeEventEmitter();
+        const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
         const speechStateMin = Math.max(
           0,
           typeof liveOptions.speechStateEventMinIntervalMs === 'number'

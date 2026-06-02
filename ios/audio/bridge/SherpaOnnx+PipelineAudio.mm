@@ -1461,10 +1461,12 @@ static bool pa_populate_offline_from_source_if_empty(
 - (void)decodeFileToOfflineBuffer:(NSDictionary *)source
                targetSampleRateHz:(double)targetSampleRateHz
                         forceMono:(BOOL)forceMono
+              allowDemuxerAutoProbe:(BOOL)allowDemuxerAutoProbe
                       operationId:(NSString *)operationId
                           resolve:(RCTPromiseResolveBlock)resolve
                            reject:(RCTPromiseRejectBlock)reject
 {
+  (void)allowDemuxerAutoProbe;
   if (!source || [source count] == 0) {
     reject(kPAErrInvalidArgument, @"source is required", nil);
     return;

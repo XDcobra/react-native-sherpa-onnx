@@ -1931,6 +1931,11 @@ export interface Spec extends TurboModule {
 
   /** Cancel network activity; does not delete the partial file. */
   cancelForegroundDownload(id: string): Promise<boolean>;
+
+  /** Required by NativeEventEmitter on RN iOS/Android. */
+  addListener(eventName: string): void;
+  /** Required by NativeEventEmitter on RN iOS/Android. */
+  removeListeners(count: number): void;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

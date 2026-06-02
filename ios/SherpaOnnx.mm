@@ -88,6 +88,16 @@ extern "C" void slm_release_all_link_maps(void);
     return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError" ];
 }
 
+- (void)addListener:(NSString *)eventName
+{
+    (void)eventName;
+}
+
+- (void)removeListeners:(double)count
+{
+    (void)count;
+}
+
 - (void)resolveBundledAssetPath:(NSString *)relativePath
                         resolve:(RCTPromiseResolveBlock)resolve
                          reject:(RCTPromiseRejectBlock)reject
