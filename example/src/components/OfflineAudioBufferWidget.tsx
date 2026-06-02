@@ -52,6 +52,7 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../utils/audioDevices';
+import { fileSourceFromBundledPath } from '../utils/fileSourceFromUri';
 import { widgetStyles as s } from './OfflineAudioBufferWidget.styles';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +114,10 @@ function toFileSource(pathOrUri: string) {
   if (trimmed.startsWith('file://')) {
     const p = decodeURI(trimmed.replace(/^file:\/\//, ''));
     return { kind: 'fs' as const, path: p };
+  }
+  // Relative paths are bundled example assets (test_wavs/test_codec).
+  if (!trimmed.startsWith('/')) {
+    return fileSourceFromBundledPath(trimmed);
   }
   return { kind: 'fs' as const, path: trimmed };
 }
@@ -353,10 +358,11 @@ export const OfflineAudioBufferWidget = forwardRef<
   const handleExamplePick = useCallback(
     async (audioFile: AudioFileInfo) => {
       try {
-        await decodeSource(audioFile.id, audioFile.name, {
-          kind: 'fs',
-          path: audioFile.id,
-        });
+        await decodeSource(
+          audioFile.id,
+          audioFile.name,
+          toFileSource(audioFile.id)
+        );
       } catch (err) {
         setDecodeError(err instanceof Error ? err.message : String(err));
       }
