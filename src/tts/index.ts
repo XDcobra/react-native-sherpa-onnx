@@ -484,14 +484,14 @@ export async function createTTS(
       );
 
       let linkMap = orchestrated.linkMap ?? batchOpts?.linkMap;
-      if (!linkMap && orchestrated.segmentMappings.length > 0) {
+      if (!linkMap?.linkMapId && orchestrated.segmentMappings.length > 0) {
         linkMap = await createSegmentLinkMap({
           textBufferId: textInId,
           audioBufferId: audioOutId,
         });
       }
 
-      if (linkMap) {
+      if (linkMap?.linkMapId) {
         for (const mapping of orchestrated.segmentMappings) {
           await addSegmentLink(linkMap, {
             textSegmentId: mapping.textSegmentId,

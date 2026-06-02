@@ -476,7 +476,7 @@ export async function createSTT(
       }
 
       let linkMap = batchOptions?.linkMap;
-      if (!linkMap) {
+      if (!linkMap?.linkMapId) {
         linkMap = await createSegmentLinkMap({
           audioBufferId: bufferId,
           textBufferId: textOutBufferId,

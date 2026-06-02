@@ -1070,7 +1070,14 @@ export async function createSegmentLinkMap(options?: {
   audioBufferId?: string;
 }): Promise<SegmentLinkMapRef> {
   const out = await getNative().createSegmentLinkMap(options);
-  return { linkMapId: out.linkMapId };
+  const linkMapId =
+    typeof out?.linkMapId === 'string' ? out.linkMapId.trim() : '';
+  if (!linkMapId) {
+    throw new Error(
+      'SEGMENT_LINK_INTERNAL_ERROR: createSegmentLinkMap returned empty linkMapId'
+    );
+  }
+  return { linkMapId };
 }
 
 export async function addSegmentLink(

@@ -188,12 +188,13 @@ static std::string slmPairTypeKey(
       store.audioBufferId = std::string(audioBufferId.UTF8String ?: "");
     }
 
+    const std::string createdLinkMapId = store.linkMapId;
     {
       std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-      g_segment_link_maps[store.linkMapId] = std::move(store);
+      g_segment_link_maps[createdLinkMapId] = std::move(store);
     }
 
-    resolve(@{ @"linkMapId": [NSString stringWithUTF8String:store.linkMapId.c_str()] ?: @"" });
+    resolve(@{ @"linkMapId": [NSString stringWithUTF8String:createdLinkMapId.c_str()] ?: @"" });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
