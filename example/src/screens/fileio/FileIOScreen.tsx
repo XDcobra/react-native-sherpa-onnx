@@ -42,23 +42,37 @@ const FILE_DESTINATION_OPTIONS: {
   kind: FileDestination['kind'];
   label: string;
   hint: string;
+  platform: 'ios' | 'android' | 'both';
 }[] = [
-  { kind: 'fs', label: 'fs', hint: 'Absolute filesystem path' },
-  { kind: 'app', label: 'app', hint: 'App sandbox (base + relative path)' },
+  {
+    kind: 'fs',
+    label: 'fs',
+    hint: 'Absolute filesystem path',
+    platform: 'both',
+  },
+  {
+    kind: 'app',
+    label: 'app',
+    hint: 'App sandbox (base + relative path)',
+    platform: 'both',
+  },
   {
     kind: 'contentUri',
     label: 'contentUri',
     hint: 'Single content:// document',
+    platform: 'android',
   },
   {
     kind: 'contentTree',
     label: 'contentTree',
     hint: 'SAF tree URI + filename + mime (Android)',
+    platform: 'android',
   },
   {
     kind: 'securityScoped',
     label: 'securityScoped',
     hint: 'Security-scoped URL (typically iOS)',
+    platform: 'ios',
   },
 ];
 
@@ -70,6 +84,23 @@ const OPERATIONS: { id: FileioOperation; label: string }[] = [
 
 function formatLabel(format: AudioOutputFormat): string {
   return format.toUpperCase();
+}
+
+function platformBadgeLabel(platform: 'ios' | 'android' | 'both'): string {
+  if (platform === 'both') {
+    return 'iOS + Android';
+  }
+  return platform === 'ios' ? 'iOS' : 'Android';
+}
+
+function platformBadgeStyle(platform: 'ios' | 'android' | 'both') {
+  if (platform === 'ios') {
+    return styles.channelBadgePlatformIos;
+  }
+  if (platform === 'android') {
+    return styles.channelBadgePlatformAndroid;
+  }
+  return styles.channelBadgePlatformBoth;
 }
 
 const DEFAULT_PAD_PACK = 'demo_codec_pack';
@@ -526,6 +557,14 @@ export default function FileIOScreen() {
                     <Text
                       style={[
                         styles.channelBadge,
+                        platformBadgeStyle(ch.platform),
+                      ]}
+                    >
+                      {platformBadgeLabel(ch.platform)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.channelBadge,
                         ch.automatic
                           ? styles.channelBadgeAuto
                           : styles.channelBadgePick,
@@ -821,14 +860,25 @@ export default function FileIOScreen() {
                     }}
                   >
                     <View style={styles.optionTextCol}>
-                      <Text
-                        style={[
-                          styles.optionKind,
-                          active && styles.optionKindActive,
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
+                      <View style={styles.optionKindRow}>
+                        <Text
+                          style={[
+                            styles.optionKind,
+                            active && styles.optionKindActive,
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.channelBadge,
+                            styles.optionPlatformBadge,
+                            platformBadgeStyle(opt.platform),
+                          ]}
+                        >
+                          {platformBadgeLabel(opt.platform)}
+                        </Text>
+                      </View>
                       <Text style={styles.optionHint}>{opt.hint}</Text>
                     </View>
                     {active && (
@@ -1080,6 +1130,18 @@ const styles = StyleSheet.create({
     color: '#C45C00',
     backgroundColor: 'rgba(196, 92, 0, 0.12)',
   },
+  channelBadgePlatformIos: {
+    color: '#7A38B5',
+    backgroundColor: 'rgba(122, 56, 181, 0.12)',
+  },
+  channelBadgePlatformAndroid: {
+    color: '#1F7A3F',
+    backgroundColor: 'rgba(31, 122, 63, 0.12)',
+  },
+  channelBadgePlatformBoth: {
+    color: '#2858A8',
+    backgroundColor: 'rgba(40, 88, 168, 0.12)',
+  },
   padField: {
     marginBottom: 10,
   },
@@ -1296,6 +1358,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  optionKindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   optionKind: {
     fontSize: 16,
     fontWeight: '500',
@@ -1308,6 +1375,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#8E8E93',
     marginTop: 2,
+  },
+  optionPlatformBadge: {
+    fontSize: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
   },
   footer: {
     paddingHorizontal: 16,

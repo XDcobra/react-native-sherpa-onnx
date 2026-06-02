@@ -10,6 +10,12 @@ import type {
   ShareFileOptions,
   FileIOProgressEvent,
 } from './types';
+import { FileIOErrorCode } from './types';
+import {
+  assertFileDestinationSupportedOnPlatform,
+  assertFileLocationsSupportedOnPlatform,
+  assertFileSourceSupportedOnPlatform,
+} from './platformValidation';
 
 // Re-export all types
 export type {
@@ -27,6 +33,12 @@ export type {
 } from './types';
 
 export { FileIOErrorCode } from './types';
+export {
+  assertFileDestinationSupportedOnPlatform,
+  assertFileLocationsSupportedOnPlatform,
+  assertFileSourceSupportedOnPlatform,
+  createFileIOError,
+} from './platformValidation';
 
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
@@ -69,9 +81,10 @@ export async function copyFile(
       new Error(
         "FileSource kind 'auto' is for model path resolution only. Pass a concrete source to copyFile."
       ),
-      { code: 'FILEIO_INVALID_ARGUMENT' }
+      { code: FileIOErrorCode.INVALID_ARGUMENT }
     );
   }
+  assertFileLocationsSupportedOnPlatform(input, output);
 
   const operationId = generateOperationId();
   const overwrite = options?.overwrite ?? true;
@@ -145,6 +158,8 @@ export async function saveText(
   const encoding = options?.encoding ?? 'utf8';
   const overwrite = options?.overwrite ?? true;
 
+  assertFileDestinationSupportedOnPlatform(output);
+
   const result = await SherpaOnnx.saveText(
     text,
     output as any,
@@ -169,9 +184,10 @@ export async function shareFile(
       new Error(
         "FileSource kind 'auto' is for model path resolution only. Pass a concrete source to shareFile."
       ),
-      { code: 'FILEIO_INVALID_ARGUMENT' }
+      { code: FileIOErrorCode.INVALID_ARGUMENT }
     );
   }
+  assertFileSourceSupportedOnPlatform(input);
 
   await SherpaOnnx.shareFile(
     input as any,

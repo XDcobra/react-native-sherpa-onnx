@@ -168,7 +168,13 @@ function formatFileioNativeError(
   bundledPath: string | undefined,
   err: unknown
 ): string {
+  const code =
+    err instanceof Error &&
+    typeof (err as Error & { code?: unknown }).code === 'string'
+      ? String((err as Error & { code?: unknown }).code)
+      : null;
   const base = err instanceof Error ? err.message : String(err);
+  const baseWithCode = code ? `[${code}] ${base}` : base;
   const rel =
     bundledPath ??
     (source.kind === 'app' && source.base === 'files'
@@ -176,7 +182,7 @@ function formatFileioNativeError(
       : undefined);
 
   if (!isBundledTestPath(rel)) {
-    return base;
+    return baseWithCode;
   }
 
   if (looksLikeMissingBundledAsset(base)) {
@@ -187,7 +193,7 @@ function formatFileioNativeError(
         : 'iOS: place under example/ios/sherpa_models/ and rebuild.',
       'See test_codec/README in assets and sherpa_models.',
       '',
-      `Native: ${base}`,
+      `Native: ${baseWithCode}`,
     ].join('\n');
   }
 
@@ -195,7 +201,7 @@ function formatFileioNativeError(
     `Failed for: ${rel}`,
     describeFileSource(source),
     '',
-    `Native: ${base}`,
+    `Native: ${baseWithCode}`,
   ].join('\n');
 }
 
@@ -217,6 +223,16 @@ function buildContentTreeDestination(
   filename: string,
   mimeType: string
 ): FileDestination {
+  if (Platform.OS === 'ios') {
+    // Keep deterministic behavior: pass unsupported kind directly to SDK.
+    return {
+      kind: 'contentTree',
+      treeUri: 'content://unsupported-on-ios',
+      filename,
+      mimeType,
+    };
+  }
+
   const trimmed = treeOrFolderUri.trim();
   if (trimmed.startsWith('content://')) {
     return {
@@ -226,13 +242,7 @@ function buildContentTreeDestination(
       mimeType,
     };
   }
-  if (trimmed.startsWith('file://')) {
-    const dir = decodeURI(trimmed.replace(/^file:\/\//, '')).replace(/\/$/, '');
-    return { kind: 'fs', path: `${dir}/${filename}` };
-  }
-  throw new Error(
-    'Folder picker must return content:// (Android SAF) or file:// (iOS / simulator).'
-  );
+  throw new Error('Folder picker must return content:// for contentTree.');
 }
 
 async function pickContentTreeDestination(
@@ -500,6 +510,15 @@ export async function runFileioCopy(
         break;
       }
       case 'contentUri': {
+        if (Platform.OS === 'ios') {
+          resolved = await saveAudioAsFile(
+            prepared.input,
+            { kind: 'contentUri', uri: 'content://unsupported-on-ios' },
+            input.outputFormat,
+            saveOptions
+          );
+          break;
+        }
         resolved = await saveViaStagingAndSaveDocuments(
           prepared.input,
           input.outputFormat,

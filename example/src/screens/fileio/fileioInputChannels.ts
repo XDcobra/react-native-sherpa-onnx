@@ -51,6 +51,7 @@ export type FileioInputChannelMeta = {
   id: FileioInputChannelId;
   title: string;
   hint: string;
+  platform: 'ios' | 'android' | 'both';
   /** Uses the selected sample chip without a system file picker */
   automatic: boolean;
   supported: boolean;
@@ -121,6 +122,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_apkAsset',
       title: 'app / apkAsset',
+      platform: 'android',
       hint: isAndroid
         ? 'APK assets/ (test_codec/sample.*) — default on Android'
         : 'Android-only',
@@ -131,6 +133,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_appBundle',
       title: 'app / appBundle',
+      platform: 'ios',
       hint: isIos
         ? 'Main bundle Resources (test_codec/sample.*) — default on iOS'
         : 'iOS-only',
@@ -141,6 +144,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_files',
       title: 'app / files',
+      platform: 'both',
       hint: isAndroid
         ? 'Sandbox files/ dir (sample copied from apkAsset)'
         : 'Sandbox Application Support (sample copied)',
@@ -150,6 +154,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_cache',
       title: 'app / cache',
+      platform: 'both',
       hint: 'Copy sample into app cache, then read',
       automatic: true,
       supported: true,
@@ -157,6 +162,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_documents',
       title: 'app / documents',
+      platform: 'both',
       hint: 'Copy sample into documents, then read',
       automatic: true,
       supported: true,
@@ -164,6 +170,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_tmp',
       title: 'app / tmp',
+      platform: 'both',
       hint: 'Copy sample into tmp, then read',
       automatic: true,
       supported: true,
@@ -171,6 +178,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'app_externalFiles',
       title: 'app / externalFiles',
+      platform: 'android',
       hint: 'Copy sample into external files (Android)',
       automatic: true,
       supported: isAndroid,
@@ -179,6 +187,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'fs',
       title: 'fs',
+      platform: 'both',
       hint: 'Copy sample to an absolute sandbox path, then read',
       automatic: true,
       supported: true,
@@ -186,6 +195,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'contentUri',
       title: 'contentUri',
+      platform: 'android',
       hint: 'SAF document URI — pick any audio file (Android)',
       automatic: false,
       supported: isAndroid,
@@ -194,6 +204,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'securityScoped',
       title: 'securityScoped',
+      platform: 'ios',
       hint: 'Security-scoped URL — pick any audio file (iOS)',
       automatic: false,
       supported: isIos,
@@ -202,6 +213,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
     {
       id: 'pad',
       title: 'pad',
+      platform: 'android',
       hint: 'Play Asset Delivery — path from sample chip + pack name',
       automatic: true,
       supported: isAndroid,
