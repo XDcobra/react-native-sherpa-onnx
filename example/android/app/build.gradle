@@ -75,47 +75,47 @@ def enableProguardInReleaseBuilds = true
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion = rootProject.ext.ndkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+    compileSdk = rootProject.ext.compileSdkVersion
 
     assetPacks = [":sherpa_models"]
 
-    namespace "com.xdcobra.voiceexample"
+    namespace = "com.xdcobra.voiceexample"
     defaultConfig {
-        applicationId "com.xdcobra.voicelab"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        applicationId = "com.xdcobra.voicelab"
+        minSdkVersion = rootProject.ext.minSdkVersion
+        targetSdkVersion = rootProject.ext.targetSdkVersion
         def resolvedVersionCode = project.findProperty('VERSION_CODE') ?: "1"
         def resolvedVersionName = project.findProperty('VERSION_NAME') ?: "0.0.1"
-        versionCode resolvedVersionCode.toInteger()
-        versionName resolvedVersionName.toString()
+        versionCode = resolvedVersionCode.toInteger()
+        versionName = resolvedVersionName.toString()
     }
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            storeFile = file('debug.keystore')
+            storePassword = 'android'
+            keyAlias = 'androiddebugkey'
+            keyPassword = 'android'
         }
         release {
             if (project.hasProperty('RELEASE_STORE_FILE')) {
-                storeFile file(RELEASE_STORE_FILE)
+                storeFile = file(RELEASE_STORE_FILE)
             }
             if (project.hasProperty('RELEASE_STORE_PASSWORD')) {
-                storePassword RELEASE_STORE_PASSWORD
+                storePassword = RELEASE_STORE_PASSWORD
             }
             if (project.hasProperty('RELEASE_KEY_ALIAS')) {
-                keyAlias RELEASE_KEY_ALIAS
+                keyAlias = RELEASE_KEY_ALIAS
             }
             if (project.hasProperty('RELEASE_KEY_PASSWORD')) {
-                keyPassword RELEASE_KEY_PASSWORD
+                keyPassword = RELEASE_KEY_PASSWORD
             }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.debug
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -123,11 +123,11 @@ android {
             // Allow disabling release signing for local/CI via -PdisableReleaseSigning=true (uses debug key)
             if (project.hasProperty('disableReleaseSigning') && project.property('disableReleaseSigning') == 'true') {
                 println "[build.gradle] Release signing disabled by -PdisableReleaseSigning=true, using debug key"
-                signingConfig signingConfigs.debug
+                signingConfig = signingConfigs.debug
             } else {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
-            minifyEnabled enableProguardInReleaseBuilds
+            minifyEnabled = enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
