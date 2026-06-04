@@ -1726,19 +1726,18 @@ export interface Spec extends TurboModule {
   >;
 
   /**
-   * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory
-   * of an Android asset pack, or null if the pack is not available (e.g. not installed).
-   * Use this to list and load models that are delivered via PAD instead of bundled app assets.
+   * Returns the filesystem path to shipped model archives for an on-demand pack/tag,
+   * or null if not available yet. Android: PAD pack; iOS: ODR tag (e.g. core_models).
    */
   getAssetPackPath(packName: string): Promise<string | null>;
 
   /**
-   * Request download of an **on-demand** Play Asset Delivery pack. Android only.
+   * Request download of an on-demand pack (Android PAD) or ODR tag (iOS).
    */
   fetchAssetPack(packName: string): Promise<boolean>;
 
   /**
-   * Current PAD pack download state (progress / errors). Android only.
+   * Current on-demand delivery state (PAD / ODR progress and errors).
    */
   getAssetPackState(packName: string): Promise<{
     packName: string;
@@ -1749,8 +1748,8 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Remove an on-demand pack from the device after extraction (frees PAD storage). Android only.
-   * @returns 0 on success (Play Core does not report freed bytes).
+   * After extraction: remove Android PAD pack from device, or end iOS ODR access (cache may evict).
+   * @returns 0 on success.
    */
   removeAssetPack(packName: string): Promise<number>;
 

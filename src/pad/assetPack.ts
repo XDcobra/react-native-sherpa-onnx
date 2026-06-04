@@ -45,7 +45,7 @@ function normalizeStatus(raw: string): AssetPackDeliveryStatus {
 }
 
 export async function fetchAssetPack(packName: string): Promise<boolean> {
-  if (Platform.OS !== 'android') {
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     return false;
   }
   return SherpaOnnx.fetchAssetPack(packName);
@@ -54,7 +54,7 @@ export async function fetchAssetPack(packName: string): Promise<boolean> {
 export async function getAssetPackState(
   packName: string
 ): Promise<AssetPackStateSnapshot> {
-  if (Platform.OS !== 'android') {
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     return {
       packName,
       status: 'not_installed',
@@ -74,7 +74,7 @@ export async function getAssetPackState(
 }
 
 export async function removeAssetPack(packName: string): Promise<number> {
-  if (Platform.OS !== 'android') {
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     return 0;
   }
   return SherpaOnnx.removeAssetPack(packName);
@@ -98,14 +98,17 @@ export type WaitForAssetPackOptions = {
 };
 
 /**
- * Starts fetch (if needed) and polls until the pack is ready on disk or fails.
+ * Starts fetch (if needed) and polls until the pack/tag is ready on disk or fails.
+ * Android: Play Asset Delivery on-demand pack. iOS: On-Demand Resources tag.
  */
 export async function waitForAssetPackReady(
   packName: string,
   options?: WaitForAssetPackOptions
 ): Promise<AssetPackStateSnapshot> {
-  if (Platform.OS !== 'android') {
-    throw new Error('PAD is only available on Android');
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
+    throw new Error(
+      'On-demand model delivery is only available on Android and iOS'
+    );
   }
 
   const pollMs = options?.pollIntervalMs ?? 500;

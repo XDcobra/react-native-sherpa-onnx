@@ -11,6 +11,7 @@
 
 #import "SherpaOnnx.h"
 #import "assets/bridge/SherpaOnnx+Assets.h"
+#import "assets/core/OdrDelivery.h"
 #import "fileio/FileIOResolver.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
@@ -262,8 +263,12 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
-    // Play Asset Delivery is Android-only; on iOS there is no asset pack path.
-    resolve([NSNull null]);
+    NSString *path = [[SherpaOnnxOdrDelivery shared] assetPackModelsPath:packName];
+    if (path.length > 0) {
+        resolve(path);
+    } else {
+        resolve([NSNull null]);
+    }
 }
 
 - (void)listBundledArchiveAssetPaths:(NSString *)packName
