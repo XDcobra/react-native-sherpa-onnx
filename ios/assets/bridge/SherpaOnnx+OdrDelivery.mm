@@ -13,6 +13,23 @@
                                           reject:reject];
 }
 
+- (void)ensureAssetPackReady:(NSString *)packName
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+  __weak SherpaOnnx *weakSelf = self;
+  [[SherpaOnnxOdrDelivery shared]
+      ensureAssetPackReady:packName
+         progressHandler:^(NSDictionary *state) {
+           SherpaOnnx *strongSelf = weakSelf;
+           if (strongSelf) {
+             [strongSelf sendEventWithName:@"sherpaAssetPackDeliveryProgress" body:state];
+           }
+         }
+                 resolve:resolve
+                  reject:reject];
+}
+
 - (void)getAssetPackState:(NSString *)packName
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject

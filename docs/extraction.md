@@ -276,7 +276,7 @@ const models = await listModelsAtPath(targetDir, true);
 
 ```typescript
 import {
-  waitForAssetPackReady,
+  ensureAssetPackReady,
   getAssetPackPath,
 } from 'react-native-sherpa-onnx/utils';
 import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
@@ -285,7 +285,7 @@ import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 const TAG = 'core_models';
 const targetDir = `${DocumentDirectoryPath}/models`;
 
-await waitForAssetPackReady(TAG);
+await ensureAssetPackReady(TAG);
 const packPath = await getAssetPackPath(TAG);
 if (!packPath) throw new Error('ODR tag not ready');
 

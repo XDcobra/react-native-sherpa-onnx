@@ -3,7 +3,7 @@
  * Re-exported from `react-native-sherpa-onnx/utils`.
  * @see docs/model-delivery-pad-odr.md
  */
-import { Platform } from 'react-native';
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 
 export type AssetPackDeliveryStatus =
@@ -25,13 +25,6 @@ export type AssetPackStateSnapshot = {
   errorCode: number;
 };
 
-const TERMINAL: ReadonlySet<AssetPackDeliveryStatus> = new Set([
-  'completed',
-  'failed',
-  'canceled',
-  'not_installed',
-]);
-
 function normalizeStatus(raw: string): AssetPackDeliveryStatus {
   const s = raw.toLowerCase() as AssetPackDeliveryStatus;
   if (
@@ -47,6 +40,22 @@ function normalizeStatus(raw: string): AssetPackDeliveryStatus {
     return s;
   }
   return 'unknown';
+}
+
+function normalizeSnapshot(raw: {
+  packName: string;
+  status: string;
+  bytesDownloaded: number;
+  totalBytes: number;
+  errorCode: number;
+}): AssetPackStateSnapshot {
+  return {
+    packName: raw.packName,
+    status: normalizeStatus(raw.status),
+    bytesDownloaded: raw.bytesDownloaded,
+    totalBytes: raw.totalBytes,
+    errorCode: raw.errorCode,
+  };
 }
 
 export async function fetchAssetPack(packName: string): Promise<boolean> {
@@ -69,13 +78,7 @@ export async function getAssetPackState(
     };
   }
   const raw = await SherpaOnnx.getAssetPackState(packName);
-  return {
-    packName: raw.packName,
-    status: normalizeStatus(raw.status),
-    bytesDownloaded: raw.bytesDownloaded,
-    totalBytes: raw.totalBytes,
-    errorCode: raw.errorCode,
-  };
+  return normalizeSnapshot(raw);
 }
 
 export async function removeAssetPack(packName: string): Promise<number> {
@@ -97,18 +100,62 @@ export function assetPackDownloadPercent(
   );
 }
 
-export type WaitForAssetPackOptions = {
-  pollIntervalMs?: number;
+export type EnsureAssetPackReadyOptions = {
   onProgress?: (state: AssetPackStateSnapshot, percent: number | null) => void;
 };
 
+type ProgressHandler = (
+  state: AssetPackStateSnapshot,
+  percent: number | null
+) => void;
+
+const progressHandlersByPack = new Map<string, ProgressHandler>();
+let progressListenersInstalled = false;
+
+function getEmitter(): NativeEventEmitter {
+  return new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+}
+
+function ensureProgressListeners(): void {
+  if (progressListenersInstalled) {
+    return;
+  }
+  progressListenersInstalled = true;
+  getEmitter().addListener(
+    'sherpaAssetPackDeliveryProgress',
+    (event: {
+      packName?: string;
+      status?: string;
+      bytesDownloaded?: number;
+      totalBytes?: number;
+      errorCode?: number;
+    }) => {
+      const packName = event?.packName;
+      if (!packName) {
+        return;
+      }
+      const handler = progressHandlersByPack.get(packName);
+      if (!handler) {
+        return;
+      }
+      const state = normalizeSnapshot({
+        packName,
+        status: event.status ?? 'unknown',
+        bytesDownloaded: event.bytesDownloaded ?? 0,
+        totalBytes: event.totalBytes ?? 0,
+        errorCode: event.errorCode ?? 0,
+      });
+      handler(state, assetPackDownloadPercent(state));
+    }
+  );
+}
+
 /**
- * Starts fetch (if needed) and polls until the pack/tag is ready on disk or fails.
- * Android: Play Asset Delivery on-demand pack. iOS: On-Demand Resources tag.
+ * Native fetch + listener until the pack/tag is ready (Android: COMPLETED; iOS: models path on disk).
  */
-export async function waitForAssetPackReady(
+export async function ensureAssetPackReady(
   packName: string,
-  options?: WaitForAssetPackOptions
+  options?: EnsureAssetPackReadyOptions
 ): Promise<AssetPackStateSnapshot> {
   if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     throw new Error(
@@ -116,34 +163,17 @@ export async function waitForAssetPackReady(
     );
   }
 
-  const pollMs = options?.pollIntervalMs ?? 500;
-  let location = await SherpaOnnx.getAssetPackPath(packName);
-  if (location == null || location.length === 0) {
-    await fetchAssetPack(packName);
+  ensureProgressListeners();
+  if (options?.onProgress) {
+    progressHandlersByPack.set(packName, options.onProgress);
   }
 
-  for (;;) {
-    const state = await getAssetPackState(packName);
-    const percent = assetPackDownloadPercent(state);
-    options?.onProgress?.(state, percent);
-
-    if (state.status === 'completed') {
-      location = await SherpaOnnx.getAssetPackPath(packName);
-      if (location != null && location.length > 0) {
-        return state;
-      }
-    }
-
-    if (state.status === 'failed' || state.status === 'canceled') {
-      throw new Error(
-        `Asset pack ${packName} ${state.status} (errorCode=${state.errorCode})`
-      );
-    }
-
-    if (TERMINAL.has(state.status) && state.status !== 'completed') {
-      throw new Error(`Asset pack ${packName} not available (${state.status})`);
-    }
-
-    await new Promise((r) => setTimeout(r, pollMs));
+  try {
+    const raw = await SherpaOnnx.ensureAssetPackReady(packName);
+    const state = normalizeSnapshot(raw);
+    options?.onProgress?.(state, assetPackDownloadPercent(state));
+    return state;
+  } finally {
+    progressHandlersByPack.delete(packName);
   }
 }

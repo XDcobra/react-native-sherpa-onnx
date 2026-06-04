@@ -5223,6 +5223,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.fetchAssetPack(packName, promise)
   }
 
+  override fun ensureAssetPackReady(packName: String, promise: Promise) {
+    assetHelper.ensureAssetPackReady(packName, promise)
+  }
+
   override fun getAssetPackState(packName: String, promise: Promise) {
     assetHelper.getAssetPackState(packName, promise)
   }

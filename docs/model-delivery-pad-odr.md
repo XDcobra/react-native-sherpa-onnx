@@ -19,8 +19,7 @@ Use this when Tier-0/1 ship archives live in a **PAD `on-demand`** pack or an **
 
 ```typescript
 import {
-  fetchAssetPack,
-  waitForAssetPackReady,
+  ensureAssetPackReady,
   getAssetPackPath,
   removeAssetPack,
 } from 'react-native-sherpa-onnx/utils';
@@ -37,10 +36,8 @@ const PACK = 'core_models';
 // Stable runtime location — survives Android removeAssetPack / iOS ODR eviction.
 const targetDir = `${DocumentDirectoryPath}/models`;
 
-// 1) Start or resume download (safe on every cold start).
-await fetchAssetPack(PACK);
-// 2) Block until pack/tag is on disk; drive UI from onProgress (percent may be null).
-await waitForAssetPackReady(PACK, {
+// 1) Fetch if needed and block until ready (native PAD listener / ODR progress).
+await ensureAssetPackReady(PACK, {
   onProgress: (_state, percent) => console.log('download', percent),
 });
 
@@ -75,7 +72,7 @@ if (Platform.OS === 'android') {
 
 ## Quick start — install-time PAD (Android)
 
-Content is delivered **with the app install** (or merged into the APK as **APK_ASSETS**). Usually **no** `fetchAssetPack` / `waitForAssetPackReady` on first launch.
+Content is delivered **with the app install** (or merged into the APK as **APK_ASSETS**). Usually **no** `fetchAssetPack` / `ensureAssetPackReady` on first launch.
 
 ```typescript
 import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
@@ -181,7 +178,7 @@ There is no Android-style `install-time` PAD on iOS; the analogue is **Copy Bund
                          │                              │
                          ▼                              ▼
               getBundledArchives /              fetchAssetPack
-              getAssetPackPath /                  waitForAssetPackReady
+              getAssetPackPath /                  ensureAssetPackReady
               listBundledArchives(bundle)                 │
                          │                              │
                          └──────────────┬───────────────┘
@@ -218,7 +215,7 @@ There is no Android-style `install-time` PAD on iOS; the analogue is **Copy Bund
 
 Use **this guide** when models live in a **PAD pack** or **ODR tag** (any `deliveryType`), or when you list/extract **compressed ship archives** from those locations.
 
-Use **`fetchAssetPack` / `waitForAssetPackReady`** when:
+Use **`fetchAssetPack` / `ensureAssetPackReady`** when:
 
 - Android pack is **`on-demand`** (or not yet present for **`fast-follow`**), or
 - iOS **ODR tag** is not yet on disk (`getAssetPackPath` returns `null`).
@@ -253,12 +250,12 @@ import {
   fetchAssetPack,
   getAssetPackState,
   removeAssetPack,
-  waitForAssetPackReady,
+  ensureAssetPackReady,
   assetPackDownloadPercent,
 } from 'react-native-sherpa-onnx/utils';
 ```
 
-On web and other platforms, delivery APIs are no-ops or throw (`waitForAssetPackReady`).
+On web and other platforms, delivery APIs are no-ops or throw (`ensureAssetPackReady`).
 
 ### `getAssetPackPath(packName)`
 
@@ -288,17 +285,22 @@ function fetchAssetPack(packName: string): Promise<boolean>;
 | **PAD install-time** | Usually unnecessary (already installed); harmless no-op if present |
 | **iOS ODR** | Request tag download when not local |
 
-Does not block until complete — use `waitForAssetPackReady` or poll `getAssetPackState`.
+Does not block until complete — prefer `ensureAssetPackReady` for on-demand delivery.
+
+### `ensureAssetPackReady(packName, options?)`
+
+Starts fetch if needed and resolves when the pack/tag is ready. Progress is delivered via native callbacks (`sherpaAssetPackDeliveryProgress`) and optional `onProgress` in TypeScript.
+
+| Platform | Ready when |
+| --- | --- |
+| **Android** | Play Core reports `completed` (includes APK_ASSETS without a filesystem path) |
+| **iOS** | ODR tag mounted and `…/<tag>/models` exists on disk |
+
+**Install-time Android:** if `getBundledArchives` already returns data, you can skip this helper entirely.
 
 ### `getAssetPackState(packName)` / `assetPackDownloadPercent`
 
-Poll delivery state. Install-time packs from Play often report `completed` immediately. Fast-follow may show `downloading` / `transferring` on first launch.
-
-### `waitForAssetPackReady(packName, options?)`
-
-Calls `fetchAssetPack` if `getAssetPackPath` is empty, then polls until the pack/tag is usable (`completed` + path, or archives discoverable via `getBundledArchives` on Android APK_ASSETS).
-
-**Install-time Android:** if `getBundledArchives` already returns data, you can skip this helper entirely.
+Snapshot of delivery state (debug / UI). Install-time packs from Play often report `completed` immediately. Fast-follow may show `downloading` / `transferring` on first launch.
 
 ### `removeAssetPack(packName)`
 
@@ -351,7 +353,7 @@ type AssetPackDeliveryStatus =
 
 ### On-demand PAD / ODR
 
-1. `fetchAssetPack` + `waitForAssetPackReady` (progress UI).
+1. `ensureAssetPackReady` (progress UI).
 2. `getBundledArchives` or `listBundledArchives(await getAssetPackPath(tag))`.
 3. Extract + manifest ([extraction.md](./extraction.md)).
 4. **Android:** `removeAssetPack` after successful extract (optional).

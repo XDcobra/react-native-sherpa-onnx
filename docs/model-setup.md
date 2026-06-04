@@ -167,7 +167,7 @@ When `recursive` is `true`, returns relative folder paths under the base path. U
 
 ### On-demand packs (PAD / ODR)
 
-**PAD & ODR delivery** (install-time, fast-follow, on-demand, iOS bundle) is documented in **[model-delivery-pad-odr.md](./model-delivery-pad-odr.md)** (`fetchAssetPack`, `waitForAssetPackReady`, `getAssetPackState`, `removeAssetPack`).
+**PAD & ODR delivery** (install-time, fast-follow, on-demand, iOS bundle) is documented in **[model-delivery-pad-odr.md](./model-delivery-pad-odr.md)** (`fetchAssetPack`, `ensureAssetPackReady`, `getAssetPackState`, `removeAssetPack`).
 
 #### `getAssetPackPath(packName)`
 
@@ -391,7 +391,7 @@ throw new Error('No valid STT model found');
 
 ### On-demand pack — uncompressed models
 
-Requires `fetchAssetPack` / `waitForAssetPackReady` first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)).
+Requires `fetchAssetPack` / `ensureAssetPackReady` first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)).
 
 ```typescript
 const packPath = await getAssetPackPath('core_models');
@@ -434,7 +434,7 @@ if (!detection.success) {
 | --- | --- |
 | `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
 | Bundled model resolution fails | Check that the model directory exists at the expected location on the platform; use `bundledModelFileSource('models/...')` with `app:apkAsset` (Android) or `app:appBundle` (iOS) |
-| `getAssetPackPath` returns `null` | On-demand: run `fetchAssetPack` + `waitForAssetPackReady` ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)); check pack/tag name and native Gradle/Xcode setup |
+| `getAssetPackPath` returns `null` | On-demand: run `fetchAssetPack` + `ensureAssetPackReady` ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)); check pack/tag name and native Gradle/Xcode setup |
 | `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
 | Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |

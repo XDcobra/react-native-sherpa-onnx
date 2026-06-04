@@ -1737,6 +1737,18 @@ export interface Spec extends TurboModule {
   fetchAssetPack(packName: string): Promise<boolean>;
 
   /**
+   * Fetch if needed and resolve when the pack/tag is ready.
+   * Emits {@code sherpaAssetPackDeliveryProgress} during download.
+   */
+  ensureAssetPackReady(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
    * Current on-demand delivery state (PAD / ODR progress and errors).
    */
   getAssetPackState(packName: string): Promise<{

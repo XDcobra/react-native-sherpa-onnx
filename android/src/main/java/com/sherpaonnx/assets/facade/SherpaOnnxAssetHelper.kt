@@ -40,6 +40,10 @@ internal class SherpaOnnxAssetHelper(
     assetPackDelivery.fetchAssetPack(packName, promise)
   }
 
+  fun ensureAssetPackReady(packName: String, promise: Promise) {
+    assetPackDelivery.ensureAssetPackReady(packName, promise)
+  }
+
   fun getAssetPackState(packName: String, promise: Promise) {
     assetPackDelivery.getAssetPackState(packName, promise)
   }
