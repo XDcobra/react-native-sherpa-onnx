@@ -288,7 +288,8 @@ See [download-manager.md](download-manager.md) and [model-languages.md](model-la
 
 ## Related docs
 
-- [model-setup.md](model-setup.md) — bundled assets, PAD, discovery
+- [model-setup.md](model-setup.md) — bundled assets, discovery
+- [on-demand-model-delivery.md](on-demand-model-delivery.md) — PAD & ODR (install-time, on-demand)
 - [memory-and-models.md](memory-and-models.md) — detect before heavy engine init
 - [execution-providers.md](execution-providers.md) — QNN provider setup (after you know the pack is QNN-capable)
 - [fileio.md](fileio.md) — `FileSource` shapes

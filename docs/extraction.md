@@ -22,7 +22,7 @@ if (archives?.length) {
 }
 ```
 
-Use this path when model archives are shipped via Android PAD or copied to a known directory and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
+Use this path when model archives are shipped via **PAD / ODR / main bundle** (see [on-demand-model-delivery.md](./on-demand-model-delivery.md) for install-time vs on-demand), or any known directory, and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
 
 ---
 
@@ -39,8 +39,9 @@ Use this path when model archives are shipped via Android PAD or copied to a kno
 - [Path expectations table](#path-expectations-table)
 - [Examples](#examples)
   - [PAD compressed archives (Android)](#1-pad-compressed-archives-android)
-  - [iOS main bundle archives](#2-ios-main-bundle-archives)
-  - [Non-PAD compressed archives (any platform)](#3-non-pad-compressed-archives-any-platform)
+  - [iOS ODR tag archives](#2-ios-odr-tag-archives)
+  - [iOS main bundle archives](#3-ios-main-bundle-archives)
+  - [Non-PAD compressed archives (any platform)](#4-non-pad-compressed-archives-any-platform)
 - [Workflow: from archive to model init](#workflow-from-archive-to-model-init)
 - [See also](#see-also)
 
@@ -53,6 +54,7 @@ Use this API whenever your models are delivered as **compressed archives** (`.ta
 | Scenario | Function | Platform |
 | --- | --- | --- |
 | Android PAD pack with compressed archives | `getBundledArchives` | Android only |
+| iOS ODR tag (after `fetchAssetPack`) | `listBundledArchives(await getAssetPackPath(tag))` | iOS |
 | iOS main-bundle archives | `listBundledArchives` | iOS (and Android) |
 | Archives downloaded to the filesystem | `listBundledArchives` | Both |
 | Extract any of the above | `extractArchive` | Both |
@@ -114,7 +116,7 @@ import {
 function getBundledArchives(packName: string): Promise<BundledArchive[] | null>
 ```
 
-**Android only.** Returns the list of `.tar.zst` and `.tar.bz2` archives in the given Play Asset Delivery pack.
+**Android only.** Returns the list of `.tar.zst` and `.tar.bz2` archives in the given Play Asset Delivery pack. For **iOS ODR**, fetch the tag first ([on-demand-model-delivery.md](./on-demand-model-delivery.md)), then use `listBundledArchives` on `getAssetPackPath(tag)`.
 
 - When the pack is **STORAGE_FILES**, scans the pack directory on the filesystem.
 - When the pack is **APK_ASSETS**, lists archives at asset path `models` (pack content is merged at app asset root). Archives are returned with `fromAsset: true` and `archivePath` like `models/name.tar.zst`.
@@ -235,6 +237,7 @@ import type {
 | --- | --- | --- | --- | --- | --- |
 | **PAD STORAGE_FILES** | `getBundledArchives("pack")` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **PAD APK_ASSETS** | `getBundledArchives("pack")` | `models/name.tar.zst` (app asset root) | `true` | ❌ | `extractTarZstFromAsset` / `extractTarBz2FromAsset` (stream) |
+| **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./on-demand-model-delivery.md) | Absolute filesystem path | absent | ✅ | path-based extract |
 | **iOS main bundle** | `listBundledArchives(MainBundlePath + '/models')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **Downloaded archive** | `listBundledArchives(DocumentDirectoryPath + '/downloads')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **Any other directory** | `listBundledArchives(path)` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
@@ -269,7 +272,34 @@ const models = await listModelsAtPath(targetDir, true);
 // --> [{ folder: 'whisper-tiny', hint: 'stt' }, ...]
 ```
 
-### 2. iOS main bundle archives
+### 2. iOS ODR tag archives
+
+```typescript
+import {
+  waitForAssetPackReady,
+  getAssetPackPath,
+} from 'react-native-sherpa-onnx/utils';
+import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+
+const TAG = 'core_models';
+const targetDir = `${DocumentDirectoryPath}/models`;
+
+await waitForAssetPackReady(TAG);
+const packPath = await getAssetPackPath(TAG);
+if (!packPath) throw new Error('ODR tag not ready');
+
+const archives = await listBundledArchives(packPath);
+for (const archive of archives) {
+  await extractArchive(archive, targetDir, {
+    onProgress: (e) => console.log(archive.modelId, e.percent),
+  });
+}
+```
+
+See [on-demand-model-delivery.md](./on-demand-model-delivery.md) for `fetchAssetPack`, progress, and `removeAssetPack` on iOS.
+
+### 3. iOS main bundle archives
 
 ```typescript
 import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
@@ -284,7 +314,7 @@ for (const archive of archives) {
 }
 ```
 
-### 3. Non-PAD compressed archives (any platform)
+### 4. Non-PAD compressed archives (any platform)
 
 If your app ships or downloads `.tar.zst` / `.tar.bz2` archives **outside** of Play Asset Delivery — for example archives bundled in the Android `assets/` folder, copied from the iOS bundle, or downloaded via the network — use `listBundledArchives` to discover them and `extractArchive` to extract.
 
@@ -344,6 +374,7 @@ if (sttModel) {
 
 ## See also
 
+- [Ship model delivery (PAD & ODR)](on-demand-model-delivery.md) — install-time, on-demand, fetch/progress, removal
 - [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `bundledModelFileSource`
 - [Download manager](download-manager.md) — downloading models from the network
 - [STT](stt-offline.md) — Speech-to-Text API

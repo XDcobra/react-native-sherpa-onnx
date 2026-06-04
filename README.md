@@ -27,33 +27,33 @@ A React Native TurboModule that provides offline and streaming speech processing
 
 ### Speech & media features
 
-- Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- Text-to-Speech (TTS): [Offline](./docs/tts-offline.md)
-- Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
-- VAD: [Streaming](./docs/vad-streaming.md)
-- Alignment / timestamps: [Offline](./docs/alignment-offline.md)
+- ✅ Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
+- ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
+- ✅ VAD: [Streaming](./docs/vad-streaming.md)
+- ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 
 ### Pipeline & buffers
 
-- Audio buffers: [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
-- Text buffers: [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
-- Segment buffers: [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
-- Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
-- File and conversion I/O: [File I/O](./docs/fileio.md) · [Audio save / conversion](./docs/audio-conversion.md)
+- ✅ Audio buffers: [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
+- ✅ Text buffers: [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
+- ✅ Segment buffers: [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
+- ✅ Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
+- ✅ File and conversion I/O: [File I/O](./docs/fileio.md) · [Audio save / conversion](./docs/audio-conversion.md)
 
 ### Playback & utilities
 
-- Playback: [PCM Player](./docs/pcm-player.md)
-- Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
-- Runtime acceleration: [Execution providers](./docs/execution-providers.md)
-- Automatic Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
-- Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md)
+- ✅ Playback: [PCM Player](./docs/pcm-player.md)
+- ✅ Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
+- ✅ Runtime acceleration: [Execution providers](./docs/execution-providers.md)
+- ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
+- ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/on-demand-model-delivery.md) — install-time, fast-follow, on-demand
 
 ### Planned / not yet
 
-- Speaker diarization: [Diarization](./docs/diarization.md)
-- Source separation: [Separation](./docs/separation.md)
+- ⏳ Speaker diarization: [Diarization](./docs/diarization.md)
+- ⏳ Source separation: [Separation](./docs/separation.md)
 
 ## Built for on-device memory
 
@@ -352,7 +352,8 @@ Full guide: [Audio visualization](./docs/audio-visualization.md).
 - [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md)
 - [Speaker Diarization](./docs/diarization.md)
 - [Source Separation](./docs/separation.md)
-- [Model Setup](./docs/model-setup.md) – Bundled assets, Play Asset Delivery (PAD), model discovery APIs, and troubleshooting
+- [Model Setup](./docs/model-setup.md) – Bundled assets, model discovery APIs, and troubleshooting
+- [Ship Model Delivery (PAD & ODR)](./docs/on-demand-model-delivery.md) – install-time, fast-follow, on-demand; `fetchAssetPack`, progress, extraction
 - [Model Download Manager](./docs/download-manager.md)
 - [Extraction API](./docs/extraction.md)
 - [Disable FFMPEG](./docs/disable-ffmpeg.md)

@@ -2,7 +2,7 @@
  * Extraction subpath: list and extract compressed model archives (.tar.zst / .tar.bz2).
  *
  * Three entry points:
- *  - getBundledArchives(packName)    – Android PAD packs (STORAGE_FILES or APK_ASSETS)
+ *  - getBundledArchives(packName)    – Android PAD packs (STORAGE_FILES or APK_ASSETS); iOS ODR: listBundledArchives(getAssetPackPath(tag))
  *  - listBundledArchives(dirPath)    – any filesystem directory (cross-platform)
  *  - extractArchive(archive, target) – unified extraction (auto-selects path or asset-stream)
  *
@@ -92,7 +92,7 @@ async function scanDirectoryForArchives(
  * - **APK_ASSETS** packs: queries the Android AssetManager for embedded archive paths.
  *   Archives returned with `fromAsset: true` are extracted by streaming from the APK
  *   (no temp copy needed).
- * - **iOS / unavailable pack**: returns `null`.
+ * - **iOS / unavailable pack**: returns `null` (use `listBundledArchives` on `getAssetPackPath` after ODR fetch — see docs/on-demand-model-delivery.md).
  *
  * @param packName  Name of the PAD asset pack (e.g. `"sherpa_models"`)
  */

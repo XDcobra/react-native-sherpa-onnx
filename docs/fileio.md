@@ -4,6 +4,8 @@
 
 Generic file operations using **`FileSource`** and **`FileDestination`** descriptors. Supports filesystem paths, app directories, Android `content://` URIs, Android SAF directory trees, iOS security-scoped URLs, and Android Play Asset Delivery (`pad`) sources.
 
+**PAD / ODR delivery** (install-time or fetch) is **not** part of fileio — see [on-demand-model-delivery.md](./on-demand-model-delivery.md).
+
 **Import path:** `react-native-sherpa-onnx/fileio`
 
 The package root also re-exports `copyFile`, `saveText`, `shareFile`, and all types for convenience.
@@ -39,7 +41,7 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 | `contentUri` | SAF document URI | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
-| `pad` | Play Asset Delivery pack | Rejects |
+| `pad` | Installed PAD pack path (Android) | Rejects — use [on-demand-model-delivery.md](./on-demand-model-delivery.md) on iOS |
 
 ## Quick start
 

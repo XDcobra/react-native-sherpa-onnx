@@ -82,9 +82,10 @@ export async function listModelsAtPath(
 
 /**
  * **Play Asset Delivery (PAD):** Returns the path to the models directory inside an
- * Android asset pack, or null if the pack is not available.
- * Use this to list and load models delivered via PAD (e.g. pack "sherpa_models").
- * On iOS returns null.
+ * Directory containing shipped models for a pack (Android PAD) or ODR tag (iOS),
+ * typically `…/models`, or null if not available yet.
+ * For on-demand / ODR, call {@link fetchAssetPack} / {@link waitForAssetPackReady} first; install-time PAD may use {@link getBundledArchives} without fetch.
+ * @see docs/on-demand-model-delivery.md
  */
 export async function getAssetPackPath(
   packName: string

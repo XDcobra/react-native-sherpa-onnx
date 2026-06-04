@@ -12,7 +12,8 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [memory-and-models.md](./memory-and-models.md) | OOM awareness, model sizing, concurrent engine budgets, buffer planning |
 | [feature-pipelines.md](./feature-pipelines.md) | Named end-to-end pipeline recipes across offline/streaming features |
-| [model-setup.md](./model-setup.md) | Bundled assets, Play Asset Delivery (PAD), model discovery APIs, troubleshooting |
+| [model-setup.md](./model-setup.md) | Bundled assets, model discovery APIs, path helpers, troubleshooting |
+| [on-demand-model-delivery.md](./on-demand-model-delivery.md) | Ship models: PAD (install-time / fast-follow / on-demand) & iOS ODR / bundle |
 | [model-detect.md](./model-detect.md) | Unified `detectModel` / `detectModelsBatch`, inputs, QNN, vs feature `detect*Model` |
 | [model-languages.md](./model-languages.md) | Language codes and model language support |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
@@ -112,7 +113,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [fileio.md](./fileio.md) | `copyFile`, `saveText`, `shareFile` — file-based I/O |
-| [extraction.md](./extraction.md) | Archive extraction API (PAD, zip, tar) |
+| [extraction.md](./extraction.md) | Archive extraction API (compressed .tar.zst / .tar.bz2) |
 | [download-manager.md](./download-manager.md) | Runtime model download, background downloads (iOS/Android) |
 | [hotwords.md](./hotwords.md) | Hotword / boosted-phrase configuration |
 
