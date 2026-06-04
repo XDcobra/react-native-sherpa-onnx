@@ -96,3 +96,16 @@ export async function getAssetPackPath(
  * Alias for {@link getAssetPackPath}. Use for PAD (Play Asset Delivery) model discovery.
  */
 export const getPlayAssetDeliveryModelsPath = getAssetPackPath;
+
+export {
+  fetchAssetPack,
+  getAssetPackState,
+  removeAssetPack,
+  waitForAssetPackReady,
+  assetPackDownloadPercent,
+} from './pad/assetPack';
+export type {
+  AssetPackDeliveryStatus,
+  AssetPackStateSnapshot,
+  WaitForAssetPackOptions,
+} from './pad/assetPack';

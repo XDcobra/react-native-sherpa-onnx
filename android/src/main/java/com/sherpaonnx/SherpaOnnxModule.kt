@@ -5219,6 +5219,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.listBundledArchiveAssetPaths(packName, promise)
   }
 
+  override fun fetchAssetPack(packName: String, promise: Promise) {
+    assetHelper.fetchAssetPack(packName, promise)
+  }
+
+  override fun getAssetPackState(packName: String, promise: Promise) {
+    assetHelper.getAssetPackState(packName, promise)
+  }
+
+  override fun removeAssetPack(packName: String, promise: Promise) {
+    assetHelper.removeAssetPack(packName, promise)
+  }
+
   override fun extractArchiveFromAsset(
     assetPath: String,
     targetPath: String,

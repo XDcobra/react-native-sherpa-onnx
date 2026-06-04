@@ -79,19 +79,32 @@ internal class AssetPackLocator(
         return
       }
 
+      val result = Arguments.createArray()
       if (location.packStorageMethod() != AssetPackStorageMethod.STORAGE_FILES) {
         val assetPrefix = "models"
         val names = context.assets.list(assetPrefix) ?: emptyArray()
-        val archives = names.filter { it.endsWith(".tar.zst") || it.endsWith(".tar.bz2") }
-        val result = Arguments.createArray()
-        for (name in archives) {
+        for (name in names.filter { it.endsWith(".tar.zst") || it.endsWith(".tar.bz2") }) {
           result.pushString("$assetPrefix/$name")
         }
-        Log.i(logTag, "listBundledArchiveAssetPaths: packName=$packName prefix=$assetPrefix count=${result.size()}")
+        Log.i(logTag, "listBundledArchiveAssetPaths: APK_ASSETS packName=$packName count=${result.size()}")
         promise.resolve(result)
-      } else {
-        promise.resolve(Arguments.createArray())
+        return
       }
+
+      val assetsPath = location.assetsPath()
+      val path = location.path()
+      val modelsDir = when {
+        assetsPath != null && assetsPath.isNotEmpty() -> File(assetsPath, "models")
+        path != null && path.isNotEmpty() -> File(path, "assets/models")
+        else -> null
+      }
+      if (modelsDir != null && modelsDir.isDirectory) {
+        modelsDir.listFiles()
+          ?.filter { it.isFile && (it.name.endsWith(".tar.zst") || it.name.endsWith(".tar.bz2")) }
+          ?.forEach { file -> result.pushString(file.absolutePath) }
+      }
+      Log.i(logTag, "listBundledArchiveAssetPaths: STORAGE_FILES packName=$packName count=${result.size()}")
+      promise.resolve(result)
     } catch (e: Exception) {
       Log.w(logTag, "listBundledArchiveAssetPaths failed: ${e.message}")
       promise.resolve(Arguments.createArray())

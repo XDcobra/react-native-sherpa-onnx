@@ -1733,6 +1733,28 @@ export interface Spec extends TurboModule {
   getAssetPackPath(packName: string): Promise<string | null>;
 
   /**
+   * Request download of an **on-demand** Play Asset Delivery pack. Android only.
+   */
+  fetchAssetPack(packName: string): Promise<boolean>;
+
+  /**
+   * Current PAD pack download state (progress / errors). Android only.
+   */
+  getAssetPackState(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
+   * Remove an on-demand pack from the device after extraction (frees PAD storage). Android only.
+   * @returns 0 on success (Play Core does not report freed bytes).
+   */
+  removeAssetPack(packName: string): Promise<number>;
+
+  /**
    * Read the contents of a text file from the bundled assets (Android) or main bundle (iOS).
    * @param assetPath The relative path to the asset file (e.g., 'model_licenses/asr-models-license-status.csv')
    * @returns Resolves with the string content of the file or rejects if the file cannot be read.
