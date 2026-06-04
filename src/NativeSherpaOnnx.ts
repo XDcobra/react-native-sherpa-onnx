@@ -1766,6 +1766,24 @@ export interface Spec extends TurboModule {
   removeAssetPack(packName: string): Promise<number>;
 
   /**
+   * iOS ODR delivery snapshot: `tag` + `resolvedModelsPath`; extra fields in DEBUG native builds.
+   * Android: tag + null path. Use extraction APIs to list archives under the models path.
+   */
+  listOdrDeliverySnapshot(tag: string): Promise<{
+    tag: string;
+    resolvedModelsPath: string | null;
+    expectedModelsPath?: string;
+    bundleSubdirectory?: string;
+    directoryProbe?: {
+      path: string;
+      exists: boolean;
+      isDirectory: boolean;
+      entryCount: number;
+      entries: string[];
+    };
+  }>;
+
+  /**
    * Read the contents of a text file from the bundled assets (Android) or main bundle (iOS).
    * @param assetPath The relative path to the asset file (e.g., 'model_licenses/asr-models-license-status.csv')
    * @returns Resolves with the string content of the file or rejects if the file cannot be read.
@@ -1815,10 +1833,10 @@ export interface Spec extends TurboModule {
   cancelExtraction(operationId: string): Promise<void>;
 
   /**
-   * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
-   * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
+   * Android only: immediate asset paths under an APK prefix (e.g. `models/foo.tar.zst`).
+   * Extraction layer; not tied to PAD pack names.
    */
-  listBundledArchiveAssetPaths(packName: string): Promise<string[]>;
+  listApkAssetPaths(assetPrefix: string): Promise<string[]>;
 
   /**
    * Compute SHA-256 of a file and return the hex digest.

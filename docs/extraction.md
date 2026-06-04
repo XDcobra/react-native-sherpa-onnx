@@ -9,10 +9,18 @@ The `react-native-sherpa-onnx/extraction` subpath provides a unified API to **li
 ## Quick start
 
 ```ts
-import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
+import {
+  listBundledArchives,
+  listBundledArchivesFromApkAssets,
+  extractArchive,
+} from 'react-native-sherpa-onnx/extraction';
+import { getAssetPackPath } from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
-const archives = await getBundledArchives('sherpa_models');
+const packPath = await getAssetPackPath('sherpa_models');
+const archives = packPath
+  ? await listBundledArchives(packPath)
+  : await listBundledArchivesFromApkAssets('models');
 if (archives?.length) {
   for (const archive of archives) {
     await extractArchive(archive, `${DocumentDirectoryPath}/models`, {
@@ -31,7 +39,7 @@ Use this path when model archives are shipped via **PAD / ODR / main bundle** (s
 - [When to use](#when-to-use)
 - [Normal assets vs. PAD assets](#normal-assets-vs-pad-assets)
 - [API Reference](#api-reference)
-  - [`getBundledArchives`](#getbundledarchivespackname)
+  - [`listBundledArchivesFromApkAssets`](#listbundledarchivesfromapkassetsassetprefix)
   - [`listBundledArchives`](#listbundledarchivesdirectorypath)
   - [`extractArchive`](#extractarchivearchive-targetpath-options)
   - [`Types`](#types)
@@ -53,7 +61,7 @@ Use this API whenever your models are delivered as **compressed archives** (`.ta
 
 | Scenario | Function | Platform |
 | --- | --- | --- |
-| Android PAD pack with compressed archives | `getBundledArchives` | Android only |
+| Android ship dir or APK `models/` prefix | `listBundledArchives` / `listBundledArchivesFromApkAssets` | Android |
 | iOS ODR tag (after `fetchAssetPack`) | `listBundledArchives(await getAssetPackPath(tag))` | iOS |
 | iOS main-bundle archives | `listBundledArchives` | iOS (and Android) |
 | Archives downloaded to the filesystem | `listBundledArchives` | Both |
@@ -71,26 +79,26 @@ Understanding the distinction helps when reading the API, but **you never need t
 | | Normal (filesystem) archive | PAD APK_ASSETS archive |
 | --- | --- | --- |
 | **Where it lives** | On the filesystem — iOS bundle, Documents dir, PAD `STORAGE_FILES`, or any directory | Embedded inside the APK (Android only) |
-| **How you list it** | `listBundledArchives(directoryPath)` | `getBundledArchives(packName)` (falls back to asset listing automatically) |
+| **How you list it** | `listBundledArchives(directoryPath)` | `listBundledArchivesFromApkAssets('models')` |
 | **`fromAsset`** | `undefined` / absent | `true` |
 | **`archivePath`** | Absolute filesystem path (e.g. `/data/.../whisper.tar.zst`) | Asset path (e.g. `models/whisper.tar.zst`) — pack content is merged at app asset root |
 | **`fileSize`** | Available (from `stat`) | Not available (0 or absent) |
 | **Extraction method** | Native reads from filesystem path | Native streams from Android `AssetManager` — no temp copy |
 | **Platform** | iOS + Android | Android only |
 
-### How `getBundledArchives` resolves the source automatically
+### PAD/ODR vs extraction
+
+**PAD/ODR** ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)) only delivers a **`…/models` path** (or nothing for APK_ASSETS). **This subpath** lists and extracts `.tar.zst` / `.tar.bz2`:
 
 ```
-getBundledArchives("sherpa_models")
-  │
-  ├─ getAssetPackPath returns a path?  -->  STORAGE_FILES
-  │    └─ scanDirectoryForArchives(path)  -->  BundledArchive[] (filesystem)
-  │
-  └─ getAssetPackPath returns null?    -->  APK_ASSETS
-       └─ listBundledArchiveAssetPaths  -->  BundledArchive[] (fromAsset: true, archivePath: "models/…")
+await ensureAssetPackReady('core_models');          // delivery (utils)
+const packPath = await getAssetPackPath('core_models');
+const archives = packPath
+  ? await listBundledArchives(packPath)             // STORAGE_FILES
+  : await listBundledArchivesFromApkAssets('models'); // APK_ASSETS install-time
 ```
 
-For **APK_ASSETS**, the pack’s `src/main/assets/models/` content is merged into the app’s asset root, so the canonical path is **`models`** (same for Play Store and bundletool install-time delivery).
+Install-time PAD merges pack assets at app asset root **`models/`** — not looked up by pack name in native code.
 
 ---
 
@@ -100,8 +108,8 @@ Import from the extraction subpath:
 
 ```typescript
 import {
-  getBundledArchives,
   listBundledArchives,
+  listBundledArchivesFromApkAssets,
   extractArchive,
   type BundledArchive,
   type ExtractArchiveOptions,
@@ -110,17 +118,13 @@ import {
 } from 'react-native-sherpa-onnx/extraction';
 ```
 
-### getBundledArchives(packName)
+### listBundledArchivesFromApkAssets(assetPrefix)
 
 ```ts
-function getBundledArchives(packName: string): Promise<BundledArchive[] | null>
+function listBundledArchivesFromApkAssets(assetPrefix?: string): Promise<BundledArchive[]>
 ```
 
-**Android only.** Returns the list of `.tar.zst` and `.tar.bz2` archives in the given Play Asset Delivery pack. For **iOS ODR**, fetch the tag first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)), then use `listBundledArchives` on `getAssetPackPath(tag)`.
-
-- When the pack is **STORAGE_FILES**, scans the pack directory on the filesystem.
-- When the pack is **APK_ASSETS**, lists archives at asset path `models` (pack content is merged at app asset root). Archives are returned with `fromAsset: true` and `archivePath` like `models/name.tar.zst`.
-- Returns `null` on **iOS** or when the pack is not available / empty.
+**Android only.** Lists `.tar.zst` / `.tar.bz2` under an APK asset prefix (default `models`). `fromAsset: true` for `extractArchive`. Not tied to PAD pack names.
 
 ### listBundledArchives(directoryPath)
 
@@ -205,8 +209,8 @@ type ExtractProgressEvent = {
 
 ```ts
 import {
-  getBundledArchives, // list compressed archives delivered by Android PAD packs
-  listBundledArchives, // list compressed archives in any filesystem directory
+  listBundledArchives, // list compressed archives in a filesystem directory
+  listBundledArchivesFromApkAssets, // Android APK asset prefix (e.g. models/)
   extractArchive, // extract one archive descriptor into target directory
 } from 'react-native-sherpa-onnx/extraction';
 
@@ -225,7 +229,7 @@ import type {
 
 | Function | Input | Returns | Platform | Use case |
 | --- | --- | --- | --- | --- |
-| `getBundledArchives(packName)` | PAD pack name | `BundledArchive[] \| null` | Android | List archives in a PAD pack (STORAGE_FILES or APK_ASSETS) |
+| `listBundledArchivesFromApkAssets(prefix)` | APK asset prefix | `BundledArchive[]` | Android | Install-time ship under `models/` |
 | `listBundledArchives(dirPath)` | Absolute directory path | `BundledArchive[]` | iOS + Android | List archives in any filesystem directory |
 | `extractArchive(archive, target)` | `BundledArchive` + target dir | `ExtractResult` | iOS + Android | Extract a single archive (any source) |
 
@@ -235,8 +239,8 @@ import type {
 
 | Source | How to list | `archivePath` format | `fromAsset` | `fileSize` | Extraction path |
 | --- | --- | --- | --- | --- | --- |
-| **PAD STORAGE_FILES** | `getBundledArchives("pack")` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
-| **PAD APK_ASSETS** | `getBundledArchives("pack")` | `models/name.tar.zst` (app asset root) | `true` | ❌ | `extractTarZstFromAsset` / `extractTarBz2FromAsset` (stream) |
+| **PAD STORAGE_FILES** | `listBundledArchives(await getAssetPackPath(pack))` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
+| **PAD APK_ASSETS** | `listBundledArchivesFromApkAssets('models')` | `models/name.tar.zst` (app asset root) | `true` | ❌ | `extractTarZstFromAsset` / `extractTarBz2FromAsset` (stream) |
 | **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./model-delivery-pad-odr.md) | Absolute filesystem path | absent | ✅ | path-based extract |
 | **iOS main bundle** | `listBundledArchives(MainBundlePath + '/models')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **Downloaded archive** | `listBundledArchives(DocumentDirectoryPath + '/downloads')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
@@ -251,15 +255,22 @@ import type {
 ### 1. PAD compressed archives (Android)
 
 ```typescript
-import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
+import {
+  listBundledArchives,
+  listBundledArchivesFromApkAssets,
+  extractArchive,
+} from 'react-native-sherpa-onnx/extraction';
+import { getAssetPackPath } from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 
 const targetDir = `${DocumentDirectoryPath}/models`;
 
-// List archives from PAD pack (STORAGE_FILES or APK_ASSETS — handled automatically)
-const archives = await getBundledArchives('sherpa_models');
-if (archives?.length) {
+const packPath = await getAssetPackPath('sherpa_models');
+const archives = packPath
+  ? await listBundledArchives(packPath)
+  : await listBundledArchivesFromApkAssets('models');
+if (archives.length) {
   for (const archive of archives) {
     await extractArchive(archive, targetDir, {
       onProgress: (e) => console.log(archive.modelId, `${e.percent}%`),
@@ -360,9 +371,9 @@ if (sttModel) {
  ┌─────────────────────┐     ┌────────────────────┐     ┌─────────────────────┐
  │  List archives       │     │  Extract            │     │  Use models          │
  │                      │     │                     │     │                      │
- │ getBundledArchives() │────▶│ extractArchive()    │────▶│ listModelsAtPath()   │
- │ listBundledArchives()│     │   (handles PAD +    │     │ listModelsAtPath()   │
- │                      │     │    filesystem)       │     │ createSTT / TTS()    │
+ │ listBundledArchives()│────▶│ extractArchive()    │────▶│ listModelsAtPath()   │
+ │ listBundledArchives  │     │   (path or APK      │     │ createSTT / TTS()    │
+ │ FromApkAssets()      │     │    asset stream)    │     │                      │
  └─────────────────────┘     └────────────────────┘     └─────────────────────┘
 ```
 

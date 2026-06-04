@@ -32,10 +32,6 @@ internal class SherpaOnnxAssetHelper(
     assetPackLocator.getAssetPackPath(packName, promise)
   }
 
-  fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
-    assetPackLocator.listBundledArchiveAssetPaths(packName, promise)
-  }
-
   fun fetchAssetPack(packName: String, promise: Promise) {
     assetPackDelivery.fetchAssetPack(packName, promise)
   }

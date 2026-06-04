@@ -48,4 +48,13 @@
                                             reject:reject];
 }
 
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+  [[SherpaOnnxOdrDelivery shared] listOdrDeliverySnapshot:tag
+                                                  resolve:resolve
+                                                   reject:reject];
+}
+
 @end

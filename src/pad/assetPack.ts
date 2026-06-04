@@ -173,7 +173,38 @@ export async function ensureAssetPackReady(
     const state = normalizeSnapshot(raw);
     options?.onProgress?.(state, assetPackDownloadPercent(state));
     return state;
+  } catch (error) {
+    throw normalizeAssetPackDeliveryError(error, packName);
   } finally {
     progressHandlersByPack.delete(packName);
   }
+}
+
+function normalizeAssetPackDeliveryError(
+  error: unknown,
+  packName: string
+): Error {
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (typeof msg === 'string' && msg.trim().length > 0) {
+      return error;
+    }
+  }
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const msg = record.message;
+    const code = record.code;
+    const text =
+      (typeof msg === 'string' && msg.trim().length > 0
+        ? msg
+        : typeof code === 'string' && code.trim().length > 0
+        ? code
+        : null) ?? `On-demand delivery failed for "${packName}"`;
+    const wrapped = new Error(text);
+    if (typeof code === 'string' && code.length > 0) {
+      wrapped.name = code;
+    }
+    return wrapped;
+  }
+  return new Error(`On-demand delivery failed for "${packName}"`);
 }

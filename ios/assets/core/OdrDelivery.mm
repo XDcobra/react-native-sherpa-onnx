@@ -45,27 +45,105 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
   return [NSSet setWithObject:tag];
 }
 
-- (nullable NSString *)assetPackModelsPath:(NSString *)tag {
-  if (tag.length == 0) {
+/// PAD parity: models path is available only while ODR access is held for the tag.
+- (BOOL)hasOdrAccessForTag:(NSString *)tag {
+  return [self.accessingTags containsObject:tag];
+}
+
+/// Xcode ODR layout: ship content lives under bundle subdirectory `{tag}/models/`.
+static NSString *OdrBundleSubdirectoryForTag(NSString *tag) {
+  return [NSString stringWithFormat:@"%@/models", tag];
+}
+
+static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundle) {
+  NSString *resourcePath = [bundle resourcePath];
+  if (tag.length == 0 || resourcePath.length == 0) {
     return nil;
   }
-  NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
-  NSString *tagged =
-      [[resourcePath stringByAppendingPathComponent:tag] stringByAppendingPathComponent:@"models"];
+  return [resourcePath stringByAppendingPathComponent:OdrBundleSubdirectoryForTag(tag)];
+}
+
+- (NSBundle *)bundleForTag:(NSString *)tag {
+  NSBundleResourceRequest *request = self.activeRequests[tag];
+  return request.bundle ?: [NSBundle mainBundle];
+}
+
+- (void)clearAccessForTag:(NSString *)tag {
+  [self.accessingTags removeObject:tag];
+  NSBundleResourceRequest *request = self.activeRequests[tag];
+  if (!request) {
+    return;
+  }
+  [self stopObservingProgressForTag:tag];
+  [request endAccessingResources];
+  [self.activeRequests removeObjectForKey:tag];
+}
+
+- (NSDictionary *)probeDictionaryForPath:(NSString *)path {
   NSFileManager *fm = [NSFileManager defaultManager];
   BOOL isDir = NO;
-  if ([fm fileExistsAtPath:tagged isDirectory:&isDir] && isDir) {
-    return tagged;
+  BOOL exists = [fm fileExistsAtPath:path isDirectory:&isDir];
+  NSMutableDictionary *probe = [NSMutableDictionary dictionary];
+  probe[@"path"] = path ?: @"";
+  probe[@"exists"] = @(exists);
+  probe[@"isDirectory"] = @(exists && isDir);
+  probe[@"entryCount"] = @0;
+  probe[@"entries"] = @[];
+  if (!exists || !isDir) {
+    return probe;
   }
-  NSString *legacy = [resourcePath stringByAppendingPathComponent:@"models"];
-  if ([fm fileExistsAtPath:legacy isDirectory:&isDir] && isDir) {
-    return legacy;
+  NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:path error:nil] ?: @[];
+  probe[@"entryCount"] = @(names.count);
+  NSUInteger listLimit = MIN(names.count, (NSUInteger)32);
+  probe[@"entries"] = [names subarrayWithRange:NSMakeRange(0, listLimit)];
+  return probe;
+}
+
+/// Canonical `{tag}/models` while ODR access is held (PAD-style; content not inspected).
+- (nullable NSString *)odrModelsDirectoryForTag:(NSString *)tag bundle:(NSBundle *)bundle {
+  if (tag.length == 0 || !bundle || ![self hasOdrAccessForTag:tag]) {
+    return nil;
   }
-  return nil;
+  return OdrExpectedModelsDirectoryForTag(tag, bundle);
+}
+
+- (NSDictionary *)odrSnapshotForTag:(NSString *)tag bundle:(NSBundle *)bundle {
+  NSBundle *resolvedBundle = bundle ?: [NSBundle mainBundle];
+  NSString *expected = OdrExpectedModelsDirectoryForTag(tag, resolvedBundle);
+  NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+  snapshot[@"tag"] = tag ?: @"";
+  snapshot[@"resolvedModelsPath"] =
+      [self odrModelsDirectoryForTag:tag bundle:resolvedBundle] ?: [NSNull null];
+#if DEBUG
+  snapshot[@"bundlePath"] = [resolvedBundle bundlePath] ?: @"";
+  snapshot[@"resourcePath"] = [resolvedBundle resourcePath] ?: @"";
+  snapshot[@"expectedModelsPath"] = expected ?: @"";
+  snapshot[@"bundleSubdirectory"] = OdrBundleSubdirectoryForTag(tag);
+  snapshot[@"hasActiveRequest"] = @(self.activeRequests[tag] != nil);
+  snapshot[@"isAccessingTag"] = @([self.accessingTags containsObject:tag]);
+  snapshot[@"directoryProbe"] = [self probeDictionaryForPath:expected];
+#endif
+  return snapshot;
+}
+
+#if DEBUG
+- (void)logOdrDiagnosticsForTag:(NSString *)tag bundle:(NSBundle *_Nullable)bundle {
+  NSDictionary *snapshot = [self odrSnapshotForTag:tag bundle:bundle ?: [NSBundle mainBundle]];
+  NSLog(@"[SherpaOnnx ODR] diagnostics tag=%@ %@", tag, snapshot);
+}
+#endif
+
+- (nullable NSString *)assetPackModelsPath:(NSString *)tag {
+  return [self odrModelsDirectoryForTag:tag bundle:[self bundleForTag:tag]];
+}
+
+- (nullable NSString *)assetPackModelsPath:(NSString *)tag request:(NSBundleResourceRequest *)request {
+  NSBundle *bundle = request.bundle ?: [NSBundle mainBundle];
+  return [self odrModelsDirectoryForTag:tag bundle:bundle];
 }
 
 - (BOOL)isTagReady:(NSString *)tag {
-  return [self assetPackModelsPath:tag] != nil;
+  return [self hasOdrAccessForTag:tag];
 }
 
 - (BOOL)hasActiveAccessForTag:(NSString *)tag {
@@ -162,10 +240,11 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
 
 - (void)finishEnsureForTag:(NSString *)tag error:(NSError *_Nullable)error {
   dispatch_async(dispatch_get_main_queue(), ^{
+    NSBundleResourceRequest *request = self.activeRequests[tag];
     [self stopObservingProgressForTag:tag];
-    [self.activeRequests removeObjectForKey:tag];
 
     if (error) {
+      [self clearAccessForTag:tag];
       self.lastErrors[tag] = error;
       [self rejectEnsureWaitersForTag:tag
                                   code:@"ODR_FETCH_FAILED"
@@ -174,18 +253,11 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
       return;
     }
 
-    NSString *modelsPath = [self assetPackModelsPath:tag];
-    if (modelsPath.length == 0) {
-      [self rejectEnsureWaitersForTag:tag
-                                  code:@"ODR_PATH_NOT_FOUND"
-                               message:@"ODR download finished but models path is unavailable. "
-                                         @"Use a physical device, or enable ODR in the Run scheme / "
-                                         @"embed tags for Simulator."
-                                 error:nil];
-      return;
-    }
-
     [self.accessingTags addObject:tag];
+#if DEBUG
+    NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
+    [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
+#endif
     [self emitProgressForTag:tag];
     [self resolveEnsureWaitersForTag:tag];
   });
@@ -198,18 +270,12 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
   [self emitProgressForTag:tag];
 
   __weak SherpaOnnxOdrDelivery *weakSelf = self;
-  [request conditionallyBeginAccessingResourcesWithCompletionHandler:^(BOOL resourcesAvailable) {
+  [request beginAccessingResourcesWithCompletionHandler:^(NSError *_Nullable accessError) {
     SherpaOnnxOdrDelivery *strongSelf = weakSelf;
     if (!strongSelf) {
       return;
     }
-    if (resourcesAvailable) {
-      [strongSelf finishEnsureForTag:tag error:nil];
-      return;
-    }
-    [request beginAccessingResourcesWithCompletionHandler:^(NSError *_Nullable accessError) {
-      [strongSelf finishEnsureForTag:tag error:accessError];
-    }];
+    [strongSelf finishEnsureForTag:tag error:accessError];
   }];
 }
 
@@ -240,21 +306,17 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
     self.progressHandler = progressHandler;
   }
 
-  if ([self isTagReady:tag]) {
+  if ([self.accessingTags containsObject:tag] && ![self isTagReady:tag]) {
+    [self clearAccessForTag:tag];
+  }
+
+  if (self.activeRequests[tag] != nil && [self isTagReady:tag]) {
+    [self.accessingTags addObject:tag];
     NSDictionary *state = [self stateDictionaryForTag:tag];
     if (progressHandler) {
       progressHandler(state);
     }
     resolve(state);
-    return;
-  }
-
-  if ([self.accessingTags containsObject:tag]) {
-    reject(
-        @"ODR_PATH_NOT_FOUND",
-        @"ODR access was granted but the models directory is missing. "
-        @"On Simulator, test on a device or embed ODR for local runs.",
-        nil);
     return;
   }
 
@@ -276,7 +338,11 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
     return;
   }
 
-  if ([self isTagReady:tag]) {
+  if ([self.accessingTags containsObject:tag] && ![self isTagReady:tag]) {
+    [self clearAccessForTag:tag];
+  }
+
+  if (self.activeRequests[tag] != nil && [self isTagReady:tag]) {
     [self.accessingTags addObject:tag];
     resolve(@YES);
     return;
@@ -287,35 +353,21 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
     return;
   }
 
-  if ([self.accessingTags containsObject:tag]) {
-    reject(
-        @"ODR_PATH_NOT_FOUND",
-        @"ODR access was granted but the models directory is missing. "
-        @"On Simulator, test on a device or embed ODR for local runs.",
-        nil);
-    return;
-  }
-
   [self.lastErrors removeObjectForKey:tag];
   NSBundleResourceRequest *request = [self requestForTag:tag create:YES];
   [request beginAccessingResourcesWithCompletionHandler:^(NSError *_Nullable error) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [self.activeRequests removeObjectForKey:tag];
       if (error) {
+        [self clearAccessForTag:tag];
         self.lastErrors[tag] = error;
         reject(@"ODR_FETCH_FAILED", error.localizedDescription ?: @"ODR fetch failed", error);
         return;
       }
-      NSString *modelsPath = [self assetPackModelsPath:tag];
-      if (modelsPath.length == 0) {
-        reject(
-            @"ODR_PATH_NOT_FOUND",
-            @"ODR download finished but models path is unavailable. "
-            @"Use a physical device, or enable ODR in the Run scheme / embed tags for Simulator.",
-            nil);
-        return;
-      }
       [self.accessingTags addObject:tag];
+#if DEBUG
+      NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
+      [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
+#endif
       resolve(@YES);
     });
   }];
@@ -389,6 +441,16 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
   [self.lastErrors removeObjectForKey:tag];
   [self.ensureWaiters removeObjectForKey:tag];
   resolve(@0);
+}
+
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                        resolve:(void (^)(id result))resolve
+                         reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject {
+  if (tag.length == 0) {
+    reject(@"ODR_INVALID_TAG", @"ODR tag is empty", nil);
+    return;
+  }
+  resolve([self odrSnapshotForTag:tag bundle:[self bundleForTag:tag]]);
 }
 
 @end

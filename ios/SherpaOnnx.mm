@@ -271,12 +271,21 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
     }
 }
 
-- (void)listBundledArchiveAssetPaths:(NSString *)packName
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
+- (void)listApkAssetPaths:(NSString *)assetPrefix
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
-    // PAD APK_ASSETS listing is Android-only.
+    // APK AssetManager listing is Android-only.
     resolve(@[]);
+}
+
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+    [[SherpaOnnxOdrDelivery shared] listOdrDeliverySnapshot:tag
+                                                resolve:resolve
+                                                 reject:reject];
 }
 
 // ─── FileSource helpers ──────────────────────────────────────────────

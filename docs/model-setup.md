@@ -184,7 +184,7 @@ function getAssetPackPath(packName: string): Promise<string | null>;
 
 Alias: `getPlayAssetDeliveryModelsPath` (same function).
 
-After fetch, list **uncompressed** folders with `listModelsAtPath`, or **compressed** archives via [extraction.md](./extraction.md) (`getBundledArchives` on Android, `listBundledArchives(packPath)` on iOS).
+After fetch, list **uncompressed** folders with `listModelsAtPath`, or **compressed** archives via [extraction.md](./extraction.md) (`listBundledArchives` on `getAssetPackPath` after PAD/ODR fetch).
 
 ```typescript
 const packPath = await getAssetPackPath('core_models');
@@ -329,7 +329,7 @@ See [sdk-init-bridge.md](./sdk-init-bridge.md) for the two-layer pattern, bridge
 | --- | --- | --- | --- |
 | Bundled assets | `bundledModelFileSource()` | `listAssetModels()` | Ship models with the app |
 | Multi-source probe | `autoModelFileSource(path, tryOrder)` | — | Same folder name in bundle, sandbox, PAD, or FS |
-| PAD / ODR ship | [guide](./model-delivery-pad-odr.md): install-time → `getBundledArchives`; on-demand → `fetchAssetPack` | `extractArchive()` | Tiered or bundled ship archives |
+| PAD / ODR ship | [guide](./model-delivery-pad-odr.md): `getAssetPackPath` → `listBundledArchives` | `extractArchive()` | Tiered or bundled ship archives |
 | PAD `FileSource` (installed pack) | `{ kind: 'pad', … }` or `auto` `{ pad: … }` | `getAssetPackPath()` + `listModelsAtPath()` | Android only — read/copy from pack without re-download API |
 | Downloaded models | `{ kind: 'fs', path }` | Download Manager or `listModelsAtPath()` | User-selected models at runtime |
 
@@ -451,7 +451,7 @@ if (!detection.success) {
 ## See also
 
 - [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, fast-follow, on-demand, bundle
-- [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for compressed ship archives
+- [Extraction API](extraction.md) — `listBundledArchives`, `listBundledArchivesFromApkAssets`, `extractArchive`
 - [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts-offline.md) — Text-to-Speech API
 - [SDK init bridge](sdk-init-bridge.md) — `create*` public API vs `initialize*` TurboModule maps

@@ -1,21 +1,46 @@
 # Ship Model Delivery (PAD & ODR)
 
-Ship speech models with the app via **Android Play Asset Delivery (PAD)** and **iOS On-Demand Resources (ODR)** — including **install-time**, **fast-follow**, and **on-demand** delivery on Android, plus **main-bundle** and **ODR-tagged** content on iOS.
+Fetch and resolve on-disk paths for models shipped via **Android Play Asset Delivery (PAD)** or **iOS On-Demand Resources (ODR)**.
 
-The same TypeScript APIs apply to every mode; what changes is **when** content is on disk and whether you must call `fetchAssetPack`.
-
-| Platform | Mechanisms | SDK identifier |
+| Platform | Identifier | Native layout |
 | --- | --- | --- |
-| **Android** | PAD `install-time`, `fast-follow`, `on-demand` | `packName` (e.g. `sherpa_models`, `core_models`) |
-| **iOS** | Main bundle `models/` (install-time) or **ODR tags** | ODR: tag name (e.g. `core_models`); bundle: `listAssetModels` / `bundledModelFileSource` |
+| **Android** | `packName` (Gradle `assetPack.packName`) | `{pack}/models/` when `STORAGE_FILES`; install-time may use APK assets at `models/` |
+| **iOS** | ODR tag (Xcode tag on the `models` folder) | `{tag}/models/` after `beginAccessingResources` |
 
-**Import path:** `react-native-sherpa-onnx/utils` (path + delivery APIs) and `react-native-sherpa-onnx/extraction` (compressed archives).
+**Imports:** delivery — `react-native-sherpa-onnx/utils`; archives — `react-native-sherpa-onnx/extraction` ([extraction.md](./extraction.md)).
+
+PAD/ODR APIs return a **path only** (no archive listing). Listing `.tar.zst` / `.tar.bz2` and `extractArchive` live in the extraction subpath.
 
 ---
 
-## Quick start — on-demand (small store listing)
+## Table of Contents
 
-Use this when Tier-0/1 ship archives live in a **PAD `on-demand`** pack or an **iOS ODR tag**, not in the base APK/IPA. Flow: **fetch → wait → discover → extract → (Android) optional remove pack**. After extract, engines use **`{ kind: 'fs', path }`** under `targetDir` — not the pack/tag path ([model-setup.md](./model-setup.md)).
+- [Layout](#layout)
+- [Quick start — on-demand PAD / ODR](#quick-start--on-demand-pad--odr)
+- [Quick start — install-time PAD (Android)](#quick-start--install-time-pad-android)
+- [Quick start — iOS main bundle](#quick-start--ios-main-bundle)
+- [Delivery modes](#delivery-modes)
+- [API reference](#api-reference)
+- [Delivery status](#delivery-status)
+- [Workflows](#workflows)
+- [Native setup](#native-setup)
+- [Troubleshooting](#troubleshooting)
+- [See also](#see-also)
+
+---
+
+## Layout
+
+Ship under **`models/`** inside the pack or tag:
+
+- **Archives** — `.tar.zst` / `.tar.bz2` in `models/` (list via [extraction.md](./extraction.md))
+- **Folders** — `models/<modelId>/…` (list via `listModelsAtPath`)
+
+`getAssetPackPath` returns `…/models` when the pack/tag is ready, **without checking contents**. Extract, copy, or init from paths is app responsibility ([model-setup.md](./model-setup.md)).
+
+---
+
+## Quick start — on-demand PAD / ODR
 
 ```typescript
 import {
@@ -23,125 +48,103 @@ import {
   getAssetPackPath,
   removeAssetPack,
 } from 'react-native-sherpa-onnx/utils';
-import {
-  getBundledArchives,
-  listBundledArchives,
-  extractArchive,
-} from 'react-native-sherpa-onnx/extraction';
+import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { Platform } from 'react-native';
 
-// Must match Gradle assetPack name (Android) or Xcode ODR tag (iOS).
-const PACK = 'core_models';
-// Stable runtime location — survives Android removeAssetPack / iOS ODR eviction.
+const PACK = 'sherpa_models'; // Gradle packName or Xcode ODR tag
 const targetDir = `${DocumentDirectoryPath}/models`;
 
-// 1) Fetch if needed and block until ready (native PAD listener / ODR progress).
 await ensureAssetPackReady(PACK, {
   onProgress: (_state, percent) => console.log('download', percent),
 });
 
-// 3) Directory containing ship archives (…/models). Still null on Android APK_ASSETS — see install-time quick start.
 const packPath = await getAssetPackPath(PACK);
 if (!packPath) throw new Error(`${PACK} not available after fetch`);
 
-// 4) List .tar.zst / .tar.bz2 in the pack/tag (Android: pack name; iOS: filesystem path).
-const archives =
-  Platform.OS === 'android'
-    ? await getBundledArchives(PACK)
-    : await listBundledArchives(packPath);
-
-if (archives?.length) {
-  for (const archive of archives) {
-    // 5) Unpack to targetDir; keep a manifest in app code so re-run is idempotent.
-    await extractArchive(archive, targetDir, {
-      onProgress: (e) => console.log(archive.modelId, e.percent),
-    });
-  }
+const archives = await listBundledArchives(packPath);
+for (const archive of archives) {
+  await extractArchive(archive, targetDir);
 }
 
-// 6) Android only: drop PAD bytes after extract (Play Core). iOS: optional — ends ODR access, may evict cache.
 if (Platform.OS === 'android') {
-  await removeAssetPack(PACK);
+  await removeAssetPack(PACK); // optional after extract
 }
 
-// 7) Init engines, e.g. detectSttModel({ kind: 'fs', path: `${targetDir}/<modelId>` })
+// detectSttModel({ kind: 'fs', path: `${targetDir}/<modelId>` })
+```
+
+**Uncompressed folders** (no `extractArchive`):
+
+```typescript
+import {
+  ensureAssetPackReady,
+  getAssetPackPath,
+  listModelsAtPath,
+} from 'react-native-sherpa-onnx/utils';
+
+const PACK = 'sherpa_models';
+await ensureAssetPackReady(PACK);
+const packPath = await getAssetPackPath(PACK);
+if (!packPath) throw new Error(`${PACK} not ready`);
+
+const folders = await listModelsAtPath(packPath, false);
+// Use packPath/folder or copy to your sandbox — app-defined
 ```
 
 ---
 
 ## Quick start — install-time PAD (Android)
 
-Content is delivered **with the app install** (or merged into the APK as **APK_ASSETS**). Usually **no** `fetchAssetPack` / `ensureAssetPackReady` on first launch.
+Usually no `ensureAssetPackReady` on first launch.
 
 ```typescript
-import { getBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
-import { getAssetPackPath } from 'react-native-sherpa-onnx/utils';
+import {
+  listBundledArchives,
+  listBundledArchivesFromApkAssets,
+  extractArchive,
+} from 'react-native-sherpa-onnx/extraction';
+import { getAssetPackPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
 const PACK = 'sherpa_models';
 const targetDir = `${DocumentDirectoryPath}/models`;
 
-// Works for install-time, fast-follow, and on-demand once the pack is present.
-// APK_ASSETS install-time: getAssetPackPath often returns null — use getBundledArchives.
-const archives = await getBundledArchives(PACK);
-if (!archives?.length) {
-  throw new Error(`PAD pack ${PACK} has no archives (not installed yet?)`);
-}
+const packPath = await getAssetPackPath(PACK);
+const archives = packPath
+  ? await listBundledArchives(packPath)
+  : await listBundledArchivesFromApkAssets('models');
 
 for (const archive of archives) {
   await extractArchive(archive, targetDir);
 }
 
-// Optional: if getAssetPackPath returns a STORAGE_FILES path, list uncompressed folders:
-const packPath = await getAssetPackPath(PACK);
 if (packPath) {
-  // listModelsAtPath(packPath, true) — see model-setup.md
+  await listModelsAtPath(packPath, false); // if you ship folders
 }
 ```
 
-Gradle: `deliveryType = "install-time"` (or `"fast-follow"`) on the asset pack module. See [Native app setup](#native-app-setup-summary).
-
 ---
 
-## Quick start — install-time iOS (main bundle)
+## Quick start — iOS main bundle
 
-Models ship in the app target (**Copy Bundle Resources**), not via ODR. Use bundle helpers from [model-setup.md](./model-setup.md); use extraction only for **compressed** archives in `models/`.
+Not PAD/ODR — models in **Copy Bundle Resources**:
 
 ```typescript
 import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { bundledModelFileSource, listAssetModels } from 'react-native-sherpa-onnx/utils';
 import { MainBundlePath, DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
-// Uncompressed folders in the bundle
-const bundled = await listAssetModels();
-
-// Compressed .tar.zst in bundle models/
+await listAssetModels();
 const archives = await listBundledArchives(`${MainBundlePath}/models`);
-for (const archive of archives ?? []) {
+for (const archive of archives) {
   await extractArchive(archive, `${DocumentDirectoryPath}/models`);
 }
 
-// Init from bundle (no PAD/ODR)
-const source = bundledModelFileSource('models/sherpa-onnx-whisper-tiny');
+bundledModelFileSource('models/my-model-id');
 ```
 
-For **ODR-tagged** install-time-sized tiers, use the [on-demand quick start](#quick-start--on-demand-small-store-listing) with `fetchAssetPack` only when the tag is not already local.
-
----
-
-## Table of Contents
-
-- [Delivery modes](#delivery-modes)
-- [Overview](#overview)
-- [When to use](#when-to-use)
-- [How this relates to other APIs](#how-this-relates-to-other-apis)
-- [API Reference](#api-reference)
-- [Delivery status values](#delivery-status-values)
-- [Recommended workflows](#recommended-workflows)
-- [Native app setup (summary)](#native-app-setup-summary)
-- [Troubleshooting](#troubleshooting)
-- [See also](#see-also)
+ODR-tagged ship: use the [on-demand quick start](#quick-start--on-demand-pad--odr) (`packName` = tag name).
 
 ---
 
@@ -149,274 +152,149 @@ For **ODR-tagged** install-time-sized tiers, use the [on-demand quick start](#qu
 
 ### Android PAD
 
-| `deliveryType` | When available | `fetchAssetPack` | Typical storage | `getAssetPackPath` |
-| --- | --- | --- | --- | --- |
-| **`install-time`** | With app install from Play / bundletool | Usually **not** needed | Often **APK_ASSETS** (archives under app asset root `models/`) | Often `null` → use `getBundledArchives` |
-| **`fast-follow`** | Automatically soon after install | Optional; poll `getAssetPackState` if not ready at first launch | STORAGE_FILES or APK_ASSETS | Path when STORAGE_FILES |
-| **`on-demand`** | After `fetchAssetPack` + download | **Required** before use | Usually **STORAGE_FILES** after download | Path when completed |
-
-`getBundledArchives(packName)` handles both **STORAGE_FILES** (filesystem scan) and **APK_ASSETS** (AssetManager stream) — see [extraction.md](./extraction.md).
+| `deliveryType` | Fetch needed? | `getAssetPackPath` |
+| --- | --- | --- |
+| `install-time` | Usually no | Often `null` (APK_ASSETS) → `listBundledArchivesFromApkAssets('models')` |
+| `fast-follow` | Sometimes on cold start | Path when `STORAGE_FILES` |
+| `on-demand` | Yes (`ensureAssetPackReady`) | Path when `STORAGE_FILES` |
 
 ### iOS
 
-| Delivery | When available | APIs |
-| --- | --- | --- |
-| **Main bundle** (`models/` in app target) | At install | `bundledModelFileSource`, `listAssetModels`, `listBundledArchives(MainBundlePath + '/models')` |
-| **ODR tag** | After resources are local (often pre-cached or after `fetchAssetPack`) | Same as Android pack name: `fetchAssetPack(tag)`, `getAssetPackPath(tag)`, `listBundledArchives(packPath)` |
-
-There is no Android-style `install-time` PAD on iOS; the analogue is **Copy Bundle Resources** or a **non-optional ODR tag** included in the IPA variant.
-
----
-
-## Overview
-
-```
-                         ┌──────────────────────────────┐
-                         │  Content already on device?   │
-                         └──────────────┬───────────────┘
-                    yes ───────────────┼────────────── no (on-demand / ODR)
-                         │                              │
-                         ▼                              ▼
-              getBundledArchives /              fetchAssetPack
-              getAssetPackPath /                  ensureAssetPackReady
-              listBundledArchives(bundle)                 │
-                         │                              │
-                         └──────────────┬───────────────┘
-                                        ▼
-                         extractArchive → Documents/models/
-                                        ▼
-              Android on-demand: optional removeAssetPack
-                                        ▼
-                         Engines: { kind: 'fs', path } (extracted dir)
-```
-
-| Topic | Android PAD | iOS |
-| --- | --- | --- |
-| **Install-time ship** | PAD `install-time` / APK assets | Main bundle `models/` |
-| **Deferred ship** | `on-demand`, `fast-follow` | ODR tags + `fetchAssetPack` |
-| **List compressed archives** | `getBundledArchives(pack)` | `listBundledArchives(packPath or bundle)` |
-| **Progress** | `getAssetPackState` (meaningful bytes on Play) | ODR `NSBundleResourceRequest` progress |
-| **Free ship copy after extract** | `removeAssetPack` (on-demand typical) | `removeAssetPack` ends ODR access; bundle unchanged |
-| **Runtime source of truth** | Extracted sandbox (recommended) | Same |
-
----
-
-## When to use
-
-| Approach | Store / install size | When |
-| --- | --- | --- |
-| **Bundled** (`bundledModelFileSource`, `listAssetModels`) | Large base APK/IPA | Small models always in main `assets/` or bundle |
-| **PAD install-time** | Medium; not in base module split | Legacy/simple: models available at first launch without fetch |
-| **PAD fast-follow** | Medium base; pack follows install | Automatic background delivery right after install |
-| **PAD on-demand** | Small base listing | Tiered models; first-run or feature-gated download |
-| **iOS main bundle** | Large IPA | Same as small bundled ship |
-| **iOS ODR** | Smaller IPA | Tagged archives; fetch when needed |
-| **Download manager** | Small base | User-initiated HF/GitHub ([download-manager.md](./download-manager.md)) |
-
-Use **this guide** when models live in a **PAD pack** or **ODR tag** (any `deliveryType`), or when you list/extract **compressed ship archives** from those locations.
-
-Use **`fetchAssetPack` / `ensureAssetPackReady`** when:
-
-- Android pack is **`on-demand`** (or not yet present for **`fast-follow`**), or
-- iOS **ODR tag** is not yet on disk (`getAssetPackPath` returns `null`).
-
-Skip fetch when:
-
-- Android **install-time** pack is already installed and `getBundledArchives` returns archives, or
-- iOS models are in the **main bundle** only.
-
----
-
-## How this relates to other APIs
-
-| API | Role |
+| Source | APIs |
 | --- | --- |
-| **This doc** | PAD / ODR delivery modes, fetch/progress/remove, when to skip fetch |
-| [`getAssetPackPath`](./model-setup.md#getassetpackpathpackname) | Resolve `…/models` when pack uses STORAGE_FILES or ODR is ready |
-| [`getBundledArchives` / `extractArchive`](./extraction.md) | Compressed archives (install-time APK_ASSETS and on-demand STORAGE_FILES) |
-| [`bundledModelFileSource`](./model-setup.md) | iOS/Android main package assets (not PAD pack name) |
-| `{ kind: 'pad', packName, path }` in [fileio.md](./fileio.md) | **Android only** — read/copy from installed pack path |
-| `kind: 'auto'` + `{ pad: 'pack' }` | Probe installed PAD during detect/init (Android) |
+| Main bundle `models/` | `bundledModelFileSource`, `listAssetModels`, `listBundledArchives` on bundle path |
+| ODR tag | `fetchAssetPack` / `ensureAssetPackReady`, `getAssetPackPath(tag)`, then extraction or `listModelsAtPath` |
+
+`getAssetPackPath(tag)` returns `resourcePath/{tag}/models` while ODR access is active; `null` without `ensureAssetPackReady` first.
+
+**Debug (`__DEV__`):** `listOdrDeliverySnapshot(tag)`, `logOdrDeliveryDiagnostics(tag)`.
 
 ---
 
-## API Reference
+## API reference
 
-Exported from `react-native-sherpa-onnx/utils`:
+From `react-native-sherpa-onnx/utils`:
 
 ```typescript
 import {
   getAssetPackPath,
   fetchAssetPack,
+  ensureAssetPackReady,
   getAssetPackState,
   removeAssetPack,
-  ensureAssetPackReady,
   assetPackDownloadPercent,
+  discoverShipContentAtPack,
+  listOdrDeliverySnapshot,
+  logOdrDeliveryDiagnostics,
 } from 'react-native-sherpa-onnx/utils';
 ```
 
-On web and other platforms, delivery APIs are no-ops or throw (`ensureAssetPackReady`).
+Web/other platforms: delivery APIs no-op or throw on `ensureAssetPackReady`.
 
 ### `getAssetPackPath(packName)`
 
-```ts
-function getAssetPackPath(packName: string): Promise<string | null>;
-```
+`Promise<string | null>` — canonical `…/models` directory.
 
-Returns `…/models` for the pack or ODR tag when content is on disk as a **directory**.
-
-| Platform | Behavior |
+| Platform | Result |
 | --- | --- |
-| **Android** | Path when pack uses **STORAGE_FILES** and is installed. **`null`** for **APK_ASSETS** install-time packs — use `getBundledArchives(packName)` instead. |
-| **iOS** | `<resourcePath>/<tag>/models` when tag is available; legacy fallback `<resourcePath>/models`. **`null`** until ODR resources are present. |
+| Android | Path when pack is `STORAGE_FILES` and installed |
+| Android APK_ASSETS | `null` — use [extraction](./extraction.md) `listBundledArchivesFromApkAssets` |
+| iOS ODR | Path after successful access for that tag |
 
 Alias: `getPlayAssetDeliveryModelsPath`.
 
-### `fetchAssetPack(packName)`
+### `fetchAssetPack` / `ensureAssetPackReady`
 
-```ts
-function fetchAssetPack(packName: string): Promise<boolean>;
-```
+- `fetchAssetPack` — starts download; does not block.
+- `ensureAssetPackReady` — fetch + wait; optional `onProgress` (also via `sherpaAssetPackDeliveryProgress`).
 
-| Mode | Typical use |
+Ready: Android Play `completed`; iOS `beginAccessingResources` succeeded.
+
+### `getAssetPackState` / `assetPackDownloadPercent`
+
+Snapshot for UI/debug.
+
+### `removeAssetPack`
+
+Android: removes pack from device. iOS: ends ODR access (may evict cache). Does not delete extracted files.
+
+### `discoverShipContentAtPack(packName)`
+
+Combines `getAssetPackPath`, `listBundledArchives` (via [extraction](./extraction.md)), and `listModelsAtPath`. Convenience only; no extract/copy.
+
+---
+
+## Delivery status
+
+| `status` | Meaning |
 | --- | --- |
-| **PAD on-demand** | **Required** to start download |
-| **PAD fast-follow** | Safe to call; resumes if not finished |
-| **PAD install-time** | Usually unnecessary (already installed); harmless no-op if present |
-| **iOS ODR** | Request tag download when not local |
-
-Does not block until complete — prefer `ensureAssetPackReady` for on-demand delivery.
-
-### `ensureAssetPackReady(packName, options?)`
-
-Starts fetch if needed and resolves when the pack/tag is ready. Progress is delivered via native callbacks (`sherpaAssetPackDeliveryProgress`) and optional `onProgress` in TypeScript.
-
-| Platform | Ready when |
-| --- | --- |
-| **Android** | Play Core reports `completed` (includes APK_ASSETS without a filesystem path) |
-| **iOS** | ODR tag mounted and `…/<tag>/models` exists on disk |
-
-**Install-time Android:** if `getBundledArchives` already returns data, you can skip this helper entirely.
-
-### `getAssetPackState(packName)` / `assetPackDownloadPercent`
-
-Snapshot of delivery state (debug / UI). Install-time packs from Play often report `completed` immediately. Fast-follow may show `downloading` / `transferring` on first launch.
-
-### `removeAssetPack(packName)`
-
-| Platform | Behavior |
-| --- | --- |
-| **Android** | Removes pack from device (including install-time / on-demand). Use **after** extract when you only need `Documents/models/`. |
-| **iOS** | Ends ODR access; system may evict cache. Does not remove main bundle or extracted dirs. |
-
-Avoid removing **install-time** packs if the app still reads archives directly from the pack without extracting.
-
-### Types
+| `pending` | Queued |
+| `downloading` / `transferring` | In progress |
+| `completed` | Ready |
+| `failed` / `canceled` | Retry `fetchAssetPack` |
+| `waiting_for_wifi` | Android unmetered gate |
+| `not_installed` | Missing pack/tag — check native config |
 
 ```ts
 type AssetPackDeliveryStatus =
-  | 'unknown'
-  | 'pending'
-  | 'downloading'
-  | 'transferring'
-  | 'completed'
-  | 'failed'
-  | 'canceled'
-  | 'waiting_for_wifi'
-  | 'not_installed';
+  | 'unknown' | 'pending' | 'downloading' | 'transferring'
+  | 'completed' | 'failed' | 'canceled' | 'waiting_for_wifi' | 'not_installed';
 ```
 
 ---
 
-## Delivery status values
+## Workflows
 
-| `status` | Meaning | UI hint |
-| --- | --- | --- |
-| `pending` | Queued / known but not local | Indeterminate |
-| `downloading` | Active download | Progress % |
-| `transferring` | Android: applying pack to storage | Progress % |
-| `completed` | Installed / ready | Extract or list archives |
-| `failed` | Error — see `errorCode` | Retry `fetchAssetPack` |
-| `canceled` | Canceled | Retry |
-| `waiting_for_wifi` | Android: unmetered required | Wi‑Fi hint |
-| `not_installed` | Pack/tag missing | Fetch or fix Gradle/Xcode |
+**On-demand:** `ensureAssetPackReady` → `getAssetPackPath` → list/extract ([extraction.md](./extraction.md)) → optional Android `removeAssetPack` → engines use `{ kind: 'fs', path }` in your sandbox.
+
+**Install-time Android:** list archives (path or `listBundledArchivesFromApkAssets`) → extract; usually skip fetch and skip `removeAssetPack` if still reading from APK assets.
+
+**iOS bundle:** `listAssetModels` / `bundledModelFileSource` — no PAD/ODR.
 
 ---
 
-## Recommended workflows
+## Native setup
 
-### Install-time PAD (Android)
-
-1. At first launch, call `getBundledArchives(pack)` (no fetch).
-2. `extractArchive` → sandbox; engines use `{ kind: 'fs', path }`.
-3. Usually **do not** `removeAssetPack` if you rely on APK_ASSETS paths for updates/re-reads.
-
-### On-demand PAD / ODR
-
-1. `ensureAssetPackReady` (progress UI).
-2. `getBundledArchives` or `listBundledArchives(await getAssetPackPath(tag))`.
-3. Extract + manifest ([extraction.md](./extraction.md)).
-4. **Android:** `removeAssetPack` after successful extract (optional).
-5. **Eviction:** missing extracted dirs + no pack path → fetch again, clear stale manifest, re-extract.
-
-### iOS main bundle only
-
-1. `listAssetModels` or `listBundledArchives` on bundle `models/`.
-2. Extract if needed; init with `bundledModelFileSource` or `fs` to extracted dir.
-
----
-
-## Native app setup (summary)
-
-### Android PAD
+### Android
 
 ```gradle
-// settings.gradle / app build.gradle — example
 assetPacks = [":sherpa_models"]
 
 // sherpa_models/build.gradle
 assetPack {
     packName = "sherpa_models"
     dynamicDelivery {
-        deliveryType = "install-time"  // or "fast-follow" | "on-demand"
+        deliveryType = "on-demand"  // or install-time | fast-follow
     }
 }
 ```
 
-Ship `.tar.zst` under `src/main/assets/models/` in the pack module.
+Ship content under the pack module’s `src/main/assets/models/`.
 
-| `deliveryType` | Notes |
-| --- | --- |
-| `install-time` | Delivered with install; often **APK_ASSETS** → `getBundledArchives`, not `getAssetPackPath` |
-| `fast-follow` | Auto after install; may need short wait on first cold start |
-| `on-demand` | Requires Play Core fetch; local testing via bundletool + PAD local testing |
+### iOS ODR
 
-### iOS
-
-| Ship style | Xcode setup |
-| --- | --- |
-| **Install-time (bundle)** | Add `models/` to app target → Copy Bundle Resources |
-| **ODR** | Asset catalog tags (e.g. `core_models`); folders `core_models/models/*.tar.zst`; request with `fetchAssetPack('core_models')` |
+1. Tag the `models` folder in Xcode (e.g. tag `sherpa_models`).
+2. On-disk layout: `sherpa_models/models/…` in the tagged bundle.
+3. Request with `fetchAssetPack('sherpa_models')` or `ensureAssetPackReady`.
 
 ---
 
 ## Troubleshooting
 
-| Issue | What to check |
+| Issue | Check |
 | --- | --- |
-| Install-time: `getAssetPackPath` is `null` | **Expected** for APK_ASSETS — use `getBundledArchives` |
-| Install-time: `getBundledArchives` is `null` | Pack name typo; app not installed from bundle/APK that includes the pack |
-| On-demand: path still `null` after fetch | Download not finished; wrong pack name; Play / network |
-| iOS bundle empty | Models not in Copy Bundle Resources |
-| iOS ODR: fetch fails | Tag not in variant; simulator limitations; `ODR_FETCH_FAILED` |
-| Extract OK but engine fails | Use extracted `fs` path, not pack path after `removeAssetPack` |
-| `{ kind: 'pad' }` on iOS | Unsupported — bundle or ODR + `fs` ([fileio.md](./fileio.md)) |
+| `getAssetPackPath` is `null` (install-time Android) | Expected for APK_ASSETS — `listBundledArchivesFromApkAssets('models')` |
+| `null` after on-demand fetch | Download incomplete; wrong `packName`/tag |
+| Empty `listBundledArchives` | Wrong `…/models` path; ship layout; [extraction.md](./extraction.md) |
+| iOS ODR fetch fails | Tag not in build variant; simulator limits |
+| Engine fails after extract | Init with extracted `fs` path, not pack path |
+| `{ kind: 'pad' }` on iOS | Unsupported — [fileio.md](./fileio.md) |
 
 ---
 
 ## See also
 
-- [model-setup.md](./model-setup.md) — `bundledModelFileSource`, `listModelsAtPath`, `auto` try order
-- [extraction.md](./extraction.md) — APK_ASSETS vs STORAGE_FILES, `getBundledArchives`
-- [fileio.md](./fileio.md) — `pad` FileSource (Android)
-- [download-manager.md](./download-manager.md) — runtime HF/GitHub downloads
+- [model-setup.md](./model-setup.md) — `bundledModelFileSource`, `listModelsAtPath`, FileSource
+- [extraction.md](./extraction.md) — `listBundledArchives`, `listBundledArchivesFromApkAssets`, `extractArchive`
+- [fileio.md](./fileio.md) — Android `pad` FileSource
+- [download-manager.md](./download-manager.md) — runtime downloads (not PAD/ODR)

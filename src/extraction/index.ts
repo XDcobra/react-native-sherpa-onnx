@@ -1,10 +1,12 @@
 /**
  * Extraction subpath: list and extract compressed model archives (.tar.zst / .tar.bz2).
  *
- * Three entry points:
- *  - getBundledArchives(packName)    – Android PAD packs (STORAGE_FILES or APK_ASSETS); iOS ODR: listBundledArchives(getAssetPackPath(tag))
- *  - listBundledArchives(dirPath)    – any filesystem directory (cross-platform)
- *  - extractArchive(archive, target) – unified extraction (auto-selects path or asset-stream)
+ * Entry points:
+ *  - listBundledArchives(dirPath)              – filesystem directory (cross-platform)
+ *  - listBundledArchivesFromApkAssets(prefix)  – Android APK AssetManager (install-time ship)
+ *  - extractArchive(archive, target)           – unified extraction (path or asset-stream)
+ *
+ * PAD/ODR delivery only provides paths via `getAssetPackPath`; use `listBundledArchives` on that path.
  *
  * After extraction, use listModelsAtPath and `{ kind: 'fs', path }` from the main package.
  */
@@ -49,7 +51,7 @@ function modelIdFromFilename(filename: string): string {
 
 /**
  * Scan a filesystem directory for .tar.zst / .tar.bz2 entries.
- * Shared by getBundledArchives (STORAGE_FILES) and listBundledArchives.
+ * Shared by listBundledArchives and listBundledArchivesFromApkAssets.
  */
 async function scanDirectoryForArchives(
   directoryPath: string
@@ -83,55 +85,48 @@ async function scanDirectoryForArchives(
   return archives;
 }
 
-// ── Public API ────────────────────────────────────────────────────
-
-/**
- * List compressed archives delivered via a **Play Asset Delivery** pack.
- *
- * - **STORAGE_FILES** packs: scans the pack directory on the filesystem.
- * - **APK_ASSETS** packs: queries the Android AssetManager for embedded archive paths.
- *   Archives returned with `fromAsset: true` are extracted by streaming from the APK
- *   (no temp copy needed).
- * - **iOS / unavailable pack**: returns `null` (use `listBundledArchives` on `getAssetPackPath` after ODR fetch — see docs/model-delivery-pad-odr.md).
- *
- * @param packName  Name of the PAD asset pack (e.g. `"sherpa_models"`)
- */
-export async function getBundledArchives(
-  packName: string
-): Promise<BundledArchive[] | null> {
-  if (Platform.OS !== 'android') {
-    return null;
-  }
-
-  const packPath = await SherpaOnnx.getAssetPackPath(packName);
-
-  if (packPath != null && packPath.length > 0) {
-    const archives = await scanDirectoryForArchives(packPath);
-    return archives.length > 0 ? archives : null;
-  }
-
-  const assetPaths = await SherpaOnnx.listBundledArchiveAssetPaths(packName);
-  if (assetPaths.length === 0) return null;
-
-  return assetPaths.map((archivePath) => {
+function archivesFromApkAssetPaths(assetPaths: string[]): BundledArchive[] {
+  const archives: BundledArchive[] = [];
+  for (const archivePath of assetPaths) {
     const filename = archivePath.split('/').pop() ?? archivePath;
-    const format = formatFromFilename(filename) ?? 'tar.zst';
-    return {
+    const format = formatFromFilename(filename);
+    if (!format) {
+      continue;
+    }
+    archives.push({
       modelId: modelIdFromFilename(filename),
       archivePath,
       format,
       fromAsset: true,
-    };
-  });
+    });
+  }
+  return archives;
+}
+
+// ── Public API ────────────────────────────────────────────────────
+
+/**
+ * List `.tar.zst` and `.tar.bz2` under an Android APK asset prefix (e.g. `models`).
+ * Install-time ship content merged into the app APK — not tied to PAD pack names.
+ */
+export async function listBundledArchivesFromApkAssets(
+  assetPrefix = 'models'
+): Promise<BundledArchive[]> {
+  if (Platform.OS !== 'android') {
+    return [];
+  }
+  const listNative = SherpaOnnx.listApkAssetPaths;
+  if (typeof listNative !== 'function') {
+    return [];
+  }
+  const assetPaths = await listNative.call(SherpaOnnx, assetPrefix);
+  return archivesFromApkAssetPaths(assetPaths);
 }
 
 /**
  * List `.tar.zst` and `.tar.bz2` archives in a filesystem directory.
  *
- * Works on **all platforms** — use for:
- * - iOS main-bundle archives (`MainBundlePath + '/models'`)
- * - Archives downloaded to the documents directory
- * - Any other folder containing compressed model archives
+ * Use after PAD/ODR `getAssetPackPath`, main bundle paths, or any directory.
  *
  * @param directoryPath  Absolute path to the directory to scan
  */
@@ -150,7 +145,7 @@ export async function listBundledArchives(
  * - **APK asset archives** (`fromAsset: true`, from PAD APK_ASSETS) —
  *   streams directly from the APK without copying the archive to disk first.
  *
- * @param archive    Descriptor returned by `getBundledArchives` or `listBundledArchives`
+ * @param archive    Descriptor from `listBundledArchives` or `listBundledArchivesFromApkAssets`
  * @param targetPath Directory to extract into (e.g. `DocumentDirectoryPath + '/models'`)
  * @param options    `force` (default `true`), `onProgress`, `signal` (AbortSignal)
  */

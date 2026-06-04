@@ -12,8 +12,18 @@ typedef void (^SherpaOnnxOdrProgressHandler)(NSDictionary *state);
 
 + (instancetype)shared;
 
-/** Models directory inside the bundle after the tag is available (…/TagName/models). */
+/** Canonical …/{tag}/models while ODR access is held (PAD-style; content not inspected). */
 - (nullable NSString *)assetPackModelsPath:(NSString *)tag;
+
+/**
+ * Delivery snapshot for {@p listOdrDeliverySnapshot}. Always includes {@p tag} and
+ * {@p resolvedModelsPath}; further fields are present in DEBUG builds only.
+ */
+- (NSDictionary *)odrSnapshotForTag:(NSString *)tag bundle:(NSBundle *)bundle;
+
+#if DEBUG
+- (void)logOdrDiagnosticsForTag:(NSString *)tag bundle:(NSBundle *_Nullable)bundle;
+#endif
 
 - (BOOL)isTagReady:(NSString *)tag;
 
@@ -23,7 +33,7 @@ typedef void (^SherpaOnnxOdrProgressHandler)(NSDictionary *state);
                 reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject;
 
 /**
- * Fetch if needed and resolve when {@p assetPackModelsPath} exists.
+ * Fetch if needed and resolve when ODR access for {@p tag} is active.
  * Progress via {@p progressHandler} (bridge maps to sherpaAssetPackDeliveryProgress).
  */
 - (void)ensureAssetPackReady:(NSString *)tag
@@ -39,6 +49,11 @@ typedef void (^SherpaOnnxOdrProgressHandler)(NSDictionary *state);
 - (void)removeAssetPack:(NSString *)tag
                 resolve:(void (^)(id result))resolve
                  reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject;
+
+/** iOS debug/diagnostics: {@p odrSnapshotForTag} (delivery only; no archive listing). */
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                        resolve:(void (^)(id result))resolve
+                         reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject;
 
 @end
 
