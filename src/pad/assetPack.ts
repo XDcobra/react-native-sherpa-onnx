@@ -1,7 +1,7 @@
 /**
  * Ship model delivery — Android PAD (install-time / fast-follow / on-demand) & iOS ODR.
  * Re-exported from `react-native-sherpa-onnx/utils`.
- * @see docs/on-demand-model-delivery.md
+ * @see docs/model-delivery-pad-odr.md
  */
 import { Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';

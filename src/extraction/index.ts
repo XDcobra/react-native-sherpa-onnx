@@ -92,7 +92,7 @@ async function scanDirectoryForArchives(
  * - **APK_ASSETS** packs: queries the Android AssetManager for embedded archive paths.
  *   Archives returned with `fromAsset: true` are extracted by streaming from the APK
  *   (no temp copy needed).
- * - **iOS / unavailable pack**: returns `null` (use `listBundledArchives` on `getAssetPackPath` after ODR fetch — see docs/on-demand-model-delivery.md).
+ * - **iOS / unavailable pack**: returns `null` (use `listBundledArchives` on `getAssetPackPath` after ODR fetch — see docs/model-delivery-pad-odr.md).
  *
  * @param packName  Name of the PAD asset pack (e.g. `"sherpa_models"`)
  */

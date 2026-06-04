@@ -32,7 +32,7 @@ Discover, resolve, and validate model paths across bundled assets, on-demand shi
 | Multi-source fallback | ✅ | `kind: 'auto'` + explicit `tryOrder` (model detect/init only) |
 | Asset listing | ✅ | `listAssetModels()` — scans `assets/models/` (Android) / bundle `models/` (iOS) |
 | Filesystem listing | ✅ | `listModelsAtPath()` — scans any directory |
-| PAD / ODR ship packs | ✅ | [on-demand-model-delivery.md](./on-demand-model-delivery.md) (install-time, on-demand, …); `{ kind: 'pad' }` FileSource **Android only** |
+| PAD / ODR ship packs | ✅ | [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) (install-time, on-demand, …); `{ kind: 'pad' }` FileSource **Android only** |
 | STT model detection | ✅ | `detectSttModel()` — file-based type detection + required-file validation |
 | TTS model detection | ✅ | `detectTtsModel()` — file-based type detection |
 
@@ -131,7 +131,7 @@ Prefer **`bundledModelFileSource()`** when you know the model is shipped in the 
 | `appBundle` | `FILEIO_UNSUPPORTED_ON_PLATFORM` | Main bundle `<path>` |
 | `files`, `cache`, … | App sandbox only | App sandbox only — **no** bundle fallback |
 
-`pad` (`FileSource`) is Android-only; on iOS use [on-demand-model-delivery.md](./on-demand-model-delivery.md) (`fetchAssetPack` / `getAssetPackPath`) then `{ kind: 'fs', path }` for extracted models.
+`pad` (`FileSource`) is Android-only; on iOS use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) (`fetchAssetPack` / `getAssetPackPath`) then `{ kind: 'fs', path }` for extracted models.
 
 ---
 
@@ -167,7 +167,7 @@ When `recursive` is `true`, returns relative folder paths under the base path. U
 
 ### On-demand packs (PAD / ODR)
 
-**PAD & ODR delivery** (install-time, fast-follow, on-demand, iOS bundle) is documented in **[on-demand-model-delivery.md](./on-demand-model-delivery.md)** (`fetchAssetPack`, `waitForAssetPackReady`, `getAssetPackState`, `removeAssetPack`).
+**PAD & ODR delivery** (install-time, fast-follow, on-demand, iOS bundle) is documented in **[model-delivery-pad-odr.md](./model-delivery-pad-odr.md)** (`fetchAssetPack`, `waitForAssetPackReady`, `getAssetPackState`, `removeAssetPack`).
 
 #### `getAssetPackPath(packName)`
 
@@ -329,7 +329,7 @@ See [sdk-init-bridge.md](./sdk-init-bridge.md) for the two-layer pattern, bridge
 | --- | --- | --- | --- |
 | Bundled assets | `bundledModelFileSource()` | `listAssetModels()` | Ship models with the app |
 | Multi-source probe | `autoModelFileSource(path, tryOrder)` | — | Same folder name in bundle, sandbox, PAD, or FS |
-| PAD / ODR ship | [guide](./on-demand-model-delivery.md): install-time → `getBundledArchives`; on-demand → `fetchAssetPack` | `extractArchive()` | Tiered or bundled ship archives |
+| PAD / ODR ship | [guide](./model-delivery-pad-odr.md): install-time → `getBundledArchives`; on-demand → `fetchAssetPack` | `extractArchive()` | Tiered or bundled ship archives |
 | PAD `FileSource` (installed pack) | `{ kind: 'pad', … }` or `auto` `{ pad: … }` | `getAssetPackPath()` + `listModelsAtPath()` | Android only — read/copy from pack without re-download API |
 | Downloaded models | `{ kind: 'fs', path }` | Download Manager or `listModelsAtPath()` | User-selected models at runtime |
 
@@ -357,7 +357,7 @@ import { getLocalModelPathByCategory, listDownloadedModelsByCategory, ModelCateg
 // Bundled
 const bundled = await listAssetModels();
 
-// On-demand pack (Android PAD or iOS ODR tag) — fetch first; see on-demand-model-delivery.md
+// On-demand pack (Android PAD or iOS ODR tag) — fetch first; see model-delivery-pad-odr.md
 const packPath = await getAssetPackPath('core_models');
 const packModels = packPath ? await listModelsAtPath(packPath, true) : [];
 
@@ -391,7 +391,7 @@ throw new Error('No valid STT model found');
 
 ### On-demand pack — uncompressed models
 
-Requires `fetchAssetPack` / `waitForAssetPackReady` first ([on-demand-model-delivery.md](./on-demand-model-delivery.md)).
+Requires `fetchAssetPack` / `waitForAssetPackReady` first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)).
 
 ```typescript
 const packPath = await getAssetPackPath('core_models');
@@ -409,7 +409,7 @@ if (sttFolder) {
 }
 ```
 
-For `.tar.zst` ship archives, extract to a sandbox directory and use `{ kind: 'fs', path }` there — see [extraction.md](./extraction.md) and the quick start in [on-demand-model-delivery.md](./on-demand-model-delivery.md).
+For `.tar.zst` ship archives, extract to a sandbox directory and use `{ kind: 'fs', path }` there — see [extraction.md](./extraction.md) and the quick start in [model-delivery-pad-odr.md](./model-delivery-pad-odr.md).
 
 ### Validation: check before init
 
@@ -434,7 +434,7 @@ if (!detection.success) {
 | --- | --- |
 | `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
 | Bundled model resolution fails | Check that the model directory exists at the expected location on the platform; use `bundledModelFileSource('models/...')` with `app:apkAsset` (Android) or `app:appBundle` (iOS) |
-| `getAssetPackPath` returns `null` | On-demand: run `fetchAssetPack` + `waitForAssetPackReady` ([on-demand-model-delivery.md](./on-demand-model-delivery.md)); check pack/tag name and native Gradle/Xcode setup |
+| `getAssetPackPath` returns `null` | On-demand: run `fetchAssetPack` + `waitForAssetPackReady` ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)); check pack/tag name and native Gradle/Xcode setup |
 | `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
 | Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |
@@ -450,7 +450,7 @@ if (!detection.success) {
 
 ## See also
 
-- [Ship model delivery (PAD & ODR)](on-demand-model-delivery.md) — install-time, fast-follow, on-demand, bundle
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, fast-follow, on-demand, bundle
 - [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for compressed ship archives
 - [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts-offline.md) — Text-to-Speech API

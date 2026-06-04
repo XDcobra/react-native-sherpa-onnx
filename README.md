@@ -48,7 +48,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 - ✅ Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
 - ✅ Runtime acceleration: [Execution providers](./docs/execution-providers.md)
 - ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
-- ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/on-demand-model-delivery.md) — install-time, fast-follow, on-demand
+- ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/model-delivery-pad-odr.md) — install-time, fast-follow, on-demand
 
 ### Planned / not yet
 
@@ -353,7 +353,7 @@ Full guide: [Audio visualization](./docs/audio-visualization.md).
 - [Speaker Diarization](./docs/diarization.md)
 - [Source Separation](./docs/separation.md)
 - [Model Setup](./docs/model-setup.md) – Bundled assets, model discovery APIs, and troubleshooting
-- [Ship Model Delivery (PAD & ODR)](./docs/on-demand-model-delivery.md) – install-time, fast-follow, on-demand; `fetchAssetPack`, progress, extraction
+- [Ship Model Delivery (PAD & ODR)](./docs/model-delivery-pad-odr.md) – install-time, fast-follow, on-demand; `fetchAssetPack`, progress, extraction
 - [Model Download Manager](./docs/download-manager.md)
 - [Extraction API](./docs/extraction.md)
 - [Disable FFMPEG](./docs/disable-ffmpeg.md)

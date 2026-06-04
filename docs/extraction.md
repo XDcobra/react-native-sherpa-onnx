@@ -22,7 +22,7 @@ if (archives?.length) {
 }
 ```
 
-Use this path when model archives are shipped via **PAD / ODR / main bundle** (see [on-demand-model-delivery.md](./on-demand-model-delivery.md) for install-time vs on-demand), or any known directory, and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
+Use this path when model archives are shipped via **PAD / ODR / main bundle** (see [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) for install-time vs on-demand), or any known directory, and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
 
 ---
 
@@ -116,7 +116,7 @@ import {
 function getBundledArchives(packName: string): Promise<BundledArchive[] | null>
 ```
 
-**Android only.** Returns the list of `.tar.zst` and `.tar.bz2` archives in the given Play Asset Delivery pack. For **iOS ODR**, fetch the tag first ([on-demand-model-delivery.md](./on-demand-model-delivery.md)), then use `listBundledArchives` on `getAssetPackPath(tag)`.
+**Android only.** Returns the list of `.tar.zst` and `.tar.bz2` archives in the given Play Asset Delivery pack. For **iOS ODR**, fetch the tag first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)), then use `listBundledArchives` on `getAssetPackPath(tag)`.
 
 - When the pack is **STORAGE_FILES**, scans the pack directory on the filesystem.
 - When the pack is **APK_ASSETS**, lists archives at asset path `models` (pack content is merged at app asset root). Archives are returned with `fromAsset: true` and `archivePath` like `models/name.tar.zst`.
@@ -237,7 +237,7 @@ import type {
 | --- | --- | --- | --- | --- | --- |
 | **PAD STORAGE_FILES** | `getBundledArchives("pack")` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **PAD APK_ASSETS** | `getBundledArchives("pack")` | `models/name.tar.zst` (app asset root) | `true` | ❌ | `extractTarZstFromAsset` / `extractTarBz2FromAsset` (stream) |
-| **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./on-demand-model-delivery.md) | Absolute filesystem path | absent | ✅ | path-based extract |
+| **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./model-delivery-pad-odr.md) | Absolute filesystem path | absent | ✅ | path-based extract |
 | **iOS main bundle** | `listBundledArchives(MainBundlePath + '/models')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **Downloaded archive** | `listBundledArchives(DocumentDirectoryPath + '/downloads')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
 | **Any other directory** | `listBundledArchives(path)` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
@@ -297,7 +297,7 @@ for (const archive of archives) {
 }
 ```
 
-See [on-demand-model-delivery.md](./on-demand-model-delivery.md) for `fetchAssetPack`, progress, and `removeAssetPack` on iOS.
+See [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) for `fetchAssetPack`, progress, and `removeAssetPack` on iOS.
 
 ### 3. iOS main bundle archives
 
@@ -374,7 +374,7 @@ if (sttModel) {
 
 ## See also
 
-- [Ship model delivery (PAD & ODR)](on-demand-model-delivery.md) — install-time, on-demand, fetch/progress, removal
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, on-demand, fetch/progress, removal
 - [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `bundledModelFileSource`
 - [Download manager](download-manager.md) — downloading models from the network
 - [STT](stt-offline.md) — Speech-to-Text API
