@@ -183,7 +183,6 @@ import {
   getAssetPackState,
   removeAssetPack,
   assetPackDownloadPercent,
-  discoverShipContentAtPack,
   listOdrDeliverySnapshot,
   logOdrDeliveryDiagnostics,
 } from 'react-native-sherpa-onnx/utils';
@@ -217,10 +216,6 @@ Snapshot for UI/debug.
 ### `removeAssetPack`
 
 Android: removes pack from device. iOS: ends ODR access (may evict cache). Does not delete extracted files.
-
-### `discoverShipContentAtPack(packName)`
-
-Combines `getAssetPackPath`, `listBundledArchives` (via [extraction](./extraction.md)), and `listModelsAtPath`. Convenience only; no extract/copy.
 
 ---
 

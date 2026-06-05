@@ -6,7 +6,7 @@ typedef void (^SherpaOnnxOdrProgressHandler)(NSDictionary *state);
 
 /**
  * On-Demand Resources (ODR) for shipped model archives.
- * Tag names align with Android PAD pack names (e.g. core_models, studio_models).
+ * Tag names are app-defined (often aligned with Android PAD pack names).
  */
 @interface SherpaOnnxOdrDelivery : NSObject
 

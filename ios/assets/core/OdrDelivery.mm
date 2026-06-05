@@ -55,6 +55,13 @@ static NSString *OdrBundleSubdirectoryForTag(NSString *tag) {
   return [NSString stringWithFormat:@"%@/models", tag];
 }
 
+static NSString *OdrModelsPathNotFoundMessage(NSString *tag) {
+  return [NSString stringWithFormat:
+               @"ODR tag \"%@\" is accessible but resourcePath/%@/models does not exist.",
+               tag ?: @"",
+               tag ?: @""];
+}
+
 static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundle) {
   NSString *resourcePath = [bundle resourcePath];
   if (tag.length == 0 || resourcePath.length == 0) {
@@ -99,12 +106,26 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
   return probe;
 }
 
-/// Canonical `{tag}/models` while ODR access is held (PAD-style; content not inspected).
+/// Canonical `resourcePath/{tag}/models` (must exist on disk).
+- (nullable NSString *)resolveModelsDirectoryForTag:(NSString *)tag
+                                             bundle:(NSBundle *)bundle {
+  if (tag.length == 0 || !bundle) {
+    return nil;
+  }
+  NSString *expected = OdrExpectedModelsDirectoryForTag(tag, bundle);
+  BOOL isDir = NO;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:expected isDirectory:&isDir] && isDir) {
+    return expected;
+  }
+  return nil;
+}
+
+/// Canonical models path while ODR access is held.
 - (nullable NSString *)odrModelsDirectoryForTag:(NSString *)tag bundle:(NSBundle *)bundle {
   if (tag.length == 0 || !bundle || ![self hasOdrAccessForTag:tag]) {
     return nil;
   }
-  return OdrExpectedModelsDirectoryForTag(tag, bundle);
+  return [self resolveModelsDirectoryForTag:tag bundle:bundle];
 }
 
 - (NSDictionary *)odrSnapshotForTag:(NSString *)tag bundle:(NSBundle *)bundle {
@@ -143,7 +164,10 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
 }
 
 - (BOOL)isTagReady:(NSString *)tag {
-  return [self hasOdrAccessForTag:tag];
+  if (![self hasOdrAccessForTag:tag]) {
+    return NO;
+  }
+  return [self odrModelsDirectoryForTag:tag bundle:[self bundleForTag:tag]] != nil;
 }
 
 - (BOOL)hasActiveAccessForTag:(NSString *)tag {
@@ -253,9 +277,19 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
       return;
     }
 
+    NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
+    NSString *modelsPath = [self resolveModelsDirectoryForTag:tag bundle:accessBundle];
+    if (modelsPath.length == 0) {
+      [self clearAccessForTag:tag];
+      [self rejectEnsureWaitersForTag:tag
+                                  code:@"ODR_PATH_NOT_FOUND"
+                               message:OdrModelsPathNotFoundMessage(tag)
+                                 error:nil];
+      return;
+    }
+
     [self.accessingTags addObject:tag];
 #if DEBUG
-    NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
     [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
 #endif
     [self emitProgressForTag:tag];
@@ -363,9 +397,15 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
         reject(@"ODR_FETCH_FAILED", error.localizedDescription ?: @"ODR fetch failed", error);
         return;
       }
+      NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
+      NSString *modelsPath = [self resolveModelsDirectoryForTag:tag bundle:accessBundle];
+      if (modelsPath.length == 0) {
+        [self clearAccessForTag:tag];
+        reject(@"ODR_PATH_NOT_FOUND", OdrModelsPathNotFoundMessage(tag), nil);
+        return;
+      }
       [self.accessingTags addObject:tag];
 #if DEBUG
-      NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
       [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
 #endif
       resolve(@YES);

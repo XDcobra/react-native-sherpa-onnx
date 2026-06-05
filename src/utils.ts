@@ -104,11 +104,6 @@ export {
   ensureAssetPackReady,
   assetPackDownloadPercent,
 } from './pad/assetPack';
-export { discoverShipContentAtPack } from './pad/shipContent';
-export type {
-  ShipContentDiscovery,
-  ShipModelFolderListing,
-} from './pad/shipContent';
 export {
   listOdrDeliverySnapshot,
   logOdrDeliveryDiagnostics,
