@@ -12,6 +12,8 @@ export type {
   VADLiveRunOptions,
   VADOfflineRunOptions,
   VADRunOptions,
+  VADRuntimeOptions,
+  VADRuntimeTuningOptions,
   VADSummary,
   VADPipelineStatus,
   VADPipelineHandle,
