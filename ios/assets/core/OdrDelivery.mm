@@ -57,9 +57,23 @@ static NSString *OdrBundleSubdirectoryForTag(NSString *tag) {
 
 static NSString *OdrModelsPathNotFoundMessage(NSString *tag) {
   return [NSString stringWithFormat:
-               @"ODR tag \"%@\" is accessible but resourcePath/%@/models does not exist.",
+               @"ODR tag \"%@\" access completed but %@/models was not found via bundle lookup. "
+               @"Ship archives must live under %@/models/ in the ODR-tagged Xcode folder.",
+               tag ?: @"",
                tag ?: @"",
                tag ?: @""];
+}
+
+static NSArray<NSString *> *OdrListDirectoryEntries(NSString *path, NSUInteger limit) {
+  if (path.length == 0) {
+    return @[];
+  }
+  NSArray<NSString *> *names =
+      [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:nil] ?: @[];
+  if (names.count <= limit) {
+    return names;
+  }
+  return [names subarrayWithRange:NSMakeRange(0, limit)];
 }
 
 static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundle) {
@@ -68,6 +82,14 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
     return nil;
   }
   return [resourcePath stringByAppendingPathComponent:OdrBundleSubdirectoryForTag(tag)];
+}
+
+/// Apple ODR: tagged folder path via bundle lookup (works when content lives in asset packs).
+static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
+  if (tag.length == 0 || !bundle) {
+    return nil;
+  }
+  return [bundle pathForResource:tag ofType:nil];
 }
 
 - (NSBundle *)bundleForTag:(NSString *)tag {
@@ -106,16 +128,20 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
   return probe;
 }
 
-/// Canonical `resourcePath/{tag}/models` (must exist on disk).
+/// Canonical `{tag}/models` on the ODR bundle (via pathForResource, not resourcePath string concat).
 - (nullable NSString *)resolveModelsDirectoryForTag:(NSString *)tag
                                              bundle:(NSBundle *)bundle {
   if (tag.length == 0 || !bundle) {
     return nil;
   }
-  NSString *expected = OdrExpectedModelsDirectoryForTag(tag, bundle);
+  NSString *tagFolder = OdrTaggedFolderPathForTag(tag, bundle);
+  if (tagFolder.length == 0) {
+    return nil;
+  }
+  NSString *modelsDir = [tagFolder stringByAppendingPathComponent:@"models"];
   BOOL isDir = NO;
-  if ([[NSFileManager defaultManager] fileExistsAtPath:expected isDirectory:&isDir] && isDir) {
-    return expected;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:modelsDir isDirectory:&isDir] && isDir) {
+    return modelsDir;
   }
   return nil;
 }
@@ -130,21 +156,65 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
 
 - (NSDictionary *)odrSnapshotForTag:(NSString *)tag bundle:(NSBundle *)bundle {
   NSBundle *resolvedBundle = bundle ?: [NSBundle mainBundle];
-  NSString *expected = OdrExpectedModelsDirectoryForTag(tag, resolvedBundle);
+  NSString *tagFolder = OdrTaggedFolderPathForTag(tag, resolvedBundle);
+  NSString *expected =
+      tagFolder.length > 0
+          ? [tagFolder stringByAppendingPathComponent:@"models"]
+          : OdrExpectedModelsDirectoryForTag(tag, resolvedBundle);
+  NSString *resourcePath = [resolvedBundle resourcePath] ?: @"";
   NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
   snapshot[@"tag"] = tag ?: @"";
   snapshot[@"resolvedModelsPath"] =
       [self odrModelsDirectoryForTag:tag bundle:resolvedBundle] ?: [NSNull null];
 #if DEBUG
   snapshot[@"bundlePath"] = [resolvedBundle bundlePath] ?: @"";
-  snapshot[@"resourcePath"] = [resolvedBundle resourcePath] ?: @"";
+  snapshot[@"resourcePath"] = resourcePath;
   snapshot[@"expectedModelsPath"] = expected ?: @"";
+  snapshot[@"tagFolderPath"] = tagFolder ?: @"";
   snapshot[@"bundleSubdirectory"] = OdrBundleSubdirectoryForTag(tag);
   snapshot[@"hasActiveRequest"] = @(self.activeRequests[tag] != nil);
   snapshot[@"isAccessingTag"] = @([self.accessingTags containsObject:tag]);
+  snapshot[@"accessBundleIsMainBundle"] =
+      @(resolvedBundle == [NSBundle mainBundle] || [[resolvedBundle bundlePath] isEqualToString:[[NSBundle mainBundle] bundlePath]]);
+  snapshot[@"resourcePathEntries"] = OdrListDirectoryEntries(resourcePath, 24);
+  snapshot[@"tagDirectoryProbe"] = [self probeDictionaryForPath:tagFolder];
   snapshot[@"directoryProbe"] = [self probeDictionaryForPath:expected];
 #endif
   return snapshot;
+}
+
+- (void)logPathResolutionFailureForTag:(NSString *)tag
+                                bundle:(NSBundle *)bundle
+                               request:(NSBundleResourceRequest *_Nullable)request {
+  NSBundle *mainBundle = [NSBundle mainBundle];
+  NSBundle *accessBundle = bundle ?: mainBundle;
+  NSString *resourcePath = [accessBundle resourcePath] ?: @"";
+  NSString *tagFolder = OdrTaggedFolderPathForTag(tag, accessBundle);
+  NSString *resourcePathTagDir = [resourcePath stringByAppendingPathComponent:tag ?: @""];
+  NSString *modelsDir =
+      tagFolder.length > 0 ? [tagFolder stringByAppendingPathComponent:@"models"] : @"";
+  BOOL requestBundleNil = request.bundle == nil;
+  NSLog(@"[SherpaOnnx ODR] pathNotFound tag=%@ pathForResource=%@ modelsDir=%@ "
+        @"accessing=%@ activeRequest=%@ requestBundleNil=%@ accessBundleIsMain=%@",
+        tag ?: @"",
+        tagFolder ?: @"null",
+        modelsDir.length > 0 ? modelsDir : @"null",
+        @([self.accessingTags containsObject:tag]),
+        @(self.activeRequests[tag] != nil),
+        @(requestBundleNil),
+        @(accessBundle == mainBundle));
+  NSLog(@"[SherpaOnnx ODR] pathNotFound mainBundle=%@ accessBundle=%@",
+        [mainBundle bundlePath] ?: @"",
+        [accessBundle bundlePath] ?: @"");
+  NSLog(@"[SherpaOnnx ODR] pathNotFound resourcePathTagDir=%@ entries=%@",
+        resourcePathTagDir,
+        OdrListDirectoryEntries(resourcePathTagDir, 16));
+  if (tagFolder.length > 0) {
+    NSLog(@"[SherpaOnnx ODR] pathNotFound tagFolderEntries=%@",
+          OdrListDirectoryEntries(tagFolder, 16));
+  }
+  NSLog(@"[SherpaOnnx ODR] pathNotFound hint=ship archives under %@/models/ in the ODR-tagged Xcode folder",
+        tag ?: @"");
 }
 
 #if DEBUG
@@ -162,7 +232,18 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
 #endif
 
 - (nullable NSString *)assetPackModelsPath:(NSString *)tag {
-  return [self odrModelsDirectoryForTag:tag bundle:[self bundleForTag:tag]];
+  NSBundle *bundle = [self bundleForTag:tag];
+  NSString *path = [self odrModelsDirectoryForTag:tag bundle:bundle];
+  if (path.length > 0) {
+    return path;
+  }
+  NSLog(@"[SherpaOnnx ODR] getAssetPackPath tag=%@ path=null accessing=%@ activeRequest=%@ "
+        @"hint=call ensureAssetPackReady first; ship layout is %@/models/ (bundle pathForResource)",
+        tag ?: @"",
+        @([self hasOdrAccessForTag:tag]),
+        @(self.activeRequests[tag] != nil),
+        tag ?: @"");
+  return nil;
 }
 
 - (nullable NSString *)assetPackModelsPath:(NSString *)tag request:(NSBundleResourceRequest *)request {
@@ -275,6 +356,11 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
     [self stopObservingProgressForTag:tag];
 
     if (error) {
+      NSLog(@"[SherpaOnnx ODR] ensureReady tag=%@ accessFailed domain=%@ code=%ld %@",
+            tag ?: @"",
+            error.domain ?: @"",
+            (long)error.code,
+            error.localizedDescription ?: @"");
       [self clearAccessForTag:tag];
       self.lastErrors[tag] = error;
       [self rejectEnsureWaitersForTag:tag
@@ -287,6 +373,7 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
     NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
     NSString *modelsPath = [self resolveModelsDirectoryForTag:tag bundle:accessBundle];
     if (modelsPath.length == 0) {
+      [self logPathResolutionFailureForTag:tag bundle:accessBundle request:request];
       [self clearAccessForTag:tag];
       [self rejectEnsureWaitersForTag:tag
                                   code:@"ODR_PATH_NOT_FOUND"
@@ -296,6 +383,10 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
     }
 
     [self.accessingTags addObject:tag];
+    NSLog(@"[SherpaOnnx ODR] ensureReady tag=%@ path=%@ bundle=%@",
+          tag ?: @"",
+          modelsPath,
+          [accessBundle bundlePath] ?: @"");
 #if DEBUG
     [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
 #endif
@@ -307,6 +398,7 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
 - (void)beginEnsureDownloadForTag:(NSString *)tag {
   [self.lastErrors removeObjectForKey:tag];
   NSBundleResourceRequest *request = [self requestForTag:tag create:YES];
+  NSLog(@"[SherpaOnnx ODR] ensureAssetPackReady tag=%@ beginAccessingResources", tag ?: @"");
   [self startObservingProgressForTag:tag request:request];
   [self emitProgressForTag:tag];
 
@@ -407,11 +499,13 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
       NSBundle *accessBundle = request.bundle ?: [NSBundle mainBundle];
       NSString *modelsPath = [self resolveModelsDirectoryForTag:tag bundle:accessBundle];
       if (modelsPath.length == 0) {
+        [self logPathResolutionFailureForTag:tag bundle:accessBundle request:request];
         [self clearAccessForTag:tag];
         reject(@"ODR_PATH_NOT_FOUND", OdrModelsPathNotFoundMessage(tag), nil);
         return;
       }
       [self.accessingTags addObject:tag];
+      NSLog(@"[SherpaOnnx ODR] fetchAssetPack tag=%@ path=%@", tag ?: @"", modelsPath);
 #if DEBUG
       [self logOdrDiagnosticsForTag:tag bundle:accessBundle];
 #endif

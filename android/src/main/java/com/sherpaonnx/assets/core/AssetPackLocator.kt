@@ -104,10 +104,13 @@ internal class AssetPackLocator(
           }
 
           val archiveCount = archiveCountInDir(File(modelsDir))
-          Log.i(
-            logTag,
-            "[SherpaOnnx PAD] getAssetPackPath pack=$packName path=$modelsDir archiveCount=$archiveCount",
-          )
+          if (archiveCount == 0) {
+            Log.i(
+              logTag,
+              "[SherpaOnnx PAD] getAssetPackPath pack=$packName path=$modelsDir archiveCount=0 " +
+                "hint=ship archives under models/ in the asset pack module",
+            )
+          }
           promise.resolve(modelsDir)
         }
         .addOnFailureListener { e ->
