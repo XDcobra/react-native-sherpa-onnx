@@ -91,14 +91,14 @@ export async function logOdrDeliveryDiagnostics(tag: string): Promise<void> {
   }
   try {
     const snapshot = await listOdrDeliverySnapshot(tag);
-    console.warn('[SherpaOnnx ODR] delivery snapshot', {
-      tag: snapshot.tag,
-      expectedModelsPath: snapshot.expectedModelsPath,
-      resolvedModelsPath: snapshot.resolvedModelsPath,
-      hasActiveRequest: snapshot.hasActiveRequest,
-      isAccessingTag: snapshot.isAccessingTag,
-      directoryProbe: snapshot.directoryProbe,
-    });
+    const path = snapshot.resolvedModelsPath ?? 'null';
+    const expected = snapshot.expectedModelsPath ?? 'tag/models/';
+    console.log(
+      `[SherpaOnnx ODR] tag=${snapshot.tag} path=${path} expected=${expected} ` +
+        `accessing=${snapshot.isAccessingTag ?? false} activeRequest=${
+          snapshot.hasActiveRequest ?? false
+        }`
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.warn('[SherpaOnnx ODR] delivery snapshot failed:', message);

@@ -150,7 +150,14 @@ static NSString *OdrExpectedModelsDirectoryForTag(NSString *tag, NSBundle *bundl
 #if DEBUG
 - (void)logOdrDiagnosticsForTag:(NSString *)tag bundle:(NSBundle *_Nullable)bundle {
   NSDictionary *snapshot = [self odrSnapshotForTag:tag bundle:bundle ?: [NSBundle mainBundle]];
-  NSLog(@"[SherpaOnnx ODR] diagnostics tag=%@ %@", tag, snapshot);
+  NSString *path = snapshot[@"resolvedModelsPath"];
+  NSString *expected = snapshot[@"expectedModelsPath"];
+  NSLog(@"[SherpaOnnx ODR] tag=%@ path=%@ expected=%@ accessing=%@ activeRequest=%@",
+        tag,
+        path.length > 0 ? path : @"null",
+        expected.length > 0 ? expected : @"tag/models/",
+        snapshot[@"isAccessingTag"],
+        snapshot[@"hasActiveRequest"]);
 }
 #endif
 

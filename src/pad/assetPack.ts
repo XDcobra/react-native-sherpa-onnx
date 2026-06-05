@@ -5,6 +5,7 @@
  */
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { probePadNativeBridge } from './padDiagnostics';
 
 export type AssetPackDeliveryStatus =
   | 'unknown'
@@ -116,6 +117,30 @@ function getEmitter(): NativeEventEmitter {
   return new NativeEventEmitter(NativeModules.SherpaOnnx as any);
 }
 
+type NativeEnsureRaw = {
+  packName: string;
+  status: string;
+  bytesDownloaded: number;
+  totalBytes: number;
+  errorCode: number;
+};
+
+/** TurboModule first, then NativeModules (same native listener implementation). */
+function resolveNativeEnsureAssetPackReady():
+  | ((packName: string) => Promise<NativeEnsureRaw>)
+  | null {
+  if (typeof SherpaOnnx.ensureAssetPackReady === 'function') {
+    return SherpaOnnx.ensureAssetPackReady.bind(SherpaOnnx);
+  }
+  const legacy = NativeModules.SherpaOnnx as
+    | { ensureAssetPackReady?: (packName: string) => Promise<NativeEnsureRaw> }
+    | undefined;
+  if (typeof legacy?.ensureAssetPackReady === 'function') {
+    return legacy.ensureAssetPackReady.bind(legacy);
+  }
+  return null;
+}
+
 function ensureProgressListeners(): void {
   if (progressListenersInstalled) {
     return;
@@ -168,8 +193,24 @@ export async function ensureAssetPackReady(
     progressHandlersByPack.set(packName, options.onProgress);
   }
 
+  const nativeEnsure = resolveNativeEnsureAssetPackReady();
+  if (!nativeEnsure) {
+    const bridge = probePadNativeBridge();
+    const message =
+      `SherpaOnnx.ensureAssetPackReady is not available on the native module. ` +
+      `Rebuild and reinstall the app with the SherpaOnnx native library linked. ` +
+      `bridge=${JSON.stringify(bridge)}`;
+    if (__DEV__) {
+      console.warn(
+        '[SherpaOnnx PAD] ensureAssetPackReady unavailable:',
+        message
+      );
+    }
+    throw new Error(message);
+  }
+
   try {
-    const raw = await SherpaOnnx.ensureAssetPackReady(packName);
+    const raw = await nativeEnsure(packName);
     const state = normalizeSnapshot(raw);
     options?.onProgress?.(state, assetPackDownloadPercent(state));
     return state;

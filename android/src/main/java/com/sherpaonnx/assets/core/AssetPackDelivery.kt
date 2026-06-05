@@ -20,11 +20,11 @@ internal class AssetPackDelivery(
   fun fetchAssetPack(packName: String, promise: Promise) {
     try {
       val manager = AssetPackManagerFactory.getInstance(context)
-      Log.i(logTag, "fetchAssetPack: packName=$packName")
+      Log.i(logTag, "[SherpaOnnx PAD] fetchAssetPack pack=$packName")
       manager
         .fetch(listOf(packName))
         .addOnSuccessListener {
-          Log.i(logTag, "fetchAssetPack: requested $packName")
+          Log.i(logTag, "[SherpaOnnx PAD] fetchAssetPack requested pack=$packName")
           promise.resolve(true)
         }
         .addOnFailureListener { e ->
@@ -44,7 +44,7 @@ internal class AssetPackDelivery(
       }
       ensureListenerRegistered()
       val manager = AssetPackManagerFactory.getInstance(context)
-      Log.i(logTag, "ensureAssetPackReady: packName=$packName")
+      Log.i(logTag, "[SherpaOnnx PAD] ensureAssetPackReady pack=$packName")
       manager
         .getPackStates(listOf(packName))
         .addOnSuccessListener { packStates ->
@@ -91,6 +91,18 @@ internal class AssetPackDelivery(
 
   private fun handlePackState(state: AssetPackState) {
     val packName = state.name()
+    val status = state.status()
+    val line =
+      "[SherpaOnnx PAD] pack=$packName status=${statusName(status)} " +
+        "bytes=${state.bytesDownloaded()}/${state.totalBytesToDownload()} " +
+        "errorCode=${state.errorCode()}"
+    when (status) {
+      AssetPackStatus.DOWNLOADING,
+      AssetPackStatus.TRANSFERRING,
+      AssetPackStatus.PENDING,
+      -> Log.d(logTag, line)
+      else -> Log.i(logTag, line)
+    }
     emitProgress(stateToMap(state))
     when (state.status()) {
       AssetPackStatus.COMPLETED -> completeEnsures(packName, state)
@@ -114,6 +126,11 @@ internal class AssetPackDelivery(
         unregisterListenerIfIdle()
       }
     }
+    Log.i(
+      logTag,
+      "[SherpaOnnx PAD] ensureReady pack=$packName status=completed " +
+        "waiters=${promises.size} next=app_calls_getAssetPackPath",
+    )
     val map = stateToMap(state)
     for (p in promises) {
       p.resolve(map)
@@ -187,11 +204,11 @@ internal class AssetPackDelivery(
   fun removeAssetPack(packName: String, promise: Promise) {
     try {
       val manager = AssetPackManagerFactory.getInstance(context)
-      Log.i(logTag, "removeAssetPack: packName=$packName")
+      Log.i(logTag, "[SherpaOnnx PAD] removeAssetPack pack=$packName")
       manager
         .removePack(packName)
         .addOnSuccessListener {
-          Log.i(logTag, "removeAssetPack: $packName removed")
+          Log.i(logTag, "[SherpaOnnx PAD] removeAssetPack removed pack=$packName")
           promise.resolve(0.0)
         }
         .addOnFailureListener { e ->
