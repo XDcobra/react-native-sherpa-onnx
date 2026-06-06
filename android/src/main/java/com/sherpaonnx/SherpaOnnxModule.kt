@@ -5215,8 +5215,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.getAssetPackPath(packName, promise)
   }
 
-  override fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
-    assetHelper.listBundledArchiveAssetPaths(packName, promise)
+  override fun listApkAssetPaths(assetPrefix: String, promise: Promise) {
+    com.sherpaonnx.extraction.ApkAssetPathLister(reactApplicationContext, NAME)
+      .listApkAssetPaths(assetPrefix, promise)
+  }
+
+  override fun fetchAssetPack(packName: String, promise: Promise) {
+    assetHelper.fetchAssetPack(packName, promise)
+  }
+
+  override fun ensureAssetPackReady(packName: String, promise: Promise) {
+    assetHelper.ensureAssetPackReady(packName, promise)
+  }
+
+  override fun getAssetPackState(packName: String, promise: Promise) {
+    assetHelper.getAssetPackState(packName, promise)
+  }
+
+  override fun removeAssetPack(packName: String, promise: Promise) {
+    assetHelper.removeAssetPack(packName, promise)
+  }
+
+  override fun listOdrDeliverySnapshot(tag: String, promise: Promise) {
+    val result = com.facebook.react.bridge.Arguments.createMap()
+    result.putString("tag", tag)
+    result.putNull("resolvedModelsPath")
+    promise.resolve(result)
   }
 
   override fun extractArchiveFromAsset(

@@ -11,6 +11,7 @@
 
 #import "SherpaOnnx.h"
 #import "assets/bridge/SherpaOnnx+Assets.h"
+#import "assets/core/OdrDelivery.h"
 #import "fileio/FileIOResolver.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
@@ -85,7 +86,7 @@ extern "C" void slm_release_all_link_maps(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError", @"sherpaAssetPackDeliveryProgress" ];
 }
 
 - (void)addListener:(NSString *)eventName
@@ -262,16 +263,29 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
-    // Play Asset Delivery is Android-only; on iOS there is no asset pack path.
-    resolve([NSNull null]);
+    NSString *path = [[SherpaOnnxOdrDelivery shared] assetPackModelsPath:packName];
+    if (path.length > 0) {
+        resolve(path);
+    } else {
+        resolve([NSNull null]);
+    }
 }
 
-- (void)listBundledArchiveAssetPaths:(NSString *)packName
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
+- (void)listApkAssetPaths:(NSString *)assetPrefix
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
-    // PAD APK_ASSETS listing is Android-only.
+    // APK AssetManager listing is Android-only.
     resolve(@[]);
+}
+
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+    [[SherpaOnnxOdrDelivery shared] listOdrDeliverySnapshot:tag
+                                                resolve:resolve
+                                                 reject:reject];
 }
 
 // ─── FileSource helpers ──────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Model Setup
 
-Discover, resolve, and validate model paths across bundled assets, Play Asset Delivery (PAD), and downloaded models.
+Discover, resolve, and validate model paths across bundled assets, on-demand ship packs (PAD / ODR), and downloaded models.
 
 **Import paths:** path helpers (`bundledModelFileSource`, `listAssetModels`, …) live in `react-native-sherpa-onnx/utils`. The **`FileSource`** type is exported from **`react-native-sherpa-onnx/fileio`**.
 
@@ -13,7 +13,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 - [API Reference](#api-reference)
   - [Path Helpers](#path-helpers)
   - [Asset Discovery](#asset-discovery)
-  - [Play Asset Delivery (PAD)](#play-asset-delivery-pad)
+  - [On-demand packs (PAD / ODR)](#on-demand-packs-pad--odr)
   - [Model Detection](#model-detection)
   - [Model detection internals](#model-detection-internals)
 - [SDK init bridge (create* vs initialize*)](#sdk-init-bridge)
@@ -32,7 +32,7 @@ Discover, resolve, and validate model paths across bundled assets, Play Asset De
 | Multi-source fallback | ✅ | `kind: 'auto'` + explicit `tryOrder` (model detect/init only) |
 | Asset listing | ✅ | `listAssetModels()` — scans `assets/models/` (Android) / bundle `models/` (iOS) |
 | Filesystem listing | ✅ | `listModelsAtPath()` — scans any directory |
-| PAD support | ✅ | Android only — `pad` FileSource or `getAssetPackPath()` |
+| PAD / ODR ship packs | ✅ | [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) (install-time, on-demand, …); `{ kind: 'pad' }` FileSource **Android only** |
 | STT model detection | ✅ | `detectSttModel()` — file-based type detection + required-file validation |
 | TTS model detection | ✅ | `detectTtsModel()` — file-based type detection |
 
@@ -131,7 +131,7 @@ Prefer **`bundledModelFileSource()`** when you know the model is shipped in the 
 | `appBundle` | `FILEIO_UNSUPPORTED_ON_PLATFORM` | Main bundle `<path>` |
 | `files`, `cache`, … | App sandbox only | App sandbox only — **no** bundle fallback |
 
-`pad` (Play Asset Delivery) is Android-only; on iOS the SDK rejects with `FILEIO_UNSUPPORTED_ON_PLATFORM`.
+`pad` (`FileSource`) is Android-only; on iOS use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) (`fetchAssetPack` / `getAssetPackPath`) then `{ kind: 'fs', path }` for extracted models.
 
 ---
 
@@ -165,25 +165,32 @@ When `recursive` is `true`, returns relative folder paths under the base path. U
 
 ---
 
-### Play Asset Delivery (PAD)
+### On-demand packs (PAD / ODR)
+
+**PAD & ODR delivery** (install-time, fast-follow, on-demand, iOS bundle) is documented in **[model-delivery-pad-odr.md](./model-delivery-pad-odr.md)** (`fetchAssetPack`, `ensureAssetPackReady`, `getAssetPackState`, `removeAssetPack`).
 
 #### `getAssetPackPath(packName)`
 
-Returns the path to the models directory inside an Android asset pack, or `null` if unavailable (iOS always returns `null`).
+Returns the path to the `models` directory inside an installed pack or downloaded ODR tag, or `null` if not available yet.
 
 ```ts
 function getAssetPackPath(packName: string): Promise<string | null>;
 ```
 
+| Platform | `packName` | Notes |
+| --- | --- | --- |
+| Android | PAD pack name (e.g. `core_models`) | STORAGE_FILES path when pack is on disk; `null` until fetched for on-demand packs |
+| iOS | ODR tag (e.g. `core_models`) | `<bundle>/<tag>/models` after `fetchAssetPack` / ODR completes |
+
 Alias: `getPlayAssetDeliveryModelsPath` (same function).
 
-Use with `listModelsAtPath` to enumerate PAD-delivered models:
+After fetch, list **uncompressed** folders with `listModelsAtPath`, or **compressed** archives via [extraction.md](./extraction.md) (`listBundledArchives` on `getAssetPackPath` after PAD/ODR fetch).
 
 ```typescript
-const padPath = await getAssetPackPath('sherpa_models');
-if (padPath) {
-  const padModels = await listModelsAtPath(padPath, true);
-  console.log('PAD models:', padModels);
+const packPath = await getAssetPackPath('core_models');
+if (packPath) {
+  const models = await listModelsAtPath(packPath, true);
+  console.log('Ship pack models:', models);
 }
 ```
 
@@ -322,8 +329,8 @@ See [sdk-init-bridge.md](./sdk-init-bridge.md) for the two-layer pattern, bridge
 | --- | --- | --- | --- |
 | Bundled assets | `bundledModelFileSource()` | `listAssetModels()` | Ship models with the app |
 | Multi-source probe | `autoModelFileSource(path, tryOrder)` | — | Same folder name in bundle, sandbox, PAD, or FS |
-| Play Asset Delivery | `{ kind: 'pad', … }` or `auto` `{ pad: … }` | `getAssetPackPath()` + `listModelsAtPath()` | Large models on Android (on-demand packs) |
-| PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `{ kind: 'fs', path }` |
+| PAD / ODR ship | [guide](./model-delivery-pad-odr.md): `getAssetPackPath` → `listBundledArchives` | `extractArchive()` | Tiered or bundled ship archives |
+| PAD `FileSource` (installed pack) | `{ kind: 'pad', … }` or `auto` `{ pad: … }` | `getAssetPackPath()` + `listModelsAtPath()` | Android only — read/copy from pack without re-download API |
 | Downloaded models | `{ kind: 'fs', path }` | Download Manager or `listModelsAtPath()` | User-selected models at runtime |
 
 `app:files`, `app:apkAsset`, and `app:appBundle` have different semantics and must not be mixed:
@@ -350,9 +357,9 @@ import { getLocalModelPathByCategory, listDownloadedModelsByCategory, ModelCateg
 // Bundled
 const bundled = await listAssetModels();
 
-// PAD (Android)
-const padPath = await getAssetPackPath('sherpa_models');
-const padModels = padPath ? await listModelsAtPath(padPath, true) : [];
+// On-demand pack (Android PAD or iOS ODR tag) — fetch first; see model-delivery-pad-odr.md
+const packPath = await getAssetPackPath('core_models');
+const packModels = packPath ? await listModelsAtPath(packPath, true) : [];
 
 // Downloaded
 const downloaded = await listDownloadedModelsByCategory(ModelCategory.Stt);
@@ -382,23 +389,27 @@ for (const m of sttModels) {
 throw new Error('No valid STT model found');
 ```
 
-### PAD model loading with detection
+### On-demand pack — uncompressed models
+
+Requires `fetchAssetPack` / `ensureAssetPackReady` first ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)).
 
 ```typescript
-const padPath = await getAssetPackPath('sherpa_models');
-if (!padPath) throw new Error('Asset pack not available');
+const packPath = await getAssetPackPath('core_models');
+if (!packPath) throw new Error('Pack/tag not available');
 
-const models = await listModelsAtPath(padPath, true);
+const models = await listModelsAtPath(packPath, true);
 const sttFolder = models.find((m) => m.hint === 'stt');
 
 if (sttFolder) {
-  const fullPath = `${padPath}/${sttFolder.folder}`;
+  const fullPath = `${packPath}/${sttFolder.folder}`;
   const stt = await createSTT({
     modelSource: fileModelPath(fullPath),
     modelType: 'auto',
   });
 }
 ```
+
+For `.tar.zst` ship archives, extract to a sandbox directory and use `{ kind: 'fs', path }` there — see [extraction.md](./extraction.md) and the quick start in [model-delivery-pad-odr.md](./model-delivery-pad-odr.md).
 
 ### Validation: check before init
 
@@ -423,7 +434,7 @@ if (!detection.success) {
 | --- | --- |
 | `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
 | Bundled model resolution fails | Check that the model directory exists at the expected location on the platform; use `bundledModelFileSource('models/...')` with `app:apkAsset` (Android) or `app:appBundle` (iOS) |
-| PAD returns `null` | PAD requires `play-core` dependency and correct `build.gradle` asset pack config; iOS always returns `null` |
+| `getAssetPackPath` returns `null` | On-demand: run `fetchAssetPack` + `ensureAssetPackReady` ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)); check pack/tag name and native Gradle/Xcode setup |
 | `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
 | Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
 | Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |
@@ -433,13 +444,14 @@ if (!detection.success) {
 
 - Use `listAssetModels()` for discovery, then `detectSttModel()`/`detectTtsModel()` for accurate type detection — the `hint` is based on naming heuristics only
 - Always prefer `modelType: 'auto'` with `detectSttModel()`/`detectTtsModel()` rather than hardcoding model types
-- Combine bundled assets, PAD, and downloads into a single model picker by merging all sources
+- Combine bundled assets, on-demand packs, and downloads into a single model picker by merging all sources
 
 ---
 
 ## See also
 
-- [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, fast-follow, on-demand, bundle
+- [Extraction API](extraction.md) — `listBundledArchives`, `listBundledArchivesFromApkAssets`, `extractArchive`
 - [STT](stt-offline.md) — Speech-to-Text API
 - [TTS](tts-offline.md) — Text-to-Speech API
 - [SDK init bridge](sdk-init-bridge.md) — `create*` public API vs `initialize*` TurboModule maps

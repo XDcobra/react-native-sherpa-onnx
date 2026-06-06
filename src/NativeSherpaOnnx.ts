@@ -1726,11 +1726,62 @@ export interface Spec extends TurboModule {
   >;
 
   /**
-   * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory
-   * of an Android asset pack, or null if the pack is not available (e.g. not installed).
-   * Use this to list and load models that are delivered via PAD instead of bundled app assets.
+   * Returns the filesystem path to shipped model archives for an on-demand pack/tag,
+   * or null if not available yet. Android: PAD pack; iOS: ODR tag (e.g. core_models).
    */
   getAssetPackPath(packName: string): Promise<string | null>;
+
+  /**
+   * Request download of an on-demand pack (Android PAD) or ODR tag (iOS).
+   */
+  fetchAssetPack(packName: string): Promise<boolean>;
+
+  /**
+   * Fetch if needed and resolve when the pack/tag is ready.
+   * Emits {@code sherpaAssetPackDeliveryProgress} during download.
+   */
+  ensureAssetPackReady(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
+   * Current on-demand delivery state (PAD / ODR progress and errors).
+   */
+  getAssetPackState(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
+   * After extraction: remove Android PAD pack from device, or end iOS ODR access (cache may evict).
+   * @returns 0 on success.
+   */
+  removeAssetPack(packName: string): Promise<number>;
+
+  /**
+   * iOS ODR delivery snapshot: `tag` + `resolvedModelsPath`; extra fields in DEBUG native builds.
+   * Android: tag + null path. Use extraction APIs to list archives under the models path.
+   */
+  listOdrDeliverySnapshot(tag: string): Promise<{
+    tag: string;
+    resolvedModelsPath: string | null;
+    expectedModelsPath?: string;
+    bundleSubdirectory?: string;
+    directoryProbe?: {
+      path: string;
+      exists: boolean;
+      isDirectory: boolean;
+      entryCount: number;
+      entries: string[];
+    };
+  }>;
 
   /**
    * Read the contents of a text file from the bundled assets (Android) or main bundle (iOS).
@@ -1782,10 +1833,10 @@ export interface Spec extends TurboModule {
   cancelExtraction(operationId: string): Promise<void>;
 
   /**
-   * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
-   * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
+   * Android only: immediate asset paths under an APK prefix (e.g. `models/foo.tar.zst`).
+   * Extraction layer; not tied to PAD pack names.
    */
-  listBundledArchiveAssetPaths(packName: string): Promise<string[]>;
+  listApkAssetPaths(assetPrefix: string): Promise<string[]>;
 
   /**
    * Compute SHA-256 of a file and return the hex digest.

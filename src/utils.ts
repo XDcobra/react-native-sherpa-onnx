@@ -81,10 +81,10 @@ export async function listModelsAtPath(
 }
 
 /**
- * **Play Asset Delivery (PAD):** Returns the path to the models directory inside an
- * Android asset pack, or null if the pack is not available.
- * Use this to list and load models delivered via PAD (e.g. pack "sherpa_models").
- * On iOS returns null.
+ * **PAD / ODR:** Returns the canonical `…/models` directory when the pack is
+ * installed (Android) or ODR access is active (iOS), regardless of contents.
+ * For on-demand / ODR, call {@link ensureAssetPackReady} first; list archives via {@link listBundledArchives} from `react-native-sherpa-onnx/extraction`.
+ * @see docs/model-delivery-pad-odr.md
  */
 export async function getAssetPackPath(
   packName: string
@@ -96,3 +96,24 @@ export async function getAssetPackPath(
  * Alias for {@link getAssetPackPath}. Use for PAD (Play Asset Delivery) model discovery.
  */
 export const getPlayAssetDeliveryModelsPath = getAssetPackPath;
+
+export {
+  fetchAssetPack,
+  getAssetPackState,
+  removeAssetPack,
+  ensureAssetPackReady,
+  assetPackDownloadPercent,
+} from './pad/assetPack';
+export {
+  listOdrDeliverySnapshot,
+  logOdrDeliveryDiagnostics,
+} from './pad/odrDiagnostics';
+export type {
+  OdrDeliverySnapshot,
+  OdrDirectoryProbe,
+} from './pad/odrDiagnostics';
+export type {
+  AssetPackDeliveryStatus,
+  AssetPackStateSnapshot,
+  EnsureAssetPackReadyOptions,
+} from './pad/assetPack';

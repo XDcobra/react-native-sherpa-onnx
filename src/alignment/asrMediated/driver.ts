@@ -354,7 +354,9 @@ function mapNativeAsrMediatedError(error: unknown): AsrMediatedRuntimeError {
   const messageFromObject =
     typeof errorObj?.message === 'string' ? errorObj.message.trim() : '';
   const messageFromError =
-    error instanceof Error ? error.message.trim() : messageFromObject;
+    error instanceof Error && typeof error.message === 'string'
+      ? error.message.trim()
+      : messageFromObject;
 
   const codeFromMessage = (() => {
     const idx = messageFromError.indexOf(':');
