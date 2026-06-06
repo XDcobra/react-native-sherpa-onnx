@@ -19,13 +19,9 @@ import {
   type DetectedModelEntry,
 } from '../types/modelDetect';
 import type { FileSource } from '../fileio/types';
-import {
-  resolveFileSourceForDetect,
-  resolveFileSourceForModelInit,
-} from '../detect/resolveModelInput';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import {
   buildTtsInitBridgeOptions,
-  expandTtsInitializeOptions,
   expandTtsUpdateOptions,
   flattenTtsModelOptionsForNative,
   toNativeSynthesisOptions,
@@ -363,14 +359,7 @@ export async function createTTS(
 ): Promise<TtsEngine> {
   const instanceId = `tts_${++ttsInstanceCounter}`;
 
-  const modelSource = options.modelSource;
-  const expanded = expandTtsInitializeOptions(options);
-  const flat = flattenTtsModelOptionsForNative(
-    expanded.modelType,
-    expanded.modelOptions
-  );
-  const resolvedPath = await resolveFileSourceForModelInit(modelSource);
-  const bridgeOptions = buildTtsInitBridgeOptions(resolvedPath, expanded, flat);
+  const bridgeOptions = await buildTtsInitBridgeOptions(options);
 
   const result = await SherpaOnnx.initializeTts(instanceId, bridgeOptions);
 
@@ -387,8 +376,10 @@ export async function createTTS(
 
   const firstDetected = result.detectedModels?.[0];
   const effectiveModelType: TTSModelType | undefined =
-    expanded.modelType && expanded.modelType !== 'auto'
-      ? expanded.modelType
+    options.initMode === 'custom'
+      ? options.modelType
+      : options.modelType && options.modelType !== 'auto'
+      ? options.modelType
       : (firstDetected?.type as TTSModelType);
 
   let destroyed = false;
@@ -595,6 +586,11 @@ export async function createTTS(
 // Export types and runtime type list
 export type {
   TTSInitializeOptions,
+  TTSInitOptionsShared,
+  TTSAutoInitOptionsBase,
+  TTSAutoInitializeOptions,
+  TTSCustomInitializeOptions,
+  TTSConcreteModelType,
   TTSInitializeOptionsAuto,
   TTSInitializeOptionsBase,
   TTSInitializeOptionsVits,
@@ -631,6 +627,14 @@ export type {
   TtsLivePipelineOptions,
 } from './types';
 export { TTS_MODEL_TYPES, isTtsModelType } from './types';
+export {
+  assertTtsCustomConfig,
+  resolveTtsCustomConfigPaths,
+  TtsErrorCode,
+  type TtsCustomConfig,
+  type TtsCustomConfigByModelType,
+  type TtsCustomPathKey,
+} from './customConfig';
 export {
   resolveLexiconPath,
   resolveTtsLanguagePolicy,

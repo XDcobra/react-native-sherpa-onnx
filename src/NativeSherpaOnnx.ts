@@ -61,7 +61,10 @@ export type OnlineSttInitBridgeOptions = {
 
 /** `initializeTts(instanceId, options)` — offline TTS. */
 export type TtsInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (ttsModel, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
   modelType: string;
   numThreads?: number;
   debug?: boolean;

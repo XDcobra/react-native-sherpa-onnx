@@ -58,6 +58,22 @@ public:
         const std::optional<std::string>& kokoroLang = std::nullopt
     );
 
+    TtsInitializeResult initializeCustom(
+        const std::string& modelType,
+        const TtsModelPaths& paths,
+        int32_t numThreads = 2,
+        bool debug = false,
+        const std::optional<float>& noiseScale = std::nullopt,
+        const std::optional<float>& noiseScaleW = std::nullopt,
+        const std::optional<float>& lengthScale = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<int32_t>& maxNumSentences = std::nullopt,
+        const std::optional<float>& silenceScale = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& kokoroLang = std::nullopt
+    );
+
     struct AudioResult {
         std::vector<float> samples;  // Audio samples in range [-1.0, 1.0]
         int32_t sampleRate;          // Sample rate in Hz

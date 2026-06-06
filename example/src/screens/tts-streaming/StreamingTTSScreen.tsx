@@ -16,6 +16,7 @@ import {
   type TtsEngine,
   type TtsLivePipelineOptions,
   type TtsPipelineHandle,
+  type TTSInitializeOptions,
   type TTSModelType,
 } from 'react-native-sherpa-onnx/tts';
 import {
@@ -106,11 +107,11 @@ type StreamingSessionEngine = {
 
 async function createStreamingSessionEngine(options: {
   modelSource: FileSource;
-  modelType: TTSModelType;
+  modelType?: TTSModelType;
   numThreads: number;
   debug: boolean;
 }): Promise<StreamingSessionEngine> {
-  const ttsEngine: TtsEngine = await createTTS(options);
+  const ttsEngine: TtsEngine = await createTTS(options as TTSInitializeOptions);
   let activePipeline: TtsPipelineHandle | null = null;
   let activeTextBufferId: string | null = null;
 
@@ -483,7 +484,7 @@ export default function StreamingTTSScreen() {
 
       const engine = await createStreamingSessionEngine({
         modelSource: modelPath,
-        modelType: 'auto' as TTSModelType,
+        modelType: 'auto',
         numThreads: 2,
         debug: false,
       });
