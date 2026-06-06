@@ -137,7 +137,7 @@ export type UnifiedDetectNativeResult = {
   isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   detectionSources?: string[];
-  paths?: Record<string, string>;
+  paths?: Object;
   error?: string;
 };
 
@@ -218,7 +218,7 @@ export interface Spec extends TurboModule {
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
     /** Resolved non-empty path keys from native file-based detection. */
-    paths?: Record<string, string>;
+    paths?: Object;
   }>;
 
   // ==================== Offline STT (by-reference) ====================
@@ -1205,7 +1205,7 @@ export interface Spec extends TurboModule {
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
     /** Resolved non-empty path keys from native file-based detection. */
-    paths?: Record<string, string>;
+    paths?: Object;
   }>;
 
   /**
