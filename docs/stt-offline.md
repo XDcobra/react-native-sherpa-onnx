@@ -173,8 +173,10 @@ function detectSttModel(
 
 ```ts
 const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/sherpa-onnx-whisper-tiny-en' });
-console.log(det.success, det.modelType, det.detectedModels);
+console.log(det.success, det.modelType, det.detectedModels, det.paths);
 ```
+
+On folder scans, `paths` contains resolved non-empty config keys (`encoder`, `tokens`, `whisperEncoder`, …) suitable for custom init or `validateCustomModelPaths`.
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 

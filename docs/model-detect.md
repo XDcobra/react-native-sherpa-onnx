@@ -365,7 +365,7 @@ const r = await detectModel({ kind: 'fs', path: '/path/to/model' });
 if (r.matched) console.log(r.category, r.modelType);
 ```
 
-Single unified detect call after input resolution. Returns compact category/type metadata — no required-file validation.
+Single unified detect call after input resolution. On folder scans, matched results may include `paths`, `detectionSources`, and `detectedModels` when native file-based detection resolves them.
 
 ---
 
@@ -374,15 +374,16 @@ Single unified detect call after input resolution. Returns compact category/type
 ```typescript
 function detectModelsBatch(
   inputs: readonly DetectModelInput[],
-  options?: { concurrency?: number }
+  options?: { concurrency?: number; includePaths?: boolean }
 ): Promise<DetectModelResult[]>;
 ```
 
 ```typescript
 const rows = await detectModelsBatch([{ assetName: 'foo' }, { assetName: 'bar' }], { concurrency: 4 });
+const withPaths = await detectModelsBatch(inputs, { includePaths: true });
 ```
 
-Default concurrency: `8`. One native batch call per chunk. Result order matches input order.
+Default concurrency: `8`. `includePaths` defaults to `false` (omit `paths` from matched batch rows). Single `detectModel` always includes `paths` when present. One native batch call per chunk. Result order matches input order.
 
 ---
 
@@ -498,8 +499,14 @@ type DetectModelResult =
       isStreaming: boolean;
       isHardwareSpecificUnsupported?: boolean;
       supportsQnn?: boolean;
+      /** Non-empty resolved path keys from native folder detection. */
+      paths?: Record<string, string>;
+      detectionSources?: DetectionSource[];
+      detectedModels?: DetectedModelEntry[];
     };
 ```
+
+`paths` uses the same string keys as `validateCustomModelPaths` / custom init (`encoder`, `ttsModel`, `dataDir`, …). Only non-empty values are included.
 
 Name-only input (`{ assetName }`) uses native name heuristics when no listable directory exists.
 

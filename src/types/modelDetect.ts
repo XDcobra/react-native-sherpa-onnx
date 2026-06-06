@@ -70,6 +70,8 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
    * Not the same as catalog `languages` hints.
    */
   lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage>;
+  /** Resolved non-empty path keys from native file-based detection. */
+  paths?: Readonly<Record<string, string>>;
 }
 
 // ─── STT extension ──────────────────────────────────────────────────────
@@ -77,6 +79,8 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
 export interface SttDetectModelResult extends ModelDetectResultBase {
   /** True when model targets unsupported hardware-specific acceleration (RK35xx, Ascend, CANN). */
   isHardwareSpecificUnsupported?: boolean;
+  /** Resolved non-empty path keys from native file-based detection. */
+  paths?: Readonly<Record<string, string>>;
 }
 
 // ─── Enhancement extension ─────────────────────────────────────────────

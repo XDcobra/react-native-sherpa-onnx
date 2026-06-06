@@ -200,6 +200,8 @@ export async function detectEnhancementModel(
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
       : undefined;
+  const modelFilePath =
+    typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -212,6 +214,7 @@ export async function detectEnhancementModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
   };
 }
 

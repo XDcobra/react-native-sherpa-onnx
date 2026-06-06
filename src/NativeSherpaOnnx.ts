@@ -137,6 +137,7 @@ export type UnifiedDetectNativeResult = {
   isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   detectionSources?: string[];
+  paths?: Record<string, string>;
   error?: string;
 };
 
@@ -216,6 +217,8 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Record<string, string>;
   }>;
 
   // ==================== Offline STT (by-reference) ====================
@@ -1201,6 +1204,8 @@ export interface Spec extends TurboModule {
     sizeTier?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Record<string, string>;
   }>;
 
   /**
@@ -1436,6 +1441,9 @@ export interface Spec extends TurboModule {
     languages?: string[];
     quantization?: string;
     detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
   }>;
 
   detectVadModel(

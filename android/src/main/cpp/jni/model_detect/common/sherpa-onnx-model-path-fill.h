@@ -43,6 +43,16 @@ void FillOnlineSttModelPathsFromStringMap(
     OnlineSttModelPaths& out
 );
 
+std::map<std::string, std::string> SttModelPathsToStringMap(const SttModelPaths& paths);
+std::map<std::string, std::string> TtsModelPathsToStringMap(const TtsModelPaths& paths);
+std::map<std::string, std::string> VadModelPathsToStringMap(const VadModelPaths& paths);
+std::map<std::string, std::string> EnhancementModelPathsToStringMap(
+    const EnhancementModelPaths& paths);
+std::map<std::string, std::string> PunctuationModelPathsToStringMap(
+    const PunctuationModelPaths& paths);
+std::map<std::string, std::string> AlignmentModelPathsToStringMap(
+    const AlignmentModelPaths& paths);
+
 }  // namespace sherpaonnx
 
 #endif  // SHERPA_ONNX_MODEL_PATH_FILL_H

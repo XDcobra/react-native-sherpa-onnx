@@ -6,6 +6,7 @@
 #include "sherpa-onnx-model-detect-unified.h"
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
 
 #include <algorithm>
 
@@ -135,6 +136,7 @@ UnifiedModelDetectResult MakeHit(
     bool isHardwareSpecificUnsupported,
     const std::vector<DetectedModel>& detectedModels,
     const std::vector<DetectionSource>& detectionSources,
+    const std::map<std::string, std::string>& paths,
     const std::string& error) {
     UnifiedModelDetectResult out;
     out.matched = true;
@@ -148,6 +150,7 @@ UnifiedModelDetectResult MakeHit(
     out.isHardwareSpecificUnsupported = isHardwareSpecificUnsupported;
     out.detectedModels = detectedModels;
     CopyDetectionSources(out, detectionSources);
+    out.paths = paths;
     out.error = error;
     return out;
 }
@@ -175,6 +178,7 @@ UnifiedModelDetectResult DetectModelInternal(
             false,
             tts.detectedModels,
             tts.detectionSources,
+            TtsModelPathsToStringMap(tts.paths),
             tts.error);
     }
 
@@ -192,6 +196,7 @@ UnifiedModelDetectResult DetectModelInternal(
             stt.isHardwareSpecificUnsupported,
             stt.detectedModels,
             stt.detectionSources,
+            SttModelPathsToStringMap(stt.paths),
             stt.error);
     }
 
@@ -208,6 +213,7 @@ UnifiedModelDetectResult DetectModelInternal(
             false,
             vad.detectedModels,
             vad.detectionSources,
+            VadModelPathsToStringMap(vad.paths),
             vad.error);
     }
 
@@ -227,6 +233,7 @@ UnifiedModelDetectResult DetectModelInternal(
             false,
             punctuation.detectedModels,
             punctuation.detectionSources,
+            PunctuationModelPathsToStringMap(punctuation.paths),
             punctuation.error);
     }
 
@@ -246,6 +253,7 @@ UnifiedModelDetectResult DetectModelInternal(
             false,
             enhancement.detectedModels,
             enhancement.detectionSources,
+            EnhancementModelPathsToStringMap(enhancement.paths),
             enhancement.error);
     }
 
@@ -272,6 +280,7 @@ UnifiedModelDetectResult DetectModelInternal(
                 false,
                 alignment.detectedModels,
                 alignment.detectionSources,
+                AlignmentModelPathsToStringMap(alignment.paths),
                 alignment.error);
         }
     }

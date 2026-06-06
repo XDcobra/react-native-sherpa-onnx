@@ -101,7 +101,7 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.isStreaming, det.detectedModels);
+console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.detectedModels);
 ```
 
 ```ts
@@ -242,6 +242,8 @@ Auto mode prefers `gtcrn` when both ONNX stacks are present.
 ## Model detection
 
 `detectEnhancementModel` is a pre-check before `createEnhancement` — no denoiser load. Unified catalog: [model-detect.md](model-detect.md).
+
+On filesystem-backed detection, the result includes `paths.model` (resolved `.onnx` file) when native file listing finds one. Name-only heuristics may omit `paths`.
 
 Filename rules: recursive `.onnx` scan (depth 4); `gtcrn` in path → `gtcrn`; `dpdfnet`/`dpcrn` → `dpdfnet`. Optional `assetName` for catalog hints.
 

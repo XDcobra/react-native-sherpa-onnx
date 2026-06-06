@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_DETECT_UNIFIED_H
 
 #include "sherpa-onnx-common.h"
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@ struct UnifiedModelDetectResult {
     bool isHardwareSpecificUnsupported = false;
     std::vector<DetectedModel> detectedModels;
     std::vector<std::string> detectionSources;
+    std::map<std::string, std::string> paths;
     std::string error;
 };
 

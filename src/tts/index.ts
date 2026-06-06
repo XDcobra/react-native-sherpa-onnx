@@ -27,6 +27,7 @@ import {
   toNativeSynthesisOptions,
 } from './ttsNativeBridge';
 import { resolvePublicLanguageHints } from '../model-languages';
+import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
   releasePipelineAudioBuffer,
@@ -319,6 +320,7 @@ export async function detectTtsModel(
       }
     }
   }
+  const paths = readNonEmptyDetectPathsMap(raw.paths);
   return {
     success: raw.success,
     isStreaming: true,
@@ -330,6 +332,7 @@ export async function detectTtsModel(
     ...(quantization != null ? { quantization } : {}),
     ...(sizeTier != null ? { sizeTier } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }
 

@@ -99,7 +99,7 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.detectedModels);
+console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
 ```
 
 ```ts

@@ -106,6 +106,37 @@ jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings) {
   return list;
 }
 
+jobject BuildStringStringMap(
+    JNIEnv* env,
+    const std::map<std::string, std::string>& strings
+) {
+  if (strings.empty()) {
+    return nullptr;
+  }
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  for (const auto& entry : strings) {
+    if (entry.second.empty()) {
+      continue;
+    }
+    PutString(env, map, mapPut, entry.first.c_str(), entry.second);
+  }
+  return map;
+}
+
 jobject BuildLexiconLanguagesList(
     JNIEnv* env,
     const std::vector<model_detect::LexiconCandidate>& languages) {

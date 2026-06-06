@@ -75,6 +75,14 @@ jobject UnifiedDetectResultToJava(JNIEnv* env, const UnifiedModelDetectResult& r
         env->DeleteLocalRef(detectionSourcesList);
     }
 
+    jobject pathsMap = BuildStringStringMap(env, result.paths);
+    if (pathsMap) {
+        jstring keyPaths = env->NewStringUTF("paths");
+        env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
+        env->DeleteLocalRef(keyPaths);
+        env->DeleteLocalRef(pathsMap);
+    }
+
     return map;
 }
 

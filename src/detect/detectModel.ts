@@ -12,6 +12,13 @@ import {
   type Quantization,
   type SizeTier,
 } from '../download/types';
+import type { DetectedModelEntry, DetectionSource } from '../types/modelDetect';
+import {
+  readDetectedModels,
+  readDetectionSources,
+  readNonEmptyDetectPathsMap,
+  type DetectModelPathsMap,
+} from './detectModelOutput';
 
 /** Name-only or directory-backed detect input without a full {@link FileSource}. */
 export type DetectModelNameInput = {
@@ -32,6 +39,10 @@ export type DetectModelMatchedResult = {
   isHardwareSpecificUnsupported?: boolean;
   /** Set when an STT hit also matches the QNN release naming convention. */
   supportsQnn?: boolean;
+  /** Non-empty resolved path keys from native detection (folder scans). */
+  paths?: DetectModelPathsMap;
+  detectionSources?: readonly DetectionSource[];
+  detectedModels?: readonly DetectedModelEntry[];
 };
 
 export type DetectModelResult = { matched: false } | DetectModelMatchedResult;
@@ -39,6 +50,8 @@ export type DetectModelResult = { matched: false } | DetectModelMatchedResult;
 export type DetectModelsBatchOptions = {
   /** Parallel batch jobs (default 8). Splits inputs into chunks when less than input count. */
   concurrency?: number;
+  /** Include `paths` in each matched result (default false). Single `detectModel` always includes paths when present. */
+  includePaths?: boolean;
 };
 
 type ResolvedDetectModelInput = ResolvedDetectInput & {
@@ -150,7 +163,8 @@ function languagesFromNative(
 function buildMatchedResult(
   category: ModelCategory,
   modelKey: string,
-  raw: UnifiedDetectNativeResult
+  raw: UnifiedDetectNativeResult,
+  includePaths: boolean
 ): DetectModelMatchedResult {
   const modelType = (raw.modelType ?? 'unknown').trim();
   const result: DetectModelMatchedResult = {
@@ -180,12 +194,51 @@ function buildMatchedResult(
     result.supportsQnn = true;
   }
 
+  const detectionSources = readDetectionSources(raw.detectionSources);
+  if (detectionSources.length > 0) {
+    result.detectionSources = detectionSources;
+  }
+
+  const detectedModels = readDetectedModels(raw.detectedModels);
+  if (detectedModels.length > 0) {
+    result.detectedModels = detectedModels;
+  }
+
+  if (includePaths) {
+    const paths = readNonEmptyDetectPathsMap(raw.paths);
+    if (paths != null) {
+      result.paths = paths;
+    }
+  }
+
   return result;
+}
+
+function omitPathsFromMatched(
+  result: DetectModelMatchedResult
+): DetectModelMatchedResult {
+  if (result.paths == null) {
+    return result;
+  }
+  const rest = { ...result };
+  delete rest.paths;
+  return rest;
+}
+
+function finalizeDetectResult(
+  result: DetectModelResult,
+  includePaths: boolean
+): DetectModelResult {
+  if (!result.matched || includePaths) {
+    return result;
+  }
+  return omitPathsFromMatched(result);
 }
 
 function mapNativeDetectResult(
   resolved: ResolvedDetectModelInput,
-  raw: UnifiedDetectNativeResult
+  raw: UnifiedDetectNativeResult,
+  includePaths: boolean
 ): DetectModelResult {
   if (raw.matched !== true) {
     return { matched: false };
@@ -196,7 +249,7 @@ function mapNativeDetectResult(
     return { matched: false };
   }
 
-  return buildMatchedResult(category, resolved.modelKey, raw);
+  return buildMatchedResult(category, resolved.modelKey, raw, includePaths);
 }
 
 function toNativeDetectInput(resolved: ResolvedDetectModelInput): {
@@ -224,7 +277,7 @@ export async function detectModel(
     resolved.modelDir,
     resolved.assetName
   );
-  return mapNativeDetectResult(resolved, raw);
+  return mapNativeDetectResult(resolved, raw, true);
 }
 
 /** Batch wrapper around unified native detection with optional chunked parallelism. */
@@ -237,6 +290,7 @@ export async function detectModelsBatch(
   }
 
   const concurrency = options?.concurrency ?? DEFAULT_BATCH_CONCURRENCY;
+  const includePaths = options?.includePaths === true;
   const resolvedList = await Promise.all(
     inputs.map((input) => resolveDetectModelInput(input))
   );
@@ -247,7 +301,10 @@ export async function detectModelsBatch(
     const nativeInputs = chunk.map((r) => toNativeDetectInput(r));
     const rawResults = await SherpaOnnx.detectModelsBatch(nativeInputs);
     return rawResults.map((raw, index) =>
-      mapNativeDetectResult(chunk[index]!, raw)
+      finalizeDetectResult(
+        mapNativeDetectResult(chunk[index]!, raw, includePaths),
+        includePaths
+      )
     );
   };
 

@@ -42,6 +42,7 @@ import type { SttPipelineHandle } from './streamingTypes';
 import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
+import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
   isDetectionSource,
@@ -268,9 +269,8 @@ export async function detectSttModel(
       ? raw.quantization
       : undefined;
 
-  // isStreaming is now provided by the native online-compatibility guard.
-  // Falls back to false when the native layer does not return the field.
   const isStreaming = raw.isStreaming === true;
+  const paths = readNonEmptyDetectPathsMap(raw.paths);
 
   return {
     success: raw.success,
@@ -284,6 +284,7 @@ export async function detectSttModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }
 

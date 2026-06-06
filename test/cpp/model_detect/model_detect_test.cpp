@@ -31,6 +31,7 @@
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
+#include "sherpa-onnx-model-path-fill.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -1074,6 +1075,18 @@ TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsDataDirIsDirect
     ASSERT_NE(ttsModel, reqs.fields.end());
     EXPECT_TRUE(ttsModel->required);
     EXPECT_FALSE(ttsModel->isDirectory);
+}
+
+TEST(ModelDetectValidation, TtsModelPathsToStringMapOmitsEmptyValues) {
+    sherpaonnx::TtsModelPaths paths;
+    paths.ttsModel = "/tmp/model.onnx";
+    paths.tokens = "/tmp/tokens.txt";
+    paths.dataDir = "/tmp/espeak-ng-data";
+    auto map = sherpaonnx::TtsModelPathsToStringMap(paths);
+    EXPECT_EQ(map.at("ttsModel"), "/tmp/model.onnx");
+    EXPECT_EQ(map.at("tokens"), "/tmp/tokens.txt");
+    EXPECT_EQ(map.at("dataDir"), "/tmp/espeak-ng-data");
+    EXPECT_EQ(map.find("lexicon"), map.end());
 }
 
 }  // namespace

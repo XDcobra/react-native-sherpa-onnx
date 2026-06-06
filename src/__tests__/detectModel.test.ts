@@ -38,7 +38,12 @@ describe('detectModel', () => {
       success: true,
       category: 'tts',
       modelType: 'vits',
-      detectedModels: [],
+      detectedModels: [{ type: 'vits', modelDir: '/models/vits' }],
+      detectionSources: ['fileListing'],
+      paths: {
+        ttsModel: '/models/vits/model.onnx',
+        tokens: '/models/vits/tokens.txt',
+      },
       languages: ['en'],
       quantization: 'int8',
       sizeTier: 'small',
@@ -53,6 +58,12 @@ describe('detectModel', () => {
         category: ModelCategory.Tts,
         modelType: 'vits',
         isStreaming: true,
+        paths: {
+          ttsModel: '/models/vits/model.onnx',
+          tokens: '/models/vits/tokens.txt',
+        },
+        detectionSources: ['fileListing'],
+        detectedModels: [{ type: 'vits', modelDir: '/models/vits' }],
       })
     );
     expect(mockSherpa.detectModel).toHaveBeenCalledWith('', 'vits-piper-en');
@@ -101,6 +112,7 @@ describe('detectModelsBatch', () => {
         modelType: 'vits',
         detectedModels: [],
         isStreaming: true,
+        paths: { ttsModel: '/x.onnx' },
       },
       {
         matched: false,
@@ -118,11 +130,37 @@ describe('detectModelsBatch', () => {
     expect(results[0]).toEqual(
       expect.objectContaining({ matched: true, category: ModelCategory.Tts })
     );
+    expect(results[0]).not.toHaveProperty('paths');
     expect(results[1]).toEqual({ matched: false });
     expect(mockSherpa.detectModelsBatch).toHaveBeenCalledWith([
       { modelDir: '', assetName: 'vits-en' },
       { modelDir: '', assetName: 'missing' },
     ]);
+  });
+
+  it('includes paths in batch results when includePaths is true', async () => {
+    mockSherpa.detectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        success: true,
+        category: 'tts',
+        modelType: 'vits',
+        detectedModels: [],
+        isStreaming: true,
+        paths: { ttsModel: '/x.onnx', tokens: '/x/tokens.txt' },
+      },
+    ]);
+
+    const results = await detectModelsBatch([{ assetName: 'vits-en' }], {
+      includePaths: true,
+    });
+
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        matched: true,
+        paths: { ttsModel: '/x.onnx', tokens: '/x/tokens.txt' },
+      })
+    );
   });
 });
 
