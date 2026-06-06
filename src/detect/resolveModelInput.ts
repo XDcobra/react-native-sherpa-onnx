@@ -213,6 +213,176 @@ async function isUsableModelDirectory(modelDir: string): Promise<boolean> {
   }
 }
 
+async function isUsableModelFile(filePath: string): Promise<boolean> {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    return await exists(trimmed);
+  } catch {
+    return false;
+  }
+}
+
+let modelFileCacheCounter = 0;
+
+async function materializeUriFileSourceToCache(
+  source: Extract<FileSource, { kind: 'contentUri' | 'securityScoped' }>
+): Promise<string> {
+  const cacheName = `model_file_${Date.now()}_${++modelFileCacheCounter}`;
+  const displayName = source.displayName?.trim();
+  const destPath =
+    displayName && displayName.length > 0
+      ? `tmp/${cacheName}_${displayName.replace(/[/\\]/g, '_')}`
+      : `tmp/${cacheName}`;
+  const result = await SherpaOnnx.copyFile(
+    source,
+    { kind: 'app', base: 'tmp', path: destPath },
+    true,
+    true,
+    `resolve_model_file_${++modelFileCacheCounter}`
+  );
+  if (result.outputKind !== 'fs' || !result.outputPath?.trim()) {
+    createFileIOError(
+      FileIOErrorCode.RESOLVE_ERROR,
+      `Failed to materialize ${source.kind} source to a readable file path`
+    );
+  }
+  return result.outputPath;
+}
+
+async function resolveConcreteFileSourceForModelFile(
+  source: ConcreteFileSource
+): Promise<string> {
+  switch (source.kind) {
+    case 'fs': {
+      const path = source.path.trim();
+      if (!path) {
+        createFileIOError(
+          FileIOErrorCode.INVALID_ARGUMENT,
+          "FileSource kind 'fs' requires a non-empty path"
+        );
+      }
+      if (!(await isUsableModelFile(path))) {
+        createFileIOError(
+          FileIOErrorCode.NOT_FOUND,
+          `Model file not found: ${path}`
+        );
+      }
+      return path;
+    }
+
+    case 'app': {
+      const safeRelativePath = normalizeRelativePathForDetect(
+        source.path,
+        'app'
+      );
+      if (source.base === 'apkAsset' || source.base === 'appBundle') {
+        if (source.base === 'apkAsset' && platformOs() !== 'android') {
+          createFileIOError(
+            FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
+            'app:apkAsset is supported on Android only. Use app:appBundle or fs on this platform.'
+          );
+        }
+        if (source.base === 'appBundle' && platformOs() !== 'ios') {
+          createFileIOError(
+            FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
+            'app:appBundle is supported on iOS only. Use app:apkAsset or fs on this platform.'
+          );
+        }
+        const resolved = await resolveBundledRelativePath(safeRelativePath);
+        if (!(await isUsableModelFile(resolved))) {
+          createFileIOError(
+            FileIOErrorCode.NOT_FOUND,
+            `Bundled model file not found: ${safeRelativePath}`
+          );
+        }
+        return resolved;
+      }
+      const baseDir = await SherpaOnnx.resolveAppBaseDir(source.base);
+      const fullPath = joinBaseAndRelativePath(baseDir, safeRelativePath);
+      if (!(await isUsableModelFile(fullPath))) {
+        createFileIOError(
+          FileIOErrorCode.NOT_FOUND,
+          `Model file not found: ${fullPath}`
+        );
+      }
+      return fullPath;
+    }
+
+    case 'pad': {
+      if (platformOs() !== 'android') {
+        createFileIOError(
+          FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
+          'pad is supported on Android only.'
+        );
+      }
+      const safeRelativePath = normalizeRelativePathForDetect(
+        source.path,
+        'pad'
+      );
+      const packPath = await SherpaOnnx.getAssetPackPath(source.packName);
+      if (!packPath) {
+        createFileIOError(
+          FileIOErrorCode.RESOLVE_ERROR,
+          `Play Asset Delivery pack not available: ${source.packName}`
+        );
+      }
+      const fullPath = joinBaseAndRelativePath(packPath, safeRelativePath);
+      if (!(await isUsableModelFile(fullPath))) {
+        createFileIOError(
+          FileIOErrorCode.NOT_FOUND,
+          `Model file not found in pack ${source.packName}: ${fullPath}`
+        );
+      }
+      return fullPath;
+    }
+
+    case 'contentUri':
+    case 'securityScoped':
+      return materializeUriFileSourceToCache(source);
+  }
+}
+
+async function resolveAutoFileSourceForModelFile(source: {
+  kind: 'auto';
+  path: string;
+  tryOrder: FileSourceAutoTryTarget[];
+}): Promise<string> {
+  validateAutoFileSource(source);
+
+  const attemptErrors: string[] = [];
+
+  for (const target of source.tryOrder) {
+    const label = autoTryTargetLabel(target);
+    try {
+      const concrete = fileSourceFromAutoTryTarget(target, source.path);
+      const resolved = await resolveConcreteFileSourceForModelFile(concrete);
+      if (!(await isUsableModelFile(resolved))) {
+        attemptErrors.push(`${label}: file not found (${resolved})`);
+        continue;
+      }
+      return resolved;
+    } catch (error) {
+      if (isFatalAutoResolveError(error)) {
+        throw toFileIOResolveError(error);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      attemptErrors.push(`${label}: ${message}`);
+    }
+  }
+
+  createFileIOError(
+    FileIOErrorCode.NOT_FOUND,
+    `No FileSource location matched file path "${
+      source.path
+    }". tryOrder=[${source.tryOrder
+      .map(autoTryTargetLabel)
+      .join(', ')}]. ${attemptErrors.join(' | ')}`
+  );
+}
+
 async function resolveConcreteFileSourceForDetect(
   source: ConcreteFileSource
 ): Promise<ResolvedDetectInput> {
@@ -371,4 +541,37 @@ export async function resolveFileSourceForModelInit(
     FileIOErrorCode.RESOLVE_ERROR,
     `Unable to resolve a local model directory for source kind '${source.kind}'.`
   );
+}
+
+/**
+ * Resolve a {@link FileSource} to an absolute filesystem path for a single model file.
+ * Mirror of {@link resolveFileSourceForModelInit} for file-backed custom configs.
+ */
+export async function resolveFileSourceForModelFile(
+  source: FileSource
+): Promise<string> {
+  try {
+    if (source.kind === 'auto') {
+      return await resolveAutoFileSourceForModelFile(source);
+    }
+    return await resolveConcreteFileSourceForModelFile(source);
+  } catch (error) {
+    throw toFileIOResolveError(error);
+  }
+}
+
+/**
+ * Resolve every {@link FileSource} value in a map to absolute file paths (parallel).
+ */
+export async function resolveModelFileSources(
+  config: Record<string, FileSource>
+): Promise<Record<string, string>> {
+  const entries = Object.entries(config);
+  const resolvedEntries = await Promise.all(
+    entries.map(async ([key, source]) => {
+      const path = await resolveFileSourceForModelFile(source);
+      return [key, path] as const;
+    })
+  );
+  return Object.fromEntries(resolvedEntries);
 }

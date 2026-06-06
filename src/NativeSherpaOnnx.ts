@@ -10,7 +10,9 @@ import type { ExtractArchiveResult } from './extraction/types';
 
 /** `initializeStt(instanceId, options)` — offline STT. */
 export type SttInitBridgeOptions = {
-  modelDir: string;
+  initMode: 'auto' | 'custom';
+  modelDir?: string;
+  modelPaths?: Record<string, string>;
   preferInt8?: boolean;
   modelType?: string;
   debug?: boolean;
@@ -1442,6 +1444,26 @@ export interface Spec extends TurboModule {
       assetName?: string | null;
     }>
   ): Promise<UnifiedDetectNativeResult[]>;
+
+  /** Runtime validation of resolved custom-init path maps (C++ validate-* tables). */
+  validateCustomModelPaths(
+    category: string,
+    modelType: string,
+    paths: Readonly<Record<string, string>>
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    missingRequired?: string[];
+  }>;
+
+  /** Schema for custom-init UI: required vs optional path keys from native C++. */
+  getCustomModelPathRequirements(
+    category: string,
+    modelType: string
+  ): Promise<{
+    required: string[];
+    optional: string[];
+  }>;
 
   /**
    * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with

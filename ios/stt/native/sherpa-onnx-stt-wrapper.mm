@@ -7,6 +7,7 @@
 
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-stt.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -469,6 +470,283 @@ SttInitializeResult SttWrapper::initialize(
     } catch (...) {
         result.error = "Unknown exception during initialization";
         LOGE("%s", result.error.c_str());
+        return result;
+    }
+}
+
+SttInitializeResult SttWrapper::initializeCustom(
+    const std::string& modelType,
+    const SttModelPaths& paths,
+    bool debug,
+    const std::optional<std::string>& hotwordsFile,
+    const std::optional<float>& hotwordsScore,
+    const std::optional<int32_t>& numThreads,
+    const std::optional<std::string>& provider,
+    const std::optional<std::string>& ruleFsts,
+    const std::optional<std::string>& ruleFars,
+    const std::optional<float>& dither,
+    const SttWhisperOptions* whisperOpts,
+    const SttSenseVoiceOptions* senseVoiceOpts,
+    const SttCanaryOptions* canaryOpts,
+    const SttFunAsrNanoOptions* funasrNanoOpts,
+    const SttQwen3AsrOptions* qwen3AsrOpts,
+    const SttCohereTranscribeOptions* cohereTranscribeOpts
+) {
+    SttInitializeResult result;
+    result.success = false;
+    (void)debug;
+
+    if (pImpl->initialized) {
+        release();
+    }
+
+    const SttModelKind selectedKind = ParseSttModelType(modelType);
+    if (selectedKind == SttModelKind::kUnknown) {
+        result.error = "Unsupported custom STT model type: " + modelType;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    auto validation = ValidateSttPaths(selectedKind, paths, "custom");
+    if (!validation.ok) {
+        result.error = validation.error;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    SttDetectResult detect;
+    detect.ok = true;
+    detect.selectedKind = selectedKind;
+    detect.paths = paths;
+    detect.detectedModels.push_back({modelType, "custom"});
+
+    try {
+        sherpa_onnx::cxx::OfflineRecognizerConfig config;
+        config.feat_config.sample_rate = 16000;
+        config.feat_config.feature_dim = 80;
+
+        switch (detect.selectedKind) {
+            case SttModelKind::kTransducer:
+            case SttModelKind::kNemoTransducer:
+                config.model_config.transducer.encoder = detect.paths.encoder;
+                config.model_config.transducer.decoder = detect.paths.decoder;
+                config.model_config.transducer.joiner = detect.paths.joiner;
+                break;
+            case SttModelKind::kParaformer:
+                config.model_config.paraformer.model = detect.paths.paraformerModel;
+                break;
+            case SttModelKind::kNemoCtc:
+                config.model_config.nemo_ctc.model = detect.paths.ctcModel;
+                break;
+            case SttModelKind::kWenetCtc:
+                config.model_config.wenet_ctc.model = detect.paths.ctcModel;
+                break;
+            case SttModelKind::kSenseVoice:
+                config.model_config.sense_voice.model = detect.paths.ctcModel;
+                break;
+            case SttModelKind::kZipformerCtc:
+                config.model_config.zipformer_ctc.model = detect.paths.ctcModel;
+                break;
+            case SttModelKind::kWhisper:
+                config.model_config.whisper.encoder = detect.paths.whisperEncoder;
+                config.model_config.whisper.decoder = detect.paths.whisperDecoder;
+                break;
+            case SttModelKind::kFunAsrNano:
+                config.model_config.funasr_nano.encoder_adaptor = detect.paths.funasrEncoderAdaptor;
+                config.model_config.funasr_nano.llm = detect.paths.funasrLLM;
+                config.model_config.funasr_nano.embedding = detect.paths.funasrEmbedding;
+                config.model_config.funasr_nano.tokenizer = detect.paths.funasrTokenizer;
+                break;
+            case SttModelKind::kQwen3Asr:
+                config.model_config.qwen3_asr.conv_frontend = detect.paths.qwen3ConvFrontend;
+                config.model_config.qwen3_asr.encoder = detect.paths.qwen3Encoder;
+                config.model_config.qwen3_asr.decoder = detect.paths.qwen3Decoder;
+                config.model_config.qwen3_asr.tokenizer = detect.paths.qwen3Tokenizer;
+                break;
+            case SttModelKind::kCohereTranscribe:
+                config.model_config.cohere_transcribe.encoder = detect.paths.cohereEncoder;
+                config.model_config.cohere_transcribe.decoder = detect.paths.cohereDecoder;
+                break;
+            case SttModelKind::kFireRedAsr:
+                config.model_config.fire_red_asr.encoder = detect.paths.fireRedEncoder;
+                config.model_config.fire_red_asr.decoder = detect.paths.fireRedDecoder;
+                break;
+            case SttModelKind::kMoonshine:
+                config.model_config.moonshine.preprocessor = detect.paths.moonshinePreprocessor;
+                config.model_config.moonshine.encoder = detect.paths.moonshineEncoder;
+                config.model_config.moonshine.uncached_decoder = detect.paths.moonshineUncachedDecoder;
+                config.model_config.moonshine.cached_decoder = detect.paths.moonshineCachedDecoder;
+                break;
+            case SttModelKind::kMoonshineV2:
+                config.model_config.moonshine.encoder = detect.paths.moonshineEncoder;
+                config.model_config.moonshine.merged_decoder = detect.paths.moonshineMergedDecoder;
+                break;
+            case SttModelKind::kDolphin:
+                config.model_config.dolphin.model = detect.paths.dolphinModel;
+                break;
+            case SttModelKind::kCanary:
+                config.model_config.canary.encoder = detect.paths.canaryEncoder;
+                config.model_config.canary.decoder = detect.paths.canaryDecoder;
+                break;
+            case SttModelKind::kOmnilingual:
+                config.model_config.omnilingual.model = detect.paths.omnilingualModel;
+                break;
+            case SttModelKind::kMedAsr:
+                config.model_config.medasr.model = detect.paths.medasrModel;
+                break;
+            case SttModelKind::kTeleSpeechCtc:
+                config.model_config.telespeech_ctc = detect.paths.telespeechCtcModel;
+                break;
+            default:
+                result.error = "Unsupported custom STT model kind";
+                return result;
+        }
+
+        if (!detect.paths.tokens.empty()) {
+            config.model_config.tokens = detect.paths.tokens;
+        }
+
+        switch (detect.selectedKind) {
+            case SttModelKind::kWhisper:
+                if (whisperOpts) {
+                    if (whisperOpts->language.has_value())
+                        config.model_config.whisper.language = *whisperOpts->language;
+                    if (whisperOpts->task.has_value())
+                        config.model_config.whisper.task = *whisperOpts->task;
+                    if (whisperOpts->tail_paddings.has_value())
+                        config.model_config.whisper.tail_paddings = *whisperOpts->tail_paddings;
+                    if (whisperOpts->enable_token_timestamps.has_value())
+                        config.model_config.whisper.enable_token_timestamps =
+                            *whisperOpts->enable_token_timestamps;
+                    if (whisperOpts->enable_segment_timestamps.has_value())
+                        config.model_config.whisper.enable_segment_timestamps =
+                            *whisperOpts->enable_segment_timestamps;
+                }
+                break;
+            case SttModelKind::kSenseVoice:
+                if (senseVoiceOpts) {
+                    if (senseVoiceOpts->language.has_value())
+                        config.model_config.sense_voice.language = *senseVoiceOpts->language;
+                    if (senseVoiceOpts->use_itn.has_value())
+                        config.model_config.sense_voice.use_itn = *senseVoiceOpts->use_itn;
+                }
+                break;
+            case SttModelKind::kCanary:
+                if (canaryOpts) {
+                    if (canaryOpts->src_lang.has_value())
+                        config.model_config.canary.src_lang = *canaryOpts->src_lang;
+                    if (canaryOpts->tgt_lang.has_value())
+                        config.model_config.canary.tgt_lang = *canaryOpts->tgt_lang;
+                    if (canaryOpts->use_pnc.has_value())
+                        config.model_config.canary.use_pnc = *canaryOpts->use_pnc;
+                }
+                break;
+            case SttModelKind::kFunAsrNano:
+                if (funasrNanoOpts) {
+                    if (funasrNanoOpts->system_prompt.has_value())
+                        config.model_config.funasr_nano.system_prompt = *funasrNanoOpts->system_prompt;
+                    if (funasrNanoOpts->user_prompt.has_value())
+                        config.model_config.funasr_nano.user_prompt = *funasrNanoOpts->user_prompt;
+                    if (funasrNanoOpts->max_new_tokens.has_value())
+                        config.model_config.funasr_nano.max_new_tokens = *funasrNanoOpts->max_new_tokens;
+                    if (funasrNanoOpts->temperature.has_value())
+                        config.model_config.funasr_nano.temperature = *funasrNanoOpts->temperature;
+                    if (funasrNanoOpts->top_p.has_value())
+                        config.model_config.funasr_nano.top_p = *funasrNanoOpts->top_p;
+                    if (funasrNanoOpts->seed.has_value())
+                        config.model_config.funasr_nano.seed = *funasrNanoOpts->seed;
+                    if (funasrNanoOpts->language.has_value())
+                        config.model_config.funasr_nano.language = *funasrNanoOpts->language;
+                    if (funasrNanoOpts->itn.has_value())
+                        config.model_config.funasr_nano.itn = *funasrNanoOpts->itn;
+                    if (funasrNanoOpts->hotwords.has_value())
+                        config.model_config.funasr_nano.hotwords = *funasrNanoOpts->hotwords;
+                }
+                break;
+            case SttModelKind::kQwen3Asr:
+                if (qwen3AsrOpts) {
+                    if (qwen3AsrOpts->max_total_len.has_value())
+                        config.model_config.qwen3_asr.max_total_len = *qwen3AsrOpts->max_total_len;
+                    if (qwen3AsrOpts->max_new_tokens.has_value())
+                        config.model_config.qwen3_asr.max_new_tokens = *qwen3AsrOpts->max_new_tokens;
+                    if (qwen3AsrOpts->temperature.has_value())
+                        config.model_config.qwen3_asr.temperature = *qwen3AsrOpts->temperature;
+                    if (qwen3AsrOpts->top_p.has_value())
+                        config.model_config.qwen3_asr.top_p = *qwen3AsrOpts->top_p;
+                    if (qwen3AsrOpts->seed.has_value())
+                        config.model_config.qwen3_asr.seed = *qwen3AsrOpts->seed;
+                }
+                break;
+            case SttModelKind::kCohereTranscribe:
+                if (cohereTranscribeOpts) {
+                    if (cohereTranscribeOpts->language.has_value())
+                        config.model_config.cohere_transcribe.language = *cohereTranscribeOpts->language;
+                    if (cohereTranscribeOpts->use_punct.has_value())
+                        config.model_config.cohere_transcribe.use_punct = *cohereTranscribeOpts->use_punct;
+                    if (cohereTranscribeOpts->use_itn.has_value())
+                        config.model_config.cohere_transcribe.use_itn = *cohereTranscribeOpts->use_itn;
+                }
+                break;
+            default:
+                break;
+        }
+
+        if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
+            if (!SupportsHotwords(detect.selectedKind)) {
+                result.error = "HOTWORDS_NOT_SUPPORTED: Hotwords are only supported for transducer models (transducer, nemo_transducer).";
+                return result;
+            }
+            auto validateErr = ValidateHotwordsFile(*hotwordsFile);
+            if (validateErr.has_value()) {
+                result.error = "INVALID_HOTWORDS_FILE: " + *validateErr;
+                return result;
+            }
+        }
+
+        config.decoding_method = "greedy_search";
+        config.model_config.num_threads = numThreads.value_or(1);
+        config.model_config.provider = provider.value_or("cpu");
+        if (hotwordsFile.has_value() && !hotwordsFile->empty()) {
+            config.hotwords_file = *hotwordsFile;
+            config.decoding_method = "modified_beam_search";
+            config.max_active_paths = std::max(4, config.max_active_paths);
+        }
+        if (hotwordsScore.has_value()) {
+            config.hotwords_score = *hotwordsScore;
+        }
+        if (ruleFsts.has_value() && !ruleFsts->empty()) {
+            config.rule_fsts = *ruleFsts;
+        }
+        if (ruleFars.has_value() && !ruleFars->empty()) {
+            config.rule_fars = *ruleFars;
+        }
+        (void)dither;
+
+        pImpl->qwen3_hotwords_csv.clear();
+        if (detect.selectedKind == SttModelKind::kQwen3Asr && qwen3AsrOpts &&
+            qwen3AsrOpts->hotwords.has_value() && !qwen3AsrOpts->hotwords->empty()) {
+            pImpl->qwen3_hotwords_csv = NormalizeQwen3HotwordsCsv(*qwen3AsrOpts->hotwords);
+        }
+
+        try {
+            pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
+        } catch (const std::exception& e) {
+            result.error = std::string("INIT_ERROR: ") + e.what();
+            return result;
+        }
+
+        pImpl->lastConfig = config;
+        pImpl->modelDir = "custom";
+        pImpl->currentModelKind = detect.selectedKind;
+        pImpl->initialized = true;
+
+        result.success = true;
+        result.detectedModels = detect.detectedModels;
+        result.modelType = modelType;
+        result.decodingMethod = config.decoding_method;
+        return result;
+    } catch (const std::exception& e) {
+        result.error = std::string("Exception during custom initialization: ") + e.what();
         return result;
     }
 }

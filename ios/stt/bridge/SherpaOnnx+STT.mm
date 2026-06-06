@@ -16,9 +16,11 @@
 #include "../pipeline/SttOfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -78,6 +80,23 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
     }
 }
 
+static void FillSttModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::SttModelPaths &paths
+) {
+    if (![dict isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    std::map<std::string, std::string> pathMap;
+    for (NSString *key in dict) {
+        id value = dict[key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+            pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+        }
+    }
+    sherpaonnx::FillSttModelPathsFromStringMap(pathMap, paths);
+}
+
 @implementation SherpaOnnx (STT)
 
 - (void)initializeStt:(NSString *)instanceId
@@ -89,12 +108,12 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         reject(kSttErrInitFailed, @"instanceId is required", nil);
         return;
     }
-    NSString *modelDir = options.modelDir();
-    if (modelDir == nil || [modelDir length] == 0) {
-        reject(kSttErrInitFailed, @"modelDir is required", nil);
-        return;
+
+    NSString *initMode = @"auto";
+    if (options.initMode().has_value()) {
+        initMode = [NSString stringWithUTF8String:options.initMode()->c_str()];
     }
-    auto preferInt8 = options.preferInt8();
+
     NSString *modelType = options.modelType();
     auto debug = options.debug();
     NSString *hotwordsFile = options.hotwordsFile();
@@ -108,7 +127,19 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
     NSDictionary *modelOptions =
         [modelOptionsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)modelOptionsRaw : nil;
     std::string instanceIdStr = [instanceId UTF8String];
-    RCTLogInfo(@"Initializing STT instance %@ with modelDir: %@", instanceId, modelDir);
+
+    const bool isCustomInit = initMode.length > 0 && [initMode isEqualToString:@"custom"];
+    NSString *modelDir = options.modelDir();
+    if (!isCustomInit && (modelDir == nil || [modelDir length] == 0)) {
+        reject(kSttErrInitFailed, @"modelDir is required for initMode auto", nil);
+        return;
+    }
+    if (isCustomInit && (modelType == nil || [modelType length] == 0)) {
+        reject(kSttErrInitFailed, @"modelType is required for initMode custom", nil);
+        return;
+    }
+
+    RCTLogInfo(@"Initializing STT instance %@ initMode=%@ modelDir=%@", instanceId, initMode, modelDir);
 
     @try {
         std::lock_guard<std::mutex> lock(g_stt_mutex);
@@ -121,11 +152,14 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             inst->wrapper = std::make_unique<sherpaonnx::SttWrapper>();
         }
 
-        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
 
         std::optional<bool> preferInt8Opt = std::nullopt;
-        if (preferInt8.has_value()) {
-            preferInt8Opt = preferInt8.value();
+        if (!isCustomInit) {
+            auto preferInt8 = options.preferInt8();
+            if (preferInt8.has_value()) {
+                preferInt8Opt = preferInt8.value();
+            }
         }
 
         std::optional<std::string> modelTypeOpt = std::nullopt;
@@ -242,11 +276,42 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             }
         }
 
-        sherpaonnx::SttInitializeResult result = inst->wrapper->initialize(
-            modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
-            numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
-            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
-            cohereTranscribeOptsPtr);
+        sherpaonnx::SttInitializeResult result;
+        if (isCustomInit) {
+            id pathsRaw = options.modelPaths();
+            NSDictionary *pathsDict =
+                [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+            if (pathsDict == nil || pathsDict.count == 0) {
+                reject(kSttErrInitFailed, @"modelPaths is required for initMode custom", nil);
+                return;
+            }
+            sherpaonnx::SttModelPaths paths;
+            FillSttModelPathsFromDict(pathsDict, paths);
+            result = inst->wrapper->initializeCustom(
+                modelTypeOpt.value_or(""),
+                paths,
+                debugVal,
+                hotwordsFileOpt,
+                hotwordsScoreOpt,
+                numThreadsOpt,
+                providerOpt,
+                ruleFstsOpt,
+                ruleFarsOpt,
+                ditherOpt,
+                whisperOptsPtr,
+                senseVoiceOptsPtr,
+                canaryOptsPtr,
+                funasrNanoOptsPtr,
+                qwen3AsrOptsPtr,
+                cohereTranscribeOptsPtr
+            );
+        } else {
+            result = inst->wrapper->initialize(
+                modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
+                numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
+                whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
+                cohereTranscribeOptsPtr);
+        }
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");

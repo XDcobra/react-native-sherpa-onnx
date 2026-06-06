@@ -1,27 +1,63 @@
-import type { STTInitializeOptions } from './types';
+import type {
+  STTAutoInitializeOptions,
+  STTCustomInitializeOptions,
+  STTInitializeOptions,
+  STTInitializeOptionsBase,
+} from './types';
 import type {
   OnlineSttInitBridgeOptions,
   SttInitBridgeOptions,
 } from '../nativeBridge/initBridgeTypes';
 import type { StreamingSttInitOptions } from './streamingTypes';
+import { resolveFileSourceForModelFile } from '../detect/resolveModelInput';
+import { resolveSttCustomConfigPaths } from './customConfig';
 
 export type { OnlineSttInitBridgeOptions, SttInitBridgeOptions };
 
-export function buildSttInitBridgeOptions(
-  modelDir: string,
-  options: STTInitializeOptions
-): SttInitBridgeOptions {
+async function resolveOptionalFileSourcePath(
+  source: import('../fileio/types').FileSource | undefined
+): Promise<string | undefined> {
+  if (source === undefined) {
+    return undefined;
+  }
+  return resolveFileSourceForModelFile(source);
+}
+
+async function resolveOptionalFileSourceList(
+  sources:
+    | import('../fileio/types').FileSource
+    | readonly import('../fileio/types').FileSource[]
+    | undefined
+): Promise<string | undefined> {
+  if (sources === undefined) {
+    return undefined;
+  }
+  const list = Array.isArray(sources) ? sources : [sources];
+  if (list.length === 0) {
+    return undefined;
+  }
+  const paths = await Promise.all(
+    list.map((source) => resolveFileSourceForModelFile(source))
+  );
+  return paths.join(',');
+}
+
+function appendSharedInitBridgeFields(
+  options: STTInitializeOptionsBase,
+  resolved: {
+    hotwordsFile?: string;
+    bpeVocab?: string;
+    ruleFsts?: string;
+    ruleFars?: string;
+  }
+): Omit<
+  SttInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType' | 'preferInt8'
+> {
   return {
-    modelDir,
-    ...(options.preferInt8 !== undefined
-      ? { preferInt8: options.preferInt8 }
-      : {}),
-    ...(options.modelType !== undefined
-      ? { modelType: options.modelType }
-      : {}),
     ...(options.debug !== undefined ? { debug: options.debug } : {}),
-    ...(options.hotwordsFile !== undefined
-      ? { hotwordsFile: options.hotwordsFile }
+    ...(resolved.hotwordsFile !== undefined
+      ? { hotwordsFile: resolved.hotwordsFile }
       : {}),
     ...(options.hotwordsScore !== undefined
       ? { hotwordsScore: options.hotwordsScore }
@@ -30,8 +66,8 @@ export function buildSttInitBridgeOptions(
       ? { numThreads: options.numThreads }
       : {}),
     ...(options.provider !== undefined ? { provider: options.provider } : {}),
-    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
-    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(resolved.ruleFsts !== undefined ? { ruleFsts: resolved.ruleFsts } : {}),
+    ...(resolved.ruleFars !== undefined ? { ruleFars: resolved.ruleFars } : {}),
     ...(options.dither !== undefined ? { dither: options.dither } : {}),
     ...(options.modelOptions !== undefined
       ? { modelOptions: options.modelOptions }
@@ -39,7 +75,67 @@ export function buildSttInitBridgeOptions(
     ...(options.modelingUnit !== undefined
       ? { modelingUnit: options.modelingUnit }
       : {}),
-    ...(options.bpeVocab !== undefined ? { bpeVocab: options.bpeVocab } : {}),
+    ...(resolved.bpeVocab !== undefined ? { bpeVocab: resolved.bpeVocab } : {}),
+  };
+}
+
+async function resolveSharedFilePaths(
+  options: STTInitializeOptionsBase
+): Promise<{
+  hotwordsFile?: string;
+  bpeVocab?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+}> {
+  const [hotwordsFile, bpeVocab, ruleFsts, ruleFars] = await Promise.all([
+    resolveOptionalFileSourcePath(options.hotwordsFile),
+    resolveOptionalFileSourcePath(options.bpeVocab),
+    resolveOptionalFileSourceList(options.ruleFsts),
+    resolveOptionalFileSourceList(options.ruleFars),
+  ]);
+  return {
+    ...(hotwordsFile !== undefined ? { hotwordsFile } : {}),
+    ...(bpeVocab !== undefined ? { bpeVocab } : {}),
+    ...(ruleFsts !== undefined ? { ruleFsts } : {}),
+    ...(ruleFars !== undefined ? { ruleFars } : {}),
+  };
+}
+
+export async function buildSttInitBridgeOptions(
+  options: STTInitializeOptions
+): Promise<SttInitBridgeOptions> {
+  const sharedPaths = await resolveSharedFilePaths(options);
+  const sharedFields = appendSharedInitBridgeFields(options, sharedPaths);
+
+  if (options.initMode === 'custom') {
+    const customOptions = options as STTCustomInitializeOptions;
+    const modelPaths = await resolveSttCustomConfigPaths(
+      customOptions.modelType,
+      customOptions.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: customOptions.modelType,
+      modelPaths,
+      ...sharedFields,
+    };
+  }
+
+  const autoOptions = options as STTAutoInitializeOptions;
+  const { resolveFileSourceForModelInit } = await import(
+    '../detect/resolveModelInput'
+  );
+  const modelDir = await resolveFileSourceForModelInit(autoOptions.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    ...(autoOptions.preferInt8 !== undefined
+      ? { preferInt8: autoOptions.preferInt8 }
+      : {}),
+    ...(autoOptions.modelType !== undefined
+      ? { modelType: autoOptions.modelType }
+      : {}),
+    ...sharedFields,
   };
 }
 
