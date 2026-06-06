@@ -2,9 +2,15 @@
 
 ## Introduction
 
-On-device **batch** synthesis via a buffer-to-buffer pipeline: text goes in as an `OfflineTextBuffer`, audio comes out in an `OfflineAudioBuffer`. The engine is **instance-based** — create with `createTTS()`, call `destroy()` when done.
+On-device **batch** synthesis with a **pipeline-first** API.
 
-**For live synthesis with PCM playback:** use the Live overload section in this document.
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated text buffer |
+| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
+| **Engine** | `TtsEngine` via `createTTS` | Instance-based — call `destroy()` when done |
+
+For live synthesis with PCM playback, see [Live overload](#live-overload-on-offline-tts-offline-weights-live-consumption) below.
 
 **Import paths:**
 ```ts
@@ -13,46 +19,6 @@ import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'reac
 import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
-
-## Model detection
-
-`detectTtsModel` is the TTS-specific pre-check before `createTTS` (family, lexicons, quantization). When the feature category is not known yet (model library, multi-category folders), use unified [`detectModel`](model-detect.md) from `react-native-sherpa-onnx/detect` — see [model-detect.md](model-detect.md).
-
-## Custom initialization (`initMode: 'custom'`)
-
-Use custom init when model files are **not** in one detectable directory layout (non-standard names, scattered paths, or detection fails but you know the Sherpa TTS family).
-
-- Set `initMode: 'custom'` and a concrete `modelType` (not `'auto'`).
-- Pass `customConfig` with **`FileSource`** per required file. Path keys match native detection (`ttsModel`, `tokens`, `acousticModel`, `vocoder`, … — see [model-detect.md](model-detect.md#custom-path-validation)).
-- Auto-detection is **skipped**; **`resolveTtsCustomConfigPaths`** resolves each `FileSource` and calls native **`validateCustomModelPaths('tts', modelType, paths)`** (C++ `validate-tts` tables).
-- Query required vs optional keys for UI with **`getCustomModelPathRequirements('tts', modelType)`** from `react-native-sherpa-onnx/detect`.
-- **`lexiconLanguageId`** is **auto mode only**; in custom mode pass `lexicon` directly in `customConfig` when needed.
-- **`modelOptions`** (noise scales, Kokoro init `lang`, etc.) are allowed on custom init the same as auto.
-
-```ts
-import { createTTS } from 'react-native-sherpa-onnx/tts';
-
-const tts = await createTTS({
-  initMode: 'custom',
-  modelType: 'vits',
-  customConfig: {
-    ttsModel: { kind: 'fs', path: '/data/models/en_US-lessac-medium.onnx' },
-    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
-    lexicon: { kind: 'fs', path: '/data/models/lexicon.txt' },
-  },
-  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
-  numThreads: 2,
-});
-```
-
-| Model type | Required path keys |
-| --- | --- |
-| `vits` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `matcha` | `acousticModel`, `vocoder`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` (+ optional `lexicon` for kokoro) |
-| `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` |
-| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` |
-| `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` |
 
 ## Quick start
 
@@ -170,15 +136,6 @@ try {
   await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 }
 ```
-
-## Setup
-
-| Topic | Notes |
-| --- | --- |
-| `audioOut.sampleRate` | Must equal model output rate. Get it via `tts.getSampleRate()` before allocating. |
-| Execution providers | Optional `provider` on init — see [execution-providers.md](execution-providers.md) |
-| Multi-instance | Each `createTTS()` has a unique `instanceId`; do not use after `destroy()` |
-| Voice cloning | Zipvoice and Pocket only; requires `OfflineAudioBuffer` as reference (not raw samples) |
 
 ## API reference
 
@@ -309,6 +266,8 @@ const buf = await createEmptyOfflineAudioBuffer(22050);
 // buf.info.numSamples === 0 — synthesis fills it exactly once
 ```
 
+> The output buffer's `sampleRate` must equal the model output rate — read it with `tts.getSampleRate()` before allocating. Each `createTTS()` has a unique `instanceId`; do not use it after `destroy()`. Voice cloning (Zipvoice / Pocket only) requires an `OfflineAudioBuffer` reference, not raw samples.
+
 ### Convert output buffer to file
 
 Use audio save helpers from `react-native-sherpa-onnx/audio`:
@@ -360,6 +319,51 @@ const info = await getPipelineAudioBufferInfo(audioBuf);
 ```ts
 await releasePipelineAudioBuffer(audioBuf); // frees native audio buffer
 await releasePipelineTextBuffer(textBuf);   // frees native text buffer
+```
+
+## Model detection
+
+`detectTtsModel` is a cheap pre-check before `createTTS` (family, lexicons, required files). Unified catalog detect: [model-detect.md](model-detect.md).
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `vits` | `ttsModel`, `tokens` | `dataDir`, `lexicon` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `matcha` | `acousticModel`, `vocoder`, `tokens` | `dataDir`, `lexicon` | `acousticModel`, `vocoder`, `tokens` |
+| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` | `lexicon` (kokoro) | same as required |
+| `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | — | same as required |
+| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` | — | same as required |
+| `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` | — | same as required |
+
+Query keys: `getCustomModelPathRequirements('tts', modelType)`.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). **`lexiconLanguageId`** is auto-only; pass `lexicon` in `customConfig` when needed.
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `vits` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `matcha` | `acousticModel`, `vocoder`, `tokens` |
+| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` |
+| `pocket` | 7 keys — see table above |
+| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` |
+| `supertonic` | 7 keys — see table above |
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createTTS({
+  initMode: 'custom',
+  modelType: 'vits',
+  customConfig: {
+    ttsModel: { kind: 'fs', path: '/data/models/model.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+    lexicon: { kind: 'fs', path: '/data/models/lexicon.txt' },
+  },
+  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
+});
 ```
 
 ## Segmentation

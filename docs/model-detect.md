@@ -1,104 +1,129 @@
-# Model detection
+# Model detection & initialization
 
-## Introduction
+Inspect model folders, validate required files, and choose how to pass paths to engines — **without loading weights**.
 
-Model detection inspects a **model directory** and/or a **release asset name** to determine **which Sherpa feature owns the pack** (`ModelCategory`) and the **concrete model family** (`modelType`, e.g. `whisper`, `vits`, `silero_vad`). Detection is **stateless**: it does not load recognizers, TTS engines, or other runtime weights.
+| Doc | Question it answers |
+| --- | --- |
+| [model-setup.md](model-setup.md) | Where is my model? How do I build a `FileSource`? |
+| **This page** | What type is this? Is it valid? Auto or custom init? |
+| [model-languages.md](model-languages.md) | Language codes for pickers / `modelOptions` |
 
-Two APIs exist:
+**Import:** `react-native-sherpa-onnx/detect` (unified) · feature packages (`/stt`, `/tts`, `/vad`, …) for feature-specific detect
 
-| API | Import | When to use |
-| --- | --- | --- |
-| **Unified** | `react-native-sherpa-onnx/detect` | Category unknown; catalog / library UX; batch scans (one native call per item in batch) |
-| **Feature-specific** | `react-native-sherpa-onnx/stt`, `/tts`, `/vad`, … | You already know the feature; need full detect payloads (`detectedModels`, `paths`, `detectionSources`, required-file validation) |
+---
 
-Unified detection runs the same native domain detectors as the feature APIs, in a **fixed order** (first hit wins). Feature-specific detectors expose richer results documented on each feature page.
+## Table of contents
 
-## Import path
+- [Why detection exists](#why-detection-exists)
+- [Quick start](#quick-start)
+- [Unified vs feature-specific detection](#unified-vs-feature-specific-detection)
+- [Init modes: auto vs custom](#init-modes-auto-vs-custom)
+- [Custom path validation](#custom-path-validation)
+- [Required files per feature](#required-files-per-feature)
+- [Unified detector order](#unified-detector-order)
+- [QNN and ModelCategory](#qnn-and-modelcategory)
+- [API reference](#api-reference)
+- [Feature-specific detect APIs](#feature-specific-detect-apis)
+- [See also](#see-also)
 
-```ts
-import {
-  detectModel,
-  detectModelsBatch,
-  detectModelResultMatchesCategory,
-  isQnnModelName,
-  resolveFileSourceForDetect,
-  type DetectModelInput,
-  type DetectModelResult,
-} from 'react-native-sherpa-onnx/detect';
+---
+
+## Why detection exists
+
+`detect*Model` functions answer three questions **before** you pay for engine init:
+
+1. **What model family is this?** (`modelType` — e.g. `whisper`, `vits`, `silero_vad`)
+2. **Are the required files present?** (`success` / `error`, missing-file messages)
+3. **What else can I show in UI?** (languages, quantization, streaming hint, lexicon list)
+
+```mermaid
+flowchart LR
+  folder["Model folder\nFileSource"]
+  detect["detectSttModel\n(cheap preflight)"]
+  init["createSTT\n(loads weights)"]
+
+  folder --> detect
+  detect -->|"success: true"| init
+  detect -->|"success: false"| error["Show error\nno allocation"]
 ```
 
-`react-native-sherpa-onnx/download` still re-exports the unified APIs for backward compatibility; prefer `./detect` for new code.
-
-## Models and paths
-
-| Input | Type | Notes |
+| | Detection | Engine init |
 | --- | --- | --- |
-| Filesystem / bundled tree | `FileSource` from `react-native-sherpa-onnx/fileio` | Resolved to `modelDir` + `assetName` via `resolveFileSourceForDetect` |
-| Name-only (no listable dir) | `{ assetName: string; modelDir?: string }` | Heuristics from the asset/folder name; `modelDir` may be `''` |
-| Catalog category filter | `detectModelResultMatchesCategory` | Maps unified results to `ModelCategory` slices (incl. QNN) |
+| Loads ONNX weights | **No** | Yes |
+| Allocates recognizer / TTS / VAD runtime | **No** | Yes |
+| Speed | Fast (file scan + validate) | Slow (ORT session creation) |
+| Returns | `modelType`, `success`, `error`, `paths` | Live engine handle |
+| When to skip | Single known-good bundled pack | Model pickers, downloads, diagnostics |
 
-See also [model-setup.md](model-setup.md), [fileio.md](fileio.md), [download-manager.md](download-manager.md).
+> [!NOTE]
+> **`createSTT({ modelType: 'auto' })` runs the same native auto-selection internally.** You do not *need* a separate detect call for init to work. Use detect when you want to **validate early**, build a model picker, or show errors before allocation.
 
-## When to use unified vs feature-specific detection
-
-| Scenario | Recommended API |
-| --- | --- |
-| Model library row: “what is this download?” | `detectModel` |
-| Scan many repos/folders (HF author test, catalog hints) | `detectModelsBatch` |
-| Filter unified result for download category `Stt` vs `Qnn` | `detectModelResultMatchesCategory` |
-| Before `createSTT` / `createStreamingSTT` with required-file checks | `detectSttModel` — [stt-offline.md](stt-offline.md#detection-and-factory) |
-| Before `createTTS` with lexicon / speaker metadata | `detectTtsModel` — [tts-offline.md](tts-offline.md#detectttsmodelsource-options) |
-| VAD / punctuation / enhancement / alignment init | `detectVadModel`, `detectPunctuationModel`, `detectEnhancementModel`, `detectAlignmentModel` on the matching feature package |
-
-Unified `detectModel` returns a **compact** result (`category`, `modelType`, `languages`, `quantization`, `sizeTier`, `isStreaming`, optional `supportsQnn`). It does **not** replace feature detect APIs when you need `detectedModels`, per-family `paths`, or `success` / `error` from required-file validation.
+---
 
 ## Quick start
 
-### 1) Detect category from a downloaded folder
+### 1) Preflight before STT init
 
-```ts
+```typescript
+import { bundledModelFileSource } from 'react-native-sherpa-onnx/utils';
+import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
+
+const modelSource = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
+
+const det = await detectSttModel(modelSource);
+if (!det.success) throw new Error(det.error ?? 'STT pack invalid');
+
+// Prefer modelType: 'auto' on create — same native selection path
+const stt = await createSTT({ modelSource, modelType: 'auto' });
+```
+
+### 2) Catalog row — unknown category
+
+```typescript
 import { detectModel } from 'react-native-sherpa-onnx/detect';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
 
 const result = await detectModel({
   kind: 'fs',
   path: '/absolute/path/to/extracted-model-dir',
 });
 
-if (!result.matched) {
-  console.log('No Sherpa category matched');
-} else {
+if (result.matched) {
   console.log(result.category, result.modelType, result.languages);
-  // e.g. ModelCategory.Stt, 'zipformer2_ctc', ['en']
 }
 ```
 
-### 2) Name-only detect (asset id before files exist)
+### 3) Custom init — skip folder detection
 
-```ts
-import { detectModel } from 'react-native-sherpa-onnx/detect';
+```typescript
+import { createSTT } from 'react-native-sherpa-onnx/stt';
 
-const result = await detectModel({
-  assetName: 'sherpa-onnx-streaming-zipformer-en-2023-06-26',
+const stt = await createSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/data/models/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/data/models/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/data/models/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+  },
 });
-// Uses native name heuristics; modelDir defaults to ''.
 ```
 
-### 3) Batch detect for a model library
+No `detectSttModel` call — validation runs via native `validateCustomModelPaths`. See [Init modes](#init-modes-auto-vs-custom).
 
-```ts
-import {
-  detectModelsBatch,
-  detectModelResultMatchesCategory,
-} from 'react-native-sherpa-onnx/detect';
+### 4) Batch scan for a model library
+
+```typescript
+import { detectModelsBatch, detectModelResultMatchesCategory } from 'react-native-sherpa-onnx/detect';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 
-const inputs = [
-  { kind: 'fs' as const, path: '/data/models/pack-a' },
-  { assetName: 'vits-piper-en_US-lessac-medium' },
-];
-
-const results = await detectModelsBatch(inputs, { concurrency: 8 });
+const results = await detectModelsBatch(
+  [
+    { kind: 'fs', path: '/data/models/pack-a' },
+    { assetName: 'vits-piper-en_US-lessac-medium' },
+  ],
+  { concurrency: 8 }
+);
 
 results.forEach((r, i) => {
   if (r.matched && detectModelResultMatchesCategory(ModelCategory.Stt, r)) {
@@ -107,182 +132,140 @@ results.forEach((r, i) => {
 });
 ```
 
-### 4) Resolve `FileSource`, then call feature-specific detect
+---
 
-```ts
-import { resolveFileSourceForDetect } from 'react-native-sherpa-onnx/detect';
-import { detectSttModel } from 'react-native-sherpa-onnx/stt';
+## Unified vs feature-specific detection
 
-const source = { kind: 'app' as const, base: 'apkAsset' as const, path: 'models/whisper-tiny' };
-const { modelDir, assetName } = await resolveFileSourceForDetect(source);
-// Same resolution path unified detect uses internally.
+Two API layers — same native detectors, different JS payloads.
 
-const det = await detectSttModel(source);
-if (!det.success) throw new Error(det.error ?? 'STT detect failed');
-```
+| | Unified (`detect`) | Feature-specific (`detectSttModel`, …) |
+| --- | --- | --- |
+| **Import** | `react-native-sherpa-onnx/detect` | Feature package (`/stt`, `/tts`, …) |
+| **Input** | `FileSource` or `{ assetName }` | `FileSource` |
+| **Output** | Compact: `category`, `modelType`, `languages`, `quantization`, `isStreaming` | Full: `success`, `error`, `detectedModels`, `paths`, `detectionSources` |
+| **Validates required files** | No (category/type only) | **Yes** |
+| **Best for** | Model library UX, batch scans, HF catalog hints | Before `create*` / per-call init when you know the feature |
 
-## Unified detector order (first hit wins)
-
-Native unified detection (`DetectModel` / `DetectModelsBatch`) tries domains in this order:
-
-1. **TTS**
-2. **STT**
-3. **VAD**
-4. **Punctuation**
-5. **Enhancement**
-6. **Alignment**
-
-A domain counts as a hit when native detection succeeds and `modelType !== 'unknown'`. If nothing matches, `detectModel` returns `{ matched: false }` (no thrown error).
-
-Implications:
-
-- A directory that could be misread by an earlier detector is classified by the **first** matching domain. This matches catalog/library use cases where each folder is intended for one feature.
-- When you **know** the target feature, prefer that feature’s `detect*Model` so validation and `paths` match engine init exactly.
-
-## QNN and `ModelCategory`
-
-QNN release packs are **STT** models with a specific naming convention. Unified detect sets:
-
-- `category: ModelCategory.Stt`
-- `supportsQnn: true` when the asset name matches the QNN binary pattern (see `isQnnModelName`)
-
-Use `detectModelResultMatchesCategory(ModelCategory.Qnn, result)` to treat QNN as its own catalog slice, or `ModelCategory.Stt` to exclude QNN-named packs from the regular STT list.
-
-## Input resolution
-
-### `DetectModelInput`
-
-```ts
-type DetectModelInput = FileSource | { assetName: string; modelDir?: string };
-```
-
-### `resolveFileSourceForDetect(source)`
-
-Maps `FileSource` (`fs` / `app` / `pad`) to native inputs. This lives on **`detect`**, not `fileio`: `fileio` defines source types and copy/save/share; engines need a directory path and/or basename for heuristics.
-
-```ts
-function resolveFileSourceForDetect(source: FileSource): Promise<ResolvedDetectInput>;
-
-type ResolvedDetectInput = {
-  modelDir: string;   // absolute path, or '' for name-only
-  assetName: string | null;
-};
-```
-
-`resolveFileSourceForModelInit` uses the same mapping for `createSTT`, `createTTS`, etc.
-
-**Errors:** invalid or unsafe paths reject with `FILEIO_*` **before** native detection (same as feature `detect*Model` when passed a `FileSource`).
-
-**`assetName` derivation:** last path segment with common archive suffixes stripped (`.tar.bz2`, `.zip`, …). Optional explicit `assetName` on feature detect options overrides catalog hints when passed through to native.
-
-## Data model
-
-### `DetectModelResult`
-
-```ts
-type DetectModelResult = { matched: false } | DetectModelMatchedResult;
-
-type DetectModelMatchedResult = {
-  matched: true;
-  category: ModelCategory;
-  modelType: string;
-  languages: string[];       // ISO 639-1 hints via model-languages helpers
-  quantization: Quantization;
-  sizeTier: SizeTier;
-  isStreaming: boolean;
-  isHardwareSpecificUnsupported?: boolean;
-  supportsQnn?: boolean;    // STT + QNN naming convention
-};
-```
-
-| Field | Meaning |
+| Scenario | Use |
 | --- | --- |
-| `matched` | `false` = no domain hit; unified API does not throw |
-| `category` | `ModelCategory` enum value for routing downloads / UI |
-| `modelType` | Family string (`whisper`, `vits`, `silero_vad`, …) |
-| `languages` | Public language hints normalized in JS |
-| `isStreaming` | Native streaming/offline hint for the matched family |
-| `isHardwareSpecificUnsupported` | STT packs that need special hardware paths |
-| `supportsQnn` | STT hit that also matches QNN release naming |
+| "What is this download?" (category unknown) | `detectModel` |
+| Scan many folders (catalog, author validation) | `detectModelsBatch` |
+| Filter STT vs QNN in a unified result | `detectModelResultMatchesCategory` |
+| Before `createSTT` with required-file checks | `detectSttModel` |
+| Before `createTTS` with lexicon metadata | `detectTtsModel` |
+| VAD / punctuation / enhancement / alignment init | Matching `detect*Model` on the feature package |
 
-## API reference
+Unified detection tries domains in fixed order (first hit wins) — see [Unified detector order](#unified-detector-order). When you **know** the target feature, prefer that feature's `detect*Model` so validation and `paths` match engine init exactly.
 
-### `detectModel(input)`
+---
 
-```ts
-function detectModel(input: DetectModelInput): Promise<DetectModelResult>;
+## Init modes: auto vs custom
+
+Every engine that loads model weights accepts one of two init modes. Policy-level features (alignment accurate, segmentation `speech_vad_model`) follow the same pattern on their options object — no persistent engine init.
+
+```mermaid
+flowchart TD
+  call["createSTT / createTTS / createStreamingVAD / …\nor alignTextToAudio / segmentOfflineBuffer policy"]
+  branch{initMode?}
+  auto["auto (default)\nmodelSource: FileSource folder\n→ detect*Model internally\n→ resolved paths → native init"]
+  custom["custom\ninitMode: 'custom'\nmodelType: concrete\n customConfig: FileSource per file\n→ validateCustomModelPaths\n→ resolved paths → native init"]
+  native["Native engine / policy"]
+
+  call --> branch
+  branch -->|"default / omitted"| auto --> native
+  branch -->|"'custom'"| custom --> native
 ```
 
-Single native bridge call after input resolution.
+### Auto mode (default)
 
-```ts
-const r = await detectModel({ kind: 'fs', path: '/path/to/model' });
-if (r.matched) {
-  console.log(r.category, r.modelType);
-}
+Pass a **folder** as `modelSource` (`FileSource`). The SDK:
+
+1. Resolves `FileSource` → absolute directory ([model-setup.md](model-setup.md))
+2. Runs native file scan + type selection (`modelType: 'auto'` or explicit type)
+3. Validates required files for the chosen type
+4. Loads weights
+
+```typescript
+const stt = await createSTT({
+  modelSource: bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en'),
+  modelType: 'auto', // native picks from folder contents
+});
 ```
 
-### `detectModelsBatch(inputs, options?)`
+**Expected folder layout:** one directory with ONNX + sidecar files for one model family. See [Expected folder layouts](model-setup.md#expected-folder-layouts).
 
-```ts
-function detectModelsBatch(
-  inputs: readonly DetectModelInput[],
-  options?: { concurrency?: number }
-): Promise<DetectModelResult[]>;
-```
+Optional **`detect*Model` preflight** before init — same scan, no allocation ([Why detection exists](#why-detection-exists)).
 
-- Default `concurrency`: `8`
-- Each batch chunk uses one native `detectModelsBatch` call (not N sequential `detectModel` calls)
-- Result order matches `inputs`
+### Custom mode (`initMode: 'custom'`)
 
-```ts
-const rows = await detectModelsBatch(
-  [{ assetName: 'foo' }, { assetName: 'bar' }],
-  { concurrency: 4 }
-);
-```
+Use when files are **not** in one detectable folder — non-standard names, scattered paths, or detection fails but you know the model family.
 
-### `detectModelResultMatchesCategory(category, result)`
-
-```ts
-function detectModelResultMatchesCategory(
-  category: ModelCategory,
-  result: DetectModelMatchedResult
-): boolean;
-```
-
-Only call when `result.matched === true`. Special cases:
-
-| `category` | Matches when |
+| Field | Value |
 | --- | --- |
-| `ModelCategory.Qnn` | `category === Stt` && `supportsQnn === true` |
-| `ModelCategory.Stt` | `category === Stt` && `supportsQnn !== true` |
-| Other | `result.category === category` |
+| `initMode` | `'custom'` |
+| `modelType` | Concrete type (`'transducer'`, `'vits'`, `'silero_vad'`, …) — **not** `'auto'` |
+| `customConfig` | One **`FileSource` per required file** (keys match native validate tables) |
 
-### `isQnnModelName(name)`
+Auto-detection is **skipped**. Each `FileSource` is resolved to an absolute path, then native **`validateCustomModelPaths(category, modelType, paths)`** runs (C++ `validate-*.cpp` tables).
 
-```ts
-function isQnnModelName(name: string): boolean;
+```typescript
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  sampleRate: 16000,
+});
 ```
 
-Shared naming check for QNN binary releases (also used when building `supportsQnn` on unified STT hits).
+Query required vs optional keys for UI forms:
+
+```typescript
+import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+
+const { required, optional } = await getCustomModelPathRequirements('stt', 'transducer');
+// required: ['encoder', 'decoder', 'joiner', 'tokens']
+```
+
+Path keys per feature: [Required files per feature](#required-files-per-feature) below and each feature doc.
+
+### Init by feature (where custom applies)
+
+| Feature | Init point | Auto field | Custom field |
+| --- | --- | --- | --- |
+| STT offline | `createSTT` | `modelSource` | `customConfig` |
+| STT streaming | `createStreamingSTT` | `modelSource` | `customConfig` (category `stt_streaming`) |
+| TTS | `createTTS` | `modelSource` | `customConfig` |
+| VAD | `createStreamingVAD` | `modelSource` | `customConfig` |
+| Enhancement | `createEnhancement` / `createStreamingEnhancement` | `modelSource` | `customConfig` |
+| Punctuation offline | `createOfflinePunctuation` | `modelSource` | `customConfig` |
+| Punctuation streaming | `createStreamingPunctuation` | `modelSource` | `customConfig` |
+| Alignment | `alignTextToAudio` (`mode: 'accurate'` only) | `modelSource` | `customConfig` — **per call**, no engine init |
+| Segmentation | `segmentOfflineBuffer` / policy (`speech_vad_model`) | `modelPath` | `customConfig` — reuses VAD keys |
+
+No TurboModule `initialize*` entry for alignment or segmentation — see [sdk-init-bridge.md](sdk-init-bridge.md).
+
+TypeScript helpers: `src/stt/customConfig.ts`, `src/vad/customConfig.ts`, etc. Runtime truth is native validate tables.
+
+---
 
 ## Custom path validation
 
-For **`initMode: 'custom'`** (and early app-side checks), use the unified native validation layer backed by C++ `validate-*.cpp` tables (STT, TTS, VAD, Enhancement, Punctuation, Alignment):
+Native C++ `validate-*.cpp` tables are the single source of truth for which path keys each model type requires.
 
-```ts
+```typescript
 import {
   getCustomModelPathRequirements,
   validateCustomModelPaths,
 } from 'react-native-sherpa-onnx/detect';
-import { ModelCategory } from 'react-native-sherpa-onnx/download';
 
-// Schema for forms / slot pickers (required vs optional keys)
-const schema = await getCustomModelPathRequirements(ModelCategory.Stt, 'paraformer');
+// 1) Schema for forms / slot pickers
+const schema = await getCustomModelPathRequirements('stt', 'transducer');
+// { required: ['encoder','decoder','joiner','tokens'], optional: ['bpeVocab'] }
 
-// Runtime check on resolved absolute paths (Record<string, string>)
-const result = await validateCustomModelPaths(ModelCategory.Tts, 'vits', {
+// 2) Runtime check on resolved absolute paths
+const result = await validateCustomModelPaths('tts', 'vits', {
   ttsModel: '/path/model.onnx',
   tokens: '/path/tokens.txt',
 });
@@ -291,40 +274,226 @@ if (!result.ok) {
 }
 ```
 
-Categories match unified detect literals: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `punctuation`, `alignment`.
+| API | Purpose |
+| --- | --- |
+| `getCustomModelPathRequirements(category, modelType)` | Read-only schema — required vs optional keys |
+| `validateCustomModelPaths(category, modelType, paths)` | Enforces non-empty paths + family-specific rules |
 
-- **`stt_streaming`** — online/streaming STT custom init (`createStreamingSTT` with `initMode: 'custom'`). Path keys differ from offline `stt`: transducer uses `encoder`/`decoder`/`joiner`/`tokens`; CTC streaming types use `model`/`tokens` (not offline `ctcModel`).
+Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `punctuation`, `alignment`.
 
-- **`getCustomModelPathRequirements`** — read-only schema; paraformer includes optional offline/streaming keys (`paraformerModel`, `encoder`, `decoder`) with `tokens` required.
-- **`validateCustomModelPaths`** — enforces non-empty paths and feature-specific rules (e.g. paraformer OR-layout, `moonshine` vs `moonshine_v2`).
+> [!NOTE]
+> **`stt_streaming`** keys differ from offline `stt` (e.g. streaming transducer uses `encoder`/`decoder`/`joiner`/`tokens`; offline CTC uses `ctcModel`/`tokens`). Always query the schema for the exact category.
 
-TypeScript discriminated unions in `src/stt/customConfig.ts`, `src/tts/customConfig.ts`, `src/vad/customConfig.ts`, `src/enhancement/customConfig.ts`, `src/punctuation/customConfig.ts`, and `src/alignment/customConfig.ts` remain compile-time helpers; **runtime truth is native**.
+Segmentation `speech_vad_model` custom policy reuses **`vad`** category and key `model` — no separate `src/segment/customConfig.ts`. See [segmentation-engine.md](segmentation-engine.md#custom-model-path-initmode-custom).
 
-**Segmentation `speech_vad_model` custom policy** reuses `src/vad/customConfig.ts` and native category `vad` (key `model`) — there is no separate `src/segment/customConfig.ts`. See [segmentation-engine.md — Custom model path](segmentation-engine.md#custom-model-path-initmode-custom).
+Validation checks **non-empty resolved path strings** — not ONNX correctness or on-disk existence at validate time.
 
-## Feature-specific detection APIs
+---
 
-Use these when initializing engines or when you need validation details. Each page documents required files, `paths`, and `detectionSources`.
+## Required files per feature
+
+Each feature doc has the full per-`modelType` table. Summary of where to look:
+
+| Feature | Doc | Detect function | Validate category |
+| --- | --- | --- | --- |
+| STT offline | [stt-offline.md](stt-offline.md#validation-required-files) | `detectSttModel` | `stt` |
+| STT streaming | [stt-streaming.md](stt-streaming.md#validation-required-files) | `detectSttModel` | `stt_streaming` |
+| TTS | [tts-offline.md](tts-offline.md#validation-required-files) | `detectTtsModel` | `tts` |
+| VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
+| Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
+| Punctuation offline | [punctuation-offline.md](punctuation-offline.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
+| Punctuation streaming | [punctuation-streaming.md](punctuation-streaming.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
+| Alignment | [alignment-offline.md](alignment-offline.md#validation-required-files) | `detectAlignmentModel` | `alignment` |
+| Segmentation VAD policy | [segmentation-engine.md](segmentation-engine.md#custom-model-path-initmode-custom) | `detectVadModel` (auto) | `vad` (custom) |
+
+**How native detection picks files:** scans the resolved directory recursively, maps filenames to engine roles, lists all matching families in `detectedModels`, then validates the highest-probability one as `modelType`. Same rules as `create*` with `modelType: 'auto'`.
+
+---
+
+## Unified detector order
+
+Native unified detection (`detectModel` / `detectModelsBatch`) tries domains in this order — **first hit wins**:
+
+```mermaid
+flowchart LR
+  input["DetectModelInput"] --> tts[TTS]
+  tts -->|no match| stt[STT]
+  stt -->|no match| vad[VAD]
+  vad -->|no match| punct[Punctuation]
+  punct -->|no match| enh[Enhancement]
+  enh -->|no match| align[Alignment]
+  align -->|no match| none["matched: false"]
+```
+
+A domain counts as a hit when native detection succeeds and `modelType !== 'unknown'`. No match → `{ matched: false }` (no thrown error).
+
+When you **know** the target feature, use that feature's `detect*Model` — avoids misclassification and returns full validation payload.
+
+---
+
+## QNN and ModelCategory
+
+QNN release packs are **STT** models with a specific naming convention. Unified detect sets:
+
+- `category: ModelCategory.Stt`
+- `supportsQnn: true` when the asset name matches the QNN binary pattern (`isQnnModelName`)
+
+| Filter | Matches when |
+| --- | --- |
+| `ModelCategory.Qnn` | `category === Stt` && `supportsQnn === true` |
+| `ModelCategory.Stt` | `category === Stt` && `supportsQnn !== true` |
+| Other categories | `result.category === category` |
+
+Use `detectModelResultMatchesCategory(ModelCategory.Qnn, result)` for QNN catalog slices.
+
+---
+
+## API reference
+
+### `detectModel(input)`
+
+```typescript
+function detectModel(input: DetectModelInput): Promise<DetectModelResult>;
+```
+
+```typescript
+const r = await detectModel({ kind: 'fs', path: '/path/to/model' });
+if (r.matched) console.log(r.category, r.modelType);
+```
+
+Single unified detect call after input resolution. Returns compact category/type metadata — no required-file validation.
+
+---
+
+### `detectModelsBatch(inputs, options?)`
+
+```typescript
+function detectModelsBatch(
+  inputs: readonly DetectModelInput[],
+  options?: { concurrency?: number }
+): Promise<DetectModelResult[]>;
+```
+
+```typescript
+const rows = await detectModelsBatch([{ assetName: 'foo' }, { assetName: 'bar' }], { concurrency: 4 });
+```
+
+Default concurrency: `8`. One native batch call per chunk. Result order matches input order.
+
+---
+
+### `detectModelResultMatchesCategory(category, result)`
+
+```typescript
+function detectModelResultMatchesCategory(
+  category: ModelCategory,
+  result: DetectModelMatchedResult
+): boolean;
+```
+
+Call only when `result.matched === true`. Handles QNN / STT split — see [QNN](#qnn-and-modelcategory).
+
+---
+
+### `isQnnModelName(name)`
+
+```typescript
+function isQnnModelName(name: string): boolean;
+```
+
+Shared naming check for QNN binary releases.
+
+---
+
+### `resolveFileSourceForDetect(source)`
+
+```typescript
+function resolveFileSourceForDetect(source: FileSource): Promise<{
+  modelDir: string;
+  assetName: string | null;
+}>;
+```
+
+Maps `FileSource` to native detect inputs. Same resolution path used internally by unified and feature detect. `resolveFileSourceForModelInit` uses the same mapping for engine init.
+
+Invalid paths reject with `FILEIO_*` before native detection runs.
+
+---
+
+### `getCustomModelPathRequirements(category, modelType)`
+
+```typescript
+function getCustomModelPathRequirements(
+  category: string,
+  modelType: string
+): Promise<{ required: string[]; optional: string[] }>;
+```
+
+Read-only schema for custom-init UI. Do not hardcode key lists in app code.
+
+---
+
+### `validateCustomModelPaths(category, modelType, paths)`
+
+```typescript
+function validateCustomModelPaths(
+  category: string,
+  modelType: string,
+  paths: Record<string, string>
+): Promise<{ ok: boolean; error?: string; missingRequired?: string[] }>;
+```
+
+Runtime validation on resolved absolute path strings. Used internally by `resolve*CustomConfigPaths` helpers.
+
+---
+
+### `DetectModelInput` / `DetectModelResult`
+
+```typescript
+type DetectModelInput = FileSource | { assetName: string; modelDir?: string };
+
+type DetectModelResult =
+  | { matched: false }
+  | {
+      matched: true;
+      category: ModelCategory;
+      modelType: string;
+      languages: string[];
+      quantization: Quantization;
+      sizeTier: SizeTier;
+      isStreaming: boolean;
+      isHardwareSpecificUnsupported?: boolean;
+      supportsQnn?: boolean;
+    };
+```
+
+Name-only input (`{ assetName }`) uses native name heuristics when no listable directory exists.
+
+---
+
+## Feature-specific detect APIs
+
+Full payloads (`success`, `error`, `detectedModels`, `paths`, `detectionSources`) — use when initializing engines.
 
 | Feature | Function | Guide |
 | --- | --- | --- |
-| STT (offline / streaming) | `detectSttModel` | [stt-offline.md — Detection](stt-offline.md#detection-and-factory), [stt-streaming.md](stt-streaming.md#detection-and-initialization) |
-| TTS | `detectTtsModel` | [tts-offline.md — `detectTtsModel`](tts-offline.md#detectttsmodelsource-options) |
-| VAD | `detectVadModel` | [vad-streaming.md](vad-streaming.md#model-detection) |
-| Punctuation | `detectPunctuationModel` | [punctuation-offline.md](punctuation-offline.md#model-detection), [punctuation-streaming.md](punctuation-streaming.md#model-detection) |
+| STT offline | `detectSttModel` | [stt-offline.md — Detection](stt-offline.md#detection-and-factory) |
+| STT streaming | `detectSttModel` | [stt-streaming.md](stt-streaming.md#model-detection) |
+| TTS | `detectTtsModel` | [tts-offline.md — Model detection](tts-offline.md#model-detection) |
+| VAD | `detectVadModel` | [vad-streaming.md — Model detection](vad-streaming.md#model-detection) |
+| Punctuation | `detectPunctuationModel` | [punctuation-offline.md](punctuation-offline.md#model-detection) |
 | Enhancement | `detectEnhancementModel` | [enhancement-offline.md](enhancement-offline.md#model-detection) |
 | Alignment | `detectAlignmentModel` | [alignment-offline.md](alignment-offline.md#model-detection) |
 
-## Download manager and catalogs
+The download module uses unified batch detection internally. App catalog code should prefer `detect` over calling multiple `detect*Model` APIs in sequence.
 
-The download module uses unified batch detection internally for catalog hints and Hugging Face author validation. App code that builds custom libraries should use the same `detect` entry point rather than calling multiple `detect*Model` APIs in sequence (fewer bridge round-trips, consistent category order).
+---
 
-See [download-manager.md](download-manager.md) and [model-languages.md](model-languages.md) for category enums and language display.
+## See also
 
-## Related docs
-
-- [model-setup.md](model-setup.md) — bundled assets, discovery
-- [model-delivery-pad-odr.md](model-delivery-pad-odr.md) — PAD & ODR (install-time, on-demand)
-- [memory-and-models.md](memory-and-models.md) — detect before heavy engine init
-- [execution-providers.md](execution-providers.md) — QNN provider setup (after you know the pack is QNN-capable)
-- [fileio.md](fileio.md) — `FileSource` shapes
+- [Model setup](model-setup.md) — `FileSource`, bundled/PAD/downloaded paths
+- [Model languages](model-languages.md) — language pickers
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md)
+- [Memory & models](memory-and-models.md) — detect before heavy init
+- [Execution providers](execution-providers.md) — QNN setup after identifying QNN packs
+- [File I/O](fileio.md) — `FileSource` type reference

@@ -1,6 +1,7 @@
 # react-native-sherpa-onnx — Documentation Index
 
-> For installation and a feature overview, start at the [root README](../README.md).
+> For installation and a feature overview, start at the [root README](../README.md).  
+> **New to models?** Follow the [How to start](../README.md#how-to-start) reading path under Feature Support in the root README.
 
 This index maps every user-facing guide to its canonical file. Internal and migration docs live in separate sub-folders and are **not** listed here.
 
@@ -12,10 +13,10 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [memory-and-models.md](./memory-and-models.md) | OOM awareness, model sizing, concurrent engine budgets, buffer planning |
 | [feature-pipelines.md](./feature-pipelines.md) | Named end-to-end pipeline recipes across offline/streaming features |
-| [model-setup.md](./model-setup.md) | Bundled assets, model discovery APIs, path helpers, troubleshooting |
+| [model-setup.md](./model-setup.md) | `FileSource`, bundled/PAD/downloaded paths, discovery APIs, expected folder layouts |
 | [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) | Ship models: PAD (install-time / fast-follow / on-demand) & iOS ODR / bundle |
-| [model-detect.md](./model-detect.md) | Unified `detectModel` / `detectModelsBatch`, inputs, QNN, vs feature `detect*Model` |
-| [model-languages.md](./model-languages.md) | Language codes and model language support |
+| [model-detect.md](./model-detect.md) | Detection (cheap preflight), init modes (auto vs custom), validation, unified vs feature detect |
+| [model-languages.md](./model-languages.md) | Language tables and hints for picker UI / `modelOptions` |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
 | [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |
 | [native-diagnostics.md](./native-diagnostics.md) | Native crash ring buffer, signal-handler dumps (`SherpaNativeDiag`), snapshot API |

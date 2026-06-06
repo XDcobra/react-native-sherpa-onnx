@@ -191,14 +191,11 @@ Materializes segments for offline text/audio. For `speech_vad_model`, pass eithe
 
 ## Custom model path (`initMode: 'custom'`)
 
-Segmentation has **no** TurboModule engine init — custom paths apply on **`segmentOfflineBuffer`** and **`attachSegmentationEngine`** policy only, and **only** when `evaluator: 'speech_vad_model'`.
+Policy-level custom path — **no engine init**. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). Applies to **`speech_vad_model`** only (on `segmentOfflineBuffer` / `attachSegmentationEngine` policy).
 
-Use custom paths when the VAD ONNX is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the file).
-
-- Set `initMode: 'custom'` and a concrete `modelType` (`silero_vad` or `ten_vad`, not `'auto'`).
-- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
-- Validation reuses native `validate-vad` (category `vad`, key `model`). TypeScript helpers live in [`src/vad/customConfig.ts`](../src/vad/customConfig.ts) — there is no separate segment customConfig module. See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
-- Auto mode (default): pass `modelPath` — the SDK runs `detectVadModel` before native (same pipeline as streaming VAD init).
+| `modelType` | Custom-init keys | Validate category |
+| --- | --- | --- |
+| `silero_vad`, `ten_vad` | `model` | `vad` (reuses [VAD customConfig](../src/vad/customConfig.ts)) |
 
 ```ts
 await segmentOfflineBuffer(offlineAudioBuffer, {
@@ -209,26 +206,10 @@ await segmentOfflineBuffer(offlineAudioBuffer, {
     model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
   },
   vadThreshold: 0.5,
-  vadMinSpeechMs: 250,
-  vadMinSilenceMs: 200,
 });
 ```
 
-Live attach uses the same policy union:
-
-```ts
-await attachSegmentationEngine(liveAudioBuffer, {
-  policy: {
-    evaluator: 'speech_vad_model',
-    initMode: 'custom',
-    modelType: 'ten_vad',
-    customConfig: {
-      model: { kind: 'fs', path: '/data/models/ten-vad.onnx' },
-    },
-    vadThreshold: 0.5,
-  },
-});
-```
+Auto mode (default): pass `modelPath` (`FileSource`) — SDK runs `detectVadModel` before native.
 
 ### Live text helpers
 

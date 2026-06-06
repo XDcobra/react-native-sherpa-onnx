@@ -2,15 +2,19 @@
 
 ## Introduction
 
-On-device streaming speech denoising with a **pipeline-first** API:
+On-device streaming speech denoising with a **pipeline-first** API.
 
-- **Input:** live pipeline audio buffer ([`audiobuffer` — live / streaming](audiobuffer-streaming.md)) — ring/spool buffer the denoiser **drains** (mic, append, or upstream native pipeline).
-- **Output:** live pipeline audio buffer ([`audiobuffer` — live / streaming](audiobuffer-streaming.md)) — separate live buffer; native worker **appends** denoised PCM (`source: "enhancement"` on append events).
-- **Engine:** `createStreamingEnhancement` exposes **`enhance(audioIn, audioOut)`** → `Promise<EnhancementPipelineHandle>` (plus `getSampleRate` / `getFrameShiftInSamples` / `destroy`). There is **no** JS API to push raw sample arrays into the online denoiser; control the running worker via **`EnhancementPipelineHandle`** (`flush`, `stop`, `reset`, `getStatus`). In this guide **`denoiser`** means the returned `StreamingEnhancementEngine` and **`pipeline`** means that handle.
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Ring/spool buffer the denoiser drains (mic, append, or upstream pipeline) |
+| **Output** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Separate live buffer; native worker appends denoised PCM |
+| **Engine** | `StreamingEnhancementEngine` via `createStreamingEnhancement` | `enhance(audioIn, audioOut)` returns `EnhancementPipelineHandle` (`flush`, `stop`, `reset`, `getStatus`, `completed`) |
 
 Import path: `react-native-sherpa-onnx/enhancement`
 
-For **offline batch** enhancement (`OfflineAudioBuffer` → `OfflineAudioBuffer`), see [Speech enhancement (offline)](enhancement-offline.md).
+In this guide **`denoiser`** means the `StreamingEnhancementEngine` and **`pipeline`** means the `EnhancementPipelineHandle`.
+
+For **offline batch** enhancement, see [Speech enhancement (offline)](enhancement-offline.md).
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
@@ -18,52 +22,7 @@ If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or i
 
 ## Streaming pipeline system
 
-`enhance` registers a **native worker** that drains **`inputBuf`** in frame-sized steps and appends denoised PCM to **`outputBuf`**. There is no JS API to push samples into the denoiser directly — only buffer producers and the **`EnhancementPipelineHandle`**. Shared semantics of **`stop` / `flush` / `reset` / `getStatus` / `completed`** are described in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Streaming enhancement** is special in that **finalizing the live input audio buffer** normally causes the worker to **auto-flush and stop**; explicit `flush()` is still available for mid-run tail flush without stopping.
-
-## Models and paths
-
-- **`FileSource`:** `FileSource` (from `react-native-sherpa-onnx/fileio`, same as STT/TTS).
-- In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
-- Model detection without loading the denoiser: **`detectEnhancementModel(...)`** (same rules as offline; see [Model detection](enhancement-offline.md#model-detection) on the offline page for the full rule list).
-- File expectations per family: [model-setup.md](model-setup.md) where applicable.
-
----
-
-## Model detection
-
-Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enhancement-specific rules for **`detectEnhancementModel`**.
-
-`detectEnhancementModel` does **not** load the denoiser — use it as a **pre-check** before **`createStreamingEnhancement`** (same idea as `detectTtsModel` / `detectSttModel`).
-
-**Rules (directory scan):**
-
-- Recursively finds `.onnx` under the resolved model directory (depth 4, same family as other detectors).
-- Filename / path contains `gtcrn` → candidate **`gtcrn`**; contains `dpdfnet` or `dpcrn` → candidate **`dpdfnet`**.
-- **`modelType: 'auto'`** (default): prefers **`gtcrn`** if both ONNX stacks are present, else **`dpdfnet`**.
-- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelSource.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
-
-**`detectionSources`:** optional ordered trace (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`). **`nameOnly`** means no file list was scanned — see native `error` when `success` is false.
-
----
-
-## Custom initialization (`initMode: 'custom'`)
-
-Streaming enhancement uses the same init union as offline — `createStreamingEnhancement` accepts `initMode: 'custom'` with a concrete `modelType` and a single `model` path in `customConfig`. See [Speech enhancement (offline) — Custom initialization](enhancement-offline.md#custom-initialization-initmode-custom) for path keys and validation rules.
-
-```ts
-import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
-
-const denoiser = await createStreamingEnhancement({
-  initMode: 'custom',
-  modelType: 'gtcrn',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
-  },
-  numThreads: 2,
-});
-```
-
----
+`enhance` registers a **native worker** that drains **`inputBuf`** in frame-sized steps and appends denoised PCM to **`outputBuf`**. Audio enters via buffer producers (mic, append, upstream pipeline); control the worker through **`EnhancementPipelineHandle`**. Shared semantics of **`stop` / `flush` / `reset` / `getStatus` / `completed`** are described in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Streaming enhancement** is special in that **finalizing the live input audio buffer** normally causes the worker to **auto-flush and stop**; explicit `flush()` is still available for mid-run tail flush without stopping.
 
 ## Quick start
 
@@ -114,25 +73,6 @@ await denoiser.destroy();
 ```
 
 The pipeline handle supports **`flush()`** / **`reset()`** / **`getStatus()`** while running. When the input buffer **finalizes**, the worker auto-flushes and stops.
-
----
-
-## Data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **`StreamingEnhancementEngine`** | From **`createStreamingEnhancement`** (the **denoiser** in examples). **`destroy()`** releases native **`OnlineSpeechDenoiser`**. |
-| **Pipeline handle** | Returned by **`enhance()`** as **`EnhancementPipelineHandle`**. **`stop()`** / **`flush()`** / **`reset()`** / **`getStatus()`**. Registered in **`StreamingPipelineRegistry`**. |
-
----
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Execution provider | Optional **`provider`** on init; see [execution-providers.md](execution-providers.md) |
-| Live buffers | Float PCM at the **model sample rate**; input/output **`LiveAudioBuffer`** sample rates must match **`getSampleRate()`** |
-| Instance lifetime | **`destroy()`** the denoiser; **`releasePipelineAudioBuffer()`** on buffers; **`pipeline.stop()`** before tearing down buffers |
 
 ---
 
@@ -378,6 +318,44 @@ import {
 ```
 
 See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
+
+### Buffer data model and lifetime
+
+| Item | Behaviour |
+| --- | --- |
+| **`StreamingEnhancementEngine`** | From **`createStreamingEnhancement`** (the **denoiser** in examples). **`destroy()`** releases native **`OnlineSpeechDenoiser`**. |
+| **Pipeline handle** | Returned by **`enhance()`** as **`EnhancementPipelineHandle`**. **`stop()`** / **`flush()`** / **`reset()`** / **`getStatus()`**. Registered in **`StreamingPipelineRegistry`**. |
+
+> Input/output **`LiveAudioBuffer`** sample rates must match **`getSampleRate()`** (Float PCM at the model sample rate). Call **`pipeline.stop()`** before tearing down buffers, then **`destroy()`** the denoiser and **`releasePipelineAudioBuffer()`** on buffers.
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md) · same families as [enhancement-offline](enhancement-offline.md#validation-required-files)
+
+## Validation required files
+
+Same as offline — see [enhancement-offline.md — Validation required files](enhancement-offline.md#validation-required-files).
+
+## Model detection
+
+`detectEnhancementModel` pre-check before `createStreamingEnhancement`. Rules: [enhancement-offline.md — Model detection](enhancement-offline.md#model-detection).
+
+## Custom initialization (`initMode: 'custom'`)
+
+Same init union as offline. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). Keys: [enhancement-offline — Custom init](enhancement-offline.md#custom-initialization-initmode-custom).
+
+```ts
+import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const denoiser = await createStreamingEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+});
+```
 
 ## Segmentation
 

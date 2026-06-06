@@ -2,54 +2,15 @@
 
 ## Introduction
 
-**CT-Transformer** batch punctuation: **Input** = populated [offline text buffer](textbuffer-offline.md) (`lang` pass-through, not from the model). **Output** = empty buffer, one write; v1 leaves tokens/timestamps/etc. empty. **Return value** in JS always includes `processingTimeMs`; when segmentation is enabled it also includes orchestration fields (`status`, segment counters, optional failed/skipped segment details). Engine: `createOfflinePunctuation` → `punctuate` / `punctuateString`.
+**CT-Transformer** batch punctuation with a **pipeline-first** API.
 
-`react-native-sherpa-onnx/punctuation` — loads **offline CT** only; online CNN is out of scope here ([`detectPunctuationModel`](#model-detection) for family checks). The offline engine supports both batch `txt_off_*` and the Phase-3 live overload `punctuate(txt_live_*, txt_live_*, { segmentation })`. For online CNN pipelines, see [punctuation-streaming.md](punctuation-streaming.md).
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated plain text; `lang` is pass-through from input |
+| **Output** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer before the call; filled once with punctuated text |
+| **Engine** | `OfflinePunctuationEngine` via `createOfflinePunctuation` | `punctuate` / `punctuateString`; returns `processingTimeMs` (plus segment stats when segmentation is enabled) |
 
-Live-overload contract references:
-
-- Design note: [offline-stt-live-pipeline-mandatory-segmentation.md](migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md)
-- Overview: [live_overload_overview.md](migration/liveOverload/live_overload_overview.md)
-- Phase plan: [sub-04-punctuation-live-overload.md](migration/liveOverload/sub-04-punctuation-live-overload.md)
-
----
-
-## Models and paths
-
-**`FileSource`** (`{ kind: 'fs' | 'app' | 'pad', path, ... }`) for **`createOfflinePunctuation`**. **`FileSource`** for **`detectPunctuationModel`**. See [download-manager.md](download-manager.md), [model-setup.md](model-setup.md). **Init** always re-runs **ct_transformer** detect (no CNN fallback) — online-only trees **fail** init.
-
-## Model detection
-
-Unified cross-feature detection: [model-detect.md](model-detect.md).
-
-`detectPunctuationModel` = **pre-check** only (no engine load). Splits **ct_transformer** vs **cnn_bilstm**+bpe; `modelType` = `auto` | `ct_transformer` | `cnn_bilstm`. Optional `assetName` for catalog hints. Returns `paths.*`, `isStreaming` (reserved), `detectionSources`; vocabs come from **ONNX**, not a separate tokens arg.
-
-`detectPunctuationModel` with `auto` can succeed while **still** not CT-only — `createOfflinePunctuation` only accepts a valid **CT offline** directory. `FILEIO_*` if `FileSource` resolution fails.
-
----
-
-## Custom initialization (`initMode: 'custom'`)
-
-Use custom init when the CT-Transformer ONNX file is **not** in a detectable folder layout.
-
-- Set `initMode: 'custom'` and `modelType: 'ct_transformer'` (concrete, not `'auto'`).
-- Pass `customConfig` with a single **`ct_transformer`** {@link FileSource} pointing at the `.onnx` file.
-- Validation uses native `validate-punctuation`. See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
-
-```ts
-import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
-
-const engine = await createOfflinePunctuation({
-  initMode: 'custom',
-  modelType: 'ct_transformer',
-  customConfig: {
-    ct_transformer: { kind: 'fs', path: '/data/models/ct-punct.onnx' },
-  },
-  numThreads: 2,
-});
-```
-
----
+Import path: `react-native-sherpa-onnx/punctuation` — **offline CT-Transformer** only. For online CNN pipelines, see [punctuation-streaming.md](punctuation-streaming.md). The offline engine also supports a [live overload](#live-overload-on-offline-punctuation-offline-weights-live-consumption) on `LiveTextBuffer` pairs.
 
 ## Quick start
 
@@ -124,64 +85,6 @@ try {
 }
 ```
 
----
-
-## Live overload on offline punctuation (offline weights, live consumption)
-
-> Mandatory `segmentation.policy`. Commit-only — no partials.
-
-The offline punctuation engine can drive a live pipeline directly. This is useful when you want to punctuate a live stream of text (e.g. from an STT live buffer) using a high-quality CT-Transformer model without the latency/BPE-size constraints of streaming CNN models.
-
-```ts
-const punct = await createOfflinePunctuation({
-  modelSource: { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' },
-});
-
-const handle = await punct.punctuate(liveTextIn, liveTextOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
-  },
-});
-
-// handle.stop() / .flush() / .completed as usual
-const completion = await handle.completed;
-console.log(`Punctuated ${completion.unitsRead} characters`);
-```
-
-| Aspect | Live overload (`createOfflinePunctuation`) | Streaming engine (`createStreamingPunctuation`) |
-| --- | --- | --- |
-| Weights | CT-Transformer (Higher quality) | CNN-BiLSTM (Lower quality) |
-| Latency | Per-segment (higher) | Per-token (lower) |
-| Context | Global (per segment) | Local (sliding window) |
-
-
-
----
-
-## Data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **Offline punctuation engine** | Created with **`createOfflinePunctuation`**. Holds native **`OfflinePunctuation`**. Call **`destroy()`** when done. |
-| **`OfflineTextBuffer` (input)** | **Populated** (immutable). Must contain the **plain** text to punctuate. |
-| **`OfflineTextBuffer` (output)** | **Empty** before **`punctuate` / `punctuateString`**. Filled **once** with punctuated `text` and `lang` **from input** (buffer path only for `lang`). |
-| **Result in JS** | **`{ processingTimeMs: number }`** only (native add-punctuation duration). Read full text with **`getOfflineTextBufferTextSlice`**. |
-
----
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| **Execution provider** | Optional **`provider`** on init (e.g. **`cpu`**); see [execution-providers.md](execution-providers.md). |
-| **Model layout** | **Offline CT-Transformer** only. Online CNN packs **cannot** drive **`createOfflinePunctuation`**. |
-| **Instance lifetime** | Always **`destroy()`** the engine; **`releasePipelineTextBuffer()`** on created buffers. |
-
-On module teardown, native text registry invalidation and offline engine teardown follow the same ordering as other features (see native **`invalidate`** ordering).
-
----
-
 ## API reference
 
 Signatures are exported from **`react-native-sherpa-onnx/punctuation`**. Types are defined in **`src/punctuation/types.ts`**; detection types mirror **`src/punctuation/detect.ts`** and **`PunctuationDetectModelResult`**.
@@ -240,7 +143,7 @@ const engine = await createOfflinePunctuation({
 });
 ```
 
-- If native init **rejects** (e.g. not CT), the promise **rejects** with a **`PUNCTUATION_*`** or **`PUNCT_DETECT_ERROR`**-related code. If a legacy bridge ever **resolves** with `{ success: false }`, **`createOfflinePunctuation`** throws a **`Error`** with a short message so callers do not get a no-op engine.
+- If native init rejects (e.g. CNN-only pack), the promise rejects with a **`PUNCTUATION_*`** or detection-related code. **`createOfflinePunctuation`** throws an **`Error`** on init failure so callers do not get a no-op engine.
 
 ### Offline engine (`OfflinePunctuationEngine`)
 
@@ -314,6 +217,85 @@ import {
 ```
 
 See [textbuffer — offline](textbuffer-offline.md) and [textbuffer — streaming](textbuffer-streaming.md) for the live side of the pipeline.
+
+### Buffer data model and lifetime
+
+| Item | Behaviour |
+| --- | --- |
+| **Offline punctuation engine** | Created with **`createOfflinePunctuation`**. Holds native **`OfflinePunctuation`**. Call **`destroy()`** when done. |
+| **`OfflineTextBuffer` (input)** | **Populated** (immutable). Must contain the **plain** text to punctuate. |
+| **`OfflineTextBuffer` (output)** | **Empty** before **`punctuate` / `punctuateString`**. Filled **once** with punctuated `text` and `lang` **from input** (buffer path only for `lang`). |
+| **Result in JS** | **`{ processingTimeMs: number }`** only (native add-punctuation duration). Read full text with **`getOfflineTextBufferTextSlice`**. |
+
+> Always **`destroy()`** the engine and **`releasePipelineTextBuffer()`** created buffers.
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md)
+- Offline CT only — `createOfflinePunctuation` rejects CNN-only trees
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `ct_transformer` | `*.onnx` (CT-Transformer) | — | `ct_transformer` |
+| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | — | `cnn_bilstm`, `bpe_vocab` (streaming only) |
+
+`detectPunctuationModel` with `auto` may detect either family; **`createOfflinePunctuation`** accepts **`ct_transformer`** only.
+
+## Model detection
+
+`detectPunctuationModel` pre-check — no engine load. Unified catalog: [model-detect.md](model-detect.md). Returns `paths.*`, `detectionSources`; vocabs from ONNX.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `ct_transformer` | `ct_transformer` |
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createOfflinePunctuation({
+  initMode: 'custom',
+  modelType: 'ct_transformer',
+  customConfig: {
+    ct_transformer: { kind: 'fs', path: '/data/models/ct-punct.onnx' },
+  },
+});
+```
+
+## Live overload on offline punctuation (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline punctuation engine can drive a live pipeline directly. This is useful when you want to punctuate a live stream of text (e.g. from an STT live buffer) using a high-quality CT-Transformer model without the latency/BPE-size constraints of streaming CNN models.
+
+```ts
+const punct = await createOfflinePunctuation({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-punct-ct-en' },
+});
+
+const handle = await punct.punctuate(liveTextIn, liveTextOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Punctuated ${completion.unitsRead} characters`);
+```
+
+| Aspect | Live overload (`createOfflinePunctuation`) | Streaming engine (`createStreamingPunctuation`) |
+| --- | --- | --- |
+| Weights | CT-Transformer (Higher quality) | CNN-BiLSTM (Lower quality) |
+| Latency | Per-segment (higher) | Per-token (lower) |
+| Context | Global (per segment) | Local (sliding window) |
 
 ## Segmentation
 

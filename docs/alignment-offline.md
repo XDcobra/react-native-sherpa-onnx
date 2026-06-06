@@ -1,12 +1,17 @@
 # AlignmentEngine (buffer-first)
 
-Alignment is offline and buffer-first:
-- input transcript from `OfflineTextBuffer`
-- input waveform from `OfflineAudioBuffer`
-- output written into a caller-provided `OfflineSegmentBuffer` as `kind: 'alignment'`
+## Introduction
 
-Use `createAlignment()` and `engine.alignTextToAudio(...)`.
-The freestanding public `alignTextToAudio` symbol is removed (hard cut).
+Offline forced alignment with a **buffer-first** API.
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input (text)** | [`OfflineTextBuffer`](textbuffer-offline.md) | Reference transcript |
+| **Input (audio)** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Waveform to align against |
+| **Output** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Caller-provided buffer; segments written with `kind: 'alignment'` |
+| **Engine** | `AlignmentEngine` via `createAlignment` | `alignTextToAudio(textIn, audioIn, segmentOut, options)` |
+
+Import path: `react-native-sherpa-onnx/alignment`
 
 ## Modes
 
@@ -140,47 +145,7 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 });
 ```
 
-## Custom model path (`initMode: 'custom'`)
-
-Alignment has **no** TurboModule engine init — `createAlignment()` stays lightweight. Custom paths apply **per accurate call** on `engine.alignTextToAudio(..., { mode: 'accurate', ... })` only (plain accurate, `asr_mediated`, and `chunked_forced_ctc`). Proportional, estimated, and `vad` modes do not load a wav2vec2 model.
-
-Use custom paths when the wav2vec2 ONNX is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the file).
-
-- Set `initMode: 'custom'` and `modelType: 'wav2vec2'` (concrete, not `'auto'`).
-- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
-- Validation uses native `validate-alignment` (key `model` for `wav2vec2`). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
-- Auto mode (default): pass `modelSource` — the SDK runs `detectAlignmentModel` once per call to resolve the ONNX path.
-
-```ts
-await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
-  mode: 'accurate',
-  granularity: 'word',
-  initMode: 'custom',
-  modelType: 'wav2vec2',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
-  },
-});
-```
-
-Anchor-constrained accurate modes use the same model union:
-
-```ts
-await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
-  mode: 'accurate',
-  granularity: 'word',
-  initMode: 'custom',
-  modelType: 'wav2vec2',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
-  },
-  segmentation: {
-    mode: 'auto',
-    anchorSegmentBuffer: anchorBufferId,
-    mappingStrategy: 'chunked_forced_ctc',
-  },
-});
-```
+## Mode examples
 
 ### `vad` (standalone)
 
@@ -308,12 +273,6 @@ const subtitleRows = alignmentSegments.map((segment) => ({
 }));
 ```
 
-## Model detection
-
-Unified cross-feature detection: [model-detect.md](model-detect.md).
-
-`detectAlignmentModel` checks wav2vec2 alignment packs before `createAlignment` or per-call `modelSource` in `accurate` mode. See [`detectAlignmentModel`](#detectalignmentmodelsource-options) below.
-
 ## API reference
 
 ### `createAlignment(options?)`
@@ -350,6 +309,36 @@ function assertAlignmentGranularityForMode(
   mode: 'proportional' | 'estimated' | 'aligned' | 'vad' | 'off' ,
   granularity: AlignmentGranularity
 ): void;
+```
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `wav2vec2` | `*.onnx` (alignment CTC model) | — | `model` |
+
+## Model detection
+
+`detectAlignmentModel` checks wav2vec2 packs before accurate alignment. Unified catalog: [model-detect.md](model-detect.md). Auto mode (default): pass `modelSource` — the SDK runs `detectAlignmentModel` per call.
+
+## Custom model path (`initMode: 'custom'`)
+
+Per-call custom path on `alignTextToAudio` — **no engine init**. Applies to **`mode: 'accurate'`** only. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `wav2vec2` | `model` |
+
+```ts
+await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  initMode: 'custom',
+  modelType: 'wav2vec2',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
+  },
+});
 ```
 
 ## Pipeline composition
