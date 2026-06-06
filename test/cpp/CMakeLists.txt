@@ -39,6 +39,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-vad-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-model-detect-vad.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-stt.cpp"
+  "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-online-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-validate-tts.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-validate-enhancement.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"

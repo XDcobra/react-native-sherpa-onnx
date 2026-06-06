@@ -3,6 +3,7 @@ import NativeSherpaOnnx from '../NativeSherpaOnnx';
 
 export type CustomModelPathCategory =
   | ModelCategory.Stt
+  | 'stt_streaming'
   | ModelCategory.Tts
   | ModelCategory.Vad
   | ModelCategory.Enhancement

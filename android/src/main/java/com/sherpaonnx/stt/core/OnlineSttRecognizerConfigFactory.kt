@@ -42,6 +42,59 @@ internal class OnlineSttRecognizerConfigFactory(
     rule3MinUtteranceLength: Float?
   ): OnlineRecognizerConfig {
     val paths = scanOnlineModelPaths(modelDir, modelType)
+    return buildOnlineRecognizerConfigFromPaths(
+      paths,
+      modelType,
+      enableEndpoint,
+      decodingMethod,
+      maxActivePaths,
+      hotwordsFile,
+      hotwordsScore,
+      numThreads,
+      provider,
+      ruleFsts,
+      ruleFars,
+      dither,
+      blankPenalty,
+      debug,
+      rule1MustContainNonSilence,
+      rule1MinTrailingSilence,
+      rule1MinUtteranceLength,
+      rule2MustContainNonSilence,
+      rule2MinTrailingSilence,
+      rule2MinUtteranceLength,
+      rule3MustContainNonSilence,
+      rule3MinTrailingSilence,
+      rule3MinUtteranceLength
+    )
+  }
+
+  fun buildOnlineRecognizerConfigFromPaths(
+    paths: Map<String, String>,
+    modelType: String,
+    enableEndpoint: Boolean,
+    decodingMethod: String,
+    maxActivePaths: Int,
+    hotwordsFile: String?,
+    hotwordsScore: Float?,
+    numThreads: Int?,
+    provider: String?,
+    ruleFsts: String?,
+    ruleFars: String?,
+    dither: Float?,
+    blankPenalty: Float?,
+    debug: Boolean?,
+    rule1MustContainNonSilence: Boolean?,
+    rule1MinTrailingSilence: Float?,
+    rule1MinUtteranceLength: Float?,
+    rule2MustContainNonSilence: Boolean?,
+    rule2MinTrailingSilence: Float?,
+    rule2MinUtteranceLength: Float?,
+    rule3MustContainNonSilence: Boolean?,
+    rule3MinTrailingSilence: Float?,
+    rule3MinUtteranceLength: Float?
+  ): OnlineRecognizerConfig {
+    validateOnlinePaths(paths, modelType)
 
     val endpointConfig = EndpointConfig(
       rule1 = EndpointRule(
@@ -188,21 +241,35 @@ internal class OnlineSttRecognizerConfigFactory(
       )
       else -> throw IllegalArgumentException("Unsupported online STT model type: $modelType. Use: transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc")
     }.also { paths ->
-      when (modelType) {
-        "transducer", "nemo_transducer" -> {
-          if ((paths["encoder"]?.isEmpty() != false) || (paths["decoder"]?.isEmpty() != false) || (paths["joiner"]?.isEmpty() != false)) {
-            throw IllegalArgumentException("Transducer model requires encoder, decoder, and joiner .onnx files in $modelDir")
-          }
+      validateOnlinePaths(paths, modelType)
+    }
+  }
+
+  private fun validateOnlinePaths(paths: Map<String, String>, modelType: String) {
+    when (modelType) {
+      "transducer", "nemo_transducer" -> {
+        if (
+          paths["encoder"].isNullOrEmpty() ||
+          paths["decoder"].isNullOrEmpty() ||
+          paths["joiner"].isNullOrEmpty()
+        ) {
+          throw IllegalArgumentException(
+            "Transducer model requires encoder, decoder, and joiner .onnx files"
+          )
         }
-        "paraformer" -> {
-          if ((paths["encoder"]?.isEmpty() != false) || (paths["decoder"]?.isEmpty() != false)) {
-            throw IllegalArgumentException("Paraformer model requires encoder and decoder .onnx files in $modelDir")
-          }
+      }
+      "paraformer" -> {
+        if (paths["encoder"].isNullOrEmpty() || paths["decoder"].isNullOrEmpty()) {
+          throw IllegalArgumentException(
+            "Paraformer model requires encoder and decoder .onnx files"
+          )
         }
-        "zipformer2_ctc", "nemo_ctc", "tone_ctc" -> {
-          if (paths["model"]?.isEmpty() != false) {
-            throw IllegalArgumentException("$modelType model requires model.onnx (or model*.onnx) in $modelDir")
-          }
+      }
+      "zipformer2_ctc", "nemo_ctc", "tone_ctc" -> {
+        if (paths["model"].isNullOrEmpty()) {
+          throw IllegalArgumentException(
+            "$modelType model requires model.onnx (or model*.onnx)"
+          )
         }
       }
     }

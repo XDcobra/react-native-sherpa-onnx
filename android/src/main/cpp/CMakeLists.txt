@@ -96,6 +96,7 @@ set(SOURCES
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
+    jni/model_detect/stt/sherpa-onnx-validate-online-stt.cpp
     jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp
     jni/model_detect/stt/sherpa-onnx-stt-online-guard.cpp
     jni/model_detect/stt/sherpa-onnx-stt-online-guard-transducer.cpp

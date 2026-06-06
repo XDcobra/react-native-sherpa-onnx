@@ -37,6 +37,30 @@ Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are
 - If your model is offline-only (for example Whisper), you can still use it for live consumption via the **[Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)** pattern.
 - Model setup details: [model-setup.md](model-setup.md)
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use when streaming model files are scattered or not in the directory layout native auto-scan expects.
+
+- Set `initMode: 'custom'` and a concrete online `modelType` (not `'auto'`).
+- Pass `customConfig` with **`FileSource`** per required file. Keys match native online layout: transducer / nemo_transducer → `encoder`, `decoder`, `joiner`, `tokens`; paraformer → `encoder`, `decoder`, `tokens`; zipformer2_ctc / nemo_ctc / tone_ctc → `model`, `tokens`.
+- Validation category is **`stt_streaming`** (separate from offline `stt`). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+
+const engine = await createStreamingSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/path/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/path/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/path/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/path/tokens.txt' },
+  },
+  enableEndpoint: true,
+});
+```
+
 ## Quick start
 
 ```ts

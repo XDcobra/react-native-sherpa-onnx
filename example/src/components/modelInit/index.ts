@@ -5,3 +5,7 @@ export {
   SttCustomInitForm,
   type SttCustomInitFormState,
 } from './SttCustomInitForm';
+export {
+  StreamingSttCustomInitForm,
+  type StreamingSttCustomInitFormState,
+} from './StreamingSttCustomInitForm';

@@ -55,13 +55,9 @@ export interface EndpointConfig {
 }
 
 /**
- * Options for initializing the streaming (online) STT engine.
+ * Options shared by auto and custom streaming STT initialization.
  */
-export interface StreamingSttInitOptions {
-  /** Model source configuration. */
-  modelSource: FileSource;
-  /** Online model type. Use 'auto' to detect from model directory (calls detectSttModel and maps to an online type). */
-  modelType: OnlineSTTModelType | 'auto';
+export interface StreamingSttInitOptionsBase {
   /** Enable endpoint detection. Default: true. */
   enableEndpoint?: boolean;
   /** Endpoint rules. Defaults match Kotlin (rule1: 2.4s silence, rule2: 1.4s + speech, rule3: 20s max). */
@@ -92,6 +88,32 @@ export interface StreamingSttInitOptions {
   /** Enable debug logging. Default: false. */
   debug?: boolean;
 }
+
+/** Auto-detect model files from a directory-backed {@link FileSource}. */
+export interface StreamingSttAutoInitOptions
+  extends StreamingSttInitOptionsBase {
+  initMode?: 'auto';
+  /** Model source configuration. */
+  modelSource: FileSource;
+  /** Online model type. Use 'auto' to detect from model directory. */
+  modelType: OnlineSTTModelType | 'auto';
+}
+
+/** Explicit per-file paths; skips directory scan / detect. */
+export interface StreamingSttCustomInitOptions
+  extends StreamingSttInitOptionsBase {
+  initMode: 'custom';
+  /** Concrete online model type (not `'auto'`). */
+  modelType: OnlineSTTModelType;
+  customConfig: import('./streamingCustomConfig').StreamingSttCustomConfig;
+}
+
+/**
+ * Options for initializing the streaming (online) STT engine.
+ */
+export type StreamingSttInitOptions =
+  | StreamingSttAutoInitOptions
+  | StreamingSttCustomInitOptions;
 
 /** Options for starting a native **streaming (online)** STT pipeline worker. */
 export interface SttPipelineOptions {

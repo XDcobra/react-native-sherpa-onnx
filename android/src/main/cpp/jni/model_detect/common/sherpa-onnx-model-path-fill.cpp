@@ -110,4 +110,15 @@ void FillAlignmentModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillOnlineSttModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    OnlineSttModelPaths& out
+) {
+    SetPathFromMap(paths, "encoder", out.encoder);
+    SetPathFromMap(paths, "decoder", out.decoder);
+    SetPathFromMap(paths, "joiner", out.joiner);
+    SetPathFromMap(paths, "tokens", out.tokens);
+    SetPathFromMap(paths, "model", out.model);
+}
+
 }  // namespace sherpaonnx

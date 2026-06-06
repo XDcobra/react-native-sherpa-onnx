@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
-import { buildOnlineSttInitBridgeOptions } from './sttNativeBridge';
+import { buildStreamingSttInitBridgeOptions } from './sttNativeBridge';
 import type {
   OnlineSTTModelType,
   LiveSttEngine,
@@ -65,10 +65,14 @@ export async function createStreamingSTT(
   options: StreamingSttInitOptions
 ): Promise<LiveSttEngine> {
   const instanceId = `streaming_stt_${++streamingSttInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
 
   let effectiveModelType: OnlineSTTModelType;
-  if (options.modelType === 'auto' || options.modelType === undefined) {
+  if (options.initMode === 'custom') {
+    effectiveModelType = normalizeToOnlineType(options.modelType);
+  } else if (options.modelType === 'auto' || options.modelType === undefined) {
+    const resolvedPath = await resolveFileSourceForModelInit(
+      options.modelSource
+    );
     const detectResult = await SherpaOnnx.detectSttModel(
       resolvedPath,
       null,
@@ -91,10 +95,9 @@ export async function createStreamingSTT(
     effectiveModelType = normalizeToOnlineType(options.modelType);
   }
 
-  const optionsWithResolvedType = { ...options, modelType: effectiveModelType };
-  const bridgeOptions = buildOnlineSttInitBridgeOptions(
-    resolvedPath,
-    optionsWithResolvedType
+  const bridgeOptions = await buildStreamingSttInitBridgeOptions(
+    options,
+    effectiveModelType
   );
 
   const result = await SherpaOnnx.initializeOnlineStt(

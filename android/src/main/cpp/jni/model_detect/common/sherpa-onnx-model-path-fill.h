@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_PATH_FILL_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-online-stt.h"
 #include <map>
 #include <string>
 
@@ -35,6 +36,11 @@ void FillPunctuationModelPathsFromStringMap(
 void FillAlignmentModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     AlignmentModelPaths& out
+);
+
+void FillOnlineSttModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    OnlineSttModelPaths& out
 );
 
 }  // namespace sherpaonnx

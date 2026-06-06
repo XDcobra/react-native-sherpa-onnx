@@ -1035,60 +1035,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   // ==================== Online (streaming) STT Methods ====================
 
   override fun initializeOnlineStt(instanceId: String, options: ReadableMap, promise: Promise) {
-    val modelDir = options.getString("modelDir")
-    if (modelDir.isNullOrEmpty()) {
-      promise.reject("INIT_ERROR", "modelDir is required")
-      return
-    }
-    val modelType = options.getString("modelType") ?: "transducer"
-    val enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else true
-    val decodingMethod = options.getString("decodingMethod") ?: "greedy_search"
-    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 4
-    val hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null
-    val hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null
-    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
-    val provider = if (options.hasKey("provider")) options.getString("provider") else null
-    val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
-    val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
-    val dither = if (options.hasKey("dither")) options.getDouble("dither") else null
-    val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
-    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
-    val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
-    val rule1MinTrailingSilence = if (options.hasKey("rule1MinTrailingSilence")) options.getDouble("rule1MinTrailingSilence") else null
-    val rule1MinUtteranceLength = if (options.hasKey("rule1MinUtteranceLength")) options.getDouble("rule1MinUtteranceLength") else null
-    val rule2MustContainNonSilence = if (options.hasKey("rule2MustContainNonSilence")) options.getBoolean("rule2MustContainNonSilence") else null
-    val rule2MinTrailingSilence = if (options.hasKey("rule2MinTrailingSilence")) options.getDouble("rule2MinTrailingSilence") else null
-    val rule2MinUtteranceLength = if (options.hasKey("rule2MinUtteranceLength")) options.getDouble("rule2MinUtteranceLength") else null
-    val rule3MustContainNonSilence = if (options.hasKey("rule3MustContainNonSilence")) options.getBoolean("rule3MustContainNonSilence") else null
-    val rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null
-    val rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null
-    onlineSttHelper.initializeOnlineStt(
-      instanceId,
-      modelDir,
-      modelType,
-      enableEndpoint,
-      decodingMethod,
-      maxActivePaths,
-      hotwordsFile,
-      hotwordsScore,
-      numThreads,
-      provider,
-      ruleFsts,
-      ruleFars,
-      dither,
-      blankPenalty,
-      debug,
-      rule1MustContainNonSilence,
-      rule1MinTrailingSilence,
-      rule1MinUtteranceLength,
-      rule2MustContainNonSilence,
-      rule2MinTrailingSilence,
-      rule2MinUtteranceLength,
-      rule3MustContainNonSilence,
-      rule3MinTrailingSilence,
-      rule3MinUtteranceLength,
-      promise
-    )
+    onlineSttHelper.initializeOnlineStt(instanceId, options, promise)
   }
 
   override fun unloadOnlineStt(instanceId: String, promise: Promise) {

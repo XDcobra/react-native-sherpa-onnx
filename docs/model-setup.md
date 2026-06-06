@@ -411,6 +411,25 @@ if (sttFolder) {
 
 For `.tar.zst` ship archives, extract to a sandbox directory and use `{ kind: 'fs', path }` there — see [extraction.md](./extraction.md) and the quick start in [model-delivery-pad-odr.md](./model-delivery-pad-odr.md).
 
+### Custom STT init (skip auto-detection)
+
+When model files are not in a single detectable folder, pass explicit paths per file with `initMode: 'custom'`. Each path is a {@link FileSource}; the SDK resolves them to absolute paths before native init. See [STT custom initialization](stt-offline.md#custom-initialization-initmode-custom) for required path keys per model type.
+
+```typescript
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+
+const stt = await createSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/data/models/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/data/models/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/data/models/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+  },
+});
+```
+
 ### Validation: check before init
 
 ```typescript

@@ -6,6 +6,7 @@
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx-validate-stt.h"
+#include "sherpa-onnx-validate-online-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-vad.h"
 
@@ -102,6 +103,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "stt_streaming") {
+        const OnlineSttModelKind kind = ParseOnlineSttModelType(modelType);
+        if (kind == OnlineSttModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom streaming STT model type: " + modelType
+            );
+        }
+        OnlineSttModelPaths onlinePaths;
+        FillOnlineSttModelPathsFromStringMap(paths, onlinePaths);
+        const auto vr = ValidateOnlineSttPaths(kind, onlinePaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     if (cat == "tts") {
         const TtsModelKind kind = ParseTtsModelTypeLocal(modelType);
         if (kind == TtsModelKind::kUnknown) {
@@ -194,6 +210,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const SttModelKind kind = ParseSttModelType(modelType);
         if (kind == SttModelKind::kUnknown) return {};
         return FromSpecs(GetSttPathRequirements(kind));
+    }
+    if (cat == "stt_streaming") {
+        const OnlineSttModelKind kind = ParseOnlineSttModelType(modelType);
+        if (kind == OnlineSttModelKind::kUnknown) return {};
+        return FromSpecs(GetOnlineSttPathRequirements(kind));
     }
     if (cat == "tts") {
         const TtsModelKind kind = ParseTtsModelTypeLocal(modelType);

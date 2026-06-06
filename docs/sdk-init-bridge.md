@@ -19,7 +19,7 @@ The React Native package uses two layers for engine initialization:
 |---------------|--------------|--------------|---------|
 | `initializeTts(instanceId, options)` | `createTTS` | `TtsInitBridgeOptions` | `buildTtsInitBridgeOptions` in `src/tts/ttsNativeBridge.ts` |
 | `initializeStt(instanceId, options)` | `createSTT` | `SttInitBridgeOptions` | `buildSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
-| `initializeOnlineStt(instanceId, options)` | `createStreamingSTT` | `OnlineSttInitBridgeOptions` | `buildOnlineSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
+| `initializeOnlineStt(instanceId, options)` | `createStreamingSTT` | `OnlineSttInitBridgeOptions` | `buildStreamingSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
 
 Bridge option types are defined in `src/NativeSherpaOnnx.ts` (required for React Native codegen) and re-exported from `src/nativeBridge/initBridgeTypes.ts` for builders.
 

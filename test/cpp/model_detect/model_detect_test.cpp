@@ -26,6 +26,7 @@
 #include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-stt.h"
+#include "sherpa-onnx-validate-online-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-vad.h"
@@ -803,6 +804,34 @@ TEST(ModelDetectValidation, ValidateTtsPathsUnknownKindPassesThrough) {
 TEST(ModelDetectValidation, ValidateSttPathsUnknownKindPassesThrough) {
     sherpaonnx::SttModelPaths paths;
     auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, ValidateOnlineSttPathsDirectOk) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.joiner = "/m/joiner.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kTransducer, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateOnlineSttPathsDirectMissing) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kTransducer, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateOnlineSttPathsUnknownKindPassesThrough) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kUnknown, paths, "/m");
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
 }
 

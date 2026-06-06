@@ -14,7 +14,9 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   createStreamingSTT,
   detectSttModel,
+  assertStreamingSttCustomConfig,
   type LiveSttEngine,
+  type StreamingSttCustomConfig,
   type SttPipelineHandle,
 } from 'react-native-sherpa-onnx/stt';
 import {
@@ -51,6 +53,13 @@ import {
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  InitModeSelector,
+  StreamingSttCustomInitForm,
+  type ModelInitMode,
+  type StreamingSttCustomInitFormState,
+} from '../../components/modelInit';
+import { fillStreamingCustomConfigFromFolder } from '../../utils/streamingCustomInitFill';
+import {
   SegmentationPolicyControls,
   buildSegmentationOption,
   type SegmentationControlConfig,
@@ -64,6 +73,11 @@ import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowca
 
 const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
+
+const DEFAULT_STREAMING_CUSTOM_INIT: StreamingSttCustomInitFormState = {
+  modelType: 'transducer',
+  fileSources: {},
+};
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -103,6 +117,11 @@ export default function STTStreamingScreen() {
     null
   );
   const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<StreamingSttCustomInitFormState>(DEFAULT_STREAMING_CUSTOM_INIT);
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
   const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
     new Set()
   );
@@ -373,11 +392,46 @@ export default function STTStreamingScreen() {
     }
   }, [stopPolling]);
 
+  const fillCustomFromSelectedModel = useCallback(async () => {
+    if (!selectedModelFolder) {
+      setCustomFillHint('Select a catalog model first.');
+      return;
+    }
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    try {
+      const modelPath = resolveModelPath(selectedModelFolder);
+      const fillResult = await fillStreamingCustomConfigFromFolder({
+        modelSource: modelPath,
+        modelType: customInitForm.modelType,
+      });
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      if (fillResult.missingKeys.length > 0) {
+        setCustomFillHint(
+          `Filled from ${
+            fillResult.modelDir
+          }; still missing: ${fillResult.missingKeys.join(', ')}`
+        );
+      } else {
+        setCustomFillHint(`Filled all slots from ${fillResult.modelDir}`);
+      }
+    } catch (err) {
+      setCustomFillHint(normalizeErrorMessage(err));
+    } finally {
+      setCustomFillLoading(false);
+    }
+  }, [customInitForm.modelType, resolveModelPath, selectedModelFolder]);
+
   const startStreaming = useCallback(async () => {
     if (streamingState !== 'idle') {
       return;
     }
-    if (!selectedModelFolder) {
+    const isStreamingCustom =
+      engineMode === 'streaming' && initMode === 'custom';
+    if (!isStreamingCustom && !selectedModelFolder) {
       setError('Select an STT model first.');
       return;
     }
@@ -394,40 +448,56 @@ export default function STTStreamingScreen() {
     setStreamingState('starting');
 
     try {
-      const modelPath = resolveModelPath(selectedModelFolder);
-      const detectSource = await toDetectSource(modelPath);
-      const detection = await detectSttModel(detectSource, {
-        modelType: 'auto',
-      });
-      if (!detection.success) {
-        throw new Error(detection.error ?? 'STT model detection failed');
-      }
-      if (engineMode === 'streaming' && !detection.isStreaming) {
-        throw new Error(
-          'This STT model is offline-only. Switch to "Live Overload" mode to use it.'
+      if (engineMode === 'streaming' && initMode === 'custom') {
+        const customConfig = {
+          ...customInitForm.fileSources,
+        } as StreamingSttCustomConfig;
+        assertStreamingSttCustomConfig(
+          customConfig as unknown as Record<string, unknown>
         );
-      }
-      if (engineMode === 'offline' && detection.isStreaming) {
-        throw new Error(
-          'This STT model is streaming-only (incremental encoder). Live Overload needs offline weights — pick another model or use ⚡ Streaming.'
-        );
-      }
-
-      if (engineMode === 'streaming') {
         const engine = await createStreamingSTT({
-          modelSource: modelPath,
-          modelType: 'auto',
+          initMode: 'custom',
+          modelType: customInitForm.modelType,
+          customConfig,
           numThreads: 2,
         });
         engineRef.current = engine;
       } else {
-        const { createSTT } = require('react-native-sherpa-onnx/stt');
-        const engine = await createSTT({
-          modelSource: modelPath,
+        const modelPath = resolveModelPath(selectedModelFolder!);
+        const detectSource = await toDetectSource(modelPath);
+        const detection = await detectSttModel(detectSource, {
           modelType: 'auto',
-          numThreads: 2,
         });
-        engineRef.current = engine;
+        if (!detection.success) {
+          throw new Error(detection.error ?? 'STT model detection failed');
+        }
+        if (engineMode === 'streaming' && !detection.isStreaming) {
+          throw new Error(
+            'This STT model is offline-only. Switch to "Live Overload" mode to use it.'
+          );
+        }
+        if (engineMode === 'offline' && detection.isStreaming) {
+          throw new Error(
+            'This STT model is streaming-only (incremental encoder). Live Overload needs offline weights — pick another model or use ⚡ Streaming.'
+          );
+        }
+
+        if (engineMode === 'streaming') {
+          const engine = await createStreamingSTT({
+            modelSource: modelPath,
+            modelType: 'auto',
+            numThreads: 2,
+          });
+          engineRef.current = engine;
+        } else {
+          const { createSTT } = require('react-native-sherpa-onnx/stt');
+          const engine = await createSTT({
+            modelSource: modelPath,
+            modelType: 'auto',
+            numThreads: 2,
+          });
+          engineRef.current = engine;
+        }
       }
 
       const liveAudio = await createEmptyLiveAudioBuffer({
@@ -526,7 +596,9 @@ export default function STTStreamingScreen() {
     }
   }, [
     cleanupStream,
+    customInitForm,
     engineMode,
+    initMode,
     resolveModelPath,
     segConfig,
     selectedFileUri,
@@ -588,10 +660,15 @@ export default function STTStreamingScreen() {
     setStatus('Audio file removed. Choose another file to continue.');
   }, [streamingState]);
 
+  const canStartCustomStreaming =
+    engineMode === 'streaming' &&
+    initMode === 'custom' &&
+    Object.keys(customInitForm.fileSources).length > 0;
+
   const canStart =
-    !!selectedModelFolder &&
     streamingState === 'idle' &&
-    (sourceMode === 'mic' || !!selectedFileUri);
+    (sourceMode === 'mic' || !!selectedFileUri) &&
+    (canStartCustomStreaming || !!selectedModelFolder);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -615,6 +692,33 @@ export default function STTStreamingScreen() {
           loading={loadingModels}
           disabled={streamingState !== 'idle'}
         />
+
+        {engineMode === 'streaming' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Initialization</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={streamingState !== 'idle' || customFillLoading}
+            />
+            {initMode === 'custom' ? (
+              <StreamingSttCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelFolder}
+                onFillFromSelectedModel={fillCustomFromSelectedModel}
+                fillLoading={customFillLoading}
+                disabled={streamingState !== 'idle'}
+                fillHint={customFillHint}
+              />
+            ) : (
+              <Text style={styles.bodyText}>
+                Auto mode scans the selected model folder for streaming ONNX
+                files.
+              </Text>
+            )}
+          </View>
+        )}
 
         {engineMode === 'offline' && (
           <View style={styles.card}>

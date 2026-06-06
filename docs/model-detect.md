@@ -267,6 +267,39 @@ function isQnnModelName(name: string): boolean;
 
 Shared naming check for QNN binary releases (also used when building `supportsQnn` on unified STT hits).
 
+## Custom path validation
+
+For **`initMode: 'custom'`** (and early app-side checks), use the unified native validation layer backed by C++ `validate-*.cpp` tables (STT, TTS, VAD, Enhancement, Punctuation, Alignment):
+
+```ts
+import {
+  getCustomModelPathRequirements,
+  validateCustomModelPaths,
+} from 'react-native-sherpa-onnx/detect';
+import { ModelCategory } from 'react-native-sherpa-onnx/download';
+
+// Schema for forms / slot pickers (required vs optional keys)
+const schema = await getCustomModelPathRequirements(ModelCategory.Stt, 'paraformer');
+
+// Runtime check on resolved absolute paths (Record<string, string>)
+const result = await validateCustomModelPaths(ModelCategory.Tts, 'vits', {
+  ttsModel: '/path/model.onnx',
+  tokens: '/path/tokens.txt',
+});
+if (!result.ok) {
+  console.warn(result.error, result.missingRequired);
+}
+```
+
+Categories match unified detect literals: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `punctuation`, `alignment`.
+
+- **`stt_streaming`** — online/streaming STT custom init (`createStreamingSTT` with `initMode: 'custom'`). Path keys differ from offline `stt`: transducer uses `encoder`/`decoder`/`joiner`/`tokens`; CTC streaming types use `model`/`tokens` (not offline `ctcModel`).
+
+- **`getCustomModelPathRequirements`** — read-only schema; paraformer includes optional offline/streaming keys (`paraformerModel`, `encoder`, `decoder`) with `tokens` required.
+- **`validateCustomModelPaths`** — enforces non-empty paths and feature-specific rules (e.g. paraformer OR-layout, `moonshine` vs `moonshine_v2`).
+
+TypeScript discriminated unions in `src/stt/customConfig.ts` remain compile-time helpers; **runtime truth is native**.
+
 ## Feature-specific detection APIs
 
 Use these when initializing engines or when you need validation details. Each page documents required files, `paths`, and `detectionSources`.

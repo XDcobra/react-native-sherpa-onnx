@@ -37,6 +37,56 @@ For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
 If validation fails, `success` is `false` and `error` contains the missing-file reason.
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use custom init when model files are **not** in one detectable directory layout (non-standard names, scattered paths, or detection fails but you know the Sherpa model family).
+
+- Set `initMode: 'custom'` and a concrete `modelType` (not `'auto'`).
+- Pass `customConfig` with **`FileSource`** per required file (same path keys as native detection uses internally, e.g. `encoder`, `whisperEncoder`, `ctcModel`, `tokens`).
+- Auto-detection is **skipped**; **`resolveSttCustomConfigPaths`** resolves each `FileSource` and calls native **`validateCustomModelPaths('stt', modelType, paths)`** (C++ `validate-stt` tables — single source of truth). Sherpa ONNX load errors are forwarded unchanged.
+- Query required vs optional keys for UI with **`getCustomModelPathRequirements('stt', modelType)`** from `react-native-sherpa-onnx/detect` (do not hardcode key lists in app code).
+- Auxiliary paths (`hotwordsFile`, `bpeVocab`, `ruleFsts`, `ruleFars`) also use **`FileSource`**.
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+
+const engine = await createSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/data/models/my-encoder.onnx' },
+    decoder: { kind: 'app', base: 'files', path: 'weights/decoder.onnx' },
+    joiner: {
+      kind: 'app',
+      base: 'apkAsset',
+      path: 'models/my-pack/joiner.onnx',
+    },
+    tokens: { kind: 'fs', path: '/data/vocab/tokens.txt' },
+  },
+  hotwordsFile: { kind: 'fs', path: '/data/hotwords.txt' },
+});
+```
+
+Required path keys depend on `modelType` (including `moonshine_v2`, `tone_ctc`, paraformer offline vs streaming layouts). Use the native schema API instead of duplicating tables:
+
+```ts
+import {
+  getCustomModelPathRequirements,
+  validateCustomModelPaths,
+} from 'react-native-sherpa-onnx/detect';
+
+const { required, optional } = await getCustomModelPathRequirements('stt', 'transducer');
+// required: ['encoder', 'decoder', 'joiner', 'tokens']; optional: ['bpeVocab']
+
+const resolved = await resolveSttCustomConfigPaths('transducer', customConfig);
+// or validate resolved paths directly:
+const check = await validateCustomModelPaths('stt', 'transducer', resolved);
+```
+
+Validation checks **non-empty resolved path strings** only (not ONNX correctness or on-disk existence). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+
+File resolution uses the same helpers as model init: `resolveFileSourceForModelFile` (see `react-native-sherpa-onnx/detect`). Bundled single files use `{ kind: 'app', base: 'apkAsset' | 'appBundle', path: '…/file.onnx' }` — no manual copy step.
+
 ## Quick start
 
 ### `createSTT`, `modelOptions`, and `setConfig`

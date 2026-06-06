@@ -32,7 +32,9 @@ export type SttInitBridgeOptions = {
 
 /** `initializeOnlineStt(instanceId, options)` — streaming STT (endpoint rules flattened). */
 export type OnlineSttInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  modelDir?: string;
+  modelPaths?: Object;
   modelType: string;
   enableEndpoint?: boolean;
   decodingMethod?: string;

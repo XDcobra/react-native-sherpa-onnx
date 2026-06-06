@@ -9,6 +9,7 @@ import type {
   SttInitBridgeOptions,
 } from '../nativeBridge/initBridgeTypes';
 import type { StreamingSttInitOptions } from './streamingTypes';
+import { resolveStreamingSttCustomConfigPaths } from './streamingCustomConfig';
 import {
   resolveFileSourceForModelFile,
   resolveFileSourceForModelInit,
@@ -140,7 +141,103 @@ export async function buildSttInitBridgeOptions(
 }
 
 /**
+ * Build bridge options for `initializeOnlineStt` (auto or custom init).
+ */
+export async function buildStreamingSttInitBridgeOptions(
+  options: StreamingSttInitOptions,
+  resolvedModelType: string
+): Promise<OnlineSttInitBridgeOptions> {
+  const shared = appendStreamingInitBridgeFields(options);
+
+  if (options.initMode === 'custom') {
+    const modelPaths = await resolveStreamingSttCustomConfigPaths(
+      options.modelType,
+      options.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: resolvedModelType,
+      modelPaths,
+      ...shared,
+    };
+  }
+
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    modelType: resolvedModelType,
+    ...shared,
+  };
+}
+
+function appendStreamingInitBridgeFields(
+  options: StreamingSttInitOptions
+): Omit<
+  OnlineSttInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
+> {
+  const ep = options.endpointConfig;
+  return {
+    ...(options.enableEndpoint !== undefined
+      ? { enableEndpoint: options.enableEndpoint }
+      : {}),
+    ...(options.decodingMethod !== undefined
+      ? { decodingMethod: options.decodingMethod }
+      : {}),
+    ...(options.maxActivePaths !== undefined
+      ? { maxActivePaths: options.maxActivePaths }
+      : {}),
+    ...(options.hotwordsFile !== undefined
+      ? { hotwordsFile: options.hotwordsFile }
+      : {}),
+    ...(options.hotwordsScore !== undefined
+      ? { hotwordsScore: options.hotwordsScore }
+      : {}),
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
+      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
+    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(options.dither !== undefined ? { dither: options.dither } : {}),
+    ...(options.blankPenalty !== undefined
+      ? { blankPenalty: options.blankPenalty }
+      : {}),
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
+    ...(ep?.rule1?.mustContainNonSilence !== undefined
+      ? { rule1MustContainNonSilence: ep.rule1.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule1?.minTrailingSilence !== undefined
+      ? { rule1MinTrailingSilence: ep.rule1.minTrailingSilence }
+      : {}),
+    ...(ep?.rule1?.minUtteranceLength !== undefined
+      ? { rule1MinUtteranceLength: ep.rule1.minUtteranceLength }
+      : {}),
+    ...(ep?.rule2?.mustContainNonSilence !== undefined
+      ? { rule2MustContainNonSilence: ep.rule2.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule2?.minTrailingSilence !== undefined
+      ? { rule2MinTrailingSilence: ep.rule2.minTrailingSilence }
+      : {}),
+    ...(ep?.rule2?.minUtteranceLength !== undefined
+      ? { rule2MinUtteranceLength: ep.rule2.minUtteranceLength }
+      : {}),
+    ...(ep?.rule3?.mustContainNonSilence !== undefined
+      ? { rule3MustContainNonSilence: ep.rule3.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule3?.minTrailingSilence !== undefined
+      ? { rule3MinTrailingSilence: ep.rule3.minTrailingSilence }
+      : {}),
+    ...(ep?.rule3?.minUtteranceLength !== undefined
+      ? { rule3MinUtteranceLength: ep.rule3.minUtteranceLength }
+      : {}),
+  };
+}
+
+/**
  * Flatten public streaming init options for `initializeOnlineStt` (endpoint rules → top-level keys).
+ * @deprecated Prefer {@link buildStreamingSttInitBridgeOptions}.
  */
 export function buildOnlineSttInitBridgeOptions(
   modelDir: string,
@@ -148,6 +245,7 @@ export function buildOnlineSttInitBridgeOptions(
 ): OnlineSttInitBridgeOptions {
   const ep = options.endpointConfig;
   return {
+    initMode: 'auto',
     modelDir,
     modelType: options.modelType,
     enableEndpoint: options.enableEndpoint ?? true,

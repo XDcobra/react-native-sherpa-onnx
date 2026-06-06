@@ -1,5 +1,6 @@
 import {
   buildOnlineSttInitBridgeOptions,
+  buildStreamingSttInitBridgeOptions,
   buildSttInitBridgeOptions,
 } from '../sttNativeBridge';
 
@@ -16,6 +17,15 @@ jest.mock('../../detect/resolveModelInput', () => ({
 
 jest.mock('../customConfig', () => ({
   resolveSttCustomConfigPaths: jest.fn(async () => ({
+    encoder: '/enc.onnx',
+    decoder: '/dec.onnx',
+    joiner: '/join.onnx',
+    tokens: '/tokens.txt',
+  })),
+}));
+
+jest.mock('../streamingCustomConfig', () => ({
+  resolveStreamingSttCustomConfigPaths: jest.fn(async () => ({
     encoder: '/enc.onnx',
     decoder: '/dec.onnx',
     joiner: '/join.onnx',
@@ -53,6 +63,31 @@ describe('sttNativeBridge', () => {
         tokens: { kind: 'fs', path: '/tokens.txt' },
       },
     });
+    expect(bridge.initMode).toBe('custom');
+    expect(bridge.modelDir).toBeUndefined();
+    expect(bridge.modelPaths).toEqual({
+      encoder: '/enc.onnx',
+      decoder: '/dec.onnx',
+      joiner: '/join.onnx',
+      tokens: '/tokens.txt',
+    });
+    expect(bridge.modelType).toBe('transducer');
+  });
+
+  it('buildStreamingSttInitBridgeOptions maps custom streaming options to modelPaths', async () => {
+    const bridge = await buildStreamingSttInitBridgeOptions(
+      {
+        initMode: 'custom',
+        modelType: 'transducer',
+        customConfig: {
+          encoder: { kind: 'fs', path: '/enc.onnx' },
+          decoder: { kind: 'fs', path: '/dec.onnx' },
+          joiner: { kind: 'fs', path: '/join.onnx' },
+          tokens: { kind: 'fs', path: '/tokens.txt' },
+        },
+      },
+      'transducer'
+    );
     expect(bridge.initMode).toBe('custom');
     expect(bridge.modelDir).toBeUndefined();
     expect(bridge.modelPaths).toEqual({

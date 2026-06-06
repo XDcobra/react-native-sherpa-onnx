@@ -590,6 +590,8 @@ export type {
   OnlineSTTModelType,
   LiveSttEngine,
   StreamingSttInitOptions,
+  StreamingSttAutoInitOptions,
+  StreamingSttCustomInitOptions,
   SttPipelineHandle,
   SttPipelineOptions,
   EndpointConfig,
@@ -627,6 +629,18 @@ export {
   assertSttCustomConfig,
   resolveSttCustomConfigPaths,
 } from './customConfig';
+export type {
+  StreamingSttCustomConfig,
+  StreamingSttCustomConfigByModelType,
+  StreamingSttCustomPathKey,
+  StreamingTransducerCustomConfig,
+  StreamingParaformerCustomConfig,
+  StreamingSingleModelCustomConfig,
+} from './streamingCustomConfig';
+export {
+  assertStreamingSttCustomConfig,
+  resolveStreamingSttCustomConfigPaths,
+} from './streamingCustomConfig';
 export type { SttDetectModelResult } from '../types/modelDetect';
 export {
   STT_MODEL_TYPES,
