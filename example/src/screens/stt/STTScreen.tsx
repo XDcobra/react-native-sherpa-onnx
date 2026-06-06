@@ -12,30 +12,15 @@ import { styles } from './STTScreen.styles';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
-import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
-import {
+  assertSttCustomConfig,
   createSTT,
   detectSttModel,
+  type SttCustomConfig,
   type STTModelType,
 } from 'react-native-sherpa-onnx/stt';
 import type { SttEngine } from 'react-native-sherpa-onnx/stt';
 import { getSttCache, setSttCache, clearSttCache } from '../../engineCache';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
+import { getModelDisplayName, toDetectSource } from '../../modelConfig';
 import { getAudioFilesForModel } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
@@ -62,8 +47,20 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  ModelFolderGrid,
+  SttCustomInitForm,
+  type ModelInitMode,
+  type SttCustomInitFormState,
+} from '../../components/modelInit';
+import { useSttModelCatalog } from '../../hooks/useSttModelCatalog';
+import { fillSttCustomConfigFromModelFolder } from '../../utils/sttCustomInitFill';
 
-const PAD_PACK_NAME = 'sherpa_models';
+const DEFAULT_CUSTOM_INIT: SttCustomInitFormState = {
+  modelType: 'transducer',
+  fileSources: {},
+};
 
 type SttTranscriptionResult = {
   text: string;
@@ -85,12 +82,22 @@ let gSttOfflineInputBuffer: OfflineAudioBufferInfo | null = null;
 let gSttOfflineTextBuffers: SttOfflineTextBufferState[] = [];
 
 export default function STTScreen() {
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
+  const {
+    entries: catalogEntries,
+    loading: loadingModels,
+    error: catalogError,
+    resolveModelPath,
+  } = useSttModelCatalog();
+
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<SttCustomInitFormState>(DEFAULT_CUSTOM_INIT);
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
   const [initResult, setInitResult] = useState<string | null>(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
   );
@@ -125,25 +132,20 @@ export default function STTScreen() {
   const sttEngineRef = useRef<SttEngine | null>(null);
   const STT_NUM_THREADS = 2;
 
+  const isEngineInitialized = initializedSummary != null;
+
   const availableAudioFiles = useMemo(
     () => (currentModelFolder ? getAudioFilesForModel(currentModelFolder) : []),
     [currentModelFolder]
   );
 
-  // Load available models on mount
   useEffect(() => {
-    loadAvailableModels();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Stt) return;
-      loadAvailableModels().catch(() => {
-        // ignore refresh errors
-      });
-    });
-    return unsubscribe;
-  }, []);
+    if (!catalogError) {
+      return;
+    }
+    setErrorSource('init');
+    setError(catalogError);
+  }, [catalogError]);
 
   // Restore persisted instance state when entering the screen (no cleanup on unmount)
   useEffect(() => {
@@ -154,6 +156,11 @@ export default function STTScreen() {
       setSelectedModelForInit(cached.modelFolder);
       setDetectedModels(cached.detectedModels);
       setSelectedModelType(cached.selectedModelType);
+      setInitializedSummary(
+        cached.modelFolder === 'custom'
+          ? `custom:${cached.selectedModelType ?? 'unknown'}`
+          : `auto:${getModelDisplayName(cached.modelFolder)}`
+      );
       setInitResult(
         `Initialized: ${getModelDisplayName(
           cached.modelFolder
@@ -164,86 +171,42 @@ export default function STTScreen() {
     }
   }, []);
 
-  const loadAvailableModels = async () => {
-    setLoadingModels(true);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const assetModels = await listAssetModels();
-      const sttFolders = assetModels
-        .filter((model) => model.hint === 'stt')
-        .map((model) => model.folder);
-      const downloadedModels = await listDownloadedModels(ModelCategory.Stt);
-      const downloadedFolders = downloadedModels.map((model) => model.id);
-
-      // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => m.hint === 'stt')
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-          console.log(
-            'STTScreen: Found PAD/filesystem STT models:',
-            padFolders,
-            'at',
-            padPath
-          );
-        }
-      } catch (e) {
-        console.warn('STTScreen: PAD/listModelsAtPath failed', e);
-        padFolders = [];
+  const formatInitError = (err: unknown): string => {
+    if (err instanceof Error) {
+      let errorMessage = err.message;
+      if ('code' in err) {
+        errorMessage = `[${String(err.code)}] ${errorMessage}`;
       }
-      setPadModelsPath(resolvedPadPath);
-
-      // Merge: PAD folders, then bundled asset folders (no duplicates)
-      const combined = [
-        ...padFolders,
-        ...sttFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedFolders.filter(
-          (f) => !padFolders.includes(f) && !sttFolders.includes(f)
-        ),
-      ];
-
-      setPadModelIds(padFolders);
-      setDownloadedModelIds(downloadedFolders);
-      if (sttFolders.length > 0) {
-        console.log('STTScreen: Found asset models:', sttFolders);
+      if (err.stack) {
+        console.error('Stack trace:', err.stack);
       }
-      setAvailableModels(combined);
-
-      if (combined.length === 0) {
-        setErrorSource('init');
-        setError(
-          'No STT models found. Use bundled assets, downloaded models, or PAD models. See STT_MODEL_SETUP.md'
-        );
-      }
-    } catch (err) {
-      console.error('STTScreen: Failed to load models:', err);
-      setErrorSource('init');
-      setError('Failed to load available models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
+      return errorMessage;
     }
+    if (typeof err === 'object' && err !== null) {
+      const errorObj = err as {
+        message?: string;
+        code?: string;
+        userInfo?: { NSLocalizedDescription?: string };
+      };
+      let errorMessage =
+        errorObj.message ||
+        errorObj.userInfo?.NSLocalizedDescription ||
+        JSON.stringify(err);
+      if (errorObj.code) {
+        errorMessage = `[${errorObj.code}] ${errorMessage}`;
+      }
+      return errorMessage;
+    }
+    return String(err);
   };
 
-  const resolveSttModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(modelFolder, ModelCategory.Stt, padModelsPath)
-        : getFileModelPath(modelFolder, ModelCategory.Stt);
+  const releaseCurrentEngine = async () => {
+    const previous = sttEngineRef.current;
+    if (previous) {
+      await previous.destroy();
+      sttEngineRef.current = null;
+      clearSttCache();
     }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Stt);
-    }
-    return getAssetModelPath(modelFolder);
   };
 
   const appendOfflineTextBuffer = useCallback(
@@ -283,17 +246,12 @@ export default function STTScreen() {
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
+    setInitializedSummary(null);
 
     try {
-      // Release previous engine if switching to another model
-      const previous = sttEngineRef.current;
-      if (previous) {
-        await previous.destroy();
-        sttEngineRef.current = null;
-        clearSttCache();
-      }
+      await releaseCurrentEngine();
 
-      const modelPath = resolveSttModelPath(modelFolder);
+      const modelPath = resolveModelPath(modelFolder);
 
       const engine = await createSTT({
         modelSource: modelPath,
@@ -329,8 +287,9 @@ export default function STTScreen() {
       }
 
       const detectedTypes = normalizedDetected.map((m) => m.type).join(', ');
+      setInitializedSummary(`auto:${getModelDisplayName(modelFolder)}`);
       setInitResult(
-        `Initialized: ${getModelDisplayName(
+        `Initialized (auto): ${getModelDisplayName(
           modelFolder
         )}\nDetected models: ${detectedTypes}`
       );
@@ -344,32 +303,8 @@ export default function STTScreen() {
 
       setTranscriptionResult(null);
     } catch (err) {
-      // Log full error details for debugging
       console.error('Initialization error:', err);
-
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        // Include error code if available (React Native error objects)
-        if ('code' in err) {
-          errorMessage = `[${err.code}] ${errorMessage}`;
-        }
-        // Include stack trace in console
-        if (err.stack) {
-          console.error('Stack trace:', err.stack);
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        // Handle React Native error objects
-        const errorObj = err as any;
-        errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
-          JSON.stringify(err);
-        if (errorObj.code) {
-          errorMessage = `[${errorObj.code}] ${errorMessage}`;
-        }
-      }
-
+      const errorMessage = formatInitError(err);
       setErrorSource('init');
       setError(errorMessage);
       setInitResult(
@@ -380,10 +315,104 @@ export default function STTScreen() {
     }
   };
 
+  const handleFillFromSelectedModel = async () => {
+    const modelFolder = selectedModelForInit;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
+    }
+
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    setErrorSource(null);
+    try {
+      const modelPath = resolveModelPath(modelFolder);
+      const fillResult = await fillSttCustomConfigFromModelFolder(modelPath, {
+        preferInt8: true,
+        modelTypeOverride: customInitForm.modelType,
+      });
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (err) {
+      const message = formatInitError(err);
+      setCustomFillHint(null);
+      setErrorSource('init');
+      setError(message);
+    } finally {
+      setCustomFillLoading(false);
+    }
+  };
+
+  const handlePrepareScatteredTest = () => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick each file from different locations, then Initialize.'
+    );
+  };
+
+  const handleInitializeCustom = async () => {
+    setLoading(true);
+    setError(null);
+    setErrorSource(null);
+    setInitResult(null);
+    setDetectedModels([]);
+    setInitializedSummary(null);
+
+    try {
+      await releaseCurrentEngine();
+
+      const customConfig = {
+        ...customInitForm.fileSources,
+      } as SttCustomConfig;
+      assertSttCustomConfig(customConfig as unknown as Record<string, unknown>);
+
+      const engine = await createSTT({
+        initMode: 'custom',
+        modelType: customInitForm.modelType,
+        customConfig,
+        numThreads: STT_NUM_THREADS,
+      });
+
+      sttEngineRef.current = engine;
+      setCurrentModelFolder(null);
+      setSelectedModelType(customInitForm.modelType);
+      setInitializedSummary(`custom:${customInitForm.modelType}`);
+      setInitResult(
+        `Initialized (custom): ${
+          customInitForm.modelType
+        }\nFiles: ${Object.keys(customConfig).join(', ')}`
+      );
+
+      setSttCache(engine, 'custom', [], customInitForm.modelType);
+
+      setTranscriptionResult(null);
+    } catch (err) {
+      console.error('Custom initialization error:', err);
+      const errorMessage = formatInitError(err);
+      setErrorSource('init');
+      setError(errorMessage);
+      setInitResult(`Custom initialization failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleTranscribe = async () => {
-    if (!currentModelFolder) {
+    if (!selectedModelType) {
       setErrorSource('transcribe');
-      setError('Please select a model first');
+      setError('Please initialize a model first');
       return;
     }
 
@@ -526,6 +555,8 @@ export default function STTScreen() {
     setDetectedModels([]);
     setSelectedModelType(null);
     setInitResult(null);
+    setInitializedSummary(null);
+    setCustomFillHint(null);
     const prevBuf = gSttOfflineInputBuffer;
     gSttOfflineInputBuffer = null;
     setOfflineInputBuffer(null);
@@ -552,7 +583,7 @@ export default function STTScreen() {
           style={styles.scrollView}
           keyboardShouldPersistTaps="handled"
         >
-          {currentModelFolder != null && (
+          {isEngineInitialized && (
             <TouchableOpacity
               style={styles.freeButton}
               onPress={handleFree}
@@ -563,15 +594,22 @@ export default function STTScreen() {
           )}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize Model</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={loading || customFillLoading}
+            />
             <Text style={styles.hint}>
-              Select a model, then tap "Use model".
+              {initMode === 'auto'
+                ? 'Select a model folder, then tap "Use model" for auto-detection.'
+                : 'Choose model type and pick files (or Fill from a catalog folder), then Initialize.'}
             </Text>
 
-            {(currentModelFolder || selectedModelForInit) && (
+            {(initializedSummary || selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  {currentModelFolder
-                    ? `Initialized: ${getModelDisplayName(currentModelFolder)}`
+                  {initializedSummary
+                    ? `Initialized: ${initializedSummary}`
                     : `Selected: ${
                         selectedModelForInit
                           ? getModelDisplayName(selectedModelForInit)
@@ -581,113 +619,67 @@ export default function STTScreen() {
               </View>
             )}
 
-            {loadingModels ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>
-                  Discovering available models...
-                </Text>
-              </View>
-            ) : availableModels.length === 0 ? (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No models found. Please add STT models as bundled assets,
-                  downloaded models, or PAD models. See STT_MODEL_SETUP.md for
-                  details.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.modelButtons}>
-                {availableModels.map((modelFolder) => {
-                  const isSelected = selectedModelForInit === modelFolder;
-                  const isInitialized = currentModelFolder === modelFolder;
-                  return (
-                    <TouchableOpacity
-                      key={modelFolder}
-                      style={[
-                        styles.modelButton,
-                        isSelected && styles.modelButtonActive,
-                        isInitialized && styles.modelButtonInitialized,
-                        loading && styles.buttonDisabled,
-                      ]}
-                      onPress={() => setSelectedModelForInit(modelFolder)}
-                      disabled={loading}
-                    >
-                      <Text
-                        style={[
-                          styles.modelButtonText,
-                          isSelected && styles.modelButtonTextActive,
-                        ]}
-                      >
-                        {getModelDisplayName(modelFolder)}
-                      </Text>
-                      {(() => {
-                        const sizeHintInfo = getSizeHint(modelFolder);
-                        const qualityHintInfo = getQualityHint(modelFolder);
+            <ModelFolderGrid
+              entries={catalogEntries}
+              selectedId={selectedModelForInit}
+              initializedId={currentModelFolder}
+              onSelect={setSelectedModelForInit}
+              loading={loadingModels}
+              disabled={loading || customFillLoading}
+              emptyMessage="No models found. Add bundled, downloaded, or PAD STT models."
+            />
 
-                        return (
-                          <View style={styles.modelHintRow}>
-                            <View style={styles.modelHintGroup}>
-                              <Ionicons
-                                name={sizeHintInfo.iconName as any}
-                                size={12}
-                                color={sizeHintInfo.iconColor}
-                              />
-                              <Text style={styles.modelHintText}>
-                                {sizeHintInfo.tier}
-                              </Text>
-                            </View>
+            {initMode === 'custom' ? (
+              <SttCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelForInit}
+                onFillFromSelectedModel={handleFillFromSelectedModel}
+                onPrepareScatteredTest={handlePrepareScatteredTest}
+                fillLoading={customFillLoading}
+                disabled={loading}
+                fillHint={customFillHint}
+              />
+            ) : null}
 
-                            <View style={styles.modelHintGroup}>
-                              <Ionicons
-                                name={qualityHintInfo.iconName as any}
-                                size={12}
-                                color={qualityHintInfo.iconColor}
-                              />
-                              <Text style={styles.modelHintText}>
-                                {qualityHintInfo.text.split(',')[0]}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })()}
-                      <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-
-            <>
-              <TouchableOpacity
-                style={[
-                  styles.button,
-                  styles.applyButton,
-                  loading && styles.buttonDisabled,
-                ]}
-                onPress={() =>
-                  handleInitialize(
-                    selectedModelForInit ?? currentModelFolder ?? ''
-                  )
+            <TouchableOpacity
+              style={[
+                styles.button,
+                styles.applyButton,
+                loading && styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                if (initMode === 'custom') {
+                  handleInitializeCustom();
+                  return;
                 }
-                disabled={
-                  loading || (!selectedModelForInit && !currentModelFolder)
-                }
-              >
-                {loading ? (
-                  <View style={styles.applyButtonContent}>
-                    <ActivityIndicator
-                      size="small"
-                      color="#FFFFFF"
-                      style={styles.applyButtonSpinner}
-                    />
-                    <Text style={styles.buttonText}>Initializing…</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.buttonText}>Use model</Text>
-                )}
-              </TouchableOpacity>
-            </>
+                handleInitialize(
+                  selectedModelForInit ?? currentModelFolder ?? ''
+                );
+              }}
+              disabled={
+                loading ||
+                customFillLoading ||
+                (initMode === 'auto'
+                  ? !selectedModelForInit && !currentModelFolder
+                  : false)
+              }
+            >
+              {loading ? (
+                <View style={styles.applyButtonContent}>
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                    style={styles.applyButtonSpinner}
+                  />
+                  <Text style={styles.buttonText}>Initializing…</Text>
+                </View>
+              ) : (
+                <Text style={styles.buttonText}>
+                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
+                </Text>
+              )}
+            </TouchableOpacity>
 
             {initResult && !(error && errorSource === 'init') && (
               <View style={styles.resultContainer}>
@@ -769,9 +761,7 @@ export default function STTScreen() {
             {!selectedModelType && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  {!currentModelFolder
-                    ? 'Please initialize a model directory first'
-                    : 'Please select a model type first'}
+                  Please initialize a model first
                 </Text>
               </View>
             )}
