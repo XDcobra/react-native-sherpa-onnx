@@ -28,6 +28,29 @@ Unified cross-feature detection: [model-detect.md](model-detect.md).
 
 ---
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use custom init when the CT-Transformer ONNX file is **not** in a detectable folder layout.
+
+- Set `initMode: 'custom'` and `modelType: 'ct_transformer'` (concrete, not `'auto'`).
+- Pass `customConfig` with a single **`ct_transformer`** {@link FileSource} pointing at the `.onnx` file.
+- Validation uses native `validate-punctuation`. See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createOfflinePunctuation({
+  initMode: 'custom',
+  modelType: 'ct_transformer',
+  customConfig: {
+    ct_transformer: { kind: 'fs', path: '/data/models/ct-punct.onnx' },
+  },
+  numThreads: 2,
+});
+```
+
+---
+
 ## Quick start
 
 `textIn` is **populated**; `textOut` is **empty** before the call. Both are offline text buffers. Raw string ids are rejected early with **`TEXT_*`** or **`PUNCTUATION_*`** error codes as appropriate.

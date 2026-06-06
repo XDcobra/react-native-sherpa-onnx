@@ -43,6 +43,26 @@ if (!det.success || det.modelType !== 'cnn_bilstm' || !det.isStreaming) {
 }
 ```
 
+---
+
+## Custom initialization (`initMode: 'custom'`)
+
+Streaming punctuation uses a separate init union from offline. Pass `initMode: 'custom'`, concrete `modelType: 'cnn_bilstm'`, and both required paths in `customConfig`. See [Punctuation offline — Custom initialization](punctuation-offline.md#custom-initialization-initmode-custom) for validation rules (offline uses one key; streaming uses two).
+
+```ts
+import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createStreamingPunctuation({
+  initMode: 'custom',
+  modelType: 'cnn_bilstm',
+  customConfig: {
+    cnn_bilstm: { kind: 'fs', path: '/data/models/cnn.onnx' },
+    bpe_vocab: { kind: 'fs', path: '/data/models/bpe.vocab' },
+  },
+  provider: 'cpu',
+});
+```
+
 ## Quick start
 
 ```ts

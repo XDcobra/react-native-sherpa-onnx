@@ -4903,20 +4903,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOfflinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     punctuationHelper.initializeOfflinePunctuation(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -4962,20 +4954,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOnlinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     onlinePunctuationHelper.initializeOnlinePunctuation(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }

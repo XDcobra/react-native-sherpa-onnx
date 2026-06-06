@@ -439,6 +439,37 @@ const enhancement = await createEnhancement({
 });
 ```
 
+### Custom Punctuation init (skip auto-detection)
+
+Offline CT punctuation: `initMode: 'custom'`, `modelType: 'ct_transformer'`, and `customConfig` with **`ct_transformer`** {@link FileSource}. See [Punctuation offline custom initialization](punctuation-offline.md#custom-initialization-initmode-custom).
+
+Streaming CNN-BiLSTM: `initMode: 'custom'`, `modelType: 'cnn_bilstm'`, and `customConfig` with **`cnn_bilstm`** + **`bpe_vocab`** {@link FileSource} paths. See [Punctuation streaming custom initialization](punctuation-streaming.md#custom-initialization-initmode-custom).
+
+```typescript
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const offline = await createOfflinePunctuation({
+  initMode: 'custom',
+  modelType: 'ct_transformer',
+  customConfig: {
+    ct_transformer: { kind: 'fs', path: '/data/models/ct.onnx' },
+  },
+});
+```
+
+```typescript
+import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const streaming = await createStreamingPunctuation({
+  initMode: 'custom',
+  modelType: 'cnn_bilstm',
+  customConfig: {
+    cnn_bilstm: { kind: 'fs', path: '/data/models/cnn.onnx' },
+    bpe_vocab: { kind: 'fs', path: '/data/models/bpe.vocab' },
+  },
+});
+```
+
 ```typescript
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 

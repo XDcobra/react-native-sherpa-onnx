@@ -4,9 +4,12 @@ import android.os.SystemClock
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.k2fsa.sherpa.onnx.OfflinePunctuation
 import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig
 import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig
+import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.punctuation.config.PunctuationInitOptionsParser
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.text.pipeline.TextErrorCodes
@@ -129,87 +132,32 @@ class SherpaOnnxPunctuationHelper(
 
   fun initializeOfflinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     if (instanceId.isBlank()) {
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "instanceId is required", null)
       return
     }
-    if (modelDir.isBlank()) {
-      promise.reject(PunctuationErrorCodes.INIT_ERROR, "modelDir is required", null)
+    val parsed = PunctuationInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        },
+        null
+      )
       return
     }
     try {
-      // Always resolve **offline CT** for this API (no native `auto` that prefers CNN).
-      val detect = nativeDetectPunctuationModel(modelDir, null, "ct_transformer")
-      if (detect == null) {
-        promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
-        return
+      if (parsed.initMode == "custom") {
+        initializeOfflinePunctuationCustom(instanceId, parsed, promise)
+      } else {
+        initializeOfflinePunctuationAuto(instanceId, parsed, promise)
       }
-      val success = detect["success"] as? Boolean ?: false
-      if (!success) {
-        val reason = (detect["error"] as? String)?.trim()
-        promise.reject(
-          PunctuationErrorCodes.INIT_ERROR,
-          if (reason.isNullOrEmpty()) "Punctuation: model is not a valid offline CT-Transformer layout for this directory" else reason
-        )
-        return
-      }
-      val resolvedType = (detect["modelType"] as? String)?.trim() ?: ""
-      if (resolvedType != "ct_transformer") {
-        promise.reject(
-          PunctuationErrorCodes.INIT_ERROR,
-          "Offline punctuation requires ct_transformer; native detect reported: $resolvedType"
-        )
-        return
-      }
-      @Suppress("UNCHECKED_CAST")
-      val paths = detect["paths"] as? HashMap<*, *>
-      val ctPath = (paths?.get("ct_transformer") as? String)?.trim() ?: ""
-      if (ctPath.isEmpty()) {
-        promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation: missing ct_transformer onnx path in detect result", null)
-        return
-      }
-      // Optional: ensure requested modelType in options is compatible (v1: only auto / ct)
-      val req = (modelType ?: "auto").lowercase()
-      if (req != "auto" && req != "ct_transformer") {
-        promise.reject(PunctuationErrorCodes.INIT_ERROR, "Unsupported modelType for offline engine: $modelType", null)
-        return
-      }
-
-      val threads = (numThreads ?: 1.0).toInt().coerceAtLeast(1)
-      val prov = provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu"
-      val debugVal = debug ?: false
-      val modelConfig = OfflinePunctuationModelConfig(
-        ctTransformer = ctPath,
-        numThreads = threads,
-        debug = debugVal,
-        provider = prov
-      )
-      val config = OfflinePunctuationConfig(model = modelConfig)
-      val eng = OfflinePunctuation(assetManager = null, config = config)
-      offlineEngines[instanceId]?.release()
-      offlineEngines[instanceId] = eng
-
-      val out = Arguments.createMap()
-      out.putBoolean("success", true)
-      out.putString("modelType", "ct_transformer")
-      @Suppress("UNCHECKED_CAST")
-      val dms = detect["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
-      val arr = Arguments.createArray()
-      for (m in dms) {
-        val w = Arguments.createMap()
-        w.putString("type", m["type"] ?: "")
-        w.putString("modelDir", m["modelDir"] ?: "")
-        arr.pushMap(w)
-      }
-      out.putArray("detectedModels", arr)
-      promise.resolve(out)
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "initializeOfflinePunctuation", e)
       promise.reject(
@@ -218,6 +166,143 @@ class SherpaOnnxPunctuationHelper(
         e
       )
     }
+  }
+
+  private fun initializeOfflinePunctuationCustom(
+    instanceId: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    val modelTypeStr = parsed.modelType.trim()
+    if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "custom init requires a concrete modelType",
+        null
+      )
+      return
+    }
+    if (modelTypeStr != "ct_transformer") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "Unsupported modelType for offline engine: $modelTypeStr",
+        null
+      )
+      return
+    }
+
+    val pathStrings = parsed.modelPaths.orEmpty()
+    ModelPathValidationNative.validate("punctuation", modelTypeStr, pathStrings)?.let { errorMsg ->
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, errorMsg, null)
+      return
+    }
+
+    finishInitializeOfflineWithPaths(
+      instanceId = instanceId,
+      ctPath = pathStrings["ct_transformer"]?.trim().orEmpty(),
+      parsed = parsed,
+      detectedModels = arrayListOf(
+        hashMapOf("type" to "ct_transformer", "modelDir" to "custom")
+      ),
+      promise = promise
+    )
+  }
+
+  private fun initializeOfflinePunctuationAuto(
+    instanceId: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    val modelDir = parsed.modelDir?.trim().orEmpty()
+    if (modelDir.isEmpty()) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "modelDir is required", null)
+      return
+    }
+
+    // Always resolve **offline CT** for this API (no native `auto` that prefers CNN).
+    val detect = nativeDetectPunctuationModel(modelDir, null, "ct_transformer")
+    if (detect == null) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
+      return
+    }
+    val success = detect["success"] as? Boolean ?: false
+    if (!success) {
+      val reason = (detect["error"] as? String)?.trim()
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        if (reason.isNullOrEmpty()) "Punctuation: model is not a valid offline CT-Transformer layout for this directory" else reason
+      )
+      return
+    }
+    val resolvedType = (detect["modelType"] as? String)?.trim() ?: ""
+    if (resolvedType != "ct_transformer") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "Offline punctuation requires ct_transformer; native detect reported: $resolvedType"
+      )
+      return
+    }
+    @Suppress("UNCHECKED_CAST")
+    val paths = detect["paths"] as? HashMap<*, *>
+    val ctPath = (paths?.get("ct_transformer") as? String)?.trim() ?: ""
+    if (ctPath.isEmpty()) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation: missing ct_transformer onnx path in detect result", null)
+      return
+    }
+    val req = parsed.modelType.lowercase()
+    if (req != "auto" && req != "ct_transformer") {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Unsupported modelType for offline engine: ${parsed.modelType}", null)
+      return
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val dms = detect["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+    finishInitializeOfflineWithPaths(
+      instanceId = instanceId,
+      ctPath = ctPath,
+      parsed = parsed,
+      detectedModels = dms,
+      promise = promise
+    )
+  }
+
+  private fun finishInitializeOfflineWithPaths(
+    instanceId: String,
+    ctPath: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    detectedModels: ArrayList<HashMap<String, String>>,
+    promise: Promise
+  ) {
+    if (ctPath.isEmpty()) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation: missing ct_transformer onnx path", null)
+      return
+    }
+
+    val threads = parsed.numThreads.toInt().coerceAtLeast(1)
+    val prov = parsed.provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu"
+    val modelConfig = OfflinePunctuationModelConfig(
+      ctTransformer = ctPath,
+      numThreads = threads,
+      debug = parsed.debug,
+      provider = prov
+    )
+    val config = OfflinePunctuationConfig(model = modelConfig)
+    val eng = OfflinePunctuation(assetManager = null, config = config)
+    offlineEngines[instanceId]?.release()
+    offlineEngines[instanceId] = eng
+
+    val out = Arguments.createMap()
+    out.putBoolean("success", true)
+    out.putString("modelType", "ct_transformer")
+    val arr = Arguments.createArray()
+    for (m in detectedModels) {
+      val w = Arguments.createMap()
+      w.putString("type", m["type"] ?: "")
+      w.putString("modelDir", m["modelDir"] ?: "")
+      arr.pushMap(w)
+    }
+    out.putArray("detectedModels", arr)
+    promise.resolve(out)
   }
 
   private fun getEngine(instanceId: String): OfflinePunctuation? = offlineEngines[instanceId]

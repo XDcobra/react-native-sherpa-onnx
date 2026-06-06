@@ -1,6 +1,8 @@
 #import "../../SherpaOnnx.h"
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
+#include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
@@ -29,6 +31,43 @@ static NSString *kPunctErr = @"PUNCTUATION_ERROR";
 static NSString *kNotFound = @"PUNCTUATION_INSTANCE_NOT_FOUND";
 static NSString *kTxtKind = @"TEXT_BUFFER_KIND_MISMATCH";
 static NSString *kTxtState = @"TEXT_INVALID_STATE";
+
+static void FillPunctuationModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::PunctuationModelPaths &paths) {
+  if (![dict isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  std::map<std::string, std::string> pathMap;
+  for (NSString *key in dict) {
+    id value = dict[key];
+    if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+      pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+    }
+  }
+  sherpaonnx::FillPunctuationModelPathsFromStringMap(pathMap, paths);
+}
+
+struct PunctuationInitScalars {
+  int32_t numThreads = 1;
+  bool debug = false;
+  std::string provider = "cpu";
+};
+
+static PunctuationInitScalars ParsePunctuationInitScalars(NSDictionary *options) {
+  PunctuationInitScalars scalars;
+  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
+    scalars.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  }
+  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
+    scalars.debug = [options[@"debug"] boolValue];
+  }
+  NSString *provider = options[@"provider"];
+  if (provider != nil && provider.length > 0) {
+    scalars.provider = std::string([provider UTF8String]);
+  }
+  return scalars;
+}
 
 static std::string punct_resolve_text_input_normalization(NSString *mode) {
   if (mode == nil || mode.length == 0) {
@@ -312,54 +351,121 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
 @implementation SherpaOnnx (OnlinePunctuation)
 
 - (void)initializeOnlinePunctuation:(NSString *)instanceId
-                            modelDir:(NSString *)modelDir
-                           modelType:(NSString * _Nullable)modelType
-                          numThreads:(NSNumber *)numThreads
-                            provider:(NSString *)provider
-                               debug:(NSNumber *)debug
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
+                           options:(NSDictionary *)options
+                           resolve:(RCTPromiseResolveBlock)resolve
+                            reject:(RCTPromiseRejectBlock)reject
 {
   if (instanceId == nil || instanceId.length == 0) {
     reject(kInitErr, @"instanceId is required", nil);
     return;
   }
-  if (modelDir == nil || modelDir.length == 0) {
-    reject(kInitErr, @"modelDir is required", nil);
-    return;
-  }
-  NSString *req = modelType == nil ? @"auto" : [[modelType stringByTrimmingCharactersInSet:
-      [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
-  if (!([req isEqualToString:@"auto"] || [req isEqualToString:@"cnn_bilstm"])) {
-    reject(kInitErr, @"Streaming punctuation requires cnn_bilstm or auto", nil);
+  if (options == nil) {
+    reject(kInitErr, @"options is required", nil);
     return;
   }
 
+  NSString *initMode = options[@"initMode"];
+  if (initMode == nil || initMode.length == 0) {
+    initMode = @"auto";
+  }
+  const bool isCustomInit = [initMode isEqualToString:@"custom"];
+  const PunctuationInitScalars scalars = ParsePunctuationInitScalars(options);
+
   @try {
-    std::string idStr = instanceId.UTF8String ?: "";
-    std::string dirStr = modelDir.UTF8String ?: "";
-    auto det = sherpaonnx::DetectPunctuationModel(
-        std::optional<std::string>(dirStr),
-        std::nullopt,
-        "cnn_bilstm");
-    if (!det.ok || det.selectedKind != sherpaonnx::PunctuationModelKind::kCnnBilstm || !det.isStreaming) {
-      NSString *msg = det.error.empty()
-          ? @"Punctuation: model is not a valid online CNN-BiLSTM layout"
-          : [NSString stringWithUTF8String:det.error.c_str()];
-      reject(kInitErr, msg, nil);
-      return;
+    std::string cnnPath;
+    std::string vocabPath;
+    NSMutableArray *models = [NSMutableArray array];
+
+    if (isCustomInit) {
+      NSString *modelType = options[@"modelType"];
+      if (modelType == nil || modelType.length == 0 || [modelType isEqualToString:@"auto"]) {
+        reject(kInitErr, @"modelType is required for initMode custom", nil);
+        return;
+      }
+      NSString *req = [[modelType stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+      if (![req isEqualToString:@"cnn_bilstm"]) {
+        reject(kInitErr, @"Streaming punctuation requires cnn_bilstm", nil);
+        return;
+      }
+      id pathsRaw = options[@"modelPaths"];
+      NSDictionary *pathsDict =
+          [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+      if (pathsDict == nil || pathsDict.count == 0) {
+        reject(kInitErr, @"modelPaths is required for initMode custom", nil);
+        return;
+      }
+
+      sherpaonnx::PunctuationModelPaths paths;
+      FillPunctuationModelPathsFromDict(pathsDict, paths);
+      auto validation = sherpaonnx::ValidatePunctuationPaths(
+          sherpaonnx::PunctuationModelKind::kCnnBilstm,
+          paths,
+          "custom");
+      if (!validation.ok) {
+        NSString *msg = validation.error.empty()
+            ? @"Punctuation: custom path validation failed"
+            : [NSString stringWithUTF8String:validation.error.c_str()];
+        reject(kInitErr, msg, nil);
+        return;
+      }
+      cnnPath = paths.cnn_bilstm;
+      vocabPath = paths.bpe_vocab;
+      [models addObject:@{@"type": @"cnn_bilstm", @"modelDir": @"custom"}];
+    } else {
+      NSString *modelDir = options[@"modelDir"];
+      if (modelDir == nil || modelDir.length == 0) {
+        reject(kInitErr, @"modelDir is required for initMode auto", nil);
+        return;
+      }
+      NSString *modelType = options[@"modelType"];
+      NSString *req = modelType == nil ? @"auto" : [[modelType stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+      if (!([req isEqualToString:@"auto"] || [req isEqualToString:@"cnn_bilstm"])) {
+        reject(kInitErr, @"Streaming punctuation requires cnn_bilstm or auto", nil);
+        return;
+      }
+
+      std::string idStr = instanceId.UTF8String ?: "";
+      std::string dirStr = modelDir.UTF8String ?: "";
+      auto det = sherpaonnx::DetectPunctuationModel(
+          std::optional<std::string>(dirStr),
+          std::nullopt,
+          "cnn_bilstm");
+      if (!det.ok || det.selectedKind != sherpaonnx::PunctuationModelKind::kCnnBilstm || !det.isStreaming) {
+        NSString *msg = det.error.empty()
+            ? @"Punctuation: model is not a valid online CNN-BiLSTM layout"
+            : [NSString stringWithUTF8String:det.error.c_str()];
+        reject(kInitErr, msg, nil);
+        return;
+      }
+      if (det.paths.cnn_bilstm.empty() || det.paths.bpe_vocab.empty()) {
+        reject(kInitErr, @"Punctuation: missing cnn_bilstm or bpe.vocab path", nil);
+        return;
+      }
+      cnnPath = det.paths.cnn_bilstm;
+      vocabPath = det.paths.bpe_vocab;
+      for (const auto &m : det.detectedModels) {
+        [models addObject:@{
+          @"type": [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
+          @"modelDir": [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @""
+        }];
+      }
+      (void)idStr;
     }
-    if (det.paths.cnn_bilstm.empty() || det.paths.bpe_vocab.empty()) {
+
+    if (cnnPath.empty() || vocabPath.empty()) {
       reject(kInitErr, @"Punctuation: missing cnn_bilstm or bpe.vocab path", nil);
       return;
     }
 
+    std::string idStr = instanceId.UTF8String ?: "";
     sherpa_onnx::cxx::OnlinePunctuationConfig cfg;
-    cfg.model.cnn_bilstm = det.paths.cnn_bilstm;
-    cfg.model.bpe_vocab = det.paths.bpe_vocab;
-    cfg.model.num_threads = numThreads != nil ? std::max(1, numThreads.intValue) : 1;
-    cfg.model.debug = debug != nil && debug.boolValue;
-    cfg.model.provider = provider.length > 0 ? provider.UTF8String : "cpu";
+    cfg.model.cnn_bilstm = cnnPath;
+    cfg.model.bpe_vocab = vocabPath;
+    cfg.model.num_threads = scalars.numThreads;
+    cfg.model.debug = scalars.debug;
+    cfg.model.provider = scalars.provider;
     auto created = sherpa_onnx::cxx::OnlinePunctuation::Create(cfg);
     auto ptr = std::make_shared<sherpa_onnx::cxx::OnlinePunctuation>(std::move(created));
     {
@@ -367,13 +473,6 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
       g_punct_online[idStr] = ptr;
     }
 
-    NSMutableArray *models = [NSMutableArray array];
-    for (const auto &m : det.detectedModels) {
-      [models addObject:@{
-        @"type": [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
-        @"modelDir": [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @""
-      }];
-    }
     resolve(@{
       @"success": @YES,
       @"modelType": @"cnn_bilstm",

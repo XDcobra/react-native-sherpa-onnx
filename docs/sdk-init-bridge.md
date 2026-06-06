@@ -4,8 +4,8 @@ The React Native package uses two layers for engine initialization:
 
 | Layer | Examples | Shape |
 |-------|----------|--------|
-| **Public** | `createTTS`, `createSTT`, `createStreamingSTT`, `createStreamingVAD`, `createEnhancement`, `createStreamingEnhancement` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`, `VADInitializeOptions`, `EnhancementInitializeOptions`) |
-| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt`, `initializeVad`, `initializeEnhancement`, `initializeOnlineEnhancement` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
+| **Public** | `createTTS`, `createSTT`, `createStreamingSTT`, `createStreamingVAD`, `createEnhancement`, `createStreamingEnhancement`, `createOfflinePunctuation`, `createStreamingPunctuation` | Typed init unions per feature |
+| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt`, `initializeVad`, `initializeEnhancement`, `initializeOnlineEnhancement`, `initializeOfflinePunctuation`, `initializeOnlinePunctuation` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
 
 ## Why two layers?
 
@@ -23,6 +23,8 @@ The React Native package uses two layers for engine initialization:
 | `initializeVad(instanceId, options)` | `createStreamingVAD` | `VadInitBridgeOptions` | `buildVadInitBridgeOptions` in `src/vad/vadNativeBridge.ts` |
 | `initializeEnhancement(instanceId, options)` | `createEnhancement` | `EnhancementInitBridgeOptions` | `buildEnhancementInitBridgeOptions` in `src/enhancement/enhancementNativeBridge.ts` |
 | `initializeOnlineEnhancement(instanceId, options)` | `createStreamingEnhancement` | `EnhancementInitBridgeOptions` | `buildEnhancementInitBridgeOptions` in `src/enhancement/enhancementNativeBridge.ts` |
+| `initializeOfflinePunctuation(instanceId, options)` | `createOfflinePunctuation` | `PunctuationInitBridgeOptions` | `buildOfflinePunctuationInitBridgeOptions` in `src/punctuation/punctuationNativeBridge.ts` |
+| `initializeOnlinePunctuation(instanceId, options)` | `createStreamingPunctuation` | `PunctuationInitBridgeOptions` | `buildStreamingPunctuationInitBridgeOptions` in `src/punctuation/punctuationNativeBridge.ts` |
 
 Bridge option types are defined in `src/NativeSherpaOnnx.ts` (required for React Native codegen) and re-exported from `src/nativeBridge/initBridgeTypes.ts` for builders.
 
@@ -145,6 +147,45 @@ Bridge fields for Enhancement init:
 | `numThreads`, `provider`, `debug` | same names | Scalars on both modes |
 
 **Positional → options migration:** `initializeEnhancement` and `initializeOnlineEnhancement` previously accepted positional `(instanceId, modelDir, modelType?, …)` arguments. They now take `(instanceId, options: EnhancementInitBridgeOptions)` only. App code should use `createEnhancement` / `createStreamingEnhancement`; direct TurboModule callers must pass an options map.
+
+**Punctuation — custom init (offline and streaming use separate public unions, shared bridge shape):**
+
+```ts
+// Public — offline
+createOfflinePunctuation({
+  initMode: 'custom',
+  modelType: 'ct_transformer',
+  customConfig: {
+    ct_transformer: { kind: 'fs', path: '/models/ct.onnx' },
+  },
+});
+
+// Bridge map (internal) — buildOfflinePunctuationInitBridgeOptions
+{ initMode: 'custom', modelType: 'ct_transformer', modelPaths: { ct_transformer: '...' } }
+
+// Public — streaming
+createStreamingPunctuation({
+  initMode: 'custom',
+  modelType: 'cnn_bilstm',
+  customConfig: {
+    cnn_bilstm: { kind: 'fs', path: '/models/cnn.onnx' },
+    bpe_vocab: { kind: 'fs', path: '/models/bpe.vocab' },
+  },
+});
+
+// Bridge map (internal) — buildStreamingPunctuationInitBridgeOptions
+{ initMode: 'custom', modelType: 'cnn_bilstm', modelPaths: { cnn_bilstm: '...', bpe_vocab: '...' } }
+```
+
+Bridge fields for Punctuation init:
+
+| Public | Bridge key | Notes |
+|--------|------------|--------|
+| `initMode: 'custom'` | `initMode`, `modelPaths`, `modelType` | No `modelDir`; offline: `ct_transformer`; streaming: `cnn_bilstm` + `bpe_vocab` |
+| `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
+| `numThreads`, `provider`, `debug` | same names | Scalars on both modes |
+
+**Positional → options migration:** `initializeOfflinePunctuation` and `initializeOnlinePunctuation` previously accepted positional `(instanceId, modelDir, modelType?, …)` arguments. They now take `(instanceId, options: PunctuationInitBridgeOptions)` only.
 
 ## TTS language fields (bridge)
 

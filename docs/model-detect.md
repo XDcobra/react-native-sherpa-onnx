@@ -298,7 +298,7 @@ Categories match unified detect literals: `stt`, `stt_streaming`, `tts`, `vad`, 
 - **`getCustomModelPathRequirements`** — read-only schema; paraformer includes optional offline/streaming keys (`paraformerModel`, `encoder`, `decoder`) with `tokens` required.
 - **`validateCustomModelPaths`** — enforces non-empty paths and feature-specific rules (e.g. paraformer OR-layout, `moonshine` vs `moonshine_v2`).
 
-TypeScript discriminated unions in `src/stt/customConfig.ts`, `src/tts/customConfig.ts`, `src/vad/customConfig.ts`, and `src/enhancement/customConfig.ts` remain compile-time helpers; **runtime truth is native**.
+TypeScript discriminated unions in `src/stt/customConfig.ts`, `src/tts/customConfig.ts`, `src/vad/customConfig.ts`, `src/enhancement/customConfig.ts`, and `src/punctuation/customConfig.ts` remain compile-time helpers; **runtime truth is native**.
 
 ## Feature-specific detection APIs
 

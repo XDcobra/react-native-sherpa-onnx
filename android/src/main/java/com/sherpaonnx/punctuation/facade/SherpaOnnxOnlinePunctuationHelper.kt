@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.OnlinePunctuation
@@ -11,6 +12,8 @@ import com.k2fsa.sherpa.onnx.OnlinePunctuationConfig
 import com.k2fsa.sherpa.onnx.OnlinePunctuationModelConfig
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.punctuation.config.PunctuationInitOptionsParser
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.punctuation.pipeline.PunctuationPipelineWorker
@@ -55,96 +58,179 @@ class SherpaOnnxOnlinePunctuationHelper(
 
   fun initializeOnlinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     if (instanceId.isBlank()) {
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "instanceId is required", null)
       return
     }
-    if (modelDir.isBlank()) {
-      promise.reject(PunctuationErrorCodes.INIT_ERROR, "modelDir is required", null)
+    val parsed = PunctuationInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        },
+        null
+      )
       return
     }
     try {
-      val req = (modelType ?: "auto").lowercase()
-      if (req != "auto" && req != "cnn_bilstm") {
-        promise.reject(
-          PunctuationErrorCodes.INIT_ERROR,
-          "Streaming punctuation requires cnn_bilstm or auto; received $modelType",
-          null
-        )
-        return
+      if (parsed.initMode == "custom") {
+        initializeOnlinePunctuationCustom(instanceId, parsed, promise)
+      } else {
+        initializeOnlinePunctuationAuto(instanceId, parsed, promise)
       }
-      val detect = nativeDetectPunctuationModel(modelDir, null, "cnn_bilstm")
-      if (detect == null) {
-        promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
-        return
-      }
-      val success = detect["success"] as? Boolean ?: false
-      if (!success) {
-        val reason = (detect["error"] as? String)?.trim()
-        promise.reject(
-          PunctuationErrorCodes.INIT_ERROR,
-          if (reason.isNullOrEmpty()) "Punctuation: model is not a valid online CNN-BiLSTM layout" else reason,
-          null
-        )
-        return
-      }
-      val resolvedType = (detect["modelType"] as? String)?.trim() ?: ""
-      val isStreaming = detect["isStreaming"] as? Boolean ?: false
-      if (resolvedType != "cnn_bilstm" || !isStreaming) {
-        promise.reject(
-          PunctuationErrorCodes.INIT_ERROR,
-          "Streaming punctuation requires online cnn_bilstm; native detect reported modelType=$resolvedType isStreaming=$isStreaming",
-          null
-        )
-        return
-      }
-      @Suppress("UNCHECKED_CAST")
-      val paths = detect["paths"] as? HashMap<*, *>
-      val cnn = (paths?.get("cnn_bilstm") as? String)?.trim() ?: ""
-      val vocab = (paths?.get("bpe_vocab") as? String)?.trim() ?: ""
-      if (cnn.isEmpty() || vocab.isEmpty()) {
-        promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation: missing cnn_bilstm or bpe.vocab path", null)
-        return
-      }
-
-      val config = OnlinePunctuationConfig(
-        model = OnlinePunctuationModelConfig(
-          cnnBilstm = cnn,
-          bpeVocab = vocab,
-          numThreads = (numThreads ?: 1.0).toInt().coerceAtLeast(1),
-          debug = debug ?: false,
-          provider = provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu",
-        )
-      )
-      val eng = OnlinePunctuation(assetManager = null, config = config)
-      onlineEngines[instanceId]?.release()
-      onlineEngines[instanceId] = eng
-
-      val out = Arguments.createMap()
-      out.putBoolean("success", true)
-      out.putString("modelType", "cnn_bilstm")
-      @Suppress("UNCHECKED_CAST")
-      val dms = detect["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
-      val arr = Arguments.createArray()
-      for (m in dms) {
-        val w = Arguments.createMap()
-        w.putString("type", m["type"] ?: "")
-        w.putString("modelDir", m["modelDir"] ?: "")
-        arr.pushMap(w)
-      }
-      out.putArray("detectedModels", arr)
-      promise.resolve(out)
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "initializeOnlinePunctuation", e)
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "Failed to initialize online punctuation: ${e.message}", e)
     }
+  }
+
+  private fun initializeOnlinePunctuationCustom(
+    instanceId: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    val modelTypeStr = parsed.modelType.trim()
+    if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "custom init requires a concrete modelType",
+        null
+      )
+      return
+    }
+    if (modelTypeStr != "cnn_bilstm") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "Streaming punctuation requires cnn_bilstm; received $modelTypeStr",
+        null
+      )
+      return
+    }
+
+    val pathStrings = parsed.modelPaths.orEmpty()
+    ModelPathValidationNative.validate("punctuation", modelTypeStr, pathStrings)?.let { errorMsg ->
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, errorMsg, null)
+      return
+    }
+
+    finishInitializeOnlineWithPaths(
+      instanceId = instanceId,
+      cnn = pathStrings["cnn_bilstm"]?.trim().orEmpty(),
+      vocab = pathStrings["bpe_vocab"]?.trim().orEmpty(),
+      parsed = parsed,
+      detectedModels = arrayListOf(
+        hashMapOf("type" to "cnn_bilstm", "modelDir" to "custom")
+      ),
+      promise = promise
+    )
+  }
+
+  private fun initializeOnlinePunctuationAuto(
+    instanceId: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    val modelDir = parsed.modelDir?.trim().orEmpty()
+    if (modelDir.isEmpty()) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "modelDir is required", null)
+      return
+    }
+
+    val req = parsed.modelType.lowercase()
+    if (req != "auto" && req != "cnn_bilstm") {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "Streaming punctuation requires cnn_bilstm or auto; received ${parsed.modelType}",
+        null
+      )
+      return
+    }
+    val detect = nativeDetectPunctuationModel(modelDir, null, "cnn_bilstm")
+    if (detect == null) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
+      return
+    }
+    val success = detect["success"] as? Boolean ?: false
+    if (!success) {
+      val reason = (detect["error"] as? String)?.trim()
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        if (reason.isNullOrEmpty()) "Punctuation: model is not a valid online CNN-BiLSTM layout" else reason,
+        null
+      )
+      return
+    }
+    val resolvedType = (detect["modelType"] as? String)?.trim() ?: ""
+    val isStreaming = detect["isStreaming"] as? Boolean ?: false
+    if (resolvedType != "cnn_bilstm" || !isStreaming) {
+      promise.reject(
+        PunctuationErrorCodes.INIT_ERROR,
+        "Streaming punctuation requires online cnn_bilstm; native detect reported modelType=$resolvedType isStreaming=$isStreaming",
+        null
+      )
+      return
+    }
+    @Suppress("UNCHECKED_CAST")
+    val paths = detect["paths"] as? HashMap<*, *>
+    val cnn = (paths?.get("cnn_bilstm") as? String)?.trim() ?: ""
+    val vocab = (paths?.get("bpe_vocab") as? String)?.trim() ?: ""
+
+    @Suppress("UNCHECKED_CAST")
+    val dms = detect["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+    finishInitializeOnlineWithPaths(
+      instanceId = instanceId,
+      cnn = cnn,
+      vocab = vocab,
+      parsed = parsed,
+      detectedModels = dms,
+      promise = promise
+    )
+  }
+
+  private fun finishInitializeOnlineWithPaths(
+    instanceId: String,
+    cnn: String,
+    vocab: String,
+    parsed: PunctuationInitOptionsParser.Parsed,
+    detectedModels: ArrayList<HashMap<String, String>>,
+    promise: Promise
+  ) {
+    if (cnn.isEmpty() || vocab.isEmpty()) {
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation: missing cnn_bilstm or bpe.vocab path", null)
+      return
+    }
+
+    val config = OnlinePunctuationConfig(
+      model = OnlinePunctuationModelConfig(
+        cnnBilstm = cnn,
+        bpeVocab = vocab,
+        numThreads = parsed.numThreads.toInt().coerceAtLeast(1),
+        debug = parsed.debug,
+        provider = parsed.provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu",
+      )
+    )
+    val eng = OnlinePunctuation(assetManager = null, config = config)
+    onlineEngines[instanceId]?.release()
+    onlineEngines[instanceId] = eng
+
+    val out = Arguments.createMap()
+    out.putBoolean("success", true)
+    out.putString("modelType", "cnn_bilstm")
+    val arr = Arguments.createArray()
+    for (m in detectedModels) {
+      val w = Arguments.createMap()
+      w.putString("type", m["type"] ?: "")
+      w.putString("modelDir", m["modelDir"] ?: "")
+      arr.pushMap(w)
+    }
+    out.putArray("detectedModels", arr)
+    promise.resolve(out)
   }
 
   fun processOnlinePunctuationChunk(

@@ -32,9 +32,17 @@ import {
 import {
   createStreamingPunctuation,
   detectPunctuationModel,
+  assertStreamingPunctuationCustomConfig,
   type PunctuationPipelineHandle,
   type StreamingPunctuationEngine,
 } from 'react-native-sherpa-onnx/punctuation';
+import {
+  InitModeSelector,
+  PunctuationStreamingCustomInitForm,
+  type ModelInitMode,
+  type PunctuationStreamingCustomInitFormState,
+} from '../../components/modelInit';
+import { fillStreamingPunctuationCustomConfigFromModelFolder } from '../../utils/punctuationCustomInitFill';
 import {
   getFileModelPath,
   getAssetModelPath,
@@ -52,6 +60,11 @@ import {
 const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_STREAMING_TEXT =
   'hello world\nthis is streaming punctuation\nit writes live text segments';
+
+const DEFAULT_STREAMING_PUNCTUATION_CUSTOM_INIT: PunctuationStreamingCustomInitFormState =
+  {
+    fileSources: {},
+  };
 
 function isPunctuationNameCandidate(folder: string): boolean {
   const f = folder.toLowerCase();
@@ -116,6 +129,13 @@ export default function PunctuationStreamingScreen() {
   const [outputText, setOutputText] = useState('');
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<PunctuationStreamingCustomInitFormState>(
+      DEFAULT_STREAMING_PUNCTUATION_CUSTOM_INIT
+    );
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
 
   const engineRef = useRef<StreamingPunctuationEngine | null>(null);
   const handleRef = useRef<PunctuationPipelineHandle | null>(null);
@@ -218,6 +238,45 @@ export default function PunctuationStreamingScreen() {
     });
   }, [loadAvailableModels]);
 
+  const handleFillFromSelectedModel = useCallback(async () => {
+    if (!selectedFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
+    }
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    try {
+      const modelPath = resolvePunctuationModelPath(selectedFolder);
+      const fillResult =
+        await fillStreamingPunctuationCustomConfigFromModelFolder(
+          await toDetectSource(modelPath)
+        );
+      setCustomInitForm({ fileSources: fillResult.customConfig });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(selectedFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      setError(fillErr instanceof Error ? fillErr.message : String(fillErr));
+    } finally {
+      setCustomFillLoading(false);
+    }
+  }, [resolvePunctuationModelPath, selectedFolder]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm({ fileSources: {} });
+    setCustomFillHint(
+      'Scattered test: pick CNN-BiLSTM ONNX and BPE vocab separately, then Run.'
+    );
+  }, []);
+
   const cleanup = async () => {
     if (handleRef.current) {
       await handleRef.current.stop().catch(() => {});
@@ -244,7 +303,7 @@ export default function PunctuationStreamingScreen() {
   }, []);
 
   const runStreamingPunctuation = async () => {
-    if (!selectedFolder) {
+    if (initMode === 'auto' && !selectedFolder) {
       Alert.alert('Model', 'Select a streaming CNN-BiLSTM punctuation model.');
       return;
     }
@@ -261,12 +320,30 @@ export default function PunctuationStreamingScreen() {
 
     try {
       await cleanup();
-      const modelPath = resolvePunctuationModelPath(selectedFolder);
-      const engine = await createStreamingPunctuation({
-        modelSource: modelPath,
-        modelType: 'cnn_bilstm',
-        provider: 'cpu',
-      });
+      const nt = 2;
+      const engine =
+        initMode === 'custom'
+          ? await (async () => {
+              const customConfig = { ...customInitForm.fileSources };
+              assertStreamingPunctuationCustomConfig(
+                customConfig as unknown as Record<string, unknown>
+              );
+              return createStreamingPunctuation({
+                initMode: 'custom',
+                modelType: 'cnn_bilstm',
+                customConfig: customConfig as {
+                  cnn_bilstm: FileSource;
+                  bpe_vocab: FileSource;
+                },
+                numThreads: nt,
+                provider: 'cpu',
+              });
+            })()
+          : await createStreamingPunctuation({
+              modelSource: resolvePunctuationModelPath(selectedFolder!),
+              modelType: 'cnn_bilstm',
+              provider: 'cpu',
+            });
       engineRef.current = engine;
 
       const input = await createLiveTextBuffer();
@@ -331,6 +408,16 @@ export default function PunctuationStreamingScreen() {
           <Text style={styles.sectionTitle}>
             1) Model{loadingModels ? ' (loading…)' : ''}
           </Text>
+          <InitModeSelector
+            value={initMode}
+            onChange={setInitMode}
+            disabled={busy || customFillLoading}
+          />
+          <Text style={styles.hint}>
+            {initMode === 'auto'
+              ? 'Select a streaming CNN-BiLSTM catalog folder, then Run.'
+              : 'Pick CNN-BiLSTM ONNX + BPE vocab (or Fill from catalog), then Run custom.'}
+          </Text>
           {loadingModels ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" />
@@ -374,6 +461,20 @@ export default function PunctuationStreamingScreen() {
               })}
             </View>
           )}
+          {initMode === 'custom' && canShowWorkflow ? (
+            <PunctuationStreamingCustomInitForm
+              value={customInitForm}
+              onChange={setCustomInitForm}
+              selectedCatalogModelId={selectedFolder}
+              onFillFromSelectedModel={() => {
+                handleFillFromSelectedModel().catch(() => {});
+              }}
+              onPrepareScatteredTest={handlePrepareScatteredTest}
+              fillLoading={customFillLoading}
+              disabled={busy}
+              fillHint={customFillHint}
+            />
+          ) : null}
         </View>
 
         {canShowWorkflow && (
@@ -397,15 +498,24 @@ export default function PunctuationStreamingScreen() {
 
             <View style={styles.section}>
               <TouchableOpacity
-                style={[styles.button, busy && styles.buttonDisabled]}
-                disabled={busy || !selectedFolder}
+                style={[
+                  styles.button,
+                  (busy || customFillLoading) && styles.buttonDisabled,
+                ]}
+                disabled={
+                  busy ||
+                  customFillLoading ||
+                  (initMode === 'auto' ? !selectedFolder : false)
+                }
                 onPress={runStreamingPunctuation}
               >
                 {busy ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.buttonText}>
-                    Run streaming punctuation
+                    {initMode === 'custom'
+                      ? 'Run streaming (custom init)'
+                      : 'Run streaming punctuation'}
                   </Text>
                 )}
               </TouchableOpacity>

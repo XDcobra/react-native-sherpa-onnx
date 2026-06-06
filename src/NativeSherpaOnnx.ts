@@ -112,6 +112,18 @@ export type EnhancementInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeOfflinePunctuation` / `initializeOnlinePunctuation(instanceId, options)`. */
+export type PunctuationInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map; NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
 export type UnifiedDetectNativeResult = {
   matched: boolean;
@@ -1511,11 +1523,7 @@ export interface Spec extends TurboModule {
    */
   initializeOfflinePunctuation(
     instanceId: string,
-    modelDir: string,
-    modelType?: string | null,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: PunctuationInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1551,11 +1559,7 @@ export interface Spec extends TurboModule {
    */
   initializeOnlinePunctuation(
     instanceId: string,
-    modelDir: string,
-    modelType?: string | null,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: PunctuationInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;

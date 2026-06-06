@@ -1,6 +1,8 @@
 #import "../../SherpaOnnx.h"
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
+#include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
@@ -16,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <vector>
 
 namespace {
 
@@ -30,6 +33,43 @@ static NSString *kTxtNotFound = @"TEXT_BUFFER_NOT_FOUND";
 static NSString *kTxtKind = @"TEXT_BUFFER_KIND_MISMATCH";
 static NSString *kTxtEmpty = @"TEXT_BUFFER_EMPTY";
 static NSString *kTxtPop = @"TEXT_ALREADY_POPULATED";
+
+static void FillPunctuationModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::PunctuationModelPaths &paths) {
+  if (![dict isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  std::map<std::string, std::string> pathMap;
+  for (NSString *key in dict) {
+    id value = dict[key];
+    if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+      pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+    }
+  }
+  sherpaonnx::FillPunctuationModelPathsFromStringMap(pathMap, paths);
+}
+
+struct PunctuationInitScalars {
+  int32_t numThreads = 1;
+  bool debug = false;
+  std::string provider = "cpu";
+};
+
+static PunctuationInitScalars ParsePunctuationInitScalars(NSDictionary *options) {
+  PunctuationInitScalars scalars;
+  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
+    scalars.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  }
+  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
+    scalars.debug = [options[@"debug"] boolValue];
+  }
+  NSString *provider = options[@"provider"];
+  if (provider != nil && provider.length > 0) {
+    scalars.provider = std::string([provider UTF8String]);
+  }
+  return scalars;
+}
 
 }  // namespace
 
@@ -68,71 +108,125 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 @implementation SherpaOnnx (OfflinePunctuation)
 
 - (void)initializeOfflinePunctuation:(NSString *)instanceId
-                            modelDir:(NSString *)modelDir
-                           modelType:(NSString * _Nullable)modelType
-                          numThreads:(NSNumber *)numThreads
-                            provider:(NSString *)provider
-                               debug:(NSNumber *)debug
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
+                            options:(NSDictionary *)options
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
 {
   if (instanceId == nil || [instanceId length] == 0) {
     reject(kInitErr, @"instanceId is required", nil);
     return;
   }
-  if (modelDir == nil || [modelDir length] == 0) {
-    reject(kInitErr, @"modelDir is required", nil);
+  if (options == nil) {
+    reject(kInitErr, @"options is required", nil);
     return;
   }
-  if (modelType != nil) {
-    NSString *trimmed =
-        [modelType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    NSString *req = [trimmed lowercaseString];
-    if (!([req isEqualToString:@"auto"] || [req isEqualToString:@"ct_transformer"])) {
-      reject(kInitErr,
-             [NSString stringWithFormat:@"Unsupported modelType for offline engine: %@", modelType],
-             nil);
-      return;
-    }
+
+  NSString *initMode = options[@"initMode"];
+  if (initMode == nil || [initMode length] == 0) {
+    initMode = @"auto";
   }
+  const bool isCustomInit = [initMode isEqualToString:@"custom"];
   std::string idStr = [instanceId UTF8String];
-  std::string dirStr = [modelDir UTF8String];
+  const PunctuationInitScalars scalars = ParsePunctuationInitScalars(options);
 
   @try {
-    auto det = sherpaonnx::DetectPunctuationModel(
-        std::optional<std::string>(dirStr),
-        std::nullopt,
-        "ct_transformer");
-    if (!det.ok) {
-      NSString *msg = det.error.empty()
-          ? @"Punctuation: model is not a valid offline CT-Transformer layout"
-          : [NSString stringWithUTF8String:det.error.c_str()];
-      reject(kInitErr, msg, nil);
-      return;
+    std::string ctPath;
+    NSMutableArray *models = [NSMutableArray array];
+
+    if (isCustomInit) {
+      NSString *modelType = options[@"modelType"];
+      if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
+        reject(kInitErr, @"modelType is required for initMode custom", nil);
+        return;
+      }
+      NSString *req = [[modelType stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+      if (![req isEqualToString:@"ct_transformer"]) {
+        reject(kInitErr,
+               [NSString stringWithFormat:@"Unsupported modelType for offline engine: %@", modelType],
+               nil);
+        return;
+      }
+      id pathsRaw = options[@"modelPaths"];
+      NSDictionary *pathsDict =
+          [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+      if (pathsDict == nil || pathsDict.count == 0) {
+        reject(kInitErr, @"modelPaths is required for initMode custom", nil);
+        return;
+      }
+
+      sherpaonnx::PunctuationModelPaths paths;
+      FillPunctuationModelPathsFromDict(pathsDict, paths);
+      auto validation = sherpaonnx::ValidatePunctuationPaths(
+          sherpaonnx::PunctuationModelKind::kCtTransformer,
+          paths,
+          "custom");
+      if (!validation.ok) {
+        NSString *msg = validation.error.empty()
+            ? @"Punctuation: custom path validation failed"
+            : [NSString stringWithUTF8String:validation.error.c_str()];
+        reject(kInitErr, msg, nil);
+        return;
+      }
+      ctPath = paths.ct_transformer;
+      [models addObject:@{@"type": @"ct_transformer", @"modelDir": @"custom"}];
+    } else {
+      NSString *modelDir = options[@"modelDir"];
+      if (modelDir == nil || [modelDir length] == 0) {
+        reject(kInitErr, @"modelDir is required for initMode auto", nil);
+        return;
+      }
+      NSString *modelType = options[@"modelType"];
+      if (modelType != nil) {
+        NSString *trimmed =
+            [modelType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *req = [trimmed lowercaseString];
+        if (!([req isEqualToString:@"auto"] || [req isEqualToString:@"ct_transformer"])) {
+          reject(kInitErr,
+                 [NSString stringWithFormat:@"Unsupported modelType for offline engine: %@", modelType],
+                 nil);
+          return;
+        }
+      }
+      std::string dirStr = [modelDir UTF8String];
+      auto det = sherpaonnx::DetectPunctuationModel(
+          std::optional<std::string>(dirStr),
+          std::nullopt,
+          "ct_transformer");
+      if (!det.ok) {
+        NSString *msg = det.error.empty()
+            ? @"Punctuation: model is not a valid offline CT-Transformer layout"
+            : [NSString stringWithUTF8String:det.error.c_str()];
+        reject(kInitErr, msg, nil);
+        return;
+      }
+      if (det.selectedKind != sherpaonnx::PunctuationModelKind::kCtTransformer) {
+        reject(kInitErr, @"Offline punctuation requires ct_transformer (native detect mismatch)", nil);
+        return;
+      }
+      if (det.paths.ct_transformer.empty()) {
+        reject(kInitErr, @"Punctuation: missing ct_transformer onnx path", nil);
+        return;
+      }
+      ctPath = det.paths.ct_transformer;
+      for (const auto &m : det.detectedModels) {
+        [models addObject:@{
+          @"type": [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
+          @"modelDir": [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @""
+        }];
+      }
     }
-    if (det.selectedKind != sherpaonnx::PunctuationModelKind::kCtTransformer) {
-      reject(kInitErr, @"Offline punctuation requires ct_transformer (native detect mismatch)", nil);
-      return;
-    }
-    if (det.paths.ct_transformer.empty()) {
+
+    if (ctPath.empty()) {
       reject(kInitErr, @"Punctuation: missing ct_transformer onnx path", nil);
       return;
     }
-    int32_t nt = numThreads != nil ? (int32_t)[numThreads intValue] : 1;
-    if (nt < 1) {
-      nt = 1;
-    }
-    bool dbg = debug != nil && [debug boolValue];
-    std::string prov = "cpu";
-    if (provider != nil && [provider length] > 0) {
-      prov = std::string([provider UTF8String]);
-    }
 
     sherpa_onnx::cxx::OfflinePunctuationConfig cfg;
-    cfg.model.ct_transformer = det.paths.ct_transformer;
-    cfg.model.num_threads = nt;
-    cfg.model.debug = dbg;
-    cfg.model.provider = prov;
+    cfg.model.ct_transformer = ctPath;
+    cfg.model.num_threads = scalars.numThreads;
+    cfg.model.debug = scalars.debug;
+    cfg.model.provider = scalars.provider;
 
     auto created = sherpa_onnx::cxx::OfflinePunctuation::Create(cfg);
     {
@@ -141,17 +235,10 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
       g_punct_offline.emplace(idStr, std::move(created));
     }
 
-    NSMutableArray *models = [NSMutableArray array];
-    for (const auto &m : det.detectedModels) {
-      [models addObject:@ {
-        @"type" : [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
-        @"modelDir" : [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @""
-      }];
-    }
     resolve(@{
-      @"success" : @YES,
-      @"modelType" : @"ct_transformer",
-      @"detectedModels" : models
+      @"success": @YES,
+      @"modelType": @"ct_transformer",
+      @"detectedModels": models,
     });
   } @catch (NSException *exception) {
     reject(kInitErr, [NSString stringWithFormat:@"Offline punctuation init: %@", exception.reason], nil);

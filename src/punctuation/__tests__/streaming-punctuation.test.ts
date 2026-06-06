@@ -131,11 +131,11 @@ describe('streaming punctuation', () => {
 
     expect(native.initializeOnlinePunctuation).toHaveBeenCalledWith(
       expect.stringMatching(/^punc_on_/),
-      '/models/punctuation-online',
-      'auto',
-      undefined,
-      undefined,
-      undefined
+      {
+        initMode: 'auto',
+        modelDir: '/models/punctuation-online',
+        modelType: 'auto',
+      }
     );
     expect(native.startStreamingPunctuationPipeline).toHaveBeenCalledWith(
       punc.instanceId,
