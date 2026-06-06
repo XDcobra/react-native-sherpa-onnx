@@ -27,6 +27,8 @@
 #include "sherpa-onnx-alignment-wrapper.h"
 #include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-unified-detect-wrapper.h"
+#include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-validate-custom.h"
 #include "../diagnostic/NativeDiagnostic.h"
 
 extern "C" {
@@ -441,6 +443,49 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModelsBatch(
     }
   }
   return outList;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeValidateCustomModelPaths(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_category,
+    jstring j_model_type,
+    jobject j_paths) {
+  auto category = OptionalJstring(env, j_category);
+  auto modelType = OptionalJstring(env, j_model_type);
+  if (!category || !modelType) {
+    sherpaonnx::CustomModelValidationResult invalid;
+    invalid.ok = false;
+    invalid.error = "category and modelType are required";
+    return sherpaonnx::BuildCustomValidationResultMap(env, invalid);
+  }
+
+  const auto paths = sherpaonnx::JavaHashMapToStringMap(env, j_paths);
+  const auto result = sherpaonnx::ValidateCustomModelPaths(
+      *category,
+      *modelType,
+      paths,
+      "custom");
+  return sherpaonnx::BuildCustomValidationResultMap(env, result);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeGetCustomModelPathRequirements(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_category,
+    jstring j_model_type) {
+  auto category = OptionalJstring(env, j_category);
+  auto modelType = OptionalJstring(env, j_model_type);
+  if (!category || !modelType) {
+    return sherpaonnx::BuildCustomPathRequirementsMap(env, {});
+  }
+
+  const auto requirements = sherpaonnx::GetCustomModelPathRequirements(
+      *category,
+      *modelType);
+  return sherpaonnx::BuildCustomPathRequirementsMap(env, requirements);
 }
 
 }  // extern "C"

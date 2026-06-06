@@ -131,6 +131,7 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
+    "\"#{pod_root}/ios/stt/native\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",

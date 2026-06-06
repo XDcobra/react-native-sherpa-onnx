@@ -4895,6 +4895,57 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun validateCustomModelPaths(
+    category: String,
+    modelType: String,
+    paths: ReadableMap,
+    promise: Promise
+  ) {
+    try {
+      val pathMap = HashMap<String, String>()
+      val iterator = paths.keySetIterator()
+      while (iterator.hasNextKey()) {
+        val key = iterator.nextKey()
+        if (!paths.isNull(key)) {
+          paths.getString(key)?.let { pathMap[key] = it }
+        }
+      }
+      val result = Companion.validateCustomModelPathsNative(category, modelType, pathMap)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path validation returned null")
+          return
+        }
+      promise.resolve(Companion.customValidationHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path validation failed: ${e.message}",
+        e
+      )
+    }
+  }
+
+  override fun getCustomModelPathRequirements(
+    category: String,
+    modelType: String,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.getCustomModelPathRequirementsNative(category, modelType)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path requirements returned null")
+          return
+        }
+      promise.resolve(Companion.customPathRequirementsHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path requirements failed: ${e.message}",
+        e
+      )
+    }
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -5374,6 +5425,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): ArrayList<HashMap<String, Any?>>
 
     @JvmStatic
+    internal fun validateCustomModelPathsNative(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>? =
+      nativeValidateCustomModelPaths(category, modelType, paths)
+
+    @JvmStatic
+    internal fun getCustomModelPathRequirementsNative(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>? =
+      nativeGetCustomModelPathRequirements(category, modelType)
+
+    @JvmStatic
+    private external fun nativeValidateCustomModelPaths(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    private external fun nativeGetCustomModelPathRequirements(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
     internal fun unifiedDetectHashMapToWritableMap(
       result: HashMap<String, Any?>
     ): com.facebook.react.bridge.WritableMap {
@@ -5427,6 +5506,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         map.putArray("detectionSources", arr)
       }
 
+      return map
+    }
+
+    @JvmStatic
+    internal fun customValidationHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("ok", result["ok"] as? Boolean ?: false)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      @Suppress("UNCHECKED_CAST")
+      val missing = result["missingRequired"] as? ArrayList<String>
+      if (!missing.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in missing) {
+          arr.pushString(entry)
+        }
+        map.putArray("missingRequired", arr)
+      }
+      return map
+    }
+
+    @JvmStatic
+    internal fun customPathRequirementsHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      @Suppress("UNCHECKED_CAST")
+      val required = result["required"] as? ArrayList<String>
+      if (!required.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in required) {
+          arr.pushString(entry)
+        }
+        map.putArray("required", arr)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val optional = result["optional"] as? ArrayList<String>
+      if (!optional.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in optional) {
+          arr.pushString(entry)
+        }
+        map.putArray("optional", arr)
+      }
       return map
     }
 

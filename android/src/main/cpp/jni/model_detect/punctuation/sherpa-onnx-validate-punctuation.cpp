@@ -59,4 +59,17 @@ PunctuationValidationResult ValidatePunctuationPaths(
     return result;
 }
 
+std::vector<CustomPathFieldSpec> GetPunctuationPathRequirements(
+    PunctuationModelKind kind
+) {
+    switch (kind) {
+        case PunctuationModelKind::kCtTransformer:
+            return {{"ct_transformer", true}};
+        case PunctuationModelKind::kCnnBilstm:
+            return {{"cnn_bilstm", true}, {"bpe_vocab", true}};
+        default:
+            return {};
+    }
+}
+
 }  // namespace sherpaonnx

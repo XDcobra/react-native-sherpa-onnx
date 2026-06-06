@@ -1,5 +1,5 @@
-#ifndef SHERPA_ONNX_STT_WRAPPER_H
-#define SHERPA_ONNX_STT_WRAPPER_H
+#ifndef SHERPA_ONNX_STT_JNI_BRIDGE_H
+#define SHERPA_ONNX_STT_JNI_BRIDGE_H
 
 #include <jni.h>
 
@@ -13,4 +13,4 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result);
 
 }  // namespace sherpaonnx
 
-#endif  // SHERPA_ONNX_STT_WRAPPER_H
+#endif  // SHERPA_ONNX_STT_JNI_BRIDGE_H

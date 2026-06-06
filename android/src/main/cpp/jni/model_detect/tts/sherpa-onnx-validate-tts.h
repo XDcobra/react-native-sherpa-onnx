@@ -10,6 +10,7 @@
 #define SHERPA_ONNX_VALIDATE_TTS_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-custom-types.h"
 #include <string>
 #include <vector>
 
@@ -32,6 +33,8 @@ TtsValidationResult ValidateTtsPaths(
     const TtsModelPaths& paths,
     const std::string& modelDir
 );
+
+std::vector<CustomPathFieldSpec> GetTtsPathRequirements(TtsModelKind kind);
 
 } // namespace sherpaonnx
 

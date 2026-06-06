@@ -33,6 +33,9 @@ enum class SttModelKind {
     kToneCtc
 };
 
+/** Parse public model type string to {@link SttModelKind}. Returns kUnknown when unrecognized. */
+SttModelKind ParseSttModelType(const std::string& modelType);
+
 enum class TtsModelKind {
     kUnknown,
     kVits,

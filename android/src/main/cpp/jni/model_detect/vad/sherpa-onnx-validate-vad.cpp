@@ -65,4 +65,16 @@ VadValidationResult ValidateVadPaths(
     return result;
 }
 
+std::vector<CustomPathFieldSpec> GetVadPathRequirements(VadModelKind kind) {
+    std::vector<CustomPathFieldSpec> specs;
+    size_t count = 0;
+    const auto* reqs = GetRequirements(kind, count);
+    if (!reqs) return specs;
+    specs.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        specs.push_back({reqs[i].fieldName, reqs[i].required});
+    }
+    return specs;
+}
+
 } // namespace sherpaonnx
