@@ -9,7 +9,10 @@ import type {
   SttInitBridgeOptions,
 } from '../nativeBridge/initBridgeTypes';
 import type { StreamingSttInitOptions } from './streamingTypes';
-import { resolveFileSourceForModelFile } from '../detect/resolveModelInput';
+import {
+  resolveFileSourceForModelFile,
+  resolveFileSourceForModelInit,
+} from '../detect/resolveModelInput';
 import { resolveSttCustomConfigPaths } from './customConfig';
 
 export type { OnlineSttInitBridgeOptions, SttInitBridgeOptions };
@@ -122,9 +125,6 @@ export async function buildSttInitBridgeOptions(
   }
 
   const autoOptions = options as STTAutoInitializeOptions;
-  const { resolveFileSourceForModelInit } = await import(
-    '../detect/resolveModelInput'
-  );
   const modelDir = await resolveFileSourceForModelInit(autoOptions.modelSource);
   return {
     initMode: 'auto',

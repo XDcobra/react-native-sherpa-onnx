@@ -4,6 +4,7 @@ import {
   getCustomModelPathRequirements,
   validateCustomModelPaths,
 } from '../detect/validateCustomModelPaths';
+import { resolveModelFileSources } from '../detect/resolveModelInput';
 import type { STTConcreteModelType } from './types';
 import { SttErrorCode } from './types';
 
@@ -206,9 +207,6 @@ export async function resolveSttCustomConfigPaths(
       fileSources[key] = value;
     }
   }
-  const { resolveModelFileSources } = await import(
-    '../detect/resolveModelInput'
-  );
   const resolvedPaths = await resolveModelFileSources(fileSources);
 
   const validation = await validateCustomModelPaths(
