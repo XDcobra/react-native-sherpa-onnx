@@ -29,11 +29,13 @@
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-vad.h"
+#include "sherpa-onnx-validate-custom.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <string>
 
 namespace {
@@ -893,6 +895,115 @@ TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
 
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_TRUE(result.isStreaming);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerOk) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"joiner", "/j.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "transducer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerMissingJoiner) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "transducer", paths, "custom");
+    EXPECT_FALSE(result.ok);
+    ASSERT_FALSE(result.missingRequired.empty());
+    EXPECT_EQ(result.missingRequired[0], "joiner");
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerOfflineOk) {
+    std::map<std::string, std::string> paths = {
+        {"paraformerModel", "/p.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerStreamingOk) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerMissingLayout) {
+    std::map<std::string, std::string> paths = {
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttMoonshineV2Ok) {
+    std::map<std::string, std::string> paths = {
+        {"moonshineEncoder", "/e.onnx"},
+        {"moonshineMergedDecoder", "/d.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "moonshine_v2", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttMoonshineV1Distinct) {
+    std::map<std::string, std::string> paths = {
+        {"moonshineEncoder", "/e.onnx"},
+        {"moonshineMergedDecoder", "/d.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "moonshine", paths, "custom");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsTtsSmoke) {
+    std::map<std::string, std::string> paths = {
+        {"ttsModel", "/m.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("tts", "vits", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsVadSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/vad.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("vad", "silero_vad", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/gtcrn.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "gtcrn", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsPunctuationSmoke) {
+    std::map<std::string, std::string> paths = {{"ct_transformer", "/p.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths(
+        "punctuation", "ct_transformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsAlignmentSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/a.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("alignment", "wav2vec2", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttTransducer) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("stt", "transducer");
+    EXPECT_NE(std::find(reqs.required.begin(), reqs.required.end(), "encoder"), reqs.required.end());
+    EXPECT_NE(std::find(reqs.required.begin(), reqs.required.end(), "joiner"), reqs.required.end());
+    EXPECT_NE(std::find(reqs.optional.begin(), reqs.optional.end(), "bpeVocab"), reqs.optional.end());
 }
 
 }  // namespace

@@ -15,6 +15,8 @@ set(JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni")
 set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-helper.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-unified.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-path-fill.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-validate-custom.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-model-detect-alignment.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-validate-alignment.cpp"
