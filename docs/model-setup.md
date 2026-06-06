@@ -419,6 +419,22 @@ When model files are not in a single detectable folder, pass explicit paths per 
 
 Same pattern for TTS: `initMode: 'custom'`, concrete `modelType`, and `customConfig` with per-file {@link FileSource} paths. See [TTS custom initialization](tts-offline.md#custom-initialization-initmode-custom). `lexiconLanguageId` is auto-only; pass `lexicon` in `customConfig` when needed.
 
+### Custom VAD init (skip auto-detection)
+
+Same pattern for VAD: `initMode: 'custom'`, concrete `modelType` (`silero_vad` or `ten_vad`), and `customConfig` with a single `model` {@link FileSource}. See [VAD custom initialization](vad-streaming.md#custom-initialization-initmode-custom).
+
+```typescript
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+});
+```
+
 ```typescript
 import { createTTS } from 'react-native-sherpa-onnx/tts';
 

@@ -5,7 +5,7 @@ import type { ExtractArchiveResult } from './extraction/types';
 /**
  * TurboModule init bridge option shapes (flat ReadableMap / NSDictionary).
  * Must live in this file — React Native codegen does not resolve imported type aliases.
- * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`.
+ * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`, `buildVadInitBridgeOptions`.
  */
 
 /** `initializeStt(instanceId, options)` — offline STT. */
@@ -79,6 +79,25 @@ export type TtsInitBridgeOptions = {
   lexiconLanguageId?: string;
   /** Bridge-only: from public `modelOptions.kokoro.lang`. */
   kokoroLang?: string;
+};
+
+/** `initializeVad(instanceId, options)` — streaming VAD. */
+export type VadInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  sampleRate?: number;
+  threshold?: number;
+  silenceDurationMs?: number;
+  speechDurationMs?: number;
+  minSpeechDurationMs?: number;
+  maxSpeechDurationS?: number;
+  windowSize?: number;
+  provider?: string;
+  numThreads?: number;
+  debug?: boolean;
 };
 
 /** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
@@ -1062,7 +1081,10 @@ export interface Spec extends TurboModule {
 
   // ==================== VAD Methods ====================
 
-  initializeVad(instanceId: string, options: Object): Promise<void>;
+  initializeVad(
+    instanceId: string,
+    options: VadInitBridgeOptions
+  ): Promise<void>;
 
   startVadPipeline(
     instanceId: string,

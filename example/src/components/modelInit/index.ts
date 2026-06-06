@@ -13,3 +13,7 @@ export {
   TtsCustomInitForm,
   type TtsCustomInitFormState,
 } from './TtsCustomInitForm';
+export {
+  VadCustomInitForm,
+  type VadCustomInitFormState,
+} from './VadCustomInitForm';

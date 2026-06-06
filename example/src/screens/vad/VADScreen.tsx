@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -40,11 +40,13 @@ import {
 import {
   createStreamingVAD,
   detectVadModel,
+  assertVadCustomConfig,
   type VADEngine,
   type VADModelType,
   type VADOfflineRunOptions,
   type VADPipelineHandle,
   type VADPipelineStatus,
+  type VADRuntimeOptions,
   type VADSummary,
 } from 'react-native-sherpa-onnx/vad';
 import {
@@ -56,6 +58,14 @@ import {
   SegmentationPolicyControls,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  ModelFolderGrid,
+  VadCustomInitForm,
+  type ModelInitMode,
+  type VadCustomInitFormState,
+} from '../../components/modelInit';
+import { fillVadCustomConfigFromModelFolder } from '../../utils/vadCustomInitFill';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
@@ -83,6 +93,28 @@ type TimelineEntry = {
 
 const TIMELINE_LIMIT = 200;
 const SEGMENT_PREVIEW_LIMIT = 200;
+
+const DEFAULT_VAD_CUSTOM_INIT: VadCustomInitFormState = {
+  modelType: 'silero_vad',
+  fileSources: {},
+};
+
+function buildVadRuntimeOptions(
+  modelType: VADModelType,
+  threshold: number
+): VADRuntimeOptions {
+  return modelType === 'ten_vad'
+    ? {
+        tenVad: {
+          scoreThreshold: Number.isFinite(threshold) ? threshold : undefined,
+        },
+      }
+    : {
+        sileroVad: {
+          scoreThreshold: Number.isFinite(threshold) ? threshold : undefined,
+        },
+      };
+}
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -120,6 +152,12 @@ export default function VADScreen() {
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [busyOffline, setBusyOffline] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] = useState<VadCustomInitFormState>(
+    DEFAULT_VAD_CUSTOM_INIT
+  );
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
     null
@@ -166,7 +204,10 @@ export default function VADScreen() {
   const canStartLive =
     streamState === 'idle' &&
     !busyOffline &&
-    !!selectedModelFolder &&
+    !customFillLoading &&
+    (initMode === 'custom'
+      ? !!customInitForm.fileSources.model
+      : !!selectedModelFolder) &&
     (liveSource === 'mic' || !!selectedLiveFileUri);
 
   const offlineSegReady =
@@ -175,12 +216,24 @@ export default function VADScreen() {
 
   const canStartOffline =
     !busyOffline &&
+    !customFillLoading &&
     streamState === 'idle' &&
-    !!selectedModelFolder &&
+    (initMode === 'custom'
+      ? !!customInitForm.fileSources.model
+      : !!selectedModelFolder) &&
     preparedOfflineInputBuffer != null &&
     offlineSegReady;
 
-  const isBusy = streamState !== 'idle' || busyOffline;
+  const isBusy = streamState !== 'idle' || busyOffline || customFillLoading;
+
+  const catalogEntries = useMemo(
+    () =>
+      availableModels.map((id) => ({
+        id,
+        label: getModelDisplayName(id),
+      })),
+    [availableModels]
+  );
 
   const pushTimeline = useCallback((type: string, detail: string) => {
     const now = new Date();
@@ -252,6 +305,94 @@ export default function VADScreen() {
     },
     []
   );
+
+  const createVadEngine = useCallback(
+    async (sampleRate: number, threshold: number): Promise<VADEngine> => {
+      if (initMode === 'custom') {
+        const modelSource = customInitForm.fileSources.model;
+        if (!modelSource) {
+          throw new Error('Pick a VAD model file for custom init.');
+        }
+        const customConfig = { model: modelSource };
+        assertVadCustomConfig(
+          customConfig as unknown as Record<string, unknown>
+        );
+        return createStreamingVAD({
+          initMode: 'custom',
+          modelType: customInitForm.modelType,
+          customConfig,
+          sampleRate,
+          runtimeOptions: buildVadRuntimeOptions(
+            customInitForm.modelType,
+            threshold
+          ),
+        });
+      }
+
+      if (!selectedModelFolder) {
+        throw new Error('Select a VAD model folder first.');
+      }
+      const modelPath = resolveModelPath(selectedModelFolder);
+      const resolvedModelType = await detectResolvedModelType(modelPath);
+      return createStreamingVAD({
+        modelSource: modelPath,
+        modelType: resolvedModelType,
+        sampleRate,
+        runtimeOptions: buildVadRuntimeOptions(resolvedModelType, threshold),
+      });
+    },
+    [
+      customInitForm.fileSources.model,
+      customInitForm.modelType,
+      detectResolvedModelType,
+      initMode,
+      resolveModelPath,
+      selectedModelFolder,
+    ]
+  );
+
+  const handleFillFromSelectedModel = useCallback(async () => {
+    const modelFolder = selectedModelFolder;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
+    }
+
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    try {
+      const modelPath = resolveModelPath(modelFolder);
+      const fillResult = await fillVadCustomConfigFromModelFolder(modelPath, {
+        modelTypeOverride: customInitForm.modelType,
+      });
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      setError(normalizeErrorMessage(fillErr));
+    } finally {
+      setCustomFillLoading(false);
+    }
+  }, [customInitForm.modelType, resolveModelPath, selectedModelFolder]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick the model file from a different location, then run VAD.'
+    );
+  }, []);
 
   const loadModels = useCallback(async () => {
     setLoadingModels(true);
@@ -433,7 +574,11 @@ export default function VADScreen() {
   }, []);
 
   const startLive = useCallback(async () => {
-    if (!selectedModelFolder) return;
+    if (initMode === 'auto' && !selectedModelFolder) return;
+    if (initMode === 'custom' && !customInitForm.fileSources.model) {
+      setError('Pick a VAD model file for custom init.');
+      return;
+    }
     if (liveSource === 'file' && !selectedLiveFileUri) {
       setError('Select an audio file for live file-ingest mode.');
       return;
@@ -468,25 +613,6 @@ export default function VADScreen() {
         Number.parseInt(speechEventMinInput, 10) || 0
       );
 
-      const modelPath = resolveModelPath(selectedModelFolder);
-      const resolvedModelType = await detectResolvedModelType(modelPath);
-      logLiveLifecycle('model.detected', resolvedModelType);
-      const runtimeOptions =
-        resolvedModelType === 'ten_vad'
-          ? {
-              tenVad: {
-                scoreThreshold: Number.isFinite(threshold)
-                  ? threshold
-                  : undefined,
-              },
-            }
-          : {
-              sileroVad: {
-                scoreThreshold: Number.isFinite(threshold)
-                  ? threshold
-                  : undefined,
-              },
-            };
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate,
         channelCount: 1,
@@ -548,12 +674,7 @@ export default function VADScreen() {
       liveSegmentRef.current = liveSegment;
       logLiveLifecycle('segment.created', `bufferId=${liveSegment.bufferId}`);
 
-      const engine = await createStreamingVAD({
-        modelSource: modelPath,
-        modelType: resolvedModelType,
-        sampleRate,
-        runtimeOptions,
-      });
+      const engine = await createVadEngine(sampleRate, threshold);
       liveEngineRef.current = engine;
       setEngineInstanceId(engine.instanceId);
       logLiveLifecycle('engine.created', `instanceId=${engine.instanceId}`);
@@ -690,8 +811,9 @@ export default function VADScreen() {
     liveSource,
     logLiveLifecycle,
     pushTimeline,
-    resolveModelPath,
-    detectResolvedModelType,
+    createVadEngine,
+    customInitForm.fileSources.model,
+    initMode,
     sampleRateInput,
     selectedLiveFileName,
     selectedLiveFileUri,
@@ -862,8 +984,12 @@ export default function VADScreen() {
   }, [logLiveLifecycle, pushTimeline, streamState, teardownLiveResources]);
 
   const runOffline = useCallback(async () => {
-    if (!selectedModelFolder) {
+    if (initMode === 'auto' && !selectedModelFolder) {
       setError('Select a VAD model first.');
+      return;
+    }
+    if (initMode === 'custom' && !customInitForm.fileSources.model) {
+      setError('Pick a VAD model file for custom init.');
       return;
     }
     if (!preparedOfflineInputBuffer) {
@@ -897,25 +1023,6 @@ export default function VADScreen() {
         Number.parseInt(sampleRateInput, 10) || 16000
       );
       const threshold = Number.parseFloat(thresholdInput);
-      const modelPath = resolveModelPath(selectedModelFolder);
-      const resolvedModelType = await detectResolvedModelType(modelPath);
-      logOfflineLifecycle('model.detected', resolvedModelType);
-      const runtimeOptions =
-        resolvedModelType === 'ten_vad'
-          ? {
-              tenVad: {
-                scoreThreshold: Number.isFinite(threshold)
-                  ? threshold
-                  : undefined,
-              },
-            }
-          : {
-              sileroVad: {
-                scoreThreshold: Number.isFinite(threshold)
-                  ? threshold
-                  : undefined,
-              },
-            };
       const segment = await createEmptyOfflineSegmentBuffer({
         sourceAudioBufferId: preparedOfflineInputBuffer.bufferId,
       });
@@ -930,12 +1037,7 @@ export default function VADScreen() {
         }`
       );
 
-      const engine = await createStreamingVAD({
-        modelSource: modelPath,
-        modelType: resolvedModelType,
-        sampleRate,
-        runtimeOptions,
-      });
+      const engine = await createVadEngine(sampleRate, threshold);
       createdEngine = engine;
 
       const builtSeg = buildSegmentationOption(offlineSegConfig);
@@ -1029,8 +1131,9 @@ export default function VADScreen() {
     offlineSegConfig,
     preparedOfflineInputBuffer,
     pushTimeline,
-    resolveModelPath,
-    detectResolvedModelType,
+    createVadEngine,
+    customInitForm.fileSources.model,
+    initMode,
     sampleRateInput,
     selectedModelFolder,
     thresholdInput,
@@ -1114,6 +1217,16 @@ export default function VADScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Engine config</Text>
+          <InitModeSelector
+            value={initMode}
+            onChange={setInitMode}
+            disabled={isBusy}
+          />
+          <Text style={styles.mutedText}>
+            {initMode === 'auto'
+              ? 'Select a model folder; type is detected when you start live or offline VAD.'
+              : 'Choose silero_vad or ten_vad, pick the ONNX file (or Fill from catalog), then run VAD.'}
+          </Text>
           {loadingModels ? (
             <View style={styles.inlineRow}>
               <ActivityIndicator />
@@ -1127,32 +1240,30 @@ export default function VADScreen() {
               first.
             </Text>
           ) : (
-            <View style={styles.modelList}>
-              {availableModels.map((model) => {
-                const selected = selectedModelFolder === model;
-                return (
-                  <Pressable
-                    key={model}
-                    style={[
-                      styles.modelChip,
-                      selected && styles.modelChipActive,
-                    ]}
-                    onPress={() => setSelectedModelFolder(model)}
-                    disabled={isBusy}
-                  >
-                    <Text
-                      style={[
-                        styles.modelChipText,
-                        selected && styles.modelChipTextActive,
-                      ]}
-                    >
-                      {getModelDisplayName(model)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <ModelFolderGrid
+              entries={catalogEntries}
+              selectedId={selectedModelFolder}
+              initializedId={null}
+              onSelect={setSelectedModelFolder}
+              loading={loadingModels}
+              disabled={isBusy}
+              emptyMessage="No streaming VAD models found."
+            />
           )}
+          {initMode === 'custom' ? (
+            <VadCustomInitForm
+              value={customInitForm}
+              onChange={setCustomInitForm}
+              selectedCatalogModelId={selectedModelFolder}
+              onFillFromSelectedModel={() => {
+                handleFillFromSelectedModel().catch(() => {});
+              }}
+              onPrepareScatteredTest={handlePrepareScatteredTest}
+              fillLoading={customFillLoading}
+              disabled={isBusy}
+              fillHint={customFillHint}
+            />
+          ) : null}
           <View style={styles.inlineRowWrap}>
             <Text style={styles.inputLabel}>sampleRate: {sampleRateInput}</Text>
             <Pressable

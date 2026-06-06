@@ -66,15 +66,39 @@ export type TenVadRuntimeOptions = {
 
 export type VADRuntimeOptions = SileroVadRuntimeOptions | TenVadRuntimeOptions;
 
-export type VADInitializeOptions = {
-  modelSource: FileSource;
-  modelType?: VADModelType | 'auto';
+/** Concrete VAD model types (excludes `'auto'`). */
+export type VADConcreteModelType = VADModelType;
+
+/** Shared VAD init fields for auto and custom modes. */
+export type VADInitOptionsShared = {
   sampleRate?: number;
   runtimeOptions?: VADRuntimeOptions;
   provider?: string;
   numThreads?: number;
   debug?: boolean;
 };
+
+/** Automatic model detection from a model directory (default). */
+export type VADAutoInitializeOptions = VADInitOptionsShared & {
+  initMode?: 'auto';
+  modelSource: FileSource;
+  modelType?: VADModelType | 'auto';
+};
+
+/** Explicit model file path; skips native auto-detection. */
+export type VADCustomInitializeOptions = VADInitOptionsShared & {
+  initMode: 'custom';
+  modelType: VADConcreteModelType;
+  customConfig: import('./customConfig').VadCustomConfig;
+};
+
+/**
+ * Configuration for VAD initialization. Discriminated by `initMode`:
+ * auto mode scans a model directory; custom mode supplies an explicit {@link FileSource} for the ONNX file.
+ */
+export type VADInitializeOptions =
+  | VADAutoInitializeOptions
+  | VADCustomInitializeOptions;
 
 export type VADLiveRunOptions = {
   /**

@@ -25,6 +25,46 @@ Import path: `react-native-sherpa-onnx/vad`
 
 `detectVadModel` validates Silero / Ten VAD layouts before `createStreamingVAD`. For library rows where the Sherpa category is unknown, use unified detection in [model-detect.md](model-detect.md).
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use custom init when the VAD ONNX file is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the family).
+
+- Set `initMode: 'custom'` and a concrete `modelType` (`silero_vad` or `ten_vad`, not `'auto'`).
+- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
+- Validation uses native `validate-vad` (same `model` key for both families). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+- `runtimeOptions` (threshold, silence/speech ms, `windowSize`) work the same as auto mode.
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
+  },
+});
+```
+
+Ten VAD example:
+
+```ts
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'ten_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/ten-vad.onnx' },
+  },
+  runtimeOptions: {
+    tenVad: { scoreThreshold: 0.5, windowSize: 256 },
+  },
+});
+```
+
 ## Quick start
 
 ### 1) Streaming VAD with live segment output

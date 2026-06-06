@@ -7,4 +7,5 @@ export type {
   OnlineSttInitBridgeOptions,
   SttInitBridgeOptions,
   TtsInitBridgeOptions,
+  VadInitBridgeOptions,
 } from '../NativeSherpaOnnx';

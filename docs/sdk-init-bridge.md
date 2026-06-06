@@ -4,8 +4,8 @@ The React Native package uses two layers for engine initialization:
 
 | Layer | Examples | Shape |
 |-------|----------|--------|
-| **Public** | `createTTS`, `createSTT`, `createStreamingSTT` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`) |
-| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
+| **Public** | `createTTS`, `createSTT`, `createStreamingSTT`, `createStreamingVAD` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`, `VADInitializeOptions`) |
+| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt`, `initializeVad` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
 
 ## Why two layers?
 
@@ -20,6 +20,7 @@ The React Native package uses two layers for engine initialization:
 | `initializeTts(instanceId, options)` | `createTTS` | `TtsInitBridgeOptions` | `buildTtsInitBridgeOptions` in `src/tts/ttsNativeBridge.ts` |
 | `initializeStt(instanceId, options)` | `createSTT` | `SttInitBridgeOptions` | `buildSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
 | `initializeOnlineStt(instanceId, options)` | `createStreamingSTT` | `OnlineSttInitBridgeOptions` | `buildStreamingSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
+| `initializeVad(instanceId, options)` | `createStreamingVAD` | `VadInitBridgeOptions` | `buildVadInitBridgeOptions` in `src/vad/vadNativeBridge.ts` |
 
 Bridge option types are defined in `src/NativeSherpaOnnx.ts` (required for React Native codegen) and re-exported from `src/nativeBridge/initBridgeTypes.ts` for builders.
 
@@ -82,6 +83,22 @@ createTTS({
 { initMode: 'custom', modelType: 'vits', modelPaths: { ttsModel: '...', tokens: '...' } }
 ```
 
+**VAD — custom init:**
+
+```ts
+// Public
+createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/models/silero_vad.onnx' },
+  },
+});
+
+// Bridge map (internal) — buildVadInitBridgeOptions
+{ initMode: 'custom', modelType: 'silero_vad', modelPaths: { model: '...' } }
+```
+
 Bridge fields for TTS init:
 
 | Public | Bridge key | Notes |
@@ -90,6 +107,14 @@ Bridge fields for TTS init:
 | `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
 | `modelOptions.kokoro.lang` | `kokoroLang` | Bridge-only |
 | `lexiconLanguageId` | `lexiconLanguageId` | Auto mode only |
+
+Bridge fields for VAD init:
+
+| Public | Bridge key | Notes |
+|--------|------------|--------|
+| `initMode: 'custom'` | `initMode`, `modelPaths`, `modelType` | No `modelDir`; single key `model` |
+| `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
+| `runtimeOptions.*` | `threshold`, `silenceDurationMs`, `speechDurationMs`, `minSpeechDurationMs`, `maxSpeechDurationS`, `windowSize` | Flattened scalars |
 
 ## TTS language fields (bridge)
 
