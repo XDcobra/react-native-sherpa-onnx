@@ -25,7 +25,10 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import type { SegmentationPolicy } from 'react-native-sherpa-onnx/segment';
+import type {
+  SegmentationPolicy,
+  SpeechVadSegmentationPolicy,
+} from 'react-native-sherpa-onnx/segment';
 import {
   ModelCategory,
   onModelsListUpdated,
@@ -114,24 +117,18 @@ function getAvailableModes(variant: SegmentationVariant): SegmentationMode[] {
   return ['off', 'manual', 'auto'];
 }
 
-function defaultEvaluator(variant: SegmentationVariant): string {
-  if (variant === 'speech-streaming') return 'continuous_frames';
-  if (variant === 'speech-offline') return 'speech_energy_silence';
-  return 'text_synthetic_auto';
-}
-
 function defaultPolicy(variant: SegmentationVariant): SegmentationPolicy {
-  const evaluator = defaultEvaluator(
-    variant
-  ) as SegmentationPolicy['evaluator'];
   if (variant === 'text-offline' || variant === 'text-streaming') {
     return {
-      evaluator,
+      evaluator: 'text_synthetic_auto',
       maxLengthChars: 320,
       sentenceBoundary: true,
     };
   }
-  return { evaluator };
+  if (variant === 'speech-streaming') {
+    return { evaluator: 'continuous_frames' };
+  }
+  return { evaluator: 'speech_energy_silence' };
 }
 
 /** Placeholder when the field is empty: shows the effective native default. */
@@ -212,7 +209,7 @@ type PolicyFieldsProps = {
 };
 
 type VadPolicyFieldsProps = {
-  policy: SegmentationPolicy;
+  policy: SpeechVadSegmentationPolicy;
   disabled: boolean;
   onPolicyChange: (p: SegmentationPolicy) => void;
 };
@@ -351,7 +348,7 @@ function PunctuationPolicyFields({
 
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
-      onPolicyChange({ ...policy, ...patch }),
+      onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
     [policy, onPolicyChange]
   );
 
@@ -514,7 +511,7 @@ function VadPolicyFields({
         onPolicyChange({
           ...policyRef.current,
           modelPath: fileSource,
-        });
+        } as SpeechVadSegmentationPolicy);
         setVadStatusLine(
           `policy.modelPath set · detected: ${
             det.modelType
@@ -532,8 +529,8 @@ function VadPolicyFields({
   }, [snapshot, selectedVadModelId, onPolicyChange]);
 
   const update = useCallback(
-    (patch: Partial<SegmentationPolicy>) =>
-      onPolicyChange({ ...policy, ...patch }),
+    (patch: Partial<SpeechVadSegmentationPolicy>) =>
+      onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
     [policy, onPolicyChange]
   );
 
@@ -624,7 +621,7 @@ function VadPolicyFields({
 function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
-      onPolicyChange({ ...policy, ...patch }),
+      onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
     [policy, onPolicyChange]
   );
 
@@ -669,7 +666,7 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
       {/* ── speech_vad_model ── */}
       {evaluator === 'speech_vad_model' && (
         <VadPolicyFields
-          policy={policy}
+          policy={policy as SpeechVadSegmentationPolicy}
           disabled={disabled}
           onPolicyChange={onPolicyChange}
         />
@@ -753,27 +750,30 @@ export function SegmentationPolicyControls({
     (evaluator: string) => {
       const current = value.policy;
       // Preserve evaluator-agnostic numeric fields (maxLengthChars, etc.) when switching
-      const base: SegmentationPolicy = {
+      const base = {
         ...defaultPolicy(variant),
         ...current,
         evaluator: evaluator as SegmentationPolicy['evaluator'],
-      };
+      } as SegmentationPolicy;
       // Remove fields that don't apply to the new evaluator
       if (evaluator !== 'speech_energy_silence') {
-        delete base.silenceThresholdMs;
-        delete base.energyThresholdDb;
-        delete base.minSegmentMs;
-        delete base.maxSegmentMs;
-        delete base.hangoverMs;
+        delete (base as Record<string, unknown>).silenceThresholdMs;
+        delete (base as Record<string, unknown>).energyThresholdDb;
+        delete (base as Record<string, unknown>).minSegmentMs;
+        delete (base as Record<string, unknown>).maxSegmentMs;
+        delete (base as Record<string, unknown>).hangoverMs;
       }
       if (evaluator !== 'speech_vad_model') {
-        delete base.vadThreshold;
-        delete base.vadMinSpeechMs;
-        delete base.vadMinSilenceMs;
-        delete base.modelPath;
+        delete (base as Record<string, unknown>).vadThreshold;
+        delete (base as Record<string, unknown>).vadMinSpeechMs;
+        delete (base as Record<string, unknown>).vadMinSilenceMs;
+        delete (base as Record<string, unknown>).modelPath;
+        delete (base as Record<string, unknown>).initMode;
+        delete (base as Record<string, unknown>).modelType;
+        delete (base as Record<string, unknown>).customConfig;
       }
       if (evaluator !== 'continuous_frames') {
-        delete base.checkpointIntervalMs;
+        delete (base as Record<string, unknown>).checkpointIntervalMs;
       }
       if (
         evaluator !== 'text_synthetic_auto' &&

@@ -474,6 +474,24 @@ const streaming = await createStreamingPunctuation({
 
 Alignment does **not** use `initializeAlignment`. For `mode: 'accurate'` only, pass `initMode: 'custom'`, `modelType: 'wav2vec2'`, and `customConfig` with a single **`model`** {@link FileSource}. See [Alignment custom model path](alignment-offline.md#custom-model-path-initmode-custom).
 
+### Custom Segmentation path (`speech_vad_model` policy)
+
+Segmentation has **no** engine init. For `evaluator: 'speech_vad_model'` only, pass `initMode: 'custom'`, concrete `modelType` (`silero_vad` or `ten_vad`), and `customConfig` with a single **`model`** {@link FileSource} — same VAD keys as streaming VAD. See [Segmentation custom model path](segmentation-engine.md#custom-model-path-initmode-custom).
+
+```typescript
+import { segmentOfflineBuffer } from 'react-native-sherpa-onnx/segment';
+
+await segmentOfflineBuffer(offlineAudio, {
+  evaluator: 'speech_vad_model',
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  vadThreshold: 0.5,
+});
+```
+
 ```typescript
 import { createAlignment } from 'react-native-sherpa-onnx/alignment';
 

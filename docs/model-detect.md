@@ -300,6 +300,8 @@ Categories match unified detect literals: `stt`, `stt_streaming`, `tts`, `vad`, 
 
 TypeScript discriminated unions in `src/stt/customConfig.ts`, `src/tts/customConfig.ts`, `src/vad/customConfig.ts`, `src/enhancement/customConfig.ts`, `src/punctuation/customConfig.ts`, and `src/alignment/customConfig.ts` remain compile-time helpers; **runtime truth is native**.
 
+**Segmentation `speech_vad_model` custom policy** reuses `src/vad/customConfig.ts` and native category `vad` (key `model`) — there is no separate `src/segment/customConfig.ts`. See [segmentation-engine.md — Custom model path](segmentation-engine.md#custom-model-path-initmode-custom).
+
 ## Feature-specific detection APIs
 
 Use these when initializing engines or when you need validation details. Each page documents required files, `paths`, and `detectionSources`.

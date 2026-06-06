@@ -1,5 +1,7 @@
 import type { FileSource } from '../fileio/types';
+import { assertVadCustomConfig } from '../vad/customConfig';
 import type { SegmentationPolicy } from './engine-types';
+import { isSpeechVadSegmentationPolicy } from './resolveSpeechVadModelForPolicy';
 
 function isFileSource(value: unknown): value is FileSource {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -125,18 +127,48 @@ export function validateSegmentationConfig(
         `${errorPrefix}: ${featureName} requires a speech segmentation evaluator; received ${evaluator}`
       );
     }
-    if (policy.modelPath != null && evaluator !== 'speech_vad_model') {
+    if (
+      'modelPath' in policy &&
+      policy.modelPath != null &&
+      evaluator !== 'speech_vad_model'
+    ) {
       throw new Error(
         `${errorPrefix}: policy.modelPath is only valid for speech_vad_model`
       );
     }
     if (evaluator === 'speech_vad_model') {
-      if (!policy.modelPath) {
+      const speechVadPolicy = policy as SegmentationPolicy;
+      if (!isSpeechVadSegmentationPolicy(speechVadPolicy)) {
         throw new Error(
-          `${errorPrefix}: speech_vad_model requires policy.modelPath`
+          `${errorPrefix}: speech_vad_model policy shape is invalid`
         );
       }
-      if (!isFileSource(policy.modelPath)) {
+      if (speechVadPolicy.initMode === 'custom') {
+        if (
+          speechVadPolicy.modelType !== 'silero_vad' &&
+          speechVadPolicy.modelType !== 'ten_vad'
+        ) {
+          throw new Error(
+            `${errorPrefix}: speech_vad_model custom mode requires modelType silero_vad or ten_vad`
+          );
+        }
+        if (speechVadPolicy.customConfig == null) {
+          throw new Error(
+            `${errorPrefix}: speech_vad_model custom mode requires customConfig with model: FileSource`
+          );
+        }
+        try {
+          assertVadCustomConfig(
+            speechVadPolicy.customConfig as unknown as Record<string, unknown>
+          );
+        } catch (error) {
+          throw new Error(
+            `${errorPrefix}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      } else if (!isFileSource(speechVadPolicy.modelPath)) {
         throw new Error(
           `${errorPrefix}: speech_vad_model requires policy.modelPath to be a valid FileSource`
         );

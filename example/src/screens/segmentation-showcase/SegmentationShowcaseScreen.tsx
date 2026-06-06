@@ -8,6 +8,7 @@ import {
   TextInput,
   FlatList,
   Switch,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -54,6 +55,13 @@ import {
 import { AUDIO_FILES } from '../../audioConfig';
 import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  InitModeSelector,
+  SpeechVadSegmentationCustomInitForm,
+  type ModelInitMode,
+  type SpeechVadSegmentationCustomInitFormState,
+} from '../../components/modelInit';
+import { fillSegmentSpeechVadCustomConfigFromModelFolder } from '../../utils/segmentSpeechVadCustomInitFill';
 import {
   OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
@@ -118,6 +126,12 @@ type AudioSegmentationState = {
 const EXAMPLE_TEXT =
   'Hello world. This is a longer example text that will be segmented. The segmentation engine cuts text at sentence boundaries and respects length limits. You can adjust parameters to see how segments change.';
 const SEGMENT_PAGE_SIZE = 128;
+
+const DEFAULT_SPEECH_VAD_CUSTOM_INIT: SpeechVadSegmentationCustomInitFormState =
+  {
+    modelType: 'silero_vad',
+    fileSources: {},
+  };
 
 const PAD_PACK_NAME = 'sherpa_models';
 const RECOMMENDED_VAD_MODEL_IDS =
@@ -272,6 +286,15 @@ export default function SegmentationShowcaseScreen() {
   const [loadingVadModels, setLoadingVadModels] = useState(false);
   const [initializingPunctuation, setInitializingPunctuation] = useState(false);
   const [initializingVadModel, setInitializingVadModel] = useState(false);
+  const [vadInitMode, setVadInitMode] = useState<ModelInitMode>('auto');
+  const [vadCustomInitForm, setVadCustomInitForm] =
+    useState<SpeechVadSegmentationCustomInitFormState>(
+      DEFAULT_SPEECH_VAD_CUSTOM_INIT
+    );
+  const [vadCustomFillLoading, setVadCustomFillLoading] = useState(false);
+  const [vadCustomFillHint, setVadCustomFillHint] = useState<string | null>(
+    null
+  );
   const [punctuationStatus, setPunctuationStatus] = useState<string | null>(
     null
   );
@@ -725,6 +748,65 @@ export default function SegmentationShowcaseScreen() {
     padVadModelIds,
   ]);
 
+  const resolveVadModelPath = useCallback(
+    (modelId: string): FileSource =>
+      getVadModelPathConfig(modelId, {
+        padModelIds: padVadModelIds,
+        padModelsPath,
+        bundledFolders: bundledVadFolders,
+        downloadedIds: new Set(downloadedVadIds),
+      }),
+    [bundledVadFolders, downloadedVadIds, padModelsPath, padVadModelIds]
+  );
+
+  const handleFillVadCustomFromCatalog = useCallback(async () => {
+    const modelId = audioState.selectedVadModelId;
+    if (!modelId) {
+      Alert.alert('Select a model', 'Pick a catalog VAD model first.');
+      return;
+    }
+
+    setVadCustomFillLoading(true);
+    setVadCustomFillHint(null);
+    setError(null);
+    try {
+      const modelPath = resolveVadModelPath(modelId);
+      const fillResult = await fillSegmentSpeechVadCustomConfigFromModelFolder(
+        modelPath,
+        { modelTypeOverride: vadCustomInitForm.modelType }
+      );
+      setVadCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setVadCustomFillHint(
+        `Filled from ${getModelDisplayName(modelId)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setVadCustomFillHint(null);
+      setError(normalizeErrorMessage(fillErr));
+    } finally {
+      setVadCustomFillLoading(false);
+    }
+  }, [
+    audioState.selectedVadModelId,
+    resolveVadModelPath,
+    vadCustomInitForm.modelType,
+  ]);
+
+  const handleVadCustomScatteredTest = useCallback(() => {
+    setVadCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setVadCustomFillHint(
+      'Scattered test: pick the model file from a different location, then run segmentation.'
+    );
+  }, []);
+
   const handleRunTextSegmentation = useCallback(async () => {
     if (!textState.inputText.trim()) {
       setError('Please enter some text');
@@ -822,16 +904,24 @@ export default function SegmentationShowcaseScreen() {
       return;
     }
 
-    if (
-      audioState.evaluator === 'speech_vad_model' &&
-      (!audioState.selectedVadModelId ||
-        !audioState.initializedVadFileSource ||
-        audioState.initializedVadModelId !== audioState.selectedVadModelId)
-    ) {
-      setError(
-        'Initialize a VAD model first. This evaluator requires policy.modelPath.'
-      );
-      return;
+    if (audioState.evaluator === 'speech_vad_model') {
+      if (vadInitMode === 'auto') {
+        if (
+          !audioState.selectedVadModelId ||
+          !audioState.initializedVadFileSource ||
+          audioState.initializedVadModelId !== audioState.selectedVadModelId
+        ) {
+          setError(
+            'Initialize a VAD model first. Auto mode requires policy.modelPath.'
+          );
+          return;
+        }
+      } else if (!vadCustomInitForm.fileSources.model) {
+        setError(
+          'Custom mode requires customConfig.model (pick the VAD ONNX file).'
+        );
+        return;
+      }
     }
 
     setLoading(true);
@@ -843,6 +933,10 @@ export default function SegmentationShowcaseScreen() {
 
       const energyDb = parseOptionalFloat(audioState.energyThresholdDb, -40);
       const vadTh = parseOptionalFloat(audioState.vadThreshold, 0.5);
+      const vadCustomModelSource =
+        vadInitMode === 'custom'
+          ? vadCustomInitForm.fileSources.model
+          : undefined;
 
       await segmentOfflineBuffer(
         audioBufferId,
@@ -854,6 +948,18 @@ export default function SegmentationShowcaseScreen() {
               minSegmentMs: audioState.minSegmentMs,
               maxSegmentMs: audioState.maxSegmentMs,
               hangoverMs: audioState.hangoverMs,
+            }
+          : vadInitMode === 'custom'
+          ? {
+              evaluator: 'speech_vad_model',
+              initMode: 'custom',
+              modelType: vadCustomInitForm.modelType,
+              customConfig: { model: vadCustomModelSource! },
+              vadThreshold: vadTh,
+              vadMinSpeechMs: audioState.vadMinSpeechMs,
+              vadMinSilenceMs: audioState.vadMinSilenceMs,
+              minSegmentMs: audioState.minSegmentMs,
+              maxSegmentMs: audioState.maxSegmentMs,
             }
           : {
               evaluator: 'speech_vad_model',
@@ -892,6 +998,9 @@ export default function SegmentationShowcaseScreen() {
     audioState.vadMinSilenceMs,
     audioState.vadMinSpeechMs,
     audioState.vadThreshold,
+    vadCustomInitForm.fileSources,
+    vadCustomInitForm.modelType,
+    vadInitMode,
   ]);
 
   const handleLoadMoreTextSegments = useCallback(async () => {
@@ -967,9 +1076,13 @@ export default function SegmentationShowcaseScreen() {
     !loading &&
     !!preparedAudioBuffer &&
     (audioState.evaluator === 'speech_energy_silence' ||
-      (!!audioState.selectedVadModelId &&
-        !!audioState.initializedVadFileSource &&
-        audioState.initializedVadModelId === audioState.selectedVadModelId));
+      (audioState.evaluator === 'speech_vad_model' &&
+        (vadInitMode === 'custom'
+          ? !!vadCustomInitForm.fileSources.model
+          : !!audioState.selectedVadModelId &&
+            !!audioState.initializedVadFileSource &&
+            audioState.initializedVadModelId ===
+              audioState.selectedVadModelId)));
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -1496,8 +1609,9 @@ export default function SegmentationShowcaseScreen() {
                     speech_vad_model
                   </Text>
                   <Text style={styles.optionDescription}>
-                    Segment with a VAD bundle via policy.modelPath (FileSource;
-                    same detect path as streaming VAD).
+                    Segment with a VAD ONNX via policy — auto: detect from a
+                    folder (`modelPath`); custom: explicit `model` path (no
+                    detect).
                   </Text>
                 </Pressable>
               </View>
@@ -1635,9 +1749,18 @@ export default function SegmentationShowcaseScreen() {
               <View>
                 <Text style={styles.sectionTitle}>VAD Model</Text>
                 <Text style={styles.sectionDescription}>
-                  Choose an available VAD model, detect its concrete files once,
-                  then use it for offline speech segmentation.
+                  Choose auto (detect from catalog folder) or custom (explicit
+                  ONNX path). Custom reuses VAD validation keys — single slot
+                  `model`.
                 </Text>
+
+                <InitModeSelector
+                  value={vadInitMode}
+                  onChange={setVadInitMode}
+                  disabled={
+                    loading || initializingVadModel || vadCustomFillLoading
+                  }
+                />
 
                 {loadingVadModels ? (
                   <View style={styles.loadingContainer}>
@@ -1706,38 +1829,53 @@ export default function SegmentationShowcaseScreen() {
                   </View>
                 )}
 
-                <Pressable
-                  style={[
-                    styles.button,
-                    styles.secondaryButton,
-                    (initializingVadModel ||
+                {vadInitMode === 'auto' ? (
+                  <Pressable
+                    style={[
+                      styles.button,
+                      styles.secondaryButton,
+                      (initializingVadModel ||
+                        !audioState.selectedVadModelId ||
+                        availableVadModels.length === 0) &&
+                        styles.buttonDisabled,
+                    ]}
+                    onPress={handleInitializeVadModel}
+                    disabled={
+                      initializingVadModel ||
                       !audioState.selectedVadModelId ||
-                      availableVadModels.length === 0) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={handleInitializeVadModel}
-                  disabled={
-                    initializingVadModel ||
-                    !audioState.selectedVadModelId ||
-                    availableVadModels.length === 0
-                  }
-                >
-                  {initializingVadModel ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="hardware-chip"
-                        size={18}
-                        color="#FFF"
-                        style={styles.buttonIcon}
-                      />
-                      <Text style={styles.buttonText}>Use VAD Model</Text>
-                    </>
-                  )}
-                </Pressable>
+                      availableVadModels.length === 0
+                    }
+                  >
+                    {initializingVadModel ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="hardware-chip"
+                          size={18}
+                          color="#FFF"
+                          style={styles.buttonIcon}
+                        />
+                        <Text style={styles.buttonText}>Use VAD Model</Text>
+                      </>
+                    )}
+                  </Pressable>
+                ) : (
+                  <SpeechVadSegmentationCustomInitForm
+                    value={vadCustomInitForm}
+                    onChange={setVadCustomInitForm}
+                    selectedCatalogModelId={audioState.selectedVadModelId}
+                    onFillFromSelectedModel={() => {
+                      handleFillVadCustomFromCatalog().catch(() => {});
+                    }}
+                    onPrepareScatteredTest={handleVadCustomScatteredTest}
+                    fillLoading={vadCustomFillLoading}
+                    disabled={loading || initializingVadModel}
+                    fillHint={vadCustomFillHint}
+                  />
+                )}
 
-                {vadStatus && (
+                {vadInitMode === 'auto' && vadStatus && (
                   <View style={styles.statusCard}>
                     <Text style={styles.statusTitle}>Loaded model</Text>
                     <Text style={styles.statusText}>{vadStatus}</Text>

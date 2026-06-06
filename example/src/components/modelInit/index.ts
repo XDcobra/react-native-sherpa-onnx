@@ -33,3 +33,7 @@ export {
   AlignmentCustomInitForm,
   type AlignmentCustomInitFormState,
 } from './AlignmentCustomInitForm';
+export {
+  SpeechVadSegmentationCustomInitForm,
+  type SpeechVadSegmentationCustomInitFormState,
+} from './SpeechVadSegmentationCustomInitForm';

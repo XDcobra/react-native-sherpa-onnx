@@ -37,7 +37,7 @@ Policies are **domain-specific**: only **text** evaluators go on text buffers; o
 | `text_synthetic_auto` | Text | Offline + live (text) | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
 | `text_punctuation_assisted` | Text | Offline + live (text); needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
 | `speech_energy_silence` | Speech | Offline + live (speech) | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
-| `speech_vad_model` | Speech | Offline + live (speech); needs `policy.modelPath` (**`FileSource`**) | Spans from VAD ONNX. JS runs **`detectVadModel`** on `modelPath` (same plumbing as **`createStreamingVAD`** / `detectVadModel`), then native uses the resolved `.onnx` file + `modelType` (`vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, …). |
+| `speech_vad_model` | Speech | Offline + live (speech); needs VAD model config | Spans from VAD ONNX. **Auto:** `modelPath` (**`FileSource`**) — JS runs **`detectVadModel`**, then native uses resolved `.onnx` + `modelType`. **Custom:** `initMode: 'custom'`, concrete `modelType` (`silero_vad` / `ten_vad`), `customConfig.model` — no detect (same VAD keys as [`createStreamingVAD`](vad-streaming.md)). Runtime fields: `vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, … |
 | `continuous_frames` | Speech | **Live speech only** (offline → `POLICY_INVALID_FOR_OFFLINE`) | Frame checkpoints (`checkpointIntervalMs`). |
 
 ### Text `sentenceBoundary` delimiters
@@ -187,7 +187,48 @@ const ref = await segmentOfflineBuffer(offlineAudioBuffer, {
 });
 ```
 
-Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` (**`FileSource`**) is required; JS resolves it with **`detectVadModel`** and forwards a concrete `.onnx` path plus `modelType` to native (no directory heuristics on the native side).
+Materializes segments for offline text/audio. For `speech_vad_model`, pass either auto `modelPath` (**`FileSource`**) or custom `initMode: 'custom'` with `customConfig.model` — see [Custom model path](#custom-model-path-initmode-custom) below.
+
+## Custom model path (`initMode: 'custom'`)
+
+Segmentation has **no** TurboModule engine init — custom paths apply on **`segmentOfflineBuffer`** and **`attachSegmentationEngine`** policy only, and **only** when `evaluator: 'speech_vad_model'`.
+
+Use custom paths when the VAD ONNX is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the file).
+
+- Set `initMode: 'custom'` and a concrete `modelType` (`silero_vad` or `ten_vad`, not `'auto'`).
+- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
+- Validation reuses native `validate-vad` (category `vad`, key `model`). TypeScript helpers live in [`src/vad/customConfig.ts`](../src/vad/customConfig.ts) — there is no separate segment customConfig module. See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+- Auto mode (default): pass `modelPath` — the SDK runs `detectVadModel` before native (same pipeline as streaming VAD init).
+
+```ts
+await segmentOfflineBuffer(offlineAudioBuffer, {
+  evaluator: 'speech_vad_model',
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  vadThreshold: 0.5,
+  vadMinSpeechMs: 250,
+  vadMinSilenceMs: 200,
+});
+```
+
+Live attach uses the same policy union:
+
+```ts
+await attachSegmentationEngine(liveAudioBuffer, {
+  policy: {
+    evaluator: 'speech_vad_model',
+    initMode: 'custom',
+    modelType: 'ten_vad',
+    customConfig: {
+      model: { kind: 'fs', path: '/data/models/ten-vad.onnx' },
+    },
+    vadThreshold: 0.5,
+  },
+});
+```
 
 ### Live text helpers
 
