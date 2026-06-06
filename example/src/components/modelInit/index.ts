@@ -9,3 +9,7 @@ export {
   StreamingSttCustomInitForm,
   type StreamingSttCustomInitFormState,
 } from './StreamingSttCustomInitForm';
+export {
+  TtsCustomInitForm,
+  type TtsCustomInitFormState,
+} from './TtsCustomInitForm';

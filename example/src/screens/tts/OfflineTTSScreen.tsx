@@ -12,6 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   createTTS,
   detectTtsModel,
+  assertTtsCustomConfig,
+  type TtsCustomConfig,
   type TTSModelType,
   type TtsSynthesisOptions,
   type TtsSynthesisResult,
@@ -49,7 +51,6 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import { getSizeHint, getQualityHint } from '../../utils/recommendedModels';
 import {
   DocumentDirectoryPath,
   unlink,
@@ -73,8 +74,21 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  ModelFolderGrid,
+  TtsCustomInitForm,
+  type ModelInitMode,
+  type TtsCustomInitFormState,
+} from '../../components/modelInit';
+import { fillTtsCustomConfigFromModelFolder } from '../../utils/ttsCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
+
+const DEFAULT_TTS_CUSTOM_INIT: TtsCustomInitFormState = {
+  modelType: 'vits',
+  fileSources: {},
+};
 
 /** Readable placeholder on gray `synthesisOptionInput` / `textInput` backgrounds. */
 const INPUT_PLACEHOLDER_COLOR = '#8E8E93';
@@ -96,6 +110,18 @@ type ReferenceAudioState = {
 
 export default function OfflineTTSScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] = useState<TtsCustomInitFormState>(
+    DEFAULT_TTS_CUSTOM_INIT
+  );
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [selectedModelForInit, setSelectedModelForInit] = useState<
+    string | null
+  >(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
@@ -110,9 +136,7 @@ export default function OfflineTTSScreen() {
   const [selectedModelType, setSelectedModelType] =
     useState<TTSModelType | null>(null);
   const [loading, setLoading] = useState(false);
-  const [initializingModel, setInitializingModel] = useState<string | null>(
-    null
-  );
+  const [, setInitializingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inputText, setInputText] = useState<string>('Hello, world!');
   const [generatedAudio, setGeneratedAudio] = useState<GeneratedResult | null>(
@@ -235,7 +259,7 @@ export default function OfflineTTSScreen() {
   }, [currentModelFolder]);
 
   useEffect(() => {
-    if (!currentModelFolder) {
+    if (!selectedModelType) {
       return;
     }
     if (paramsDebounceRef.current) {
@@ -333,6 +357,7 @@ export default function OfflineTTSScreen() {
     };
   }, [
     currentModelFolder,
+    initializedSummary,
     lengthScale,
     noiseScale,
     noiseScaleW,
@@ -344,7 +369,14 @@ export default function OfflineTTSScreen() {
     const cached = getTtsCache();
     if (cached.engine != null && cached.modelFolder != null) {
       ttsEngineRef.current = cached.engine;
-      setCurrentModelFolder(cached.modelFolder);
+      setCurrentModelFolder(
+        cached.modelFolder === 'custom' ? null : cached.modelFolder
+      );
+      setInitializedSummary(
+        cached.modelFolder === 'custom'
+          ? `custom:${cached.selectedModelType ?? 'unknown'}`
+          : getModelDisplayName(cached.modelFolder)
+      );
       setDetectedModels(cached.detectedModels);
       setSelectedModelType(cached.selectedModelType);
       setModelInfo(cached.modelInfo);
@@ -551,6 +583,41 @@ export default function OfflineTTSScreen() {
     }
   };
 
+  const catalogEntries = useMemo(
+    () =>
+      availableModels.map((id) => ({
+        id,
+        label: getModelDisplayName(id),
+      })),
+    [availableModels]
+  );
+
+  const isEngineInitialized =
+    currentModelFolder != null || initializedSummary != null;
+
+  const formatInitError = (err: unknown): string => {
+    if (err instanceof Error) {
+      let message = err.message;
+      if ('code' in err && typeof err.code === 'string') {
+        message = `[${err.code}] ${message}`;
+      }
+      return message;
+    }
+    if (typeof err === 'object' && err !== null) {
+      const errorObj = err as {
+        message?: string;
+        code?: string;
+        userInfo?: { NSLocalizedDescription?: string };
+      };
+      const message =
+        errorObj.message ??
+        errorObj.userInfo?.NSLocalizedDescription ??
+        JSON.stringify(err);
+      return errorObj.code ? `[${errorObj.code}] ${message}` : message;
+    }
+    return 'Unknown error';
+  };
+
   const resolveTtsModelPath = (modelFolder: string) => {
     if (padModelIds.includes(modelFolder)) {
       return padModelsPath
@@ -564,12 +631,17 @@ export default function OfflineTTSScreen() {
   };
 
   const handleInitialize = async (modelFolder: string) => {
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
+    }
     setLoading(true);
     setInitializingModel(modelFolder);
     setError(null);
     setInitResult(null);
     setDetectedModels([]);
     setSelectedModelType(null);
+    setInitializedSummary(null);
     setModelInfo(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
@@ -662,6 +734,7 @@ export default function OfflineTTSScreen() {
       setDetectedModels(normalizedDetected);
       setCurrentModelFolder(modelFolder);
       setSelectedModelType(firstType);
+      setInitializedSummary(getModelDisplayName(modelFolder));
       setModelInfo(modelInfoValue);
       setInitResult(
         `Initialized: ${getModelDisplayName(
@@ -712,14 +785,152 @@ export default function OfflineTTSScreen() {
     }
   };
 
-  const handleGenerate = async () => {
-    if (!currentModelFolder) {
-      setError('Please initialize a model first');
+  const handleFillFromSelectedModel = async () => {
+    const modelFolder = selectedModelForInit;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
       return;
     }
 
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    try {
+      const modelPath = resolveTtsModelPath(modelFolder);
+      const fillResult = await fillTtsCustomConfigFromModelFolder(modelPath, {
+        modelTypeOverride: customInitForm.modelType,
+      });
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (err) {
+      setCustomFillHint(null);
+      setError(formatInitError(err));
+    } finally {
+      setCustomFillLoading(false);
+    }
+  };
+
+  const handlePrepareScatteredTest = () => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick each file from different locations, then Initialize.'
+    );
+  };
+
+  const handleInitializeCustom = async () => {
+    setLoading(true);
+    setError(null);
+    setInitResult(null);
+    setDetectedModels([]);
+    setSelectedModelType(null);
+    setInitializedSummary(null);
+    setModelInfo(null);
+    setGeneratedAudio(null);
+    setSavedAudioPath(null);
+    setSavedAudioBufferId(null);
+    stopTtsSavedAudioPlayback();
+
+    try {
+      const previous = ttsEngineRef.current;
+      if (previous) {
+        await previous.destroy();
+        ttsEngineRef.current = null;
+        clearTtsCache();
+      }
+
+      const customConfig = {
+        ...customInitForm.fileSources,
+      } as TtsCustomConfig;
+      assertTtsCustomConfig(customConfig as unknown as Record<string, unknown>);
+
+      let engine: TtsEngine;
+      try {
+        engine = await createTTS({
+          initMode: 'custom',
+          modelType: customInitForm.modelType,
+          customConfig,
+          numThreads: TTS_NUM_THREADS,
+          debug: false,
+        });
+      } catch (initErr) {
+        console.warn(
+          'Custom createTTS failed, retrying with 1 thread',
+          initErr
+        );
+        engine = await createTTS({
+          initMode: 'custom',
+          modelType: customInitForm.modelType,
+          customConfig,
+          numThreads: 1,
+          debug: false,
+        });
+      }
+
+      let modelInfoValue: { sampleRate: number; numSpeakers: number } | null =
+        null;
+      try {
+        const info = await engine.getModelInfo();
+        if (
+          info &&
+          typeof info.sampleRate === 'number' &&
+          typeof info.numSpeakers === 'number'
+        ) {
+          modelInfoValue = {
+            sampleRate: info.sampleRate,
+            numSpeakers: info.numSpeakers,
+          };
+        }
+      } catch {
+        // leave modelInfoValue null
+      }
+
+      const detected = [
+        { type: customInitForm.modelType, modelDir: 'custom' },
+      ] as Array<{ type: TTSModelType; modelDir: string }>;
+
+      ttsEngineRef.current = engine;
+      setCurrentModelFolder(null);
+      setDetectedModels(detected);
+      setSelectedModelType(customInitForm.modelType);
+      setInitializedSummary(`custom:${customInitForm.modelType}`);
+      setModelInfo(modelInfoValue);
+      setInitResult(
+        `Initialized (custom): ${
+          customInitForm.modelType
+        }\nFiles: ${Object.keys(customConfig).join(', ')}`
+      );
+      setTtsCache(
+        engine,
+        'custom',
+        detected,
+        customInitForm.modelType,
+        modelInfoValue
+      );
+    } catch (err) {
+      console.error('TTS custom initialization error:', err);
+      const errorMessage = formatInitError(err);
+      setError(errorMessage);
+      setInitResult(`Custom initialization failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+      setInitializingModel(null);
+    }
+  };
+
+  const handleGenerate = async () => {
     if (!selectedModelType) {
-      setError('Please select a model type first');
+      setError('Please initialize a model first');
       return;
     }
 
@@ -973,6 +1184,8 @@ export default function OfflineTTSScreen() {
       }
       clearTtsCache();
       setCurrentModelFolder(null);
+      setInitializedSummary(null);
+      setSelectedModelForInit(null);
       setInitResult(null);
       setDetectedModels([]);
       setSelectedModelType(null);
@@ -1012,7 +1225,7 @@ export default function OfflineTTSScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
         >
-          {currentModelFolder != null && (
+          {isEngineInitialized && (
             <TouchableOpacity
               style={styles.cleanupButton}
               onPress={handleFree}
@@ -1034,92 +1247,88 @@ export default function OfflineTTSScreen() {
           {/* Section 1: Initialize Model */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize TTS Model</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={loading || customFillLoading}
+            />
             <Text style={styles.sectionDescription}>
-              Select a TTS model to load:
+              {initMode === 'auto'
+                ? 'Select a model folder, then tap "Use model" for auto-detection.'
+                : 'Choose model type and pick files (or Fill from a catalog folder), then Initialize.'}
             </Text>
-            {loadingModels ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color="#007AFF" />
-                <Text style={styles.loadingText}>Loading models...</Text>
-              </View>
-            ) : availableModels.length === 0 ? (
-              <View style={styles.resultContainer}>
-                <Text style={styles.errorText}>
-                  No TTS models found. See TTS_MODEL_SETUP.md
+
+            {(initializedSummary || selectedModelForInit) && (
+              <View style={styles.currentModelContainer}>
+                <Text style={styles.currentModelText}>
+                  {initializedSummary
+                    ? `Initialized: ${initializedSummary}`
+                    : `Selected: ${
+                        selectedModelForInit
+                          ? getModelDisplayName(selectedModelForInit)
+                          : ''
+                      }`}
                 </Text>
               </View>
-            ) : (
-              <View style={styles.buttonGroup}>
-                {availableModels.map((modelFolder) => {
-                  const isInitializingOther =
-                    initializingModel !== null &&
-                    initializingModel !== modelFolder;
-                  const isDisabled =
-                    isInitializingOther ||
-                    (loading && initializingModel !== modelFolder);
-                  return (
-                    <TouchableOpacity
-                      key={modelFolder}
-                      style={[
-                        styles.modelButton,
-                        currentModelFolder === modelFolder &&
-                          styles.modelButtonActive,
-                        isDisabled && styles.modelButtonDisabled,
-                      ]}
-                      onPress={() => {
-                        if (isDisabled) return;
-                        handleInitialize(modelFolder);
-                      }}
-                      disabled={isDisabled}
-                    >
-                      <Text
-                        style={[
-                          styles.modelButtonText,
-                          currentModelFolder === modelFolder &&
-                            styles.modelButtonTextActive,
-                          isDisabled && styles.modelButtonTextDisabled,
-                        ]}
-                      >
-                        {getModelDisplayName(modelFolder)}
-                      </Text>
-                      {(() => {
-                        const sizeHintInfo = getSizeHint(modelFolder);
-                        const qualityHintInfo = getQualityHint(modelFolder);
-
-                        return (
-                          <View style={styles.modelHintRow}>
-                            <View style={styles.modelHintGroup}>
-                              <Ionicons
-                                name={sizeHintInfo.iconName as any}
-                                size={12}
-                                color={sizeHintInfo.iconColor}
-                              />
-                              <Text style={styles.modelHintText}>
-                                {sizeHintInfo.tier}
-                              </Text>
-                            </View>
-
-                            <View style={styles.modelHintGroup}>
-                              <Ionicons
-                                name={qualityHintInfo.iconName as any}
-                                size={12}
-                                color={qualityHintInfo.iconColor}
-                              />
-                              <Text style={styles.modelHintText}>
-                                {qualityHintInfo.text.split(',')[0]}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })()}
-                      <Text style={styles.modelButtonSubtext}>
-                        {modelFolder}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
             )}
+
+            <ModelFolderGrid
+              entries={catalogEntries}
+              selectedId={selectedModelForInit}
+              initializedId={currentModelFolder}
+              onSelect={setSelectedModelForInit}
+              loading={loadingModels}
+              disabled={loading || customFillLoading}
+              emptyMessage="No TTS models found. See TTS_MODEL_SETUP.md"
+            />
+
+            {initMode === 'custom' ? (
+              <TtsCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelForInit}
+                onFillFromSelectedModel={handleFillFromSelectedModel}
+                onPrepareScatteredTest={handlePrepareScatteredTest}
+                fillLoading={customFillLoading}
+                disabled={loading}
+                fillHint={customFillHint}
+              />
+            ) : null}
+
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                styles.applyButton,
+                (loading || customFillLoading) && styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                if (initMode === 'custom') {
+                  handleInitializeCustom();
+                  return;
+                }
+                handleInitialize(selectedModelForInit ?? '');
+              }}
+              disabled={
+                loading ||
+                customFillLoading ||
+                (initMode === 'auto'
+                  ? !selectedModelForInit && !currentModelFolder
+                  : false)
+              }
+            >
+              <View style={styles.applyButtonContent}>
+                {loading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                    style={styles.applyButtonSpinner}
+                  />
+                ) : null}
+                <Text style={styles.primaryButtonText}>
+                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
+                </Text>
+              </View>
+            </TouchableOpacity>
 
             {loading && (
               <View style={styles.loadingContainer}>
@@ -1199,7 +1408,7 @@ export default function OfflineTTSScreen() {
             </View>
           )}
 
-          {currentModelFolder != null && selectedModelType != null && (
+          {selectedModelType != null && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Synthesis options</Text>
               <Text style={styles.sectionDescription}>

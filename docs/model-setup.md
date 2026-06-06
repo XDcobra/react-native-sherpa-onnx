@@ -415,6 +415,23 @@ For `.tar.zst` ship archives, extract to a sandbox directory and use `{ kind: 'f
 
 When model files are not in a single detectable folder, pass explicit paths per file with `initMode: 'custom'`. Each path is a {@link FileSource}; the SDK resolves them to absolute paths before native init. See [STT custom initialization](stt-offline.md#custom-initialization-initmode-custom) for required path keys per model type.
 
+### Custom TTS init (skip auto-detection)
+
+Same pattern for TTS: `initMode: 'custom'`, concrete `modelType`, and `customConfig` with per-file {@link FileSource} paths. See [TTS custom initialization](tts-offline.md#custom-initialization-initmode-custom). `lexiconLanguageId` is auto-only; pass `lexicon` in `customConfig` when needed.
+
+```typescript
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createTTS({
+  initMode: 'custom',
+  modelType: 'vits',
+  customConfig: {
+    ttsModel: { kind: 'fs', path: '/data/models/model.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+  },
+});
+```
+
 ```typescript
 import { createSTT } from 'react-native-sherpa-onnx/stt';
 

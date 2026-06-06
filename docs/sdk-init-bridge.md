@@ -65,6 +65,32 @@ createStreamingSTT({
 { modelDir, modelType, rule1MinTrailingSilence: 2.4, ... }
 ```
 
+**TTS — custom init:**
+
+```ts
+// Public
+createTTS({
+  initMode: 'custom',
+  modelType: 'vits',
+  customConfig: {
+    ttsModel: { kind: 'fs', path: '/models/en.onnx' },
+    tokens: { kind: 'fs', path: '/models/tokens.txt' },
+  },
+});
+
+// Bridge map (internal)
+{ initMode: 'custom', modelType: 'vits', modelPaths: { ttsModel: '...', tokens: '...' } }
+```
+
+Bridge fields for TTS init:
+
+| Public | Bridge key | Notes |
+|--------|------------|--------|
+| `initMode: 'custom'` | `initMode`, `modelPaths`, `modelType` | No `modelDir` |
+| `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
+| `modelOptions.kokoro.lang` | `kokoroLang` | Bridge-only |
+| `lexiconLanguageId` | `lexiconLanguageId` | Auto mode only |
+
 ## TTS language fields (bridge)
 
 | Public | Bridge key | Notes |

@@ -18,6 +18,42 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 `detectTtsModel` is the TTS-specific pre-check before `createTTS` (family, lexicons, quantization). When the feature category is not known yet (model library, multi-category folders), use unified [`detectModel`](model-detect.md) from `react-native-sherpa-onnx/detect` — see [model-detect.md](model-detect.md).
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use custom init when model files are **not** in one detectable directory layout (non-standard names, scattered paths, or detection fails but you know the Sherpa TTS family).
+
+- Set `initMode: 'custom'` and a concrete `modelType` (not `'auto'`).
+- Pass `customConfig` with **`FileSource`** per required file. Path keys match native detection (`ttsModel`, `tokens`, `acousticModel`, `vocoder`, … — see [model-detect.md](model-detect.md#custom-path-validation)).
+- Auto-detection is **skipped**; **`resolveTtsCustomConfigPaths`** resolves each `FileSource` and calls native **`validateCustomModelPaths('tts', modelType, paths)`** (C++ `validate-tts` tables).
+- Query required vs optional keys for UI with **`getCustomModelPathRequirements('tts', modelType)`** from `react-native-sherpa-onnx/detect`.
+- **`lexiconLanguageId`** is **auto mode only**; in custom mode pass `lexicon` directly in `customConfig` when needed.
+- **`modelOptions`** (noise scales, Kokoro init `lang`, etc.) are allowed on custom init the same as auto.
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createTTS({
+  initMode: 'custom',
+  modelType: 'vits',
+  customConfig: {
+    ttsModel: { kind: 'fs', path: '/data/models/en_US-lessac-medium.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+    lexicon: { kind: 'fs', path: '/data/models/lexicon.txt' },
+  },
+  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
+  numThreads: 2,
+});
+```
+
+| Model type | Required path keys |
+| --- | --- |
+| `vits` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `matcha` | `acousticModel`, `vocoder`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` (+ optional `lexicon` for kokoro) |
+| `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` |
+| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` |
+| `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` |
+
 ## Quick start
 
 All buffer parameters accept refs directly. Prefer refs over raw string ids. If you pass raw ids, malformed values are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`.

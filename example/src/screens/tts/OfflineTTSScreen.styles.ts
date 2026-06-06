@@ -49,6 +49,41 @@ export const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 12,
   },
+  currentModelContainer: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  currentModelText: {
+    fontSize: 14,
+    color: '#3A3A3C',
+    fontWeight: '500',
+  },
+  primaryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  applyButton: {
+    marginTop: 16,
+  },
+  applyButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  applyButtonSpinner: {
+    marginRight: 2,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   labelText: {
     fontSize: 14,
     color: '#8E8E93',
