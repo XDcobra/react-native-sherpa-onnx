@@ -537,7 +537,7 @@ sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia.tar.bz2,apache-2.0,yes,high,manua
 matcha-icefall-zh-en.tar.bz2,apache-2.0,yes,high,manual,https://modelscope.cn/models/dengcunqin/matcha_tts_zh_en_20251010/summary
 sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2,cc-by-4.0,yes,high,archive_license_file,sherpa-onnx-pocket-tts-int8-2026-01-26/LICENSE
 sherpa-onnx-pocket-tts-2026-01-26.tar.bz2,cc-by-4.0,yes,high,archive_license_file,sherpa-onnx-pocket-tts-2026-01-26/LICENSE
-sherpa-onnx-supertonic-tts-int8-2026-03-06.tar.bz2,mit,yes,high,archive_license_file,sherpa-onnx-supertonic-tts-int8-2026-03-06/LICENSE
+sherpa-onnx-supertonic-tts-int8-2026-03-06.tar.bz2,openrail-m,yes,high,manual,https://huggingface.co/Supertone/supertonic-2/blob/main/LICENSE
 vits-piper-en_US-amy-medium.tar.bz2,See URL,unknown,medium,huggingface_model_card,https://huggingface.co/csukuangfj/vits-piper-en_US-amy-medium
 vits-piper-en_US-amy-medium-int8.tar.bz2,cc-by-sa-4.0,conditional,high,manual,https://github.com/MycroftAI/mimic3-voices
 vits-piper-en_US-amy-medium-fp16.tar.bz2,cc-by-sa-4.0,conditional,high,manual,https://github.com/MycroftAI/mimic3-voices
@@ -630,4 +630,4 @@ kitten-nano-en-v0_8-fp32.tar.bz2,apache-2.0,yes,high,archive_license_file,kitten
 kitten-nano-en-v0_8-int8.tar.bz2,apache-2.0,yes,high,archive_license_file,kitten-nano-en-v0_8-int8/LICENSE
 kitten-micro-en-v0_8.tar.bz2,apache-2.0,yes,high,archive_license_file,kitten-micro-en-v0_8/LICENSE
 kitten-mini-en-v0_8.tar.bz2,apache-2.0,yes,high,archive_license_file,kitten-mini-en-v0_8/LICENSE
-sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2,mit,yes,high,archive_license_file,sherpa-onnx-supertonic-3-tts-int8-2026-05-11/LICENSE
+sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2,openrail-m,yes,high,manual,https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE
