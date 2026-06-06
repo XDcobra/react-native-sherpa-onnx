@@ -1,6 +1,7 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-enhancement.h"
 
 #include <optional>
 
@@ -18,6 +19,38 @@ std::string EnhancementKindToString(EnhancementModelKind kind) {
         default:
             return "unknown";
     }
+}
+
+EnhancementModelKind ParseEnhancementModelTypeFromString(const std::string& modelType) {
+    if (modelType == "gtcrn") return EnhancementModelKind::kGtcrn;
+    if (modelType == "dpdfnet") return EnhancementModelKind::kDpdfNet;
+    return EnhancementModelKind::kUnknown;
+}
+
+sherpa_onnx::cxx::OfflineSpeechDenoiserModelConfig BuildModelConfigFromPaths(
+    EnhancementModelKind kind,
+    const EnhancementModelPaths& paths,
+    int32_t numThreads,
+    const std::optional<std::string>& provider,
+    bool debug
+) {
+    sherpa_onnx::cxx::OfflineSpeechDenoiserModelConfig cfg;
+    cfg.num_threads = numThreads;
+    cfg.debug = debug;
+    if (provider.has_value() && !provider->empty()) {
+        cfg.provider = *provider;
+    }
+    switch (kind) {
+        case EnhancementModelKind::kGtcrn:
+            cfg.gtcrn.model = paths.model;
+            break;
+        case EnhancementModelKind::kDpdfNet:
+            cfg.dpdfnet.model = paths.model;
+            break;
+        default:
+            break;
+    }
+    return cfg;
 }
 
 sherpa_onnx::cxx::OfflineSpeechDenoiserModelConfig BuildModelConfig(
@@ -104,6 +137,43 @@ EnhancementInitializeResult EnhancementWrapper::initialize(
     return result;
 }
 
+EnhancementInitializeResult EnhancementWrapper::initializeCustom(
+    const std::string& modelType,
+    const EnhancementModelPaths& paths,
+    int32_t numThreads,
+    const std::optional<std::string>& provider,
+    bool debug
+) {
+    EnhancementInitializeResult result;
+    if (pImpl->initialized) {
+        release();
+    }
+
+    const EnhancementModelKind selectedKind = ParseEnhancementModelTypeFromString(modelType);
+    if (selectedKind == EnhancementModelKind::kUnknown) {
+        result.error = "Unsupported custom enhancement model type";
+        return result;
+    }
+
+    auto validation = ValidateEnhancementPaths(selectedKind, paths, "custom");
+    if (!validation.ok) {
+        result.error = validation.error;
+        return result;
+    }
+
+    result.modelType = EnhancementKindToString(selectedKind);
+    result.detectedModels.push_back({result.modelType, "custom"});
+
+    sherpa_onnx::cxx::OfflineSpeechDenoiserConfig config;
+    config.model = BuildModelConfigFromPaths(selectedKind, paths, numThreads, provider, debug);
+    pImpl->denoiser = sherpa_onnx::cxx::OfflineSpeechDenoiser::Create(config);
+    pImpl->initialized = true;
+
+    result.success = true;
+    result.sampleRate = pImpl->denoiser->GetSampleRate();
+    return result;
+}
+
 EnhancedAudioResult EnhancementWrapper::runSamples(
     const std::vector<float>& samples,
     int32_t sampleRate
@@ -171,6 +241,44 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initialize(
 
     sherpa_onnx::cxx::OnlineSpeechDenoiserConfig config;
     config.model = BuildModelConfig(detect, numThreads, provider, debug);
+    pImpl->denoiser = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
+    pImpl->initialized = true;
+
+    result.success = true;
+    result.sampleRate = pImpl->denoiser->GetSampleRate();
+    result.frameShiftInSamples = pImpl->denoiser->GetFrameShiftInSamples();
+    return result;
+}
+
+EnhancementInitializeResult OnlineEnhancementWrapper::initializeCustom(
+    const std::string& modelType,
+    const EnhancementModelPaths& paths,
+    int32_t numThreads,
+    const std::optional<std::string>& provider,
+    bool debug
+) {
+    EnhancementInitializeResult result;
+    if (pImpl->initialized) {
+        release();
+    }
+
+    const EnhancementModelKind selectedKind = ParseEnhancementModelTypeFromString(modelType);
+    if (selectedKind == EnhancementModelKind::kUnknown) {
+        result.error = "Unsupported custom enhancement model type";
+        return result;
+    }
+
+    auto validation = ValidateEnhancementPaths(selectedKind, paths, "custom");
+    if (!validation.ok) {
+        result.error = validation.error;
+        return result;
+    }
+
+    result.modelType = EnhancementKindToString(selectedKind);
+    result.detectedModels.push_back({result.modelType, "custom"});
+
+    sherpa_onnx::cxx::OnlineSpeechDenoiserConfig config;
+    config.model = BuildModelConfigFromPaths(selectedKind, paths, numThreads, provider, debug);
     pImpl->denoiser = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
     pImpl->initialized = true;
 

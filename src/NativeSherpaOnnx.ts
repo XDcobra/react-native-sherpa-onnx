@@ -100,6 +100,18 @@ export type VadInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeEnhancement` / `initializeOnlineEnhancement(instanceId, options)`. */
+export type EnhancementInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
 export type UnifiedDetectNativeResult = {
   matched: boolean;
@@ -1609,11 +1621,7 @@ export interface Spec extends TurboModule {
 
   initializeEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1634,11 +1642,7 @@ export interface Spec extends TurboModule {
 
   initializeOnlineEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;

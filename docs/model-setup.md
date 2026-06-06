@@ -423,6 +423,22 @@ Same pattern for TTS: `initMode: 'custom'`, concrete `modelType`, and `customCon
 
 Same pattern for VAD: `initMode: 'custom'`, concrete `modelType` (`silero_vad` or `ten_vad`), and `customConfig` with a single `model` {@link FileSource}. See [VAD custom initialization](vad-streaming.md#custom-initialization-initmode-custom).
 
+### Custom Enhancement init (skip auto-detection)
+
+Same pattern for Enhancement (offline and streaming): `initMode: 'custom'`, concrete `modelType` (`gtcrn` or `dpdfnet`), and `customConfig` with a single `model` {@link FileSource}. See [Enhancement custom initialization](enhancement-offline.md#custom-initialization-initmode-custom).
+
+```typescript
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+});
+```
+
 ```typescript
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 

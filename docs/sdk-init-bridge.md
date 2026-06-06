@@ -4,8 +4,8 @@ The React Native package uses two layers for engine initialization:
 
 | Layer | Examples | Shape |
 |-------|----------|--------|
-| **Public** | `createTTS`, `createSTT`, `createStreamingSTT`, `createStreamingVAD` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`, `VADInitializeOptions`) |
-| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt`, `initializeVad` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
+| **Public** | `createTTS`, `createSTT`, `createStreamingSTT`, `createStreamingVAD`, `createEnhancement`, `createStreamingEnhancement` | Typed, nested options (`TTSInitializeOptions`, `STTInitializeOptions`, `StreamingSttInitOptions`, `VADInitializeOptions`, `EnhancementInitializeOptions`) |
+| **Bridge** | `initializeTts`, `initializeStt`, `initializeOnlineStt`, `initializeVad`, `initializeEnhancement`, `initializeOnlineEnhancement` | Flat `ReadableMap` / `NSDictionary` per instance — **not** the primary app API |
 
 ## Why two layers?
 
@@ -21,6 +21,8 @@ The React Native package uses two layers for engine initialization:
 | `initializeStt(instanceId, options)` | `createSTT` | `SttInitBridgeOptions` | `buildSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
 | `initializeOnlineStt(instanceId, options)` | `createStreamingSTT` | `OnlineSttInitBridgeOptions` | `buildStreamingSttInitBridgeOptions` in `src/stt/sttNativeBridge.ts` |
 | `initializeVad(instanceId, options)` | `createStreamingVAD` | `VadInitBridgeOptions` | `buildVadInitBridgeOptions` in `src/vad/vadNativeBridge.ts` |
+| `initializeEnhancement(instanceId, options)` | `createEnhancement` | `EnhancementInitBridgeOptions` | `buildEnhancementInitBridgeOptions` in `src/enhancement/enhancementNativeBridge.ts` |
+| `initializeOnlineEnhancement(instanceId, options)` | `createStreamingEnhancement` | `EnhancementInitBridgeOptions` | `buildEnhancementInitBridgeOptions` in `src/enhancement/enhancementNativeBridge.ts` |
 
 Bridge option types are defined in `src/NativeSherpaOnnx.ts` (required for React Native codegen) and re-exported from `src/nativeBridge/initBridgeTypes.ts` for builders.
 
@@ -99,6 +101,24 @@ createStreamingVAD({
 { initMode: 'custom', modelType: 'silero_vad', modelPaths: { model: '...' } }
 ```
 
+**Enhancement — custom init (offline and streaming share one builder):**
+
+```ts
+// Public
+createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/models/gtcrn.onnx' },
+  },
+});
+
+// Bridge map (internal) — buildEnhancementInitBridgeOptions
+{ initMode: 'custom', modelType: 'gtcrn', modelPaths: { model: '...' } }
+```
+
+`createStreamingEnhancement` uses the same public union and `initializeOnlineEnhancement` with the same bridge shape.
+
 Bridge fields for TTS init:
 
 | Public | Bridge key | Notes |
@@ -115,6 +135,16 @@ Bridge fields for VAD init:
 | `initMode: 'custom'` | `initMode`, `modelPaths`, `modelType` | No `modelDir`; single key `model` |
 | `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
 | `runtimeOptions.*` | `threshold`, `silenceDurationMs`, `speechDurationMs`, `minSpeechDurationMs`, `maxSpeechDurationS`, `windowSize` | Flattened scalars |
+
+Bridge fields for Enhancement init:
+
+| Public | Bridge key | Notes |
+|--------|------------|--------|
+| `initMode: 'custom'` | `initMode`, `modelPaths`, `modelType` | No `modelDir`; single key `model` |
+| `initMode: 'auto'` (default) | `initMode`, `modelDir`, `modelType` | No `modelPaths` |
+| `numThreads`, `provider`, `debug` | same names | Scalars on both modes |
+
+**Positional → options migration:** `initializeEnhancement` and `initializeOnlineEnhancement` previously accepted positional `(instanceId, modelDir, modelType?, …)` arguments. They now take `(instanceId, options: EnhancementInitBridgeOptions)` only. App code should use `createEnhancement` / `createStreamingEnhancement`; direct TurboModule callers must pass an options map.
 
 ## TTS language fields (bridge)
 

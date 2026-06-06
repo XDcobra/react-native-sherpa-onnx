@@ -42,6 +42,42 @@ Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enha
 
 ---
 
+## Custom initialization (`initMode: 'custom'`)
+
+Use custom init when the enhancement ONNX file is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the family).
+
+- Set `initMode: 'custom'` and a concrete `modelType` (`gtcrn` or `dpdfnet`, not `'auto'`).
+- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
+- Validation uses native `validate-enhancement` (same `model` key for both families). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+- `numThreads`, `provider`, and `debug` work the same as auto mode.
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+  numThreads: 2,
+});
+```
+
+DPCRN / DPDFNet example:
+
+```ts
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'dpdfnet',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/dpdfnet.onnx' },
+  },
+});
+```
+
+---
+
 ## Quick start
 
 All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.

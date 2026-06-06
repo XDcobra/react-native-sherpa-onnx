@@ -46,6 +46,25 @@ Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enha
 
 ---
 
+## Custom initialization (`initMode: 'custom'`)
+
+Streaming enhancement uses the same init union as offline — `createStreamingEnhancement` accepts `initMode: 'custom'` with a concrete `modelType` and a single `model` path in `customConfig`. See [Speech enhancement (offline) — Custom initialization](enhancement-offline.md#custom-initialization-initmode-custom) for path keys and validation rules.
+
+```ts
+import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const denoiser = await createStreamingEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+  numThreads: 2,
+});
+```
+
+---
+
 ## Quick start
 
 All buffer parameters accept refs directly. Raw string ids are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT`.

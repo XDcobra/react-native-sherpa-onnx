@@ -31,13 +31,30 @@ export const ENHANCEMENT_MODEL_TYPES: readonly EnhancementModelType[] = [
   'dpdfnet',
 ] as const;
 
-export interface EnhancementInitializeOptions {
-  modelSource: FileSource;
-  modelType?: EnhancementModelType | 'auto';
+export type EnhancementConcreteModelType = EnhancementModelType;
+
+export type EnhancementInitOptionsShared = {
   numThreads?: number;
   provider?: string;
   debug?: boolean;
-}
+};
+
+export type EnhancementAutoInitializeOptions = EnhancementInitOptionsShared & {
+  initMode?: 'auto';
+  modelSource: FileSource;
+  modelType?: EnhancementModelType | 'auto';
+};
+
+export type EnhancementCustomInitializeOptions =
+  EnhancementInitOptionsShared & {
+    initMode: 'custom';
+    modelType: EnhancementConcreteModelType;
+    customConfig: import('./customConfig').EnhancementCustomConfig;
+  };
+
+export type EnhancementInitializeOptions =
+  | EnhancementAutoInitializeOptions
+  | EnhancementCustomInitializeOptions;
 
 export type EnhancementDetectResult = EnhancementDetectModelResult;
 

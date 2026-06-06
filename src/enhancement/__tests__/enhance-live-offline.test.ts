@@ -17,6 +17,12 @@ jest.mock('react-native', () => ({
   })),
 }));
 
+jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
+  createStreamingPipelineCompletionPromise: jest.fn(() =>
+    Promise.resolve({ pipelineId: 'pipe_1', reason: 'completed' })
+  ),
+}));
+
 jest.mock('../../NativeSherpaOnnx', () => {
   return {
     __esModule: true,

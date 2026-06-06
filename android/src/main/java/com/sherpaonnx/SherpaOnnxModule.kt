@@ -4711,20 +4711,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -4748,20 +4740,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOnlineEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeOnlineEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }

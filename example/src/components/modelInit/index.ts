@@ -17,3 +17,7 @@ export {
   VadCustomInitForm,
   type VadCustomInitFormState,
 } from './VadCustomInitForm';
+export {
+  EnhancementCustomInitForm,
+  type EnhancementCustomInitFormState,
+} from './EnhancementCustomInitForm';
