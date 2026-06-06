@@ -190,7 +190,7 @@ describe('asrMediated/driver pipeline', () => {
       segmentOut: 'seg_out',
       anchorSegmentBuffer: 'seg_anchor',
       hypothesisTextBuffer: 'txt_hyp',
-      modelSource: { kind: 'fs', path: '/m' },
+      model: { modelSource: { kind: 'fs', path: '/m' } },
       granularity: 'word',
       language: 'en',
       onProgress,

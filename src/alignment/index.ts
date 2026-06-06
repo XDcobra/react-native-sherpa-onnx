@@ -13,6 +13,19 @@ import { ModelCategory } from '../download/types';
 
 export { createAlignment } from './engine';
 export type { AlignmentEngine, AlignmentEngineOptions } from './engine';
+export {
+  assertAlignmentCustomConfig,
+  resolveAlignmentCustomConfigPaths,
+  AlignmentErrorCode,
+} from './customConfig';
+export type {
+  AlignmentCustomConfig,
+  AlignmentCustomPathKey,
+} from './customConfig';
+export {
+  resolveAlignmentOnnxPath,
+  accurateOptionsToModelConfig,
+} from './resolveAlignmentOnnxPath';
 
 export type {
   AlignTextToAudioFn,
@@ -21,6 +34,10 @@ export type {
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioOptionsVad,
+  AlignmentAccurateModelAuto,
+  AlignmentAccurateModelConfig,
+  AlignmentAccurateModelCustom,
+  AlignmentConcreteModelType,
   AlignmentProgressCallbacks,
   AlignTextToAudioWriteResult,
   AlignmentAccurateSegmentationConfig,
@@ -28,7 +45,6 @@ export type {
   AlignmentVadSegmentationConfig,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
-  AlignmentErrorCode,
   AlignmentGranularity,
   AlignmentMappingStrategy,
   AlignmentModelType,

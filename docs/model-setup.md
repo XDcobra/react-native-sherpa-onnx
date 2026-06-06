@@ -470,6 +470,26 @@ const streaming = await createStreamingPunctuation({
 });
 ```
 
+### Custom Alignment path (per accurate call)
+
+Alignment does **not** use `initializeAlignment`. For `mode: 'accurate'` only, pass `initMode: 'custom'`, `modelType: 'wav2vec2'`, and `customConfig` with a single **`model`** {@link FileSource}. See [Alignment custom model path](alignment-offline.md#custom-model-path-initmode-custom).
+
+```typescript
+import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+
+const engine = createAlignment();
+await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  initMode: 'custom',
+  modelType: 'wav2vec2',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/wav2vec2.onnx' },
+  },
+  granularity: 'word',
+});
+await engine.destroy();
+```
+
 ```typescript
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 

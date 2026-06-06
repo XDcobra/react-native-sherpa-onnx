@@ -1,6 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,
@@ -12,6 +11,10 @@ import {
   createAlignmentProgressSession,
   type AlignmentProgressSession,
 } from './progress';
+import {
+  accurateOptionsToModelConfig,
+  resolveAlignmentOnnxPath,
+} from './resolveAlignmentOnnxPath';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -71,24 +74,9 @@ async function buildNativeOptions(
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const modelDir = (
-      await resolveFileSourceForModelInit(options.modelSource)
-    ).trim();
-    if (!modelDir) {
-      throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.modelSource for accurate alignment.'
-      );
-    }
-    const det = await SherpaOnnx.detectAlignmentModel(modelDir, 'auto');
-    const onnxPath =
-      typeof det.paths?.model === 'string' ? det.paths.model.trim() : '';
-    if (!det.success || !onnxPath) {
-      const err =
-        typeof det.error === 'string' && det.error.trim().length > 0
-          ? det.error.trim()
-          : 'Alignment model detection failed: no ONNX path.';
-      throw new Error(`ALIGNMENT_MODEL_LOAD_FAILED: ${err}`);
-    }
+    const onnxPath = await resolveAlignmentOnnxPath(
+      accurateOptionsToModelConfig(options)
+    );
     const base: Record<string, unknown> = {
       modelPath: onnxPath,
       ...(language.length > 0 ? { language } : {}),
@@ -152,6 +140,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
 ) => {
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     const onProgress = options.onProgress;
+    const model = accurateOptionsToModelConfig(options);
     if (options.segmentation.mappingStrategy === 'asr_mediated') {
       return runAccurateAsrMediated({
         textIn,
@@ -159,7 +148,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
         segmentOut,
         anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
         hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
-        modelSource: options.modelSource,
+        model,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
         ...(onProgress ? { onProgress } : {}),
         ...(typeof options.language === 'string'
@@ -173,7 +162,7 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
       audioIn,
       segmentOut,
       anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
-      modelSource: options.modelSource,
+      model,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
       ...(onProgress ? { onProgress } : {}),
       ...(typeof options.language === 'string'

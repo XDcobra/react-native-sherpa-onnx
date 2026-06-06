@@ -67,6 +67,13 @@ import { AUDIO_FILES } from '../../audioConfig';
 import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
+  AlignmentCustomInitForm,
+  InitModeSelector,
+  type AlignmentCustomInitFormState,
+  type ModelInitMode,
+} from '../../components/modelInit';
+import { fillAlignmentCustomConfigFromModelFolder } from '../../utils/alignmentCustomInitFill';
+import {
   OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
@@ -481,6 +488,9 @@ function ModelPreparationCard(props: {
   preparedSummary: string | null;
   onSelect: (id: string) => void;
   onPrepare: () => void;
+  showPrepareButton?: boolean;
+  leadingExtra?: ReactNode;
+  footerExtra?: ReactNode;
 }) {
   return (
     <SectionCard
@@ -488,6 +498,7 @@ function ModelPreparationCard(props: {
       title={props.title}
       description={props.description}
     >
+      {props.leadingExtra}
       {props.preparedId ? (
         <View style={styles.currentModelContainer}>
           <Text style={styles.currentModelText}>
@@ -550,24 +561,29 @@ function ModelPreparationCard(props: {
         </View>
       )}
 
-      <Pressable
-        style={[
-          styles.button,
-          styles.applyButton,
-          (props.preparing || !props.selectedId || props.models.length === 0) &&
-            styles.buttonDisabled,
-        ]}
-        onPress={props.onPrepare}
-        disabled={
-          props.preparing || !props.selectedId || props.models.length === 0
-        }
-      >
-        {props.preparing ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.buttonText}>{props.prepareLabel}</Text>
-        )}
-      </Pressable>
+      {props.showPrepareButton !== false ? (
+        <Pressable
+          style={[
+            styles.button,
+            styles.applyButton,
+            (props.preparing ||
+              !props.selectedId ||
+              props.models.length === 0) &&
+              styles.buttonDisabled,
+          ]}
+          onPress={props.onPrepare}
+          disabled={
+            props.preparing || !props.selectedId || props.models.length === 0
+          }
+        >
+          {props.preparing ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>{props.prepareLabel}</Text>
+          )}
+        </Pressable>
+      ) : null}
+      {props.footerExtra}
     </SectionCard>
   );
 }
@@ -610,6 +626,15 @@ export default function GenerateTimestampScreen() {
   >(null);
   const [preparingAlignmentModel, setPreparingAlignmentModel] = useState(false);
   const [alignmentPrepareSummary, setAlignmentPrepareSummary] = useState<
+    string | null
+  >(null);
+  const [alignmentInitMode, setAlignmentInitMode] =
+    useState<ModelInitMode>('auto');
+  const [alignmentCustomInitForm, setAlignmentCustomInitForm] =
+    useState<AlignmentCustomInitFormState>({ fileSources: {} });
+  const [alignmentCustomFillLoading, setAlignmentCustomFillLoading] =
+    useState(false);
+  const [alignmentCustomFillHint, setAlignmentCustomFillHint] = useState<
     string | null
   >(null);
 
@@ -866,10 +891,18 @@ export default function GenerateTimestampScreen() {
     }
     if (
       activeMode.requiresAlignmentModel &&
+      alignmentInitMode === 'auto' &&
       (!selectedAlignmentModelId ||
         preparedAlignmentModelId !== selectedAlignmentModelId)
     ) {
       issues.push('Prepare the selected alignment model with Use model.');
+    }
+    if (
+      activeMode.requiresAlignmentModel &&
+      alignmentInitMode === 'custom' &&
+      alignmentCustomInitForm.fileSources.model == null
+    ) {
+      issues.push('Set the custom alignment model path (model slot).');
     }
     if (
       activeMode.requiresVadModel &&
@@ -896,6 +929,8 @@ export default function GenerateTimestampScreen() {
     preparedAudioBuffer,
     selectedSttModelId,
     selectedVadModelId,
+    alignmentInitMode,
+    alignmentCustomInitForm.fileSources.model,
   ]);
 
   const handlePrepareAlignmentModel = useCallback(async () => {
@@ -948,6 +983,57 @@ export default function GenerateTimestampScreen() {
       setPreparingAlignmentModel(false);
     }
   }, [alignmentCatalog, selectedAlignmentModelId]);
+
+  const handleFillAlignmentCustomFromCatalog = useCallback(async () => {
+    if (!selectedAlignmentModelId) {
+      setError('Select an alignment model folder first.');
+      return;
+    }
+
+    setAlignmentCustomFillLoading(true);
+    setAlignmentCustomFillHint(null);
+    setError(null);
+    setErrorCode(null);
+
+    try {
+      const modelSource = resolveModelPathForCatalog(
+        selectedAlignmentModelId,
+        ModelCategory.Alignment,
+        alignmentCatalog
+      );
+      const fillResult = await fillAlignmentCustomConfigFromModelFolder(
+        await toDetectSource(modelSource)
+      );
+      setAlignmentCustomInitForm({ fileSources: fillResult.customConfig });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setAlignmentCustomFillHint(
+        `Filled from ${getModelDisplayName(selectedAlignmentModelId)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+      setResult(null);
+    } catch (err) {
+      setAlignmentCustomFillHint(null);
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Failed to fill custom alignment paths.';
+      setError(message);
+      setErrorCode(extractErrorCode(message));
+    } finally {
+      setAlignmentCustomFillLoading(false);
+    }
+  }, [alignmentCatalog, selectedAlignmentModelId]);
+
+  const handleAlignmentCustomScatteredTest = useCallback(() => {
+    setAlignmentCustomInitForm({ fileSources: {} });
+    setAlignmentCustomFillHint(
+      'Scattered test: pick the wav2vec2 ONNX from a different location, then run alignment.'
+    );
+  }, []);
 
   const handlePrepareVadModel = useCallback(async () => {
     if (!selectedVadModelId) {
@@ -1083,12 +1169,22 @@ export default function GenerateTimestampScreen() {
       });
       outputSegmentBufferId = outputBuffer.bufferId;
 
-      const alignmentModelPath = activeMode.requiresAlignmentModel
-        ? resolveModelPathForCatalog(
-            preparedAlignmentModelId!,
-            ModelCategory.Alignment,
-            alignmentCatalog
-          )
+      const accurateAlignmentModel = activeMode.requiresAlignmentModel
+        ? alignmentInitMode === 'custom'
+          ? {
+              initMode: 'custom' as const,
+              modelType: 'wav2vec2' as const,
+              customConfig: {
+                model: alignmentCustomInitForm.fileSources.model!,
+              },
+            }
+          : {
+              modelSource: resolveModelPathForCatalog(
+                preparedAlignmentModelId!,
+                ModelCategory.Alignment,
+                alignmentCatalog
+              ),
+            }
         : null;
       const vadModelPath = activeMode.requiresVadModel
         ? await toDetectSource(
@@ -1168,7 +1264,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity,
-                modelSource: alignmentModelPath!,
+                ...accurateAlignmentModel!,
               }
             )
           : mode === 'vad'
@@ -1193,7 +1289,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity: textGranularity,
-                modelSource: alignmentModelPath!,
+                ...accurateAlignmentModel!,
                 segmentation: {
                   mode: 'auto',
                   anchorSegmentBuffer: anchorSegmentBufferId!,
@@ -1211,7 +1307,7 @@ export default function GenerateTimestampScreen() {
               {
                 mode: 'accurate',
                 granularity: textGranularity,
-                modelSource: alignmentModelPath!,
+                ...accurateAlignmentModel!,
                 segmentation: {
                   mode: 'auto',
                   anchorSegmentBuffer: anchorSegmentBufferId!,
@@ -1274,6 +1370,8 @@ export default function GenerateTimestampScreen() {
   }, [
     activeMode,
     alignmentCatalog,
+    alignmentCustomInitForm.fileSources.model,
+    alignmentInitMode,
     estimatedTimeline.counts,
     estimatedTimeline.sampleRate,
     granularity,
@@ -1494,17 +1592,49 @@ export default function GenerateTimestampScreen() {
             <ModelPreparationCard
               stepLabel={stepLabels.alignment!}
               title="Prepare wav2vec2 alignment model"
-              description="Plain accurate and both anchor-constrained accurate modes require a wav2vec2 alignment model. Use model runs autodetect and stores the prepared selection for the next run."
+              description="Plain accurate and both anchor-constrained accurate modes require a wav2vec2 alignment model. Auto: detect from catalog folder per call. Custom: explicit ONNX path per accurate call (no engine init)."
               loading={loadingModelCatalogs}
               emptyMessage="No alignment models found. Add a wav2vec2 model under assets/models, PAD/documents/models, or downloads (category: alignment)."
               models={alignmentCatalog.entries}
               selectedId={selectedAlignmentModelId}
-              preparedId={preparedAlignmentModelId}
+              preparedId={
+                alignmentInitMode === 'auto' ? preparedAlignmentModelId : null
+              }
               preparing={preparingAlignmentModel}
               prepareLabel="Use alignment model"
-              preparedSummary={alignmentPrepareSummary}
+              preparedSummary={
+                alignmentInitMode === 'auto' ? alignmentPrepareSummary : null
+              }
               onSelect={setSelectedAlignmentModelId}
               onPrepare={handlePrepareAlignmentModel}
+              showPrepareButton={alignmentInitMode === 'auto'}
+              leadingExtra={
+                <InitModeSelector
+                  value={alignmentInitMode}
+                  onChange={setAlignmentInitMode}
+                  disabled={
+                    running ||
+                    preparingAlignmentModel ||
+                    alignmentCustomFillLoading
+                  }
+                />
+              }
+              footerExtra={
+                alignmentInitMode === 'custom' ? (
+                  <AlignmentCustomInitForm
+                    value={alignmentCustomInitForm}
+                    onChange={setAlignmentCustomInitForm}
+                    selectedCatalogModelId={selectedAlignmentModelId}
+                    onFillFromSelectedModel={() => {
+                      handleFillAlignmentCustomFromCatalog().catch(() => {});
+                    }}
+                    onPrepareScatteredTest={handleAlignmentCustomScatteredTest}
+                    fillLoading={alignmentCustomFillLoading}
+                    disabled={running || preparingAlignmentModel}
+                    fillHint={alignmentCustomFillHint}
+                  />
+                ) : null
+              }
             />
           ) : null}
 
@@ -1561,12 +1691,23 @@ export default function GenerateTimestampScreen() {
                 granularity: {granularity}
               </Text>
               <Text style={styles.resultCodeText}>
-                alignment model:{' '}
+                alignment init:{' '}
                 {activeMode.requiresAlignmentModel
-                  ? preparedAlignmentModelId ?? 'missing'
+                  ? alignmentInitMode
                   : 'not required'}
               </Text>
-              {activeMode.requiresAlignmentModel ? (
+              <Text style={styles.resultCodeText}>
+                alignment model:{' '}
+                {activeMode.requiresAlignmentModel
+                  ? alignmentInitMode === 'auto'
+                    ? preparedAlignmentModelId ?? 'missing'
+                    : alignmentCustomInitForm.fileSources.model
+                    ? 'custom path set'
+                    : 'missing'
+                  : 'not required'}
+              </Text>
+              {activeMode.requiresAlignmentModel &&
+              alignmentInitMode === 'auto' ? (
                 <Text style={styles.resultCodeText}>
                   alignment detect: {preparedAlignmentModelType ?? 'unknown'} ·{' '}
                   {preparedAlignmentModelPath ?? 'path unavailable'}

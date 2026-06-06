@@ -140,6 +140,48 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 });
 ```
 
+## Custom model path (`initMode: 'custom'`)
+
+Alignment has **no** TurboModule engine init — `createAlignment()` stays lightweight. Custom paths apply **per accurate call** on `engine.alignTextToAudio(..., { mode: 'accurate', ... })` only (plain accurate, `asr_mediated`, and `chunked_forced_ctc`). Proportional, estimated, and `vad` modes do not load a wav2vec2 model.
+
+Use custom paths when the wav2vec2 ONNX is **not** in a detectable folder layout (non-standard name, scattered path, or detection fails but you know the file).
+
+- Set `initMode: 'custom'` and `modelType: 'wav2vec2'` (concrete, not `'auto'`).
+- Pass `customConfig` with a single **`model`** {@link FileSource} pointing at the `.onnx` file.
+- Validation uses native `validate-alignment` (key `model` for `wav2vec2`). See [model-detect.md — Custom path validation](model-detect.md#custom-path-validation).
+- Auto mode (default): pass `modelSource` — the SDK runs `detectAlignmentModel` once per call to resolve the ONNX path.
+
+```ts
+await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  initMode: 'custom',
+  modelType: 'wav2vec2',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
+  },
+});
+```
+
+Anchor-constrained accurate modes use the same model union:
+
+```ts
+await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  initMode: 'custom',
+  modelType: 'wav2vec2',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
+  },
+  segmentation: {
+    mode: 'auto',
+    anchorSegmentBuffer: anchorBufferId,
+    mappingStrategy: 'chunked_forced_ctc',
+  },
+});
+```
+
 ### `vad` (standalone)
 
 ```ts
