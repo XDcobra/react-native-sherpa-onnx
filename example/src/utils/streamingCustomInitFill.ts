@@ -1,6 +1,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import type {
@@ -104,14 +105,14 @@ export async function fillStreamingCustomConfigFromFolder(args: {
 
   const customConfig: Partial<Record<StreamingSttCustomPathKey, FileSource>> =
     {};
-  for (const key of [...schema.required, ...schema.optional]) {
-    const path = scanned[key as StreamingSttCustomPathKey];
+  for (const field of schema.fields) {
+    const path = scanned[field.key as StreamingSttCustomPathKey];
     if (path) {
-      customConfig[key as StreamingSttCustomPathKey] = toFileSource(path);
+      customConfig[field.key as StreamingSttCustomPathKey] = toFileSource(path);
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as StreamingSttCustomPathKey] == null
   );
 

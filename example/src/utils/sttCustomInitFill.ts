@@ -6,6 +6,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import {
@@ -329,9 +330,9 @@ export async function fillSttCustomConfigFromModelFolder(
   const candidate = buildCandidatePaths(files, preferInt8);
   const customConfig = mapCandidatesToCustomConfig(modelType, candidate);
 
-  const required = (await getCustomModelPathRequirements('stt', modelType))
-    .required;
-  const missingKeys = required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(
+    await getCustomModelPathRequirements('stt', modelType)
+  ).filter(
     (key) =>
       (customConfig as Record<string, FileSource | undefined>)[key] == null
   );

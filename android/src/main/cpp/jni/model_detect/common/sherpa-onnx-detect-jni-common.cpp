@@ -256,6 +256,32 @@ jobject BuildCustomValidationResultMap(
   return map;
 }
 
+jobject BuildCustomPathFieldMap(
+    JNIEnv* env,
+    const CustomPathFieldSpec& field
+) {
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  PutString(env, map, mapPut, "key", field.key);
+  PutBoolean(env, map, mapPut, "required", field.required);
+  PutString(env, map, mapPut, "kind", field.isDirectory ? "dir" : "file");
+  return map;
+}
+
 jobject BuildCustomPathRequirementsMap(
     JNIEnv* env,
     const CustomModelPathRequirements& requirements
@@ -276,24 +302,31 @@ jobject BuildCustomPathRequirementsMap(
   env->DeleteLocalRef(mapClass);
   if (!map) return nullptr;
 
-  jobject required = BuildStringList(env, requirements.required);
-  if (required) {
-    jstring jkey = env->NewStringUTF("required");
-    if (jkey) {
-      env->CallObjectMethod(map, mapPut, jkey, required);
-      env->DeleteLocalRef(jkey);
+  if (!requirements.fields.empty()) {
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    if (listClass) {
+      jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+      jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+      if (listInit && listAdd) {
+        jobject fields = env->NewObject(listClass, listInit);
+        if (fields) {
+          for (const auto& field : requirements.fields) {
+            jobject fieldMap = BuildCustomPathFieldMap(env, field);
+            if (fieldMap) {
+              env->CallBooleanMethod(fields, listAdd, fieldMap);
+              env->DeleteLocalRef(fieldMap);
+            }
+          }
+          jstring jkey = env->NewStringUTF("fields");
+          if (jkey) {
+            env->CallObjectMethod(map, mapPut, jkey, fields);
+            env->DeleteLocalRef(jkey);
+          }
+          env->DeleteLocalRef(fields);
+        }
+      }
+      env->DeleteLocalRef(listClass);
     }
-    env->DeleteLocalRef(required);
-  }
-
-  jobject optional = BuildStringList(env, requirements.optional);
-  if (optional) {
-    jstring jkey = env->NewStringUTF("optional");
-    if (jkey) {
-      env->CallObjectMethod(map, mapPut, jkey, optional);
-      env->DeleteLocalRef(jkey);
-    }
-    env->DeleteLocalRef(optional);
   }
 
   return map;

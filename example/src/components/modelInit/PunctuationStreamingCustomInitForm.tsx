@@ -7,7 +7,10 @@ import {
   View,
 } from 'react-native';
 import type { StreamingPunctuationCustomPathKey } from 'react-native-sherpa-onnx/punctuation';
-import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+import {
+  getCustomModelPathRequirements,
+  type CustomModelPathRequirements,
+} from 'react-native-sherpa-onnx/detect';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { FileSourceSlotPicker } from './FileSourceSlotPicker';
 import { labelForStreamingPunctuationCustomPathKey } from '../../utils/punctuationCustomInitLabels';
@@ -37,10 +40,9 @@ export function PunctuationStreamingCustomInitForm({
   disabled = false,
   fillHint = null,
 }: PunctuationStreamingCustomInitFormProps) {
-  const [schema, setSchema] = useState<{
-    required: string[];
-    optional: string[];
-  }>({ required: [], optional: [] });
+  const [schema, setSchema] = useState<CustomModelPathRequirements>({
+    fields: [],
+  });
   const [schemaLoading, setSchemaLoading] = useState(false);
 
   useEffect(() => {
@@ -62,33 +64,14 @@ export function PunctuationStreamingCustomInitForm({
     };
   }, []);
 
-  const slotKeys = useMemo(() => {
-    const requiredSet = new Set(schema.required);
-    const seen = new Set<string>();
-    const keys: Array<{
-      key: StreamingPunctuationCustomPathKey;
-      required: boolean;
-    }> = [];
-    for (const key of schema.required) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({
-          key: key as StreamingPunctuationCustomPathKey,
-          required: true,
-        });
-      }
-    }
-    for (const key of schema.optional) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({
-          key: key as StreamingPunctuationCustomPathKey,
-          required: requiredSet.has(key),
-        });
-      }
-    }
-    return keys;
-  }, [schema]);
+  const slotKeys = useMemo(
+    () =>
+      schema.fields.map((field) => ({
+        key: field.key as StreamingPunctuationCustomPathKey,
+        required: field.required,
+      })),
+    [schema.fields]
+  );
 
   const setFileSource = (
     key: StreamingPunctuationCustomPathKey,

@@ -1,14 +1,27 @@
-jest.mock('../../detect/validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(
-    async (_category: string, modelType: string) => {
-      if (modelType === 'ct_transformer') {
-        return { required: ['ct_transformer'], optional: [] };
+jest.mock('../../detect/validateCustomModelPaths', () => {
+  const helpers = jest.requireActual(
+    '../../detect/customModelPathRequirements'
+  );
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(
+      async (_category: string, modelType: string) => {
+        if (modelType === 'ct_transformer') {
+          return {
+            fields: [{ key: 'ct_transformer', required: true, kind: 'file' }],
+          };
+        }
+        return {
+          fields: [
+            { key: 'cnn_bilstm', required: true, kind: 'file' },
+            { key: 'bpe_vocab', required: true, kind: 'file' },
+          ],
+        };
       }
-      return { required: ['cnn_bilstm', 'bpe_vocab'], optional: [] };
-    }
-  ),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+    ),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 jest.mock('../../detect/resolveModelInput', () => ({
   resolveModelFileSources: jest.fn(async (sources: Record<string, unknown>) => {
@@ -75,8 +88,7 @@ describe('resolveOfflinePunctuationCustomConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['ct_transformer'],
-      optional: [],
+      fields: [{ key: 'ct_transformer', required: true, kind: 'file' }],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });
@@ -108,8 +120,10 @@ describe('resolveStreamingPunctuationCustomConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['cnn_bilstm', 'bpe_vocab'],
-      optional: [],
+      fields: [
+        { key: 'cnn_bilstm', required: true, kind: 'file' },
+        { key: 'bpe_vocab', required: true, kind: 'file' },
+      ],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });

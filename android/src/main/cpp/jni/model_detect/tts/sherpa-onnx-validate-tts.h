@@ -20,6 +20,7 @@ struct TtsFieldRequirement {
     const char* fieldName;
     std::string TtsModelPaths::* field;
     bool required;
+    bool isDirectory = false;
 };
 
 struct TtsValidationResult {

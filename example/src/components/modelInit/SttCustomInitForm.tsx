@@ -12,7 +12,10 @@ import {
   type STTConcreteModelType,
   type SttCustomPathKey,
 } from 'react-native-sherpa-onnx/stt';
-import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+import {
+  getCustomModelPathRequirements,
+  type CustomModelPathRequirements,
+} from 'react-native-sherpa-onnx/detect';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { FileSourceSlotPicker } from './FileSourceSlotPicker';
 import { labelForSttCustomPathKey } from '../../utils/sttCustomInitLabels';
@@ -47,10 +50,9 @@ export function SttCustomInitForm({
   disabled = false,
   fillHint = null,
 }: SttCustomInitFormProps) {
-  const [schema, setSchema] = useState<{
-    required: string[];
-    optional: string[];
-  }>({ required: [], optional: [] });
+  const [schema, setSchema] = useState<CustomModelPathRequirements>({
+    fields: [],
+  });
   const [schemaLoading, setSchemaLoading] = useState(false);
 
   useEffect(() => {
@@ -72,27 +74,14 @@ export function SttCustomInitForm({
     };
   }, [value.modelType]);
 
-  const slotKeys = useMemo(() => {
-    const requiredSet = new Set(schema.required);
-    const seen = new Set<string>();
-    const keys: Array<{ key: SttCustomPathKey; required: boolean }> = [];
-    for (const key of schema.required) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({ key: key as SttCustomPathKey, required: true });
-      }
-    }
-    for (const key of schema.optional) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({
-          key: key as SttCustomPathKey,
-          required: requiredSet.has(key),
-        });
-      }
-    }
-    return keys;
-  }, [schema]);
+  const slotKeys = useMemo(
+    () =>
+      schema.fields.map((field) => ({
+        key: field.key as SttCustomPathKey,
+        required: field.required,
+      })),
+    [schema.fields]
+  );
 
   const setModelType = (modelType: STTConcreteModelType) => {
     onChange({ modelType, fileSources: {} });

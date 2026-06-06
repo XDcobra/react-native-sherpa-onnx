@@ -10,13 +10,23 @@ jest.mock('../../detect/resolveModelInput', () => ({
   ),
 }));
 
-jest.mock('../../detect/validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(async () => ({
-    required: ['encoder', 'decoder', 'joiner', 'tokens'],
-    optional: [],
-  })),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+jest.mock('../../detect/validateCustomModelPaths', () => {
+  const helpers = jest.requireActual(
+    '../../detect/customModelPathRequirements'
+  );
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(async () => ({
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'joiner', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+      ],
+    })),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 describe('streamingCustomConfig', () => {
   it('resolveStreamingSttCustomConfigPaths validates and resolves transducer paths', async () => {

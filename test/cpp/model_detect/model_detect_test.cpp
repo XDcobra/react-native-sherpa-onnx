@@ -1030,9 +1030,50 @@ TEST(ModelDetectValidation, ValidateCustomModelPathsAlignmentSmoke) {
 
 TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttTransducer) {
     auto reqs = sherpaonnx::GetCustomModelPathRequirements("stt", "transducer");
-    EXPECT_NE(std::find(reqs.required.begin(), reqs.required.end(), "encoder"), reqs.required.end());
-    EXPECT_NE(std::find(reqs.required.begin(), reqs.required.end(), "joiner"), reqs.required.end());
-    EXPECT_NE(std::find(reqs.optional.begin(), reqs.optional.end(), "bpeVocab"), reqs.optional.end());
+    auto hasKey = [&reqs](const char* key) {
+        return std::any_of(
+            reqs.fields.begin(),
+            reqs.fields.end(),
+            [key](const sherpaonnx::CustomPathFieldSpec& field) {
+                return field.key == key;
+            });
+    };
+    EXPECT_TRUE(hasKey("encoder"));
+    EXPECT_TRUE(hasKey("joiner"));
+    auto bpe = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "bpeVocab";
+        });
+    ASSERT_NE(bpe, reqs.fields.end());
+    EXPECT_FALSE(bpe->required);
+    for (const auto& field : reqs.fields) {
+        EXPECT_FALSE(field.isDirectory) << field.key;
+    }
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsDataDirIsDirectory) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("tts", "vits");
+    ASSERT_FALSE(reqs.fields.empty());
+    auto dataDir = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "dataDir";
+        });
+    ASSERT_NE(dataDir, reqs.fields.end());
+    EXPECT_FALSE(dataDir->required);
+    EXPECT_TRUE(dataDir->isDirectory);
+    auto ttsModel = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "ttsModel";
+        });
+    ASSERT_NE(ttsModel, reqs.fields.end());
+    EXPECT_TRUE(ttsModel->required);
+    EXPECT_FALSE(ttsModel->isDirectory);
 }
 
 }  // namespace

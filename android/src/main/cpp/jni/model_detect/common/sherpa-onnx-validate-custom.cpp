@@ -29,13 +29,7 @@ CustomModelValidationResult FromValidation(
 
 CustomModelPathRequirements FromSpecs(const std::vector<CustomPathFieldSpec>& specs) {
     CustomModelPathRequirements out;
-    for (const auto& spec : specs) {
-        if (spec.required) {
-            out.required.push_back(spec.key);
-        } else {
-            out.optional.push_back(spec.key);
-        }
-    }
+    out.fields = specs;
     return out;
 }
 

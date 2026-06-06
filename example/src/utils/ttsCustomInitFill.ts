@@ -1,6 +1,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import {
@@ -188,15 +189,15 @@ export async function fillTtsCustomConfigFromModelFolder(
 
   const schema = await getCustomModelPathRequirements('tts', modelType);
   const customConfig: Partial<Record<TtsCustomPathKey, FileSource>> = {};
-  for (const key of [...schema.required, ...schema.optional]) {
-    const path = scanned[key as TtsCustomPathKey];
+  for (const field of schema.fields) {
+    const path = scanned[field.key as TtsCustomPathKey];
     const source = path ? toFsSource(path) : undefined;
     if (source) {
-      customConfig[key as TtsCustomPathKey] = source;
+      customConfig[field.key as TtsCustomPathKey] = source;
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as TtsCustomPathKey] == null
   );
 

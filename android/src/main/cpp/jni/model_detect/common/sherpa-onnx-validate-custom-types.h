@@ -9,6 +9,7 @@ namespace sherpaonnx {
 struct CustomPathFieldSpec {
     std::string key;
     bool required = false;
+    bool isDirectory = false;
 };
 
 struct CustomModelValidationResult {
@@ -18,8 +19,7 @@ struct CustomModelValidationResult {
 };
 
 struct CustomModelPathRequirements {
-    std::vector<std::string> required;
-    std::vector<std::string> optional;
+    std::vector<CustomPathFieldSpec> fields;
 };
 
 }  // namespace sherpaonnx

@@ -12,7 +12,10 @@ import {
   type OnlineSTTModelType,
   type StreamingSttCustomPathKey,
 } from 'react-native-sherpa-onnx/stt';
-import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+import {
+  getCustomModelPathRequirements,
+  type CustomModelPathRequirements,
+} from 'react-native-sherpa-onnx/detect';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { FileSourceSlotPicker } from './FileSourceSlotPicker';
 import { labelForStreamingSttCustomPathKey } from '../../utils/streamingCustomInitLabels';
@@ -45,10 +48,9 @@ export function StreamingSttCustomInitForm({
   disabled = false,
   fillHint = null,
 }: StreamingSttCustomInitFormProps) {
-  const [schema, setSchema] = useState<{
-    required: string[];
-    optional: string[];
-  }>({ required: [], optional: [] });
+  const [schema, setSchema] = useState<CustomModelPathRequirements>({
+    fields: [],
+  });
   const [schemaLoading, setSchemaLoading] = useState(false);
 
   useEffect(() => {
@@ -70,28 +72,14 @@ export function StreamingSttCustomInitForm({
     };
   }, [value.modelType]);
 
-  const slotKeys = useMemo(() => {
-    const requiredSet = new Set(schema.required);
-    const seen = new Set<string>();
-    const keys: Array<{ key: StreamingSttCustomPathKey; required: boolean }> =
-      [];
-    for (const key of schema.required) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({ key: key as StreamingSttCustomPathKey, required: true });
-      }
-    }
-    for (const key of schema.optional) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({
-          key: key as StreamingSttCustomPathKey,
-          required: requiredSet.has(key),
-        });
-      }
-    }
-    return keys;
-  }, [schema]);
+  const slotKeys = useMemo(
+    () =>
+      schema.fields.map((field) => ({
+        key: field.key as StreamingSttCustomPathKey,
+        required: field.required,
+      })),
+    [schema.fields]
+  );
 
   const setModelType = (modelType: OnlineSTTModelType) => {
     onChange({ modelType, fileSources: {} });

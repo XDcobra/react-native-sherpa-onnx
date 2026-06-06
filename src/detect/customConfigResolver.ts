@@ -1,5 +1,6 @@
 import type { FileSource } from '../fileio/types';
 import { resolveModelFileSources } from './resolveModelInput';
+import { customModelPathFieldKeys } from './customModelPathRequirements';
 import {
   getCustomModelPathRequirements,
   validateCustomModelPaths,
@@ -59,7 +60,7 @@ export async function resolveCustomModelConfigPaths(args: {
   assertCustomModelConfig(customConfig, errorCode);
 
   const schema = await getCustomModelPathRequirements(category, modelType);
-  const allowedKeys = new Set([...schema.required, ...schema.optional]);
+  const allowedKeys = new Set(customModelPathFieldKeys(schema));
   for (const key of Object.keys(customConfig)) {
     if (!allowedKeys.has(key)) {
       createInvalidArgumentError(errorCode, unknownKeyMessage(key, modelType));

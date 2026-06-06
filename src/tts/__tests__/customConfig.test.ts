@@ -1,10 +1,20 @@
-jest.mock('../../detect/validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(async () => ({
-    required: ['ttsModel', 'tokens'],
-    optional: ['dataDir', 'lexicon'],
-  })),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+jest.mock('../../detect/validateCustomModelPaths', () => {
+  const helpers = jest.requireActual(
+    '../../detect/customModelPathRequirements'
+  );
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(async () => ({
+      fields: [
+        { key: 'ttsModel', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'dataDir', required: false, kind: 'dir' },
+        { key: 'lexicon', required: false, kind: 'file' },
+      ],
+    })),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 jest.mock('../../detect/resolveModelInput', () => ({
   resolveModelFileSources: jest.fn(async (sources: Record<string, unknown>) => {
@@ -57,8 +67,12 @@ describe('resolveTtsCustomConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['ttsModel', 'tokens'],
-      optional: ['dataDir', 'lexicon'],
+      fields: [
+        { key: 'ttsModel', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'dataDir', required: false, kind: 'dir' },
+        { key: 'lexicon', required: false, kind: 'file' },
+      ],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });

@@ -1,10 +1,21 @@
-jest.mock('../../detect/validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(async () => ({
-    required: ['encoder', 'decoder', 'joiner', 'tokens'],
-    optional: ['bpeVocab'],
-  })),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+jest.mock('../../detect/validateCustomModelPaths', () => {
+  const helpers = jest.requireActual(
+    '../../detect/customModelPathRequirements'
+  );
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(async () => ({
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'joiner', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'bpeVocab', required: false, kind: 'file' },
+      ],
+    })),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 jest.mock('../../detect/resolveModelInput', () => ({
   resolveModelFileSources: jest.fn(async (sources: Record<string, unknown>) => {
@@ -57,16 +68,23 @@ describe('resolveSttCustomConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['whisperEncoder', 'whisperDecoder', 'tokens'],
-      optional: [],
+      fields: [
+        { key: 'whisperEncoder', required: true, kind: 'file' },
+        { key: 'whisperDecoder', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+      ],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });
 
   it('rejects unknown keys using native schema', async () => {
     mockGetRequirements.mockResolvedValueOnce({
-      required: ['encoder', 'decoder', 'joiner', 'tokens'],
-      optional: [],
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'joiner', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+      ],
     });
 
     await expect(

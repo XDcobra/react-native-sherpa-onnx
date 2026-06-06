@@ -1,6 +1,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import {
@@ -108,14 +109,14 @@ export async function fillVadCustomConfigFromModelFolder(
 
   const schema = await getCustomModelPathRequirements('vad', modelType);
   const customConfig: Partial<Record<VadCustomPathKey, FileSource>> = {};
-  for (const key of [...schema.required, ...schema.optional]) {
-    const source = key === 'model' ? toFsSource(modelPath) : undefined;
+  for (const field of schema.fields) {
+    const source = field.key === 'model' ? toFsSource(modelPath) : undefined;
     if (source) {
-      customConfig[key as VadCustomPathKey] = source;
+      customConfig[field.key as VadCustomPathKey] = source;
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as VadCustomPathKey] == null
   );
 

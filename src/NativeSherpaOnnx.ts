@@ -1508,13 +1508,16 @@ export interface Spec extends TurboModule {
     missingRequired?: string[];
   }>;
 
-  /** Schema for custom-init UI: required vs optional path keys from native C++. */
+  /** Schema for custom-init UI: path keys from native C++ requirement tables. */
   getCustomModelPathRequirements(
     category: string,
     modelType: string
   ): Promise<{
-    required: string[];
-    optional: string[];
+    fields: Array<{
+      key: string;
+      required: boolean;
+      kind: 'file' | 'dir';
+    }>;
   }>;
 
   /**

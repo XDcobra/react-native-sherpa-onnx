@@ -219,13 +219,17 @@ const vad = await createStreamingVAD({
 });
 ```
 
-Query required vs optional keys for UI forms:
+Query path keys for UI forms:
 
 ```typescript
-import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+import {
+  getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
+} from 'react-native-sherpa-onnx/detect';
 
-const { required, optional } = await getCustomModelPathRequirements('stt', 'transducer');
-// required: ['encoder', 'decoder', 'joiner', 'tokens']
+const { fields } = await getCustomModelPathRequirements('stt', 'transducer');
+// fields: [{ key: 'encoder', required: true, kind: 'file' }, ...]
+const requiredKeys = requiredCustomModelPathFieldKeys({ fields });
 ```
 
 Path keys per feature: [Required files per feature](#required-files-per-feature) below and each feature doc.
@@ -262,7 +266,7 @@ import {
 
 // 1) Schema for forms / slot pickers
 const schema = await getCustomModelPathRequirements('stt', 'transducer');
-// { required: ['encoder','decoder','joiner','tokens'], optional: ['bpeVocab'] }
+// { fields: [{ key: 'encoder', required: true, kind: 'file' }, ...] }
 
 // 2) Runtime check on resolved absolute paths
 const result = await validateCustomModelPaths('tts', 'vits', {
@@ -276,7 +280,7 @@ if (!result.ok) {
 
 | API | Purpose |
 | --- | --- |
-| `getCustomModelPathRequirements(category, modelType)` | Read-only schema — required vs optional keys |
+| `getCustomModelPathRequirements(category, modelType)` | Read-only schema — ordered `fields[]` with `required` and `kind` (`file` \| `dir`) |
 | `validateCustomModelPaths(category, modelType, paths)` | Enforces non-empty paths + family-specific rules |
 
 Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `punctuation`, `alignment`.
@@ -423,13 +427,43 @@ Invalid paths reject with `FILEIO_*` before native detection runs.
 ### `getCustomModelPathRequirements(category, modelType)`
 
 ```typescript
+type CustomModelPathFieldKind = 'file' | 'dir';
+
+type CustomModelPathField = {
+  key: string;
+  required: boolean;
+  kind: CustomModelPathFieldKind;
+};
+
+type CustomModelPathRequirements = {
+  fields: ReadonlyArray<CustomModelPathField>;
+};
+
 function getCustomModelPathRequirements(
   category: string,
   modelType: string
-): Promise<{ required: string[]; optional: string[] }>;
+): Promise<CustomModelPathRequirements>;
 ```
 
-Read-only schema for custom-init UI. Do not hardcode key lists in app code.
+Read-only schema for custom-init. Do not hardcode key lists in app code.
+
+`fields` preserves declaration order from native C++ requirement tables. Each entry carries:
+
+- `key` — config key passed to `customConfig` / `validateCustomModelPaths`
+- `required` — whether native validation treats the key as mandatory
+- `kind` — `'file'` or `'dir'` (for example TTS `dataDir` → `'dir'`)
+
+Helpers (same module):
+
+```typescript
+function customModelPathFieldKeys(
+  requirements: CustomModelPathRequirements
+): string[];
+
+function requiredCustomModelPathFieldKeys(
+  requirements: CustomModelPathRequirements
+): string[];
+```
 
 ---
 

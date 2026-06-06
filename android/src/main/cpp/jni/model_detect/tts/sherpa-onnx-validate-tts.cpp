@@ -18,55 +18,55 @@ namespace {
 // ============================================================
 
 static const TtsFieldRequirement kVitsReqs[] = {
-    {"ttsModel", &TtsModelPaths::ttsModel, true},
-    {"tokens",   &TtsModelPaths::tokens,   true},
-    {"dataDir",  &TtsModelPaths::dataDir,  false},
-    {"lexicon",  &TtsModelPaths::lexicon,  false},
+    {"ttsModel", &TtsModelPaths::ttsModel, true, false},
+    {"tokens",   &TtsModelPaths::tokens,   true, false},
+    {"dataDir",  &TtsModelPaths::dataDir,  false, true},
+    {"lexicon",  &TtsModelPaths::lexicon,  false, false},
 };
 
 static const TtsFieldRequirement kMatchaReqs[] = {
-    {"acousticModel", &TtsModelPaths::acousticModel, true},
-    {"vocoder",       &TtsModelPaths::vocoder,       true},
-    {"tokens",        &TtsModelPaths::tokens,        true},
-    {"dataDir",       &TtsModelPaths::dataDir,       false},
-    {"lexicon",       &TtsModelPaths::lexicon,       false},
+    {"acousticModel", &TtsModelPaths::acousticModel, true, false},
+    {"vocoder",       &TtsModelPaths::vocoder,       true, false},
+    {"tokens",        &TtsModelPaths::tokens,        true, false},
+    {"dataDir",       &TtsModelPaths::dataDir,       false, true},
+    {"lexicon",       &TtsModelPaths::lexicon,       false, false},
 };
 
 static const TtsFieldRequirement kKokoroReqs[] = {
-    {"ttsModel", &TtsModelPaths::ttsModel, true},
-    {"tokens",   &TtsModelPaths::tokens,   true},
-    {"voices",   &TtsModelPaths::voices,   true},
-    {"dataDir",  &TtsModelPaths::dataDir,  true},
-    {"lexicon",  &TtsModelPaths::lexicon,  false},
+    {"ttsModel", &TtsModelPaths::ttsModel, true, false},
+    {"tokens",   &TtsModelPaths::tokens,   true, false},
+    {"voices",   &TtsModelPaths::voices,   true, false},
+    {"dataDir",  &TtsModelPaths::dataDir,  true, true},
+    {"lexicon",  &TtsModelPaths::lexicon,  false, false},
 };
 
 static const TtsFieldRequirement kPocketReqs[] = {
-    {"lmFlow",          &TtsModelPaths::lmFlow,          true},
-    {"lmMain",          &TtsModelPaths::lmMain,          true},
-    {"encoder",         &TtsModelPaths::encoder,         true},
-    {"decoder",         &TtsModelPaths::decoder,         true},
-    {"textConditioner", &TtsModelPaths::textConditioner, true},
-    {"vocabJson",       &TtsModelPaths::vocabJson,       true},
-    {"tokenScoresJson", &TtsModelPaths::tokenScoresJson, true},
+    {"lmFlow",          &TtsModelPaths::lmFlow,          true, false},
+    {"lmMain",          &TtsModelPaths::lmMain,          true, false},
+    {"encoder",         &TtsModelPaths::encoder,         true, false},
+    {"decoder",         &TtsModelPaths::decoder,         true, false},
+    {"textConditioner", &TtsModelPaths::textConditioner, true, false},
+    {"vocabJson",       &TtsModelPaths::vocabJson,       true, false},
+    {"tokenScoresJson", &TtsModelPaths::tokenScoresJson, true, false},
 };
 
 static const TtsFieldRequirement kZipvoiceReqs[] = {
-    {"encoder",  &TtsModelPaths::encoder,  true},
-    {"decoder",  &TtsModelPaths::decoder,  true},
-    {"vocoder",  &TtsModelPaths::vocoder,  true},
-    {"tokens",   &TtsModelPaths::tokens,   true},
-    {"dataDir",  &TtsModelPaths::dataDir,  true},
-    {"lexicon",  &TtsModelPaths::lexicon,  true},
+    {"encoder",  &TtsModelPaths::encoder,  true, false},
+    {"decoder",  &TtsModelPaths::decoder,  true, false},
+    {"vocoder",  &TtsModelPaths::vocoder,  true, false},
+    {"tokens",   &TtsModelPaths::tokens,   true, false},
+    {"dataDir",  &TtsModelPaths::dataDir,  true, true},
+    {"lexicon",  &TtsModelPaths::lexicon,  true, false},
 };
 
 static const TtsFieldRequirement kSupertonicReqs[] = {
-    {"durationPredictor", &TtsModelPaths::durationPredictor, true},
-    {"textEncoder",       &TtsModelPaths::textEncoder,       true},
-    {"vectorEstimator",   &TtsModelPaths::vectorEstimator,   true},
-    {"vocoder",           &TtsModelPaths::vocoder,           true},
-    {"ttsJson",           &TtsModelPaths::ttsJson,           true},
-    {"unicodeIndexer",    &TtsModelPaths::unicodeIndexer,    true},
-    {"voiceStyle",        &TtsModelPaths::voiceStyle,        true},
+    {"durationPredictor", &TtsModelPaths::durationPredictor, true, false},
+    {"textEncoder",       &TtsModelPaths::textEncoder,       true, false},
+    {"vectorEstimator",   &TtsModelPaths::vectorEstimator,   true, false},
+    {"vocoder",           &TtsModelPaths::vocoder,           true, false},
+    {"ttsJson",           &TtsModelPaths::ttsJson,           true, false},
+    {"unicodeIndexer",    &TtsModelPaths::unicodeIndexer,    true, false},
+    {"voiceStyle",        &TtsModelPaths::voiceStyle,        true, false},
 };
 
 // ============================================================
@@ -164,7 +164,7 @@ std::vector<CustomPathFieldSpec> GetTtsPathRequirements(TtsModelKind kind) {
     if (!reqs) return specs;
     specs.reserve(count);
     for (size_t i = 0; i < count; ++i) {
-        specs.push_back({reqs[i].fieldName, reqs[i].required});
+        specs.push_back({reqs[i].fieldName, reqs[i].required, reqs[i].isDirectory});
     }
     return specs;
 }

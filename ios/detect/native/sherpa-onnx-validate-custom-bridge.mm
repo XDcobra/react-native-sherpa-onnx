@@ -22,19 +22,16 @@ NSDictionary *CustomValidationResultToDict(const CustomModelValidationResult &re
 
 NSDictionary *CustomPathRequirementsToDict(const CustomModelPathRequirements &requirements) {
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-    if (!requirements.required.empty()) {
-        NSMutableArray *required = [NSMutableArray arrayWithCapacity:requirements.required.size()];
-        for (const auto &entry : requirements.required) {
-            [required addObject:[NSString stringWithUTF8String:entry.c_str()]];
+    if (!requirements.fields.empty()) {
+        NSMutableArray *fields = [NSMutableArray arrayWithCapacity:requirements.fields.size()];
+        for (const auto &field : requirements.fields) {
+            NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+            entry[@"key"] = [NSString stringWithUTF8String:field.key.c_str()];
+            entry[@"required"] = @(field.required);
+            entry[@"kind"] = field.isDirectory ? @"dir" : @"file";
+            [fields addObject:entry];
         }
-        dict[@"required"] = required;
-    }
-    if (!requirements.optional.empty()) {
-        NSMutableArray *optional = [NSMutableArray arrayWithCapacity:requirements.optional.size()];
-        for (const auto &entry : requirements.optional) {
-            [optional addObject:[NSString stringWithUTF8String:entry.c_str()]];
-        }
-        dict[@"optional"] = optional;
+        dict[@"fields"] = fields;
     }
     return dict;
 }

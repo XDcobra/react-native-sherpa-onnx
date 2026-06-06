@@ -1,6 +1,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import {
@@ -114,14 +115,14 @@ export async function fillEnhancementCustomConfigFromModelFolder(
   const schema = await getCustomModelPathRequirements('enhancement', modelType);
   const customConfig: Partial<Record<EnhancementCustomPathKey, FileSource>> =
     {};
-  for (const key of [...schema.required, ...schema.optional]) {
-    const source = key === 'model' ? toFsSource(modelPath) : undefined;
+  for (const field of schema.fields) {
+    const source = field.key === 'model' ? toFsSource(modelPath) : undefined;
     if (source) {
-      customConfig[key as EnhancementCustomPathKey] = source;
+      customConfig[field.key as EnhancementCustomPathKey] = source;
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as EnhancementCustomPathKey] == null
   );
 

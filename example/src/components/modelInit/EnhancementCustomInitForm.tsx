@@ -12,7 +12,10 @@ import {
   type EnhancementConcreteModelType,
   type EnhancementCustomPathKey,
 } from 'react-native-sherpa-onnx/enhancement';
-import { getCustomModelPathRequirements } from 'react-native-sherpa-onnx/detect';
+import {
+  getCustomModelPathRequirements,
+  type CustomModelPathRequirements,
+} from 'react-native-sherpa-onnx/detect';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { FileSourceSlotPicker } from './FileSourceSlotPicker';
 import { labelForEnhancementCustomPathKey } from '../../utils/enhancementCustomInitLabels';
@@ -43,10 +46,9 @@ export function EnhancementCustomInitForm({
   disabled = false,
   fillHint = null,
 }: EnhancementCustomInitFormProps) {
-  const [schema, setSchema] = useState<{
-    required: string[];
-    optional: string[];
-  }>({ required: [], optional: [] });
+  const [schema, setSchema] = useState<CustomModelPathRequirements>({
+    fields: [],
+  });
   const [schemaLoading, setSchemaLoading] = useState(false);
 
   useEffect(() => {
@@ -68,28 +70,14 @@ export function EnhancementCustomInitForm({
     };
   }, [value.modelType]);
 
-  const slotKeys = useMemo(() => {
-    const requiredSet = new Set(schema.required);
-    const seen = new Set<string>();
-    const keys: Array<{ key: EnhancementCustomPathKey; required: boolean }> =
-      [];
-    for (const key of schema.required) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({ key: key as EnhancementCustomPathKey, required: true });
-      }
-    }
-    for (const key of schema.optional) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        keys.push({
-          key: key as EnhancementCustomPathKey,
-          required: requiredSet.has(key),
-        });
-      }
-    }
-    return keys;
-  }, [schema]);
+  const slotKeys = useMemo(
+    () =>
+      schema.fields.map((field) => ({
+        key: field.key as EnhancementCustomPathKey,
+        required: field.required,
+      })),
+    [schema.fields]
+  );
 
   const setModelType = (modelType: EnhancementConcreteModelType) => {
     onChange({ modelType, fileSources: {} });

@@ -31,10 +31,17 @@ export {
 } from './detectModel';
 
 export {
+  customModelPathFieldKeys,
+  requiredCustomModelPathFieldKeys,
+  type CustomModelPathField,
+  type CustomModelPathFieldKind,
+  type CustomModelPathRequirements,
+} from './customModelPathRequirements';
+
+export {
   getCustomModelPathRequirements,
   validateCustomModelPaths,
   type CustomModelPathCategory,
-  type CustomModelPathRequirements,
   type CustomModelPathValidationResult,
 } from './validateCustomModelPaths';
 

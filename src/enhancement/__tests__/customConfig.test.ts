@@ -1,10 +1,15 @@
-jest.mock('../../detect/validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(async () => ({
-    required: ['model'],
-    optional: [],
-  })),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+jest.mock('../../detect/validateCustomModelPaths', () => {
+  const helpers = jest.requireActual(
+    '../../detect/customModelPathRequirements'
+  );
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(async () => ({
+      fields: [{ key: 'model', required: true, kind: 'file' }],
+    })),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 jest.mock('../../detect/resolveModelInput', () => ({
   resolveModelFileSources: jest.fn(async (sources: Record<string, unknown>) => {
@@ -56,8 +61,7 @@ describe('resolveEnhancementCustomConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['model'],
-      optional: [],
+      fields: [{ key: 'model', required: true, kind: 'file' }],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });

@@ -1,6 +1,7 @@
 import { exists, readDir } from '@dr.pogodin/react-native-fs';
 import {
   getCustomModelPathRequirements,
+  requiredCustomModelPathFieldKeys,
   resolveFileSourceForModelInit,
 } from 'react-native-sherpa-onnx/detect';
 import {
@@ -100,14 +101,15 @@ export async function fillOfflinePunctuationCustomConfigFromModelFolder(
   const customConfig: Partial<
     Record<OfflinePunctuationCustomPathKey, FileSource>
   > = {};
-  for (const key of [...schema.required, ...schema.optional]) {
-    const source = key === 'ct_transformer' ? toFsSource(ctPath) : undefined;
+  for (const field of schema.fields) {
+    const source =
+      field.key === 'ct_transformer' ? toFsSource(ctPath) : undefined;
     if (source) {
-      customConfig[key as OfflinePunctuationCustomPathKey] = source;
+      customConfig[field.key as OfflinePunctuationCustomPathKey] = source;
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as OfflinePunctuationCustomPathKey] == null
   );
 
@@ -147,19 +149,19 @@ export async function fillStreamingPunctuationCustomConfigFromModelFolder(
   const customConfig: Partial<
     Record<StreamingPunctuationCustomPathKey, FileSource>
   > = {};
-  for (const key of [...schema.required, ...schema.optional]) {
+  for (const field of schema.fields) {
     let source: FileSource | undefined;
-    if (key === 'cnn_bilstm') {
+    if (field.key === 'cnn_bilstm') {
       source = toFsSource(cnnPath);
-    } else if (key === 'bpe_vocab') {
+    } else if (field.key === 'bpe_vocab') {
       source = toFsSource(vocabPath);
     }
     if (source) {
-      customConfig[key as StreamingPunctuationCustomPathKey] = source;
+      customConfig[field.key as StreamingPunctuationCustomPathKey] = source;
     }
   }
 
-  const missingKeys = schema.required.filter(
+  const missingKeys = requiredCustomModelPathFieldKeys(schema).filter(
     (key) => customConfig[key as StreamingPunctuationCustomPathKey] == null
   );
 

@@ -7,13 +7,22 @@ jest.mock('../resolveModelInput', () => ({
   ),
 }));
 
-jest.mock('../validateCustomModelPaths', () => ({
-  getCustomModelPathRequirements: jest.fn(async () => ({
-    required: ['encoder', 'decoder', 'joiner', 'tokens'],
-    optional: ['bpeVocab'],
-  })),
-  validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
-}));
+jest.mock('../validateCustomModelPaths', () => {
+  const helpers = jest.requireActual('../customModelPathRequirements');
+  return {
+    ...helpers,
+    getCustomModelPathRequirements: jest.fn(async () => ({
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'joiner', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'bpeVocab', required: false, kind: 'file' },
+      ],
+    })),
+    validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
+  };
+});
 
 import {
   assertCustomModelConfig,
@@ -53,8 +62,12 @@ describe('resolveCustomModelConfigPaths', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetRequirements.mockResolvedValue({
-      required: ['encoder', 'decoder', 'joiner', 'tokens'],
-      optional: [],
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'joiner', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+      ],
     });
     mockValidate.mockResolvedValue({ ok: true });
   });
