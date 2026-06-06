@@ -57,6 +57,36 @@ void FillVadModelPathsFromDict(NSDictionary *dict, sherpaonnx::VadModelPaths &pa
   sherpaonnx::FillVadModelPathsFromStringMap(pathMap, paths);
 }
 
+struct VadInstanceState {
+  std::string modelType;
+  std::string modelPath;
+  int sampleRate = 16000;
+  int numThreads = 1;
+  std::string provider = "cpu";
+  bool debug = false;
+  double scoreThreshold = 0.5;
+  int minSpeechDurationMs = 250;
+  int minSilenceDurationMs = 250;
+  int maxSpeechDurationMs = 5000;
+  int windowSize = 512;
+  bool speechDetected = false;
+  std::shared_ptr<VadRuntime> runtime;
+};
+
+struct VadPipelineState {
+  std::string instanceId;
+  std::shared_ptr<VadPipelineWorker> worker;
+  bool running = true;
+  bool flushing = false;
+  int queueDepth = 0;
+  std::string error;
+};
+
+std::mutex g_vad_mutex;
+std::unordered_map<std::string, VadInstanceState> g_vad_instances;
+std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
+std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
+
 void ApplyVadInitScalars(VadInstanceState &state, NSDictionary *options, NSString *resolvedModelType) {
   if ([options[@"sampleRate"] respondsToSelector:@selector(intValue)]) {
     state.sampleRate = MAX(1, [options[@"sampleRate"] intValue]);
@@ -126,36 +156,6 @@ bool FinishVadInitialize(
   resolve(nil);
   return true;
 }
-
-struct VadInstanceState {
-  std::string modelType;
-  std::string modelPath;
-  int sampleRate = 16000;
-  int numThreads = 1;
-  std::string provider = "cpu";
-  bool debug = false;
-  double scoreThreshold = 0.5;
-  int minSpeechDurationMs = 250;
-  int minSilenceDurationMs = 250;
-  int maxSpeechDurationMs = 5000;
-  int windowSize = 512;
-  bool speechDetected = false;
-  std::shared_ptr<VadRuntime> runtime;
-};
-
-struct VadPipelineState {
-  std::string instanceId;
-  std::shared_ptr<VadPipelineWorker> worker;
-  bool running = true;
-  bool flushing = false;
-  int queueDepth = 0;
-  std::string error;
-};
-
-std::mutex g_vad_mutex;
-std::unordered_map<std::string, VadInstanceState> g_vad_instances;
-std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
-std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
 
 std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   const std::string &pipelineId,
