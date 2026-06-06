@@ -1,9 +1,8 @@
 import type { FileSource } from '../fileio/types';
 import {
-  getCustomModelPathRequirements,
-  validateCustomModelPaths,
-} from '../detect/validateCustomModelPaths';
-import { resolveModelFileSources } from '../detect/resolveModelInput';
+  assertCustomModelConfig,
+  resolveCustomModelConfigPaths,
+} from '../detect/customConfigResolver';
 import type { OnlineSTTModelType } from './streamingTypes';
 import { SttErrorCode } from './types';
 
@@ -47,76 +46,22 @@ export type StreamingSttCustomConfig =
 
 const STREAMING_STT_CATEGORY = 'stt_streaming';
 
-function createStreamingInvalidArgumentError(message: string): never {
-  const err = new Error(
-    `${SttErrorCode.INVALID_ARGUMENT}: ${message}`
-  ) as Error & { code?: string };
-  err.code = SttErrorCode.INVALID_ARGUMENT;
-  throw err;
-}
-
-function isFileSource(value: unknown): value is FileSource {
-  if (typeof value !== 'object' || value === null || !('kind' in value)) {
-    return false;
-  }
-  const kind = (value as { kind?: unknown }).kind;
-  return typeof kind === 'string';
-}
-
 export function assertStreamingSttCustomConfig(
   customConfig: Record<string, unknown>
 ): void {
-  for (const [key, value] of Object.entries(customConfig)) {
-    if (!isFileSource(value)) {
-      createStreamingInvalidArgumentError(
-        `customConfig.${key} must be a FileSource object`
-      );
-    }
-  }
+  assertCustomModelConfig(customConfig, SttErrorCode.INVALID_ARGUMENT);
 }
 
 export async function resolveStreamingSttCustomConfigPaths(
   modelType: OnlineSTTModelType,
   customConfig: StreamingSttCustomConfig
 ): Promise<Record<string, string>> {
-  assertStreamingSttCustomConfig(
-    customConfig as unknown as Record<string, unknown>
-  );
-
-  const schema = await getCustomModelPathRequirements(
-    STREAMING_STT_CATEGORY,
-    modelType
-  );
-  const allowedKeys = new Set([...schema.required, ...schema.optional]);
-  for (const key of Object.keys(customConfig)) {
-    if (!allowedKeys.has(key)) {
-      createStreamingInvalidArgumentError(
-        `Unknown customConfig key '${key}' for streaming modelType '${modelType}'`
-      );
-    }
-  }
-
-  const fileSources: Record<string, FileSource> = {};
-  for (const [key, value] of Object.entries(customConfig)) {
-    if (isFileSource(value)) {
-      fileSources[key] = value;
-    }
-  }
-  const resolvedPaths = await resolveModelFileSources(fileSources);
-
-  const validation = await validateCustomModelPaths(
-    STREAMING_STT_CATEGORY,
+  return resolveCustomModelConfigPaths({
+    category: STREAMING_STT_CATEGORY,
     modelType,
-    resolvedPaths
-  );
-  if (!validation.ok) {
-    createStreamingInvalidArgumentError(
-      validation.error?.trim() ||
-        `Missing required paths: ${(validation.missingRequired ?? []).join(
-          ', '
-        )}`
-    );
-  }
-
-  return resolvedPaths;
+    customConfig: customConfig as unknown as Record<string, unknown>,
+    errorCode: SttErrorCode.INVALID_ARGUMENT,
+    unknownKeyMessage: (key, mt) =>
+      `Unknown customConfig key '${key}' for streaming modelType '${mt}'`,
+  });
 }

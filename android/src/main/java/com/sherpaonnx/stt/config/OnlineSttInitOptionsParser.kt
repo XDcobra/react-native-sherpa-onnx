@@ -1,7 +1,7 @@
 package com.sherpaonnx.stt.config
 
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.ReadableType
+import com.sherpaonnx.bridge.InitModeModelPathsParser
 
 /** Parse `initializeOnlineStt(instanceId, options)` TurboModule map. */
 internal object OnlineSttInitOptionsParser {
@@ -34,36 +34,13 @@ internal object OnlineSttInitOptionsParser {
   )
 
   fun parse(options: ReadableMap): Parsed? {
-    val initMode = if (options.hasKey("initMode")) {
-      options.getString("initMode")?.trim().orEmpty().ifEmpty { "auto" }
-    } else {
-      "auto"
-    }
-
-    val modelDir = if (options.hasKey("modelDir")) {
-      options.getString("modelDir")?.trim()?.takeIf { it.isNotEmpty() }
-    } else {
-      null
-    }
-
-    val modelPaths = if (options.hasKey("modelPaths") && !options.isNull("modelPaths")) {
-      readStringMap(options.getMap("modelPaths"))
-    } else {
-      null
-    }
-
-    if (initMode == "custom") {
-      if (modelPaths.isNullOrEmpty()) return null
-      if (!options.hasKey("modelType") || options.isNull("modelType")) return null
-    } else if (modelDir.isNullOrEmpty()) {
-      return null
-    }
+    val core = InitModeModelPathsParser.parseCore(options) ?: return null
 
     return Parsed(
-      initMode = initMode,
-      modelDir = modelDir,
-      modelPaths = modelPaths,
-      modelType = if (options.hasKey("modelType")) options.getString("modelType") else null,
+      initMode = core.initMode,
+      modelDir = core.modelDir,
+      modelPaths = core.modelPaths,
+      modelType = core.modelType ?: if (options.hasKey("modelType")) options.getString("modelType") else null,
       enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else null,
       decodingMethod = if (options.hasKey("decodingMethod")) options.getString("decodingMethod") else null,
       maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else null,
@@ -86,20 +63,5 @@ internal object OnlineSttInitOptionsParser {
       rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null,
       rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null,
     )
-  }
-
-  private fun readStringMap(map: ReadableMap?): Map<String, String>? {
-    if (map == null) return null
-    val out = linkedMapOf<String, String>()
-    val iterator = map.keySetIterator()
-    while (iterator.hasNextKey()) {
-      val key = iterator.nextKey()
-      if (map.getType(key) != ReadableType.String) continue
-      val value = map.getString(key)?.trim().orEmpty()
-      if (value.isNotEmpty()) {
-        out[key] = value
-      }
-    }
-    return out
   }
 }

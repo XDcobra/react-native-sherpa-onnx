@@ -1,10 +1,9 @@
 import type { FileSource } from '../fileio/types';
 import { ModelCategory } from '../download/types';
 import {
-  getCustomModelPathRequirements,
-  validateCustomModelPaths,
-} from '../detect/validateCustomModelPaths';
-import { resolveModelFileSources } from '../detect/resolveModelInput';
+  assertCustomModelConfig,
+  resolveCustomModelConfigPaths,
+} from '../detect/customConfigResolver';
 import type { STTConcreteModelType } from './types';
 import { SttErrorCode } from './types';
 
@@ -151,77 +150,23 @@ export type SttCustomConfigByModelType = {
 
 export type SttCustomConfig = SttCustomConfigByModelType[STTConcreteModelType];
 
-function createSttInvalidArgumentError(message: string): never {
-  const err = new Error(
-    `${SttErrorCode.INVALID_ARGUMENT}: ${message}`
-  ) as Error & {
-    code?: string;
-  };
-  err.code = SttErrorCode.INVALID_ARGUMENT;
-  throw err;
-}
-
-function isFileSource(value: unknown): value is FileSource {
-  if (typeof value !== 'object' || value === null || !('kind' in value)) {
-    return false;
-  }
-  const kind = (value as { kind?: unknown }).kind;
-  return typeof kind === 'string';
-}
-
 /** Structural check: every present customConfig value must be a FileSource. */
 export function assertSttCustomConfig(
   customConfig: Record<string, unknown>
 ): void {
-  for (const [key, value] of Object.entries(customConfig)) {
-    if (!isFileSource(value)) {
-      createSttInvalidArgumentError(
-        `customConfig.${key} must be a FileSource object`
-      );
-    }
-  }
+  assertCustomModelConfig(customConfig, SttErrorCode.INVALID_ARGUMENT);
 }
 
 export async function resolveSttCustomConfigPaths(
   modelType: STTConcreteModelType,
   customConfig: SttCustomConfig
 ): Promise<Record<string, string>> {
-  assertSttCustomConfig(customConfig as unknown as Record<string, unknown>);
-
-  const schema = await getCustomModelPathRequirements(
-    ModelCategory.Stt,
-    modelType
-  );
-  const allowedKeys = new Set([...schema.required, ...schema.optional]);
-  for (const key of Object.keys(customConfig)) {
-    if (!allowedKeys.has(key)) {
-      createSttInvalidArgumentError(
-        `Unknown customConfig key '${key}' for modelType '${modelType}'`
-      );
-    }
-  }
-
-  const fileSources: Record<string, FileSource> = {};
-  for (const [key, value] of Object.entries(customConfig)) {
-    if (isFileSource(value)) {
-      fileSources[key] = value;
-    }
-  }
-  const resolvedPaths = await resolveModelFileSources(fileSources);
-
-  const validation = await validateCustomModelPaths(
-    ModelCategory.Stt,
+  return resolveCustomModelConfigPaths({
+    category: ModelCategory.Stt,
     modelType,
-    resolvedPaths
-  );
-  if (!validation.ok) {
-    createSttInvalidArgumentError(
-      validation.error?.trim() ||
-        `Missing required paths: ${(validation.missingRequired ?? []).join(
-          ', '
-        )}`
-    );
-  }
-
-  return resolvedPaths;
+    customConfig: customConfig as unknown as Record<string, unknown>,
+    errorCode: SttErrorCode.INVALID_ARGUMENT,
+    unknownKeyMessage: (key, mt) =>
+      `Unknown customConfig key '${key}' for modelType '${mt}'`,
+  });
 }

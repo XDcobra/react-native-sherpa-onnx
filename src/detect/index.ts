@@ -6,6 +6,7 @@
  *
  * - {@link detectModel} / {@link detectModelsBatch} — category + type (native C++)
  * - {@link validateCustomModelPaths} / {@link getCustomModelPathRequirements} — custom-init path schema + validation (native C++)
+ * - {@link resolveCustomModelConfigPaths} / {@link isFileSource} — shared custom-init FileSource → path resolution
  * - {@link resolveFileSourceForDetect} — `FileSource` → `modelDir` + `assetName` (supports `kind: 'auto'`)
  */
 
@@ -36,3 +37,10 @@ export {
   type CustomModelPathRequirements,
   type CustomModelPathValidationResult,
 } from './validateCustomModelPaths';
+
+export {
+  assertCustomModelConfig,
+  createInvalidArgumentError,
+  isFileSource,
+  resolveCustomModelConfigPaths,
+} from './customConfigResolver';
