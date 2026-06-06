@@ -10,9 +10,10 @@ import type { ExtractArchiveResult } from './extraction/types';
 
 /** `initializeStt(instanceId, options)` — offline STT. */
 export type SttInitBridgeOptions = {
-  initMode: 'auto' | 'custom';
+  initMode?: string;
   modelDir?: string;
-  modelPaths?: Record<string, string>;
+  /** Resolved path map (encoder, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
   preferInt8?: boolean;
   modelType?: string;
   debug?: boolean;
@@ -1449,7 +1450,7 @@ export interface Spec extends TurboModule {
   validateCustomModelPaths(
     category: string,
     modelType: string,
-    paths: Readonly<Record<string, string>>
+    paths: Object
   ): Promise<{
     ok: boolean;
     error?: string;

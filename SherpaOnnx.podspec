@@ -137,6 +137,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",

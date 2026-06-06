@@ -109,9 +109,9 @@ static void FillSttModelPathsFromDict(
         return;
     }
 
-    NSString *initMode = @"auto";
-    if (options.initMode().has_value()) {
-        initMode = [NSString stringWithUTF8String:options.initMode()->c_str()];
+    NSString *initMode = options.initMode();
+    if (initMode == nil || [initMode length] == 0) {
+        initMode = @"auto";
     }
 
     NSString *modelType = options.modelType();
