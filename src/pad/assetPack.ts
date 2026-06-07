@@ -92,8 +92,11 @@ export async function removeAssetPack(packName: string): Promise<number> {
 export function assetPackDownloadPercent(
   state: AssetPackStateSnapshot
 ): number | null {
-  if (state.totalBytes <= 0) {
-    return state.status === 'completed' ? 100 : null;
+  if (state.status === 'completed') {
+    return 100;
+  }
+  if (state.totalBytes <= 0 || state.bytesDownloaded <= 0) {
+    return null;
   }
   return Math.min(
     100,
