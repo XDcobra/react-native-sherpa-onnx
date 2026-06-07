@@ -5450,22 +5450,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): com.facebook.react.bridge.WritableMap {
       val map = Arguments.createMap()
       @Suppress("UNCHECKED_CAST")
-      val required = result["required"] as? ArrayList<String>
-      if (!required.isNullOrEmpty()) {
+      val fields = result["fields"] as? ArrayList<HashMap<String, Any?>>
+      if (!fields.isNullOrEmpty()) {
         val arr = Arguments.createArray()
-        for (entry in required) {
-          arr.pushString(entry)
+        for (entry in fields) {
+          val key = entry["key"] as? String ?: continue
+          val fieldMap = Arguments.createMap()
+          fieldMap.putString("key", key)
+          fieldMap.putBoolean("required", entry["required"] as? Boolean ?: false)
+          val kind = entry["kind"] as? String
+          fieldMap.putString("kind", if (kind == "dir") "dir" else "file")
+          arr.pushMap(fieldMap)
         }
-        map.putArray("required", arr)
-      }
-      @Suppress("UNCHECKED_CAST")
-      val optional = result["optional"] as? ArrayList<String>
-      if (!optional.isNullOrEmpty()) {
-        val arr = Arguments.createArray()
-        for (entry in optional) {
-          arr.pushString(entry)
-        }
-        map.putArray("optional", arr)
+        map.putArray("fields", arr)
       }
       return map
     }
