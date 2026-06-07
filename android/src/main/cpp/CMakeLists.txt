@@ -305,6 +305,7 @@ target_compile_options(sherpaonnx PRIVATE
     -Wall
     -Wextra
     -fvisibility=hidden
+    -g
 )
 
 # Android 15+ requires 16 KB page-size compatibility on arm64 devices.

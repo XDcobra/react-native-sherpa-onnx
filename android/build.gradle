@@ -94,6 +94,11 @@ android {
   buildTypes {
     release {
       minifyEnabled = false
+      packaging {
+        jniLibs {
+          keepDebugSymbols += "**/libsherpaonnx.so"
+        }
+      }
     }
   }
 
