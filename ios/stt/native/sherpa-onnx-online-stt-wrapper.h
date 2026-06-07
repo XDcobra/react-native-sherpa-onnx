@@ -9,6 +9,8 @@
 #ifndef SHERPA_ONNX_ONLINE_STT_WRAPPER_H
 #define SHERPA_ONNX_ONLINE_STT_WRAPPER_H
 
+#include "sherpa-onnx-validate-online-stt.h"
+
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,6 +42,32 @@ public:
     OnlineSttInitResult initialize(
         const std::string& modelDir,
         const std::string& modelType,
+        bool enableEndpoint,
+        const std::string& decodingMethod,
+        int32_t maxActivePaths,
+        const std::string& hotwordsFile,
+        float hotwordsScore,
+        int32_t numThreads,
+        const std::string& provider,
+        const std::string& ruleFsts,
+        const std::string& ruleFars,
+        float dither,
+        float blankPenalty,
+        bool debug,
+        bool rule1MustContainNonSilence,
+        float rule1MinTrailingSilence,
+        float rule1MinUtteranceLength,
+        bool rule2MustContainNonSilence,
+        float rule2MinTrailingSilence,
+        float rule2MinUtteranceLength,
+        bool rule3MustContainNonSilence,
+        float rule3MinTrailingSilence,
+        float rule3MinUtteranceLength
+    );
+
+    OnlineSttInitResult initializeCustom(
+        const std::string& modelType,
+        const OnlineSttModelPaths& paths,
         bool enableEndpoint,
         const std::string& decodingMethod,
         int32_t maxActivePaths,

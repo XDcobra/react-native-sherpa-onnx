@@ -23,6 +23,12 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
+## Installation
+
+```sh
+npm install react-native-sherpa-onnx
+```
+
 ## Feature Support
 
 ### Speech & media features
@@ -47,13 +53,36 @@ A React Native TurboModule that provides offline and streaming speech processing
 - ✅ Playback: [PCM Player](./docs/pcm-player.md)
 - ✅ Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
 - ✅ Runtime acceleration: [Execution providers](./docs/execution-providers.md)
-- ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model languages](./docs/model-languages.md)
+- ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/model-delivery-pad-odr.md) — install-time, fast-follow, on-demand
 
 ### Planned / not yet
 
 - ⏳ Speaker diarization: [Diarization](./docs/diarization.md)
 - ⏳ Source separation: [Separation](./docs/separation.md)
+
+## How to start
+
+Every feature needs **model files on disk** and a way to point the SDK at them. Read these guides **in order** before diving into STT, TTS, VAD, or any other feature doc:
+
+| Step | Doc | You learn |
+| --- | --- | --- |
+| **1** | [Model setup](./docs/model-setup.md) | Where models live (bundled app assets, downloads, PAD/ODR), how **`FileSource`** works, expected folder layouts |
+| **2** | [Model detection & init](./docs/model-detect.md) | Cheap preflight with `detect*Model`, **`auto` vs `custom`** init, required-file validation |
+| **3** | [Feature pipelines](./docs/feature-pipelines.md) | End-to-end recipes and how features chain (buffers, segmentation, live overload) |
+| **4** | Your **feature doc** | Quick start + API for the engine you need — see below |
+
+**Optional, depending on your app:**
+
+| Need | Read |
+| --- | --- |
+| Large models shipped outside the main APK/IPA | [PAD & ODR delivery](./docs/model-delivery-pad-odr.md) (after step 1) |
+| Download models at runtime | [Download manager](./docs/download-manager.md) |
+| Long audio or offline-only models on low-end devices (OOM risk) | [Segmentation engine](./docs/segmentation-engine.md) — process bounded chunks instead of one monolithic pass; essential on modest RAM when a full-file load would exhaust memory |
+| RAM planning for large files or chained engines | [Memory and models](./docs/memory-and-models.md) |
+
+Full doc index: [docs/README.md](./docs/README.md).
+
 
 ## Built for on-device memory
 
@@ -77,27 +106,10 @@ A React Native TurboModule that provides offline and streaming speech processing
 
 **Default mindset:** use buffers, segmentation, and pipeline APIs for large or chained work—treat “load everything into memory, run once” as the exception.
 
-## Segmentation
-
-Deep dive on policies, offline orchestration, and live overload hooks: [Segmentation engine](./docs/segmentation-engine.md). For how segmentation fits OOM planning, see [Memory and models — Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation).
-
 ## Installation
 
 ```sh
 npm install react-native-sherpa-onnx
-```
-
-If your project uses Yarn (v3+) or Plug'n'Play, configure Yarn to use the Node Modules linker to avoid postinstall issues:
-
-```yaml
-# .yarnrc.yml
-nodeLinker: node-modules
-```
-
-Alternatively, set the environment variable during install:
-
-```sh
-YARN_NODE_LINKER=node-modules yarn install
 ```
 
 ### Android
@@ -334,32 +346,61 @@ Full guide: [Audio visualization](./docs/audio-visualization.md).
 
 ## Documentation
 
-- [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cloning / cross-platform behavior)
-- [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning, **offline-only models vs segmentation / chunking**
-- [Segmentation engine](./docs/segmentation-engine.md) – segment boundaries, links, modes; **OOM mitigation** when using offline models on constrained devices
-- **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md)
-- **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- **Punctuation:** [Offline](./docs/punctuation-offline.md)
-- [Voice Activity Detection (VAD)](./docs/vad-streaming.md)
-- [Alignment / subtitles (offline)](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`, `generateSpeechWithTimestamps()`
-- **Pipeline audio buffers:** [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
-- **Pipeline text buffers:** [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
-- **Pipeline segment buffers:** [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
-- [Pipeline Audio Session](./docs/audio-session.md) – Global audio session policy and route preference for mic + PCM
-- [PCM Player](./docs/pcm-player.md) – Play audio from pipeline buffers
-- [Audio visualization](./docs/audio-visualization.md) – `computeAudioVisualizationProfile` — static `levels` and timeline `frames` for spectrum UI
-- [Execution provider support (QNN, NNAPI, XNNPACK, Core ML)](./docs/execution-providers.md)
-- [Speaker Diarization](./docs/diarization.md)
-- [Source Separation](./docs/separation.md)
-- [Model Setup](./docs/model-setup.md) – Bundled assets, model discovery APIs, and troubleshooting
-- [Ship Model Delivery (PAD & ODR)](./docs/model-delivery-pad-odr.md) – install-time, fast-follow, on-demand; `fetchAssetPack`, progress, extraction
-- [Model Download Manager](./docs/download-manager.md)
-- [Extraction API](./docs/extraction.md)
-- [Disable FFMPEG](./docs/disable-ffmpeg.md)
-- [Disable LIBARCHIVE](./docs/disable-libarchive.md)
+Full index: [docs/README.md](./docs/README.md). New to models? See [How to start](#how-to-start).
 
-Note: For when to use `listAssetModels()` vs `listModelsAtPath()` and how to combine bundled and PAD/file-based models, see [Model Setup](./docs/model-setup.md).
+### Getting started & planning
+
+- [How to start](#how-to-start) – model setup → detection → feature pipelines → feature doc
+- [Feature pipelines](./docs/feature-pipelines.md) – end-to-end recipes, chaining features
+- [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning
+- [Streaming pipelines overview](./docs/streaming-pipelines-overview.md) – shared live pipeline lifecycle (`stop` / `flush` / `completed`)
+- [Native diagnostics](./docs/native-diagnostics.md) – crash ring buffer, `SherpaNativeDiag`
+
+### Models & delivery
+
+- [Model setup](./docs/model-setup.md) – `FileSource`, bundled/PAD/downloaded paths, discovery APIs
+- [Model detection & init](./docs/model-detect.md) – preflight, `auto` vs `custom` init, validation
+- [Model languages](./docs/model-languages.md) – language pickers and `modelOptions` hints
+- [Ship model delivery (PAD & ODR)](./docs/model-delivery-pad-odr.md) – install-time, fast-follow, on-demand
+- [Download manager](./docs/download-manager.md) – runtime model downloads
+- [Extraction API](./docs/extraction.md) – `.tar.zst` / `.tar.bz2` ship archives
+- [File I/O](./docs/fileio.md) – `copyFile`, `saveText`, `shareFile`
+- [Hotwords](./docs/hotwords.md) – boosted phrases for supported STT models
+
+> For `listAssetModels()` vs `listModelsAtPath()` and combining bundled with PAD/file-based models, see [Model setup](./docs/model-setup.md).
+
+### Speech & media features
+
+- **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
+- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
+- **VAD:** [Streaming](./docs/vad-streaming.md)
+- **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
+
+### Segmentation
+
+- [Segmentation engine](./docs/segmentation-engine.md) – policies, `SegmentLink`, live overload; **OOM mitigation** on low-end devices when offline models cannot load full audio at once
+
+### Pipeline buffers
+
+- **Audio:** [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
+- **Text:** [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
+- **Segment:** [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
+
+### Audio I/O & playback
+
+- [Pipeline audio session](./docs/audio-session.md) – mic + PCM route policy
+- [PCM player](./docs/pcm-player.md) – play pipeline buffer output
+- [Audio conversion](./docs/audio-conversion.md) – save / encode, duration probe
+- [Audio visualization](./docs/audio-visualization.md) – spectrum `levels` and timeline `frames`
+
+### Platform & build
+
+- [Execution providers](./docs/execution-providers.md) – CPU, NNAPI, XNNPACK, Core ML, QNN
+- [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
+- [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cross-platform drift)
+- **Planned:** [Speaker diarization](./docs/diarization.md) · [Source separation](./docs/separation.md)
 
 ## Requirements
 

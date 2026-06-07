@@ -9,11 +9,30 @@
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
 
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
+
+static void FillTtsModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::TtsModelPaths &paths
+) {
+    if (![dict isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    std::map<std::string, std::string> pathMap;
+    for (NSString *key in dict) {
+        id value = dict[key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+            pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+        }
+    }
+    sherpaonnx::FillTtsModelPathsFromStringMap(pathMap, paths);
+}
 
 @implementation SherpaOnnx (TTSInit)
 
@@ -32,12 +51,27 @@ static NSString *TtsTrimmedString(NSString *value) {
         reject(@"TTS_INIT_ERROR", @"instanceId is required", nil);
         return;
     }
+
+    NSString *initMode = options.initMode();
+    if (initMode == nil || [initMode length] == 0) {
+        initMode = @"auto";
+    }
+    const bool isCustomInit = initMode.length > 0 && [initMode isEqualToString:@"custom"];
+
     NSString *modelDir = TtsTrimmedString(options.modelDir());
-    if (modelDir == nil) {
-        reject(@"TTS_INIT_ERROR", @"modelDir is required", nil);
+    if (!isCustomInit && modelDir == nil) {
+        reject(@"TTS_INIT_ERROR", @"modelDir is required for initMode auto", nil);
         return;
     }
     NSString *modelType = TtsTrimmedString(options.modelType()) ?: @"auto";
+    if (isCustomInit && (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"])) {
+        reject(@"TTS_INIT_ERROR", @"modelType is required for initMode custom", nil);
+        return;
+    }
+    if (isCustomInit && TtsTrimmedString(options.lexiconLanguageId()) != nil) {
+        reject(@"TTS_INIT_ERROR", @"lexiconLanguageId is only supported for initMode auto", nil);
+        return;
+    }
     auto numThreadsOpt = options.numThreads();
     double numThreads = numThreadsOpt.has_value() ? numThreadsOpt.value() : 2.0;
     auto debugOpt = options.debug();
@@ -59,7 +93,7 @@ static NSString *TtsTrimmedString(NSString *value) {
     NSString *kokoroLang = TtsTrimmedString(options.kokoroLang());
 
     std::string instanceIdStr = [instanceId UTF8String];
-    RCTLogInfo(@"Initializing TTS instance %@ with modelDir: %@, modelType: %@", instanceId, modelDir, modelType);
+    RCTLogInfo(@"Initializing TTS instance %@ initMode=%@ modelDir=%@, modelType: %@", instanceId, initMode, modelDir, modelType);
 
     @try {
         std::lock_guard<std::mutex> lock(g_tts_mutex);
@@ -72,7 +106,7 @@ static NSString *TtsTrimmedString(NSString *value) {
             inst->wrapper = std::make_unique<sherpaonnx::TtsWrapper>();
         }
 
-        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
         std::string modelTypeStr = [modelType UTF8String];
 
         std::optional<float> noiseScaleOpt = std::nullopt;
@@ -117,27 +151,55 @@ static NSString *TtsTrimmedString(NSString *value) {
             kokoroLangOpt = std::string([kokoroLang UTF8String]);
         }
 
-        sherpaonnx::TtsInitializeResult result = inst->wrapper->initialize(
-            modelDirStr,
-            modelTypeStr,
-            static_cast<int32_t>(numThreads),
-            debug,
-            noiseScaleOpt,
-            noiseScaleWOpt,
-            lengthScaleOpt,
-            ruleFstsOpt,
-            ruleFarsOpt,
-            maxNumSentencesOpt,
-            silenceScaleOpt,
-            providerOpt,
-            lexiconLanguageIdOpt,
-            kokoroLangOpt
-        );
+        sherpaonnx::TtsInitializeResult result;
+        if (isCustomInit) {
+            id pathsRaw = options.modelPaths();
+            NSDictionary *pathsDict =
+                [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+            if (pathsDict == nil || pathsDict.count == 0) {
+                reject(@"TTS_INIT_ERROR", @"modelPaths is required for initMode custom", nil);
+                return;
+            }
+            sherpaonnx::TtsModelPaths paths;
+            FillTtsModelPathsFromDict(pathsDict, paths);
+            result = inst->wrapper->initializeCustom(
+                modelTypeStr,
+                paths,
+                static_cast<int32_t>(numThreads),
+                debug,
+                noiseScaleOpt,
+                noiseScaleWOpt,
+                lengthScaleOpt,
+                ruleFstsOpt,
+                ruleFarsOpt,
+                maxNumSentencesOpt,
+                silenceScaleOpt,
+                providerOpt,
+                kokoroLangOpt
+            );
+        } else {
+            result = inst->wrapper->initialize(
+                modelDirStr,
+                modelTypeStr,
+                static_cast<int32_t>(numThreads),
+                debug,
+                noiseScaleOpt,
+                noiseScaleWOpt,
+                lengthScaleOpt,
+                ruleFstsOpt,
+                ruleFarsOpt,
+                maxNumSentencesOpt,
+                silenceScaleOpt,
+                providerOpt,
+                lexiconLanguageIdOpt,
+                kokoroLangOpt
+            );
+        }
 
         if (result.success) {
             RCTLogInfo(@"TTS initialization successful for instance %@", instanceId);
 
-            inst->modelDir = [modelDir copy];
+            inst->modelDir = isCustomInit ? [@"custom" copy] : [modelDir copy];
             inst->modelType = [modelType copy];
             inst->numThreads = static_cast<int32_t>(numThreads);
             inst->debug = debug;

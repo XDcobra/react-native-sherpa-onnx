@@ -1,4 +1,5 @@
 import type { FileSource } from '../fileio/types';
+import { assertAlignmentCustomConfig } from './customConfig';
 import { runAlignTextToAudio } from './alignTextToAudio';
 import type {
   AlignTextToAudioFn,
@@ -76,7 +77,28 @@ function validateGranularity(
 }
 
 function validateAccurateOptions(options: Record<string, unknown>): void {
-  if (!isFileSource(options.modelSource)) {
+  if (options.initMode === 'custom') {
+    if (options.modelType !== 'wav2vec2') {
+      throw createAlignmentError(
+        'ALIGNMENT_MODEL_PATH_INVALID',
+        "Accurate custom mode requires modelType: 'wav2vec2'."
+      );
+    }
+    if (!isRecord(options.customConfig)) {
+      throw createAlignmentError(
+        'ALIGNMENT_MODEL_PATH_INVALID',
+        'Accurate custom mode requires customConfig with model: FileSource.'
+      );
+    }
+    try {
+      assertAlignmentCustomConfig(options.customConfig);
+    } catch (error) {
+      throw createAlignmentError(
+        'ALIGNMENT_MODEL_PATH_INVALID',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  } else if (!isFileSource(options.modelSource)) {
     throw createAlignmentError(
       'ALIGNMENT_MODEL_PATH_INVALID',
       'Accurate mode requires modelSource: FileSource.'

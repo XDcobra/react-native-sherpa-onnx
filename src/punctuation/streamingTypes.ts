@@ -13,14 +13,32 @@ export type OnlinePunctuationModelType = Extract<
   'cnn_bilstm' | 'auto'
 >;
 
-export type StreamingPunctuationInitializeOptions = {
-  /** OnlinePunctuation layout (CNN-BiLSTM + bpe.vocab). */
-  modelSource: FileSource;
-  modelType?: OnlinePunctuationModelType;
+export type StreamingPunctuationConcreteModelType = 'cnn_bilstm';
+
+export type StreamingPunctuationInitOptionsShared = {
   numThreads?: number;
   provider?: string;
   debug?: boolean;
 };
+
+export type StreamingPunctuationAutoInitializeOptions =
+  StreamingPunctuationInitOptionsShared & {
+    initMode?: 'auto';
+    /** OnlinePunctuation layout (CNN-BiLSTM + bpe.vocab). */
+    modelSource: FileSource;
+    modelType?: OnlinePunctuationModelType;
+  };
+
+export type StreamingPunctuationCustomInitializeOptions =
+  StreamingPunctuationInitOptionsShared & {
+    initMode: 'custom';
+    modelType: StreamingPunctuationConcreteModelType;
+    customConfig: import('./customConfig').StreamingPunctuationCustomConfig;
+  };
+
+export type StreamingPunctuationInitializeOptions =
+  | StreamingPunctuationAutoInitializeOptions
+  | StreamingPunctuationCustomInitializeOptions;
 
 export type StreamingPunctuationOptions = {
   /**

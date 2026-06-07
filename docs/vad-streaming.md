@@ -2,28 +2,20 @@
 
 ## Introduction
 
-On-device streaming VAD with a pipeline-first API:
+On-device streaming VAD with a **pipeline-first** API.
 
-- **Input:** live or offline pipeline audio buffer (`audiobuffer`)
-- **Output:** live or offline segment buffer (`segmentbuffer`)
-- **Engine:** `createStreamingVAD` exposes `process(...)`, `isSpeechDetected()`, and `destroy()` (no engine-level data events)
-- **Pipeline handle (live):** `onSpeechStateChanged` for speech activity; **segment buffer:** `onSegmentAppended` / `streamEvents.segmentAppended` for new segments (fat metadata; pull APIs remain)
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | Pipeline audio buffer ([`audiobuffer`](audiobuffer-streaming.md)) | Live or offline PCM |
+| **Output** | Segment buffer ([`segmentbuffer`](segmentbuffer-streaming.md)) | Speech segments; subscribe via `onSegmentAppended` / `streamEvents.segmentAppended` |
+| **Engine** | `StreamingVadEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
+| **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged` for speech activity |
 
 Import path: `react-native-sherpa-onnx/vad`
 
 ## Streaming pipeline system
 
 `process` starts a **native VAD worker** that consumes **audio** and emits **speech segments** (and optional speech-state callbacks). Control uses **`VADPipelineHandle`** (`stop`, `flush`, `reset`, `getStatus`, `completed`) — same **registry-backed** pattern as STT/enhancement; see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Important:** with **`autoFlushOnInputEnded: true`** (quick start), **`finalizeLiveAudioBuffer(audioIn)`** already triggers **terminal draining** — do **not** call **`pipeline.flush()`** again afterward (redundant / race-prone). For **parallel pipelines** (VAD + STT on the same `audioIn`), call each feature’s **`flush()`** before **`stop()`** when you need a coordinated end-of-session drain.
-
-## Models and paths
-
-- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- Model detection without engine init: `detectVadModel(...)` — unified category detect: [model-detect.md](model-detect.md)
-- Supported model families: `silero_vad`, `ten_vad`
-
-## Model detection
-
-`detectVadModel` validates Silero / Ten VAD layouts before `createStreamingVAD`. For library rows where the Sherpa category is unknown, use unified detection in [model-detect.md](model-detect.md).
 
 ## Quick start
 
@@ -164,15 +156,6 @@ await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
 ```
 
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Input format | Float PCM `[-1, 1]` in a pipeline audio buffer |
-| Sample rate | VAD `sampleRate` and input buffer sample rate must match model expectations (typically 16kHz) |
-| Model detection | Run `detectVadModel(...)` before engine init when you want explicit preflight checks |
-| Lifecycle | Finalize input for graceful completion, or stop explicitly for early abort; destroy engine(s), then release buffers |
-
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/vad`.
@@ -309,6 +292,49 @@ Snapshot of worker progress and VAD-specific flags (see exported `VADPipelineSta
 
 Resolves when the worker has **fully stopped** (normal completion after finalize + auto-flush, `stop()`, or error). Use with **`await finalizeLiveAudioBuffer`** in the graceful path shown in the quick start.
 
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md)
+- Families: `silero_vad`, `ten_vad`
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `silero_vad` | `*.onnx` (silero VAD) | — | `model` |
+| `ten_vad` | `*.onnx` (ten VAD) | — | `model` |
+
+## Model detection
+
+`detectVadModel` validates Silero / Ten layouts before `createStreamingVAD`. Unified catalog: [model-detect.md](model-detect.md).
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `silero_vad`, `ten_vad` | `model` |
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
+  },
+});
+```
+
+`runtimeOptions` work the same as auto mode.
+
 ## Pipeline composition
 
 ### Typical upstream
@@ -352,7 +378,7 @@ More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-
 ### Modes (offline only)
 
 - **`'off'`** (default) — one `runVadOffline` over the **entire** `off_*` buffer; smallest surprise vs. pre-segmentation behavior.
-- **`'auto'`** — `segmentOfflineBuffer` + `getSegments` (domain **speech**); one `runVadOffline` per slice; results merged into `segmentOut`. **Segment boundaries can differ** from single-pass `off`; keep `off` if you rely on legacy whole-file semantics.
+- **`'auto'`** — `segmentOfflineBuffer` + `getSegments` (domain **speech**); one `runVadOffline` per slice; results merged into `segmentOut`. **Segment boundaries can differ** from single-pass `off`; keep `'off'` if you need single-pass whole-file boundaries.
 
 For `mode: 'auto'`, **`policy` is required** (validation). The snippet below uses the same default shape as `validateSegmentationConfig` for offline VAD (`speech_energy_silence`, …). Tune in [segmentation-engine.md](segmentation-engine.md).
 
@@ -422,7 +448,7 @@ const { summary } = await vad.process({
 });
 ```
 
-**Edge cases (`auto`):** zero speech slices → zero summary, **no** native calls, **no** `onProgress`. `onProgress` throws → run aborts. Fail-fast per segment in v1 (no STT-style retries on `VADOfflineRunOptions`). Details: [ADR-002 — VAD offline segmentation & progress](./migration/OrchestrationProgressVADAli/ADR-002-vad-offline-segmentation-progress-strategy.md).
+**Edge cases (`auto`):** zero speech slices → zero summary, **no** native calls, **no** `onProgress`. `onProgress` throws → run aborts. Fail-fast per segment (no STT-style retries on `VADOfflineRunOptions`).
 
 ### Streaming: live buffers (no `segmentation` options)
 

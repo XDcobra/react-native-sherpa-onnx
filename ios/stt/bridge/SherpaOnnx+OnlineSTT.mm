@@ -17,8 +17,10 @@
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/SttPipelineWorker.h"
 #include "../native/sherpa-onnx-online-stt-wrapper.h"
+#include "sherpa-onnx-model-path-fill.h"
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,6 +29,22 @@
 static std::unordered_map<std::string, std::unique_ptr<sherpaonnx::OnlineSttWrapper>> g_online_stt_instances;
 static std::unordered_map<std::string, std::string> g_online_stt_instance_to_pipeline;
 static std::mutex g_online_stt_mutex;
+
+static void FillOnlineSttModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::OnlineSttModelPaths &out
+) {
+    if (dict == nil) return;
+    std::map<std::string, std::string> paths;
+    for (NSString *key in dict) {
+        id value = dict[key];
+        if (![value isKindOfClass:[NSString class]]) continue;
+        NSString *str = (NSString *)value;
+        if ([str length] == 0) continue;
+        paths[[key UTF8String]] = [str UTF8String];
+    }
+    sherpaonnx::FillOnlineSttModelPathsFromStringMap(paths, out);
+}
 
 static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) {
     if (instanceId == nil || [instanceId length] == 0) return nullptr;
@@ -48,15 +66,21 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
         return;
     }
 
+    NSString *initMode = options.initMode();
+    const bool isCustomInit = initMode.length > 0 && [initMode isEqualToString:@"custom"];
     NSString *modelDir = options.modelDir();
     NSString *modelType = options.modelType();
-    if (modelDir == nil || [modelDir length] == 0) {
-        reject(@"STT_INIT_FAILED", @"modelDir is required", nil);
+    if (!isCustomInit && (modelDir == nil || [modelDir length] == 0)) {
+        reject(@"STT_INIT_FAILED", @"modelDir is required for initMode auto", nil);
+        return;
+    }
+    if (isCustomInit && (modelType == nil || [modelType length] == 0)) {
+        reject(@"STT_INIT_FAILED", @"modelType is required for initMode custom", nil);
         return;
     }
 
     std::string instanceIdStr = [instanceId UTF8String];
-    std::string modelDirStr = [modelDir UTF8String];
+    std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
     std::string modelTypeStr = (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "transducer";
 
     auto enableEndpoint = options.enableEndpoint();
@@ -89,31 +113,69 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
         }
 
         auto wrapper = std::make_unique<sherpaonnx::OnlineSttWrapper>();
-        sherpaonnx::OnlineSttInitResult result = wrapper->initialize(
-            modelDirStr,
-            modelTypeStr,
-            enableEndpoint.has_value() && enableEndpoint.value(),
-            decodingMethod != nil ? [decodingMethod UTF8String] : "greedy_search",
-            maxActivePaths.has_value() ? (int32_t)maxActivePaths.value() : 4,
-            hotwordsFile != nil ? [hotwordsFile UTF8String] : "",
-            hotwordsScore.has_value() ? (float)hotwordsScore.value() : 1.5f,
-            numThreads.has_value() ? (int32_t)numThreads.value() : 1,
-            provider != nil ? [provider UTF8String] : "cpu",
-            ruleFsts != nil ? [ruleFsts UTF8String] : "",
-            ruleFars != nil ? [ruleFars UTF8String] : "",
-            dither.has_value() ? (float)dither.value() : 0.f,
-            blankPenalty.has_value() ? (float)blankPenalty.value() : 0.f,
-            debug.has_value() && debug.value(),
-            rule1MustContainNonSilence.has_value() && rule1MustContainNonSilence.value(),
-            rule1MinTrailingSilence.has_value() ? (float)rule1MinTrailingSilence.value() : 2.4f,
-            rule1MinUtteranceLength.has_value() ? (float)rule1MinUtteranceLength.value() : 0.f,
-            rule2MustContainNonSilence.has_value() && rule2MustContainNonSilence.value(),
-            rule2MinTrailingSilence.has_value() ? (float)rule2MinTrailingSilence.value() : 1.2f,
-            rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
-            rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
-            rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
-            rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
-        );
+        sherpaonnx::OnlineSttInitResult result;
+        if (isCustomInit) {
+            id pathsRaw = options.modelPaths();
+            NSDictionary *pathsDict =
+                [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+            if (pathsDict == nil || pathsDict.count == 0) {
+                reject(@"STT_INIT_FAILED", @"modelPaths is required for initMode custom", nil);
+                return;
+            }
+            sherpaonnx::OnlineSttModelPaths paths;
+            FillOnlineSttModelPathsFromDict(pathsDict, paths);
+            result = wrapper->initializeCustom(
+                modelTypeStr,
+                paths,
+                enableEndpoint.has_value() && enableEndpoint.value(),
+                decodingMethod != nil ? [decodingMethod UTF8String] : "greedy_search",
+                maxActivePaths.has_value() ? (int32_t)maxActivePaths.value() : 4,
+                hotwordsFile != nil ? [hotwordsFile UTF8String] : "",
+                hotwordsScore.has_value() ? (float)hotwordsScore.value() : 1.5f,
+                numThreads.has_value() ? (int32_t)numThreads.value() : 1,
+                provider != nil ? [provider UTF8String] : "cpu",
+                ruleFsts != nil ? [ruleFsts UTF8String] : "",
+                ruleFars != nil ? [ruleFars UTF8String] : "",
+                dither.has_value() ? (float)dither.value() : 0.f,
+                blankPenalty.has_value() ? (float)blankPenalty.value() : 0.f,
+                debug.has_value() && debug.value(),
+                rule1MustContainNonSilence.has_value() && rule1MustContainNonSilence.value(),
+                rule1MinTrailingSilence.has_value() ? (float)rule1MinTrailingSilence.value() : 2.4f,
+                rule1MinUtteranceLength.has_value() ? (float)rule1MinUtteranceLength.value() : 0.f,
+                rule2MustContainNonSilence.has_value() && rule2MustContainNonSilence.value(),
+                rule2MinTrailingSilence.has_value() ? (float)rule2MinTrailingSilence.value() : 1.2f,
+                rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
+                rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
+                rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
+                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
+            );
+        } else {
+            result = wrapper->initialize(
+                modelDirStr,
+                modelTypeStr,
+                enableEndpoint.has_value() && enableEndpoint.value(),
+                decodingMethod != nil ? [decodingMethod UTF8String] : "greedy_search",
+                maxActivePaths.has_value() ? (int32_t)maxActivePaths.value() : 4,
+                hotwordsFile != nil ? [hotwordsFile UTF8String] : "",
+                hotwordsScore.has_value() ? (float)hotwordsScore.value() : 1.5f,
+                numThreads.has_value() ? (int32_t)numThreads.value() : 1,
+                provider != nil ? [provider UTF8String] : "cpu",
+                ruleFsts != nil ? [ruleFsts UTF8String] : "",
+                ruleFars != nil ? [ruleFars UTF8String] : "",
+                dither.has_value() ? (float)dither.value() : 0.f,
+                blankPenalty.has_value() ? (float)blankPenalty.value() : 0.f,
+                debug.has_value() && debug.value(),
+                rule1MustContainNonSilence.has_value() && rule1MustContainNonSilence.value(),
+                rule1MinTrailingSilence.has_value() ? (float)rule1MinTrailingSilence.value() : 2.4f,
+                rule1MinUtteranceLength.has_value() ? (float)rule1MinUtteranceLength.value() : 0.f,
+                rule2MustContainNonSilence.has_value() && rule2MustContainNonSilence.value(),
+                rule2MinTrailingSilence.has_value() ? (float)rule2MinTrailingSilence.value() : 1.2f,
+                rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
+                rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
+                rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
+                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
+            );
+        }
 
         if (!result.success) {
             reject(@"STT_INIT_FAILED", [NSString stringWithUTF8String:result.error.c_str()], nil);

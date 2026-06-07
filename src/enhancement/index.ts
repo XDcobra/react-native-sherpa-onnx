@@ -1,7 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
-import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
@@ -35,6 +34,7 @@ import {
   getSegmentationEngineInfo,
 } from '../segment';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
 
 let enhancementInstanceCounter = 0;
 
@@ -200,6 +200,8 @@ export async function detectEnhancementModel(
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
       : undefined;
+  const modelFilePath =
+    typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -212,6 +214,7 @@ export async function detectEnhancementModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
   };
 }
 
@@ -219,14 +222,10 @@ export async function createEnhancement(
   options: EnhancementInitializeOptions
 ): Promise<EnhancementEngine> {
   const instanceId = `enhancement_${++enhancementInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
+  const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const init = await SherpaOnnx.initializeEnhancement(
     instanceId,
-    resolvedPath,
-    options.modelType ?? 'auto',
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!init.success) {
@@ -350,6 +349,10 @@ export type {
 
 export type {
   EnhancementModelType,
+  EnhancementConcreteModelType,
+  EnhancementInitOptionsShared,
+  EnhancementAutoInitializeOptions,
+  EnhancementCustomInitializeOptions,
   EnhancementInitializeOptions,
   EnhancementDetectResult,
   EnhancementEngine,
@@ -357,4 +360,11 @@ export type {
   EnhancementResult,
   EnhanceSegmentationConfig,
 } from './types';
+export {
+  assertEnhancementCustomConfig,
+  resolveEnhancementCustomConfigPaths,
+  EnhancementErrorCode,
+  type EnhancementCustomConfig,
+  type EnhancementCustomPathKey,
+} from './customConfig';
 export { ENHANCEMENT_MODEL_TYPES } from './types';

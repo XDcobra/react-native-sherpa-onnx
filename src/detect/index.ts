@@ -5,12 +5,16 @@
  * User guide: `docs/model-detect.md` in the package repo.
  *
  * - {@link detectModel} / {@link detectModelsBatch} — category + type (native C++)
+ * - {@link validateCustomModelPaths} / {@link getCustomModelPathRequirements} — custom-init path schema + validation (native C++)
+ * - {@link resolveCustomModelConfigPaths} / {@link isFileSource} — shared custom-init FileSource → path resolution
  * - {@link resolveFileSourceForDetect} — `FileSource` → `modelDir` + `assetName` (supports `kind: 'auto'`)
  */
 
 export {
   resolveFileSourceForDetect,
   resolveFileSourceForModelInit,
+  resolveFileSourceForModelFile,
+  resolveModelFileSources,
   type ResolvedDetectInput,
 } from './resolveModelInput';
 
@@ -25,3 +29,25 @@ export {
   type DetectModelResult,
   type DetectModelsBatchOptions,
 } from './detectModel';
+
+export {
+  customModelPathFieldKeys,
+  requiredCustomModelPathFieldKeys,
+  type CustomModelPathField,
+  type CustomModelPathFieldKind,
+  type CustomModelPathRequirements,
+} from './customModelPathRequirements';
+
+export {
+  getCustomModelPathRequirements,
+  validateCustomModelPaths,
+  type CustomModelPathCategory,
+  type CustomModelPathValidationResult,
+} from './validateCustomModelPaths';
+
+export {
+  assertCustomModelConfig,
+  createInvalidArgumentError,
+  isFileSource,
+  resolveCustomModelConfigPaths,
+} from './customConfigResolver';

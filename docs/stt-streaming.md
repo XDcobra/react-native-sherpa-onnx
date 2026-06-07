@@ -2,23 +2,19 @@
 
 ## Introduction
 
-Low-latency online recognition in pipeline mode.
+Low-latency online recognition with a **pipeline-first** API.
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | One live PCM buffer the native worker reads |
+| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | Partial hypotheses and committed text segments |
+| **Engine** | `LiveSttEngine` via `createStreamingSTT` | `transcribe(audioIn, textOut)` returns `SttPipelineHandle` for pipeline control |
 
 Import path: `react-native-sherpa-onnx/stt`
 
 For full-file/batch transcription, see [Offline STT](stt-offline.md).
 
-## Pipeline model
-
-Streaming STT now runs as a native worker pipeline:
-
-- Input: one live audio buffer (`livePcmBuffer`)
-- Output: one live text buffer (`liveTextBuffer`)
-- Runtime: one STT pipeline handle (`SttPipelineHandle`)
-
-There is no per-chunk stream object in the JS API anymore.
-
-**Naming in this doc:** **`engine`** is the value returned by **`createStreamingSTT`** / **`createLiveSTT`** (`LiveSttEngine`). **`pipeline`** is the handle returned by **`engine.transcribe(...)`** (`SttPipelineHandle`).
+**Naming in this doc:** **`engine`** = `LiveSttEngine`; **`pipeline`** = `SttPipelineHandle` from `engine.transcribe(...)`.
 
 ## Streaming pipeline system
 
@@ -29,13 +25,6 @@ There is no per-chunk stream object in the JS API anymore.
 Committed transcripts are **text segments** on the output `LiveTextBuffer`. Prefer **`onSegment`** on that buffer (or `subscribeLiveTextBufferEvents`) instead of polling `getLiveTextBufferSegmentCount` in a timer. See **[Pipeline text buffers — live / Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling)**.
 
 Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are a separate concern — they require **live audio segmentation** and carry **speech** metadata, not STT text. See **[Pipeline audio buffers — live / `onSegment`](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment)**.
-
-## Models and paths
-
-- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- Streaming-capable model types: `transducer`, `nemo_transducer` (NeMo/Nemotron streaming transducers), `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
-- If your model is offline-only (for example Whisper), you can still use it for live consumption via the **[Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)** pattern.
-- Model setup details: [model-setup.md](model-setup.md)
 
 ## Quick start
 
@@ -169,16 +158,6 @@ const engine = await createStreamingSTT({
 | 6 | `getLiveTextBufferPartialSlice(...)` + segment reads | Partial + committed text |
 | 7 | `pipeline.flush()` / `pipeline.reset()` / `pipeline.stop()` | Pipeline control |
 | 8 | `engine.destroy()` + release buffers | Cleanup |
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Input format | Float PCM `[-1, 1]` at buffer sample rate |
-| Live microphone | [audiobuffer-streaming.md](audiobuffer-streaming.md): `startMicToLiveAudioBuffer` / `stopMicToLiveAudioBuffer` |
-| Text output | [textbuffer-streaming.md](textbuffer-streaming.md): partial slice + segment log getters |
-| Sample rate | Live audio buffer sample rate must match STT model sample rate |
-| Lifecycle | Stop pipeline, destroy engine, and release both buffers |
 
 ## API reference
 
@@ -364,6 +343,55 @@ import {
 ```
 
 See [textbuffer-streaming.md](textbuffer-streaming.md).
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md)
+- Streaming types: `transducer`, `nemo_transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
+- Offline-only models (Whisper): use [Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)
+
+## Validation required files
+
+Streaming STT uses validate category **`stt_streaming`** (keys differ from offline `stt`).
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` | — | `encoder`, `decoder`, `joiner`, `tokens` |
+| `paraformer` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` | — | `encoder`, `decoder`, `tokens` |
+| `zipformer2_ctc`, `nemo_ctc`, `tone_ctc` | `model*.onnx`, `tokens.txt` | — | `model`, `tokens` |
+
+Query keys: `getCustomModelPathRequirements('stt_streaming', modelType)`.
+
+## Model detection
+
+`detectSttModel` validates streaming-capable packs before `createStreamingSTT`. See [model-detect.md](model-detect.md). Check `det.isStreaming === true` for online engines.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). Validate category: **`stt_streaming`**.
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `transducer`, `nemo_transducer` | `encoder`, `decoder`, `joiner`, `tokens` |
+| `paraformer` | `encoder`, `decoder`, `tokens` |
+| `zipformer2_ctc`, `nemo_ctc`, `tone_ctc` | `model`, `tokens` |
+
+```ts
+import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
+
+const engine = await createStreamingSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/path/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/path/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/path/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/path/tokens.txt' },
+  },
+  enableEndpoint: true,
+});
+```
 
 ## Pipeline composition
 

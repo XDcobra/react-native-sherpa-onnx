@@ -40,12 +40,53 @@ export type STTModelType =
   | 'cohere_transcribe'
   | 'fire_red_asr'
   | 'moonshine'
+  | 'moonshine_v2'
   | 'dolphin'
   | 'canary'
   | 'omnilingual'
   | 'medasr'
   | 'telespeech_ctc'
+  | 'tone_ctc'
   | 'auto';
+
+/** Concrete offline STT model types (excludes `'auto'`). */
+export type STTConcreteModelType = Exclude<STTModelType, 'auto'>;
+
+/** Shared STT init fields for auto and custom modes. */
+export interface STTInitializeOptionsBase {
+  debug?: boolean;
+  hotwordsFile?: FileSource;
+  hotwordsScore?: number;
+  modelingUnit?: 'cjkchar' | 'bpe' | 'cjkchar+bpe';
+  bpeVocab?: FileSource;
+  numThreads?: number;
+  provider?: string;
+  ruleFsts?: FileSource | readonly FileSource[];
+  ruleFars?: FileSource | readonly FileSource[];
+  dither?: number;
+  modelOptions?: SttModelOptions;
+}
+
+/** Automatic model detection from a model directory (default). */
+export interface STTAutoInitializeOptions extends STTInitializeOptionsBase {
+  initMode?: 'auto';
+  modelSource: FileSource;
+  preferInt8?: boolean;
+  modelType?: STTModelType;
+}
+
+/** Explicit per-file model layout; skips native auto-detection. */
+export interface STTCustomInitializeOptions<
+  T extends STTConcreteModelType = STTConcreteModelType
+> extends STTInitializeOptionsBase {
+  initMode: 'custom';
+  modelType: T;
+  customConfig: import('./customConfig').SttCustomConfigByModelType[T];
+}
+
+export type STTInitializeOptions =
+  | STTAutoInitializeOptions
+  | STTCustomInitializeOptions;
 
 /** Model types that support hotwords (contextual biasing). Transducer and NeMo transducer support hotwords in sherpa-onnx (NeMo: see k2-fsa/sherpa-onnx#3077). */
 export const STT_HOTWORDS_MODEL_TYPES: readonly STTModelType[] = [
@@ -77,11 +118,13 @@ export const STT_MODEL_TYPES: readonly STTModelType[] = [
   'cohere_transcribe',
   'fire_red_asr',
   'moonshine',
+  'moonshine_v2',
   'dolphin',
   'canary',
   'omnilingual',
   'medasr',
   'telespeech_ctc',
+  'tone_ctc',
   'auto',
 ] as const;
 
@@ -192,114 +235,6 @@ export interface SttModelOptions {
   funasrNano?: SttFunAsrNanoModelOptions;
   qwen3Asr?: SttQwen3AsrModelOptions;
   cohereTranscribe?: SttCohereTranscribeModelOptions;
-}
-
-/**
- * STT-specific initialization options
- */
-export interface STTInitializeOptions {
-  /**
-   * Model directory source configuration.
-   */
-  modelSource: FileSource;
-
-  /**
-   * Model quantization preference
-   * - true: Prefer int8 quantized models (model.int8.onnx) - smaller, faster
-   * - false: Prefer regular models (model.onnx) - higher accuracy
-   * - undefined: Try int8 first, then fall back to regular (default behavior)
-   */
-  preferInt8?: boolean;
-
-  /**
-   * Explicit model type specification for STT models
-   * - 'transducer': Force detection as Transducer model
-   * - 'zipformer_ctc' | 'ctc': Force detection as Zipformer CTC model
-   * - 'paraformer': Force detection as Paraformer model
-   * - 'nemo_ctc': Force detection as NeMo CTC model
-   * - 'whisper': Force detection as Whisper model
-   * - 'wenet_ctc': Force detection as WeNet CTC model
-   * - 'sense_voice': Force detection as SenseVoice model
-   * - 'funasr_nano': Force detection as FunASR Nano model
-   * - 'qwen3_asr': Force detection as Qwen3 ASR
-   * - 'cohere_transcribe': Cohere Transcribe (encoder/decoder + tokens.txt)
-   * - 'fire_red_asr': FireRed ASR (encoder/decoder)
-   * - 'moonshine': Moonshine (preprocess, encode, uncached_decode, cached_decode)
-   * - 'dolphin': Dolphin (single model)
-   * - 'canary': Canary (encoder/decoder)
-   * - 'omnilingual': Omnilingual CTC (single model)
-   * - 'medasr': MedASR CTC (single model)
-   * - 'telespeech_ctc': TeleSpeech CTC (single model)
-   * - 'auto': Automatic detection based on files (default)
-   */
-  modelType?: STTModelType;
-
-  /**
-   * Enable debug logging in native layer and sherpa-onnx (config.model_config.debug).
-   * When true, wrapper and JNI emit verbose logs (config dumps, file checks, init/transcribe flow).
-   * Default: false.
-   */
-  debug?: boolean;
-
-  /**
-   * Path to hotwords file for keyword boosting (Kotlin OfflineRecognizerConfig.hotwordsFile).
-   */
-  hotwordsFile?: string;
-
-  /**
-   * Hotwords score/weight (Kotlin OfflineRecognizerConfig.hotwordsScore).
-   * Default in Kotlin: 1.5.
-   */
-  hotwordsScore?: number;
-
-  /**
-   * Modeling unit for hotwords tokenization (Kotlin OfflineModelConfig.modelingUnit).
-   * Only used when hotwords are set and model is transducer/nemo_transducer.
-   * Must match how the model was trained: 'bpe' (e.g. English zipformer), 'cjkchar' (e.g. Chinese conformer), 'cjkchar+bpe' (bilingual zh-en).
-   * See docs/stt-offline.md "When to use which modelingUnit" and sherpa-onnx hotwords docs.
-   */
-  modelingUnit?: 'cjkchar' | 'bpe' | 'cjkchar+bpe';
-
-  /**
-   * Path to BPE vocabulary file for hotwords (Kotlin OfflineModelConfig.bpeVocab).
-   * Required when modelingUnit is 'bpe' or 'cjkchar+bpe'. Sentencepiece .vocab export (bpe.vocab), not the hotwords file.
-   */
-  bpeVocab?: string;
-
-  /**
-   * Number of threads for inference (Kotlin OfflineModelConfig.numThreads).
-   * Default in Kotlin: 1.
-   */
-  numThreads?: number;
-
-  /**
-   * Provider string (e.g. "cpu"). Stored in config only; no special logic on change.
-   * Kotlin OfflineModelConfig.provider.
-   */
-  provider?: string;
-
-  /**
-   * Path to rule FSTs (Kotlin OfflineRecognizerConfig.ruleFsts).
-   */
-  ruleFsts?: string;
-
-  /**
-   * Path to rule FARs (Kotlin OfflineRecognizerConfig.ruleFars).
-   */
-  ruleFars?: string;
-
-  /**
-   * Dither for feature extraction (Kotlin `FeatureConfig.dither`). Default: no dither.
-   * **Android:** applied natively. **iOS:** ignored — the bundled sherpa-onnx C/CXX API does not
-   * expose this field; the native default is used.
-   */
-  dither?: number;
-
-  /**
-   * Model-specific options. Only options for the loaded model type are applied.
-   * E.g. when modelType is 'whisper', only modelOptions.whisper is used.
-   */
-  modelOptions?: SttModelOptions;
 }
 
 // ========== STT error codes ==========

@@ -7,8 +7,20 @@ export type SegmentationEvaluator =
   | 'speech_vad_model'
   | 'continuous_frames';
 
-export interface SegmentationPolicy {
-  evaluator: SegmentationEvaluator;
+export type SpeechVadModelAuto = {
+  initMode?: 'auto';
+  modelPath: FileSource;
+};
+
+export type SpeechVadModelCustom = {
+  initMode: 'custom';
+  modelType: import('../vad/types').VADConcreteModelType;
+  customConfig: import('../vad/customConfig').VadCustomConfig;
+};
+
+export type SpeechVadModelConfig = SpeechVadModelAuto | SpeechVadModelCustom;
+
+type SegmentationPolicyCommon = {
   maxLengthChars?: number;
   sentenceBoundary?: boolean;
   /**
@@ -26,15 +38,22 @@ export interface SegmentationPolicy {
   hangoverMs?: number;
   checkpointIntervalMs?: number;
   punctuationInstanceId?: string;
-  /**
-   * Required for `speech_vad_model`. Same `FileSource` model location as
-   * `detectVadModel` / `createStreamingVAD`; JS runs detection before native attach.
-   */
-  modelPath?: FileSource;
+};
+
+export type SpeechVadSegmentationPolicy = SegmentationPolicyCommon & {
+  evaluator: 'speech_vad_model';
   vadThreshold?: number;
   vadMinSpeechMs?: number;
   vadMinSilenceMs?: number;
-}
+} & SpeechVadModelConfig;
+
+export type NonSpeechVadSegmentationPolicy = SegmentationPolicyCommon & {
+  evaluator: Exclude<SegmentationEvaluator, 'speech_vad_model'>;
+};
+
+export type SegmentationPolicy =
+  | SpeechVadSegmentationPolicy
+  | NonSpeechVadSegmentationPolicy;
 
 export interface SegmentationConfig {
   policy?: SegmentationPolicy;

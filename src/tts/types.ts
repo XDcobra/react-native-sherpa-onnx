@@ -50,6 +50,9 @@ export type TTSModelType =
   | 'supertonic'
   | 'auto';
 
+/** Concrete TTS model types (excludes `'auto'`). */
+export type TTSConcreteModelType = Exclude<TTSModelType, 'auto'>;
+
 export {
   DETECTION_SOURCES,
   isDetectionSource,
@@ -122,7 +125,7 @@ export interface TtsMatchaModelOptions {
  * Options for Kokoro models. Applied only when modelType is 'kokoro'.
  * Kotlin OfflineTtsKokoroModelConfig.
  *
- * Init `lang` is separate from {@link TTSInitializeOptionsBase.lexiconLanguageId} (lexicon file)
+ * Init `lang` is separate from {@link TTSAutoInitOptionsBase.lexiconLanguageId} (lexicon file)
  * and from {@link TtsSynthesisOptions.lang} (per-synthesis override).
  */
 export interface TtsKokoroModelOptions {
@@ -168,14 +171,8 @@ export interface TtsModelOptions {
   supertonic?: TtsSupertonicModelOptions;
 }
 
-/** Shared init fields (excluding modelType / modelOptions). */
-export type TTSInitializeOptionsBase = {
-  /**
-   * Path to the model directory.
-   * Can be an asset path, file system path, or auto-detection path.
-   */
-  modelSource: FileSource;
-
+/** Shared TTS init fields for auto and custom modes. */
+export type TTSInitOptionsShared = {
   /**
    * Execution provider (e.g. `'cpu'`, `'coreml'`, `'xnnpack'`, `'nnapi'`, `'qnn'`).
    * Use getCoreMlSupport(), getXnnpackSupport(), etc. to check availability. See execution-providers.md.
@@ -222,6 +219,16 @@ export type TTSInitializeOptionsBase = {
    * Default: 0.2.
    */
   silenceScale?: number;
+};
+
+/** Automatic model detection from a model directory (default). */
+export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
+  initMode?: 'auto';
+  /**
+   * Path to the model directory.
+   * Can be an asset path, file system path, or auto-detection path.
+   */
+  modelSource: FileSource;
 
   /**
    * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`
@@ -235,52 +242,70 @@ export type TTSInitializeOptionsBase = {
   lexiconLanguageId?: string;
 };
 
+/** Alias for auto-init shared fields (includes `modelSource`). */
+export type TTSInitializeOptionsBase = TTSAutoInitOptionsBase;
+
+type TtsCustomModelOptionsFor<T extends TTSConcreteModelType> = T extends 'vits'
+  ? { modelOptions?: { vits: TtsVitsModelOptions } }
+  : T extends 'matcha'
+  ? { modelOptions?: { matcha: TtsMatchaModelOptions } }
+  : T extends 'kokoro'
+  ? { modelOptions?: { kokoro: TtsKokoroModelOptions } }
+  : T extends 'kitten'
+  ? { modelOptions?: { kitten: TtsKittenModelOptions } }
+  : { modelOptions?: never };
+
+/** Explicit per-file paths; skips native auto-detection. */
+export type TTSCustomInitializeOptions<
+  T extends TTSConcreteModelType = TTSConcreteModelType
+> = TTSInitOptionsShared & {
+  initMode: 'custom';
+  modelType: T;
+  customConfig: import('./customConfig').TtsCustomConfigByModelType[T];
+} & TtsCustomModelOptionsFor<T>;
+
 /** `modelType` omitted or `'auto'`: no `modelOptions` (set an explicit `modelType` to pass scales). */
-export type TTSInitializeOptionsAuto = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsAuto = TTSAutoInitOptionsBase & {
   modelType?: 'auto' | undefined;
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsVits = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsVits = TTSAutoInitOptionsBase & {
   modelType: 'vits';
   modelOptions?: { vits: TtsVitsModelOptions };
 };
 
-export type TTSInitializeOptionsMatcha = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsMatcha = TTSAutoInitOptionsBase & {
   modelType: 'matcha';
   modelOptions?: { matcha: TtsMatchaModelOptions };
 };
 
-export type TTSInitializeOptionsKokoro = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsKokoro = TTSAutoInitOptionsBase & {
   modelType: 'kokoro';
   modelOptions?: { kokoro: TtsKokoroModelOptions };
 };
 
-export type TTSInitializeOptionsKitten = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsKitten = TTSAutoInitOptionsBase & {
   modelType: 'kitten';
   modelOptions?: { kitten: TtsKittenModelOptions };
 };
 
-export type TTSInitializeOptionsPocket = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsPocket = TTSAutoInitOptionsBase & {
   modelType: 'pocket';
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsZipvoice = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsZipvoice = TTSAutoInitOptionsBase & {
   modelType: 'zipvoice';
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsSupertonic = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsSupertonic = TTSAutoInitOptionsBase & {
   modelType: 'supertonic';
   modelOptions?: never;
 };
 
-/**
- * Configuration for TTS initialization. Discriminated by `modelType`:
- * with `'auto'` or omitted, `modelOptions` is not allowed; with a concrete synthesizer type, only the matching `modelOptions` block is allowed.
- */
-export type TTSInitializeOptions =
+export type TTSAutoInitializeOptions =
   | TTSInitializeOptionsAuto
   | TTSInitializeOptionsVits
   | TTSInitializeOptionsMatcha
@@ -289,6 +314,14 @@ export type TTSInitializeOptions =
   | TTSInitializeOptionsPocket
   | TTSInitializeOptionsZipvoice
   | TTSInitializeOptionsSupertonic;
+
+/**
+ * Configuration for TTS initialization. Discriminated by `initMode` and `modelType`:
+ * auto mode scans a model directory; custom mode supplies explicit {@link FileSource} paths.
+ */
+export type TTSInitializeOptions =
+  | TTSAutoInitializeOptions
+  | TTSCustomInitializeOptions;
 
 /** No runtime parameter change. */
 export type TtsUpdateOptionsEmpty = {

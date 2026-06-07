@@ -1,6 +1,7 @@
 import type {
   TTSInitializeOptions,
   TTSModelType,
+  TTSCustomInitializeOptions,
   TtsSynthesisOptions,
   TtsKittenModelOptions,
   TtsKokoroModelOptions,
@@ -12,6 +13,8 @@ import type {
 import type { TtsInitBridgeOptions } from '../nativeBridge/initBridgeTypes';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
+import { resolveTtsCustomConfigPaths } from './customConfig';
 
 export type FlattenedTtsModelNativeOptions = {
   noiseScale: number | undefined;
@@ -95,53 +98,48 @@ function modelOptionsBagFromInit(
     return undefined;
   }
   switch (mt) {
-    case 'vits':
-      return { vits: options.modelOptions.vits };
-    case 'matcha':
-      return { matcha: options.modelOptions.matcha };
-    case 'kokoro':
-      return { kokoro: options.modelOptions.kokoro };
-    case 'kitten':
-      return { kitten: options.modelOptions.kitten };
+    case 'vits': {
+      const mo = options.modelOptions as { vits: TtsVitsModelOptions };
+      return { vits: mo.vits };
+    }
+    case 'matcha': {
+      const mo = options.modelOptions as { matcha: TtsMatchaModelOptions };
+      return { matcha: mo.matcha };
+    }
+    case 'kokoro': {
+      const mo = options.modelOptions as { kokoro: TtsKokoroModelOptions };
+      return { kokoro: mo.kokoro };
+    }
+    case 'kitten': {
+      const mo = options.modelOptions as { kitten: TtsKittenModelOptions };
+      return { kitten: mo.kitten };
+    }
     default:
       return undefined;
   }
 }
 
-export type ExpandedTtsInitFields = {
-  modelSource: TTSInitializeOptions['modelSource'];
-  modelType: TTSModelType | undefined;
-  provider: string | undefined;
-  numThreads: number | undefined;
-  debug: boolean | undefined;
-  modelOptions: TtsModelOptions | undefined;
-  ruleFsts: string | undefined;
-  ruleFars: string | undefined;
-  maxNumSentences: number | undefined;
-  silenceScale: number | undefined;
-  lexiconLanguageId: string | undefined;
-};
+function kokoroLangFromInit(options: TTSInitializeOptions): string | undefined {
+  const bag = modelOptionsBagFromInit(options);
+  const lang = bag?.kokoro?.lang;
+  return lang !== undefined && typeof lang === 'string' && lang.length > 0
+    ? lang
+    : undefined;
+}
 
-export type { TtsInitBridgeOptions };
-
-export function buildTtsInitBridgeOptions(
-  modelDir: string,
-  expanded: ExpandedTtsInitFields,
+function appendTtsScalarBridgeFields(
+  options: TTSInitializeOptions,
   flat: FlattenedTtsModelNativeOptions
-): TtsInitBridgeOptions {
-  const kokoroLang =
-    expanded.modelOptions?.kokoro?.lang !== undefined &&
-    typeof expanded.modelOptions.kokoro.lang === 'string' &&
-    expanded.modelOptions.kokoro.lang.length > 0
-      ? expanded.modelOptions.kokoro.lang
-      : undefined;
+): Omit<
+  TtsInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
+> {
+  const kokoroLang = kokoroLangFromInit(options);
   return {
-    modelDir,
-    modelType: expanded.modelType ?? 'auto',
-    ...(expanded.numThreads !== undefined
-      ? { numThreads: expanded.numThreads }
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
       : {}),
-    ...(expanded.debug !== undefined ? { debug: expanded.debug } : {}),
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
     ...(flat.noiseScale !== undefined ? { noiseScale: flat.noiseScale } : {}),
     ...(flat.noiseScaleW !== undefined
       ? { noiseScaleW: flat.noiseScaleW }
@@ -149,38 +147,53 @@ export function buildTtsInitBridgeOptions(
     ...(flat.lengthScale !== undefined
       ? { lengthScale: flat.lengthScale }
       : {}),
-    ...(expanded.ruleFsts !== undefined ? { ruleFsts: expanded.ruleFsts } : {}),
-    ...(expanded.ruleFars !== undefined ? { ruleFars: expanded.ruleFars } : {}),
-    ...(expanded.maxNumSentences !== undefined
-      ? { maxNumSentences: expanded.maxNumSentences }
+    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
+    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(options.maxNumSentences !== undefined
+      ? { maxNumSentences: options.maxNumSentences }
       : {}),
-    ...(expanded.silenceScale !== undefined
-      ? { silenceScale: expanded.silenceScale }
+    ...(options.silenceScale !== undefined
+      ? { silenceScale: options.silenceScale }
       : {}),
-    ...(expanded.provider !== undefined ? { provider: expanded.provider } : {}),
-    ...(expanded.lexiconLanguageId !== undefined
-      ? { lexiconLanguageId: expanded.lexiconLanguageId }
-      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
     ...(kokoroLang !== undefined ? { kokoroLang } : {}),
   };
 }
 
-export function expandTtsInitializeOptions(
+export type { TtsInitBridgeOptions };
+
+export async function buildTtsInitBridgeOptions(
   options: TTSInitializeOptions
-): ExpandedTtsInitFields {
+): Promise<TtsInitBridgeOptions> {
+  const flat = flattenTtsModelOptionsForNative(
+    options.modelType,
+    modelOptionsBagFromInit(options)
+  );
+  const scalarFields = appendTtsScalarBridgeFields(options, flat);
+
+  if (options.initMode === 'custom') {
+    const customOptions = options as TTSCustomInitializeOptions;
+    const modelPaths = await resolveTtsCustomConfigPaths(
+      customOptions.modelType,
+      customOptions.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: customOptions.modelType,
+      modelPaths,
+      ...scalarFields,
+    };
+  }
+
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
   return {
-    modelSource: options.modelSource,
-    modelType: options.modelType,
-    provider:
-      options.provider !== undefined ? String(options.provider) : undefined,
-    numThreads: options.numThreads,
-    debug: options.debug,
-    modelOptions: modelOptionsBagFromInit(options),
-    ruleFsts: options.ruleFsts,
-    ruleFars: options.ruleFars,
-    maxNumSentences: options.maxNumSentences,
-    silenceScale: options.silenceScale,
-    lexiconLanguageId: options.lexiconLanguageId,
+    initMode: 'auto',
+    modelDir,
+    modelType: options.modelType ?? 'auto',
+    ...(options.lexiconLanguageId !== undefined
+      ? { lexiconLanguageId: options.lexiconLanguageId }
+      : {}),
+    ...scalarFields,
   };
 }
 

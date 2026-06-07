@@ -1,11 +1,14 @@
 package com.sherpaonnx.stt.config
 
 import com.facebook.react.bridge.ReadableMap
+import com.sherpaonnx.bridge.InitModeModelPathsParser
 
 /** Parse `initializeStt(instanceId, options)` TurboModule map. */
 internal object SttInitOptionsParser {
   data class Parsed(
-    val modelDir: String,
+    val initMode: String,
+    val modelDir: String?,
+    val modelPaths: Map<String, String>?,
     val preferInt8: Boolean?,
     val modelType: String?,
     val debug: Boolean?,
@@ -22,12 +25,14 @@ internal object SttInitOptionsParser {
   )
 
   fun parse(options: ReadableMap): Parsed? {
-    val modelDir = options.getString("modelDir")?.trim().orEmpty()
-    if (modelDir.isEmpty()) return null
+    val core = InitModeModelPathsParser.parseCore(options) ?: return null
+
     return Parsed(
-      modelDir = modelDir,
+      initMode = core.initMode,
+      modelDir = core.modelDir,
+      modelPaths = core.modelPaths,
       preferInt8 = if (options.hasKey("preferInt8")) options.getBoolean("preferInt8") else null,
-      modelType = if (options.hasKey("modelType")) options.getString("modelType") else null,
+      modelType = core.modelType ?: if (options.hasKey("modelType")) options.getString("modelType") else null,
       debug = if (options.hasKey("debug")) options.getBoolean("debug") else null,
       hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null,
       hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null,

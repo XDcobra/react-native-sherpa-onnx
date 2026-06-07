@@ -4,7 +4,7 @@ import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTy
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
-import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
+import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
 import type { EnhancementModelType } from './types';
 import type {
   EnhancementPipelineHandle,
@@ -67,14 +67,10 @@ export async function createStreamingEnhancement(
   options: StreamingEnhancementInitializeOptions
 ): Promise<StreamingEnhancementEngine> {
   const instanceId = `streaming_enhancement_${++streamingEnhancementInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
+  const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const result = await SherpaOnnx.initializeOnlineEnhancement(
     instanceId,
-    resolvedPath,
-    options.modelType ?? 'auto',
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!result.success) {

@@ -106,6 +106,37 @@ jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings) {
   return list;
 }
 
+jobject BuildStringStringMap(
+    JNIEnv* env,
+    const std::map<std::string, std::string>& strings
+) {
+  if (strings.empty()) {
+    return nullptr;
+  }
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  for (const auto& entry : strings) {
+    if (entry.second.empty()) {
+      continue;
+    }
+    PutString(env, map, mapPut, entry.first.c_str(), entry.second);
+  }
+  return map;
+}
+
 jobject BuildLexiconLanguagesList(
     JNIEnv* env,
     const std::vector<model_detect::LexiconCandidate>& languages) {
@@ -144,6 +175,192 @@ jobject BuildLexiconLanguagesList(
   }
   env->DeleteLocalRef(mapClass);
   return list;
+}
+
+std::map<std::string, std::string> JavaHashMapToStringMap(JNIEnv* env, jobject map) {
+  std::map<std::string, std::string> out;
+  if (!map) return out;
+
+  jclass mapClass = env->FindClass("java/util/Map");
+  jclass entryClass = env->FindClass("java/util/Map$Entry");
+  jclass setClass = env->FindClass("java/util/Set");
+  if (!mapClass || !entryClass || !setClass) return out;
+
+  jmethodID entrySet = env->GetMethodID(mapClass, "entrySet", "()Ljava/util/Set;");
+  jmethodID setIterator = env->GetMethodID(setClass, "iterator", "()Ljava/util/Iterator;");
+  jclass iteratorClass = env->FindClass("java/util/Iterator");
+  jmethodID iteratorHasNext = env->GetMethodID(iteratorClass, "hasNext", "()Z");
+  jmethodID iteratorNext = env->GetMethodID(iteratorClass, "next", "()Ljava/lang/Object;");
+  jmethodID entryGetKey = env->GetMethodID(entryClass, "getKey", "()Ljava/lang/Object;");
+  jmethodID entryGetValue = env->GetMethodID(entryClass, "getValue", "()Ljava/lang/Object;");
+
+  if (!entrySet || !setIterator || !iteratorHasNext || !iteratorNext ||
+      !entryGetKey || !entryGetValue) {
+    env->DeleteLocalRef(mapClass);
+    env->DeleteLocalRef(entryClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(iteratorClass);
+    return out;
+  }
+
+  jobject entries = env->CallObjectMethod(map, entrySet);
+  if (!entries) {
+    env->DeleteLocalRef(mapClass);
+    env->DeleteLocalRef(entryClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(iteratorClass);
+    return out;
+  }
+
+  jobject it = env->CallObjectMethod(entries, setIterator);
+  env->DeleteLocalRef(entries);
+  if (!it) {
+    env->DeleteLocalRef(mapClass);
+    env->DeleteLocalRef(entryClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(iteratorClass);
+    return out;
+  }
+
+  while (env->CallBooleanMethod(it, iteratorHasNext)) {
+    jobject entry = env->CallObjectMethod(it, iteratorNext);
+    if (!entry) continue;
+    jstring jkey = static_cast<jstring>(env->CallObjectMethod(entry, entryGetKey));
+    jstring jval = static_cast<jstring>(env->CallObjectMethod(entry, entryGetValue));
+    if (jkey && jval) {
+      const char* keyChars = env->GetStringUTFChars(jkey, nullptr);
+      const char* valChars = env->GetStringUTFChars(jval, nullptr);
+      if (keyChars && valChars && valChars[0] != '\0') {
+        out.emplace(keyChars, valChars);
+      }
+      if (keyChars) env->ReleaseStringUTFChars(jkey, keyChars);
+      if (valChars) env->ReleaseStringUTFChars(jval, valChars);
+    }
+    if (jkey) env->DeleteLocalRef(jkey);
+    if (jval) env->DeleteLocalRef(jval);
+    env->DeleteLocalRef(entry);
+  }
+
+  env->DeleteLocalRef(it);
+  env->DeleteLocalRef(mapClass);
+  env->DeleteLocalRef(entryClass);
+  env->DeleteLocalRef(setClass);
+  env->DeleteLocalRef(iteratorClass);
+  return out;
+}
+
+jobject BuildCustomValidationResultMap(
+    JNIEnv* env,
+    const CustomModelValidationResult& result
+) {
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  PutBoolean(env, map, mapPut, "ok", result.ok);
+  if (!result.error.empty()) {
+    PutString(env, map, mapPut, "error", result.error);
+  }
+  if (!result.missingRequired.empty()) {
+    jobject missing = BuildStringList(env, result.missingRequired);
+    if (missing) {
+      jstring jkey = env->NewStringUTF("missingRequired");
+      if (jkey) {
+        env->CallObjectMethod(map, mapPut, jkey, missing);
+        env->DeleteLocalRef(jkey);
+      }
+      env->DeleteLocalRef(missing);
+    }
+  }
+  return map;
+}
+
+jobject BuildCustomPathFieldMap(
+    JNIEnv* env,
+    const CustomPathFieldSpec& field
+) {
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  PutString(env, map, mapPut, "key", field.key);
+  PutBoolean(env, map, mapPut, "required", field.required);
+  PutString(env, map, mapPut, "kind", field.isDirectory ? "dir" : "file");
+  return map;
+}
+
+jobject BuildCustomPathRequirementsMap(
+    JNIEnv* env,
+    const CustomModelPathRequirements& requirements
+) {
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!mapClass) return nullptr;
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut = env->GetMethodID(
+      mapClass,
+      "put",
+      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!mapInit || !mapPut) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  jobject map = env->NewObject(mapClass, mapInit);
+  env->DeleteLocalRef(mapClass);
+  if (!map) return nullptr;
+
+  if (!requirements.fields.empty()) {
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    if (listClass) {
+      jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+      jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+      if (listInit && listAdd) {
+        jobject fields = env->NewObject(listClass, listInit);
+        if (fields) {
+          for (const auto& field : requirements.fields) {
+            jobject fieldMap = BuildCustomPathFieldMap(env, field);
+            if (fieldMap) {
+              env->CallBooleanMethod(fields, listAdd, fieldMap);
+              env->DeleteLocalRef(fieldMap);
+            }
+          }
+          jstring jkey = env->NewStringUTF("fields");
+          if (jkey) {
+            env->CallObjectMethod(map, mapPut, jkey, fields);
+            env->DeleteLocalRef(jkey);
+          }
+          env->DeleteLocalRef(fields);
+        }
+      }
+      env->DeleteLocalRef(listClass);
+    }
+  }
+
+  return map;
 }
 
 }  // namespace sherpaonnx

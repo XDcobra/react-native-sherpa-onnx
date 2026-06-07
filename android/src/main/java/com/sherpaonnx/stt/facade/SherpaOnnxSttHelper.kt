@@ -13,6 +13,7 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.stt.config.SttInitOptionsParser
 import com.sherpaonnx.stt.core.OfflineSttRecognizerConfigFactory
+import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
 import com.sherpaonnx.stt.core.normalizeQwen3HotwordsCsv
@@ -61,47 +62,31 @@ internal class SherpaOnnxSttHelper(
   ) {
     val parsed = SttInitOptionsParser.parse(options)
     if (parsed == null) {
-      promise.reject(SttErrorCodes.INIT_FAILED, "modelDir is required")
+      promise.reject(
+        SttErrorCodes.INIT_FAILED,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        }
+      )
       return
     }
-    initializeSttInternal(
-      instanceId,
-      parsed.modelDir,
-      parsed.preferInt8,
-      parsed.modelType,
-      parsed.debug,
-      parsed.hotwordsFile,
-      parsed.hotwordsScore,
-      parsed.numThreads,
-      parsed.provider,
-      parsed.ruleFsts,
-      parsed.ruleFars,
-      parsed.dither,
-      parsed.modelOptions,
-      parsed.modelingUnit,
-      parsed.bpeVocab,
-      promise
-    )
+
+    if (parsed.initMode == "custom") {
+      initializeSttCustom(instanceId, parsed, promise)
+      return
+    }
+
+    initializeSttAuto(instanceId, parsed, promise)
   }
 
-  private fun initializeSttInternal(
+  private fun initializeSttAuto(
     instanceId: String,
-    modelDir: String,
-    preferInt8: Boolean?,
-    modelType: String?,
-    debug: Boolean?,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    dither: Double?,
-    modelOptions: ReadableMap?,
-    modelingUnit: String?,
-    bpeVocab: String?,
+    parsed: SttInitOptionsParser.Parsed,
     promise: Promise
   ) {
+    val modelDir = parsed.modelDir.orEmpty()
     try {
       val modelDirFile = File(modelDir)
       if (!modelDirFile.exists()) {
@@ -121,10 +106,10 @@ internal class SherpaOnnxSttHelper(
       val result = detectSttModel(
         modelDir,
         null,
-        modelType ?: "auto",
-        preferInt8 ?: false,
-        preferInt8 != null,
-        debug ?: false
+        parsed.modelType ?: "auto",
+        parsed.preferInt8 ?: false,
+        parsed.preferInt8 != null,
+        parsed.debug ?: false
       )
 
       if (result == null) {
@@ -154,101 +139,154 @@ internal class SherpaOnnxSttHelper(
       val pathStrings = paths.mapValues { (_, v) -> (v as? String).orEmpty() }.mapKeys { it.key.toString() }
       val modelTypeStr = result["modelType"] as? String ?: "unknown"
 
-      val hotwordsFileTrimmed = hotwordsFile?.trim().orEmpty()
-      if (hotwordsFileTrimmed.isNotEmpty() && !supportsHotwords(modelTypeStr)) {
-        val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: $modelTypeStr"
-        Log.e(logTag, errorMsg)
-        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
-        return
-      }
-      val resolvedHotwordsPath = if (hotwordsFileTrimmed.isNotEmpty()) {
-        try {
-          pathResolver.resolveHotwordsPath(hotwordsFileTrimmed)
-        } catch (e: Exception) {
-          val errorMsg = e.message ?: "Hotwords file could not be resolved"
-          Log.e(logTag, errorMsg, e)
-          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
-          return
-        }
-      } else ""
-      if (resolvedHotwordsPath.isNotEmpty()) {
-        pathResolver.validateHotwordsFile(resolvedHotwordsPath)?.let { errorMsg ->
-          Log.e(logTag, errorMsg)
-          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
-          return
-        }
-      }
-
-      val resolvedRuleFsts = try {
-        pathResolver.resolveFilePaths(ruleFsts.orEmpty().trim(), "stt_rule_fst")
-      } catch (e: Exception) {
-        val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
-        Log.e(logTag, errorMsg, e)
-        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
-        return
-      }
-      val resolvedRuleFars = try {
-        pathResolver.resolveFilePaths(ruleFars.orEmpty().trim(), "stt_rule_far")
-      } catch (e: Exception) {
-        val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
-        Log.e(logTag, errorMsg, e)
-        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
-        return
-      }
-
-      val inst = instances.getOrPut(instanceId) { SttEngineInstance() }
-      inst.recognizer?.release()
-      inst.recognizer = null
-      val config = configFactory.buildRecognizerConfig(
-        pathStrings,
-        modelTypeStr,
-        hotwordsFile = resolvedHotwordsPath,
-        hotwordsScore = hotwordsScore?.toFloat() ?: 1.5f,
-        numThreads = numThreads?.toInt(),
-        provider = provider,
-        ruleFsts = resolvedRuleFsts,
-        ruleFars = resolvedRuleFars,
-        dither = dither?.toFloat() ?: 0f,
-        modelOptions = modelOptions,
-        modelingUnit = modelingUnit?.trim().orEmpty(),
-        bpeVocab = bpeVocab?.trim().orEmpty()
+      finishInitializeWithPaths(
+        instanceId = instanceId,
+        pathStrings = pathStrings,
+        modelTypeStr = modelTypeStr,
+        detectedModels = detectedModels,
+        parsed = parsed,
+        promise = promise
       )
-      inst.lastRecognizerConfig = config
-      inst.currentSttModelType = modelTypeStr
-      inst.qwen3HotwordsForStream = if (modelTypeStr == "qwen3_asr") {
-        normalizeQwen3HotwordsCsv(modelOptions?.getMap("qwen3Asr")?.getString("hotwords")?.trim().orEmpty())
-      } else ""
-      // Defer recognizer creation to the dedicated background thread so release() of the previous
-      // recognizer can complete off the UI thread (avoids "destroyed mutex" / SIGSEGV when switching models).
-      initHandler.post {
-        try {
-          inst.recognizer = OfflineRecognizer(config = config)
-          val resultMap = Arguments.createMap()
-          resultMap.putBoolean("success", true)
-          resultMap.putString("modelType", modelTypeStr)
-          resultMap.putString("decodingMethod", config.decodingMethod)
-          val detectedModelsArray = Arguments.createArray()
-          for (model in detectedModels) {
-            val modelMap = model as? HashMap<*, *>
-            if (modelMap != null) {
-              val modelResultMap = Arguments.createMap()
-              modelResultMap.putString("type", modelMap["type"] as? String ?: "")
-              modelResultMap.putString("modelDir", modelMap["modelDir"] as? String ?: "")
-              detectedModelsArray.pushMap(modelResultMap)
-            }
-          }
-          resultMap.putArray("detectedModels", detectedModelsArray)
-          promise.resolve(resultMap)
-        } catch (e: Exception) {
-          val errorMsg = "Exception creating recognizer: ${e.message ?: e.javaClass.simpleName}"
-          Log.e(logTag, errorMsg, e)
-          promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
-        }
-      }
     } catch (e: Exception) {
       val errorMsg = "Exception during initialization: ${e.message ?: e.javaClass.simpleName}"
       Log.e(logTag, errorMsg, e)
       promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+    }
+  }
+
+  private fun initializeSttCustom(
+    instanceId: String,
+    parsed: SttInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    try {
+      val modelTypeStr = parsed.modelType?.trim().orEmpty()
+      if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+        promise.reject(SttErrorCodes.INIT_FAILED, "custom init requires a concrete modelType")
+        return
+      }
+
+      val pathStrings = parsed.modelPaths.orEmpty()
+      ModelPathValidationNative.validate("stt", modelTypeStr, pathStrings)?.let { errorMsg ->
+        Log.e(logTag, errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
+        return
+      }
+
+      finishInitializeWithPaths(
+        instanceId = instanceId,
+        pathStrings = pathStrings,
+        modelTypeStr = modelTypeStr,
+        detectedModels = arrayListOf(
+          hashMapOf("type" to modelTypeStr, "modelDir" to "custom")
+        ),
+        parsed = parsed,
+        promise = promise
+      )
+    } catch (e: Exception) {
+      val errorMsg = "Exception during custom initialization: ${e.message ?: e.javaClass.simpleName}"
+      Log.e(logTag, errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+    }
+  }
+
+  private fun finishInitializeWithPaths(
+    instanceId: String,
+    pathStrings: Map<String, String>,
+    modelTypeStr: String,
+    detectedModels: ArrayList<*>,
+    parsed: SttInitOptionsParser.Parsed,
+    promise: Promise
+  ) {
+    val hotwordsFileTrimmed = parsed.hotwordsFile?.trim().orEmpty()
+    if (hotwordsFileTrimmed.isNotEmpty() && !supportsHotwords(modelTypeStr)) {
+      val errorMsg =
+        "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: $modelTypeStr"
+      Log.e(logTag, errorMsg)
+      promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
+      return
+    }
+    val resolvedHotwordsPath = if (hotwordsFileTrimmed.isNotEmpty()) {
+      try {
+        pathResolver.resolveHotwordsPath(hotwordsFileTrimmed)
+      } catch (e: Exception) {
+        val errorMsg = e.message ?: "Hotwords file could not be resolved"
+        Log.e(logTag, errorMsg, e)
+        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
+        return
+      }
+    } else ""
+    if (resolvedHotwordsPath.isNotEmpty()) {
+      pathResolver.validateHotwordsFile(resolvedHotwordsPath)?.let { errorMsg ->
+        Log.e(logTag, errorMsg)
+        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
+        return
+      }
+    }
+
+    val resolvedRuleFsts = try {
+      pathResolver.resolveFilePaths(parsed.ruleFsts.orEmpty().trim(), "stt_rule_fst")
+    } catch (e: Exception) {
+      val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
+      Log.e(logTag, errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+      return
+    }
+    val resolvedRuleFars = try {
+      pathResolver.resolveFilePaths(parsed.ruleFars.orEmpty().trim(), "stt_rule_far")
+    } catch (e: Exception) {
+      val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
+      Log.e(logTag, errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+      return
+    }
+
+    val inst = instances.getOrPut(instanceId) { SttEngineInstance() }
+    inst.recognizer?.release()
+    inst.recognizer = null
+    val config = configFactory.buildRecognizerConfig(
+      pathStrings,
+      modelTypeStr,
+      hotwordsFile = resolvedHotwordsPath,
+      hotwordsScore = parsed.hotwordsScore?.toFloat() ?: 1.5f,
+      numThreads = parsed.numThreads?.toInt(),
+      provider = parsed.provider,
+      ruleFsts = resolvedRuleFsts,
+      ruleFars = resolvedRuleFars,
+      dither = parsed.dither?.toFloat() ?: 0f,
+      modelOptions = parsed.modelOptions,
+      modelingUnit = parsed.modelingUnit?.trim().orEmpty(),
+      bpeVocab = parsed.bpeVocab?.trim().orEmpty()
+    )
+    inst.lastRecognizerConfig = config
+    inst.currentSttModelType = modelTypeStr
+    inst.qwen3HotwordsForStream = if (modelTypeStr == "qwen3_asr") {
+      normalizeQwen3HotwordsCsv(parsed.modelOptions?.getMap("qwen3Asr")?.getString("hotwords")?.trim().orEmpty())
+    } else ""
+    initHandler.post {
+      try {
+        inst.recognizer = OfflineRecognizer(config = config)
+        val resultMap = Arguments.createMap()
+        resultMap.putBoolean("success", true)
+        resultMap.putString("modelType", modelTypeStr)
+        resultMap.putString("decodingMethod", config.decodingMethod)
+        val detectedModelsArray = Arguments.createArray()
+        for (model in detectedModels) {
+          val modelMap = model as? HashMap<*, *>
+          if (modelMap != null) {
+            val modelResultMap = Arguments.createMap()
+            modelResultMap.putString("type", modelMap["type"] as? String ?: "")
+            modelResultMap.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+            detectedModelsArray.pushMap(modelResultMap)
+          }
+        }
+        resultMap.putArray("detectedModels", detectedModelsArray)
+        promise.resolve(resultMap)
+      } catch (e: Exception) {
+        val errorMsg = "Exception creating recognizer: ${e.message ?: e.javaClass.simpleName}"
+        Log.e(logTag, errorMsg, e)
+        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+      }
     }
   }
 

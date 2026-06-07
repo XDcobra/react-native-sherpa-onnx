@@ -2,9 +2,13 @@
 
 ## Introduction
 
-On-device streaming punctuation with a pipeline-first API:
+On-device streaming punctuation with a **pipeline-first** API.
 
-- Pipeline handle: `PunctuationPipelineHandle` provides `stop`, `flush`, `reset`, `getStatus`, and `completed`.
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`LiveTextBuffer`](textbuffer-streaming.md) | Committed text segments from upstream (e.g. live STT) |
+| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | Punctuated committed segments |
+| **Engine** | `StreamingPunctuationEngine` via `createStreamingPunctuation` | `punctuate(textIn, textOut)` returns `PunctuationPipelineHandle` (`stop`, `flush`, `reset`, `getStatus`, `completed`) |
 
 Import path: `react-native-sherpa-onnx/punctuation`
 
@@ -13,35 +17,6 @@ For batch punctuation with offline text buffers, see [punctuation-offline.md](pu
 ## Streaming pipeline system
 
 `punctuate` starts a **native worker** that reads **committed text segments** from the live **input** buffer and writes punctuated segments to the live **output** buffer (not the raw partial window). Shared **`stop` / `flush` / `reset` / `getStatus` / `completed`** semantics are in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**; punctuation additionally requires a **post-input-finalize `flush()`** barrier — see Quick start and **`pipeline.flush()`** below.
-
-## Models and paths
-
-- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- `FileSource` is used by `detectPunctuationModel(...)` for preflight checks.
-- Streaming punctuation requires an online-capable `cnn_bilstm` layout. Offline `ct_transformer` models are not valid for this API.
-- **Input normalization:** `textInputNormalization` defaults to `'lower'` so ALL-CAPS ASR text is normalized before inference. Pass `'none'` to disable.
-- Download/catalog setup: [download-manager.md](download-manager.md), [model-setup.md](model-setup.md)
-
-## Model detection
-
-Unified cross-feature detection: [model-detect.md](model-detect.md).
-
-Use `detectPunctuationModel` as preflight before initialization:
-- `modelType: 'auto'` may detect either offline `ct_transformer` or online `cnn_bilstm`.
-- Streaming initialization requires `modelType === 'cnn_bilstm'` with `isStreaming === true`.
-
-```ts
-import { detectPunctuationModel } from 'react-native-sherpa-onnx/punctuation';
-
-const det = await detectPunctuationModel(
-  { kind: 'fs', path: '/path/to/punctuation-online-pack' },
-  { modelType: 'auto' }
-);
-
-if (!det.success || det.modelType !== 'cnn_bilstm' || !det.isStreaming) {
-  throw new Error(det.error ?? 'Streaming punctuation requires cnn_bilstm');
-}
-```
 
 ## Quick start
 
@@ -219,6 +194,55 @@ console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.u
 #### `pipeline.completed`
 
 Await after **`flush()`** / **`stop()`** in the recommended order so teardown and buffer release do not race.
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- Streaming requires online `cnn_bilstm` — offline `ct_transformer` is not valid here
+- **`textInputNormalization`:** defaults to `'lower'`; pass `'none'` to disable
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | — | `cnn_bilstm`, `bpe_vocab` |
+
+## Model detection
+
+`detectPunctuationModel` pre-check. Require `det.modelType === 'cnn_bilstm' && det.isStreaming`. Unified catalog: [model-detect.md](model-detect.md).
+
+```ts
+import { detectPunctuationModel } from 'react-native-sherpa-onnx/punctuation';
+
+const det = await detectPunctuationModel(
+  { kind: 'fs', path: '/path/to/punctuation-online-pack' },
+  { modelType: 'auto' }
+);
+if (!det.success || det.modelType !== 'cnn_bilstm' || !det.isStreaming) {
+  throw new Error(det.error ?? 'Streaming punctuation requires cnn_bilstm');
+}
+```
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `cnn_bilstm` | `cnn_bilstm`, `bpe_vocab` |
+
+```ts
+import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createStreamingPunctuation({
+  initMode: 'custom',
+  modelType: 'cnn_bilstm',
+  customConfig: {
+    cnn_bilstm: { kind: 'fs', path: '/data/models/cnn.onnx' },
+    bpe_vocab: { kind: 'fs', path: '/data/models/bpe.vocab' },
+  },
+});
+```
 
 ## Segmentation
 

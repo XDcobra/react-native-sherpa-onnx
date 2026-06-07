@@ -4,7 +4,10 @@
  */
 
 export type {
+  EnhancementInitBridgeOptions,
   OnlineSttInitBridgeOptions,
+  PunctuationInitBridgeOptions,
   SttInitBridgeOptions,
   TtsInitBridgeOptions,
+  VadInitBridgeOptions,
 } from '../NativeSherpaOnnx';

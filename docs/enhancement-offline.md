@@ -2,45 +2,21 @@
 
 ## Introduction
 
-On-device batch speech denoising with a **pipeline-first** API:
+On-device batch speech denoising with a **pipeline-first** API.
 
-- **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — populated noisy PCM (file-backed or in-memory).
-- **Output:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — empty buffer at the denoiser sample rate (`createEmptyOfflineAudioBuffer`); **`enhance`** writes denoised PCM once.
-- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut, options?)`** (plus `getSampleRate` / `destroy`). `enhance` returns an `EnhancementResult` (`status`, segment counters, timing) while denoised PCM is read from **`audioOut`**.
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
+| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate (`createEmptyOfflineAudioBuffer`); `enhance` writes denoised PCM once |
+| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy`; returns `EnhancementResult` with segment stats |
 
 Import path: `react-native-sherpa-onnx/enhancement`
 
-For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`enhance`**), see [Speech enhancement (streaming)](enhancement-streaming.md).
+For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer`), see [Speech enhancement (streaming)](enhancement-streaming.md).
 
 For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
 If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offline buffer `sampleRate` from `getSampleRate()`) explicitly to the model rate.
-
-## Models and paths
-
-- **`FileSource`:** `{ kind: 'fs' | 'app' | 'contentUri' | 'securityScoped' | 'pad', ... }` (from `react-native-sherpa-onnx`) — used by all detect functions.
-- In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
-- Model detection without loading the denoiser: **`detectEnhancementModel(...)`**.
-- File expectations per family: [model-setup.md](model-setup.md) where applicable.
-
----
-
-## Model detection
-
-Unified cross-feature detection: [model-detect.md](model-detect.md). Below, enhancement-specific rules for **`detectEnhancementModel`**.
-
-`detectEnhancementModel` does **not** load the denoiser — use it as a **pre-check** before **`createEnhancement`** (same idea as `detectTtsModel` / `detectSttModel`).
-
-**Rules (directory scan):**
-
-- Recursively finds `.onnx` under the resolved model directory (depth 4, same family as other detectors).
-- Filename / path contains `gtcrn` → candidate **`gtcrn`**; contains `dpdfnet` or `dpcrn` → candidate **`dpdfnet`**.
-- **`modelType: 'auto'`** (default): prefers **`gtcrn`** if both ONNX stacks are present, else **`dpdfnet`**.
-- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelSource.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
-
-**`detectionSources`:** optional ordered trace (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`). **`nameOnly`** means no file list was scanned — see native `error` when `success` is false.
-
----
 
 ## Quick start
 
@@ -96,26 +72,6 @@ try {
 
 ---
 
-## Data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
-| **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
-| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
-
----
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Execution provider | Optional **`provider`** on init; see [execution-providers.md](execution-providers.md) |
-| Input format | Any format supported by **`createOfflineAudioBufferFromFile()`** (WAV, etc.) |
-| Instance lifetime | Always **`destroy()`** the offline engine; **`releasePipelineAudioBuffer()`** on created buffers |
-
----
-
 ## API reference
 
 Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. Types live in **`src/enhancement/types.ts`**.
@@ -145,7 +101,7 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.isStreaming, det.detectedModels);
+console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.detectedModels);
 ```
 
 ```ts
@@ -259,6 +215,57 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
 See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
+
+### Buffer data model and lifetime
+
+| Item | Behaviour |
+| --- | --- |
+| **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
+| **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
+| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md)
+- Downloads: [download-manager.md](download-manager.md) · `ModelCategory.Enhancement`
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | — | `model` |
+| `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | — | `model` |
+
+Auto mode prefers `gtcrn` when both ONNX stacks are present.
+
+## Model detection
+
+`detectEnhancementModel` is a pre-check before `createEnhancement` — no denoiser load. Unified catalog: [model-detect.md](model-detect.md).
+
+On filesystem-backed detection, the result includes `paths.model` (resolved `.onnx` file) when native file listing finds one. Name-only heuristics may omit `paths`.
+
+Filename rules: recursive `.onnx` scan (depth 4); `gtcrn` in path → `gtcrn`; `dpdfnet`/`dpcrn` → `dpdfnet`. Optional `assetName` for catalog hints.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `gtcrn`, `dpdfnet` | `model` |
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+});
+```
 
 ## Segmentation
 

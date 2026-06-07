@@ -1,7 +1,8 @@
-#ifndef SHERPA_ONNX_STT_WRAPPER_H
-#define SHERPA_ONNX_STT_WRAPPER_H
+#ifndef SHERPA_ONNX_IOS_STT_WRAPPER_H
+#define SHERPA_ONNX_IOS_STT_WRAPPER_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -131,6 +132,26 @@ public:
         const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr
     );
 
+    /** Skip auto-detection; use explicit resolved model file paths. */
+    SttInitializeResult initializeCustom(
+        const std::string& modelType,
+        const SttModelPaths& paths,
+        bool debug = false,
+        const std::optional<std::string>& hotwordsFile = std::nullopt,
+        const std::optional<float>& hotwordsScore = std::nullopt,
+        const std::optional<int32_t>& numThreads = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<float>& dither = std::nullopt,
+        const SttWhisperOptions* whisperOpts = nullptr,
+        const SttSenseVoiceOptions* senseVoiceOpts = nullptr,
+        const SttCanaryOptions* canaryOpts = nullptr,
+        const SttFunAsrNanoOptions* funasrNanoOpts = nullptr,
+        const SttQwen3AsrOptions* qwen3AsrOpts = nullptr,
+        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr
+    );
+
     SttRecognitionResult transcribeFile(const std::string& filePath);
 
     SttRecognitionResult transcribeSamples(const std::vector<float>& samples, int32_t sampleRate);
@@ -155,4 +176,4 @@ private:
 
 } // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_STT_WRAPPER_H
+#endif // SHERPA_ONNX_IOS_STT_WRAPPER_H

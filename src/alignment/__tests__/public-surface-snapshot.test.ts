@@ -17,8 +17,13 @@ describe('alignment public surface snapshot', () => {
 
     expect(keys).toMatchInlineSnapshot(`
       [
+        "AlignmentErrorCode",
+        "accurateOptionsToModelConfig",
+        "assertAlignmentCustomConfig",
         "createAlignment",
         "detectAlignmentModel",
+        "resolveAlignmentCustomConfigPaths",
+        "resolveAlignmentOnnxPath",
       ]
     `);
   });

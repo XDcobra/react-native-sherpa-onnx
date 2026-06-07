@@ -26,6 +26,7 @@ import {
 import {
   createStreamingEnhancement,
   detectEnhancementModel,
+  assertEnhancementCustomConfig,
   type StreamingEnhancementEngine,
   type EnhancementPipelineHandle,
   type EnhancementModelType,
@@ -74,9 +75,21 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  EnhancementCustomInitForm,
+  type ModelInitMode,
+  type EnhancementCustomInitFormState,
+} from '../../components/modelInit';
+import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
+
+const DEFAULT_ENHANCEMENT_CUSTOM_INIT: EnhancementCustomInitFormState = {
+  modelType: 'gtcrn',
+  fileSources: {},
+};
 
 const ENHANCEMENT_STREAMING_MODE_HINT =
   'Streaming mode lists models with isStreaming=true from detectEnhancementModel. Live Overload lists all detected enhancement models and runs mandatory audio segmentation (continuous_frames by default) on the same streaming pipeline.';
@@ -119,6 +132,14 @@ const PIPELINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export default function EnhancementStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<EnhancementCustomInitFormState>(DEFAULT_ENHANCEMENT_CUSTOM_INIT);
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
   const [streamingEnhancementModelIds, setStreamingEnhancementModelIds] =
     useState<Set<string>>(new Set());
   const [offlineEnhancementModelIds, setOfflineEnhancementModelIds] = useState<
@@ -403,20 +424,140 @@ export default function EnhancementStreamingScreen() {
     };
   }, []);
 
-  const resolveEnhancementModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(
-            modelFolder,
-            ModelCategory.Enhancement,
-            padModelsPath
-          )
-        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+  const resolveEnhancementModelPath = useCallback(
+    (modelFolder: string) => {
+      if (padModelIds.includes(modelFolder)) {
+        return padModelsPath
+          ? getFileModelPath(
+              modelFolder,
+              ModelCategory.Enhancement,
+              padModelsPath
+            )
+          : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      if (downloadedModelIds.includes(modelFolder)) {
+        return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      return getAssetModelPath(modelFolder);
+    },
+    [downloadedModelIds, padModelIds, padModelsPath]
+  );
+
+  const handleFillFromSelectedModel = useCallback(async () => {
+    const modelFolder = selectedModelForInit;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
     }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    setErrorSource(null);
+    try {
+      const modelPath = resolveEnhancementModelPath(modelFolder);
+      const fillResult = await fillEnhancementCustomConfigFromModelFolder(
+        await toDetectSource(modelPath),
+        { modelTypeOverride: customInitForm.modelType }
+      );
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      const message =
+        fillErr instanceof Error ? fillErr.message : String(fillErr);
+      setErrorSource('init');
+      setError(message);
+    } finally {
+      setCustomFillLoading(false);
     }
-    return getAssetModelPath(modelFolder);
+  }, [
+    customInitForm.modelType,
+    resolveEnhancementModelPath,
+    selectedModelForInit,
+  ]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick the model file from a different location, then Initialize.'
+    );
+  }, []);
+
+  const handleInitializeCustom = async () => {
+    setLoading(true);
+    setError(null);
+    setErrorSource(null);
+    setInitResult(null);
+    setDetectedModels([]);
+    setSelectedModelKind(null);
+    setInitializedSummary(null);
+
+    try {
+      const previous = engineRef.current;
+      if (previous) {
+        await previous.destroy();
+        engineRef.current = null;
+      }
+
+      const customConfig = {
+        ...customInitForm.fileSources,
+      };
+      assertEnhancementCustomConfig(
+        customConfig as unknown as Record<string, unknown>
+      );
+
+      const engine = await createStreamingEnhancement({
+        initMode: 'custom',
+        modelType: customInitForm.modelType,
+        customConfig: customConfig as { model: FileSource },
+        numThreads: NUM_THREADS,
+      });
+
+      engineRef.current = engine;
+      setCurrentModelFolder(null);
+      setSelectedModelKind(customInitForm.modelType);
+      setDetectedModels([
+        { type: customInitForm.modelType, modelDir: 'custom' },
+      ]);
+      setInitializedSummary(`custom:${customInitForm.modelType}`);
+      setInitResult(
+        `Initialized streaming (custom): ${customInitForm.modelType}\nFile: model`
+      );
+
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
+      setEnhanceResult(null);
+      setLastInputPath(null);
+      await clearFinalizedOutput();
+    } catch (err) {
+      console.error('EnhancementStreaming custom init error:', err);
+      let errorMessage = 'Unknown error';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        if ('code' in err) {
+          errorMessage = `[${(err as { code?: string }).code}] ${errorMessage}`;
+        }
+      }
+      setErrorSource('init');
+      setError(errorMessage);
+      setInitResult(`Custom initialization failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loadAvailableModels = useCallback(async () => {
@@ -597,6 +738,7 @@ export default function EnhancementStreamingScreen() {
       engineRef.current = engine;
       setDetectedModels(normalized);
       setCurrentModelFolder(modelFolder);
+      setInitializedSummary(null);
       setSelectedModelForInit(modelFolder);
 
       if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
@@ -1043,6 +1185,7 @@ export default function EnhancementStreamingScreen() {
     engineRef.current = null;
 
     setCurrentModelFolder(null);
+    setInitializedSummary(null);
     setSelectedModelForInit(null);
     setDetectedModels([]);
     setSelectedModelKind(null);
@@ -1056,7 +1199,9 @@ export default function EnhancementStreamingScreen() {
     setLastInputPath(null);
   };
 
-  const engineReady = currentModelFolder != null && engineRef.current != null;
+  const engineReady =
+    (currentModelFolder != null || initializedSummary != null) &&
+    engineRef.current != null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
@@ -1071,7 +1216,7 @@ export default function EnhancementStreamingScreen() {
           style={styles.scrollView}
           keyboardShouldPersistTaps="handled"
         >
-          {currentModelFolder != null && (
+          {currentModelFolder != null || initializedSummary != null ? (
             <TouchableOpacity
               style={styles.freeButton}
               onPress={handleFree}
@@ -1079,15 +1224,29 @@ export default function EnhancementStreamingScreen() {
             >
               <Text style={styles.freeButtonText}>Release model</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize model</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={loading || enhancing || customFillLoading}
+            />
+            <Text style={styles.hint}>
+              {initMode === 'auto'
+                ? 'Select a streaming-capable folder, then tap "Use model".'
+                : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
+            </Text>
 
-            {(currentModelFolder || selectedModelForInit) && (
+            {(initializedSummary ||
+              currentModelFolder ||
+              selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  {currentModelFolder
+                  {initializedSummary
+                    ? `Initialized: ${initializedSummary}`
+                    : currentModelFolder
                     ? `Loaded: ${getModelDisplayName(currentModelFolder)}`
                     : `Selected: ${
                         selectedModelForInit
@@ -1115,21 +1274,44 @@ export default function EnhancementStreamingScreen() {
               mandatorySegmentationHint="Live Overload uses mandatory segmentation to split audio into enhancement chunks."
             />
 
+            {initMode === 'custom' ? (
+              <EnhancementCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelForInit}
+                onFillFromSelectedModel={() => {
+                  handleFillFromSelectedModel().catch(() => {});
+                }}
+                onPrepareScatteredTest={handlePrepareScatteredTest}
+                fillLoading={customFillLoading}
+                disabled={loading || enhancing}
+                fillHint={customFillHint}
+              />
+            ) : null}
+
             <TouchableOpacity
               style={[
                 styles.button,
                 styles.applyButton,
-                (loading || enhancing) && styles.buttonDisabled,
+                (loading || enhancing || customFillLoading) &&
+                  styles.buttonDisabled,
               ]}
-              onPress={() =>
+              onPress={() => {
+                if (initMode === 'custom') {
+                  handleInitializeCustom();
+                  return;
+                }
                 handleInitialize(
                   selectedModelForInit ?? currentModelFolder ?? ''
-                )
-              }
+                );
+              }}
               disabled={
                 loading ||
                 enhancing ||
-                (!selectedModelForInit && !currentModelFolder)
+                customFillLoading ||
+                (initMode === 'auto'
+                  ? !selectedModelForInit && !currentModelFolder
+                  : false)
               }
             >
               {loading ? (
@@ -1142,7 +1324,9 @@ export default function EnhancementStreamingScreen() {
                   <Text style={styles.buttonText}>Initializing...</Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>Use model</Text>
+                <Text style={styles.buttonText}>
+                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
+                </Text>
               )}
             </TouchableOpacity>
 

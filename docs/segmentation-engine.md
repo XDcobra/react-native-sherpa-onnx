@@ -37,7 +37,7 @@ Policies are **domain-specific**: only **text** evaluators go on text buffers; o
 | `text_synthetic_auto` | Text | Offline + live (text) | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
 | `text_punctuation_assisted` | Text | Offline + live (text); needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
 | `speech_energy_silence` | Speech | Offline + live (speech) | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
-| `speech_vad_model` | Speech | Offline + live (speech); needs `policy.modelPath` (**`FileSource`**) | Spans from VAD ONNX. JS runs **`detectVadModel`** on `modelPath` (same plumbing as **`createStreamingVAD`** / `detectVadModel`), then native uses the resolved `.onnx` file + `modelType` (`vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, …). |
+| `speech_vad_model` | Speech | Offline + live (speech); needs VAD model config | Spans from VAD ONNX. **Auto:** `modelPath` (**`FileSource`**) — JS runs **`detectVadModel`**, then native uses resolved `.onnx` + `modelType`. **Custom:** `initMode: 'custom'`, concrete `modelType` (`silero_vad` / `ten_vad`), `customConfig.model` — no detect (same VAD keys as [`createStreamingVAD`](vad-streaming.md)). Runtime fields: `vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, … |
 | `continuous_frames` | Speech | **Live speech only** (offline → `POLICY_INVALID_FOR_OFFLINE`) | Frame checkpoints (`checkpointIntervalMs`). |
 
 ### Text `sentenceBoundary` delimiters
@@ -187,7 +187,29 @@ const ref = await segmentOfflineBuffer(offlineAudioBuffer, {
 });
 ```
 
-Materializes segments for offline text/audio. For `speech_vad_model`, `modelPath` (**`FileSource`**) is required; JS resolves it with **`detectVadModel`** and forwards a concrete `.onnx` path plus `modelType` to native (no directory heuristics on the native side).
+Materializes segments for offline text/audio. For `speech_vad_model`, pass either auto `modelPath` (**`FileSource`**) or custom `initMode: 'custom'` with `customConfig.model` — see [Custom model path](#custom-model-path-initmode-custom) below.
+
+## Custom model path (`initMode: 'custom'`)
+
+Policy-level custom path — **no engine init**. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). Applies to **`speech_vad_model`** only (on `segmentOfflineBuffer` / `attachSegmentationEngine` policy).
+
+| `modelType` | Custom-init keys | Validate category |
+| --- | --- | --- |
+| `silero_vad`, `ten_vad` | `model` | `vad` (reuses [VAD customConfig](../src/vad/customConfig.ts)) |
+
+```ts
+await segmentOfflineBuffer(offlineAudioBuffer, {
+  evaluator: 'speech_vad_model',
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  vadThreshold: 0.5,
+});
+```
+
+Auto mode (default): pass `modelPath` (`FileSource`) — SDK runs `detectVadModel` before native.
 
 ### Live text helpers
 

@@ -1,11 +1,41 @@
 import {
   buildOnlineSttInitBridgeOptions,
+  buildStreamingSttInitBridgeOptions,
   buildSttInitBridgeOptions,
 } from '../sttNativeBridge';
 
+jest.mock('../../detect/resolveModelInput', () => ({
+  resolveFileSourceForModelInit: jest.fn(async () => '/models/whisper'),
+  resolveFileSourceForModelFile: jest.fn(
+    async (source: { path: string }) => source.path
+  ),
+  resolveModelFileSources: jest.fn(
+    async (config: Record<string, { path: string }>) =>
+      Object.fromEntries(Object.entries(config).map(([k, v]) => [k, v.path]))
+  ),
+}));
+
+jest.mock('../customConfig', () => ({
+  resolveSttCustomConfigPaths: jest.fn(async () => ({
+    encoder: '/enc.onnx',
+    decoder: '/dec.onnx',
+    joiner: '/join.onnx',
+    tokens: '/tokens.txt',
+  })),
+}));
+
+jest.mock('../streamingCustomConfig', () => ({
+  resolveStreamingSttCustomConfigPaths: jest.fn(async () => ({
+    encoder: '/enc.onnx',
+    decoder: '/dec.onnx',
+    joiner: '/join.onnx',
+    tokens: '/tokens.txt',
+  })),
+}));
+
 describe('sttNativeBridge', () => {
-  it('buildSttInitBridgeOptions maps public STT options to bridge map', () => {
-    const bridge = buildSttInitBridgeOptions('/models/whisper', {
+  it('buildSttInitBridgeOptions maps auto STT options to bridge map', async () => {
+    const bridge = await buildSttInitBridgeOptions({
       modelSource: { kind: 'fs', path: '/models/whisper' },
       modelType: 'whisper',
       preferInt8: true,
@@ -13,12 +43,60 @@ describe('sttNativeBridge', () => {
       modelOptions: { whisper: { language: 'en', task: 'transcribe' } },
     });
     expect(bridge).toEqual({
+      initMode: 'auto',
       modelDir: '/models/whisper',
       modelType: 'whisper',
       preferInt8: true,
       debug: true,
       modelOptions: { whisper: { language: 'en', task: 'transcribe' } },
     });
+  });
+
+  it('buildSttInitBridgeOptions maps custom STT options to modelPaths', async () => {
+    const bridge = await buildSttInitBridgeOptions({
+      initMode: 'custom',
+      modelType: 'transducer',
+      customConfig: {
+        encoder: { kind: 'fs', path: '/enc.onnx' },
+        decoder: { kind: 'fs', path: '/dec.onnx' },
+        joiner: { kind: 'fs', path: '/join.onnx' },
+        tokens: { kind: 'fs', path: '/tokens.txt' },
+      },
+    });
+    expect(bridge.initMode).toBe('custom');
+    expect(bridge.modelDir).toBeUndefined();
+    expect(bridge.modelPaths).toEqual({
+      encoder: '/enc.onnx',
+      decoder: '/dec.onnx',
+      joiner: '/join.onnx',
+      tokens: '/tokens.txt',
+    });
+    expect(bridge.modelType).toBe('transducer');
+  });
+
+  it('buildStreamingSttInitBridgeOptions maps custom streaming options to modelPaths', async () => {
+    const bridge = await buildStreamingSttInitBridgeOptions(
+      {
+        initMode: 'custom',
+        modelType: 'transducer',
+        customConfig: {
+          encoder: { kind: 'fs', path: '/enc.onnx' },
+          decoder: { kind: 'fs', path: '/dec.onnx' },
+          joiner: { kind: 'fs', path: '/join.onnx' },
+          tokens: { kind: 'fs', path: '/tokens.txt' },
+        },
+      },
+      'transducer'
+    );
+    expect(bridge.initMode).toBe('custom');
+    expect(bridge.modelDir).toBeUndefined();
+    expect(bridge.modelPaths).toEqual({
+      encoder: '/enc.onnx',
+      decoder: '/dec.onnx',
+      joiner: '/join.onnx',
+      tokens: '/tokens.txt',
+    });
+    expect(bridge.modelType).toBe('transducer');
   });
 
   it('buildOnlineSttInitBridgeOptions flattens endpoint rules', () => {

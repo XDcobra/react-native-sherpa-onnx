@@ -57,6 +57,20 @@ NSDictionary *UnifiedDetectResultToDict(const UnifiedModelDetectResult &result) 
         dict[@"detectionSources"] = sources;
     }
 
+    if (!result.paths.empty()) {
+        NSMutableDictionary *paths = [NSMutableDictionary dictionary];
+        for (const auto &entry : result.paths) {
+            if (entry.second.empty()) {
+                continue;
+            }
+            paths[[NSString stringWithUTF8String:entry.first.c_str()] ?: @""] =
+                [NSString stringWithUTF8String:entry.second.c_str()] ?: @"";
+        }
+        if (paths.count > 0) {
+            dict[@"paths"] = paths;
+        }
+    }
+
     return dict;
 }
 

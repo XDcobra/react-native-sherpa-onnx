@@ -45,9 +45,16 @@ jest.mock('../../audiobuffer', () => ({
 }));
 
 const mockDetectVadModel = jest.fn();
+const mockResolveVadCustomConfigPaths = jest.fn();
 
 jest.mock('../../vad/engine', () => ({
   detectVadModel: (...args: unknown[]) => mockDetectVadModel(...args),
+}));
+
+jest.mock('../../vad/customConfig', () => ({
+  resolveVadCustomConfigPaths: (...args: unknown[]) =>
+    mockResolveVadCustomConfigPaths(...args),
+  assertVadCustomConfig: jest.fn(),
 }));
 
 jest.mock('../../segmentbuffer', () => ({
@@ -96,6 +103,9 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
       paths: { model: '/models/vad/silero_vad.onnx' },
       isStreaming: false,
     });
+    mockResolveVadCustomConfigPaths.mockResolvedValue({
+      model: '/custom/silero.onnx',
+    });
 
     native.attachSegmentationEngine.mockResolvedValue({
       engineId: ENGINE_ID,
@@ -128,6 +138,32 @@ describe('segmentation engine VAD (speech_vad_model)', () => {
         createdAtMs: 42_000,
       },
     ]);
+  });
+
+  it('forwards custom speech_vad_model policy without detectVadModel', async () => {
+    const customPolicy = {
+      evaluator: 'speech_vad_model' as const,
+      initMode: 'custom' as const,
+      modelType: 'silero_vad' as const,
+      customConfig: {
+        model: { kind: 'fs' as const, path: '/custom/silero.onnx' },
+      },
+      vadThreshold: 0.48,
+    };
+
+    await attachSegmentationEngine(LIVE_AUDIO_ID, { policy: customPolicy });
+
+    expect(native.attachSegmentationEngine).toHaveBeenCalledWith(
+      LIVE_AUDIO_ID,
+      'speech',
+      expect.objectContaining({
+        evaluator: 'speech_vad_model',
+        modelPath: '/custom/silero.onnx',
+        modelType: 'silero_vad',
+        vadThreshold: 0.48,
+      })
+    );
+    expect(mockDetectVadModel).not.toHaveBeenCalled();
   });
 
   it('forwards speech_vad_model policy to native attachSegmentationEngine', async () => {

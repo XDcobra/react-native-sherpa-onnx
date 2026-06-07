@@ -1,8 +1,11 @@
 #import "../../SherpaOnnx.h"
 
 #include "../native/sherpa-onnx-unified-detect-bridge.h"
+#include "../native/sherpa-onnx-validate-custom-bridge.h"
 #include "sherpa-onnx-model-detect-unified.h"
+#include "sherpa-onnx-validate-custom.h"
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,6 +33,20 @@ std::vector<sherpaonnx::UnifiedModelDetectInput> InputsFromNSArray(NSArray *inpu
         input.model_dir = OptionalUtf8String(entry[@"modelDir"]);
         input.asset_name = OptionalUtf8String(entry[@"assetName"]);
         out.push_back(std::move(input));
+    }
+    return out;
+}
+
+std::map<std::string, std::string> StringMapFromNSDictionary(NSDictionary *dict) {
+    std::map<std::string, std::string> out;
+    if (![dict isKindOfClass:[NSDictionary class]]) {
+        return out;
+    }
+    for (NSString *key in dict) {
+        id value = dict[key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+            out[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+        }
     }
     return out;
 }
@@ -70,6 +87,54 @@ std::vector<sherpaonnx::UnifiedModelDetectInput> InputsFromNSArray(NSArray *inpu
     } @catch (NSException *exception) {
         reject(@"DETECT_ERROR",
                [NSString stringWithFormat:@"Unified batch model detect failed: %@", exception.reason],
+               nil);
+    }
+}
+
+- (void)validateCustomModelPaths:(NSString *)category
+                       modelType:(NSString *)modelType
+                           paths:(NSDictionary *)paths
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (category == nil || [category length] == 0 ||
+            modelType == nil || [modelType length] == 0) {
+            reject(@"VALIDATE_ERROR", @"category and modelType are required", nil);
+            return;
+        }
+        auto pathMap = StringMapFromNSDictionary(paths);
+        auto result = sherpaonnx::ValidateCustomModelPaths(
+            std::string([category UTF8String]),
+            std::string([modelType UTF8String]),
+            pathMap,
+            "custom");
+        resolve(sherpaonnx::detect::bridge::CustomValidationResultToDict(result));
+    } @catch (NSException *exception) {
+        reject(@"VALIDATE_ERROR",
+               [NSString stringWithFormat:@"Custom model path validation failed: %@", exception.reason],
+               nil);
+    }
+}
+
+- (void)getCustomModelPathRequirements:(NSString *)category
+                             modelType:(NSString *)modelType
+                               resolve:(RCTPromiseResolveBlock)resolve
+                                reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (category == nil || [category length] == 0 ||
+            modelType == nil || [modelType length] == 0) {
+            reject(@"VALIDATE_ERROR", @"category and modelType are required", nil);
+            return;
+        }
+        auto requirements = sherpaonnx::GetCustomModelPathRequirements(
+            std::string([category UTF8String]),
+            std::string([modelType UTF8String]));
+        resolve(sherpaonnx::detect::bridge::CustomPathRequirementsToDict(requirements));
+    } @catch (NSException *exception) {
+        reject(@"VALIDATE_ERROR",
+               [NSString stringWithFormat:@"Custom model path requirements failed: %@", exception.reason],
                nil);
     }
 }

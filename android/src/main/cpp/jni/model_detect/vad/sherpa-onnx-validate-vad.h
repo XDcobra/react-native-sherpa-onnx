@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_VALIDATE_VAD_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-custom-types.h"
 #include <string>
 #include <vector>
 
@@ -24,6 +25,8 @@ VadValidationResult ValidateVadPaths(
     const VadModelPaths& paths,
     const std::string& modelDir
 );
+
+std::vector<CustomPathFieldSpec> GetVadPathRequirements(VadModelKind kind);
 
 } // namespace sherpaonnx
 

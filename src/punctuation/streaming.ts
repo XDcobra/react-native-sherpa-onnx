@@ -10,6 +10,7 @@ import {
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { createOnlinePunctuationConfig } from './detect';
 import { resolveTextInputNormalization } from './textInputNormalization';
+import { buildStreamingPunctuationInitBridgeOptions } from './punctuationNativeBridge';
 import type {
   PunctuationPipelineHandle,
   StreamingPunctuationEngine,
@@ -71,17 +72,20 @@ export async function createStreamingPunctuation(
   options: StreamingPunctuationInitializeOptions
 ): Promise<StreamingPunctuationEngine> {
   const instanceId = `punc_on_${++streamingPunctuationInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
-  await createOnlinePunctuationConfig(resolvedPath, {
-    modelType: options.modelType ?? 'auto',
-  });
+  if (options.initMode !== 'custom') {
+    const resolvedPath = await resolveFileSourceForModelInit(
+      options.modelSource
+    );
+    await createOnlinePunctuationConfig(resolvedPath, {
+      modelType: options.modelType ?? 'auto',
+    });
+  }
+  const bridgeOptions = await buildStreamingPunctuationInitBridgeOptions(
+    options
+  );
   const result = await SherpaOnnx.initializeOnlinePunctuation(
     instanceId,
-    resolvedPath,
-    options.modelType ?? 'auto',
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!result.success) {

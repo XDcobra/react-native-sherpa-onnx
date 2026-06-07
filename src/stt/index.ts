@@ -40,11 +40,9 @@ import {
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import type { SttPipelineHandle } from './streamingTypes';
 import type { FileSource } from '../fileio/types';
-import {
-  resolveFileSourceForDetect,
-  resolveFileSourceForModelInit,
-} from '../detect/resolveModelInput';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
+import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
   isDetectionSource,
@@ -271,9 +269,8 @@ export async function detectSttModel(
       ? raw.quantization
       : undefined;
 
-  // isStreaming is now provided by the native online-compatibility guard.
-  // Falls back to false when the native layer does not return the field.
   const isStreaming = raw.isStreaming === true;
+  const paths = readNonEmptyDetectPathsMap(raw.paths);
 
   return {
     success: raw.success,
@@ -287,6 +284,7 @@ export async function detectSttModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }
 
@@ -303,7 +301,8 @@ export async function detectSttModel(
  *   getOfflineTextBufferTextSlice,
  * } from 'react-native-sherpa-onnx/textbuffer';
  * const stt = await createSTT({
- *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
+ *   modelSource: { kind: 'fs', path: '/path/to/model-dir' },
+ *   modelType: 'auto',
  * });
  * const audio = await createOfflineAudioBufferFromFile({
  *   kind: 'fs',
@@ -319,8 +318,7 @@ export async function createSTT(
   options: STTInitializeOptions
 ): Promise<SttEngine> {
   const instanceId = `stt_${++sttInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
-  const bridgeOptions = buildSttInitBridgeOptions(resolvedPath, options);
+  const bridgeOptions = await buildSttInitBridgeOptions(options);
 
   const result = await SherpaOnnx.initializeStt(instanceId, bridgeOptions);
 
@@ -593,6 +591,8 @@ export type {
   OnlineSTTModelType,
   LiveSttEngine,
   StreamingSttInitOptions,
+  StreamingSttAutoInitOptions,
+  StreamingSttCustomInitOptions,
   SttPipelineHandle,
   SttPipelineOptions,
   EndpointConfig,
@@ -603,6 +603,10 @@ export { ONLINE_STT_MODEL_TYPES } from './streamingTypes';
 // Export types and runtime type list
 export type {
   STTInitializeOptions,
+  STTAutoInitializeOptions,
+  STTCustomInitializeOptions,
+  STTConcreteModelType,
+  STTInitializeOptionsBase,
   STTModelType,
   SttModelOptions,
   SttQwen3AsrModelOptions,
@@ -615,6 +619,29 @@ export type {
   SttInitResult,
   SttErrorCodeValue,
 } from './types';
+export type {
+  SttCustomConfig,
+  SttCustomConfigByModelType,
+  SttCustomPathKey,
+  SttTransducerCustomConfig,
+  SttWhisperCustomConfig,
+} from './customConfig';
+export {
+  assertSttCustomConfig,
+  resolveSttCustomConfigPaths,
+} from './customConfig';
+export type {
+  StreamingSttCustomConfig,
+  StreamingSttCustomConfigByModelType,
+  StreamingSttCustomPathKey,
+  StreamingTransducerCustomConfig,
+  StreamingParaformerCustomConfig,
+  StreamingSingleModelCustomConfig,
+} from './streamingCustomConfig';
+export {
+  assertStreamingSttCustomConfig,
+  resolveStreamingSttCustomConfigPaths,
+} from './streamingCustomConfig';
 export type { SttDetectModelResult } from '../types/modelDetect';
 export {
   STT_MODEL_TYPES,

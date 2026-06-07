@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Text,
   View,
@@ -24,6 +24,7 @@ import {
 import {
   createEnhancement,
   detectEnhancementModel,
+  assertEnhancementCustomConfig,
   type EnhancementEngine,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
@@ -55,9 +56,22 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  ModelFolderGrid,
+  EnhancementCustomInitForm,
+  type ModelInitMode,
+  type EnhancementCustomInitFormState,
+} from '../../components/modelInit';
+import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
+
+const DEFAULT_ENHANCEMENT_CUSTOM_INIT: EnhancementCustomInitFormState = {
+  modelType: 'gtcrn',
+  fileSources: {},
+};
 
 function isEnhancementHint(folder: string, hint: string): boolean {
   if (hint === 'enhancement') return true;
@@ -97,6 +111,14 @@ const localStyles = StyleSheet.create({
 
 export default function EnhancementScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<EnhancementCustomInitFormState>(DEFAULT_ENHANCEMENT_CUSTOM_INIT);
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
@@ -242,20 +264,145 @@ export default function EnhancementScreen() {
     }
   };
 
-  const resolveEnhancementModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(
-            modelFolder,
-            ModelCategory.Enhancement,
-            padModelsPath
-          )
-        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+  const resolveEnhancementModelPath = useCallback(
+    (modelFolder: string) => {
+      if (padModelIds.includes(modelFolder)) {
+        return padModelsPath
+          ? getFileModelPath(
+              modelFolder,
+              ModelCategory.Enhancement,
+              padModelsPath
+            )
+          : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      if (downloadedModelIds.includes(modelFolder)) {
+        return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      return getAssetModelPath(modelFolder);
+    },
+    [downloadedModelIds, padModelIds, padModelsPath]
+  );
+
+  const catalogEntries = useMemo(
+    () =>
+      availableModels.map((id) => ({
+        id,
+        label: getModelDisplayName(id),
+      })),
+    [availableModels]
+  );
+
+  const handleFillFromSelectedModel = useCallback(async () => {
+    const modelFolder = selectedModelForInit;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
     }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    setErrorSource(null);
+    try {
+      const modelPath = resolveEnhancementModelPath(modelFolder);
+      const fillResult = await fillEnhancementCustomConfigFromModelFolder(
+        await toDetectSource(modelPath),
+        { modelTypeOverride: customInitForm.modelType }
+      );
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      const message =
+        fillErr instanceof Error ? fillErr.message : String(fillErr);
+      setErrorSource('init');
+      setError(message);
+    } finally {
+      setCustomFillLoading(false);
     }
-    return getAssetModelPath(modelFolder);
+  }, [
+    customInitForm.modelType,
+    resolveEnhancementModelPath,
+    selectedModelForInit,
+  ]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick the model file from a different location, then Initialize.'
+    );
+  }, []);
+
+  const handleInitializeCustom = async () => {
+    setLoading(true);
+    setError(null);
+    setErrorSource(null);
+    setInitResult(null);
+    setDetectedModels([]);
+    setSelectedModelKind(null);
+    setInitializedSummary(null);
+
+    try {
+      const previous = engineRef.current;
+      if (previous) {
+        await previous.destroy();
+        engineRef.current = null;
+      }
+
+      const customConfig = {
+        ...customInitForm.fileSources,
+      };
+      assertEnhancementCustomConfig(
+        customConfig as unknown as Record<string, unknown>
+      );
+
+      const engine = await createEnhancement({
+        initMode: 'custom',
+        modelType: customInitForm.modelType,
+        customConfig: customConfig as {
+          model: import('react-native-sherpa-onnx/fileio').FileSource;
+        },
+        numThreads: NUM_THREADS,
+      });
+
+      engineRef.current = engine;
+      setCurrentModelFolder(null);
+      setSelectedModelKind(customInitForm.modelType);
+      setDetectedModels([
+        { type: customInitForm.modelType, modelDir: 'custom' },
+      ]);
+      setInitializedSummary(`custom:${customInitForm.modelType}`);
+      setInitResult(
+        `Initialized (custom): ${customInitForm.modelType}\nFile: model`
+      );
+      setEnhanceResult(null);
+      setLastEnhancedAudio(null);
+    } catch (err) {
+      console.error('Enhancement custom init error:', err);
+      let errorMessage = 'Unknown error';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        if ('code' in err) {
+          errorMessage = `[${(err as { code?: string }).code}] ${errorMessage}`;
+        }
+      }
+      setErrorSource('init');
+      setError(errorMessage);
+      setInitResult(`Custom initialization failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInitialize = async (modelFolder: string) => {
@@ -307,6 +454,7 @@ export default function EnhancementScreen() {
       engineRef.current = engine;
       setDetectedModels(normalized);
       setCurrentModelFolder(modelFolder);
+      setInitializedSummary(null);
       setSelectedModelForInit(modelFolder);
       if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
         setSelectedModelKind(loadedKind);
@@ -500,6 +648,7 @@ export default function EnhancementScreen() {
     }
     engineRef.current = null;
     setCurrentModelFolder(null);
+    setInitializedSummary(null);
     setSelectedModelForInit(null);
     setDetectedModels([]);
     setSelectedModelKind(null);
@@ -569,7 +718,9 @@ export default function EnhancementScreen() {
     }
   };
 
-  const engineReady = currentModelFolder != null && engineRef.current != null;
+  const engineReady =
+    (currentModelFolder != null || initializedSummary != null) &&
+    engineRef.current != null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
@@ -584,7 +735,7 @@ export default function EnhancementScreen() {
           style={styles.scrollView}
           keyboardShouldPersistTaps="handled"
         >
-          {currentModelFolder != null && (
+          {currentModelFolder != null || initializedSummary != null ? (
             <TouchableOpacity
               style={styles.freeButton}
               onPress={handleFree}
@@ -592,19 +743,29 @@ export default function EnhancementScreen() {
             >
               <Text style={styles.freeButtonText}>Release model</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize model</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={loading || customFillLoading}
+            />
             <Text style={styles.hint}>
-              Offline denoising (GTCRN / DPDFNet). Select a folder, then tap
-              &quot;Use model&quot;.
+              {initMode === 'auto'
+                ? 'Offline denoising (GTCRN / DPDFNet). Select a folder, then tap "Use model".'
+                : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
             </Text>
 
-            {(currentModelFolder || selectedModelForInit) && (
+            {(initializedSummary ||
+              currentModelFolder ||
+              selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  {currentModelFolder
+                  {initializedSummary
+                    ? `Initialized: ${initializedSummary}`
+                    : currentModelFolder
                     ? `Loaded: ${getModelDisplayName(currentModelFolder)}`
                     : `Selected: ${
                         selectedModelForInit
@@ -630,50 +791,53 @@ export default function EnhancementScreen() {
                 </Text>
               </View>
             ) : (
-              <View style={styles.modelButtons}>
-                {availableModels.map((modelFolder) => {
-                  const isSelected = selectedModelForInit === modelFolder;
-                  const isInitialized = currentModelFolder === modelFolder;
-                  return (
-                    <TouchableOpacity
-                      key={modelFolder}
-                      style={[
-                        styles.modelButton,
-                        isSelected && styles.modelButtonActive,
-                        isInitialized && styles.modelButtonInitialized,
-                        loading && styles.buttonDisabled,
-                      ]}
-                      onPress={() => setSelectedModelForInit(modelFolder)}
-                      disabled={loading}
-                    >
-                      <Text
-                        style={[
-                          styles.modelButtonText,
-                          isSelected && styles.modelButtonTextActive,
-                        ]}
-                      >
-                        {getModelDisplayName(modelFolder)}
-                      </Text>
-                      <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              <ModelFolderGrid
+                entries={catalogEntries}
+                selectedId={selectedModelForInit}
+                initializedId={currentModelFolder}
+                onSelect={setSelectedModelForInit}
+                loading={loadingModels}
+                disabled={loading || customFillLoading}
+                emptyMessage="No enhancement models found."
+              />
             )}
+
+            {initMode === 'custom' ? (
+              <EnhancementCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelForInit}
+                onFillFromSelectedModel={() => {
+                  handleFillFromSelectedModel().catch(() => {});
+                }}
+                onPrepareScatteredTest={handlePrepareScatteredTest}
+                fillLoading={customFillLoading}
+                disabled={loading}
+                fillHint={customFillHint}
+              />
+            ) : null}
 
             <TouchableOpacity
               style={[
                 styles.button,
                 styles.applyButton,
-                loading && styles.buttonDisabled,
+                (loading || customFillLoading) && styles.buttonDisabled,
               ]}
-              onPress={() =>
+              onPress={() => {
+                if (initMode === 'custom') {
+                  handleInitializeCustom();
+                  return;
+                }
                 handleInitialize(
                   selectedModelForInit ?? currentModelFolder ?? ''
-                )
-              }
+                );
+              }}
               disabled={
-                loading || (!selectedModelForInit && !currentModelFolder)
+                loading ||
+                customFillLoading ||
+                (initMode === 'auto'
+                  ? !selectedModelForInit && !currentModelFolder
+                  : false)
               }
             >
               {loading ? (
@@ -686,7 +850,9 @@ export default function EnhancementScreen() {
                   <Text style={styles.buttonText}>Initializing…</Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>Use model</Text>
+                <Text style={styles.buttonText}>
+                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -866,8 +1032,8 @@ export default function EnhancementScreen() {
                         const location = formatResolvedLocation(result);
                         Alert.alert('Saved', `Audio saved to:\n${location}`);
                       }}
-                      onError={(error) => {
-                        Alert.alert('Save failed', error.message);
+                      onError={(saveError) => {
+                        Alert.alert('Save failed', saveError.message);
                       }}
                     />
                   </View>

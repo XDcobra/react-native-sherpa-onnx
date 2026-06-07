@@ -6,6 +6,10 @@ export type {
   ModelDetectResultBase,
   OrchestrationProgress,
   VADModelType,
+  VADConcreteModelType,
+  VADInitOptionsShared,
+  VADAutoInitializeOptions,
+  VADCustomInitializeOptions,
   VADDetectResult,
   VADEngine,
   VADInitializeOptions,
@@ -23,3 +27,10 @@ export type {
   VADSpeechStateChangedEvent,
 } from './types';
 export { DETECTION_SOURCES, VAD_MODEL_TYPES, isDetectionSource } from './types';
+export {
+  assertVadCustomConfig,
+  resolveVadCustomConfigPaths,
+  VadErrorCode,
+  type VadCustomConfig,
+  type VadCustomPathKey,
+} from './customConfig';

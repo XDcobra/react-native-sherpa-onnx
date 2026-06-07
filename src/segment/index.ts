@@ -59,7 +59,11 @@ import type {
   SegmentationEngineRef,
   SegmentationPolicy,
 } from './engine-types';
-import { detectVadModel } from '../vad/engine';
+import {
+  isSpeechVadSegmentationPolicy,
+  resolveSpeechVadModelForPolicy,
+  speechVadPolicyToModelConfig,
+} from './resolveSpeechVadModelForPolicy';
 import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
@@ -133,7 +137,7 @@ function normalizeSegmentationPolicyFromNative(
 async function segmentationPolicyForNative(
   policy: SegmentationPolicy
 ): Promise<Object> {
-  const { modelPath: fileSource, sentenceBoundaryChars, ...rest } = policy;
+  const { sentenceBoundaryChars, ...rest } = policy;
   const out: Record<string, unknown> = { ...rest };
   const normalized = normalizeSentenceBoundaryCharsForNative(
     sentenceBoundaryChars
@@ -141,35 +145,15 @@ async function segmentationPolicyForNative(
   if (normalized !== undefined) {
     out.sentenceBoundaryChars = normalized;
   }
-  if (policy.evaluator === 'speech_vad_model') {
-    if (fileSource == null) {
-      throw new Error(
-        'SEGMENT_INVALID_ARGUMENT: speech_vad_model requires policy.modelPath'
-      );
-    }
-    const detect = await detectVadModel(fileSource, { modelType: 'auto' });
-    const onnxPath = detect.paths?.model?.trim();
-    if (
-      !detect.success ||
-      onnxPath == null ||
-      onnxPath.length === 0 ||
-      detect.modelType == null ||
-      detect.modelType === ''
-    ) {
-      const detail =
-        typeof detect.error === 'string' && detect.error.trim().length > 0
-          ? detect.error.trim()
-          : 'VAD model detection failed';
-      throw Object.assign(
-        new Error(
-          `POLICY_MODEL_UNAVAILABLE: speech_vad_model requires a detectable VAD bundle (${detail})`
-        ),
-        { code: 'POLICY_MODEL_UNAVAILABLE' }
-      );
-    }
-    out.modelPath = onnxPath;
-    out.modelType = detect.modelType;
-  } else if (fileSource != null) {
+  if (isSpeechVadSegmentationPolicy(policy)) {
+    const resolved = await resolveSpeechVadModelForPolicy(
+      speechVadPolicyToModelConfig(policy)
+    );
+    out.modelPath = resolved.modelPath;
+    out.modelType = resolved.modelType;
+    delete out.initMode;
+    delete out.customConfig;
+  } else if ('modelPath' in policy && policy.modelPath != null) {
     throw new Error(
       'SEGMENT_INVALID_ARGUMENT: policy.modelPath is only valid for speech_vad_model'
     );
@@ -1210,7 +1194,19 @@ export type {
   SegmentationEngineRef,
   SegmentationEvaluator,
   SegmentationPolicy,
+  NonSpeechVadSegmentationPolicy,
+  SpeechVadModelAuto,
+  SpeechVadModelConfig,
+  SpeechVadModelCustom,
+  SpeechVadSegmentationPolicy,
 } from './engine-types';
+
+export {
+  isSpeechVadSegmentationPolicy,
+  resolveSpeechVadModelForPolicy,
+  speechVadPolicyToModelConfig,
+} from './resolveSpeechVadModelForPolicy';
+export type { VADConcreteModelType } from './resolveSpeechVadModelForPolicy';
 
 export type { SegmentationMode } from './runtime-state';
 

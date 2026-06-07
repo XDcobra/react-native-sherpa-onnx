@@ -86,7 +86,7 @@ describe('asrMediated/missing-timestamps', () => {
         segmentOut: 'seg_out',
         anchorSegmentBuffer: 'seg_anchor',
         hypothesisTextBuffer: 'txt_hyp',
-        modelSource: { kind: 'fs', path: '/m' },
+        model: { modelSource: { kind: 'fs', path: '/m' } },
         granularity: 'word',
       })
     ).rejects.toMatchObject({

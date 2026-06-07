@@ -57,18 +57,36 @@ export type OfflinePunctuateOptions = {
 
 export type OfflinePunctuationModelType = 'ct_transformer' | 'auto';
 
-export type OfflinePunctuationInitializeOptions = {
-  /** Directory-backed model source used for punctuation initialization. */
-  modelSource: FileSource;
-  /**
-   * `'auto'` resolves **offline CT only** (same as `ct_transformer` for native detect).
-   * Does not select online/CNN layout.
-   */
-  modelType?: OfflinePunctuationModelType;
+export type OfflinePunctuationConcreteModelType = 'ct_transformer';
+
+export type OfflinePunctuationInitOptionsShared = {
   numThreads?: number;
   provider?: string;
   debug?: boolean;
 };
+
+export type OfflinePunctuationAutoInitializeOptions =
+  OfflinePunctuationInitOptionsShared & {
+    initMode?: 'auto';
+    /** Directory-backed model source used for punctuation initialization. */
+    modelSource: FileSource;
+    /**
+     * `'auto'` resolves **offline CT only** (same as `ct_transformer` for native detect).
+     * Does not select online/CNN layout.
+     */
+    modelType?: OfflinePunctuationModelType;
+  };
+
+export type OfflinePunctuationCustomInitializeOptions =
+  OfflinePunctuationInitOptionsShared & {
+    initMode: 'custom';
+    modelType: OfflinePunctuationConcreteModelType;
+    customConfig: import('./customConfig').OfflinePunctuationCustomConfig;
+  };
+
+export type OfflinePunctuationInitializeOptions =
+  | OfflinePunctuationAutoInitializeOptions
+  | OfflinePunctuationCustomInitializeOptions;
 
 export type OfflinePunctuationEngine = {
   readonly instanceId: string;

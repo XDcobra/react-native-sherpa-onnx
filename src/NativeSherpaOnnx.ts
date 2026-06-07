@@ -5,12 +5,15 @@ import type { ExtractArchiveResult } from './extraction/types';
 /**
  * TurboModule init bridge option shapes (flat ReadableMap / NSDictionary).
  * Must live in this file — React Native codegen does not resolve imported type aliases.
- * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`.
+ * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`, `buildVadInitBridgeOptions`.
  */
 
 /** `initializeStt(instanceId, options)` — offline STT. */
 export type SttInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (encoder, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
   preferInt8?: boolean;
   modelType?: string;
   debug?: boolean;
@@ -29,7 +32,9 @@ export type SttInitBridgeOptions = {
 
 /** `initializeOnlineStt(instanceId, options)` — streaming STT (endpoint rules flattened). */
 export type OnlineSttInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  modelDir?: string;
+  modelPaths?: Object;
   modelType: string;
   enableEndpoint?: boolean;
   decodingMethod?: string;
@@ -56,7 +61,10 @@ export type OnlineSttInitBridgeOptions = {
 
 /** `initializeTts(instanceId, options)` — offline TTS. */
 export type TtsInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (ttsModel, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
   modelType: string;
   numThreads?: number;
   debug?: boolean;
@@ -73,6 +81,49 @@ export type TtsInitBridgeOptions = {
   kokoroLang?: string;
 };
 
+/** `initializeVad(instanceId, options)` — streaming VAD. */
+export type VadInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  sampleRate?: number;
+  threshold?: number;
+  silenceDurationMs?: number;
+  speechDurationMs?: number;
+  minSpeechDurationMs?: number;
+  maxSpeechDurationS?: number;
+  windowSize?: number;
+  provider?: string;
+  numThreads?: number;
+  debug?: boolean;
+};
+
+/** `initializeEnhancement` / `initializeOnlineEnhancement(instanceId, options)`. */
+export type EnhancementInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** `initializeOfflinePunctuation` / `initializeOnlinePunctuation(instanceId, options)`. */
+export type PunctuationInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map; NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
 export type UnifiedDetectNativeResult = {
   matched: boolean;
@@ -86,6 +137,7 @@ export type UnifiedDetectNativeResult = {
   isHardwareSpecificUnsupported?: boolean;
   detectedModels: Array<{ type: string; modelDir: string }>;
   detectionSources?: string[];
+  paths?: Object;
   error?: string;
 };
 
@@ -165,6 +217,8 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Object;
   }>;
 
   // ==================== Offline STT (by-reference) ====================
@@ -1054,7 +1108,10 @@ export interface Spec extends TurboModule {
 
   // ==================== VAD Methods ====================
 
-  initializeVad(instanceId: string, options: Object): Promise<void>;
+  initializeVad(
+    instanceId: string,
+    options: VadInitBridgeOptions
+  ): Promise<void>;
 
   startVadPipeline(
     instanceId: string,
@@ -1147,6 +1204,8 @@ export interface Spec extends TurboModule {
     sizeTier?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Object;
   }>;
 
   /**
@@ -1382,6 +1441,9 @@ export interface Spec extends TurboModule {
     languages?: string[];
     quantization?: string;
     detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
   }>;
 
   detectVadModel(
@@ -1443,17 +1505,36 @@ export interface Spec extends TurboModule {
     }>
   ): Promise<UnifiedDetectNativeResult[]>;
 
+  /** Runtime validation of resolved custom-init path maps (C++ validate-* tables). */
+  validateCustomModelPaths(
+    category: string,
+    modelType: string,
+    paths: Object
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    missingRequired?: string[];
+  }>;
+
+  /** Schema for custom-init UI: path keys from native C++ requirement tables. */
+  getCustomModelPathRequirements(
+    category: string,
+    modelType: string
+  ): Promise<{
+    fields: Array<{
+      key: string;
+      required: boolean;
+      kind: 'file' | 'dir';
+    }>;
+  }>;
+
   /**
    * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with
    * `ct_transformer` only (no online/CNN auto-pick).
    */
   initializeOfflinePunctuation(
     instanceId: string,
-    modelDir: string,
-    modelType?: string | null,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: PunctuationInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1489,11 +1570,7 @@ export interface Spec extends TurboModule {
    */
   initializeOnlinePunctuation(
     instanceId: string,
-    modelDir: string,
-    modelType?: string | null,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: PunctuationInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1559,11 +1636,7 @@ export interface Spec extends TurboModule {
 
   initializeEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1584,11 +1657,7 @@ export interface Spec extends TurboModule {
 
   initializeOnlineEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;

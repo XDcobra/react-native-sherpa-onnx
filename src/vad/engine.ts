@@ -1,9 +1,7 @@
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import {
-  resolveFileSourceForDetect,
-  resolveFileSourceForModelInit,
-} from '../detect/resolveModelInput';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
+import { buildVadInitBridgeOptions } from './vadNativeBridge';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {
@@ -38,7 +36,6 @@ import type {
   VADOfflineResult,
   VADPipelineHandle,
   VADPipelineStatus,
-  VADModelType,
   VADSummary,
 } from './types';
 import type { FileSource } from '../fileio/types';
@@ -175,35 +172,6 @@ function toSummary(raw: any): VADSummary {
   };
 }
 
-function resolveRuntimeTuningOptions(
-  runtimeOptions: VADInitializeOptions['runtimeOptions'],
-  modelType: VADModelType
-) {
-  if (!runtimeOptions) {
-    return undefined;
-  }
-  if (modelType === 'silero_vad') {
-    if ('sileroVad' in runtimeOptions) {
-      return runtimeOptions.sileroVad;
-    }
-    throw Object.assign(
-      new Error(
-        'VAD runtime options mismatch: expected sileroVad options for silero_vad model'
-      ),
-      { code: 'VAD_INVALID_OPTIONS' }
-    );
-  }
-  if ('tenVad' in runtimeOptions) {
-    return runtimeOptions.tenVad;
-  }
-  throw Object.assign(
-    new Error(
-      'VAD runtime options mismatch: expected tenVad options for ten_vad model'
-    ),
-    { code: 'VAD_INVALID_OPTIONS' }
-  );
-}
-
 export async function detectVadModel(
   source: FileSource,
   options?: {
@@ -277,45 +245,8 @@ export async function createStreamingVAD(
   options: VADInitializeOptions
 ): Promise<VADEngine> {
   const instanceId = `vad_${++vadInstanceCounter}`;
-  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
-  let resolvedModelType: 'auto' | VADModelType = options.modelType ?? 'auto';
-  if (resolvedModelType === 'auto') {
-    const detect = await SherpaOnnx.detectVadModel(modelDir, null, 'auto');
-    if (
-      !detect.success ||
-      detect.modelType == null ||
-      detect.modelType === ''
-    ) {
-      const reason =
-        (typeof detect.error === 'string' ? detect.error.trim() : '') ||
-        'Failed to detect VAD model type in auto mode';
-      throw Object.assign(new Error(reason), {
-        code: 'VAD_MODEL_INIT_FAILED',
-      });
-    }
-    resolvedModelType = detect.modelType as VADModelType;
-  }
-  const runtimeTuning = resolveRuntimeTuningOptions(
-    options.runtimeOptions,
-    resolvedModelType
-  );
-  await SherpaOnnx.initializeVad(instanceId, {
-    modelDir,
-    modelType: resolvedModelType,
-    sampleRate: options.sampleRate,
-    silenceDurationMs: runtimeTuning?.minSilenceDurationMs,
-    speechDurationMs: runtimeTuning?.minSpeechDurationMs,
-    maxSpeechDurationS:
-      typeof runtimeTuning?.maxSpeechDurationMs === 'number'
-        ? runtimeTuning.maxSpeechDurationMs / 1000
-        : undefined,
-    minSpeechDurationMs: runtimeTuning?.minSpeechDurationMs,
-    threshold: runtimeTuning?.scoreThreshold,
-    windowSize: runtimeTuning?.windowSize,
-    provider: options.provider,
-    numThreads: options.numThreads,
-    debug: options.debug,
-  });
+  const bridgeOptions = await buildVadInitBridgeOptions(options);
+  await SherpaOnnx.initializeVad(instanceId, bridgeOptions);
 
   let destroyed = false;
   let activePipelineId: string | null = null;

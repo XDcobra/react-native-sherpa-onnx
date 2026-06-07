@@ -8,6 +8,8 @@
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-model-path-fill.h"
+#include "sherpa-onnx-validate-tts.h"
 #include <cctype>
 #include <cstring>
 #include <optional>
@@ -32,6 +34,21 @@ namespace fs = std::filesystem;
 #include "sherpa-onnx/c-api/cxx-api.h"
 
 namespace sherpaonnx {
+
+namespace {
+
+TtsModelKind ParseTtsModelTypeFromString(const std::string& modelType) {
+    if (modelType == "vits") return TtsModelKind::kVits;
+    if (modelType == "matcha") return TtsModelKind::kMatcha;
+    if (modelType == "kokoro") return TtsModelKind::kKokoro;
+    if (modelType == "kitten") return TtsModelKind::kKitten;
+    if (modelType == "pocket") return TtsModelKind::kPocket;
+    if (modelType == "zipvoice") return TtsModelKind::kZipvoice;
+    if (modelType == "supertonic") return TtsModelKind::kSupertonic;
+    return TtsModelKind::kUnknown;
+}
+
+}  // namespace
 
 class TtsWrapper::Impl {
 public:
@@ -266,6 +283,194 @@ TtsInitializeResult TtsWrapper::initialize(
     } catch (...) {
         result.error = "TTS: Unknown exception during initialization";
         LOGE("TTS: Unknown exception during initialization");
+        return result;
+    }
+}
+
+TtsInitializeResult TtsWrapper::initializeCustom(
+    const std::string& modelType,
+    const TtsModelPaths& paths,
+    int32_t numThreads,
+    bool debug,
+    const std::optional<float>& noiseScale,
+    const std::optional<float>& noiseScaleW,
+    const std::optional<float>& lengthScale,
+    const std::optional<std::string>& ruleFsts,
+    const std::optional<std::string>& ruleFars,
+    const std::optional<int32_t>& maxNumSentences,
+    const std::optional<float>& silenceScale,
+    const std::optional<std::string>& provider,
+    const std::optional<std::string>& kokoroLang
+) {
+    TtsInitializeResult result;
+    result.success = false;
+
+    if (pImpl->initialized) {
+        release();
+    }
+
+    const TtsModelKind selectedKind = ParseTtsModelTypeFromString(modelType);
+    if (selectedKind == TtsModelKind::kUnknown) {
+        result.error = "Unsupported custom TTS model type: " + modelType;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    auto validation = ValidateTtsPaths(selectedKind, paths, "custom");
+    if (!validation.ok) {
+        result.error = validation.error;
+        LOGE("%s", result.error.c_str());
+        return result;
+    }
+
+    try {
+        sherpa_onnx::cxx::OfflineTtsConfig config;
+        config.model.num_threads = numThreads;
+        config.model.debug = debug;
+        if (provider.has_value() && !provider->empty()) {
+            config.model.provider = *provider;
+        }
+
+        switch (selectedKind) {
+            case TtsModelKind::kVits:
+                config.model.vits.model = paths.ttsModel;
+                config.model.vits.tokens = paths.tokens;
+                config.model.vits.data_dir = paths.dataDir;
+                if (!paths.lexicon.empty()) {
+                    config.model.vits.lexicon = paths.lexicon;
+                }
+                if (noiseScale.has_value()) {
+                    config.model.vits.noise_scale = *noiseScale;
+                }
+                if (noiseScaleW.has_value()) {
+                    config.model.vits.noise_scale_w = *noiseScaleW;
+                }
+                if (lengthScale.has_value()) {
+                    config.model.vits.length_scale = *lengthScale;
+                }
+                break;
+            case TtsModelKind::kMatcha:
+                config.model.matcha.acoustic_model = paths.acousticModel;
+                config.model.matcha.vocoder = paths.vocoder;
+                config.model.matcha.tokens = paths.tokens;
+                config.model.matcha.data_dir = paths.dataDir;
+                if (!paths.lexicon.empty()) {
+                    config.model.matcha.lexicon = paths.lexicon;
+                }
+                if (noiseScale.has_value()) {
+                    config.model.matcha.noise_scale = *noiseScale;
+                }
+                if (lengthScale.has_value()) {
+                    config.model.matcha.length_scale = *lengthScale;
+                }
+                break;
+            case TtsModelKind::kKokoro:
+                config.model.kokoro.model = paths.ttsModel;
+                config.model.kokoro.tokens = paths.tokens;
+                config.model.kokoro.data_dir = paths.dataDir;
+                config.model.kokoro.voices = paths.voices;
+                if (!paths.lexicon.empty()) {
+                    config.model.kokoro.lexicon = paths.lexicon;
+                }
+                if (lengthScale.has_value()) {
+                    config.model.kokoro.length_scale = *lengthScale;
+                }
+                if (kokoroLang.has_value() && !kokoroLang->empty()) {
+                    config.model.kokoro.lang = *kokoroLang;
+                }
+                break;
+            case TtsModelKind::kKitten:
+                config.model.kitten.model = paths.ttsModel;
+                config.model.kitten.tokens = paths.tokens;
+                config.model.kitten.data_dir = paths.dataDir;
+                config.model.kitten.voices = paths.voices;
+                if (lengthScale.has_value()) {
+                    config.model.kitten.length_scale = *lengthScale;
+                }
+                break;
+            case TtsModelKind::kZipvoice:
+                config.model.zipvoice.encoder = paths.encoder;
+                config.model.zipvoice.decoder = paths.decoder;
+                config.model.zipvoice.vocoder = paths.vocoder;
+                config.model.zipvoice.tokens = paths.tokens;
+                config.model.zipvoice.data_dir = paths.dataDir;
+                if (!paths.lexicon.empty()) {
+                    config.model.zipvoice.lexicon = paths.lexicon;
+                }
+                config.model.num_threads = 1;
+                break;
+            case TtsModelKind::kPocket:
+                config.model.pocket.lm_flow = paths.lmFlow;
+                config.model.pocket.lm_main = paths.lmMain;
+                config.model.pocket.encoder = paths.encoder;
+                config.model.pocket.decoder = paths.decoder;
+                config.model.pocket.text_conditioner = paths.textConditioner;
+                config.model.pocket.vocab_json = paths.vocabJson;
+                config.model.pocket.token_scores_json = paths.tokenScoresJson;
+                break;
+            case TtsModelKind::kSupertonic:
+                config.model.supertonic.duration_predictor = paths.durationPredictor;
+                config.model.supertonic.text_encoder = paths.textEncoder;
+                config.model.supertonic.vector_estimator = paths.vectorEstimator;
+                config.model.supertonic.vocoder = paths.vocoder;
+                config.model.supertonic.tts_json = paths.ttsJson;
+                config.model.supertonic.unicode_indexer = paths.unicodeIndexer;
+                config.model.supertonic.voice_style = paths.voiceStyle;
+                break;
+            case TtsModelKind::kUnknown:
+            default:
+                result.error = "TTS: Unknown model type: " + modelType;
+                LOGE("TTS: Unknown model type: %s", modelType.c_str());
+                return result;
+        }
+
+        if (selectedKind == TtsModelKind::kVits &&
+            paths.dataDir.empty() &&
+            paths.lexicon.empty()) {
+            result.error =
+                "TTS VITS init blocked: missing both espeak-ng-data and lexicon. "
+                "Please add espeak-ng-data to the model folder or provide a lexicon.";
+            LOGE("%s", result.error.c_str());
+            return result;
+        }
+
+        if (ruleFsts.has_value() && !ruleFsts->empty()) {
+            config.rule_fsts = *ruleFsts;
+        }
+        if (ruleFars.has_value() && !ruleFars->empty()) {
+            config.rule_fars = *ruleFars;
+        }
+        if (maxNumSentences.has_value() && *maxNumSentences >= 1) {
+            config.max_num_sentences = *maxNumSentences;
+        }
+        if (silenceScale.has_value()) {
+            config.silence_scale = *silenceScale;
+        }
+
+        LOGI("TTS: Creating OfflineTts instance (custom init)...");
+        pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
+
+        if (!pImpl->tts.has_value()) {
+            result.error = "TTS: Failed to create OfflineTts instance (e.g. missing espeak-ng data or invalid model)";
+            LOGE("%s", result.error.c_str());
+            return result;
+        }
+
+        pImpl->initialized = true;
+        pImpl->modelDir = "custom";
+        pImpl->modelKind = selectedKind;
+
+        LOGI("TTS: Custom initialization successful");
+        result.success = true;
+        result.detectedModels.push_back({modelType, "custom"});
+        return result;
+    } catch (const std::exception& e) {
+        result.error = std::string("TTS custom init exception: ") + e.what();
+        LOGE("TTS: Exception during custom initialization: %s", e.what());
+        return result;
+    } catch (...) {
+        result.error = "TTS: Unknown exception during custom initialization";
+        LOGE("TTS: Unknown exception during custom initialization");
         return result;
     }
 }

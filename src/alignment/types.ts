@@ -13,6 +13,23 @@ export interface AlignmentTimestamp {
 
 export type AlignmentModelType = 'wav2vec2' | 'auto';
 
+export type AlignmentConcreteModelType = 'wav2vec2';
+
+export type AlignmentAccurateModelAuto = {
+  initMode?: 'auto';
+  modelSource: FileSource;
+};
+
+export type AlignmentAccurateModelCustom = {
+  initMode: 'custom';
+  modelType: AlignmentConcreteModelType;
+  customConfig: import('./customConfig').AlignmentCustomConfig;
+};
+
+export type AlignmentAccurateModelConfig =
+  | AlignmentAccurateModelAuto
+  | AlignmentAccurateModelCustom;
+
 export type { AlignmentDetectModelResult as AlignmentDetectResult } from '../types/modelDetect';
 
 /** Subtitle/timestamp granularity (character only with `accurate`). */
@@ -116,26 +133,23 @@ export type AlignTextToAudioOptionsEstimated = {
 } & AlignmentProgressCallbacks;
 
 type AlignTextToAudioOptionsAccurateBase =
-  | {
+  | ({
       mode: 'accurate';
-      /** FileSource for the alignment model; resolved before the native bridge. */
-      modelSource: FileSource;
       granularity?: AlignmentGranularity;
       language?: string;
       segmentation?: {
         mode: 'off';
       };
-    }
-  | {
+    } & AlignmentAccurateModelConfig)
+  | ({
       mode: 'accurate';
-      modelSource: FileSource;
       granularity?: 'sentence' | 'word';
       language?: string;
       segmentation: Extract<
         AlignmentAccurateSegmentationConfig,
         { mode: 'auto' }
       >;
-    };
+    } & AlignmentAccurateModelConfig);
 
 /** Accurate: wav2vec2 CTC forced alignment. */
 export type AlignTextToAudioOptionsAccurate =
@@ -181,4 +195,5 @@ export type AlignmentErrorCode =
   | 'ALIGNMENT_FORCED_CTC_FAILED'
   | 'ALIGNMENT_FORCED_CTC_STUCK'
   | 'ALIGNMENT_NOT_IMPLEMENTED'
-  | 'ALIGNMENT_ENGINE_DESTROYED';
+  | 'ALIGNMENT_ENGINE_DESTROYED'
+  | 'ALIGNMENT_INVALID_ARGUMENT';

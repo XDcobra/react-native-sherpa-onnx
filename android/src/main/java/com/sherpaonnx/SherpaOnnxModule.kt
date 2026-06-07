@@ -1035,60 +1035,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   // ==================== Online (streaming) STT Methods ====================
 
   override fun initializeOnlineStt(instanceId: String, options: ReadableMap, promise: Promise) {
-    val modelDir = options.getString("modelDir")
-    if (modelDir.isNullOrEmpty()) {
-      promise.reject("INIT_ERROR", "modelDir is required")
-      return
-    }
-    val modelType = options.getString("modelType") ?: "transducer"
-    val enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else true
-    val decodingMethod = options.getString("decodingMethod") ?: "greedy_search"
-    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 4
-    val hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null
-    val hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null
-    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
-    val provider = if (options.hasKey("provider")) options.getString("provider") else null
-    val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
-    val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
-    val dither = if (options.hasKey("dither")) options.getDouble("dither") else null
-    val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
-    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
-    val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
-    val rule1MinTrailingSilence = if (options.hasKey("rule1MinTrailingSilence")) options.getDouble("rule1MinTrailingSilence") else null
-    val rule1MinUtteranceLength = if (options.hasKey("rule1MinUtteranceLength")) options.getDouble("rule1MinUtteranceLength") else null
-    val rule2MustContainNonSilence = if (options.hasKey("rule2MustContainNonSilence")) options.getBoolean("rule2MustContainNonSilence") else null
-    val rule2MinTrailingSilence = if (options.hasKey("rule2MinTrailingSilence")) options.getDouble("rule2MinTrailingSilence") else null
-    val rule2MinUtteranceLength = if (options.hasKey("rule2MinUtteranceLength")) options.getDouble("rule2MinUtteranceLength") else null
-    val rule3MustContainNonSilence = if (options.hasKey("rule3MustContainNonSilence")) options.getBoolean("rule3MustContainNonSilence") else null
-    val rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null
-    val rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null
-    onlineSttHelper.initializeOnlineStt(
-      instanceId,
-      modelDir,
-      modelType,
-      enableEndpoint,
-      decodingMethod,
-      maxActivePaths,
-      hotwordsFile,
-      hotwordsScore,
-      numThreads,
-      provider,
-      ruleFsts,
-      ruleFars,
-      dither,
-      blankPenalty,
-      debug,
-      rule1MustContainNonSilence,
-      rule1MinTrailingSilence,
-      rule1MinUtteranceLength,
-      rule2MustContainNonSilence,
-      rule2MinTrailingSilence,
-      rule2MinUtteranceLength,
-      rule3MustContainNonSilence,
-      rule3MinTrailingSilence,
-      rule3MinUtteranceLength,
-      promise
-    )
+    onlineSttHelper.initializeOnlineStt(instanceId, options, promise)
   }
 
   override fun unloadOnlineStt(instanceId: String, promise: Promise) {
@@ -4764,20 +4711,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -4801,20 +4740,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOnlineEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeOnlineEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -4895,6 +4826,57 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun validateCustomModelPaths(
+    category: String,
+    modelType: String,
+    paths: ReadableMap,
+    promise: Promise
+  ) {
+    try {
+      val pathMap = HashMap<String, String>()
+      val iterator = paths.keySetIterator()
+      while (iterator.hasNextKey()) {
+        val key = iterator.nextKey()
+        if (!paths.isNull(key)) {
+          paths.getString(key)?.let { pathMap[key] = it }
+        }
+      }
+      val result = Companion.validateCustomModelPathsNative(category, modelType, pathMap)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path validation returned null")
+          return
+        }
+      promise.resolve(Companion.customValidationHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path validation failed: ${e.message}",
+        e
+      )
+    }
+  }
+
+  override fun getCustomModelPathRequirements(
+    category: String,
+    modelType: String,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.getCustomModelPathRequirementsNative(category, modelType)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path requirements returned null")
+          return
+        }
+      promise.resolve(Companion.customPathRequirementsHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path requirements failed: ${e.message}",
+        e
+      )
+    }
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -4921,20 +4903,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOfflinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     punctuationHelper.initializeOfflinePunctuation(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -4980,20 +4954,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOnlinePunctuation(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     onlinePunctuationHelper.initializeOnlinePunctuation(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -5374,6 +5340,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ): ArrayList<HashMap<String, Any?>>
 
     @JvmStatic
+    internal fun validateCustomModelPathsNative(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>? =
+      nativeValidateCustomModelPaths(category, modelType, paths)
+
+    @JvmStatic
+    internal fun getCustomModelPathRequirementsNative(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>? =
+      nativeGetCustomModelPathRequirements(category, modelType)
+
+    @JvmStatic
+    private external fun nativeValidateCustomModelPaths(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    private external fun nativeGetCustomModelPathRequirements(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
     internal fun unifiedDetectHashMapToWritableMap(
       result: HashMap<String, Any?>
     ): com.facebook.react.bridge.WritableMap {
@@ -5427,6 +5421,49 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         map.putArray("detectionSources", arr)
       }
 
+      return map
+    }
+
+    @JvmStatic
+    internal fun customValidationHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("ok", result["ok"] as? Boolean ?: false)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      @Suppress("UNCHECKED_CAST")
+      val missing = result["missingRequired"] as? ArrayList<String>
+      if (!missing.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in missing) {
+          arr.pushString(entry)
+        }
+        map.putArray("missingRequired", arr)
+      }
+      return map
+    }
+
+    @JvmStatic
+    internal fun customPathRequirementsHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      @Suppress("UNCHECKED_CAST")
+      val fields = result["fields"] as? ArrayList<HashMap<String, Any?>>
+      if (!fields.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in fields) {
+          val key = entry["key"] as? String ?: continue
+          val fieldMap = Arguments.createMap()
+          fieldMap.putString("key", key)
+          fieldMap.putBoolean("required", entry["required"] as? Boolean ?: false)
+          val kind = entry["kind"] as? String
+          fieldMap.putString("kind", if (kind == "dir") "dir" else "file")
+          arr.pushMap(fieldMap)
+        }
+        map.putArray("fields", arr)
+      }
       return map
     }
 

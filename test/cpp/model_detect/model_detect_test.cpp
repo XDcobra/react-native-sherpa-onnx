@@ -26,14 +26,18 @@
 #include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-stt.h"
+#include "sherpa-onnx-validate-online-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-vad.h"
+#include "sherpa-onnx-validate-custom.h"
+#include "sherpa-onnx-model-path-fill.h"
 
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <string>
 
 namespace {
@@ -804,6 +808,34 @@ TEST(ModelDetectValidation, ValidateSttPathsUnknownKindPassesThrough) {
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
 }
 
+TEST(ModelDetectValidation, ValidateOnlineSttPathsDirectOk) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.joiner = "/m/joiner.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kTransducer, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateOnlineSttPathsDirectMissing) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kTransducer, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateOnlineSttPathsUnknownKindPassesThrough) {
+    sherpaonnx::OnlineSttModelPaths paths;
+    auto v = sherpaonnx::ValidateOnlineSttPaths(
+        sherpaonnx::OnlineSttModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
 TEST(ModelDetectValidation, ValidateEnhancementPathsDirectOk) {
     sherpaonnx::EnhancementModelPaths paths;
     paths.model = "/m/gtcrn_simple.onnx";
@@ -893,6 +925,220 @@ TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
 
     EXPECT_TRUE(result.ok) << result.error;
     EXPECT_TRUE(result.isStreaming);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerOk) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"joiner", "/j.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "transducer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerMissingJoiner) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "transducer", paths, "custom");
+    EXPECT_FALSE(result.ok);
+    ASSERT_FALSE(result.missingRequired.empty());
+    EXPECT_EQ(result.missingRequired[0], "joiner");
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerOfflineOk) {
+    std::map<std::string, std::string> paths = {
+        {"paraformerModel", "/p.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerStreamingOk) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths(
+        "stt_streaming", "paraformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerOfflineRejectsStreamingLayout) {
+    std::map<std::string, std::string> paths = {
+        {"encoder", "/e.onnx"},
+        {"decoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_FALSE(result.ok);
+    ASSERT_FALSE(result.missingRequired.empty());
+    EXPECT_EQ(result.missingRequired[0], "paraformerModel");
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttParaformerMissingLayout) {
+    std::map<std::string, std::string> paths = {
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "paraformer", paths, "custom");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttMoonshineV2Ok) {
+    std::map<std::string, std::string> paths = {
+        {"moonshineEncoder", "/e.onnx"},
+        {"moonshineMergedDecoder", "/d.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "moonshine_v2", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsSttMoonshineV1Distinct) {
+    std::map<std::string, std::string> paths = {
+        {"moonshineEncoder", "/e.onnx"},
+        {"moonshineMergedDecoder", "/d.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("stt", "moonshine", paths, "custom");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsTtsSmoke) {
+    std::map<std::string, std::string> paths = {
+        {"ttsModel", "/m.onnx"},
+        {"tokens", "/tokens.txt"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("tts", "vits", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsVadSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/vad.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("vad", "silero_vad", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/gtcrn.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "gtcrn", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsPunctuationSmoke) {
+    std::map<std::string, std::string> paths = {{"ct_transformer", "/p.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths(
+        "punctuation", "ct_transformer", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsAlignmentSmoke) {
+    std::map<std::string, std::string> paths = {{"model", "/a.onnx"}};
+    auto result = sherpaonnx::ValidateCustomModelPaths("alignment", "wav2vec2", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttParaformerOffline) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("stt", "paraformer");
+    auto findField = [&reqs](const char* key) {
+        return std::find_if(
+            reqs.fields.begin(),
+            reqs.fields.end(),
+            [key](const sherpaonnx::CustomPathFieldSpec& field) {
+                return field.key == key;
+            });
+    };
+    auto paraformerModel = findField("paraformerModel");
+    ASSERT_NE(paraformerModel, reqs.fields.end());
+    EXPECT_TRUE(paraformerModel->required);
+    auto tokens = findField("tokens");
+    ASSERT_NE(tokens, reqs.fields.end());
+    EXPECT_TRUE(tokens->required);
+    EXPECT_EQ(findField("encoder"), reqs.fields.end());
+    EXPECT_EQ(findField("decoder"), reqs.fields.end());
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttStreamingParaformer) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("stt_streaming", "paraformer");
+    auto findField = [&reqs](const char* key) {
+        return std::find_if(
+            reqs.fields.begin(),
+            reqs.fields.end(),
+            [key](const sherpaonnx::CustomPathFieldSpec& field) {
+                return field.key == key;
+            });
+    };
+    for (const char* key : {"encoder", "decoder", "tokens"}) {
+        auto field = findField(key);
+        ASSERT_NE(field, reqs.fields.end()) << key;
+        EXPECT_TRUE(field->required) << key;
+    }
+    EXPECT_EQ(findField("paraformerModel"), reqs.fields.end());
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttTransducer) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("stt", "transducer");
+    auto hasKey = [&reqs](const char* key) {
+        return std::any_of(
+            reqs.fields.begin(),
+            reqs.fields.end(),
+            [key](const sherpaonnx::CustomPathFieldSpec& field) {
+                return field.key == key;
+            });
+    };
+    EXPECT_TRUE(hasKey("encoder"));
+    EXPECT_TRUE(hasKey("joiner"));
+    auto bpe = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "bpeVocab";
+        });
+    ASSERT_NE(bpe, reqs.fields.end());
+    EXPECT_FALSE(bpe->required);
+    for (const auto& field : reqs.fields) {
+        EXPECT_FALSE(field.isDirectory) << field.key;
+    }
+}
+
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsDataDirIsDirectory) {
+    auto reqs = sherpaonnx::GetCustomModelPathRequirements("tts", "vits");
+    ASSERT_FALSE(reqs.fields.empty());
+    auto dataDir = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "dataDir";
+        });
+    ASSERT_NE(dataDir, reqs.fields.end());
+    EXPECT_FALSE(dataDir->required);
+    EXPECT_TRUE(dataDir->isDirectory);
+    auto ttsModel = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "ttsModel";
+        });
+    ASSERT_NE(ttsModel, reqs.fields.end());
+    EXPECT_TRUE(ttsModel->required);
+    EXPECT_FALSE(ttsModel->isDirectory);
+}
+
+TEST(ModelDetectValidation, TtsModelPathsToStringMapOmitsEmptyValues) {
+    sherpaonnx::TtsModelPaths paths;
+    paths.ttsModel = "/tmp/model.onnx";
+    paths.tokens = "/tmp/tokens.txt";
+    paths.dataDir = "/tmp/espeak-ng-data";
+    auto map = sherpaonnx::TtsModelPathsToStringMap(paths);
+    EXPECT_EQ(map.at("ttsModel"), "/tmp/model.onnx");
+    EXPECT_EQ(map.at("tokens"), "/tmp/tokens.txt");
+    EXPECT_EQ(map.at("dataDir"), "/tmp/espeak-ng-data");
+    EXPECT_EQ(map.find("lexicon"), map.end());
 }
 
 }  // namespace

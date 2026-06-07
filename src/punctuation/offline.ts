@@ -1,6 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
-import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import {
   attachSegmentationEngine,
@@ -34,6 +33,7 @@ import { runOfflinePunctuationPipeline } from './orchestrate';
 import { resolveTextInputNormalization } from './textInputNormalization';
 import type { TextSegment } from '../segment/segment';
 import type { PunctuationPipelineHandle } from './streamingTypes';
+import { buildOfflinePunctuationInitBridgeOptions } from './punctuationNativeBridge';
 
 let offlinePunctInstanceCounter = 0;
 
@@ -173,16 +173,11 @@ export async function createOfflinePunctuation(
   options: OfflinePunctuationInitializeOptions
 ): Promise<OfflinePunctuationEngine> {
   const instanceId = `punc_off_${++offlinePunctInstanceCounter}`;
-  const resolvedPath = await resolveFileSourceForModelInit(options.modelSource);
-  const modelType = options.modelType ?? 'auto';
+  const bridgeOptions = await buildOfflinePunctuationInitBridgeOptions(options);
 
   const init = await SherpaOnnx.initializeOfflinePunctuation(
     instanceId,
-    resolvedPath,
-    modelType,
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!init.success) {

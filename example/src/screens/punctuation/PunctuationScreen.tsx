@@ -37,8 +37,16 @@ import type {
 import {
   createOfflinePunctuation,
   detectPunctuationModel,
+  assertOfflinePunctuationCustomConfig,
   type OfflinePunctuationEngine,
 } from 'react-native-sherpa-onnx/punctuation';
+import {
+  InitModeSelector,
+  PunctuationOfflineCustomInitForm,
+  type ModelInitMode,
+  type PunctuationOfflineCustomInitFormState,
+} from '../../components/modelInit';
+import { fillOfflinePunctuationCustomConfigFromModelFolder } from '../../utils/punctuationCustomInitFill';
 import {
   getFileModelPath,
   getAssetModelPath,
@@ -57,6 +65,11 @@ import {
 const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_INPUT =
   'this is a sample line without capitals or commas it shows offline ct punctuation on device';
+
+const DEFAULT_OFFLINE_PUNCTUATION_CUSTOM_INIT: PunctuationOfflineCustomInitFormState =
+  {
+    fileSources: {},
+  };
 
 function isPunctuationNameCandidate(folder: string): boolean {
   const f = folder.toLowerCase();
@@ -128,6 +141,16 @@ export default function PunctuationScreen() {
   const [offlineSegConfig, setOfflineSegConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [engineReady, setEngineReady] = useState(false);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<PunctuationOfflineCustomInitFormState>(
+      DEFAULT_OFFLINE_PUNCTUATION_CUSTOM_INIT
+    );
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
 
   const engineRef = useRef<OfflinePunctuationEngine | null>(null);
   const textInRef = useRef<OfflineTextBufferRef | null>(null);
@@ -253,6 +276,87 @@ export default function PunctuationScreen() {
     };
   }, [releaseTextBuffers]);
 
+  const handleFillFromSelectedModel = useCallback(async () => {
+    if (!selectedFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
+    }
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    try {
+      const modelPath = resolvePunctuationModelPath(selectedFolder);
+      const fillResult =
+        await fillOfflinePunctuationCustomConfigFromModelFolder(
+          await toDetectSource(modelPath)
+        );
+      setCustomInitForm({ fileSources: fillResult.customConfig });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(selectedFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      setError(fillErr instanceof Error ? fillErr.message : String(fillErr));
+    } finally {
+      setCustomFillLoading(false);
+    }
+  }, [resolvePunctuationModelPath, selectedFolder]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm({ fileSources: {} });
+    setCustomFillHint(
+      'Scattered test: pick the CT-Transformer ONNX from a different location, then Initialize.'
+    );
+  }, []);
+
+  const handleInitEngineCustom = async () => {
+    setInitBusy(true);
+    setError(null);
+    setInitMessage(null);
+    setOutputText('');
+    setLastProcessingMs(null);
+    setLastSegmentStatus(null);
+    setEngineReady(false);
+    setInitializedSummary(null);
+    try {
+      await releaseTextBuffers();
+      if (engineRef.current) {
+        await engineRef.current.destroy();
+        engineRef.current = null;
+      }
+      const customConfig = { ...customInitForm.fileSources };
+      assertOfflinePunctuationCustomConfig(
+        customConfig as unknown as Record<string, unknown>
+      );
+      const nt = Math.max(1, parseInt(numThreads, 10) || 1);
+      const eng = await createOfflinePunctuation({
+        initMode: 'custom',
+        modelType: 'ct_transformer',
+        customConfig: customConfig as { ct_transformer: FileSource },
+        numThreads: nt,
+        provider: provider.trim() || 'cpu',
+        debug: debugPunct,
+      });
+      engineRef.current = eng;
+      setEngineReady(true);
+      setInitializedSummary('custom:ct_transformer');
+      setInitMessage(
+        `Ready: custom ct_transformer (instance ${eng.instanceId})`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Init failed: ${msg}`);
+    } finally {
+      setInitBusy(false);
+    }
+  };
+
   const handleInitEngine = async () => {
     if (!selectedFolder) {
       Alert.alert('Model', 'Select a punctuation model first.');
@@ -265,6 +369,7 @@ export default function PunctuationScreen() {
     setLastProcessingMs(null);
     setLastSegmentStatus(null);
     setEngineReady(false);
+    setInitializedSummary(null);
     try {
       await releaseTextBuffers();
       if (engineRef.current) {
@@ -282,6 +387,9 @@ export default function PunctuationScreen() {
       });
       engineRef.current = eng;
       setEngineReady(true);
+      setInitializedSummary(
+        selectedFolder ? getModelDisplayName(selectedFolder) : null
+      );
       setInitMessage(
         `Ready: ${getModelDisplayName(selectedFolder)} (instance ${
           eng.instanceId
@@ -387,6 +495,25 @@ export default function PunctuationScreen() {
           <Text style={styles.sectionTitle}>
             1) Model{loadingModels ? ' (loading…)' : ''}
           </Text>
+          <InitModeSelector
+            value={initMode}
+            onChange={setInitMode}
+            disabled={initBusy || punctuateBusy || customFillLoading}
+          />
+          <Text style={styles.hint}>
+            {initMode === 'auto'
+              ? 'Select an offline CT-Transformer catalog folder, then Initialize.'
+              : 'Pick the CT-Transformer ONNX (or Fill from catalog), then Initialize custom.'}
+          </Text>
+          {(initializedSummary || selectedFolder) && (
+            <Text style={[styles.hint, puncStyles.hintAfterAction]}>
+              {initializedSummary
+                ? `Initialized: ${initializedSummary}`
+                : selectedFolder
+                ? `Selected: ${getModelDisplayName(selectedFolder)}`
+                : ''}
+            </Text>
+          )}
           {loadingModels ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" />
@@ -430,6 +557,20 @@ export default function PunctuationScreen() {
               })}
             </View>
           )}
+          {initMode === 'custom' && canShowWorkflow ? (
+            <PunctuationOfflineCustomInitForm
+              value={customInitForm}
+              onChange={setCustomInitForm}
+              selectedCatalogModelId={selectedFolder}
+              onFillFromSelectedModel={() => {
+                handleFillFromSelectedModel().catch(() => {});
+              }}
+              onPrepareScatteredTest={handlePrepareScatteredTest}
+              fillLoading={customFillLoading}
+              disabled={initBusy || punctuateBusy}
+              fillHint={customFillHint}
+            />
+          ) : null}
         </View>
 
         {canShowWorkflow && (
@@ -483,14 +624,31 @@ export default function PunctuationScreen() {
                 </TouchableOpacity>
               </View>
               <TouchableOpacity
-                style={[styles.button, initBusy && styles.buttonDisabled]}
-                disabled={initBusy || !selectedFolder}
-                onPress={handleInitEngine}
+                style={[
+                  styles.button,
+                  (initBusy || customFillLoading) && styles.buttonDisabled,
+                ]}
+                disabled={
+                  initBusy ||
+                  customFillLoading ||
+                  (initMode === 'auto' ? !selectedFolder : false)
+                }
+                onPress={() => {
+                  if (initMode === 'custom') {
+                    handleInitEngineCustom();
+                    return;
+                  }
+                  handleInitEngine();
+                }}
               >
                 {initBusy ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.buttonText}>Initialize engine</Text>
+                  <Text style={styles.buttonText}>
+                    {initMode === 'custom'
+                      ? 'Initialize custom'
+                      : 'Initialize engine'}
+                  </Text>
                 )}
               </TouchableOpacity>
               {initMessage ? (

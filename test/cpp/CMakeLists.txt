@@ -15,6 +15,8 @@ set(JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni")
 set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-helper.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-detect-unified.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-model-path-fill.cpp"
+  "${MODEL_DETECT_DIR}/common/sherpa-onnx-validate-custom.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-model-detect-alignment.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-validate-alignment.cpp"
@@ -37,6 +39,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-vad-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-model-detect-vad.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-stt.cpp"
+  "${MODEL_DETECT_DIR}/stt/sherpa-onnx-validate-online-stt.cpp"
   "${MODEL_DETECT_DIR}/tts/sherpa-onnx-validate-tts.cpp"
   "${MODEL_DETECT_DIR}/enhancement/sherpa-onnx-validate-enhancement.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"
@@ -46,6 +49,7 @@ add_executable(model_detect_test
   "${MODEL_DETECT_TEST_DIR}/model_detect_test.cpp"
   "${MODEL_DETECT_TEST_DIR}/model_detect_test_utils.cpp"
   "${MODEL_DETECT_TEST_DIR}/tts_catalog_hints_test.cpp"
+  "${MODEL_DETECT_TEST_DIR}/custom_path_requirements_catalog_test.cpp"
 )
 
 target_sources(model_detect_test PRIVATE ${PRODUCTION_SOURCES})

@@ -31,10 +31,10 @@ import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
-import type { FileSource } from '../../fileio/types';
-import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
+import { resolveAlignmentOnnxPath } from '../resolveAlignmentOnnxPath';
 import { addSegmentLink, createSegmentLinkMap } from '../../segment';
 import type {
+  AlignmentAccurateModelConfig,
   AlignmentErrorCode,
   AlignmentWarning,
   AlignmentWarningCode,
@@ -336,7 +336,7 @@ interface RunAccurateChunkedForcedCtcInput {
   audioIn: OfflineAudioBufferIdSource;
   segmentOut: OfflineSegmentBufferIdSource;
   anchorSegmentBuffer: OfflineSegmentBufferIdSource;
-  modelSource: FileSource;
+  model: AlignmentAccurateModelConfig;
   granularity?: 'sentence' | 'word';
   language?: string;
   onProgress?: (progress: OrchestrationProgress) => void;
@@ -370,28 +370,7 @@ export async function runAccurateChunkedForcedCtc(
     getPipelineSegmentBufferInfo(anchorSegmentBufferId),
     getPipelineSegmentBufferInfo(segmentOutBufferId),
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
-    (async () => {
-      const dir = (
-        await resolveFileSourceForModelInit(input.modelSource)
-      ).trim();
-      if (!dir) {
-        throw createChunkedForcedCtcError(
-          'ALIGNMENT_MODEL_LOAD_FAILED',
-          'resolveFileSourceForModelInit returned empty for alignment modelSource.'
-        );
-      }
-      const det = await SherpaOnnx.detectAlignmentModel(dir, 'auto');
-      const onnx =
-        typeof det.paths?.model === 'string' ? det.paths.model.trim() : '';
-      if (!det.success || !onnx) {
-        const msg =
-          typeof det.error === 'string' && det.error.trim().length > 0
-            ? det.error.trim()
-            : 'Alignment model detection failed: no ONNX path.';
-        throw createChunkedForcedCtcError('ALIGNMENT_MODEL_LOAD_FAILED', msg);
-      }
-      return onnx;
-    })(),
+    resolveAlignmentOnnxPath(input.model),
   ]);
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);

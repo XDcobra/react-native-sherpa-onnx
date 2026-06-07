@@ -99,30 +99,6 @@ static const char* EmptyOrPath(const std::string& s) {
     return s.empty() ? "(empty)" : s.c_str();
 }
 
-SttModelKind ParseSttModelType(const std::string& modelType) {
-    if (modelType == "transducer") return SttModelKind::kTransducer;
-    if (modelType == "nemo_transducer") return SttModelKind::kNemoTransducer;
-    if (modelType == "paraformer") return SttModelKind::kParaformer;
-    if (modelType == "nemo_ctc") return SttModelKind::kNemoCtc;
-    if (modelType == "wenet_ctc") return SttModelKind::kWenetCtc;
-    if (modelType == "sense_voice") return SttModelKind::kSenseVoice;
-    if (modelType == "zipformer_ctc" || modelType == "ctc") return SttModelKind::kZipformerCtc;
-    if (modelType == "whisper") return SttModelKind::kWhisper;
-    if (modelType == "funasr_nano") return SttModelKind::kFunAsrNano;
-    if (modelType == "qwen3_asr") return SttModelKind::kQwen3Asr;
-    if (modelType == "cohere_transcribe") return SttModelKind::kCohereTranscribe;
-    if (modelType == "fire_red_asr") return SttModelKind::kFireRedAsr;
-    if (modelType == "moonshine") return SttModelKind::kMoonshine;
-    if (modelType == "moonshine_v2") return SttModelKind::kMoonshineV2;
-    if (modelType == "dolphin") return SttModelKind::kDolphin;
-    if (modelType == "canary") return SttModelKind::kCanary;
-    if (modelType == "omnilingual") return SttModelKind::kOmnilingual;
-    if (modelType == "medasr") return SttModelKind::kMedAsr;
-    if (modelType == "telespeech_ctc") return SttModelKind::kTeleSpeechCtc;
-    if (modelType == "tone_ctc") return SttModelKind::kToneCtc;
-    return SttModelKind::kUnknown;
-}
-
 /** Returns true if \p cap and hints/paths support the given \p kind (required files present). */
 static bool CapabilitySupportsKind(
     SttModelKind kind,
@@ -989,6 +965,30 @@ static SttDetectResult DetectSttModelFromFiles(
 }
 
 } // namespace
+
+SttModelKind ParseSttModelType(const std::string& modelType) {
+    if (modelType == "transducer") return SttModelKind::kTransducer;
+    if (modelType == "nemo_transducer") return SttModelKind::kNemoTransducer;
+    if (modelType == "paraformer") return SttModelKind::kParaformer;
+    if (modelType == "nemo_ctc") return SttModelKind::kNemoCtc;
+    if (modelType == "wenet_ctc") return SttModelKind::kWenetCtc;
+    if (modelType == "sense_voice") return SttModelKind::kSenseVoice;
+    if (modelType == "zipformer_ctc" || modelType == "ctc") return SttModelKind::kZipformerCtc;
+    if (modelType == "whisper") return SttModelKind::kWhisper;
+    if (modelType == "funasr_nano") return SttModelKind::kFunAsrNano;
+    if (modelType == "qwen3_asr") return SttModelKind::kQwen3Asr;
+    if (modelType == "cohere_transcribe") return SttModelKind::kCohereTranscribe;
+    if (modelType == "fire_red_asr") return SttModelKind::kFireRedAsr;
+    if (modelType == "moonshine") return SttModelKind::kMoonshine;
+    if (modelType == "moonshine_v2") return SttModelKind::kMoonshineV2;
+    if (modelType == "dolphin") return SttModelKind::kDolphin;
+    if (modelType == "canary") return SttModelKind::kCanary;
+    if (modelType == "omnilingual") return SttModelKind::kOmnilingual;
+    if (modelType == "medasr") return SttModelKind::kMedAsr;
+    if (modelType == "telespeech_ctc") return SttModelKind::kTeleSpeechCtc;
+    if (modelType == "tone_ctc") return SttModelKind::kToneCtc;
+    return SttModelKind::kUnknown;
+}
 
 SttDetectResult DetectSttModel(
     const std::optional<std::string>& model_dir_opt,

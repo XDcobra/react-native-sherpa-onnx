@@ -89,6 +89,36 @@ describe('AlignmentEngine options validation', () => {
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
+  it('emits ALIGNMENT_MODEL_PATH_INVALID for custom mode with invalid customConfig', async () => {
+    const engine = createAlignment();
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'accurate',
+        initMode: 'custom',
+        modelType: 'wav2vec2',
+        customConfig: { model: '/tmp/model.onnx' },
+        segmentation: { mode: 'off' },
+      } as any)
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_MODEL_PATH_INVALID' });
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
+
+  it('emits ALIGNMENT_MODEL_PATH_INVALID for custom mode with wrong modelType', async () => {
+    const engine = createAlignment();
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'accurate',
+        initMode: 'custom',
+        modelType: 'other',
+        customConfig: { model: { kind: 'fs', path: '/tmp/model.onnx' } },
+        segmentation: { mode: 'off' },
+      } as any)
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_MODEL_PATH_INVALID' });
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
+
   it('emits ALIGNMENT_GRANULARITY_INVALID for disallowed granularity', async () => {
     const engine = createAlignment();
 

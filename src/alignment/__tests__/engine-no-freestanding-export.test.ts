@@ -30,8 +30,13 @@ describe('alignment public exports', () => {
 
   it('exports only runtime alignment APIs expected in P1', () => {
     expect(Object.keys(alignment).sort()).toEqual([
+      'AlignmentErrorCode',
+      'accurateOptionsToModelConfig',
+      'assertAlignmentCustomConfig',
       'createAlignment',
       'detectAlignmentModel',
+      'resolveAlignmentCustomConfigPaths',
+      'resolveAlignmentOnnxPath',
     ]);
   });
 });

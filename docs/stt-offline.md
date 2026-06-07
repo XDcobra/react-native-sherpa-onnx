@@ -2,40 +2,17 @@
 
 ## Introduction
 
-On-device batch transcription with a **pipeline-first** API:
+On-device batch transcription with a **pipeline-first** API.
 
-- **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — file-backed or in-memory PCM.
-- **Output:** offline pipeline text buffer ([`textbuffer` — offline](textbuffer-offline.md)) — STT writes the hypothesis and optional token/timestamp metadata into a buffer you allocate (`createEmptyOfflineTextBuffer`).
-- **Engine:** `createSTT` exposes **`transcribe(audio, textOut)`** (plus `setConfig` / `destroy`). There are **no** JS-side `getSttResult*` methods or `resultId`-based lazy getters anymore; all transcript payload access goes through **textbuffer** slice APIs. `transcribe` writes directly into the output buffer and returns a `SttTranscribeResult` with orchestration stats (segments, time).
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | File-backed or in-memory PCM |
+| **Output** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer from `createEmptyOfflineTextBuffer`; STT writes the hypothesis and optional token/timestamp metadata |
+| **Engine** | `SttEngine` via `createSTT` | `transcribe(audio, textOut)`, `setConfig`, `destroy`; returns `SttTranscribeResult` with orchestration stats (segments, time). Read transcript data via textbuffer slice APIs |
 
 Import path: `react-native-sherpa-onnx/stt`
 
-For live/real-time recognition, see [Streaming STT](stt-streaming.md). 
-
-## Models and paths
-
-- `FileSource` (type from `react-native-sherpa-onnx/fileio`): `FileSource`
-- In-app model downloads: [download-manager.md](download-manager.md) with category `ModelCategory.Stt`
-- Model detection without engine init: `detectSttModel(...)` — see [model-detect.md](model-detect.md) for unified `detectModel` when category is unknown
-- Model setup and expected files: [model-setup.md](model-setup.md)
-- Hotwords details: [hotwords.md](hotwords.md)
-
-## Validation required files
-
-`detectSttModel(...)` and `createSTT(...)` both validate required files per detected model type.
-
-| Model type | Typical required files |
-| --- | --- |
-| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` |
-| `paraformer` | `model*.onnx` or paraformer model file, plus `tokens.txt` |
-| `zipformer_ctc`, `ctc`, `nemo_ctc`, `wenet_ctc`, `sense_voice`, `telespeech_ctc` | `model*.onnx`, `tokens.txt` |
-| `whisper` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` |
-| `qwen3_asr` | qwen3 frontend/encoder/decoder/tokenizer files |
-| `cohere_transcribe` | cohere encoder/decoder files, plus `tokens.txt` |
-| `fire_red_asr`, `canary` | encoder and decoder files |
-| `moonshine`, `dolphin`, `omnilingual`, `medasr`, `funasr_nano` | model-family specific required files |
-
-If validation fails, `success` is `false` and `error` contains the missing-file reason.
+For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
 ## Quick start
 
@@ -177,38 +154,13 @@ await engine.destroy();
 
 `transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string** for the first argument; the same idea applies to **`textOut`** (`OfflineTextBufferRef` | handle | string). Prefer passing **refs** so call sites stay typed (see [audiobuffer — offline](audiobuffer-offline.md) / [textbuffer — offline](textbuffer-offline.md)). Raw strings are optional; malformed ids are rejected early with `AUDIO_INVALID_ARGUMENT` or `TEXT_INVALID_ARGUMENT`. Timestamps, durations, lang, emotion, and other dimensions use the matching **`getOfflineTextBuffer*`** helpers; see [textbuffer-offline.md](textbuffer-offline.md).
 
-## Data model and lifetime
-
-| Item | Behavior |
-| --- | --- |
-| **Audio buffer** | Created via `audiobuffer` (e.g. `createOfflineAudioBufferFromFile`). Released with `releasePipelineAudioBuffer` when no longer needed. |
-| **Text output buffer** | Empty offline buffer from `createEmptyOfflineTextBuffer`. **`transcribe`** fills it on the native side. Read via **`getPipelineTextBufferInfo`** + textbuffer getters. Released with **`releasePipelineTextBuffer`**. |
-| **Re-transcription** | Use a **new** empty offline text buffer per decode unless your app explicitly manages buffer reuse; writing again into the same populated buffer is rejected natively (`TEXT_ALREADY_POPULATED` / `SttErrorCode.TEXT_ALREADY_POPULATED`). |
-| **STT engine** | Holds the loaded offline model. Call **`destroy()`** when done. Destroying the engine does **not** release pipeline buffers you still own. |
-
-Slice defaults and limits for **text** payloads are defined on the textbuffer module:
-
-| Area | Constants (import from `react-native-sherpa-onnx/textbuffer`) |
-| --- | --- |
-| Default / max slice sizes | `TEXT_DEFAULT_SLICE_COUNT`, `TEXT_MAX_SLICE_COUNT` |
-
-Use **`getPipelineTextBufferInfo(textOut)`** to obtain `utf16Length`, `tokenCount`, `timestampCount`, etc., then request slices with explicit `start` / `maxCount` (or full range up to limits).
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Execution provider | Optional `provider` on init; details: [execution-providers.md](execution-providers.md) |
-| Audio preprocessing | Use [audio-conversion.md](audio-conversion.md) when the source is not suitable PCM/WAV |
-| Instance lifetime | Always call **`destroy()`** on the STT engine when done |
-
 ## API reference
 
 Signatures below are exported from **`react-native-sherpa-onnx/stt`**. Reading transcript data is documented under **`react-native-sherpa-onnx/textbuffer`** ([textbuffer-offline.md](textbuffer-offline.md)).
 
 ### Detection and factory
 
-For cross-feature catalog scans use unified detection: [model-detect.md](model-detect.md). The APIs below are STT-specific (required files, `detectedModels`, `paths`).
+For cross-feature catalog scans use unified detection: [model-detect.md](model-detect.md). STT-specific validation and `paths` below.
 
 #### `detectSttModel(source, options?)`
 
@@ -221,12 +173,14 @@ function detectSttModel(
 
 ```ts
 const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/sherpa-onnx-whisper-tiny-en' });
-console.log(det.success, det.modelType, det.detectedModels);
+console.log(det.success, det.modelType, det.detectedModels, det.paths);
 ```
+
+On folder scans, `paths` contains resolved non-empty config keys (`encoder`, `tokens`, `whisperEncoder`, …) suitable for custom init or `validateCustomModelPaths`.
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
-For multi-location probing (bundled → sandbox → PAD → absolute path), use `kind: 'auto'` with an explicit `tryOrder` — see [model-setup.md — kind: auto](model-setup.md).
+For multi-location probing (bundled → sandbox → PAD → absolute path), use `kind: 'auto'` with an explicit `tryOrder` — see [model-setup.md — `kind: 'auto'`](model-setup.md#kind-auto--probe-multiple-locations).
 
 #### `createSTT(options)`
 
@@ -311,6 +265,76 @@ import {
 ```
 
 See [textbuffer-offline.md](textbuffer-offline.md).
+
+### Buffer data model and lifetime
+
+| Item | Behavior |
+| --- | --- |
+| **Audio buffer** | Created via `audiobuffer` (e.g. `createOfflineAudioBufferFromFile`). Released with `releasePipelineAudioBuffer` when no longer needed. |
+| **Text output buffer** | Empty offline buffer from `createEmptyOfflineTextBuffer`. **`transcribe`** fills it on the native side. Read via **`getPipelineTextBufferInfo`** + textbuffer getters. Released with **`releasePipelineTextBuffer`**. |
+| **Re-transcription** | Use a **new** empty offline text buffer per decode unless your app explicitly manages buffer reuse; writing again into the same populated buffer is rejected natively (`TEXT_ALREADY_POPULATED` / `SttErrorCode.TEXT_ALREADY_POPULATED`). |
+| **STT engine** | Holds the loaded offline model. Call **`destroy()`** when done. Destroying the engine does **not** release pipeline buffers you still own. |
+
+Slice defaults and limits for **text** payloads are defined on the textbuffer module:
+
+| Area | Constants (import from `react-native-sherpa-onnx/textbuffer`) |
+| --- | --- |
+| Default / max slice sizes | `TEXT_DEFAULT_SLICE_COUNT`, `TEXT_MAX_SLICE_COUNT` |
+
+Use **`getPipelineTextBufferInfo(textOut)`** to obtain `utf16Length`, `tokenCount`, `timestampCount`, etc., then request slices with explicit `start` / `maxCount` (or full range up to limits).
+
+## Models and paths
+
+- **`FileSource`** — see [model-setup.md](model-setup.md) for building paths (bundled, downloaded, PAD/ODR).
+- **Detection & init modes** — [model-detect.md](model-detect.md) (preflight, auto vs custom).
+- **Downloads:** [download-manager.md](download-manager.md) · category `ModelCategory.Stt`
+- **Hotwords:** [hotwords.md](hotwords.md)
+
+## Validation required files
+
+`detectSttModel` and `createSTT` validate the same required files per detected type. If validation fails, `success` is `false` and `error` describes missing files.
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` | `bpeVocab` | `encoder`, `decoder`, `joiner`, `tokens` |
+| `paraformer` | `model*.onnx` or paraformer model, `tokens.txt` | `paraformerModel`, `encoder`, `decoder` | `paraformerModel` or `encoder`+`decoder`, `tokens` |
+| `zipformer_ctc`, `ctc`, `nemo_ctc`, `wenet_ctc`, `sense_voice`, `telespeech_ctc` | `model*.onnx`, `tokens.txt` | — | `ctcModel`, `tokens` |
+| `whisper` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` | — | `whisperEncoder`, `whisperDecoder`, `tokens` |
+| `qwen3_asr` | qwen3 frontend / encoder / decoder / tokenizer files | — | family-specific keys |
+| `cohere_transcribe` | cohere encoder / decoder, `tokens.txt` | — | family-specific keys |
+| `fire_red_asr`, `canary` | encoder, decoder | — | family-specific keys |
+| `moonshine`, `dolphin`, `omnilingual`, `medasr`, `funasr_nano` | model-family specific | — | query `getCustomModelPathRequirements('stt', modelType)` |
+
+Query exact keys: `getCustomModelPathRequirements('stt', modelType)` from `react-native-sherpa-onnx/detect`.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Use when files are scattered or folder detection fails. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `transducer` | `encoder`, `decoder`, `joiner`, `tokens` |
+| `whisper` | `whisperEncoder`, `whisperDecoder`, `tokens` |
+| `paraformer` | `paraformerModel` or `encoder`+`decoder`, `tokens` |
+| CTC families | `ctcModel`, `tokens` |
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+
+const engine = await createSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/data/models/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/data/models/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/data/models/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+  },
+  hotwordsFile: { kind: 'fs', path: '/data/hotwords.txt' },
+});
+```
+
+Auxiliary paths (`hotwordsFile`, `bpeVocab`, `ruleFsts`, `ruleFars`) also accept `FileSource`. Full key list: `getCustomModelPathRequirements('stt', modelType)`.
 
 ## Segmentation
 
@@ -591,6 +615,7 @@ Quality may degrade slightly at segment boundaries. See [segmentation-engine.md]
 - [Hotwords](hotwords.md)
 - [Model Setup](model-setup.md)
 - [Execution Providers](execution-providers.md)
+- [Audio Conversion](audio-conversion.md)
 
 ## Native crash diagnostics
 
