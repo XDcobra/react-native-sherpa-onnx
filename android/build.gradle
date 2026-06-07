@@ -72,9 +72,7 @@ android {
       }
     }
 
-    // Supported ABIs; SYMBOL_TABLE for Play native debug metadata in consuming apps.
     ndk {
-      debugSymbolLevel 'SYMBOL_TABLE'
       abiFilters.addAll(["arm64-v8a", "armeabi-v7a", "x86", "x86_64"])
     }
   }
@@ -95,6 +93,9 @@ android {
   buildTypes {
     release {
       minifyEnabled = false
+      ndk {
+        debugSymbolLevel 'SYMBOL_TABLE'
+      }
     }
   }
 
