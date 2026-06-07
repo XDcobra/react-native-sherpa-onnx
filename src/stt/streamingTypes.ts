@@ -13,7 +13,6 @@ export type OnlineSTTModelType =
   | 'nemo_transducer'
   | 'paraformer'
   | 'zipformer2_ctc'
-  | 'wenet_ctc'
   | 'nemo_ctc'
   | 'tone_ctc';
 
@@ -23,7 +22,6 @@ export const ONLINE_STT_MODEL_TYPES: readonly OnlineSTTModelType[] = [
   'nemo_transducer',
   'paraformer',
   'zipformer2_ctc',
-  'wenet_ctc',
   'nemo_ctc',
   'tone_ctc',
 ] as const;

@@ -25,12 +25,10 @@ static const SttFieldRequirement kTransducerReqs[] = {
     {"bpeVocab", &SttModelPaths::bpeVocab, false},
 };
 
-// Offline paraformer uses paraformerModel; streaming paraformer uses encoder+decoder.
-// Both are valid — validated via custom logic in ValidateSttPaths, not via this table.
+// Offline paraformer: single model.onnx via paraformerModel (+ tokens).
+// Streaming encoder+decoder layout lives under stt_streaming (GetOnlineSttPathRequirements).
 static const SttFieldRequirement kParaformerReqs[] = {
-    {"paraformerModel", &SttModelPaths::paraformerModel, false},
-    {"encoder",         &SttModelPaths::encoder,         false},
-    {"decoder",         &SttModelPaths::decoder,         false},
+    {"paraformerModel", &SttModelPaths::paraformerModel, true},
     {"tokens",          &SttModelPaths::tokens,          true},
 };
 
@@ -70,11 +68,13 @@ static const SttFieldRequirement kMoonshineReqs[] = {
     {"moonshineEncoder",         &SttModelPaths::moonshineEncoder,         true},
     {"moonshineUncachedDecoder", &SttModelPaths::moonshineUncachedDecoder, true},
     {"moonshineCachedDecoder",   &SttModelPaths::moonshineCachedDecoder,   true},
+    {"tokens",                   &SttModelPaths::tokens,                   true},
 };
 
 static const SttFieldRequirement kMoonshineV2Reqs[] = {
     {"moonshineEncoder",       &SttModelPaths::moonshineEncoder,       true},
     {"moonshineMergedDecoder", &SttModelPaths::moonshineMergedDecoder, true},
+    {"tokens",                 &SttModelPaths::tokens,                 true},
 };
 
 static const SttFieldRequirement kFireRedReqs[] = {
@@ -216,16 +216,6 @@ SttValidationResult ValidateSttPaths(
     for (size_t i = 0; i < count; ++i) {
         if (reqs[i].required && (paths.*(reqs[i].field)).empty()) {
             result.missingRequired.push_back(reqs[i].fieldName);
-        }
-    }
-
-    // Paraformer: offline uses paraformerModel, streaming uses encoder+decoder.
-    // At least one variant must be present.
-    if (kind == SttModelKind::kParaformer) {
-        bool hasOffline = !paths.paraformerModel.empty();
-        bool hasStreaming = !paths.encoder.empty() && !paths.decoder.empty();
-        if (!hasOffline && !hasStreaming) {
-            result.missingRequired.push_back("paraformerModel (or encoder+decoder for streaming)");
         }
     }
 

@@ -36,7 +36,6 @@ export type StreamingSttCustomConfigByModelType = {
   nemo_transducer: StreamingTransducerCustomConfig;
   paraformer: StreamingParaformerCustomConfig;
   zipformer2_ctc: StreamingSingleModelCustomConfig;
-  wenet_ctc: StreamingSingleModelCustomConfig;
   nemo_ctc: StreamingSingleModelCustomConfig;
   tone_ctc: StreamingSingleModelCustomConfig;
 };

@@ -20,9 +20,7 @@ import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { FileSourceSlotPicker } from './FileSourceSlotPicker';
 import { labelForStreamingSttCustomPathKey } from '../../utils/streamingCustomInitLabels';
 
-const STREAMING_CUSTOM_MODEL_TYPES = ONLINE_STT_MODEL_TYPES.filter(
-  (type): type is OnlineSTTModelType => type !== 'wenet_ctc'
-);
+const STREAMING_CUSTOM_MODEL_TYPES = ONLINE_STT_MODEL_TYPES;
 
 export type StreamingSttCustomInitFormState = {
   modelType: OnlineSTTModelType;

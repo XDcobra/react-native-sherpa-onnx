@@ -77,7 +77,6 @@ function scanOnlinePaths(
     case 'zipformer2_ctc':
     case 'nemo_ctc':
     case 'tone_ctc':
-    case 'wenet_ctc':
       return {
         model: findOnnxByToken(files, 'model'),
         tokens,
