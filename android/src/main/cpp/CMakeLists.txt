@@ -92,6 +92,7 @@ set(SOURCES
     jni/model_detect/common/sherpa-onnx-validate-custom.cpp
     jni/model_detect/common/sherpa-onnx-unified-detect-wrapper.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
+    jni/model_detect/common/model_language_catalog.cpp
     jni/model_detect/common/sherpa-onnx-ort-guard-utils.cpp
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp

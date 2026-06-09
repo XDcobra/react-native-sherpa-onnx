@@ -80,7 +80,7 @@ jobject SttDetectResultToJava(JNIEnv* env, const SttDetectResult& result) {
     env->DeleteLocalRef(detectionSourcesList);
   }
 
-  jobject derivedLangsList = BuildStringList(env, result.derivedLanguages);
+  jobject derivedLangsList = BuildPublicLanguageRowList(env, result.derivedLanguages);
   if (derivedLangsList) {
     jstring keyLangs = env->NewStringUTF("languages");
     env->CallObjectMethod(map, mapPut, keyLangs, derivedLangsList);

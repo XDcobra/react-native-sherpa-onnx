@@ -1,61 +1,82 @@
-import { resolvePublicLanguageHints } from '../../resolvePublicLanguageHints';
+import {
+  iso6391HintsForSttModelType,
+  iso6391HintsForTtsModelType,
+  getWhisperLanguages,
+  getFunasrNanoLanguages,
+  getFunasrMltNanoLanguages,
+  sttModelLanguagesForModelType,
+  SUPERTONIC3_TTS_ISO6391_HINTS,
+} from '../../generated/catalog';
+import { publicLanguageHintsFromNative } from '../../resolvePublicLanguageHints';
 import { ModelCategory } from '../../../download/types';
-import { iso6391HintsForTtsModelType } from '../hints';
-import { isSupertonic3ModelKey } from '../supertonic';
-import { SUPERTONIC3_TTS_ISO6391_HINTS } from '../supertonic3';
-import { SUPERTONIC_TTS_ISO6391_HINTS } from '../supertonic';
+import fs from 'node:fs';
+import path from 'node:path';
 
-describe('isSupertonic3ModelKey', () => {
-  it('detects Supertonic 3 catalog ids', () => {
-    expect(
-      isSupertonic3ModelKey('sherpa-onnx-supertonic-3-tts-int8-2026-05-11')
-    ).toBe(true);
-    expect(isSupertonic3ModelKey('supertonic-v3-demo')).toBe(true);
-    expect(isSupertonic3ModelKey('supertonic3_release')).toBe(true);
-  });
-
-  it('does not treat legacy Supertonic bundles as v3', () => {
-    expect(
-      isSupertonic3ModelKey('sherpa-onnx-supertonic-tts-int8-2026-03-06')
-    ).toBe(false);
-    expect(isSupertonic3ModelKey('supertonic')).toBe(false);
-  });
-});
-
-describe('iso6391HintsForTtsModelType (supertonic)', () => {
-  it('uses legacy hints without a v3 model key', () => {
+describe('generated catalog (TTS)', () => {
+  it('iso6391HintsForTtsModelType picks Supertonic 3 vs legacy', () => {
     expect(iso6391HintsForTtsModelType('supertonic')).toEqual([
-      ...SUPERTONIC_TTS_ISO6391_HINTS,
+      'en',
+      'ko',
+      'fr',
+      'es',
+      'pt',
     ]);
     expect(
       iso6391HintsForTtsModelType(
         'supertonic',
-        'sherpa-onnx-supertonic-tts-int8-2026-03-06'
+        'sherpa-onnx-supertonic-3-tts-int8-2026-05-11'
       )
-    ).toEqual([...SUPERTONIC_TTS_ISO6391_HINTS]);
+    ).toEqual([...SUPERTONIC3_TTS_ISO6391_HINTS]);
   });
 
-  it('uses Supertonic 3 hints when model key contains version 3', () => {
-    const hints = iso6391HintsForTtsModelType(
-      'supertonic',
-      'sherpa-onnx-supertonic-3-tts-int8-2026-05-11'
-    );
-    expect(hints).toEqual([...SUPERTONIC3_TTS_ISO6391_HINTS]);
-    expect(hints).toContain('na');
-    expect(hints).toContain('de');
-    expect(hints).toHaveLength(32);
-  });
-});
-
-describe('resolvePublicLanguageHints (supertonic catalog)', () => {
-  it('routes Supertonic 3 through modelKey', () => {
-    const rows = resolvePublicLanguageHints({
+  it('publicLanguageHintsFromNative normalizes structured native rows', () => {
+    const rows = publicLanguageHintsFromNative({
       domain: ModelCategory.Tts,
       modelType: 'supertonic',
       modelKey: 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11',
+      rawRows: [{ iso6391Hint: 'EN', id: 'en' }],
     });
-    expect(rows.map((r) => r.iso6391Hint)).toEqual([
-      ...SUPERTONIC3_TTS_ISO6391_HINTS,
-    ]);
+    expect(rows).toEqual([{ iso6391Hint: 'en', id: 'en' }]);
+  });
+
+  it('publicLanguageHintsFromNative returns empty when native sends no rows', () => {
+    const rows = publicLanguageHintsFromNative({
+      domain: ModelCategory.Tts,
+      modelType: 'supertonic',
+      modelKey: 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11',
+      rawRows: [],
+    });
+    expect(rows).toEqual([]);
+  });
+});
+
+describe('generated catalog parity with JSON', () => {
+  const catalogPath = path.join(
+    __dirname,
+    '../../../../catalog/model-language-catalog.json'
+  );
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+
+  it('whisper picker matches JSON entries', () => {
+    expect(getWhisperLanguages()).toEqual(catalog.stt.whisper.entries);
+  });
+
+  it('funasr picker variants come from JSON pickerVariants', () => {
+    const funasr = catalog.stt.funasr_nano;
+    expect(getFunasrNanoLanguages()).toEqual(funasr.pickerVariants.nano);
+    expect(getFunasrMltNanoLanguages()).toEqual(funasr.pickerVariants.mlt);
+  });
+
+  it('funasr sttModelLanguagesForModelType uses entries not duplicated picker concat', () => {
+    expect(sttModelLanguagesForModelType('funasr_nano')).toEqual(
+      catalog.stt.funasr_nano.entries
+    );
+  });
+
+  it('STT whisper hints derived from JSON entries', () => {
+    const hints = iso6391HintsForSttModelType('whisper');
+    expect(hints?.length).toBeGreaterThan(50);
+    expect(hints).toContain('en');
+    expect(hints).toContain('yue');
   });
 });

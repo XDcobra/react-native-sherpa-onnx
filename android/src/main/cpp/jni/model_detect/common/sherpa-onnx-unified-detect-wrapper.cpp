@@ -59,7 +59,7 @@ jobject UnifiedDetectResultToJava(JNIEnv* env, const UnifiedModelDetectResult& r
         env->DeleteLocalRef(detectedList);
     }
 
-    jobject languagesList = BuildStringList(env, result.languages);
+    jobject languagesList = BuildPublicLanguageRowList(env, result.languages);
     if (languagesList) {
         jstring keyLang = env->NewStringUTF("languages");
         env->CallObjectMethod(map, mapPut, keyLang, languagesList);

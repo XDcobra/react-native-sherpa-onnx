@@ -9,6 +9,12 @@
 
 namespace sherpaonnx {
 
+/** Public language row: filter hint + modelOptions / API id (from catalog SSOT). */
+struct PublicLanguageRow {
+    std::string iso6391Hint;
+    std::string id;
+};
+
 enum class SttModelKind {
     kUnknown,
     kTransducer,
@@ -60,6 +66,8 @@ enum class DetectionSource {
     kExplicitModelType,
     /** files vector was empty: name-only heuristics only; no path validation. */
     kNameOnly,
+    /** Curated language catalog when folder/name heuristics returned no tags. */
+    kCuratedCatalog,
 };
 
 /** Stable literals for JNI / NSDictionary / TypeScript (must match src/types/modelDetect.ts). */
@@ -70,6 +78,7 @@ inline const char* DetectionSourceToLiteral(DetectionSource s) {
         case DetectionSource::kFallbackOrder: return "fallbackOrder";
         case DetectionSource::kExplicitModelType: return "explicitModelType";
         case DetectionSource::kNameOnly: return "nameOnly";
+        case DetectionSource::kCuratedCatalog: return "curatedCatalog";
     }
     return "fileListing";
 }
@@ -273,7 +282,7 @@ struct SttDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name (release id stem); not from model files. */
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
     std::string quantization;
 };
@@ -289,7 +298,7 @@ struct TtsDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name (release id stem); not from lexicon files. */
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
     std::string quantization;
     /** tiny, small, medium, large, unknown — from asset/folder name heuristics. */
@@ -307,7 +316,7 @@ struct EnhancementDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name; currently usually empty for enhancement. */
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
     std::string quantization;
 };
@@ -323,7 +332,7 @@ struct PunctuationDetectResult {
     PunctuationModelKind selectedKind = PunctuationModelKind::kUnknown;
     PunctuationModelPaths paths;
     std::vector<DetectionSource> detectionSources;
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
 };
 
@@ -336,7 +345,7 @@ struct AlignmentDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from folder name; currently empty for alignment. */
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
     std::string quantization;
 };
@@ -352,7 +361,7 @@ struct VadDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic languages from asset/folder name; usually empty for VAD. */
-    std::vector<std::string> derivedLanguages;
+    std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
     std::string quantization;
 };

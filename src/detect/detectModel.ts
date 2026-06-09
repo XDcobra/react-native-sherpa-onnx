@@ -6,7 +6,10 @@ import {
   type ResolvedDetectInput,
 } from './resolveModelInput';
 import type { FileSource } from '../fileio/types';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import {
   ModelCategory,
   type Quantization,
@@ -138,24 +141,17 @@ function normalizeSizeTier(raw: string | undefined): SizeTier {
   return 'unknown';
 }
 
-function readRawLanguages(raw: { languages?: unknown }): string[] {
-  if (!Array.isArray(raw.languages)) {
-    return [];
-  }
-  return raw.languages.filter((x): x is string => typeof x === 'string');
-}
-
 function languagesFromNative(
   domain: ModelCategory,
   modelType: string,
   modelKey: string,
-  rawLangs: string[]
+  rawLanguages: unknown
 ): string[] {
-  const rows = resolvePublicLanguageHints({
+  const rows = publicLanguageHintsFromNative({
     domain,
     modelType: modelType !== 'unknown' ? modelType : undefined,
     modelKey,
-    rawFromNative: rawLangs,
+    rawRows: readPublicLanguageRows(rawLanguages),
   });
   return rows.map((r) => r.iso6391Hint);
 }
@@ -175,7 +171,7 @@ function buildMatchedResult(
       category,
       modelType,
       modelKey,
-      readRawLanguages(raw)
+      raw.languages
     ),
     quantization: normalizeQuantization(raw.quantization),
     sizeTier: normalizeSizeTier(raw.sizeTier),

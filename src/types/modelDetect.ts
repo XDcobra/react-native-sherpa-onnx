@@ -9,6 +9,7 @@ export const DETECTION_SOURCES = [
   'fallbackOrder',
   'explicitModelType',
   'nameOnly',
+  'curatedCatalog',
 ] as const;
 
 export type DetectionSource = (typeof DETECTION_SOURCES)[number];

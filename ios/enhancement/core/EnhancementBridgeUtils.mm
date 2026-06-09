@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #include "EnhancementBridgeUtils.h"
+#import "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 
 namespace sherpaonnx {
 namespace enhancement {
@@ -43,11 +44,8 @@ NSDictionary *EnhancementDetectResultToDict(const sherpaonnx::EnhancementDetectR
   }
 
   if (!result.derivedLanguages.empty()) {
-    NSMutableArray *languages = [NSMutableArray array];
-    for (const auto &id : result.derivedLanguages) {
-      [languages addObject:[NSString stringWithUTF8String:id.c_str()] ?: @""];
-    }
-    dict[@"languages"] = languages;
+    dict[@"languages"] =
+        sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(result.derivedLanguages);
   }
 
   if (!result.quantization.empty()) {

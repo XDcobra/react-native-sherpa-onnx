@@ -191,6 +191,8 @@
     "prettier": "npx prettier --write \"src/**/*.{js,ts,tsx}\" \"example/src/**/*.{js,ts,tsx}\" \"scripts/**/*.{js,ts,tsx}\"",
     "test": "jest",
     "check:ios-turbo-signatures": "node scripts/check-ios-turbo-signatures.mjs",
+    "generate:model-language-catalog": "node scripts/generate-model-language-catalog.mjs",
+    "check:model-language-catalog": "node scripts/check-model-language-catalog.mjs",
     "verdaccio:start": "VERDACCIO_BODY_SIZE_LIMIT=100mb verdaccio --config verdaccio.config.yaml",
     "registry:local": "node scripts/switch-registry.js local",
     "registry:public": "node scripts/switch-registry.js public",

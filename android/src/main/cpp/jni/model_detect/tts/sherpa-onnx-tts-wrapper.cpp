@@ -73,7 +73,7 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
     env->DeleteLocalRef(detectionSourcesList);
   }
 
-  jobject derivedLangs = BuildStringList(env, result.derivedLanguages);
+  jobject derivedLangs = BuildPublicLanguageRowList(env, result.derivedLanguages);
   if (derivedLangs) {
     jstring keyLang = env->NewStringUTF("languages");
     env->CallObjectMethod(map, mapPut, keyLang, derivedLangs);

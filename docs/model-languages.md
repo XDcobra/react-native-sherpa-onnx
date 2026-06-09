@@ -1,6 +1,6 @@
 # Model language helpers
 
-Language tables and normalized hints for picker UI and `modelOptions` wiring.
+Language catalog, normalized hints, and picker UI wiring.
 
 **Import:** `react-native-sherpa-onnx/model-languages`
 
@@ -8,10 +8,27 @@ Language tables and normalized hints for picker UI and `modelOptions` wiring.
 | --- | --- |
 | [model-detect.md](model-detect.md) | What model type / category is this pack? |
 | **This page** | Which language codes can I show in a picker? |
+| [catalog/README.md](../catalog/README.md) | How to edit the JSON catalog and regenerate |
 | Feature docs | Per-family `modelOptions` (e.g. `whisper.language`) |
 
 > [!CAUTION]
 > APIs here are **convenience helpers** — commonly referenced language codes and labels, not a guarantee that your exact checkpoint supports every entry. Confirm supported languages in upstream model documentation.
+
+---
+
+## Catalog (single source of truth)
+
+Curated language lists live in [`catalog/model-language-catalog.json`](../catalog/model-language-catalog.json). A build step emits:
+
+- C++ embed data used by native `detectTtsModel` / `detectSttModel` when folder heuristics return no tags
+- TypeScript picker exports in `src/model-languages/generated/catalog.ts`
+
+```bash
+yarn generate:model-language-catalog   # after editing JSON
+yarn check:model-language-catalog      # CI drift check
+```
+
+`detect*Model().languages` is authoritative: each entry is `{ iso6391Hint, id }` from native (heuristics + curated catalog).
 
 ---
 
@@ -33,13 +50,13 @@ await stt.transcribe(audioIn, textOut, {
 ### Normalize hints from detection metadata
 
 ```typescript
-import { resolvePublicLanguageHints } from 'react-native-sherpa-onnx/model-languages';
+import { publicLanguageHintsFromNative } from 'react-native-sherpa-onnx/model-languages';
 import { ModelCategory } from 'react-native-sherpa-onnx/download';
 
-const hints = resolvePublicLanguageHints({
+const hints = publicLanguageHintsFromNative({
   domain: ModelCategory.Stt,
   modelType: detection.modelType,
-  rawFromNative: detection.languages,
+  rawRows: detection.languages ?? [],
 });
 
 for (const row of hints) {
@@ -51,15 +68,15 @@ for (const row of hints) {
 
 ## Language tables overview
 
-Static tables for building pickers. Each returns `ModelLanguage[]` (`{ id, name }`).
+Static tables for building pickers (generated from the JSON catalog). Each returns `ModelLanguage[]` (`{ id, name }`).
 
 | Getter | Model family | Notes |
 | --- | --- | --- |
 | `getWhisperLanguages()` | Whisper STT | Full multilingual set |
 | `getSenseVoiceLanguages()` | SenseVoice STT | |
 | `getCanaryLanguages()` | Canary STT | |
-| `getFunasrNanoLanguages()` | Fun-ASR Nano | `id` → `modelOptions` |
-| `getFunasrMltNanoLanguages()` | Fun-ASR MLT Nano | |
+| `getFunasrNanoLanguages()` | Fun-ASR Nano (3 langs) | `pickerVariants.nano` in JSON |
+| `getFunasrMltNanoLanguages()` | Fun-ASR MLT Nano (31 langs) | `pickerVariants.mlt` in JSON |
 | `getCohereTranscribeLanguages()` | Cohere Transcribe | |
 | `getQwen3AsrLanguages()` | Qwen3 ASR | |
 | `getDolphinInfoLanguages()` | Dolphin (informational) | |
@@ -77,25 +94,34 @@ Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `SUPERTONIC3_TTS_ISO
 
 ## API reference
 
-### `resolvePublicLanguageHints(input)`
+### `publicLanguageHintsFromNative(input)`
 
 ```typescript
-function resolvePublicLanguageHints(input: {
+function publicLanguageHintsFromNative(input: {
   domain: ModelCategory;
   modelType?: string;
   modelKey?: string;
-  rawFromNative?: readonly string[];
+  rawRows?: readonly Array<{ iso6391Hint: string; id: string }>;
 }): Array<{ iso6391Hint: string; id: string }>;
 ```
 
+Normalizes `iso6391Hint` on structured native rows. Does **not** apply a TypeScript fallback or id mapping — curated rows are bundled in C++ detect.
+
+`resolvePublicLanguageHints` remains as a deprecated alias.
+
+---
+
+### `resolvePublicLanguageHints(input)` (deprecated)
+
+Same shape as `publicLanguageHintsFromNative`. Prefer the latter in new code.
+
 ```typescript
-const rows = resolvePublicLanguageHints({
+const rows = publicLanguageHintsFromNative({
   domain: ModelCategory.Stt,
   modelType: 'funasr_nano',
+  rawRows: [],
 });
 ```
-
-Normalizes public language tags from detection metadata or curated tables. For stacks with language ids (Fun-ASR), `id` is the value for `modelOptions`.
 
 ---
 

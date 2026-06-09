@@ -9,6 +9,7 @@
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "sherpa-onnx-model-detect.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "native/sherpa-onnx-tts-wrapper.h"
 
@@ -287,11 +288,8 @@ static NSString *TtsTrimmedString(NSString *value) {
             resultDict[@"lexiconLanguages"] = lexiconLanguages;
         }
         if (!result.derivedLanguages.empty()) {
-            NSMutableArray *derivedLangs = [NSMutableArray array];
-            for (const auto& id : result.derivedLanguages) {
-                [derivedLangs addObject:[NSString stringWithUTF8String:id.c_str()]];
-            }
-            resultDict[@"languages"] = derivedLangs;
+            resultDict[@"languages"] =
+                sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(result.derivedLanguages);
         }
         if (!result.quantization.empty()) {
             resultDict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()];

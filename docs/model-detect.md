@@ -510,6 +510,8 @@ type DetectModelResult =
 
 Name-only input (`{ assetName }`) uses native name heuristics when no listable directory exists.
 
+**Language rows:** Native detect returns `languages` as `{ iso6391Hint, id }[]` on the raw bridge. Feature detect APIs expose the same shape on `detect*Model().languages`. Unified `detectModel()` still exposes `languages: string[]` (ISO hints only for download catalog). When folder/name heuristics produce no rows, native appends curated lists from [`catalog/model-language-catalog.json`](../catalog/model-language-catalog.json) and records `curatedCatalog` in `detectionSources`. Folder-derived rows always win when non-empty. See [model-languages.md](model-languages.md).
+
 ---
 
 ## Feature-specific detect APIs

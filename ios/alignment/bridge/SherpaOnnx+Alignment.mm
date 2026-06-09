@@ -5,6 +5,7 @@
 
 #include "../core/AlignmentBridgeUtils.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 
 #include <memory>
 #include <mutex>
@@ -60,11 +61,8 @@ static NSDictionary *alignmentDetectResultToDict(
   }
 
   if (!result.derivedLanguages.empty()) {
-    NSMutableArray *langs = [NSMutableArray arrayWithCapacity:result.derivedLanguages.size()];
-    for (const auto &lang : result.derivedLanguages) {
-      [langs addObject:[NSString stringWithUTF8String:lang.c_str()] ?: @""];
-    }
-    dict[@"languages"] = langs;
+    dict[@"languages"] =
+        sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(result.derivedLanguages);
   }
 
   if (!result.quantization.empty()) {

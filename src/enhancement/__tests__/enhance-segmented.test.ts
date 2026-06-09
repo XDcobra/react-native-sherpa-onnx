@@ -17,7 +17,7 @@ jest.mock('../../detect', () => ({
 }));
 
 jest.mock('../../model-languages', () => ({
-  resolvePublicLanguageHints: jest.fn(() => []),
+  publicLanguageHintsFromNative: jest.fn(() => []),
 }));
 
 jest.mock('../../audiobuffer', () => ({

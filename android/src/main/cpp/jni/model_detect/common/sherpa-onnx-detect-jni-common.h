@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-custom-types.h"
 
@@ -24,6 +25,11 @@ jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings);
 jobject BuildStringStringMap(
     JNIEnv* env,
     const std::map<std::string, std::string>& strings);
+/** Build ArrayList<HashMap> with {iso6391Hint, id} for public language rows. Returns null on failure. */
+jobject BuildPublicLanguageRowList(
+    JNIEnv* env,
+    const std::vector<PublicLanguageRow>& languages);
+
 /** Build ArrayList<HashMap> with {id, path} for lexicon languages. Returns null on failure. */
 jobject BuildLexiconLanguagesList(
     JNIEnv* env,

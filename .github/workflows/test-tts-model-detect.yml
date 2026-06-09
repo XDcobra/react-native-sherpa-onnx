@@ -21,6 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Check generated model language catalog
+        run: yarn check:model-language-catalog
+
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
 
@@ -34,4 +37,4 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ./test/cpp/build/model_detect_test \
-            --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected:TtsCatalogHints.*
+            --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected:TtsCatalogHints.*:CuratedLanguageCatalog.*

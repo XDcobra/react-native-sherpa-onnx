@@ -13,7 +13,7 @@ jest.mock('../../detect/resolveModelInput', () => ({
 }));
 
 jest.mock('../../model-languages', () => ({
-  resolvePublicLanguageHints: jest.fn(() => []),
+  publicLanguageHintsFromNative: jest.fn(() => []),
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';

@@ -2,7 +2,10 @@ import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { buildVadInitBridgeOptions } from './vadNativeBridge';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {
   createOfflineAudioBufferFromSamples,
@@ -206,14 +209,10 @@ export async function detectVadModel(
       }
     }
   }
-  const rawLanguageStrings =
-    Array.isArray(raw.languages) && raw.languages.length > 0
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-  const resolvedLanguages = resolvePublicLanguageHints({
+  const resolvedLanguages = publicLanguageHintsFromNative({
     domain: ModelCategory.Vad,
     modelType: raw.modelType,
-    rawFromNative: rawLanguageStrings,
+    rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0

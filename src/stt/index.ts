@@ -41,7 +41,10 @@ import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streami
 import type { SttPipelineHandle } from './streamingTypes';
 import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
@@ -255,14 +258,10 @@ export async function detectSttModel(
       }
     }
   }
-  const rawLanguageStrings =
-    Array.isArray(raw.languages) && raw.languages.length > 0
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-  const resolvedLanguages = resolvePublicLanguageHints({
+  const resolvedLanguages = publicLanguageHintsFromNative({
     domain: ModelCategory.Stt,
     modelType,
-    rawFromNative: rawLanguageStrings,
+    rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0

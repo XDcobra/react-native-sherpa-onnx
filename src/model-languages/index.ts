@@ -3,7 +3,11 @@ export type {
   PublicLanguageHint,
   ResolvePublicLanguageHintsInput,
 } from './resolvePublicLanguageHints';
-export { resolvePublicLanguageHints } from './resolvePublicLanguageHints';
-export * from './stt';
-export * from './tts';
+export {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+  normalizePublicLanguageRows,
+  resolvePublicLanguageHints,
+} from './resolvePublicLanguageHints';
+export * from './generated/catalog';
 export * from './alignment';

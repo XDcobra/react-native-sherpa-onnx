@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_MODEL_DETECT_UNIFIED_H
 
 #include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect.h"
 #include <map>
 #include <optional>
 #include <string>
@@ -19,7 +20,7 @@ struct UnifiedModelDetectResult {
     std::string category;
     bool success = false;
     std::string modelType;
-    std::vector<std::string> languages;
+    std::vector<PublicLanguageRow> languages;
     std::string quantization;
     std::string sizeTier;
     bool isStreaming = false;

@@ -173,7 +173,7 @@ std::vector<std::string> DeriveLanguagesFromModelId(const std::string& id) {
 }
 
 void FillDerivedCatalogMetadata(
-    std::vector<std::string>& outLanguages,
+    std::vector<PublicLanguageRow>& outLanguages,
     std::string& outQuantization,
     std::string& outSizeTier,
     const std::string& idForHeuristics
@@ -181,13 +181,18 @@ void FillDerivedCatalogMetadata(
     if (idForHeuristics.empty()) {
         return;
     }
-    outLanguages = DeriveLanguagesFromModelId(idForHeuristics);
+    const auto hints = DeriveLanguagesFromModelId(idForHeuristics);
+    outLanguages.clear();
+    outLanguages.reserve(hints.size());
+    for (const auto& hint : hints) {
+        outLanguages.push_back(PublicLanguageRow{hint, hint});
+    }
     outQuantization = DeriveQuantization(idForHeuristics);
     outSizeTier = DeriveSizeTier(idForHeuristics);
 }
 
 void FillDerivedCatalogMetadataFromBasename(
-    std::vector<std::string>& outLanguages,
+    std::vector<PublicLanguageRow>& outLanguages,
     std::string& outQuantization,
     std::string& outSizeTier,
     const std::string& dirPath

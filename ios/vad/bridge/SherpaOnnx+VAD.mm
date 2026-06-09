@@ -14,6 +14,7 @@
 #include <algorithm>
 
 #include "sherpa-onnx-model-detect.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-vad.h"
 #include <map>
@@ -225,11 +226,8 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     }
 
     if (!result.derivedLanguages.empty()) {
-      NSMutableArray *langs = [NSMutableArray array];
-      for (const auto &lang : result.derivedLanguages) {
-        [langs addObject:[NSString stringWithUTF8String:lang.c_str()]];
-      }
-      resultDict[@"languages"] = langs;
+      resultDict[@"languages"] =
+          sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(result.derivedLanguages);
     }
 
     if (!result.quantization.empty()) {

@@ -1,4 +1,5 @@
 #import "sherpa-onnx-unified-detect-bridge.h"
+#import "sherpa-onnx-public-language-row-bridge.h"
 
 #include "sherpa-onnx-model-detect.h"
 
@@ -42,11 +43,7 @@ NSDictionary *UnifiedDetectResultToDict(const UnifiedModelDetectResult &result) 
     }
 
     if (!result.languages.empty()) {
-        NSMutableArray *languages = [NSMutableArray array];
-        for (const auto &lang : result.languages) {
-            [languages addObject:[NSString stringWithUTF8String:lang.c_str()] ?: @""];
-        }
-        dict[@"languages"] = languages;
+        dict[@"languages"] = PublicLanguageRowsToNSArray(result.languages);
     }
 
     if (!result.detectionSources.empty()) {

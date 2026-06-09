@@ -44,7 +44,7 @@ describe('detectModel', () => {
         ttsModel: '/models/vits/model.onnx',
         tokens: '/models/vits/tokens.txt',
       },
-      languages: ['en'],
+      languages: [{ iso6391Hint: 'en', id: 'en' }],
       quantization: 'int8',
       sizeTier: 'small',
       isStreaming: true,

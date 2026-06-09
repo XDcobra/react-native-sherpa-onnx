@@ -1,7 +1,7 @@
-export { iso6391HintsForTtsModelType } from './hints';
-export { POCKET_TTS_ISO6391_HINTS } from './pocket';
 export {
+  iso6391HintsForTtsModelType,
   isSupertonic3ModelKey,
+  POCKET_TTS_ISO6391_HINTS,
+  SUPERTONIC3_TTS_ISO6391_HINTS,
   SUPERTONIC_TTS_ISO6391_HINTS,
-} from './supertonic';
-export { SUPERTONIC3_TTS_ISO6391_HINTS } from './supertonic3';
+} from '../generated/catalog';

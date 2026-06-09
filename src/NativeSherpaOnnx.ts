@@ -124,13 +124,19 @@ export type PunctuationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** Structured language row from native detect bridge. */
+export type NativePublicLanguageRow = {
+  iso6391Hint: string;
+  id: string;
+};
+
 /** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
 export type UnifiedDetectNativeResult = {
   matched: boolean;
   success: boolean;
   category?: string;
   modelType?: string;
-  languages?: string[];
+  languages?: NativePublicLanguageRow[];
   quantization?: string;
   sizeTier?: string;
   isStreaming?: boolean;
@@ -211,8 +217,8 @@ export interface Spec extends TurboModule {
     isHardwareSpecificUnsupported?: boolean;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    /** Raw heuristic language tags from asset/folder name (catalog). */
-    languages?: string[];
+    /** Structured language rows from native detect (catalog SSOT). */
+    languages?: NativePublicLanguageRow[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */
     quantization?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
@@ -1196,8 +1202,8 @@ export interface Spec extends TurboModule {
     modelType?: string;
     /** Detected lexicon files (`lexicon.txt`, `lexicon-*.txt`). Use ids with init `lexiconLanguageId`. */
     lexiconLanguages?: Array<{ id: string; path: string }>;
-    /** Raw heuristic language tags from asset/folder name (catalog); not from lexicon files. JS `detectTtsModel` / download catalog normalize these for the public API. */
-    languages?: string[];
+    /** Structured language rows from native detect (catalog SSOT). */
+    languages?: NativePublicLanguageRow[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */
     quantization?: string;
     /** tiny, small, medium, large, unknown — from name heuristics. */
@@ -1336,7 +1342,7 @@ export interface Spec extends TurboModule {
       model?: string;
     };
     /** Raw heuristic language tags from folder name (catalog). */
-    languages?: string[];
+    languages?: NativePublicLanguageRow[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */
     quantization?: string;
     /** Optional trace strings from native (see DetectionSource). */
@@ -1438,7 +1444,7 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    languages?: string[];
+    languages?: NativePublicLanguageRow[];
     quantization?: string;
     detectionSources?: string[];
     paths?: {
@@ -1456,7 +1462,7 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    languages?: string[];
+    languages?: NativePublicLanguageRow[];
     quantization?: string;
     detectionSources?: string[];
     paths?: {
@@ -1478,7 +1484,7 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    languages?: string[];
+    languages?: NativePublicLanguageRow[];
     quantization?: string;
     detectionSources?: string[];
     paths?: {

@@ -15,6 +15,7 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../pipeline/SttOfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-stt-wrapper.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
@@ -394,11 +395,8 @@ static void FillSttModelPathsFromDict(
         resultDict[@"detectedModels"] = detectedModelsArray;
         resultDict[@"modelType"] = sttModelKindToNSString(result.selectedKind);
         if (!result.derivedLanguages.empty()) {
-            NSMutableArray *langs = [NSMutableArray array];
-            for (const auto& id : result.derivedLanguages) {
-                [langs addObject:[NSString stringWithUTF8String:id.c_str()]];
-            }
-            resultDict[@"languages"] = langs;
+            resultDict[@"languages"] =
+                sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(result.derivedLanguages);
         }
         if (!result.quantization.empty()) {
             resultDict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()];

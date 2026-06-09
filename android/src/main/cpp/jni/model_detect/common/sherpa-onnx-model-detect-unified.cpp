@@ -129,7 +129,7 @@ bool IsCatalogDetectHit(
 UnifiedModelDetectResult MakeHit(
     const char* category,
     const std::string& modelType,
-    const std::vector<std::string>& languages,
+    const std::vector<PublicLanguageRow>& languages,
     const std::string& quantization,
     const std::string& sizeTier,
     bool isStreaming,

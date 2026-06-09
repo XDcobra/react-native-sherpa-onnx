@@ -46,5 +46,8 @@ jobs:
       - name: Check iOS TurboModule signatures
         run: yarn check:ios-turbo-signatures
 
+      - name: Check generated model language catalog
+        run: yarn check:model-language-catalog
+
       - name: Run JS tests
         run: yarn test --ci

@@ -33,6 +33,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-tts-catalog-metadata.h"
+#include "model_language_catalog.h"
 #include "sherpa-onnx-validate-tts.h"
 #include <algorithm>
 #include <cctype>
@@ -399,6 +400,7 @@ TtsDetectResult DetectTtsModel(
         const std::string syntheticDir = std::string("m/") + assetName;
         result = DetectTtsModelFromFileList({}, syntheticDir, modelType);
         FillTtsDerivedCatalogMetadata(result, assetName);
+        AppendCuratedTtsLanguageRowsIfEmpty(result, assetName);
         LOGI("DetectTtsModel: assetName-only path for %s", assetName.c_str());
         return result;
     }
@@ -421,8 +423,13 @@ TtsDetectResult DetectTtsModel(
 
     if (has_asset) {
         FillTtsDerivedCatalogMetadata(result, *asset_name_opt);
+        AppendCuratedTtsLanguageRowsIfEmpty(result, *asset_name_opt);
     } else {
         FillTtsDerivedCatalogMetadataUsingModelDirBasename(result, modelDir);
+        const auto pos = modelDir.find_last_of("/\\");
+        const std::string basename =
+            (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+        AppendCuratedTtsLanguageRowsIfEmpty(result, basename);
     }
 
     if (!result.ok) {

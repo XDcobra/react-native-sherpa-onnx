@@ -26,7 +26,10 @@ import {
   flattenTtsModelOptionsForNative,
   toNativeSynthesisOptions,
 } from './ttsNativeBridge';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
@@ -278,10 +281,6 @@ export async function detectTtsModel(
     typeof raw.modelType === 'string' && isTtsModelType(raw.modelType)
       ? raw.modelType
       : undefined;
-  const rawLanguageStrings =
-    Array.isArray(raw.languages) && raw.languages.length > 0
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
   const modelKey =
     resolved.assetName?.trim() ||
     resolved.modelDir
@@ -289,11 +288,11 @@ export async function detectTtsModel(
       .split(/[/\\]/)
       .pop() ||
     undefined;
-  const resolvedLanguages = resolvePublicLanguageHints({
+  const resolvedLanguages = publicLanguageHintsFromNative({
     domain: ModelCategory.Tts,
     modelType,
     modelKey,
-    rawFromNative: rawLanguageStrings,
+    rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0

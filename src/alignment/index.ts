@@ -8,7 +8,10 @@ import {
   type DetectedModelEntry,
   type AlignmentDetectModelResult,
 } from '../types/modelDetect';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import { ModelCategory } from '../download/types';
 
 export { createAlignment } from './engine';
@@ -85,14 +88,10 @@ export async function detectAlignmentModel(
     typeof raw.modelType === 'string' && raw.modelType !== ''
       ? raw.modelType
       : undefined;
-  const rawLanguageStrings =
-    Array.isArray(raw.languages) && raw.languages.length > 0
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-  const resolvedLanguages = resolvePublicLanguageHints({
+  const resolvedLanguages = publicLanguageHintsFromNative({
     domain: ModelCategory.Alignment,
     modelType,
-    rawFromNative: rawLanguageStrings,
+    rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0

@@ -37,6 +37,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-stt-catalog-metadata.h"
+#include "model_language_catalog.h"
 #include "sherpa-onnx-stt-online-guard.h"
 #include "sherpa-onnx-validate-stt.h"
 #include <cstdio>
@@ -1023,6 +1024,7 @@ SttDetectResult DetectSttModel(
         const std::string syntheticDir = std::string("m/") + assetName;
         result = DetectSttModelFromFiles({}, syntheticDir, requestedModelType, preferInt8, debug);
         FillSttDerivedCatalogMetadata(result, assetName);
+        AppendCuratedSttLanguageRowsIfEmpty(result, assetName);
         LOGI("DetectSttModel: assetName-only path for %s", assetName.c_str());
         return result;
     }
@@ -1049,8 +1051,13 @@ SttDetectResult DetectSttModel(
 
     if (has_asset) {
         FillSttDerivedCatalogMetadata(result, *asset_name_opt);
+        AppendCuratedSttLanguageRowsIfEmpty(result, *asset_name_opt);
     } else {
         FillSttDerivedCatalogMetadataUsingModelDirBasename(result, modelDir);
+        const auto pos = modelDir.find_last_of("/\\");
+        const std::string basename =
+            (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+        AppendCuratedSttLanguageRowsIfEmpty(result, basename);
     }
 
     if (!result.ok) {

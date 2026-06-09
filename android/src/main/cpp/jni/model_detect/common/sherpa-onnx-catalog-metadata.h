@@ -1,6 +1,8 @@
 #ifndef SHERPA_ONNX_CATALOG_METADATA_H
 #define SHERPA_ONNX_CATALOG_METADATA_H
 
+#include "sherpa-onnx-model-detect.h"
+
 #include <string>
 #include <vector>
 
@@ -25,7 +27,7 @@ std::vector<std::string> DeriveLanguagesFromModelId(const std::string& id);
  * Generic version used by all features.
  */
 void FillDerivedCatalogMetadata(
-    std::vector<std::string>& outLanguages,
+    std::vector<PublicLanguageRow>& outLanguages,
     std::string& outQuantization,
     std::string& outSizeTier,
     const std::string& idForHeuristics
@@ -35,7 +37,7 @@ void FillDerivedCatalogMetadata(
  * Same as FillDerivedCatalogMetadata but uses the last path segment of a directory path.
  */
 void FillDerivedCatalogMetadataFromBasename(
-    std::vector<std::string>& outLanguages,
+    std::vector<PublicLanguageRow>& outLanguages,
     std::string& outQuantization,
     std::string& outSizeTier,
     const std::string& dirPath

@@ -1,7 +1,10 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
-import { resolvePublicLanguageHints } from '../model-languages';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import { ModelCategory } from '../download/types';
 import {
   isDetectionSource,
@@ -52,14 +55,10 @@ export async function detectPunctuationModel(
       }
     }
   }
-  const rawLanguageStrings =
-    Array.isArray(raw.languages) && raw.languages.length > 0
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-  const resolvedLanguages = resolvePublicLanguageHints({
+  const resolvedLanguages = publicLanguageHintsFromNative({
     domain: ModelCategory.Punctuation,
     modelType: raw.modelType,
-    rawFromNative: rawLanguageStrings,
+    rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization =
     typeof raw.quantization === 'string' && raw.quantization.length > 0
