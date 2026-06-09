@@ -12,3 +12,7 @@
 # JSI/JNI audio buffer bridge: C++ resolves class + method names via JNI lookup.
 -keep class com.sherpaonnx.SherpaOnnxModule { *; }
 -keep class com.sherpaonnx.audio.pipeline.PipelineAudioRegistry { *; }
+
+# Android system TTS engine (subclassed by host apps).
+-keep class com.sherpaonnx.tts.system.SherpaOnnxTextToSpeechService { *; }
+-keep class com.sherpaonnx.tts.system.** { *; }

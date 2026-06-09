@@ -35,6 +35,7 @@ npm install react-native-sherpa-onnx
 
 - ✅ Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
 - ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
@@ -80,6 +81,7 @@ Every feature needs **model files on disk** and a way to point the SDK at them. 
 | Download models at runtime | [Download manager](./docs/download-manager.md) |
 | Long audio or offline-only models on low-end devices (OOM risk) | [Segmentation engine](./docs/segmentation-engine.md) — process bounded chunks instead of one monolithic pass; essential on modest RAM when a full-file load would exhaust memory |
 | RAM planning for large files or chained engines | [Memory and models](./docs/memory-and-models.md) |
+| Other apps should use your TTS voices (Maps, accessibility, system settings) | [Android system TTS](./docs/android-system-tts.md) — Kotlin `TextToSpeechService`; deliver model via PAD/extract in RN |
 
 Full doc index: [docs/README.md](./docs/README.md).
 
@@ -261,6 +263,8 @@ For **real-time (streaming) recognition** from a microphone or audio stream, use
 
 For **live TTS pipelines** (segment-driven synthesis from live text), use `createTTS().synthesize(LiveTextBuffer, LiveAudioBuffer, { segmentation })`. See [Offline Text-to-Speech](./docs/tts-offline.md) ("Live overload on offline TTS").
 
+To expose on-device voices as a **device-wide Android TTS engine** (system settings, other apps), see [Android system TTS](./docs/android-system-tts.md). Kotlin integration, opt-in — not enabled by installing the SDK alone.
+
 </details>
 
 <details>
@@ -372,7 +376,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 ### Speech & media features
 
 - **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md) · [Android system engine](./docs/android-system-tts.md) *(Kotlin, opt-in)*
 - **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - **VAD:** [Streaming](./docs/vad-streaming.md)

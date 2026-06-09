@@ -48,28 +48,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
 
   init {
-    // Load onnxruntime first so libsherpa-onnx-jni.so can resolve OrtGetApiBase.
-    // When the app adds com.xdcobra.sherpa:onnxruntime and uses pickFirst, this loads the AAR's version.
-    try {
-      System.loadLibrary("onnxruntime")
-    } catch (e: UnsatisfiedLinkError) {
-      android.util.Log.w(NAME, "onnxruntime not loaded (will use SDK copy if present): ${e.message}")
-    }
-    // Load sherpa-onnx JNI (from AAR; required for Kotlin API: OfflineRecognizer, OfflineTts, etc.)
-    try {
-      System.loadLibrary("sherpa-onnx-jni")
-    } catch (e: UnsatisfiedLinkError) {
-      throw RuntimeException("Failed to load sherpa-onnx-jni (from sherpa-onnx AAR): ${e.message}", e)
-    }
-    // Load sherpa-onnx C-API (from AAR; needed at runtime only if Zipvoice TTS is used).
-    // Non-fatal: if the .so is missing, Zipvoice init will fail with a clear error later.
-    try {
-      System.loadLibrary("sherpa-onnx-c-api")
-    } catch (e: UnsatisfiedLinkError) {
-      android.util.Log.w("SherpaOnnx", "sherpa-onnx-c-api not available — Zipvoice TTS will not work: ${e.message}")
-    }
-    // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
-    System.loadLibrary("sherpaonnx")
+    SherpaOnnxNativeLoader.ensureLoaded()
     instance = this
     com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { segmentBufferId, rec, segIdx, totalSeg ->
       try {
@@ -5293,6 +5272,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       hasPreferInt8: Boolean,
       debug: Boolean
     ): HashMap<String, Any>?
+
+    /**
+     * Blocking TTS detect for non-bridge callers (system TTS service). Loads native libs if needed.
+     */
+    @JvmStatic
+    fun detectTtsModelBlocking(
+      modelDir: String,
+      assetName: String?,
+      modelType: String?,
+    ): HashMap<String, Any>? {
+      SherpaOnnxNativeLoader.ensureLoaded()
+      return nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto")
+    }
 
     /** Model detection for TTS: optional directory and/or asset name; returns HashMap (for Kotlin API config). */
     @JvmStatic

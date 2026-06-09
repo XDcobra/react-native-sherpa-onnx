@@ -637,6 +637,7 @@ await tts.destroy();
 
 ## See also
 
+- [android-system-tts.md](android-system-tts.md) — register as an Android system TTS engine (Kotlin-only)
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, subtitle timing, alignment models
 - [execution-providers.md](execution-providers.md) — ORT execution providers
 - [download-manager.md](download-manager.md) — downloading TTS models (`ModelCategory.Tts`)

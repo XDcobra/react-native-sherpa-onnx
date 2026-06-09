@@ -38,6 +38,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [tts-offline.md](./tts-offline.md) | Offline (batch) speech generation |
 | [tts-streaming.md](./tts-streaming.md) | Live TTS entry point — links live overload (`TtsPipelineHandle`) |
+| [android-system-tts.md](./android-system-tts.md) | Android system `TextToSpeechService` engine (Kotlin-only, opt-in) |
 
 ---
 
