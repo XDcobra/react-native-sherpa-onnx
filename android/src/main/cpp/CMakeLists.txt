@@ -87,11 +87,16 @@ set(SOURCES
     jni/archive/sherpa-onnx-archive-jni.cpp
     jni/model_detect/common/sherpa-onnx-model-detect-helper.cpp
     jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp
+    jni/model_detect/common/sherpa-onnx-model-detect-unified.cpp
+    jni/model_detect/common/sherpa-onnx-model-path-fill.cpp
+    jni/model_detect/common/sherpa-onnx-validate-custom.cpp
+    jni/model_detect/common/sherpa-onnx-unified-detect-wrapper.cpp
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
     jni/model_detect/common/sherpa-onnx-ort-guard-utils.cpp
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
+    jni/model_detect/stt/sherpa-onnx-validate-online-stt.cpp
     jni/model_detect/stt/sherpa-onnx-stt-wrapper.cpp
     jni/model_detect/stt/sherpa-onnx-stt-online-guard.cpp
     jni/model_detect/stt/sherpa-onnx-stt-online-guard-transducer.cpp
@@ -106,6 +111,11 @@ set(SOURCES
     jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
+    jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
+    jni/model_detect/punctuation/sherpa-onnx-punctuation-online-guard.cpp
+    jni/model_detect/punctuation/sherpa-onnx-model-detect-punctuation.cpp
+    jni/model_detect/punctuation/sherpa-onnx-validate-punctuation.cpp
+    jni/model_detect/punctuation/sherpa-onnx-punctuation-wrapper.cpp
     jni/model_detect/vad/sherpa-onnx-vad-catalog-metadata.cpp
     jni/model_detect/vad/sherpa-onnx-model-detect-vad.cpp
     jni/model_detect/vad/sherpa-onnx-validate-vad.cpp
@@ -117,9 +127,15 @@ set(SOURCES
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
+    jni/audio/AudioVisualization.cpp
+    jni/audio/FfmpegFormatGuard.cpp
     jni/audio/audio_decode_jni.cpp
+    jni/audio/audio_visualization_jni.cpp
     jni/audio/AudioEncodeSession.cpp
     jni/audio/audio_encode_jni.cpp
+    jni/diagnostic/NativeDiagnostic.cpp
+    jni/diagnostic/NativeDiagnosticAndroid.cpp
+    jni/diagnostic/native_diagnostic_jni.cpp
     crypto/sha256.cpp
 )
 
@@ -226,6 +242,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/stt
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio

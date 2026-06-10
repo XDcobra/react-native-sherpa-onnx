@@ -5,6 +5,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
@@ -15,25 +16,32 @@ import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
+import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.alignment.facade.SherpaOnnxAlignmentHelper
 import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
+import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
+import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
+import com.sherpaonnx.stt.facade.SherpaOnnxOfflineSttLivePipelineHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
 import com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator
 import com.sherpaonnx.tts.facade.SherpaOnnxCommonTtsHelper
 import com.sherpaonnx.tts.facade.SherpaOnnxOfflineTtsHelper
-import com.sherpaonnx.tts.facade.SherpaOnnxOnlineTtsHelper
 import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
@@ -63,37 +71,36 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Then load our library (Archive, FFmpeg, model detection, Zipvoice JNI wrapper)
     System.loadLibrary("sherpaonnx")
     instance = this
-    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { liveId, rec, segIdx ->
+    com.sherpaonnx.segment.pipeline.SegmentBufferEventBridge.emitSegmentAppended = { segmentBufferId, rec, segIdx, totalSeg ->
       try {
         val eventEmitter = reactApplicationContext
           .getJSModule(com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val annotation = com.sherpaonnx.segment.engine.SegmentationEngineRegistry
+          .peekSegmentAnnotation(rec.id)
         val m = com.facebook.react.bridge.Arguments.createMap()
-        m.putString("liveBufferId", liveId)
+        m.putString("segmentBufferId", segmentBufferId)
         m.putString("segmentId", rec.id)
         m.putInt("segmentIndex", segIdx)
+        m.putInt("totalSegments", totalSeg)
         m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)
         m.putInt("startSample", rec.startSample)
         m.putInt("endSample", rec.endSample)
         m.putInt("sampleRate", rec.sampleRate)
         m.putInt("durationMs", rec.durationMs)
+        if (annotation != null) {
+          m.putString("reason", annotation.reason)
+          m.putString("source", annotation.source)
+          m.putDouble("createdAtMs", annotation.createdAtMs.toDouble())
+        } else {
+          m.putString("reason", "manual_commit")
+          m.putString("source", "manual")
+          m.putDouble("createdAtMs", System.currentTimeMillis().toDouble())
+        }
         rec.confidence?.let { m.putDouble("confidence", it) }
         if (!rec.payloadJson.isNullOrEmpty()) {
           try {
             val jo = org.json.JSONObject(rec.payloadJson)
-            val p = com.facebook.react.bridge.Arguments.createMap()
-            val keys = jo.keys()
-            while (keys.hasNext()) {
-              val k = keys.next()
-              if (!jo.isNull(k)) {
-                when (val v = jo.get(k)) {
-                  is String -> p.putString(k, v)
-                  is Int -> p.putInt(k, v)
-                  is Long -> p.putDouble(k, v.toDouble())
-                  is Double -> p.putDouble(k, v)
-                  is Boolean -> p.putBoolean(k, v)
-                }
-              }
-            }
+            val p = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(jo)
             m.putMap("payload", p)
           } catch (_: Exception) {
           }
@@ -102,7 +109,78 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } catch (_: Exception) {
       }
     }
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = { entry, source ->
+      maybeEmitLiveTextPartial(entry, source)
+    }
     tryInstallJsiBindings()
+    installForegroundDownloadEvents()
+  }
+
+  private fun installForegroundDownloadEvents() {
+    ForegroundDownloader.eventListener =
+      object : ForegroundDownloader.EventListener {
+        override fun onBegin(
+          id: String,
+          expectedBytes: Long,
+          headers: Map<String, String>,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadBegin") { map ->
+            map.putString("id", id)
+            map.putDouble("expectedBytes", expectedBytes.toDouble())
+            val headersMap = Arguments.createMap()
+            for ((k, v) in headers) {
+              headersMap.putString(k, v)
+            }
+            map.putMap("headers", headersMap)
+          }
+        }
+
+        override fun onProgress(id: String, bytesDownloaded: Long, bytesTotal: Long) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadProgress") { map ->
+            map.putString("id", id)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onComplete(
+          id: String,
+          location: String,
+          bytesDownloaded: Long,
+          bytesTotal: Long,
+        ) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadComplete") { map ->
+            map.putString("id", id)
+            map.putString("location", location)
+            map.putDouble("bytesDownloaded", bytesDownloaded.toDouble())
+            map.putDouble("bytesTotal", bytesTotal.toDouble())
+          }
+        }
+
+        override fun onError(id: String, error: String, errorCode: Int) {
+          emitForegroundDownloadEvent("sherpaForegroundDownloadError") { map ->
+            map.putString("id", id)
+            map.putString("error", error)
+            map.putInt("errorCode", errorCode)
+          }
+        }
+      }
+  }
+
+  private fun emitForegroundDownloadEvent(
+    eventName: String,
+    block: (com.facebook.react.bridge.WritableMap) -> Unit,
+  ) {
+    try {
+      val eventEmitter =
+        reactApplicationContext.getJSModule(
+          DeviceEventManagerModule.RCTDeviceEventEmitter::class.java
+        )
+      val payload = Arguments.createMap()
+      block(payload)
+      eventEmitter.emit(eventName, payload)
+    } catch (_: Exception) {
+    }
   }
 
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
@@ -114,6 +192,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val offlineSttLivePipelineHelper = SherpaOnnxOfflineSttLivePipelineHelper(
+    reactApplicationContext,
+    sttHelper,
+    NAME,
+  )
   private val pcmPlayerService = PcmPlayerService(reactApplicationContext).also {
     it.onPlayerEnded = { playerId, bufferId ->
       try {
@@ -133,7 +216,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
-  private val onlineTtsHelper = SherpaOnnxOnlineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val fileIOHelper = com.sherpaonnx.fileio.FileIOHelper(reactApplicationContext)
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
@@ -148,7 +230,106 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectVadModel(modelDir, assetName, modelType)
     }
   )
+  private val punctuationHelper = SherpaOnnxPunctuationHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    }
+  )
+  private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
+    reactApplicationContext,
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    }
+  )
+  private val offlinePunctuationLivePipelineHelper =
+    SherpaOnnxOfflinePunctuationLivePipelineHelper(
+      reactApplicationContext,
+      punctuationHelper,
+      NAME,
+    )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
+  private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
+  private val maxEventTextChars = 4096
+
+  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
+    if (text.length <= maxEventTextChars) {
+      return Pair(text, false)
+    }
+    return Pair(text.substring(0, maxEventTextChars), true)
+  }
+
+  private fun maybeEmitLiveTextPartial(
+    entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
+    source: String,
+  ) {
+    if (!entry.emitPartialEvents) return
+
+    val now = SystemClock.elapsedRealtime()
+    val minInterval = entry.partialEventMinIntervalMs.coerceAtLeast(0L)
+    val last = liveTextPartialLastEmitAtMs[entry.bufferId] ?: 0L
+    if (minInterval > 0L && last > 0L && (now - last) < minInterval) {
+      return
+    }
+    liveTextPartialLastEmitAtMs[entry.bufferId] = now
+
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("liveBufferId", entry.bufferId)
+      payload.putString("source", source)
+      payload.putString("partialText", entry.currentText)
+      payload.putInt("revision", entry.revision)
+      eventEmitter.emit("pipelineLiveTextPartial", payload)
+    } catch (_: Exception) {
+      // JS bridge may be unavailable during teardown.
+    }
+  }
+
+  private fun emitLiveTextSegment(
+    liveBufferId: String,
+    segment: com.sherpaonnx.text.pipeline.TextSegment,
+    totalSegments: Int,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
+      val payload = Arguments.createMap().apply {
+        putString("liveBufferId", liveBufferId)
+        putInt("totalSegments", totalSegments)
+        putString("text", eventText)
+        if (textTruncated) {
+          putBoolean("textTruncated", true)
+        }
+        putString("source", segment.source)
+        putInt("segmentIndex", segment.segmentIndex)
+
+        if (segment.tokens.isNotEmpty()) {
+          val tokenArray = Arguments.createArray()
+          segment.tokens.forEach { tokenArray.pushString(it) }
+          putArray("tokens", tokenArray)
+        }
+
+        if (segment.timestamps.isNotEmpty()) {
+          val tsArray = Arguments.createArray()
+          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+          putArray("timestamps", tsArray)
+        }
+
+        segment.meta?.let { rawMeta ->
+          try {
+            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+          } catch (_: Exception) {
+            // Ignore non-serializable meta values.
+          }
+        }
+      }
+      eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
+    } catch (_: Exception) {
+      // JS bridge may be unavailable during teardown.
+    }
+  }
 
   private fun normalizeInputDeviceKind(type: Int): String {
     return when (type) {
@@ -226,15 +407,21 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     super.invalidate()
     micToLiveSink?.stop()
     micToLiveSink = null
+    com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = null
+    liveTextPartialLastEmitAtMs.clear()
     onlineSttHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    punctuationHelper.shutdown()
+    onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
+    com.sherpaonnx.segment.engine.SegmentationEngineRegistry.releaseAll()
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.releaseAll()
     com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.releaseAll()
+    com.sherpaonnx.segment.core.SegmentLinkMapRegistry.releaseAll()
   }
 
   /**
@@ -248,6 +435,35 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       android.util.Log.e(NAME, "INIT_ERROR: Failed to test sherpa-onnx initialization", e)
       promise.reject("INIT_ERROR", "Failed to test sherpa-onnx initialization", e)
+    }
+  }
+
+  override fun getNativeDiagnosticSnapshot(promise: Promise) {
+    try {
+      val json = nativeGetDiagnosticSnapshot()
+      promise.resolve(json)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
+    }
+  }
+
+  override fun configureNativeDiagnostics(config: ReadableMap?, promise: Promise) {
+    try {
+      val enabled = if (config != null && config.hasKey("enabled") && !config.isNull("enabled")) {
+        config.getBoolean("enabled")
+      } else {
+        true
+      }
+      val installSignalHandler =
+        if (config != null && config.hasKey("installSignalHandler") && !config.isNull("installSignalHandler")) {
+          config.getBoolean("installSignalHandler")
+        } else {
+          true
+        }
+      nativeInitDiagnostics(enabled, installSignalHandler)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("DIAGNOSTIC_ERROR", e.message, e)
     }
   }
 
@@ -365,6 +581,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
             "No external files directory available"
           )
+        "apkAsset" -> throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
+          "AppBaseDir 'apkAsset' does not map to a sandbox directory. Use FileSource app:apkAsset or resolveBundledAssetPath for APK assets."
+        )
+        "appBundle" -> throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+          "AppBaseDir 'appBundle' is iOS-only"
+        )
         else -> throw FileIOException(
           FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
           "Unknown AppBaseDir: $base"
@@ -546,11 +770,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
+   * Resolve a bundled app asset relative path to an absolute filesystem path.
    */
-  override fun resolveModelPath(config: ReadableMap, promise: Promise) {
-    assetHelper.resolveModelPath(config, promise)
+  override fun resolveBundledAssetPath(relativePath: String, promise: Promise) {
+    assetHelper.resolveBundledAssetPath(relativePath, promise)
   }
 
   override fun extractArchive(
@@ -590,6 +813,81 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun computeFileSha256(filePath: String, promise: Promise) {
     archiveHelper.computeFileSha256(filePath, promise)
+  }
+
+  override fun startForegroundDownload(
+    id: String,
+    url: String,
+    destination: String,
+    headers: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val headerMap = readableMapToStringMap(headers)
+      val started =
+        ForegroundDownloader.start(
+          id = id,
+          url = url,
+          destination = destination,
+          headers = headerMap,
+        )
+      if (started) {
+        promise.resolve(null)
+      } else {
+        promise.reject("DOWNLOAD_START_FAILED", "Failed to start download $id")
+      }
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_START_ERROR", e.message, e)
+    }
+  }
+
+  override fun pauseForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.pause(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_PAUSE_ERROR", e.message, e)
+    }
+  }
+
+  override fun resumeForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.resume(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_RESUME_ERROR", e.message, e)
+    }
+  }
+
+  override fun cancelForegroundDownload(id: String, promise: Promise) {
+    try {
+      promise.resolve(ForegroundDownloader.cancel(id))
+    } catch (e: Exception) {
+      promise.reject("DOWNLOAD_CANCEL_ERROR", e.message, e)
+    }
+  }
+
+  // Required by NativeEventEmitter contract.
+  override fun addListener(eventName: String) {
+    // No-op: RN keeps this for listener bookkeeping on JS side.
+  }
+
+  // Required by NativeEventEmitter contract.
+  override fun removeListeners(count: Double) {
+    // No-op.
+  }
+
+  private fun readableMapToStringMap(map: ReadableMap?): Map<String, String> {
+    if (map == null) {
+      return emptyMap()
+    }
+    val out = mutableMapOf<String, String>()
+    val iterator = map.keySetIterator()
+    while (iterator.hasNextKey()) {
+      val key = iterator.nextKey()
+      if (map.getType(key) == com.facebook.react.bridge.ReadableType.String) {
+        map.getString(key)?.let { out[key] = it }
+      }
+    }
+    return out
   }
 
   private fun emitExtractProgress(
@@ -721,23 +1019,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeStt(
     instanceId: String,
-    modelDir: String,
-    preferInt8: Boolean?,
-    modelType: String?,
-    debug: Boolean?,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    dither: Double?,
-    modelOptions: ReadableMap?,
-    modelingUnit: String?,
-    bpeVocab: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    sttHelper.initializeStt(instanceId, modelDir, preferInt8, modelType, debug, hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars, dither, modelOptions, modelingUnit, bpeVocab, promise)
+    sttHelper.initializeStt(instanceId, options, promise)
   }
 
   /**
@@ -749,61 +1034,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // ==================== Online (streaming) STT Methods ====================
 
-  override fun initializeOnlineSttWithOptions(instanceId: String, options: ReadableMap, promise: Promise) {
-    val modelDir = options.getString("modelDir")
-    if (modelDir.isNullOrEmpty()) {
-      promise.reject("INIT_ERROR", "modelDir is required")
-      return
-    }
-    val modelType = options.getString("modelType") ?: "transducer"
-    val enableEndpoint = if (options.hasKey("enableEndpoint")) options.getBoolean("enableEndpoint") else true
-    val decodingMethod = options.getString("decodingMethod") ?: "greedy_search"
-    val maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 4
-    val hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") else null
-    val hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore") else null
-    val numThreads = if (options.hasKey("numThreads")) options.getDouble("numThreads") else null
-    val provider = if (options.hasKey("provider")) options.getString("provider") else null
-    val ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") else null
-    val ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") else null
-    val dither = if (options.hasKey("dither")) options.getDouble("dither") else null
-    val blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty") else null
-    val debug = if (options.hasKey("debug")) options.getBoolean("debug") else null
-    val rule1MustContainNonSilence = if (options.hasKey("rule1MustContainNonSilence")) options.getBoolean("rule1MustContainNonSilence") else null
-    val rule1MinTrailingSilence = if (options.hasKey("rule1MinTrailingSilence")) options.getDouble("rule1MinTrailingSilence") else null
-    val rule1MinUtteranceLength = if (options.hasKey("rule1MinUtteranceLength")) options.getDouble("rule1MinUtteranceLength") else null
-    val rule2MustContainNonSilence = if (options.hasKey("rule2MustContainNonSilence")) options.getBoolean("rule2MustContainNonSilence") else null
-    val rule2MinTrailingSilence = if (options.hasKey("rule2MinTrailingSilence")) options.getDouble("rule2MinTrailingSilence") else null
-    val rule2MinUtteranceLength = if (options.hasKey("rule2MinUtteranceLength")) options.getDouble("rule2MinUtteranceLength") else null
-    val rule3MustContainNonSilence = if (options.hasKey("rule3MustContainNonSilence")) options.getBoolean("rule3MustContainNonSilence") else null
-    val rule3MinTrailingSilence = if (options.hasKey("rule3MinTrailingSilence")) options.getDouble("rule3MinTrailingSilence") else null
-    val rule3MinUtteranceLength = if (options.hasKey("rule3MinUtteranceLength")) options.getDouble("rule3MinUtteranceLength") else null
-    onlineSttHelper.initializeOnlineStt(
-      instanceId,
-      modelDir,
-      modelType,
-      enableEndpoint,
-      decodingMethod,
-      maxActivePaths,
-      hotwordsFile,
-      hotwordsScore,
-      numThreads,
-      provider,
-      ruleFsts,
-      ruleFars,
-      dither,
-      blankPenalty,
-      debug,
-      rule1MustContainNonSilence,
-      rule1MinTrailingSilence,
-      rule1MinUtteranceLength,
-      rule2MustContainNonSilence,
-      rule2MinTrailingSilence,
-      rule2MinUtteranceLength,
-      rule3MustContainNonSilence,
-      rule3MinTrailingSilence,
-      rule3MinUtteranceLength,
-      promise
-    )
+  override fun initializeOnlineStt(instanceId: String, options: ReadableMap, promise: Promise) {
+    onlineSttHelper.initializeOnlineStt(instanceId, options, promise)
   }
 
   override fun unloadOnlineStt(instanceId: String, promise: Promise) {
@@ -826,13 +1058,31 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun startSttOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlineSttLivePipelineHelper.startSttOfflineLivePipeline(
+      instanceId = instanceId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
+  }
+
   // ==================== Pipeline Audio Buffers ====================
 
   // Map of operationId → cancel flag for active decode operations
   private val decodeCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
   // Map of ingestId → ingest status for active file ingest operations
   private val fileIngestStatuses = java.util.concurrent.ConcurrentHashMap<String, FileIngestStatus>()
-  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool()
+  private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "sherpa-audio-decode").apply { isDaemon = true }
+  }
 
   private data class FileIngestStatus(
     @Volatile var isRunning: Boolean = true,
@@ -898,20 +1148,46 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val path: String?,
     val fd: Int,
     val tempFile: File? = null,
+    /** FFmpeg demuxer hint (e.g. original display name when path is extensionless). */
+    val pathHint: String? = null,
   )
 
+  private fun sourcePathHint(source: ReadableMap): String? {
+    if (!source.hasKey("displayName")) {
+      return null
+    }
+    return source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
+  }
+
+  private fun extensionFromFileName(fileName: String): String? {
+    val dot = fileName.lastIndexOf('.')
+    if (dot < 0 || dot == fileName.length - 1) {
+      return null
+    }
+    val ext = fileName.substring(dot + 1).lowercase(Locale.US)
+    return ext.takeIf { it.isNotEmpty() && ext.length <= 8 }
+  }
+
+  private fun decodeTempFileName(displayName: String?): String {
+    val base = "decode_stream_${java.util.UUID.randomUUID()}"
+    val ext = displayName?.let { extensionFromFileName(it) }
+    return if (ext != null) "$base.$ext" else base
+  }
+
   private fun resolveDecodableSource(
-    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
+    handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle,
+    source: ReadableMap? = null,
   ): DecodableSource {
+    val displayName = source?.let { sourcePathHint(it) }
     return when (handle) {
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
-        DecodableSource(path = handle.file.absolutePath, fd = -1)
+        DecodableSource(path = handle.file.absolutePath, fd = -1, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
-        DecodableSource(path = null, fd = handle.pfd.fd)
+        DecodableSource(path = null, fd = handle.pfd.fd, pathHint = displayName)
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
         val tmpFile = File(
           reactApplicationContext.cacheDir,
-          "decode_stream_${java.util.UUID.randomUUID()}"
+          decodeTempFileName(displayName)
         )
         try {
           tmpFile.outputStream().use { out ->
@@ -925,12 +1201,581 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             e
           )
         }
-        DecodableSource(path = tmpFile.absolutePath, fd = -1, tempFile = tmpFile)
+        DecodableSource(
+          path = tmpFile.absolutePath,
+          fd = -1,
+          tempFile = tmpFile,
+          pathHint = displayName,
+        )
       }
     }
   }
 
-  override fun decodeFileToOfflineBuffer(source: ReadableMap, targetSampleRateHz: Double, forceMono: Boolean, operationId: String, promise: Promise) {
+  /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
+  private fun nativePathArg(decodable: DecodableSource): String? {
+    return decodable.path ?: decodable.pathHint
+  }
+
+  private fun emitVisualizationProgress(
+    operationId: String,
+    phase: String,
+    phasePercent: Double,
+    framesDecoded: Long = 0,
+    totalFramesEstimate: Long = 0,
+    stftWindowsDone: Long = 0,
+    stftWindowsTotal: Long = 0,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putString("phase", phase)
+      payload.putDouble("phasePercent", phasePercent.coerceIn(0.0, 1.0))
+      payload.putDouble("framesDecoded", framesDecoded.toDouble())
+      payload.putDouble("totalFramesEstimate", totalFramesEstimate.toDouble())
+      payload.putDouble("stftWindowsDone", stftWindowsDone.toDouble())
+      payload.putDouble("stftWindowsTotal", stftWindowsTotal.toDouble())
+      eventEmitter.emit("visualizationProgress", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures (e.g. bridge teardown)
+    }
+  }
+
+  private fun makeVisualizationProgressCallback(
+    operationId: String?,
+  ): VisualizationProgressCallback? {
+    val opId = operationId?.trim().orEmpty()
+    if (opId.isEmpty()) {
+      return null
+    }
+    return object : VisualizationProgressCallback {
+      override fun onVisualizationProgress(
+        phase: String,
+        phasePercent: Double,
+        framesDecoded: Long,
+        totalFramesEstimate: Long,
+        stftWindowsDone: Long,
+        stftWindowsTotal: Long,
+      ) {
+        emitVisualizationProgress(
+          opId,
+          phase,
+          phasePercent,
+          framesDecoded,
+          totalFramesEstimate,
+          stftWindowsDone,
+          stftWindowsTotal,
+        )
+      }
+    }
+  }
+
+  private data class VisualizationOptions(
+    val barCount: Int,
+    val minHz: Double,
+    val maxHz: Double,
+    val fftSize: Int,
+    val hopSize: Int,
+    val aggregateCode: Int,
+    val includeTimeline: Boolean,
+    val frameCount: Int,
+    val frameDurationMs: Double,
+    val maxAnalysisDurationMs: Double,
+    val levelsMaxStftFrames: Int,
+    val analysisSampleRateHz: Double,
+    val progressOperationId: String? = null,
+  )
+
+  private fun visualizationDecodeTargetSampleRate(options: VisualizationOptions): Int {
+    val rate = options.analysisSampleRateHz.toInt()
+    return if (rate > 0) rate else 0
+  }
+
+  private fun parseOptionalNumber(options: ReadableMap, key: String): Double? {
+    if (!options.hasKey(key) || options.isNull(key)) {
+      return null
+    }
+    val value = options.getDouble(key)
+    if (!value.isFinite()) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: $key must be a finite number"
+      )
+    }
+    return value
+  }
+
+  private fun parseVisualizationOptions(options: ReadableMap): VisualizationOptions {
+    val kind = options.getString("kind") ?: "spectrum_bars"
+    if (kind != "spectrum_bars") {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: kind must be 'spectrum_bars'"
+      )
+    }
+
+    val timeAggregate = options.getString("timeAggregate") ?: "max_hold"
+    val aggregateCode = when (timeAggregate) {
+      "max_hold" -> 0
+      "mean" -> 1
+      else -> -1
+    }
+    if (aggregateCode < 0) {
+      throw IllegalArgumentException(
+        "AUDIO_VISUALIZATION_INVALID_OPTIONS: timeAggregate must be 'max_hold' or 'mean'"
+      )
+    }
+
+    val requestedBars = if (options.hasKey("barCount") && !options.isNull("barCount")) {
+      options.getDouble("barCount").toInt()
+    } else {
+      96
+    }
+    val barCount = requestedBars.coerceIn(8, 512)
+
+    val minHz = if (options.hasKey("minHz") && !options.isNull("minHz")) {
+      options.getDouble("minHz").coerceAtLeast(10.0)
+    } else {
+      60.0
+    }
+
+    val maxHz = if (options.hasKey("maxHz") && !options.isNull("maxHz")) {
+      options.getDouble("maxHz")
+    } else {
+      0.0
+    }
+
+    val frameCountRaw =
+      if (options.hasKey("frameCount") && !options.isNull("frameCount")) {
+        parseOptionalNumber(options, "frameCount") ?: 0.0
+      } else {
+        0.0
+      }
+    val hasFrameCount = frameCountRaw > 0.0
+    val hasFrameDuration =
+      options.hasKey("frameDurationMs") && !options.isNull("frameDurationMs")
+    val includeTimeline =
+      (options.hasKey("includeTimeline") && !options.isNull("includeTimeline") &&
+        options.getBoolean("includeTimeline")) || hasFrameCount || hasFrameDuration
+
+    var frameCount = 0
+    if (hasFrameCount) {
+      frameCount = frameCountRaw.toInt()
+      if (frameCount < 8 || frameCount > 512) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameCount must be between 8 and 512"
+        )
+      }
+    }
+
+    var frameDurationMs = 0.0
+    if (frameCount <= 0 && hasFrameDuration) {
+      val raw = parseOptionalNumber(options, "frameDurationMs") ?: 0.0
+      frameDurationMs = raw
+      if (frameDurationMs < 50.0 || frameDurationMs > 10000.0) {
+        throw IllegalArgumentException(
+          "AUDIO_VISUALIZATION_INVALID_OPTIONS: frameDurationMs must be between 50 and 10000"
+        )
+      }
+    }
+
+    if (includeTimeline && frameCount <= 0 && frameDurationMs <= 0.0) {
+      frameDurationMs = 500.0
+    }
+
+    val maxAnalysisDurationMs =
+      (parseOptionalNumber(options, "maxAnalysisDurationMs") ?: 0.0).coerceAtLeast(0.0)
+
+    val levelsMaxStftFrames =
+      if (!includeTimeline) {
+        val raw =
+          if (options.hasKey("levelsMaxStftFrames") && !options.isNull("levelsMaxStftFrames")) {
+            parseOptionalNumber(options, "levelsMaxStftFrames")?.toInt() ?: 1024
+          } else {
+            1024
+          }
+        raw.coerceIn(64, 4096)
+      } else {
+        0
+      }
+
+    val analysisSampleRateHz =
+      if (options.hasKey("analysisSampleRateHz") && !options.isNull("analysisSampleRateHz")) {
+        val raw = parseOptionalNumber(options, "analysisSampleRateHz") ?: 0.0
+        when {
+          raw == 0.0 -> 0.0
+          raw in 4000.0..96000.0 -> raw
+          else ->
+            throw IllegalArgumentException(
+              "AUDIO_VISUALIZATION_INVALID_OPTIONS: analysisSampleRateHz must be 0 or between 4000 and 96000"
+            )
+        }
+      } else {
+        0.0
+      }
+
+    val progressOperationId =
+      options.getString("progressOperationId")?.trim()?.takeIf { it.isNotEmpty() }
+
+    return VisualizationOptions(
+      barCount = barCount,
+      minHz = minHz,
+      maxHz = maxHz,
+      fftSize = 2048,
+      hopSize = 1024,
+      aggregateCode = aggregateCode,
+      includeTimeline = includeTimeline,
+      frameCount = frameCount,
+      frameDurationMs = frameDurationMs,
+      maxAnalysisDurationMs = maxAnalysisDurationMs,
+      levelsMaxStftFrames = levelsMaxStftFrames,
+      analysisSampleRateHz = analysisSampleRateHz,
+      progressOperationId = progressOperationId,
+    )
+  }
+
+  private fun normalizeVisualizationNativeResult(
+    nativeResult: HashMap<String, Any>,
+    fallbackBarCount: Int,
+  ): com.facebook.react.bridge.WritableMap {
+    val sampleRate = (nativeResult["sampleRate"] as? Int) ?: 0
+    val durationMs = when (val value = nativeResult["durationMs"]) {
+      is Long -> value.toDouble()
+      is Int -> value.toDouble()
+      is Double -> value
+      is Float -> value.toDouble()
+      else -> 0.0
+    }
+    val nativeBarCount = ((nativeResult["barCount"] as? Int) ?: fallbackBarCount)
+      .coerceAtLeast(1)
+    val frameCount = ((nativeResult["frameCount"] as? Int) ?: 0)
+      .coerceAtLeast(0)
+    val frameDurationMs = when (val value = nativeResult["frameDurationMs"]) {
+      is Double -> value
+      is Float -> value.toDouble()
+      is Int -> value.toDouble()
+      is Long -> value.toDouble()
+      else -> 0.0
+    }.coerceAtLeast(0.0)
+    val framesTransferId = nativeResult["framesTransferId"] as? String
+
+    val rawLevels = nativeResult["levels"]
+    val levels = when (rawLevels) {
+      is FloatArray -> rawLevels.map { it.toDouble() }
+      is DoubleArray -> rawLevels.toList()
+      is IntArray -> rawLevels.map { it.toDouble() }
+      is ArrayList<*> -> rawLevels.map {
+        when (it) {
+          is Number -> it.toDouble()
+          else -> 0.0
+        }
+      }
+      else -> emptyList()
+    }
+
+    val map = Arguments.createMap()
+    map.putString("kind", "spectrum_bars")
+    map.putInt("sampleRate", sampleRate.coerceAtLeast(0))
+    map.putDouble("durationMs", durationMs.coerceAtLeast(0.0))
+    map.putInt("barCount", nativeBarCount)
+    map.putInt("frameCount", frameCount)
+    map.putDouble("frameDurationMs", frameDurationMs)
+    if (!framesTransferId.isNullOrBlank()) {
+      map.putString("framesTransferId", framesTransferId)
+    }
+
+    val levelArray = Arguments.createArray()
+    for (i in 0 until nativeBarCount) {
+      val raw = if (i < levels.size) levels[i] else 0.0
+      levelArray.pushDouble(raw.coerceIn(0.0, 1.0))
+    }
+    map.putArray("levels", levelArray)
+    return map
+  }
+
+  private fun computeVisualizationFromOffline(
+    bufferId: String,
+    options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
+  ): HashMap<String, Any> {
+    val entry = PipelineAudioRegistry.getOffline(bufferId)
+      ?: throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Offline buffer not found: $bufferId")
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      entry.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
+    )
+
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(accumulatorPtr, entry.numSamples.toLong())
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
+      }
+      val chunk = FloatArray(8192)
+      when (entry) {
+        is OfflineEntry.MmapBacked -> {
+          var start = 0
+          val total = entry.numSamples
+          while (start < total) {
+            val maxSamples = minOf(chunk.size, total - start)
+            val count = entry.readInto(start, chunk, 0, maxSamples)
+            if (count <= 0) break
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
+          }
+        }
+
+        is OfflineEntry.InMemory -> {
+          var start = 0
+          val source = entry.samples
+          while (start < source.size) {
+            val count = minOf(chunk.size, source.size - start)
+            System.arraycopy(source, start, chunk, 0, count)
+            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+            start += count
+            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+              break
+            }
+          }
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  private fun computeVisualizationFromLive(
+    liveBufferId: String,
+    options: VisualizationOptions,
+    progressCallback: VisualizationProgressCallback? = null,
+  ): HashMap<String, Any> {
+    val live = PipelineAudioRegistry.getLive(liveBufferId)
+    if (live == null) {
+      if (PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+        throw IllegalArgumentException(
+          "BUFFER_INVALIDATED: Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      }
+      throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: Live buffer not found: $liveBufferId")
+    }
+
+    if (live.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED) {
+      throw IllegalStateException(
+        "AUDIO_INVALID_STATE: Live buffer must be finalized before visualization"
+      )
+    }
+
+    val spoolPath = live.spoolFilePath
+    if (live.hasActiveSpool && !spoolPath.isNullOrBlank()) {
+      @Suppress("UNCHECKED_CAST")
+      return nativeComputeVisualizationProfileFromFile(
+        spoolPath,
+        -1,
+        visualizationDecodeTargetSampleRate(options),
+        true,
+        8192,
+        true,
+        options.barCount,
+        options.minHz,
+        options.maxHz,
+        options.fftSize,
+        options.hopSize,
+        options.aggregateCode,
+        options.includeTimeline,
+        options.frameCount,
+        options.frameDurationMs,
+        options.maxAnalysisDurationMs,
+        options.levelsMaxStftFrames,
+        progressCallback,
+      ) as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    }
+
+    val accumulatorPtr = nativeCreateVisualizationAccumulator(
+      live.sampleRate,
+      options.barCount,
+      options.minHz,
+      options.maxHz,
+      options.fftSize,
+      options.hopSize,
+      options.aggregateCode,
+      options.includeTimeline,
+      options.frameCount,
+      options.frameDurationMs,
+      options.maxAnalysisDurationMs,
+      options.levelsMaxStftFrames,
+    )
+    if (accumulatorPtr == 0L) {
+      throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Failed to create accumulator")
+    }
+
+    try {
+      if (!options.includeTimeline) {
+        nativeSetVisualizationExpectedTotalSamples(
+          accumulatorPtr,
+          live.totalSamplesWritten.toLong()
+        )
+      }
+      if (progressCallback != null) {
+        nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
+      }
+      val snapshot = live.snapshotRing()
+      if (snapshot.isNotEmpty()) {
+        val chunk = FloatArray(8192)
+        var start = 0
+        while (start < snapshot.size) {
+          val count = minOf(chunk.size, snapshot.size - start)
+          System.arraycopy(snapshot, start, chunk, 0, count)
+          nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+          start += count
+          if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+            break
+          }
+        }
+      }
+
+      @Suppress("UNCHECKED_CAST")
+      return nativeFinishVisualizationAccumulator(accumulatorPtr)
+        as? HashMap<String, Any>
+        ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+    } finally {
+      nativeReleaseVisualizationAccumulator(accumulatorPtr)
+    }
+  }
+
+  override fun computeAudioVisualizationProfile(
+    input: ReadableMap,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        val kind = input.getString("kind")
+          ?: throw IllegalArgumentException("VISUALIZATION_INVALID_INPUT: input.kind is required")
+
+        val normalizedOptions = parseVisualizationOptions(options)
+        val progressCallback =
+          makeVisualizationProgressCallback(normalizedOptions.progressOperationId)
+
+        val nativeResult = when (kind) {
+          "offline" -> {
+            val bufferId = input.getString("bufferId")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: offline input requires bufferId"
+              )
+            computeVisualizationFromOffline(bufferId, normalizedOptions, progressCallback)
+          }
+
+          "live" -> {
+            val handle = input.getString("handle")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: live input requires handle"
+              )
+            computeVisualizationFromLive(handle, normalizedOptions, progressCallback)
+          }
+
+          "file" -> {
+            val source = input.getMap("source")
+              ?: throw IllegalArgumentException(
+                "VISUALIZATION_INVALID_INPUT: file input requires source"
+              )
+
+            readHandle = fileIOHelper.resolveSource(source)
+            val decodableSource = resolveDecodableSource(
+              readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+              source,
+            )
+            tempSourceFile = decodableSource.tempFile
+
+            @Suppress("UNCHECKED_CAST")
+            nativeComputeVisualizationProfileFromFile(
+              nativePathArg(decodableSource),
+              decodableSource.fd,
+              visualizationDecodeTargetSampleRate(normalizedOptions),
+              true,
+              8192,
+              true,
+              normalizedOptions.barCount,
+              normalizedOptions.minHz,
+              normalizedOptions.maxHz,
+              normalizedOptions.fftSize,
+              normalizedOptions.hopSize,
+              normalizedOptions.aggregateCode,
+              normalizedOptions.includeTimeline,
+              normalizedOptions.frameCount,
+              normalizedOptions.frameDurationMs,
+              normalizedOptions.maxAnalysisDurationMs,
+              normalizedOptions.levelsMaxStftFrames,
+              progressCallback,
+            ) as? HashMap<String, Any>
+              ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null visualization result")
+          }
+
+          else -> {
+            throw IllegalArgumentException(
+              "VISUALIZATION_INVALID_INPUT: unsupported input kind '$kind'"
+            )
+          }
+        }
+
+        promise.resolve(
+          normalizeVisualizationNativeResult(nativeResult, normalizedOptions.barCount)
+        )
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "VISUALIZATION_INTERNAL_ERROR: Unknown visualization error"
+        val code = when {
+          msg.startsWith("VISUALIZATION_") -> msg.substringBefore(":").trim()
+          msg.startsWith("AUDIO_") -> msg.substringBefore(":").trim()
+          msg.startsWith("BUFFER_") -> msg.substringBefore(":").trim()
+          msg.startsWith("DECODE_") -> msg.substringBefore(":").trim()
+          else -> "VISUALIZATION_INTERNAL_ERROR"
+        }
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("VISUALIZATION_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
+  override fun decodeFileToOfflineBuffer(
+    source: ReadableMap,
+    targetSampleRateHz: Double,
+    forceMono: Boolean,
+    allowDemuxerAutoProbe: Boolean,
+    operationId: String,
+    promise: Promise,
+  ) {
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
 
@@ -941,11 +1786,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       try {
         readHandle = fileIOHelper.resolveSource(source)
         val decodableSource = resolveDecodableSource(
-          readHandle ?: throw IllegalStateException("Resolved read handle is null")
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
         )
         val sourcePath = decodableSource.path
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
+        val nativePath = nativePathArg(decodableSource)
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -972,15 +1819,37 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             ?: reactApplicationContext.cacheDir
           val tmpF32 = java.io.File(dir, "pa_off_decode_${java.util.UUID.randomUUID()}.f32")
 
+          val progressCallback = object {
+            @Suppress("unused")
+            fun onProgress(
+              framesDecoded: Long,
+              totalEstimate: Long,
+              percent: Int,
+              sourceSr: Int,
+              sourceCh: Int,
+            ) {
+              emitDecodeProgress(
+                operationId,
+                framesDecoded,
+                totalEstimate,
+                percent,
+                sourceSr,
+                sourceCh,
+              )
+            }
+          }
+
           @Suppress("UNCHECKED_CAST")
           val result = nativeDecodeFileToMmapFile(
-            sourcePath,
+            nativePath,
             sourceFd,
             targetRate,
             forceMono,
             8192,
+            allowDemuxerAutoProbe,
             cancelFlagAddr,
-            tmpF32.absolutePath
+            tmpF32.absolutePath,
+            progressCallback,
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
           cancelChecker.interrupt()
@@ -1039,6 +1908,97 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeAudioFileContainer(source: ReadableMap, promise: Promise) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
+
+        @Suppress("UNCHECKED_CAST")
+        val result = nativeProbeFileContainer(nativePathArg(decodableSource), sourceFd)
+          as? HashMap<String, String>
+          ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native container probe returned null")
+
+        val inputFormatName = result["inputFormatName"]
+        val codecName = result["codecName"]
+        if (inputFormatName.isNullOrBlank() || codecName.isNullOrBlank()) {
+          throw RuntimeException("PROBE_INTERNAL_ERROR: Invalid native container probe result")
+        }
+
+        val map = Arguments.createMap()
+        map.putString("inputFormatName", inputFormatName)
+        map.putString("codecName", codecName)
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("PROBE_")) msg.substringBefore(":").trim() else "PROBE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("PROBE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
+  override fun probeAudioFileDuration(source: ReadableMap, promise: Promise) {
+    decodeExecutor.execute {
+      var readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle? = null
+      var tempSourceFile: File? = null
+
+      try {
+        readHandle = fileIOHelper.resolveSource(source)
+        val decodableSource = resolveDecodableSource(
+          readHandle ?: throw IllegalStateException("Resolved read handle is null"),
+          source,
+        )
+        val sourcePath = decodableSource.path
+        val sourceFd = decodableSource.fd
+        tempSourceFile = decodableSource.tempFile
+
+        val result = nativeProbeFileDuration(nativePathArg(decodableSource), sourceFd)
+          ?: throw RuntimeException("PROBE_INTERNAL_ERROR: Native probe returned null")
+
+        if (result.size < 2) {
+          throw RuntimeException("PROBE_INTERNAL_ERROR: Invalid native probe result")
+        }
+
+        val durationMs = result[0]
+        if (durationMs < 0) {
+          throw RuntimeException("PROBE_DURATION_UNKNOWN: Could not determine duration")
+        }
+
+        val map = Arguments.createMap()
+        map.putDouble("durationMs", durationMs.toDouble())
+        map.putBoolean("isExact", result[1] != 0L)
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: ""
+        val code = if (msg.startsWith("PROBE_")) msg.substringBefore(":").trim() else "PROBE_INTERNAL_ERROR"
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("PROBE_INTERNAL_ERROR", e.message, e)
+      } finally {
+        try { readHandle?.close() } catch (_: Exception) {}
+        try { tempSourceFile?.delete() } catch (_: Exception) {}
+      }
+    }
+  }
+
   override fun startFileIngestToLiveBuffer(
     liveBufferId: String,
     source: ReadableMap,
@@ -1046,6 +2006,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     forceMono: Boolean,
     autoFinalize: Boolean,
     backpressure: String,
+    allowDemuxerAutoProbe: Boolean,
     operationId: String,
     promise: Promise
   ) {
@@ -1058,7 +2019,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     // Validate buffer exists and is RECORDING before resolving file
     val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
     if (liveEntry == null) {
-      promise.reject("AUDIO_BUFFER_NOT_FOUND", "Live buffer not found: $liveBufferId")
+      if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+        promise.reject(
+          com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED,
+          "Live buffer was transferred and is invalidated: $liveBufferId"
+        )
+      } else {
+        promise.reject("AUDIO_BUFFER_NOT_FOUND", "Live buffer not found: $liveBufferId")
+      }
       return
     }
     if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
@@ -1099,12 +2067,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     var sourcePath: String? = null
     var sourceFd: Int = -1
     var tempSourceFile: File? = null
+    var nativePath: String? = null
     try {
       readHandle = fileIOHelper.resolveSource(source)
-      val decodableSource = resolveDecodableSource(readHandle)
+      val decodableSource = resolveDecodableSource(readHandle, source)
       sourcePath = decodableSource.path
       sourceFd = decodableSource.fd
       tempSourceFile = decodableSource.tempFile
+      nativePath = nativePathArg(decodableSource)
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       decodeCancelFlags.remove(operationId)
       fileIngestStatuses.remove(ingestId)
@@ -1143,20 +2113,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val chunkCallback = object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
             if (cancelFlag.get()) return
-            when (
-              liveEntry.tryAppendSamples(
-                samples,
-                liveEntry.sampleRate,
-                com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
-                backpressure = useBackpressure
-              )
-            ) {
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
-                status.framesIngested += frameCount
+            try {
+              when (
+                liveEntry.tryAppendSamples(
+                  samples,
+                  liveEntry.sampleRate,
+                  com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                  backpressure = useBackpressure
+                )
+              ) {
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED -> {
+                  status.framesIngested += frameCount
+                }
+                com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                  cancelFlag.set(true)
+                }
               }
-              com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-                cancelFlag.set(true)
-              }
+            } catch (_: Throwable) {
+              // Listener/spool/segmentation hooks must not crash native decode thread / JNI.
+              cancelFlag.set(true)
             }
           }
         }
@@ -1173,11 +2148,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
         @Suppress("UNCHECKED_CAST")
         val result = nativeDecodeFileStreaming(
-          sourcePath,
+          nativePath,
           sourceFd,
           targetRate,
           forceMono,
           8192,
+          allowDemuxerAutoProbe,
           cancelFlagAddr,
           chunkCallback,
           progressCallback
@@ -1273,8 +2249,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
+    } catch (e: com.sherpaonnx.audio.pipeline.BufferInvalidatedException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun transferOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.transferOfflineFromLive(
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: com.sherpaonnx.audio.pipeline.TransferException) {
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1294,9 +2286,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineAudioBufferIfEmpty(
+    targetBufferId: String,
+    sourceBufferId: String,
+    _options: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.populateOfflineIfEmpty(
+        targetBufferId = targetBufferId,
+        sourceBufferId = sourceBufferId,
+      )
+      promise.resolve(null)
+    } catch (e: IllegalStateException) {
+      promise.reject(
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE,
+        e.message,
+        e
+      )
+    } catch (e: IllegalArgumentException) {
+      val msg = e.message ?: ""
+      val code = if (
+        msg.contains("not found", ignoreCase = true)
+      ) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT
+      }
+      promise.reject(code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR,
+        e.message,
+        e
+      )
+    }
+  }
+
   override fun createEmptyLiveAudioBuffer(options: ReadableMap, promise: Promise) {
     try {
-      val sampleRate = options.getDouble("sampleRate").toInt()
+      val sampleRate =
+        if (options.hasKey("sampleRate") && !options.isNull("sampleRate")) {
+          options.getDouble("sampleRate").toInt()
+        } else {
+          16000
+        }
       val channelCount = if (options.hasKey("channelCount")) options.getDouble("channelCount").toInt() else 1
       val ringSeconds = if (options.hasKey("ringSeconds")) options.getDouble("ringSeconds") else 60.0
 
@@ -1407,7 +2441,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED, e.message, e)
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.ALREADY_FINALIZED
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1419,6 +2458,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: IllegalStateException) {
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1457,12 +2503,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val tmpFile: File?
   )
 
+  /**
+   * Maps [FileDestination] → native encoder output path. Temp file usage for `saveAudioBufferToFile` /
+   * `saveFileAsAudioFile` on Android only:
+   *
+   * - **fs**, **app**: [FileIOResolver.WriteHandle.FilePath] → encoder writes that path directly (**no** app temp).
+   * - **contentUri**: always [WriteHandle.Stream] (`openOutputStream` only; FD+fopen on provider URIs is unreliable)
+   *   → encode to `cacheDir/fileio_save_*.<fmt>` then [copyTmpToStreamIfNeeded] (**same** path as contentTree).
+   * - **contentTree**: always [WriteHandle.Stream] (SAF tree + `createDocument`) → **always** temp + copy.
+   *
+   * **Cleanup:** On success or controlled failure, [saveAudioBufferToFile] / [saveFileAsAudioFile] `finally` calls
+   * [cleanupSaveDestination] (closes handles, deletes `tmpFile`) and catch blocks call [cleanupOutputFile] on the
+   * encoder path when it pointed at a temp file. If the **process dies** (crash, `kill -9`), that code does not run;
+   * [fileIOHelper.sweepStaleFileioScratchFiles] is invoked here before each resolve to drop **old** scratch files
+   * (default max age 1 hour) so orphans do not accumulate forever.
+   */
   private fun resolveDestinationForSave(destination: ReadableMap, fmt: String): ResolvedDestination {
+    fileIOHelper.sweepStaleFileioScratchFiles()
     val writeHandle = fileIOHelper.resolveDestination(
       destination = destination,
-      mode = com.sherpaonnx.fileio.FileIOResolver.WriteMode.SEEKABLE,
       overwrite = true,
-      createParentDirectories = false,
+      // e.g. app base "documents" → files/docs/ — mkdir so fopen in native encoder succeeds
+      createParentDirectories = true,
     )
 
     val outputPath: String
@@ -1475,11 +2537,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         outputPath = handle.file.absolutePath
         outputKind = "fs"
         resolvedOutputPath = handle.file.absolutePath
-      }
-      is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.FileDescriptor -> {
-        outputPath = handle.fdPath
-        outputKind = "contentUri"
-        resolvedOutputPath = handle.resultUri.toString()
       }
       is com.sherpaonnx.fileio.FileIOResolver.WriteHandle.Stream -> {
         val fallbackTmp = File(reactApplicationContext.cacheDir, "fileio_save_${java.util.UUID.randomUUID()}.$fmt")
@@ -1513,6 +2570,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try { File(path).delete() } catch (_: Exception) {}
   }
 
+  private fun sanitizeResolvedOutputPath(dest: ResolvedDestination?): String {
+    val resolved = dest?.resolvedOutputPath?.trim().orEmpty()
+    if (resolved.isNotEmpty()) return resolved
+    val output = dest?.outputPath?.trim().orEmpty()
+    if (output.isNotEmpty()) return output
+    throw IllegalStateException("AUDIO_SAVE_DESTINATION_INVALID: Empty resolved output path")
+  }
+
+  private fun sanitizeOutputKind(dest: ResolvedDestination?): String {
+    val kind = dest?.outputKind?.trim().orEmpty()
+    return if (kind.isNotEmpty()) kind else "fs"
+  }
+
   private fun encodeViaPcm(
     samples: FloatArray, sampleRate: Int, channelCount: Int,
     outputPath: String, format: String, outputSampleRateHz: Int,
@@ -1525,7 +2595,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       samples.size.toLong() / channelCount,
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1567,7 +2637,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalFrames.toLong(),
       cancelFlagAddr
     )
-    if (sessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+    if (sessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
     try {
       val chunkFrames = 4096
@@ -1614,6 +2684,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         0, // keep source sample rate
         true, // force mono
         8192,
+        true, // allowDemuxerAutoProbe
         cancelFlagAddr,
         object {
           fun onChunk(samples: FloatArray, frameCount: Int) {
@@ -1660,7 +2731,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         cancelFlagAddr
       )
       encodeSessionCreated = true
-      if (encodeSessionPtr == 0L) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session")
+      if (encodeSessionPtr == 0L) throw RuntimeException(SherpaOnnxModule.encodeSessionCreateFailureMessage())
 
       val chunkFrames = 4096
       var offset = 0
@@ -1736,8 +2807,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         copyTmpToStreamIfNeeded(dest)
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
-          putString("outputKind", dest.outputKind)
-          putString("outputPath", dest.resolvedOutputPath)
+          putString("outputKind", sanitizeOutputKind(dest))
+          putString("outputPath", sanitizeResolvedOutputPath(dest))
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
@@ -1745,13 +2816,21 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(e.code, e.message, e)
       } catch (e: IllegalArgumentException) {
         cleanupOutputFile(dest?.outputPath)
-        val code = if (e.message?.contains("empty", ignoreCase = true) == true)
-          "AUDIO_SAVE_BUFFER_EMPTY" else "AUDIO_SAVE_SOURCE_NOT_FOUND"
+        val msg = e.message ?: ""
+        val code = when {
+          msg.contains("empty", ignoreCase = true) -> "AUDIO_SAVE_BUFFER_EMPTY"
+          msg.contains("buffer not found", ignoreCase = true) -> "AUDIO_SAVE_BUFFER_NOT_FOUND"
+          else -> "AUDIO_SAVE_SOURCE_NOT_FOUND"
+        }
         promise.reject(code, e.message, e)
       } catch (e: IllegalStateException) {
         cleanupOutputFile(dest?.outputPath)
         if (e.message?.contains("finalized", ignoreCase = true) == true) {
           promise.reject("AUDIO_SAVE_BUFFER_NOT_FINALIZED", e.message, e)
+        } else if (e.message?.contains("invalidated", ignoreCase = true) == true) {
+          promise.reject("AUDIO_SAVE_BUFFER_INVALIDATED", e.message, e)
+        } else if (e.message?.contains("AUDIO_SAVE_DESTINATION_INVALID") == true) {
+          promise.reject("AUDIO_SAVE_DESTINATION_INVALID", e.message, e)
         } else {
           promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
         }
@@ -1793,7 +2872,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long
   ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
-      ?: throw IllegalArgumentException("Live buffer not found: $bufferId")
+      ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(bufferId)) {
+        throw IllegalStateException("AUDIO_SAVE_BUFFER_INVALIDATED: Live buffer is invalidated after transfer: $bufferId")
+      } else {
+        throw IllegalArgumentException("Live buffer not found: $bufferId")
+      }
     if (entry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.FINISHED)
       throw IllegalStateException("Live buffer must be finalized before conversion")
     if (entry.numSamples == 0L) throw IllegalArgumentException("Buffer is empty")
@@ -1829,13 +2912,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       var dest: ResolvedDestination? = null
 
       try {
-        readHandle = fileIOHelper.resolveSource(source)
-        val source = when (val handle = readHandle) {
+        val resolvedHandle = fileIOHelper.resolveSource(source)
+        readHandle = resolvedHandle
+        val source = when (resolvedHandle) {
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
-            handle.file.absolutePath to -1
+            resolvedHandle.file.absolutePath to -1
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
-            null to handle.pfd.fd
+            null to resolvedHandle.pfd.fd
           }
           is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
             throw FileIOException(
@@ -1843,7 +2927,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               "DECODE_UNSUPPORTED_SOURCE: Non-seekable stream source is not supported; provide a seekable fd/path"
             )
           }
-          null -> throw RuntimeException("Resolved read handle is null")
         }
         val sourcePath = source.first
         val sourceFd = source.second
@@ -1875,8 +2958,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         copyTmpToStreamIfNeeded(dest)
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
-          putString("outputKind", dest.outputKind)
-          putString("outputPath", dest.resolvedOutputPath)
+          putString("outputKind", sanitizeOutputKind(dest))
+          putString("outputPath", sanitizeResolvedOutputPath(dest))
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
@@ -1887,6 +2970,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val msg = e.message ?: ""
         val code = if (msg.startsWith("AUDIO_SAVE_")) msg.substringBefore(":").trim() else "AUDIO_SAVE_ENCODE_ERROR"
         promise.reject(code, msg, e)
+      } catch (e: IllegalStateException) {
+        cleanupOutputFile(dest?.outputPath)
+        if (e.message?.contains("AUDIO_SAVE_DESTINATION_INVALID") == true) {
+          promise.reject("AUDIO_SAVE_DESTINATION_INVALID", e.message, e)
+        } else {
+          promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
+        }
       } catch (e: Exception) {
         cleanupOutputFile(dest?.outputPath)
         promise.reject("AUDIO_SAVE_ENCODE_ERROR", e.message, e)
@@ -1912,6 +3002,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(info)
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -1929,7 +3021,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       micToLiveSink = null
 
       val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
-        ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+        ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(liveBufferId)) {
+          throw IllegalStateException("Live buffer is invalidated after transfer: $liveBufferId")
+        } else {
+          throw IllegalArgumentException("Live buffer not found: $liveBufferId")
+        }
 
       if (liveEntry.state != com.sherpaonnx.audio.pipeline.LiveEntry.State.RECORDING) {
         throw IllegalStateException("Live buffer is finalized, cannot capture into it")
@@ -1963,7 +3059,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     } catch (e: IllegalArgumentException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message, e)
     } catch (e: IllegalStateException) {
-      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+      val code = if ((e.message ?: "").contains("invalidated", ignoreCase = true)) {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED
+      } else {
+        com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE
+      }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.CAPTURE_ERROR, e.message, e)
     }
@@ -2056,10 +3157,42 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineTextBufferIfEmpty(
+    bufferId: String,
+    text: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Offline text buffer not found: $bufferId"
+        )
+        return
+      }
+      entry.populate(
+        text = text,
+        tokens = emptyArray(),
+        timestamps = floatArrayOf(),
+        durations = floatArrayOf(),
+        lang = options?.getString("lang") ?: "",
+        emotion = options?.getString("emotion") ?: "",
+        event = options?.getString("event") ?: "",
+      )
+      promise.resolve(null)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_POPULATED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun createLiveTextBuffer(options: ReadableMap, promise: Promise) {
     try {
       val windowMaxChars = if (options.hasKey("windowMaxChars")) options.getDouble("windowMaxChars").toInt() else 65536
-      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 1000
+      val maxSegments = if (options.hasKey("maxSegments")) options.getDouble("maxSegments").toInt() else 4096
       val emitPartialEvents = if (options.hasKey("emitPartialEvents")) options.getBoolean("emitPartialEvents") else false
       val partialEventMinIntervalMs = if (options.hasKey("partialEventMinIntervalMs")) options.getDouble("partialEventMinIntervalMs").toLong() else 0L
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
@@ -2344,6 +3477,58 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun setLiveTextBufferPartial(
+    liveBufferId: String,
+    text: String,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Live text buffer not found: $liveBufferId"
+        )
+        return
+      }
+
+      entry.writePartial(text)
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun appendLiveTextBufferPartial(
+    liveBufferId: String,
+    text: String,
+    promise: Promise,
+  ) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getLive(liveBufferId)
+      if (entry == null) {
+        promise.reject(
+          com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND,
+          "Live text buffer not found: $liveBufferId"
+        )
+        return
+      }
+
+      entry.appendText(text)
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: IllegalStateException) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.ALREADY_FINALIZED, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun appendLiveTextSegment(
     liveBufferId: String,
     text: String,
@@ -2383,6 +3568,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         timestamps = timestampArray,
         source = "append",
         meta = metaMap,
+      )
+
+      emitLiveTextSegment(
+        liveBufferId = liveBufferId,
+        segment = com.sherpaonnx.text.pipeline.TextSegment(
+          text = text,
+          tokens = tokenArray,
+          timestamps = timestampArray,
+          source = "append",
+          segmentIndex = segmentIndex,
+          meta = metaMap,
+        ),
+        totalSegments = entry.segmentCount,
       )
 
       val out = Arguments.createMap()
@@ -2487,6 +3685,216 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun attachSegmentationEngine(
+    bufferId: String,
+    domain: String,
+    policy: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val policyMap = policy.toHashMap() as Map<String, Any?>
+      val info = com.sherpaonnx.segment.engine.SegmentationEngineRegistry.attachEngine(
+        bufferId = bufferId,
+        domainRaw = domain,
+        rawPolicy = policyMap,
+      )
+      promise.resolve(segmentationEngineInfoToWritableMap(info))
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun detachSegmentationEngine(
+    engineId: String,
+    flushFinal: Boolean?,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.detachEngine(
+        engineId = engineId,
+        flushFinal = flushFinal == true,
+      )
+      promise.resolve(null)
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun getSegmentationEngineInfo(engineId: String, promise: Promise) {
+    try {
+      val info =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.getEngineInfo(engineId)
+      promise.resolve(segmentationEngineInfoToWritableMap(info))
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  override fun segmentOfflineBuffer(
+    bufferId: String,
+    domain: String,
+    policy: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val policyMap = policy.toHashMap() as Map<String, Any?>
+      val result = com.sherpaonnx.segment.engine.SegmentationEngineRegistry.segmentOfflineBuffer(
+        bufferId = bufferId,
+        domainRaw = domain,
+        rawPolicy = policyMap,
+      )
+
+      val out = Arguments.createMap()
+      val resultBufferId = result["bufferId"] as? String ?: bufferId
+      out.putString("bufferId", resultBufferId)
+      out.putString("kind", result["kind"] as? String ?: "offlineSegmentBuffer")
+      out.putString("state", result["state"] as? String ?: "immutable")
+      (result["segmentCount"] as? Number)?.let { out.putInt("segmentCount", it.toInt()) }
+      (result["sourceAudioBufferId"] as? String)?.let { out.putString("sourceAudioBufferId", it) }
+      @Suppress("UNCHECKED_CAST")
+      val textSegments = result["segments"] as? List<Map<String, Any?>>
+      if (!textSegments.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        textSegments.forEach { segment ->
+          val s = Arguments.createMap()
+          s.putString("segmentId", segment["segmentId"] as? String ?: "")
+          s.putInt("startOffset", (segment["startOffset"] as? Number)?.toInt() ?: 0)
+          s.putInt("endOffset", (segment["endOffset"] as? Number)?.toInt() ?: 0)
+          s.putString("reason", segment["reason"] as? String ?: "manual_commit")
+          s.putString("source", segment["source"] as? String ?: "manual")
+          s.putString("text", segment["text"] as? String ?: "")
+          arr.pushMap(s)
+        }
+        out.putArray("segments", arr)
+      }
+      promise.resolve(out)
+    } catch (t: Throwable) {
+      val (code, message) =
+        com.sherpaonnx.segment.engine.SegmentationEngineRegistry.toError(
+          throwable = t,
+          fallbackCode = com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR,
+        )
+      promise.reject(code, message, t)
+    }
+  }
+
+  private fun segmentationEngineInfoToWritableMap(
+    info: com.sherpaonnx.segment.engine.SegmentationEngineInfoSnapshot,
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("engineId", info.engineId)
+    out.putString("attachedBufferId", info.attachedBufferId)
+    out.putString(
+      "domain",
+      if (info.domain == com.sherpaonnx.segment.engine.EngineDomain.TEXT) {
+        "text"
+      } else {
+        "speech"
+      }
+    )
+    out.putString(
+      "state",
+      when (info.state) {
+        com.sherpaonnx.segment.engine.EngineState.ACTIVE -> "active"
+        com.sherpaonnx.segment.engine.EngineState.DETACHED,
+        com.sherpaonnx.segment.engine.EngineState.RELEASED -> "detached"
+      }
+    )
+    out.putInt("totalSegmentsCommitted", info.totalSegmentsCommitted)
+    info.lastSegmentId?.let { out.putString("lastSegmentId", it) }
+    info.segmentBufferId?.let { out.putString("segmentBufferId", it) }
+
+    val policy = Arguments.createMap()
+    policy.putString("evaluator", info.policy.evaluator)
+    policy.putInt("maxLengthChars", info.policy.maxLengthChars)
+    policy.putBoolean("sentenceBoundary", info.policy.sentenceBoundary)
+    info.policy.sentenceBoundaryChars?.takeIf { it.isNotEmpty() }?.let { chars ->
+      val arr = Arguments.createArray()
+      for (s in chars) {
+        arr.pushString(s)
+      }
+      policy.putArray("sentenceBoundaryChars", arr)
+    }
+    policy.putInt("silenceThresholdMs", info.policy.silenceThresholdMs)
+    policy.putDouble("energyThresholdDb", info.policy.energyThresholdDb)
+    policy.putInt("minSegmentMs", info.policy.minSegmentMs)
+    policy.putInt("maxSegmentMs", info.policy.maxSegmentMs)
+    policy.putInt("hangoverMs", info.policy.hangoverMs)
+    policy.putInt("checkpointIntervalMs", info.policy.checkpointIntervalMs)
+    info.policy.modelPath?.let { onnxPath ->
+      val modelPathMap = Arguments.createMap()
+      modelPathMap.putString("kind", "fs")
+      modelPathMap.putString("path", onnxPath)
+      policy.putMap("modelPath", modelPathMap)
+    }
+    info.policy.vadThreshold?.let { policy.putDouble("vadThreshold", it) }
+    info.policy.vadMinSpeechMs?.let { policy.putInt("vadMinSpeechMs", it) }
+    info.policy.vadMinSilenceMs?.let { policy.putInt("vadMinSilenceMs", it) }
+    out.putMap("policy", policy)
+
+    return out
+  }
+
+  private fun segmentRecordToWritableMapWithAnnotation(
+    record: com.sherpaonnx.segment.pipeline.SegmentRecord,
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("id", record.id)
+    out.putString("kind", record.kind)
+    out.putString("sourceAudioBufferId", record.sourceAudioBufferId)
+    out.putInt("startSample", record.startSample)
+    out.putInt("endSample", record.endSample)
+    out.putInt("sampleRate", record.sampleRate)
+    out.putInt("durationMs", record.durationMs)
+    record.confidence?.let { out.putDouble("confidence", it) }
+
+    val annotation =
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(
+        record.id
+      )
+    annotation?.let {
+      out.putString("reason", it.reason)
+      out.putString("source", it.source)
+      out.putDouble("createdAtMs", it.createdAtMs.toDouble())
+    }
+
+    record.payloadJson?.let { payloadJson ->
+      try {
+        val json = JSONObject(payloadJson)
+        val payload = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
+        out.putMap("payload", payload)
+      } catch (_: Exception) {
+      }
+    }
+
+    return out
+  }
+
+  private fun segmentRecordsToWritableArrayWithAnnotation(
+    records: List<com.sherpaonnx.segment.pipeline.SegmentRecord>,
+  ): com.facebook.react.bridge.WritableArray {
+    val arr = Arguments.createArray()
+    for (record in records) {
+      arr.pushMap(segmentRecordToWritableMapWithAnnotation(record))
+    }
+    return arr
+  }
+
   // ==================== Pipeline Segment Buffers ====================
 
   override fun createLiveSegmentBuffer(options: ReadableMap, promise: Promise) {
@@ -2501,7 +3909,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         if (options.hasKey("maxSegments") && !options.isNull("maxSegments")) {
           options.getDouble("maxSegments").toInt()
         } else {
-          1000
+          4096
         }
       val spoolingMode = if (options.hasKey("spoolingMode") && !options.isNull("spoolingMode")) {
         options.getString("spoolingMode")
@@ -2587,12 +3995,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
     val source = payload.getString("source")?.trim() ?: ""
     val allowedKeys = when (source) {
-      "vad" -> setOf("source", "engine", "decision", "score")
-      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal")
-      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk")
+      "vad" -> setOf("source", "engine", "decision", "score", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts"
+        "speech payload.source must be one of vad, stt, tts, manual"
       )
     }
 
@@ -2669,7 +4078,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         sampleRate = sampleRate.toInt(),
         durationMs = durationMs?.toInt(),
         confidence = confidence,
-        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() }
+        payloadJson = payload?.toHashMap()?.let { org.json.JSONObject(it as Map<*, *>).toString() },
+        annotationReason = if (payload != null && payload.hasKey("__annotationReason")) payload.getString("__annotationReason") else null,
+        annotationSource = if (payload != null && payload.hasKey("__annotationSource")) payload.getString("__annotationSource") else null,
+        annotationCreatedAtMs = if (payload != null && payload.hasKey("__annotationCreatedAtMs") && !payload.isNull("__annotationCreatedAtMs")) payload.getDouble("__annotationCreatedAtMs").toLong() else null
       )
       val out = Arguments.createMap()
       out.putString("segmentId", result.first)
@@ -2712,6 +4124,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun populateOfflineSegmentBufferIfEmpty(
+    targetBufferId: String,
+    liveBufferId: String,
+    mode: String?,
+    promise: Promise
+  ) {
+    try {
+      com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.populateOfflineFromLiveIfEmpty(
+        targetBufferId,
+        liveBufferId,
+        mode ?: "fullIfSpooled"
+      )
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun getPipelineSegmentBufferInfo(bufferId: String, promise: Promise) {
     try {
       val offline = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
@@ -2746,7 +4178,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val count = maxCount?.toInt() ?: 1024
       val segments = entry.snapshotSegments(from, count)
       val out = Arguments.createMap()
-      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -2769,7 +4201,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
       val out = Arguments.createMap()
-      out.putArray("segments", com.sherpaonnx.segment.pipeline.OfflineSegmentEntry.toWritableArray(segments))
+      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -2800,6 +4232,230 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun segmentLinkTypeRaw(
+    type: com.sherpaonnx.segment.core.SegmentLinkType
+  ): String = type.name.lowercase()
+
+  private fun segmentLinkToWritableMap(
+    link: com.sherpaonnx.segment.core.SegmentLink
+  ): com.facebook.react.bridge.WritableMap {
+    val out = Arguments.createMap()
+    out.putString("linkId", link.linkId)
+    out.putString("textSegmentId", link.textSegmentId)
+    out.putString("speechSegmentId", link.speechSegmentId)
+    out.putString("linkType", segmentLinkTypeRaw(link.linkType))
+    link.confidence?.let { out.putDouble("confidence", it.toDouble()) }
+    link.metaJson?.let { rawMeta ->
+      try {
+        val json = JSONObject(rawMeta)
+        val meta = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
+        out.putMap("meta", meta)
+      } catch (_: Exception) {
+        // Ignore malformed meta JSON.
+      }
+    }
+    return out
+  }
+
+  override fun createSegmentLinkMap(options: ReadableMap?, promise: Promise) {
+    try {
+      val textBufferId =
+        if (options != null && options.hasKey("textBufferId") && !options.isNull("textBufferId")) {
+          options.getString("textBufferId")
+        } else {
+          null
+        }
+      val audioBufferId =
+        if (options != null && options.hasKey("audioBufferId") && !options.isNull("audioBufferId")) {
+          options.getString("audioBufferId")
+        } else {
+          null
+        }
+
+      val ref = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.createLinkMap(
+        textBufferId = textBufferId,
+        audioBufferId = audioBufferId,
+      )
+      val out = Arguments.createMap()
+      out.putString("linkMapId", ref.linkMapId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun addSegmentLink(linkMapId: String, link: ReadableMap, promise: Promise) {
+    try {
+      val textSegmentId = link.getString("textSegmentId") ?: ""
+      val speechSegmentId = link.getString("speechSegmentId") ?: ""
+      val linkType = link.getString("linkType") ?: ""
+      val confidence =
+        if (link.hasKey("confidence") && !link.isNull("confidence")) {
+          link.getDouble("confidence").toFloat()
+        } else {
+          null
+        }
+      val metaJson =
+        if (link.hasKey("meta") && !link.isNull("meta")) {
+          link.getMap("meta")?.toHashMap()?.let { JSONObject(it).toString() }
+        } else {
+          null
+        }
+
+      val out = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.addLink(
+        linkMapId = linkMapId,
+        textSegmentId = textSegmentId,
+        speechSegmentId = speechSegmentId,
+        linkTypeRaw = linkType,
+        confidence = confidence,
+        metaJson = metaJson,
+      )
+      promise.resolve(segmentLinkToWritableMap(out))
+    } catch (e: IllegalArgumentException) {
+      promise.reject("SEGMENT_LINK_INVALID", e.message, e)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun addSegmentLinks(linkMapId: String, links: ReadableArray, promise: Promise) {
+    try {
+      val input = ArrayList<com.sherpaonnx.segment.core.SegmentLinkInput>(links.size())
+      for (i in 0 until links.size()) {
+        val link = links.getMap(i)
+          ?: throw IllegalArgumentException("SEGMENT_LINK_INVALID: links[$i] must be an object")
+        val metaJson =
+          if (link.hasKey("meta") && !link.isNull("meta")) {
+            link.getMap("meta")?.toHashMap()?.let { JSONObject(it).toString() }
+          } else {
+            null
+          }
+        input.add(
+          com.sherpaonnx.segment.core.SegmentLinkInput(
+            textSegmentId = link.getString("textSegmentId") ?: "",
+            speechSegmentId = link.getString("speechSegmentId") ?: "",
+            linkType = link.getString("linkType") ?: "",
+            confidence = if (link.hasKey("confidence") && !link.isNull("confidence")) {
+              link.getDouble("confidence").toFloat()
+            } else {
+              null
+            },
+            metaJson = metaJson,
+          )
+        )
+      }
+
+      val created = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.addLinks(linkMapId, input)
+      val arr = Arguments.createArray()
+      created.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: IllegalArgumentException) {
+      promise.reject("SEGMENT_LINK_INVALID", e.message, e)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun removeSegmentLink(linkMapId: String, linkId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.core.SegmentLinkMapRegistry.removeLink(linkMapId, linkId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSpeechSegmentsForText(linkMapId: String, textSegmentId: String, promise: Promise) {
+    try {
+      val links =
+        com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getSpeechSegmentsForText(
+          linkMapId,
+          textSegmentId,
+        )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getTextSegmentsForSpeech(linkMapId: String, speechSegmentId: String, promise: Promise) {
+    try {
+      val links =
+        com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getTextSegmentsForSpeech(
+          linkMapId,
+          speechSegmentId,
+        )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getAllSegmentLinks(
+    linkMapId: String,
+    startIndex: Double?,
+    maxCount: Double?,
+    promise: Promise,
+  ) {
+    try {
+      val from = startIndex?.toInt() ?: 0
+      val count = maxCount?.toInt() ?: 1024
+      val links = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getAllLinks(
+        linkMapId,
+        from,
+        count,
+      )
+      val arr = Arguments.createArray()
+      links.forEach { arr.pushMap(segmentLinkToWritableMap(it)) }
+      val out = Arguments.createMap()
+      out.putArray("links", arr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSegmentLinkCount(linkMapId: String, promise: Promise) {
+    try {
+      promise.resolve(com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getCount(linkMapId))
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun getSegmentLinkMapInfo(linkMapId: String, promise: Promise) {
+    try {
+      val info = com.sherpaonnx.segment.core.SegmentLinkMapRegistry.getInfo(linkMapId)
+      val out = Arguments.createMap()
+      out.putString("linkMapId", info.linkMapId)
+      out.putInt("linkCount", info.linkCount)
+      if (info.textBufferId != null) out.putString("textBufferId", info.textBufferId)
+      if (info.audioBufferId != null) out.putString("audioBufferId", info.audioBufferId)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
+  override fun releaseSegmentLinkMap(linkMapId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.segment.core.SegmentLinkMapRegistry.release(linkMapId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("SEGMENT_LINK_INTERNAL_ERROR", e.message, e)
+    }
+  }
+
   // ==================== STT Methods ====================
 
   override fun transcribe(instanceId: String, bufferId: String, textOutBufferId: String, promise: Promise) {
@@ -2817,36 +4473,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
    */
   override fun initializeTts(
     instanceId: String,
-    modelDir: String,
-    modelType: String,
-    numThreads: Double,
-    debug: Boolean,
-    noiseScale: Double?,
-    noiseScaleW: Double?,
-    lengthScale: Double?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    maxNumSentences: Double?,
-    silenceScale: Double?,
-    provider: String?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    commonTtsHelper.initializeTts(
-      instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      debug,
-      noiseScale,
-      noiseScaleW,
-      lengthScale,
-      ruleFsts,
-      ruleFars,
-      maxNumSentences,
-      silenceScale,
-      provider,
-      promise
-    )
+    commonTtsHelper.initializeTts(instanceId, options, promise)
   }
 
   /**
@@ -2901,17 +4531,60 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
-  /**
-   * Start a streaming TTS pipeline worker.
-   */
-  override fun startTtsPipeline(
+  override fun alignAccurateForcedCtcFromPcm(
+    modelPath: String,
+    windowText: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignAccurateForcedCtcFromPcm(
+      modelPath,
+      windowText,
+      pcm,
+      sampleRate,
+      granularity,
+      language,
+      promise,
+    )
+  }
+
+  override fun alignAccurateFromPcm(
+    modelPath: String,
+    text: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    alignmentHelper.alignAccurateFromPcm(
+      modelPath,
+      text,
+      pcm,
+      sampleRate,
+      granularity,
+      language,
+      promise,
+    )
+  }
+
+  override fun startTtsOfflineLivePipeline(
     instanceId: String,
     textInLiveBufferId: String,
     audioOutLiveBufferId: String,
-    options: ReadableMap?,
+    options: ReadableMap,
     promise: Promise
   ) {
-    onlineTtsHelper.startTtsPipeline(instanceId, textInLiveBufferId, audioOutLiveBufferId, options, promise)
+    offlineTtsHelper.startTtsOfflineLivePipeline(
+      instanceId,
+      textInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
   }
 
   override fun createPcmPlayer(
@@ -3038,20 +4711,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -3075,20 +4740,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun initializeOnlineEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise
   ) {
     enhancementHelper.initializeOnlineEnhancement(
       instanceId,
-      modelDir,
-      modelType,
-      numThreads,
-      provider,
-      debug,
+      options,
       promise
     )
   }
@@ -3108,6 +4765,118 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.startEnhancementPipeline(instanceId, inputBufferId, outputBufferId, promise)
   }
 
+  override fun startEnhancementOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    enhancementHelper.startEnhancementOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferId,
+      options,
+      promise
+    )
+  }
+
+  override fun detectModel(
+    modelDir: String,
+    assetName: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectModel(modelDir, assetName)
+      if (result == null) {
+        promise.reject("DETECT_ERROR", "Unified model detection returned null")
+        return
+      }
+      promise.resolve(Companion.unifiedDetectHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified model detection failed: ${e.message}", e)
+    }
+  }
+
+  override fun detectModelsBatch(inputs: ReadableArray, promise: Promise) {
+    try {
+      val nativeInputs = ArrayList<HashMap<String, String?>>()
+      for (i in 0 until inputs.size()) {
+        val entry = inputs.getMap(i) ?: continue
+        val item = HashMap<String, String?>()
+        if (entry.hasKey("modelDir") && !entry.isNull("modelDir")) {
+          item["modelDir"] = entry.getString("modelDir")
+        }
+        if (entry.hasKey("assetName") && !entry.isNull("assetName")) {
+          item["assetName"] = entry.getString("assetName")
+        }
+        nativeInputs.add(item)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val results = Companion.nativeDetectModelsBatch(nativeInputs)
+        as? ArrayList<HashMap<String, Any?>>
+        ?: arrayListOf()
+      val out = Arguments.createArray()
+      for (result in results) {
+        out.pushMap(Companion.unifiedDetectHashMapToWritableMap(result))
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("DETECT_ERROR", "Unified batch model detection failed: ${e.message}", e)
+    }
+  }
+
+  override fun validateCustomModelPaths(
+    category: String,
+    modelType: String,
+    paths: ReadableMap,
+    promise: Promise
+  ) {
+    try {
+      val pathMap = HashMap<String, String>()
+      val iterator = paths.keySetIterator()
+      while (iterator.hasNextKey()) {
+        val key = iterator.nextKey()
+        if (!paths.isNull(key)) {
+          paths.getString(key)?.let { pathMap[key] = it }
+        }
+      }
+      val result = Companion.validateCustomModelPathsNative(category, modelType, pathMap)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path validation returned null")
+          return
+        }
+      promise.resolve(Companion.customValidationHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path validation failed: ${e.message}",
+        e
+      )
+    }
+  }
+
+  override fun getCustomModelPathRequirements(
+    category: String,
+    modelType: String,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.getCustomModelPathRequirementsNative(category, modelType)
+        ?: run {
+          promise.reject("VALIDATE_ERROR", "Custom model path requirements returned null")
+          return
+        }
+      promise.resolve(Companion.customPathRequirementsHashMapToWritableMap(result))
+    } catch (e: Exception) {
+      promise.reject(
+        "VALIDATE_ERROR",
+        "Custom model path requirements failed: ${e.message}",
+        e
+      )
+    }
+  }
+
   // ==================== VAD Methods ====================
 
   override fun initializeVad(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -3121,6 +4890,131 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun detectPunctuationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeOfflinePunctuation(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    punctuationHelper.initializeOfflinePunctuation(
+      instanceId,
+      options,
+      promise
+    )
+  }
+
+  override fun punctuateOfflineTextBuffers(
+    instanceId: String,
+    textInBufferId: String,
+    textOutBufferId: String,
+    textInputNormalization: String?,
+    promise: Promise
+  ) {
+    punctuationHelper.punctuateOfflineTextBuffers(
+      instanceId,
+      textInBufferId,
+      textOutBufferId,
+      textInputNormalization,
+      promise
+    )
+  }
+
+  override fun punctuateOfflineString(
+    instanceId: String,
+    plain: String,
+    textOutBufferId: String,
+    textInputNormalization: String?,
+    promise: Promise
+  ) {
+    punctuationHelper.punctuateOfflineString(
+      instanceId,
+      plain,
+      textOutBufferId,
+      textInputNormalization,
+      promise
+    )
+  }
+
+  override fun unloadOfflinePunctuation(
+    instanceId: String,
+    promise: Promise
+  ) {
+    punctuationHelper.unloadOfflinePunctuation(instanceId, promise)
+  }
+
+  override fun initializeOnlinePunctuation(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.initializeOnlinePunctuation(
+      instanceId,
+      options,
+      promise
+    )
+  }
+
+  override fun processOnlinePunctuationChunk(
+    instanceId: String,
+    text: String,
+    textInputNormalization: String?,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.processOnlinePunctuationChunk(
+      instanceId,
+      text,
+      textInputNormalization,
+      promise
+    )
+  }
+
+  override fun unloadOnlinePunctuation(
+    instanceId: String,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.unloadOnlinePunctuation(instanceId, promise)
+  }
+
+  override fun startStreamingPunctuationPipeline(
+    instanceId: String,
+    inputBufferId: String,
+    outputBufferId: String,
+    textInputNormalization: String?,
+    promise: Promise
+  ) {
+    onlinePunctuationHelper.startStreamingPunctuationPipeline(
+      instanceId,
+      inputBufferId,
+      outputBufferId,
+      textInputNormalization,
+      promise
+    )
+  }
+
+  override fun startPunctuationOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    offlinePunctuationLivePipelineHelper.startPunctuationOfflineLivePipeline(
+      instanceId = instanceId,
+      textInLiveBufferId = textInLiveBufferId,
+      textOutLiveBufferId = textOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
   }
 
   override fun startVadPipeline(
@@ -3287,8 +5181,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.getAssetPackPath(packName, promise)
   }
 
-  override fun listBundledArchiveAssetPaths(packName: String, promise: Promise) {
-    assetHelper.listBundledArchiveAssetPaths(packName, promise)
+  override fun listApkAssetPaths(assetPrefix: String, promise: Promise) {
+    com.sherpaonnx.extraction.ApkAssetPathLister(reactApplicationContext, NAME)
+      .listApkAssetPaths(assetPrefix, promise)
+  }
+
+  override fun fetchAssetPack(packName: String, promise: Promise) {
+    assetHelper.fetchAssetPack(packName, promise)
+  }
+
+  override fun ensureAssetPackReady(packName: String, promise: Promise) {
+    assetHelper.ensureAssetPackReady(packName, promise)
+  }
+
+  override fun getAssetPackState(packName: String, promise: Promise) {
+    assetHelper.getAssetPackState(packName, promise)
+  }
+
+  override fun removeAssetPack(packName: String, promise: Promise) {
+    assetHelper.removeAssetPack(packName, promise)
+  }
+
+  override fun listOdrDeliverySnapshot(tag: String, promise: Promise) {
+    val result = com.facebook.react.bridge.Arguments.createMap()
+    result.putString("tag", tag)
+    result.putNull("resolvedModelsPath")
+    promise.resolve(result)
   }
 
   override fun extractArchiveFromAsset(
@@ -3351,6 +5269,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @JvmStatic
     private external fun nativeTestSherpaInit(): String
 
+    @JvmStatic
+    private external fun nativeInitDiagnostics(enabled: Boolean, installSignalHandler: Boolean)
+
+    @JvmStatic
+    private external fun nativeGetDiagnosticSnapshot(): String
+
     /** True if QNN HTP backend can be initialized (QnnBackend_create + free). */
     @JvmStatic
     private external fun nativeCanInitQnnHtp(): Boolean
@@ -3393,9 +5317,155 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelType: String
     ): HashMap<String, Any>?
 
+    @JvmStatic
+    private external fun nativeDetectPunctuationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
     private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDetectModel(
+      modelDir: String,
+      assetName: String?
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    private external fun nativeDetectModelsBatch(
+      inputs: ArrayList<HashMap<String, String?>>
+    ): ArrayList<HashMap<String, Any?>>
+
+    @JvmStatic
+    internal fun validateCustomModelPathsNative(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>? =
+      nativeValidateCustomModelPaths(category, modelType, paths)
+
+    @JvmStatic
+    internal fun getCustomModelPathRequirementsNative(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>? =
+      nativeGetCustomModelPathRequirements(category, modelType)
+
+    @JvmStatic
+    private external fun nativeValidateCustomModelPaths(
+      category: String,
+      modelType: String,
+      paths: HashMap<String, String>
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    private external fun nativeGetCustomModelPathRequirements(
+      category: String,
+      modelType: String
+    ): HashMap<String, Any?>?
+
+    @JvmStatic
+    internal fun unifiedDetectHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("matched", result["matched"] as? Boolean ?: false)
+      map.putBoolean("success", result["success"] as? Boolean ?: false)
+      map.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
+      val isHardwareSpecificUnsupported = result["isHardwareSpecificUnsupported"] as? Boolean ?: false
+      if (isHardwareSpecificUnsupported) {
+        map.putBoolean("isHardwareSpecificUnsupported", true)
+      }
+      val category = result["category"] as? String
+      if (!category.isNullOrBlank()) map.putString("category", category)
+      val modelType = result["modelType"] as? String
+      if (!modelType.isNullOrBlank()) map.putString("modelType", modelType)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      val quantization = result["quantization"] as? String
+      if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+      val sizeTier = result["sizeTier"] as? String
+      if (!sizeTier.isNullOrBlank()) map.putString("sizeTier", sizeTier)
+
+      val modelsArray = Arguments.createArray()
+      @Suppress("UNCHECKED_CAST")
+      val detectedModels = result["detectedModels"] as? ArrayList<HashMap<String, String>> ?: arrayListOf()
+      for (entry in detectedModels) {
+        val m = Arguments.createMap()
+        m.putString("type", entry["type"] ?: "")
+        m.putString("modelDir", entry["modelDir"] ?: "")
+        modelsArray.pushMap(m)
+      }
+      map.putArray("detectedModels", modelsArray)
+
+      val languages = result["languages"] as? ArrayList<*>
+      if (!languages.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in languages) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("languages", arr)
+      }
+
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (!detectionSources.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in detectionSources) {
+          val value = entry as? String
+          if (!value.isNullOrBlank()) arr.pushString(value)
+        }
+        map.putArray("detectionSources", arr)
+      }
+
+      return map
+    }
+
+    @JvmStatic
+    internal fun customValidationHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      map.putBoolean("ok", result["ok"] as? Boolean ?: false)
+      val error = result["error"] as? String
+      if (!error.isNullOrBlank()) map.putString("error", error)
+      @Suppress("UNCHECKED_CAST")
+      val missing = result["missingRequired"] as? ArrayList<String>
+      if (!missing.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in missing) {
+          arr.pushString(entry)
+        }
+        map.putArray("missingRequired", arr)
+      }
+      return map
+    }
+
+    @JvmStatic
+    internal fun customPathRequirementsHashMapToWritableMap(
+      result: HashMap<String, Any?>
+    ): com.facebook.react.bridge.WritableMap {
+      val map = Arguments.createMap()
+      @Suppress("UNCHECKED_CAST")
+      val fields = result["fields"] as? ArrayList<HashMap<String, Any?>>
+      if (!fields.isNullOrEmpty()) {
+        val arr = Arguments.createArray()
+        for (entry in fields) {
+          val key = entry["key"] as? String ?: continue
+          val fieldMap = Arguments.createMap()
+          fieldMap.putString("key", key)
+          fieldMap.putBoolean("required", entry["required"] as? Boolean ?: false)
+          val kind = entry["kind"] as? String
+          fieldMap.putString("kind", if (kind == "dir") "dir" else "file")
+          arr.pushMap(fieldMap)
+        }
+        map.putArray("fields", arr)
+      }
+      return map
+    }
 
     // -- AudioEncodeSession JNI --
     @JvmStatic
@@ -3406,6 +5476,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       totalFramesEstimate: Long,
       cancelFlagPtr: Long
     ): Long
+
+    @JvmStatic
+    private external fun nativeEncodeSessionLastCreateError(): String
+
+    @JvmStatic
+    internal fun encodeSessionCreateFailureMessage(): String {
+      val detail = nativeEncodeSessionLastCreateError().trim()
+      return if (detail.isNotEmpty()) "AUDIO_SAVE_ENCODE_ERROR: $detail"
+      else "AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session"
+    }
 
     @JvmStatic
     private external fun nativeEncodeSessionFeedChunk(
@@ -3421,6 +5501,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeEncodeSessionRelease(
       sessionPtr: Long
     )
+
+    /** Probe duration: returns long[2]{durationMs, isExact}. */
+    @JvmStatic
+    external fun nativeProbeFileDuration(
+      path: String?,
+      inputFd: Int,
+    ): LongArray?
+
+    /** Container probe: returns HashMap{inputFormatName, codecName}. */
+    @JvmStatic
+    external fun nativeProbeFileContainer(
+      path: String?,
+      inputFd: Int,
+    ): HashMap<String, String>?
 
     /** Batch decode: returns HashMap{samples: FloatArray, sourceSampleRate: Int, sourceChannels: Int, totalFramesDecoded: Long}. */
     @JvmStatic
@@ -3441,8 +5535,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
-      outputPath: String
+      outputPath: String,
+      progressCallback: Any?,
     ): HashMap<String, Any>?
 
     /** Streaming decode: delivers chunks via callback. Returns HashMap{sourceSampleRate, sourceChannels, totalFramesDecoded}. */
@@ -3453,9 +5549,85 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       targetSampleRate: Int,
       forceMono: Boolean,
       chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
       cancelFlagPtr: Long,
       chunkCallback: Any,
       progressCallback: Any?
+    ): HashMap<String, Any>?
+
+    /** Create a shared C++ visualization accumulator for chunked processing. */
+    @JvmStatic
+    external fun nativeCreateVisualizationAccumulator(
+      sampleRate: Int,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
+    ): Long
+
+    @JvmStatic
+    external fun nativeSetVisualizationExpectedTotalSamples(
+      accumulatorPtr: Long,
+      totalSamples: Long,
+    )
+
+    @JvmStatic
+    external fun nativeAttachVisualizationProgressCallback(
+      accumulatorPtr: Long,
+      progressCallback: VisualizationProgressCallback,
+    )
+
+    /** Feed mono float32 samples into a visualization accumulator. */
+    @JvmStatic
+    external fun nativeFeedVisualizationAccumulator(
+      accumulatorPtr: Long,
+      samples: FloatArray,
+      sampleCount: Int,
+    )
+
+    @JvmStatic
+    external fun nativeIsVisualizationAnalysisCapReached(accumulatorPtr: Long): Boolean
+
+    /** Finalize and get visualization profile HashMap{sampleRate,durationMs,barCount,levels,frameCount,frameDurationMs,framesTransferId?}. */
+    @JvmStatic
+    external fun nativeFinishVisualizationAccumulator(
+      accumulatorPtr: Long,
+    ): HashMap<String, Any>?
+
+    /** Release visualization accumulator pointer. */
+    @JvmStatic
+    external fun nativeReleaseVisualizationAccumulator(
+      accumulatorPtr: Long,
+    )
+
+    /** Compute visualization profile directly from a file source (path/fd) in native C++. */
+    @JvmStatic
+    external fun nativeComputeVisualizationProfileFromFile(
+      path: String?,
+      inputFd: Int,
+      targetSampleRate: Int,
+      forceMono: Boolean,
+      chunkSize: Int,
+      allowDemuxerAutoProbe: Boolean,
+      barCount: Int,
+      minHz: Double,
+      maxHz: Double,
+      fftSize: Int,
+      hopSize: Int,
+      aggregateMode: Int,
+      includeTimeline: Boolean,
+      frameCount: Int,
+      frameDurationMs: Double,
+      maxAnalysisDurationMs: Double,
+      levelsMaxStftFrames: Int,
+      progressCallback: VisualizationProgressCallback?,
     ): HashMap<String, Any>?
 
     /** Allocate a native std::atomic<bool> cancel flag. Returns a pointer as Long. */

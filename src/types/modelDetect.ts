@@ -41,6 +41,8 @@ export interface ModelDetectResultBase {
    * For TTS: always `true`.
    * For Enhancement: supplied by native detection with online-compatibility preflight
    * (`success=false` can still occur in name-only heuristic mode).
+   * For Punctuation: `true` for CNN-BiLSTM (online) when the ORT preflight passes; `false` for
+   * offline CT-Transformer; heuristics mirror Enhancement when files are not on disk.
    * For Alignment: always `false`.
    */
   isStreaming: boolean;
@@ -54,11 +56,22 @@ export interface ModelDetectResultBase {
 
 // ─── TTS extension ──────────────────────────────────────────────────────
 
+export type TtsLexiconLanguage = {
+  id: string;
+  path: string;
+};
+
 export interface TtsDetectModelResult extends ModelDetectResultBase {
   /** tiny, small, medium, large, unknown — from name heuristics. */
   sizeTier?: string;
-  /** Language ids from detected lexicon files (Kokoro/Kitten). */
-  lexiconLanguageCandidates?: string[];
+  /**
+   * Lexicon files detected on disk (`lexicon.txt`, `lexicon-*.txt`).
+   * Use with init `lexiconLanguageId` (vits/matcha/kokoro/zipvoice). Not kitten/pocket/supertonic.
+   * Not the same as catalog `languages` hints.
+   */
+  lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage>;
+  /** Resolved non-empty path keys from native file-based detection. */
+  paths?: Readonly<Record<string, string>>;
 }
 
 // ─── STT extension ──────────────────────────────────────────────────────
@@ -66,6 +79,8 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
 export interface SttDetectModelResult extends ModelDetectResultBase {
   /** True when model targets unsupported hardware-specific acceleration (RK35xx, Ascend, CANN). */
   isHardwareSpecificUnsupported?: boolean;
+  /** Resolved non-empty path keys from native file-based detection. */
+  paths?: Readonly<Record<string, string>>;
 }
 
 // ─── Enhancement extension ─────────────────────────────────────────────
@@ -92,5 +107,16 @@ export interface VadDetectModelResult extends ModelDetectResultBase {
   /** Resolved model file path from detection. */
   paths?: {
     model?: string;
+  };
+}
+
+// ─── Punctuation extension ────────────────────────────────────────────────
+
+export interface PunctuationDetectModelResult extends ModelDetectResultBase {
+  /** Resolved paths (offline: ct_transformer; online: cnn_bilstm + bpe_vocab). */
+  paths?: {
+    ct_transformer?: string;
+    cnn_bilstm?: string;
+    bpe_vocab?: string;
   };
 }

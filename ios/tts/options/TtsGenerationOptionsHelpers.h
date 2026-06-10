@@ -27,3 +27,6 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
 
 /** Check if options contain a buffer-based voice clone (referenceAudioBufferId key). */
 BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options);
+
+/** Build VoiceCloneOptions with only `extra` (e.g. runtime `lang`) for generateWithConfig. */
+std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options);

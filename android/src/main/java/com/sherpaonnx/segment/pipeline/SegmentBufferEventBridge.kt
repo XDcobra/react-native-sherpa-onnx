@@ -5,6 +5,7 @@ package com.sherpaonnx.segment.pipeline
  */
 object SegmentBufferEventBridge {
   @JvmField
-  var emitSegmentAppended: ((liveBufferId: String, record: SegmentRecord, segmentIndex: Int) -> Unit)? =
+  var emitSegmentAppended:
+    ((segmentBufferId: String, record: SegmentRecord, segmentIndex: Int, totalSegments: Int) -> Unit)? =
     null
 }

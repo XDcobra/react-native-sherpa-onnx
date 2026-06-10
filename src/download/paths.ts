@@ -1,13 +1,14 @@
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { RELEASE_API_BASE } from './constants';
-import { ModelCategory, type ModelArchiveExt } from './types';
+import { ModelCategory } from './types';
+import type { SourceAssetEntry, SourceAssetLayout } from './sources/types';
 
 type CategoryConfig = {
   tag: string;
   cacheFile: string;
   baseDir: string;
-  releaseApiBase?: string;
 };
+
+export const DEFAULT_SOURCE_ID = 'default';
 
 export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
   [ModelCategory.Tts]: {
@@ -24,6 +25,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     tag: 'asr-models',
     cacheFile: 'vad-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/vad`,
+  },
+  [ModelCategory.Punctuation]: {
+    tag: 'punctuation-models',
+    cacheFile: 'punctuation-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/punctuation`,
   },
   [ModelCategory.Diarization]: {
     tag: 'speaker-segmentation-models',
@@ -49,85 +55,163 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     tag: 'alignment-models',
     cacheFile: 'alignment-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/alignment`,
-    releaseApiBase:
-      'https://api.github.com/repos/XDcobra/react-native-sherpa-onnx/releases/tags',
   },
 };
+
+export function getCategoryTag(category: ModelCategory): string {
+  return CATEGORY_CONFIG[category].tag;
+}
 
 export function getCacheDir(): string {
   return `${DocumentDirectoryPath}/sherpa-onnx/cache`;
 }
 
-export function getCachePath(category: ModelCategory): string {
-  return `${getCacheDir()}/${CATEGORY_CONFIG[category].cacheFile}`;
+export function sanitizeSourceId(sourceId: string): string {
+  return sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function resolveSourceId(sourceId?: string): string {
+  if (!sourceId || sourceId === DEFAULT_SOURCE_ID) {
+    return DEFAULT_SOURCE_ID;
+  }
+  return sourceId;
+}
+
+export function getCachePath(
+  category: ModelCategory,
+  sourceId = DEFAULT_SOURCE_ID
+): string {
+  const cacheFile = CATEGORY_CONFIG[category].cacheFile;
+
+  if (sourceId === DEFAULT_SOURCE_ID) {
+    return `${getCacheDir()}/${cacheFile}`;
+  }
+
+  const baseName = cacheFile.replace(/\.json$/i, '');
+  return `${getCacheDir()}/${baseName}--${sanitizeSourceId(sourceId)}.json`;
 }
 
 export function getModelsBaseDir(category: ModelCategory): string {
   return CATEGORY_CONFIG[category].baseDir;
 }
 
-export function getModelDir(category: ModelCategory, modelId: string): string {
-  return `${getModelsBaseDir(category)}/${modelId}`;
+export function getSourceModelsBaseDir(
+  category: ModelCategory,
+  sourceId?: string
+): string {
+  const sourceSegment = sanitizeSourceId(resolveSourceId(sourceId));
+  return `${getModelsBaseDir(category)}/sources/${sourceSegment}`;
 }
 
-export function getArchiveFilename(
+export function getModelDir(
+  category: ModelCategory,
   modelId: string,
-  archiveExt: ModelArchiveExt
+  sourceId?: string
 ): string {
-  return `${modelId}.${archiveExt}`;
+  return `${getSourceModelsBaseDir(category, sourceId)}/${modelId}`;
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+export function getPrimaryAssetFilename(
+  modelId: string,
+  layout: SourceAssetLayout,
+  assets: ReadonlyArray<SourceAssetEntry>
+): string {
+  const asset = assets[0];
+  if (asset?.relativePath) {
+    const normalized = normalizeRelativePath(asset.relativePath);
+    const filename = normalized.split('/').pop();
+    if (filename && filename.length > 0) {
+      return filename;
+    }
+  }
+
+  if (layout.kind === 'archive') {
+    return `${modelId}.${layout.format}`;
+  }
+
+  return `${modelId}.onnx`;
+}
+
+export function getAssetDestPath(
+  category: ModelCategory,
+  modelId: string,
+  relativePath: string,
+  sourceId?: string
+): string {
+  const normalized = normalizeRelativePath(relativePath);
+  return `${getModelDir(category, modelId, sourceId)}/${normalized}`;
 }
 
 export function getArchivePath(
   category: ModelCategory,
   modelId: string,
-  archiveExt: ModelArchiveExt
+  layout: SourceAssetLayout,
+  assets: ReadonlyArray<SourceAssetEntry>,
+  sourceId?: string
 ): string {
-  const filename = getArchiveFilename(modelId, archiveExt);
-
-  if (archiveExt === 'onnx') {
-    return `${getModelDir(category, modelId)}/${filename}`;
+  const primaryAssetFilename = getPrimaryAssetFilename(modelId, layout, assets);
+  if (layout.kind === 'archive') {
+    return `${getSourceModelsBaseDir(
+      category,
+      sourceId
+    )}/${primaryAssetFilename}`;
   }
 
-  return `${getModelsBaseDir(category)}/${filename}`;
-}
-
-export function getTarArchivePath(
-  category: ModelCategory,
-  modelId: string
-): string {
-  return getArchivePath(category, modelId, 'tar.bz2');
-}
-
-export function getOnnxPath(category: ModelCategory, modelId: string): string {
-  return getArchivePath(category, modelId, 'onnx');
+  return getAssetDestPath(category, modelId, primaryAssetFilename, sourceId);
 }
 
 export function getReadyMarkerPath(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId?: string
 ): string {
-  return `${getModelDir(category, modelId)}/.ready`;
+  return `${getModelDir(category, modelId, sourceId)}/.ready`;
 }
 
 export function getManifestPath(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId?: string
 ): string {
-  return `${getModelDir(category, modelId)}/manifest.json`;
+  return `${getModelDir(category, modelId, sourceId)}/manifest.json`;
 }
 
 export function getDownloadStatePath(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId?: string
 ): string {
-  return `${getModelsBaseDir(category)}/.download-state-${modelId}.json`;
+  return `${getSourceModelsBaseDir(
+    category,
+    sourceId
+  )}/.download-state-${modelId}.json`;
+}
+
+export function getTempModelDir(
+  category: ModelCategory,
+  modelId: string,
+  tempToken: string,
+  sourceId?: string
+): string {
+  return `${getSourceModelsBaseDir(
+    category,
+    sourceId
+  )}/.tmp-${modelId}-${tempToken}`;
 }
 
 export function getExtractionStatePath(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId?: string
 ): string {
-  return `${getModelsBaseDir(category)}/.extraction-state-${modelId}.json`;
+  return `${getSourceModelsBaseDir(
+    category,
+    sourceId
+  )}/.extraction-state-${modelId}.json`;
 }
 
 /**
@@ -136,10 +220,4 @@ export function getExtractionStatePath(
 export function getNativeAssetExtractedModelDir(modelId: string): string {
   const safeId = modelId.replace(/[/\\]/g, '');
   return `${DocumentDirectoryPath}/models/${safeId}`.replace(/\/+/g, '/');
-}
-
-export function getReleaseUrl(category: ModelCategory): string {
-  const config = CATEGORY_CONFIG[category];
-  const releaseApiBase = config.releaseApiBase ?? RELEASE_API_BASE;
-  return `${releaseApiBase}/${config.tag}`;
 }

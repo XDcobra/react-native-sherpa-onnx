@@ -112,13 +112,15 @@ sealed class OfflineEntry {
     override val channelCount: Int,
     override val numSamples: Int,
     val filePath: String,
+    val dataOffsetBytes: Int = 0,
     @Volatile private var mappedBuffer: MappedByteBuffer?
   ) : OfflineEntry() {
     override val storageKind: String = "mmap"
 
     override fun readAllSamples(): FloatArray {
-      val fb = requireMapping().asFloatBuffer()
-      fb.position(0)
+      val bb = requireMapping().duplicate().order(ByteOrder.LITTLE_ENDIAN)
+      bb.position(dataOffsetBytes)
+      val fb = bb.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
       val out = FloatArray(numSamples)
       fb.get(out)
       return out
@@ -128,8 +130,9 @@ sealed class OfflineEntry {
       val safeStart = startSample.coerceAtLeast(0)
       if (safeStart >= numSamples) return FloatArray(0)
       val actualCount = (count).coerceAtMost(numSamples - safeStart)
-      val fb = requireMapping().asFloatBuffer()
-      fb.position(safeStart)
+      val bb = requireMapping().duplicate().order(ByteOrder.LITTLE_ENDIAN)
+      bb.position(dataOffsetBytes + safeStart * 4)
+      val fb = bb.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
       val out = FloatArray(actualCount)
       fb.get(out)
       return out
@@ -145,8 +148,9 @@ sealed class OfflineEntry {
       if (safeStart >= numSamples) return 0
       val actualCount = minOf(maxSamples, numSamples - safeStart, out.size - offset)
       if (actualCount <= 0) return 0
-      val fb = requireMapping().asFloatBuffer()
-      fb.position(safeStart)
+      val bb = requireMapping().duplicate().order(ByteOrder.LITTLE_ENDIAN)
+      bb.position(dataOffsetBytes + safeStart * 4)
+      val fb = bb.slice().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
       fb.get(out, offset, actualCount)
       return actualCount
     }
@@ -209,6 +213,7 @@ sealed class OfflineEntry {
           channelCount = channelCount,
           numSamples = samples.size,
           filePath = tempFile.absolutePath,
+          dataOffsetBytes = 0,
           mappedBuffer = mapped,
         )
       } catch (e: Exception) {
@@ -245,10 +250,12 @@ sealed class OfflineEntry {
       channelCount: Int,
       numSamples: Int,
       f32FilePath: String,
+      dataOffsetBytes: Int = 0,
     ): MmapBacked? {
       return try {
         val file = File(f32FilePath)
-        if (!file.exists() || file.length() != numSamples.toLong() * 4) {
+        val expectedBytes = dataOffsetBytes.toLong() + numSamples.toLong() * 4L
+        if (!file.exists() || file.length() < expectedBytes || dataOffsetBytes < 0) {
           Log.w(TAG, "createMmapFromFile: file missing or size mismatch")
           return null
         }
@@ -259,6 +266,7 @@ sealed class OfflineEntry {
           channelCount = channelCount,
           numSamples = numSamples,
           filePath = f32FilePath,
+          dataOffsetBytes = dataOffsetBytes,
           mappedBuffer = mapped,
         )
       } catch (e: Exception) {
@@ -286,6 +294,39 @@ sealed class OfflineEntry {
       } catch (e: Exception) {
         Log.w(TAG, "Orphan sweep failed: ${e.message}")
       }
+    }
+
+    /**
+     * Sweep orphaned orchestration temp files (orch_*) older than [maxAgeMs].
+     *
+     * Current naming examples:
+     * - orch_{sessionId}_acc.wav
+     * - orch_{sessionId}_seg_{N}_in.f32
+     * - orch_{sessionId}_seg_{N}_out.f32
+     */
+    fun sweepOrphanedOrchestrationFiles(cacheDir: File, maxAgeMs: Long = 3_600_000L) {
+      try {
+        val now = System.currentTimeMillis()
+        val files = cacheDir.listFiles { f ->
+          f.name.startsWith("orch_")
+        } ?: return
+        for (f in files) {
+          if (now - f.lastModified() > maxAgeMs) {
+            if (f.delete()) {
+              Log.d(TAG, "Orchestration orphan sweep: deleted ${f.name}")
+            }
+          }
+        }
+      } catch (e: Exception) {
+        Log.w(TAG, "Orchestration orphan sweep failed: ${e.message}")
+      }
+    }
+
+    fun cleanupOrphanedOrchestrationFiles(
+      cacheDir: File,
+      maxAgeMs: Long = 3_600_000L,
+    ) {
+      sweepOrphanedOrchestrationFiles(cacheDir, maxAgeMs)
     }
   }
 }

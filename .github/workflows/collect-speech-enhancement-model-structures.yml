@@ -1,4 +1,5 @@
 # Collect speech enhancement model assets from k2-fsa/sherpa-onnx speech-enhancement-models release.
+# Skip policy: stored "# updated_at:" in *-structure.txt must match the GitHub asset (see collect_one_sherpa_release_stream.sh).
 # Mostly standalone .onnx files; streams are defined in scripts/ci/sherpa_speech_enhancement_model_release_streams.json
 # (same pipeline as TTS: scripts/ci/collect_one_sherpa_release_stream.sh).
 #

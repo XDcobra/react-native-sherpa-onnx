@@ -1,6 +1,7 @@
 # Collect ASR-related model archive structures from k2-fsa/sherpa-onnx GitHub releases.
 # Streams are defined in scripts/ci/sherpa_asr_model_release_streams.json (tag, tree-cache, fixtures, license CSV).
-# For each stream: list .tar.bz2 / .onnx assets, tar -tjf (no full extract), aggregate structure + expected CSV,
+# For each stream: list .tar.bz2 / .onnx assets, tar -tjf (no full extract), aggregate structure + expected CSV.
+# Skip policy: stored "# updated_at:" in *-structure.txt must match the GitHub asset (see collect_one_sherpa_release_stream.sh).
 # then optional scripts/ci/update_model_license_csv.sh (see script header for skip rules).
 #
 # To add another release: append an object to "streams" in scripts/ci/sherpa_asr_model_release_streams.json.

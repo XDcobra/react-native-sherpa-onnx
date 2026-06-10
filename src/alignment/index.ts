@@ -1,6 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import type { AlignmentModelType } from './types';
 import {
   isDetectionSource,
@@ -11,10 +11,21 @@ import {
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 
+export { createAlignment } from './engine';
+export type { AlignmentEngine, AlignmentEngineOptions } from './engine';
 export {
-  alignTextToAudio,
-  assertAlignmentGranularityForMode,
-} from './alignTextToAudio';
+  assertAlignmentCustomConfig,
+  resolveAlignmentCustomConfigPaths,
+  AlignmentErrorCode,
+} from './customConfig';
+export type {
+  AlignmentCustomConfig,
+  AlignmentCustomPathKey,
+} from './customConfig';
+export {
+  resolveAlignmentOnnxPath,
+  accurateOptionsToModelConfig,
+} from './resolveAlignmentOnnxPath';
 
 export type {
   AlignTextToAudioFn,
@@ -23,14 +34,25 @@ export type {
   AlignTextToAudioOptionsEstimated,
   AlignTextToAudioOptionsProportional,
   AlignTextToAudioOptionsVad,
+  AlignmentAccurateModelAuto,
+  AlignmentAccurateModelConfig,
+  AlignmentAccurateModelCustom,
+  AlignmentConcreteModelType,
+  AlignmentProgressCallbacks,
   AlignTextToAudioWriteResult,
+  AlignmentAccurateSegmentationConfig,
+  AlignmentAsrConfig,
   AlignmentVadSegmentationConfig,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
   AlignmentGranularity,
+  AlignmentMappingStrategy,
   AlignmentModelType,
+  AlignmentWarning,
+  AlignmentWarningCode,
   AlignmentTimestamp,
   AlignmentTimingMode,
+  OrchestrationProgress,
 } from './types';
 export type { AlignmentDetectModelResult } from '../types/modelDetect';
 

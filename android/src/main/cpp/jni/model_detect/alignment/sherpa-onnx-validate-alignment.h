@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_VALIDATE_ALIGNMENT_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-custom-types.h"
 #include <string>
 #include <vector>
 
@@ -24,6 +25,8 @@ AlignmentValidationResult ValidateAlignmentPaths(
     const AlignmentModelPaths& paths,
     const std::string& modelDir
 );
+
+std::vector<CustomPathFieldSpec> GetAlignmentPathRequirements(AlignmentModelKind kind);
 
 } // namespace sherpaonnx
 

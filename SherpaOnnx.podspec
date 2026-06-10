@@ -37,9 +37,17 @@ Pod::Spec.new do |s|
     # Shared audio decode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioDecodeSession.cpp",
     "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
+    "android/src/main/cpp/jni/audio/AudioVisualization.cpp",
+    "android/src/main/cpp/jni/audio/AudioVisualization.h",
+    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.cpp",
+    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
     # Shared audio encode primitive (WAV fast path + FFmpeg). JNI bridge excluded below.
     "android/src/main/cpp/jni/audio/AudioEncodeSession.cpp",
-    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
+    # Native crash diagnostics (shared ring buffer + iOS signal handler).
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.cpp",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnosticIOS.mm"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -49,9 +57,12 @@ Pod::Spec.new do |s|
     "ios/model_detect/**/*",
     # Android JNI only (jni.h / JNIEnv). iOS compiles ObjC++ wrappers under ios/ instead.
     "android/src/main/cpp/jni/model_detect/**/sherpa-onnx-*-wrapper.cpp",
+    "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-unified-detect-wrapper.cpp",
     "android/src/main/cpp/jni/model_detect/common/sherpa-onnx-detect-jni-common.cpp",
     "android/src/main/cpp/jni/audio/audio_decode_jni.cpp",
-    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp"
+    "android/src/main/cpp/jni/audio/audio_encode_jni.cpp",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnosticAndroid.cpp",
+    "android/src/main/cpp/jni/diagnostic/native_diagnostic_jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -59,7 +70,10 @@ Pod::Spec.new do |s|
   # Also mark shared C++ headers from android/ as private to prevent Clang module issues.
   private_headers += [
     "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
-    "android/src/main/cpp/jni/audio/AudioEncodeSession.h"
+    "android/src/main/cpp/jni/audio/AudioVisualization.h",
+    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
+    "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
+    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h"
   ]
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
@@ -117,10 +131,13 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
+    "\"#{pod_root}/ios/stt/native\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
@@ -130,6 +147,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
     "\"#{pod_root}/ios/enhancement\"",
+    "\"#{pod_root}/ios/punctuation\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

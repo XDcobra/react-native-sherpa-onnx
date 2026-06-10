@@ -11,12 +11,25 @@ struct AudioDecodeConfig {
   int targetSampleRate = 0;  // 0 = keep source rate
   bool forceMono = true;
   int chunkSize = 8192;      // output frames per callback
+  /** When false, avformat_open_input will not fall back to auto-probe after explicit demuxer failure. */
+  bool allowDemuxerAutoProbe = true;
 };
 
 struct AudioDecodeResult {
   int64_t totalFramesDecoded = 0;
   int sourceSampleRate = 0;
   int sourceChannels = 0;
+};
+
+struct AudioFileProbeResult {
+  int64_t durationMs = -1;  // -1 = unknown
+  bool isExact = false;     // true when container/stream duration is reliable
+};
+
+/** Container + primary audio codec detected by FFmpeg (or WAV header). No PCM decode. */
+struct AudioContainerProbeResult {
+  std::string inputFormatName;  // iformat->name, e.g. "ogg", "mp3", "mov"
+  std::string codecName;        // avcodec_get_name, e.g. "opus", "aac"
 };
 
 using DecodeChunkCallback =
@@ -59,6 +72,29 @@ inline AudioDecodeResult decodeFile(
     std::atomic<bool>& cancelFlag
 ) {
     return decodeFile(pathOrFd, -1, config, onChunk, onProgress, onStreamInfo, cancelFlag);
+}
+
+/**
+ * Probe audio file duration from container metadata only (no decode).
+ *
+ * WAV: exact duration from fmt/data chunks. Other formats: FFmpeg demux when available.
+ * Throws std::runtime_error with PROBE_* error code prefix on failure.
+ */
+AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd);
+
+inline AudioFileProbeResult probeFileDuration(const char* pathOrFd) {
+  return probeFileDuration(pathOrFd, -1);
+}
+
+/**
+ * Probe container format and primary audio codec (no PCM decode).
+ * Sniffs container/codec from file content (auto-probe only; ignores extension demuxer).
+ * Throws std::runtime_error with PROBE_* error code prefix on failure.
+ */
+AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd);
+
+inline AudioContainerProbeResult probeFileContainer(const char* pathOrFd) {
+  return probeFileContainer(pathOrFd, -1);
 }
 
 } // namespace sherpa

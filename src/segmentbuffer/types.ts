@@ -86,6 +86,10 @@ interface SegmentMetaBase {
   sampleRate: number;
   durationMs: number;
   confidence?: number;
+  /** Segmentation annotation from native (e.g. vad_boundary, energy_silence, finalize). */
+  reason?: string;
+  source?: string;
+  createdAtMs?: number;
 }
 
 export interface SpeechSegmentMeta extends SegmentMetaBase {
@@ -200,7 +204,8 @@ export type OfflineSegmentBufferFromLiveMode =
   | 'windowSnapshot';
 
 interface LiveSegmentBufferSegmentAppendedEventBase {
-  liveBufferId: string;
+  segmentBufferId: string;
+  totalSegments: number;
   segmentId: string;
   segmentIndex: number;
   sourceAudioBufferId: string;
@@ -231,7 +236,7 @@ export type LiveSegmentBufferSegmentAppendedEvent =
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
 export interface LiveSegmentBufferErrorEvent {
-  liveBufferId?: string;
+  segmentBufferId?: string;
   message: string;
 }
 

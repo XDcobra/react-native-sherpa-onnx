@@ -331,13 +331,8 @@ static TtsDetectResult DetectTtsModelFromFiles(
         return result;
     }
 
-    std::string lexiconPath;
-    for (const auto& c : lexiconCandidates) {
-        result.lexiconLanguageCandidates.push_back(c.languageId);
-    }
-    if (!lexiconCandidates.empty()) {
-        lexiconPath = lexiconCandidates[0].path;
-    }
+    std::string lexiconPath = ResolveLexiconPath(lexiconCandidates, "");
+    result.lexiconLanguages = std::move(lexiconCandidates);
 
     if (selected == TtsModelKind::kMatcha && !acousticModel.empty() && vocoder.empty()) {
         vocoder = acousticModel;

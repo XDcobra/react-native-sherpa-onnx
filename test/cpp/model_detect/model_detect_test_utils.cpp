@@ -51,6 +51,11 @@ std::vector<AssetBlock> ParseAsrStructureFile(const std::string& filePath, std::
         line = Trim(line);
         if (line.empty()) continue;
         const std::string assetPrefix = "# Asset:";
+        const std::string updatedAtPrefix = "# updated_at:";
+        if (line.size() >= updatedAtPrefix.size() &&
+            line.compare(0, updatedAtPrefix.size(), updatedAtPrefix) == 0) {
+            continue;
+        }
         if (line.size() >= assetPrefix.size() &&
             line.compare(0, assetPrefix.size(), assetPrefix) == 0) {
             std::string assetName = Trim(line.substr(assetPrefix.size()));
@@ -232,6 +237,24 @@ std::string VadKindToString(VadModelKind kind) {
             return "silero_vad";
         case VadModelKind::kTenVad:
             return "ten_vad";
+        default:
+            return "unknown";
+    }
+}
+
+PunctuationModelKind PunctuationKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "ct_transformer") return PunctuationModelKind::kCtTransformer;
+    if (t == "cnn_bilstm") return PunctuationModelKind::kCnnBilstm;
+    return PunctuationModelKind::kUnknown;
+}
+
+std::string PunctuationKindToString(PunctuationModelKind kind) {
+    switch (kind) {
+        case PunctuationModelKind::kCtTransformer:
+            return "ct_transformer";
+        case PunctuationModelKind::kCnnBilstm:
+            return "cnn_bilstm";
         default:
             return "unknown";
     }

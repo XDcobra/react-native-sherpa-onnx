@@ -2,6 +2,7 @@ package com.sherpaonnx.audio.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import android.os.SystemClock
 import java.io.File
 import java.io.RandomAccessFile
@@ -243,7 +244,11 @@ class LiveEntry(
       if (state != State.RECORDING) return AppendResult.BUFFER_FINALIZED
     }
 
+    var ringCommitted = false
     rwLock.write {
+      // Finalize can race between the fast-path check above and taking the write lock.
+      if (state != State.RECORDING) return@write
+      ringCommitted = true
       for (s in toAppend) {
         ring[writePos] = s
         writePos = (writePos + 1) % windowCapacity
@@ -260,6 +265,7 @@ class LiveEntry(
         }
       }
     }
+    if (!ringCommitted) return AppendResult.BUFFER_FINALIZED
 
     // Write to spool file (outside ring lock for better concurrency)
     spoolWriter?.let { writer ->
@@ -282,6 +288,14 @@ class LiveEntry(
         listener(event)
       }
     }
+
+    SegmentationEngineRegistry.onLiveAudioWrite(
+      bufferId = bufferId,
+      chunk = toAppend,
+      sampleRate = sampleRate,
+      totalSamplesWritten = totalSamplesWritten,
+    )
+
     return AppendResult.APPENDED
   }
 
@@ -404,6 +418,8 @@ class LiveEntry(
         listener(event)
       }
     }
+
+    SegmentationEngineRegistry.onBufferFinalized(bufferId)
   }
 
   // ========== Snapshot / Read ==========
@@ -459,6 +475,21 @@ class LiveEntry(
   /** Path to the spool WAV file, if persistence is active and the file exists. */
   val spoolFilePath: String? get() = spoolWriter?.filePath
 
+  /** Number of currently active consumer cursors. */
+  fun activeCursorCount(): Int = synchronized(cursors) { cursors.size }
+
+  /**
+   * Close spool I/O handles and detach ownership for transfer to an offline buffer.
+   * The source live entry should be removed from registry immediately after this call.
+   */
+  fun detachSpoolForTransfer() {
+    spoolWriter?.release()
+    spoolReader?.release()
+    spoolWriter = null
+    spoolReader = null
+    isTemporarySpool = false
+  }
+
   // ========== Consumer Cursor ==========
 
   /**
@@ -472,7 +503,7 @@ class LiveEntry(
       val cursor = CursorHandle(
         cursorId = id,
         // When spool is active, start from absolute 0 so cursor can read all data.
-        // Without spool, start from oldest sample in the ring (legacy behavior).
+        // Ring-only: start at the oldest sample still retained in the ring.
         absoluteReadPos = if (hasActiveSpool) {
           0L
         } else if (totalSamplesWritten > windowCapacity) {
@@ -567,7 +598,7 @@ class LiveEntry(
     // No spool or read failed — fall back to ring with snap-forward
     // If cursor was truly behind ring AND spool didn't help, this is a lag error
     // when the buffer has (or had) a spool. For ring-only buffers (no spool ever),
-    // snap-forward is the legacy behavior.
+    // snap the read position forward to the ring window (recoverable lag).
     if (spoolReader != null) {
       throw CursorLagExceededException(
         "AUDIO_CURSOR_LAG_EXCEEDED: Cursor at position $readPos has fallen behind retained data (oldest in ring: $oldestInRing). " +
@@ -616,6 +647,8 @@ class LiveEntry(
       try { File(path).delete() } catch (_: Exception) {}
     }
     synchronized(cursors) { cursors.clear() }
+
+    SegmentationEngineRegistry.onBufferReleased(bufferId)
   }
 
   // ========== Inner classes ==========
@@ -644,7 +677,7 @@ enum class RetentionMode {
   SESSION,
   /** Spool retains up to N seconds. */
   MAX_SECONDS,
-  /** Explicit persistence path (replaces legacy persistencePath). */
+  /** Explicit on-disk persistence path. */
   PATH,
   /** No spool; ring-only. */
   NONE,

@@ -1,23 +1,144 @@
 import { TurboModuleRegistry, type TurboModule } from 'react-native';
+import type { AccelerationSupport } from './provider';
+import type { ExtractArchiveResult } from './extraction/types';
 
-/** Unified shape for all acceleration backends (QNN, NNAPI, XNNPACK, Core ML). */
-export type AccelerationSupport = {
-  providerCompiled: boolean;
-  hasAccelerator: boolean;
-  canInit: boolean;
+/**
+ * TurboModule init bridge option shapes (flat ReadableMap / NSDictionary).
+ * Must live in this file — React Native codegen does not resolve imported type aliases.
+ * Builders: `buildSttInitBridgeOptions`, `buildOnlineSttInitBridgeOptions`, `buildTtsInitBridgeOptions`, `buildVadInitBridgeOptions`.
+ */
+
+/** `initializeStt(instanceId, options)` — offline STT. */
+export type SttInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (encoder, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  preferInt8?: boolean;
+  modelType?: string;
+  debug?: boolean;
+  hotwordsFile?: string;
+  hotwordsScore?: number;
+  numThreads?: number;
+  provider?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+  dither?: number;
+  /** Model-specific blocks (whisper, senseVoice, …); passed through as ReadableMap. */
+  modelOptions?: Object;
+  modelingUnit?: string;
+  bpeVocab?: string;
 };
 
-/** Result from unified archive extraction (path or asset stream). */
-export type ExtractArchiveResult = {
+/** `initializeOnlineStt(instanceId, options)` — streaming STT (endpoint rules flattened). */
+export type OnlineSttInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  modelPaths?: Object;
+  modelType: string;
+  enableEndpoint?: boolean;
+  decodingMethod?: string;
+  maxActivePaths?: number;
+  hotwordsFile?: string;
+  hotwordsScore?: number;
+  numThreads?: number;
+  provider?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+  dither?: number;
+  blankPenalty?: number;
+  debug?: boolean;
+  rule1MustContainNonSilence?: boolean;
+  rule1MinTrailingSilence?: number;
+  rule1MinUtteranceLength?: number;
+  rule2MustContainNonSilence?: boolean;
+  rule2MinTrailingSilence?: number;
+  rule2MinUtteranceLength?: number;
+  rule3MustContainNonSilence?: boolean;
+  rule3MinTrailingSilence?: number;
+  rule3MinUtteranceLength?: number;
+};
+
+/** `initializeTts(instanceId, options)` — offline TTS. */
+export type TtsInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (ttsModel, tokens, …); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  debug?: boolean;
+  noiseScale?: number;
+  noiseScaleW?: number;
+  lengthScale?: number;
+  ruleFsts?: string;
+  ruleFars?: string;
+  maxNumSentences?: number;
+  silenceScale?: number;
+  provider?: string;
+  lexiconLanguageId?: string;
+  /** Bridge-only: from public `modelOptions.kokoro.lang`. */
+  kokoroLang?: string;
+};
+
+/** `initializeVad(instanceId, options)` — streaming VAD. */
+export type VadInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  sampleRate?: number;
+  threshold?: number;
+  silenceDurationMs?: number;
+  speechDurationMs?: number;
+  minSpeechDurationMs?: number;
+  maxSpeechDurationS?: number;
+  windowSize?: number;
+  provider?: string;
+  numThreads?: number;
+  debug?: boolean;
+};
+
+/** `initializeEnhancement` / `initializeOnlineEnhancement(instanceId, options)`. */
+export type EnhancementInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** `initializeOfflinePunctuation` / `initializeOnlinePunctuation(instanceId, options)`. */
+export type PunctuationInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map; NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native unified detect bridge result (see `detectModel` in detectModel.ts). */
+export type UnifiedDetectNativeResult = {
+  matched: boolean;
   success: boolean;
-  /** True when extraction stopped due to cancel (resume with skipEntries = lastEntryIndex + 1). */
-  paused: boolean;
-  lastEntryIndex: number;
-  lastEntryPath: string;
-  bytesExtracted: number;
-  path?: string;
-  sha256?: string;
-  reason?: string;
+  category?: string;
+  modelType?: string;
+  languages?: string[];
+  quantization?: string;
+  sizeTier?: string;
+  isStreaming?: boolean;
+  isHardwareSpecificUnsupported?: boolean;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  detectionSources?: string[];
+  paths?: Object;
+  error?: string;
 };
 
 export interface Spec extends TurboModule {
@@ -25,6 +146,19 @@ export interface Spec extends TurboModule {
    * Test method to verify sherpa-onnx native library is loaded.
    */
   testSherpaInit(): Promise<string>;
+
+  /**
+   * Last native activity ring buffer as JSON (see `parseNativeDiagnosticSnapshot`).
+   */
+  getNativeDiagnosticSnapshot(): Promise<string>;
+
+  /**
+   * Opt-out for native diagnostics. Omit call to keep defaults (enabled + signal handler).
+   */
+  configureNativeDiagnostics(config?: {
+    enabled?: boolean;
+    installSignalHandler?: boolean;
+  }): Promise<void>;
 
   /**
    * Install JSI bindings for high-performance sample transport.
@@ -36,40 +170,12 @@ export interface Spec extends TurboModule {
 
   /**
    * Initialize Speech-to-Text (STT) with model directory.
-   * Expects an absolute path (use resolveModelPath first for asset/file paths).
    * @param instanceId - Unique ID for this engine instance (from createSTT)
-   * @param modelDir - Absolute path to model directory
-   * @param preferInt8 - Optional: true = prefer int8 models, false = prefer regular models, undefined = try int8 first (default)
-   * @param modelType - Optional: explicit model type ('transducer', 'nemo_transducer', 'paraformer', 'nemo_ctc', 'wenet_ctc', 'sense_voice', 'zipformer_ctc', 'whisper', 'funasr_nano', 'qwen3_asr', 'cohere_transcribe', 'fire_red_asr', 'moonshine', 'moonshine_v2', 'dolphin', 'canary', 'omnilingual', 'medasr', 'telespeech_ctc', 'auto'), undefined = auto (default)
-   * @param debug - Optional: enable debug logging in native layer and sherpa-onnx (default: false)
-   * @param hotwordsFile - Optional: path to hotwords file (OfflineRecognizerConfig)
-   * @param hotwordsScore - Optional: hotwords score (default in Kotlin 1.5)
-   * @param numThreads - Optional: number of threads for inference (default in Kotlin: 1)
-   * @param provider - Optional: provider string e.g. 'cpu' (stored in config only)
-   * @param ruleFsts - Optional: path(s) to rule FSTs for ITN (comma-separated)
-   * @param ruleFars - Optional: path(s) to rule FARs for ITN (comma-separated)
-   * @param dither - Optional: dither for feature extraction. **Android:** applied. **iOS:** ignored (native API does not expose it)
-   * @param modelOptions - Optional: model-specific options (whisper, senseVoice, canary, funasrNano, qwen3Asr, cohereTranscribe). Only the block for the loaded model type is applied.
-   * @param modelingUnit - Optional: 'cjkchar' | 'bpe' | 'cjkchar+bpe' for hotwords tokenization (OfflineModelConfig.modelingUnit)
-   * @param bpeVocab - Optional: path to BPE vocab file (OfflineModelConfig.bpeVocab), used when modelingUnit is bpe or cjkchar+bpe
-   * @returns Object with success boolean, array of detected models (each with type and modelDir), and optional error when success is false.
+   * @param options - Flat init options (see `buildSttInitBridgeOptions` in sttNativeBridge.ts)
    */
   initializeStt(
     instanceId: string,
-    modelDir: string,
-    preferInt8?: boolean,
-    modelType?: string,
-    debug?: boolean,
-    hotwordsFile?: string,
-    hotwordsScore?: number,
-    numThreads?: number,
-    provider?: string,
-    ruleFsts?: string,
-    ruleFars?: string,
-    dither?: number,
-    modelOptions?: Object,
-    modelingUnit?: string,
-    bpeVocab?: string
+    options: SttInitBridgeOptions
   ): Promise<{
     success: boolean;
     /** Present when success is false (native structured failure). */
@@ -111,6 +217,8 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Object;
   }>;
 
   // ==================== Offline STT (by-reference) ====================
@@ -147,34 +255,9 @@ export interface Spec extends TurboModule {
    *   `options.dither`: **Android** only; **iOS** ignores it (native `FeatureConfig` has no dither field).
    * @returns `{ success: true }` on success, or `{ success: false, error?: string }` on structured native failure.
    */
-  initializeOnlineSttWithOptions(
+  initializeOnlineStt(
     instanceId: string,
-    options: {
-      modelDir: string;
-      modelType: string;
-      enableEndpoint?: boolean;
-      decodingMethod?: string;
-      maxActivePaths?: number;
-      hotwordsFile?: string;
-      hotwordsScore?: number;
-      numThreads?: number;
-      provider?: string;
-      ruleFsts?: string;
-      ruleFars?: string;
-      /** Feature dither. Android: applied. iOS: ignored. */
-      dither?: number;
-      blankPenalty?: number;
-      debug?: boolean;
-      rule1MustContainNonSilence?: boolean;
-      rule1MinTrailingSilence?: number;
-      rule1MinUtteranceLength?: number;
-      rule2MustContainNonSilence?: boolean;
-      rule2MinTrailingSilence?: number;
-      rule2MinUtteranceLength?: number;
-      rule3MustContainNonSilence?: boolean;
-      rule3MinTrailingSilence?: number;
-      rule3MinUtteranceLength?: number;
-    }
+    options: OnlineSttInitBridgeOptions
   ): Promise<{ success: boolean; error?: string }>;
 
   /** Start native streaming STT pipeline: live audio buffer -> live text buffer. */
@@ -188,13 +271,43 @@ export interface Spec extends TurboModule {
   /** Release OnlineRecognizer and stop any active STT pipeline for this instance. */
   unloadOnlineStt(instanceId: string): Promise<void>;
 
+  /**
+   * Start a live-offline STT pipeline: a segmentation engine drives the live audio buffer,
+   * and the offline recognizer processes each committed speech segment.
+   * Returns a pipelineId compatible with stopStreamingPipeline / flushStreamingPipeline / etc.
+   */
+  startSttOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
+  /**
+   * Start a live-offline Enhancement pipeline.
+   * Restricts evaluator to `continuous_frames`.
+   */
+  startEnhancementOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   // ==================== Pipeline Audio Buffers ====================
 
   /**
    * Decode an audio file into an offline audio buffer.
    * Uses AudioDecodeSession (FFmpeg + WAV fast path).
    * @param source - Serialized FileSource (ReadableMap with `kind` discriminator)
-   * @param targetSampleRateHz - 0 = keep source rate
+   * @param targetSampleRateHz - 0 = keep source rate, >0 = force that rate.
+   *                             Public API passes 16000 when omitted.
    * @param forceMono - true = downmix to mono
    * @param operationId - For progress events + cancellation
    */
@@ -202,6 +315,7 @@ export interface Spec extends TurboModule {
     source: Object,
     targetSampleRateHz: number,
     forceMono: boolean,
+    allowDemuxerAutoProbe: boolean,
     operationId: string
   ): Promise<{
     bufferId: string;
@@ -214,11 +328,71 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Probe audio file duration from container metadata (no decode).
+   * JS wrapper: `probeAudioFileDuration` from `react-native-sherpa-onnx/audio`.
+   * @param source - Serialized FileSource (same format as decodeFileToOfflineBuffer)
+   */
+  probeAudioFileDuration(source: Object): Promise<{
+    durationMs: number;
+    isExact: boolean;
+  }>;
+
+  /**
+   * Probe container format and primary audio codec (no PCM decode).
+   * JS wrapper: `probeAudioFileContainer` from `react-native-sherpa-onnx/audio`.
+   */
+  probeAudioFileContainer(source: Object): Promise<{
+    inputFormatName: string;
+    codecName: string;
+  }>;
+
+  /**
+   * Compute a static frequency-spectrum visualization profile.
+   *
+   * Input payload is a discriminated object:
+   * - `{ kind: 'file', source: FileSource }`
+   * - `{ kind: 'offline', bufferId: 'off_...' }`
+   * - `{ kind: 'live', handle: 'live_...' }` (must be finalized)
+   *
+   * Options are flattened for TurboModule codegen.
+   */
+  computeAudioVisualizationProfile(
+    input: Object,
+    options: Object
+  ): Promise<{
+    kind: string;
+    sampleRate: number;
+    durationMs: number;
+    barCount: number;
+    levels: number[];
+    frameCount: number;
+    frameDurationMs: number;
+    framesTransferId?: string;
+  }>;
+
+  /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
    * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).
    */
   createOfflineAudioBufferFromLive(
+    liveBufferId: string,
+    mode?: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Transfer a finalized live audio buffer spool into an offline buffer without copying.
+   * The source live buffer becomes invalidated after successful transfer.
+   */
+  transferOfflineAudioBufferFromLive(
     liveBufferId: string,
     mode?: string
   ): Promise<{
@@ -251,8 +425,20 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Populate an existing empty offline audio buffer exactly once by adopting
+   * storage from another offline audio buffer.
+   *
+   * The source buffer is invalidated/consumed after successful adoption.
+   */
+  populateOfflineAudioBufferIfEmpty(
+    targetBufferId: string,
+    sourceBufferId: string,
+    options?: Object
+  ): Promise<void>;
+
+  /**
    * Create an empty live audio buffer with a rolling-window ring buffer.
-   * @param options.sampleRate - Sample rate in Hz.
+   * @param options.sampleRate - Sample rate in Hz. Public API defaults to 16000 when omitted.
    * @param options.ringSeconds - Ring buffer window size in seconds (default: 60).
    * @param options.retentionMode - Retention mode: 'auto' | 'session' | 'maxSeconds' | 'path' | 'none'.
    *                                  ('auto'/'maxSeconds' currently do not enforce trim yet.)
@@ -349,7 +535,10 @@ export interface Spec extends TurboModule {
 
   // ==================== File Ingest to Live Buffer ====================
 
-  /** Start streaming file decode into an existing live buffer. */
+  /** Start streaming file decode into an existing live buffer.
+   *  targetSampleRateHz: 0 = keep source rate, >0 = force that rate.
+   *  Public API passes 16000 when omitted.
+   */
   startFileIngestToLiveBuffer(
     liveBufferId: string,
     source: Object,
@@ -357,6 +546,7 @@ export interface Spec extends TurboModule {
     forceMono: boolean,
     autoFinalize: boolean,
     backpressure: string,
+    allowDemuxerAutoProbe: boolean,
     operationId: string
   ): Promise<{ ingestId: string }>;
 
@@ -432,6 +622,16 @@ export interface Spec extends TurboModule {
     hasEmotion: boolean;
     hasEvent: boolean;
   }>;
+
+  /**
+   * Populate an existing empty offline text buffer exactly once.
+   * Rejects when the buffer does not exist or was already populated.
+   */
+  populateOfflineTextBufferIfEmpty(
+    bufferId: string,
+    text: string,
+    options?: Object
+  ): Promise<void>;
 
   /**
    * Create a live text buffer for streaming/incremental text.
@@ -570,6 +770,15 @@ export interface Spec extends TurboModule {
     maxUtf16: number
   ): Promise<string>;
 
+  /** Replace the current live text partial (public data-level write API). */
+  setLiveTextBufferPartial(liveBufferId: string, text: string): Promise<void>;
+
+  /** Append text to the current live text partial (public data-level write API). */
+  appendLiveTextBufferPartial(
+    liveBufferId: string,
+    text: string
+  ): Promise<void>;
+
   /** Commit a text segment to a live text buffer. */
   appendLiveTextSegment(
     liveBufferId: string,
@@ -602,6 +811,63 @@ export interface Spec extends TurboModule {
 
   /** Return number of committed segments currently retained in the live segment log. */
   getLiveTextBufferSegmentCount(liveBufferId: string): Promise<number>;
+
+  // ==================== Segmentation Engine Core ====================
+
+  /** Attach a segmentation engine to a live text/audio buffer. */
+  attachSegmentationEngine(
+    bufferId: string,
+    domain: 'text' | 'speech',
+    policy: Object
+  ): Promise<{
+    engineId: string;
+    attachedBufferId: string;
+    domain: 'text' | 'speech';
+    policy: Object;
+    state: 'active' | 'detached';
+    totalSegmentsCommitted: number;
+    lastSegmentId?: string;
+    segmentBufferId?: string;
+  }>;
+
+  /** Detach a segmentation engine and optionally flush final pending data. */
+  detachSegmentationEngine(
+    engineId: string,
+    flushFinal?: boolean
+  ): Promise<void>;
+
+  /** Get segmentation engine runtime info. */
+  getSegmentationEngineInfo(engineId: string): Promise<{
+    engineId: string;
+    attachedBufferId: string;
+    domain: 'text' | 'speech';
+    policy: Object;
+    state: 'active' | 'detached';
+    totalSegmentsCommitted: number;
+    lastSegmentId?: string;
+    segmentBufferId?: string;
+  }>;
+
+  /** One-shot offline segmentation pass. */
+  segmentOfflineBuffer(
+    bufferId: string,
+    domain: 'text' | 'speech',
+    policy: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    segmentCount?: number;
+    sourceAudioBufferId?: string;
+    segments?: Array<{
+      segmentId: string;
+      startOffset: number;
+      endOffset: number;
+      reason: string;
+      source: string;
+      text: string;
+    }>;
+  }>;
 
   // ==================== Pipeline Segment Buffers ====================
 
@@ -673,6 +939,12 @@ export interface Spec extends TurboModule {
     sourceAudioBufferId?: string;
   }>;
 
+  populateOfflineSegmentBufferIfEmpty(
+    targetBufferId: string,
+    liveBufferId: string,
+    mode?: string
+  ): Promise<void>;
+
   getPipelineSegmentBufferInfo(bufferId: string): Promise<{
     bufferId: string;
     kind: string;
@@ -701,6 +973,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;
@@ -719,6 +994,9 @@ export interface Spec extends TurboModule {
       sampleRate: number;
       durationMs: number;
       confidence?: number;
+      reason?: string;
+      source?: string;
+      createdAtMs?: number;
       payload?: Object;
     }>;
   }>;
@@ -727,9 +1005,113 @@ export interface Spec extends TurboModule {
 
   releasePipelineSegmentBuffer(bufferId: string): Promise<void>;
 
+  // ==================== Segment Link Maps ====================
+
+  createSegmentLinkMap(options?: {
+    textBufferId?: string;
+    audioBufferId?: string;
+  }): Promise<{ linkMapId: string }>;
+
+  addSegmentLink(
+    linkMapId: string,
+    link: {
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }
+  ): Promise<{
+    linkId: string;
+    textSegmentId: string;
+    speechSegmentId: string;
+    linkType: string;
+    confidence?: number;
+    meta?: Object;
+  }>;
+
+  addSegmentLinks(
+    linkMapId: string,
+    links: Array<{
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  removeSegmentLink(linkMapId: string, linkId: string): Promise<void>;
+
+  getSpeechSegmentsForText(
+    linkMapId: string,
+    textSegmentId: string
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getTextSegmentsForSpeech(
+    linkMapId: string,
+    speechSegmentId: string
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getAllSegmentLinks(
+    linkMapId: string,
+    startIndex?: number,
+    maxCount?: number
+  ): Promise<{
+    links: Array<{
+      linkId: string;
+      textSegmentId: string;
+      speechSegmentId: string;
+      linkType: string;
+      confidence?: number;
+      meta?: Object;
+    }>;
+  }>;
+
+  getSegmentLinkCount(linkMapId: string): Promise<number>;
+
+  getSegmentLinkMapInfo(linkMapId: string): Promise<{
+    linkMapId: string;
+    linkCount: number;
+    textBufferId?: string;
+    audioBufferId?: string;
+  }>;
+
+  releaseSegmentLinkMap(linkMapId: string): Promise<void>;
+
   // ==================== VAD Methods ====================
 
-  initializeVad(instanceId: string, options: Object): Promise<void>;
+  initializeVad(
+    instanceId: string,
+    options: VadInitBridgeOptions
+  ): Promise<void>;
 
   startVadPipeline(
     instanceId: string,
@@ -777,34 +1159,12 @@ export interface Spec extends TurboModule {
   /**
    * Initialize Text-to-Speech (TTS) with model directory.
    * @param instanceId - Unique ID for this engine instance (from createTTS)
-   * @param modelDir - Absolute path to model directory
-   * @param modelType - Model type ('vits', 'matcha', 'kokoro', 'kitten', 'pocket', 'zipvoice', 'supertonic', 'auto')
-   * @param numThreads - Number of threads for inference (default: 2)
-   * @param debug - Enable debug logging (default: false)
-   * @param noiseScale - Optional noise scale (VITS/Matcha)
-   * @param noiseScaleW - Optional noise scale W (VITS)
-   * @param lengthScale - Optional length scale (VITS/Matcha/Kokoro/Kitten)
-   * @param ruleFsts - Optional path(s) to rule FSTs for TTS (OfflineTtsConfig)
-   * @param ruleFars - Optional path(s) to rule FARs for TTS (OfflineTtsConfig)
-   * @param maxNumSentences - Optional max sentences per callback (default: 1)
-   * @param silenceScale - Optional silence scale on config (default: 0.2)
-   * @param provider - Optional execution provider (e.g. 'cpu', 'coreml', 'xnnpack'; default: 'cpu')
+   * @param options - Flat init options (see `buildTtsInitBridgeOptions` in ttsNativeBridge.ts). `kokoroLang` is bridge-only.
    * @returns Object with success boolean, array of detected models (each with type and modelDir), sampleRate/numSpeakers on success, and optional error when success is false.
    */
   initializeTts(
     instanceId: string,
-    modelDir: string,
-    modelType: string,
-    numThreads: number,
-    debug: boolean,
-    noiseScale?: number,
-    noiseScaleW?: number,
-    lengthScale?: number,
-    ruleFsts?: string,
-    ruleFars?: string,
-    maxNumSentences?: number,
-    silenceScale?: number,
-    provider?: string
+    options: TtsInitBridgeOptions
   ): Promise<{
     success: boolean;
     /** Present when success is false (native structured failure). */
@@ -817,12 +1177,12 @@ export interface Spec extends TurboModule {
   /**
    * Detect TTS model type and structure without initializing the engine.
    * Uses the same native file-based detection as initializeTts.
-   * For Kokoro/Kitten multi-language models, also returns lexiconLanguageCandidates (e.g. ["default"], ["us-en", "gb-en", "zh"]) from detected lexicon.txt / lexicon-*.txt files.
+   * For Kokoro multi-language models, also returns `lexiconLanguages` (`{ id, path }[]`) from detected lexicon files.
    * Note: this is the raw native bridge shape; JS facade `tts/detectTtsModel` narrows `modelType` to `TTSModelType`.
    * @param modelDir - Absolute path to extracted model directory, or empty string when using `assetName` only (catalog hints).
    * @param assetName - Release asset stem / folder basename (e.g. vits-piper-en_US-lessac-medium), or null/empty when scanning `modelDir` only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @returns Object with success, detectedModels, modelType, optional lexiconLanguageCandidates, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
+   * @returns Object with success, detectedModels, modelType, optional lexiconLanguages, optional name-derived languages/quantization/sizeTier, and optional detectionSources.
    */
   detectTtsModel(
     modelDir: string,
@@ -834,8 +1194,8 @@ export interface Spec extends TurboModule {
     error?: string;
     detectedModels: Array<{ type: string; modelDir: string }>;
     modelType?: string;
-    /** Language ids from detected lexicon files (e.g. "default" for lexicon.txt, "us-en", "zh" from lexicon-us-en.txt, lexicon-zh.txt). Present for Kokoro/Kitten when multiple or single lexicon files are found; use for language selection UI. */
-    lexiconLanguageCandidates?: string[];
+    /** Detected lexicon files (`lexicon.txt`, `lexicon-*.txt`). Use ids with init `lexiconLanguageId`. */
+    lexiconLanguages?: Array<{ id: string; path: string }>;
     /** Raw heuristic language tags from asset/folder name (catalog); not from lexicon files. JS `detectTtsModel` / download catalog normalize these for the public API. */
     languages?: string[];
     /** fp16, int8, int8-quantized, unknown — from name heuristics. */
@@ -844,6 +1204,8 @@ export interface Spec extends TurboModule {
     sizeTier?: string;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
+    /** Resolved non-empty path keys from native file-based detection. */
+    paths?: Object;
   }>;
 
   /**
@@ -910,6 +1272,58 @@ export interface Spec extends TurboModule {
     minAnchorsApplied?: number;
   }>;
 
+  /**
+   * Accurate alignment on a single PCM slice.
+   * Used by `asr_mediated` to align each linker-assigned anchor slice.
+   */
+  alignAccurateFromPcm(
+    modelPath: string,
+    text: string,
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
+    sampleRate: number,
+    granularity: 'sentence' | 'word' | 'character',
+    language?: string
+  ): Promise<{
+    subtitles: Array<{
+      text: string;
+      start: number;
+      end: number;
+    }>;
+    timingMode: string;
+  }>;
+
+  /**
+   * Forced CTC alignment on a single PCM slice + text window.
+   * Used by `chunked_forced_ctc` to advance a cursor across anchors.
+   */
+  alignAccurateForcedCtcFromPcm(
+    modelPath: string,
+    windowText: string,
+    pcm: {
+      audioBufferId: string;
+      startSample: number;
+      sampleCount: number;
+    },
+    sampleRate: number,
+    granularity: 'sentence' | 'word',
+    language?: string
+  ): Promise<{
+    tokens: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+    }>;
+    consumedTokenCount: number;
+    diagnostics?: {
+      ctcBlankRatio?: number;
+      framesProcessed?: number;
+    };
+  }>;
+
   detectAlignmentModel(
     modelDir: string,
     modelType?: string
@@ -929,20 +1343,7 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
   }>;
 
-  // ==================== Online (streaming) TTS Methods ====================
-
-  /**
-   * Start a streaming TTS pipeline worker.
-   * Reads committed segments from a LiveTextBuffer, synthesizes each one
-   * (using per-segment meta overrides where available), and writes PCM
-   * samples to a LiveAudioBuffer.
-   */
-  startTtsPipeline(
-    instanceId: string,
-    textInLiveBufferId: string,
-    audioOutLiveBufferId: string,
-    options?: Object
-  ): Promise<{ pipelineId: string }>;
+  // ==================== TTS Runtime Methods ====================
 
   /**
    * Create a standalone PCM player session.
@@ -1040,6 +1441,9 @@ export interface Spec extends TurboModule {
     languages?: string[];
     quantization?: string;
     detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
   }>;
 
   detectVadModel(
@@ -1060,13 +1464,179 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Punctuation model detection: offline (CT-Transformer) vs online (CNN-BiLSTM + bpe.vocab).
+   * `isStreaming` is true when native detection resolves an online-compatible CNN-BiLSTM layout.
+   */
+  detectPunctuationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: string[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      ct_transformer?: string;
+      cnn_bilstm?: string;
+      bpe_vocab?: string;
+    };
+  }>;
+
+  /**
+   * Unified model detection: runs TTS→STT→VAD→Punctuation→Enhancement→Alignment
+   * in one native call (first hit wins). Used by `detectModel` in JS.
+   */
+  detectModel(
+    modelDir: string,
+    assetName: string | null
+  ): Promise<UnifiedDetectNativeResult>;
+
+  /** Batch unified detection; one native round-trip for all inputs. */
+  detectModelsBatch(
+    inputs: ReadonlyArray<{
+      modelDir?: string;
+      assetName?: string | null;
+    }>
+  ): Promise<UnifiedDetectNativeResult[]>;
+
+  /** Runtime validation of resolved custom-init path maps (C++ validate-* tables). */
+  validateCustomModelPaths(
+    category: string,
+    modelType: string,
+    paths: Object
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    missingRequired?: string[];
+  }>;
+
+  /** Schema for custom-init UI: path keys from native C++ requirement tables. */
+  getCustomModelPathRequirements(
+    category: string,
+    modelType: string
+  ): Promise<{
+    fields: Array<{
+      key: string;
+      required: boolean;
+      kind: 'file' | 'dir';
+    }>;
+  }>;
+
+  /**
+   * Load sherpa-onnx `OfflinePunctuation` (CT-Transformer). Uses native detect with
+   * `ct_transformer` only (no online/CNN auto-pick).
+   */
+  initializeOfflinePunctuation(
+    instanceId: string,
+    options: PunctuationInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /**
+   * Read full text from `textIn` offline buffer, run offline punctuation, write to empty `textOut`.
+   */
+  punctuateOfflineTextBuffers(
+    instanceId: string,
+    textInBufferId: string,
+    textOutBufferId: string,
+    textInputNormalization?: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /**
+   * Punctuate a plain string into caller-owned `textOut` (same populate rules as `punctuate`).
+   */
+  punctuateOfflineString(
+    instanceId: string,
+    plain: string,
+    textOutBufferId: string,
+    textInputNormalization?: string
+  ): Promise<{ processingTimeMs: number }>;
+
+  /** Release native `OfflinePunctuation` for this instance. */
+  unloadOfflinePunctuation(instanceId: string): Promise<void>;
+
+  /**
+   * Load sherpa-onnx `OnlinePunctuation` (CNN-BiLSTM + bpe.vocab).
+   */
+  initializeOnlinePunctuation(
+    instanceId: string,
+    options: PunctuationInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+  }>;
+
+  /** Punctuate one committed live-text chunk with an existing OnlinePunctuation instance. */
+  processOnlinePunctuationChunk(
+    instanceId: string,
+    text: string,
+    textInputNormalization?: string
+  ): Promise<{ punctuatedText: string; processingTimeMs: number }>;
+
+  /** Release native `OnlinePunctuation` for this instance. */
+  unloadOnlinePunctuation(instanceId: string): Promise<void>;
+
+  // ==================== Punctuation Pipeline ====================
+
+  /**
+   * Start a live-offline punctuation pipeline: a segmentation engine drives the
+   * live text input buffer, and offline punctuation runs per committed text segment.
+   */
+  startPunctuationOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      textInputNormalization?: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
+  /**
+   * Start a live-offline TTS pipeline: a segmentation engine drives the
+   * live text input buffer, and offline TTS synthesizes each committed text segment,
+   * writing audio chunks to the live audio output buffer.
+   *
+   * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+   */
+  startTtsOfflineLivePipeline(
+    instanceId: string,
+    textInLiveBufferId: string,
+    audioOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      /** Present when speech-domain segmentation mirrors into seg_live_*; omitted for text-domain engines. */
+      segmentLiveBufferId?: string;
+      sid?: number;
+      speed?: number;
+      referenceAudioBufferId?: string;
+      referenceText?: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
+  startStreamingPunctuationPipeline(
+    instanceId: string,
+    inputBufferId: string,
+    outputBufferId: string,
+    textInputNormalization?: string
+  ): Promise<{ pipelineId: string }>;
+
   initializeEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1087,11 +1657,7 @@ export interface Spec extends TurboModule {
 
   initializeOnlineEnhancement(
     instanceId: string,
-    modelDir: string,
-    modelType?: string,
-    numThreads?: number,
-    provider?: string,
-    debug?: boolean
+    options: EnhancementInitBridgeOptions
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1176,13 +1742,17 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Assets ====================
 
   /**
-   * Resolve model path based on configuration.
-   * Handles asset paths, file system paths, and auto-detection.
-   * Returns an absolute path that can be used by native code.
+   * Resolve a bundled app asset relative path to an absolute filesystem path.
+   * Android materializes APK assets into the app sandbox; iOS locates the bundle
+   * resource (or a cached copy under Documents/models).
    *
-   * @param config - Object with 'type' ('asset' | 'file' | 'auto') and 'path' (string)
+   * Used internally when {@link FileSource} uses `app:apkAsset` or `app:appBundle`.
+   * Apps should pass {@link bundledModelFileSource} into feature APIs instead of
+   * calling this directly.
+   *
+   * @param relativePath - Relative path within bundled assets (e.g. `models/my-model`)
    */
-  resolveModelPath(config: { type: string; path: string }): Promise<string>;
+  resolveBundledAssetPath(relativePath: string): Promise<string>;
 
   /**
    * List all model folders in the assets/models directory.
@@ -1192,21 +1762,22 @@ export interface Spec extends TurboModule {
    *
    * @example
    * ```typescript
-   * const folders = await listAssetModels();
-   * // Returns: [{ folder: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', hint: 'stt' }, { folder: 'sherpa-onnx-matcha-icefall-en_US-ljspeech', hint: 'tts' }]
+   * import { bundledModelFileSource, detectSttModel } from 'react-native-sherpa-onnx/utils';
    *
-   * // Then use with resolveModelPath and initialize:
+   * const folders = await listAssetModels();
    * for (const model of folders) {
-   *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
-   *   const result = await initializeStt(path);
-   *   if (result.success) {
-   *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
-   *   }
+   *   const detection = await detectSttModel({
+   *     source: bundledModelFileSource(`models/${model.folder}`),
+   *   });
+   *   console.log(model.folder, detection);
    * }
    * ```
    */
   listAssetModels(): Promise<
-    Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
+    Array<{
+      folder: string;
+      hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+    }>
   >;
 
   /**
@@ -1216,14 +1787,70 @@ export interface Spec extends TurboModule {
   listModelsAtPath(
     path: string,
     recursive: boolean
-  ): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>;
+  ): Promise<
+    Array<{
+      folder: string;
+      hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+    }>
+  >;
 
   /**
-   * **Play Asset Delivery (PAD):** Returns the filesystem path to the models directory
-   * of an Android asset pack, or null if the pack is not available (e.g. not installed).
-   * Use this to list and load models that are delivered via PAD instead of bundled app assets.
+   * Returns the filesystem path to shipped model archives for an on-demand pack/tag,
+   * or null if not available yet. Android: PAD pack; iOS: ODR tag (e.g. core_models).
    */
   getAssetPackPath(packName: string): Promise<string | null>;
+
+  /**
+   * Request download of an on-demand pack (Android PAD) or ODR tag (iOS).
+   */
+  fetchAssetPack(packName: string): Promise<boolean>;
+
+  /**
+   * Fetch if needed and resolve when the pack/tag is ready.
+   * Emits {@code sherpaAssetPackDeliveryProgress} during download.
+   */
+  ensureAssetPackReady(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
+   * Current on-demand delivery state (PAD / ODR progress and errors).
+   */
+  getAssetPackState(packName: string): Promise<{
+    packName: string;
+    status: string;
+    bytesDownloaded: number;
+    totalBytes: number;
+    errorCode: number;
+  }>;
+
+  /**
+   * After extraction: remove Android PAD pack from device, or end iOS ODR access (cache may evict).
+   * @returns 0 on success.
+   */
+  removeAssetPack(packName: string): Promise<number>;
+
+  /**
+   * iOS ODR delivery snapshot: `tag` + `resolvedModelsPath`; extra fields in DEBUG native builds.
+   * Android: tag + null path. Use extraction APIs to list archives under the models path.
+   */
+  listOdrDeliverySnapshot(tag: string): Promise<{
+    tag: string;
+    resolvedModelsPath: string | null;
+    expectedModelsPath?: string;
+    bundleSubdirectory?: string;
+    directoryProbe?: {
+      path: string;
+      exists: boolean;
+      isDirectory: boolean;
+      entryCount: number;
+      entries: string[];
+    };
+  }>;
 
   /**
    * Read the contents of a text file from the bundled assets (Android) or main bundle (iOS).
@@ -1275,10 +1902,10 @@ export interface Spec extends TurboModule {
   cancelExtraction(operationId: string): Promise<void>;
 
   /**
-   * List asset paths of .tar.zst and .tar.bz2 archives in a PAD pack when stored as APK_ASSETS.
-   * Android only; returns [] when pack is not available or not APK_ASSETS. Used by getBundledArchives.
+   * Android only: immediate asset paths under an APK prefix (e.g. `models/foo.tar.zst`).
+   * Extraction layer; not tied to PAD pack names.
    */
-  listBundledArchiveAssetPaths(packName: string): Promise<string[]>;
+  listApkAssetPaths(assetPrefix: string): Promise<string[]>;
 
   /**
    * Compute SHA-256 of a file and return the hex digest.
@@ -1353,6 +1980,10 @@ export interface Spec extends TurboModule {
    *          tmp -> cacheDir/tmp, externalFiles -> getExternalFilesDir(null).
    * iOS:     cache -> NSCachesDirectory, documents -> NSDocumentDirectory,
    *          files -> NSApplicationSupportDirectory, tmp -> NSTemporaryDirectory.
+   *          appBundle -> iOS-only main bundle (not a sandbox base dir).
+   *
+   * Note: `apkAsset` and `appBundle` do not resolve via this method. Use
+   * `bundledModelFileSource()` or FileSource `{ kind: 'app', base: 'apkAsset' | 'appBundle', path }`.
    *
    * Rejects with `FILEIO_*` errors (e.g. `FILEIO_UNSUPPORTED_ON_PLATFORM`,
    * `FILEIO_UNSUPPORTED_LOCATION_KIND`, `FILEIO_WRITE_ERROR`, `FILEIO_RESOLVE_ERROR`).
@@ -1398,6 +2029,33 @@ export interface Spec extends TurboModule {
 
   /** Get a snapshot of the current pipeline audio session state. */
   getPipelineAudioSessionState(): Promise<Object>;
+
+  // ── Foreground model file download (HTTP Range resume) ─────────────────
+
+  /**
+   * Start downloading a file to [destination]. Emits sherpaForegroundDownload* events.
+   * If [destination] already exists, resumes with HTTP Range from file size on disk.
+   */
+  startForegroundDownload(
+    id: string,
+    url: string,
+    destination: string,
+    headers?: Object
+  ): Promise<void>;
+
+  /** Pause an active download; partial file is kept for resume. */
+  pauseForegroundDownload(id: string): Promise<boolean>;
+
+  /** Resume a download paused in the same app session (in-memory state). */
+  resumeForegroundDownload(id: string): Promise<boolean>;
+
+  /** Cancel network activity; does not delete the partial file. */
+  cancelForegroundDownload(id: string): Promise<boolean>;
+
+  /** Required by NativeEventEmitter on RN iOS/Android. */
+  addListener(eventName: string): void;
+  /** Required by NativeEventEmitter on RN iOS/Android. */
+  removeListeners(count: number): void;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');

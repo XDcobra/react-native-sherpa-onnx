@@ -132,13 +132,18 @@ internal class TtsLifecycleService(
           resultMap.putString("error", error)
         }
       }
-      val lexiconLanguageCandidates = result["lexiconLanguageCandidates"] as? ArrayList<*>
-      if (!lexiconLanguageCandidates.isNullOrEmpty()) {
-        val candidatesArray = Arguments.createArray()
-        for (c in lexiconLanguageCandidates) {
-          (c as? String)?.let { candidatesArray.pushString(it) }
+      val lexiconLanguages = result["lexiconLanguages"] as? ArrayList<*>
+      if (!lexiconLanguages.isNullOrEmpty()) {
+        val lexiconArray = Arguments.createArray()
+        for (entry in lexiconLanguages) {
+          if (entry is HashMap<*, *>) {
+            val map = Arguments.createMap()
+            map.putString("id", entry["id"] as? String ?: "")
+            map.putString("path", entry["path"] as? String ?: "")
+            lexiconArray.pushMap(map)
+          }
         }
-        resultMap.putArray("lexiconLanguageCandidates", candidatesArray)
+        resultMap.putArray("lexiconLanguages", lexiconArray)
       }
       val derivedLangs = result["languages"] as? ArrayList<*>
       if (!derivedLangs.isNullOrEmpty()) {

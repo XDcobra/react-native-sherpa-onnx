@@ -11,6 +11,8 @@
  */
 
 #include "AudioDecodeSession.h"
+#include "FfmpegFormatGuard.h"
+#include "../diagnostic/NativeDiagnostic.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -154,6 +156,91 @@ bool canUseWavFastPath(const WavInfo& wav, const AudioDecodeConfig& config) {
   return false;
 }
 
+AudioFileProbeResult durationFromWavInfo(const WavInfo& wav) {
+  AudioFileProbeResult result;
+  if (!wav.valid || wav.sampleRate <= 0 || wav.channels <= 0 || wav.bitsPerSample <= 0) {
+    return result;
+  }
+  const int bytesPerSample = wav.bitsPerSample / 8;
+  if (bytesPerSample <= 0) {
+    return result;
+  }
+  const int64_t bytesPerFrame = static_cast<int64_t>(wav.channels) * bytesPerSample;
+  if (bytesPerFrame <= 0 || wav.dataSize <= 0) {
+    return result;
+  }
+  const int64_t totalFrames = wav.dataSize / bytesPerFrame;
+  result.durationMs = (totalFrames * 1000) / wav.sampleRate;
+  result.isExact = result.durationMs >= 0;
+  return result;
+}
+
+AudioFileProbeResult probeWavDuration(const char* pathOrFd, int inputFd) {
+  FILE* f = nullptr;
+  if (inputFd >= 0) {
+    int probeFd = dup(inputFd);
+    if (probeFd < 0) {
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot duplicate input fd");
+    }
+    f = fdopen(probeFd, "rb");
+    if (!f) {
+      close(probeFd);
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot open input fd");
+    }
+  } else {
+    f = fopen(pathOrFd, "rb");
+    if (!f) {
+      throw std::runtime_error(std::string("PROBE_NOT_FOUND: Cannot open file: ") + pathOrFd);
+    }
+  }
+
+  WavInfo wavInfo = parseWavHeaderForFastPath(f);
+  fclose(f);
+
+  if (wavInfo.valid) {
+    return durationFromWavInfo(wavInfo);
+  }
+  return {};
+}
+
+AudioContainerProbeResult probeWavContainer(const char* pathOrFd, int inputFd) {
+  FILE* f = nullptr;
+  if (inputFd >= 0) {
+    int probeFd = dup(inputFd);
+    if (probeFd < 0) {
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot duplicate input fd");
+    }
+    f = fdopen(probeFd, "rb");
+    if (!f) {
+      close(probeFd);
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot open input fd");
+    }
+  } else {
+    f = fopen(pathOrFd, "rb");
+    if (!f) {
+      throw std::runtime_error(std::string("PROBE_NOT_FOUND: Cannot open file: ") + pathOrFd);
+    }
+  }
+
+  WavInfo wavInfo = parseWavHeaderForFastPath(f);
+  fclose(f);
+
+  AudioContainerProbeResult result;
+  if (!wavInfo.valid) {
+    return result;
+  }
+
+  result.inputFormatName = "wav";
+  if (wavInfo.audioFormat == 3) {
+    result.codecName = "pcm_f32le";
+  } else if (wavInfo.audioFormat == 1) {
+    result.codecName = "pcm_s16le";
+  } else {
+    result.codecName = "pcm";
+  }
+  return result;
+}
+
 AudioDecodeResult decodeWavFastPath(
     FILE* f,
     const WavInfo& wav,
@@ -287,6 +374,14 @@ AudioDecodeResult decodeFileFFmpeg(
     DecodeStreamInfoCallback onStreamInfo,
     std::atomic<bool>& cancelFlag
 ) {
+  char diagDetail[64];
+  std::snprintf(
+      diagDetail,
+      sizeof(diagDetail),
+      "allowAutoProbe=%d",
+      config.allowDemuxerAutoProbe ? 1 : 0);
+  SHERPA_DIAG_D("audio.decode", "ffmpeg_start", diagDetail);
+
   AVFormatContext* fmtCtx = nullptr;
   AVIOContext* avioCtx = nullptr;
   int ownedFd = -1;
@@ -356,16 +451,22 @@ AudioDecodeResult decodeFileFFmpeg(
     fmtCtx->pb = avioCtx;
     fmtCtx->flags |= AVFMT_FLAG_CUSTOM_IO;
 
-    if (avformat_open_input(&fmtCtx, nullptr, nullptr, nullptr) < 0) {
-      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input fd");
+    const auto openResult = openGuardedFdFormatInput(
+        &fmtCtx, path, "DECODE", config.allowDemuxerAutoProbe);
+    if (!openResult.ok) {
+      SHERPA_DIAG_D("audio.decode", "open_fail", diagDetail);
+      throw std::runtime_error(openResult.errorMessage);
     }
   } else {
     if (!path || path[0] == '\0') {
       throw std::runtime_error("DECODE_NOT_FOUND: Empty file path");
     }
 
-    if (avformat_open_input(&fmtCtx, path, nullptr, nullptr) < 0) {
-      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to open input file");
+    const auto openResult = openGuardedFormatInput(
+        &fmtCtx, path, "DECODE", config.allowDemuxerAutoProbe);
+    if (!openResult.ok) {
+      SHERPA_DIAG_D("audio.decode", "open_fail", diagDetail);
+      throw std::runtime_error(openResult.errorMessage);
     }
   }
 
@@ -562,6 +663,233 @@ AudioDecodeResult decodeFileFFmpeg(
   result.totalFramesDecoded = totalFramesDecoded;
   result.sourceSampleRate = srcSampleRate;
   result.sourceChannels = srcChannels;
+  SHERPA_DIAG("audio.decode", "ffmpeg_end");
+  return result;
+}
+
+AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
+  AVFormatContext* fmtCtx = nullptr;
+  AVIOContext* avioCtx = nullptr;
+  int ownedFd = -1;
+  FdAvioContext fdAvioContext{};
+
+  struct ProbeCleanup {
+    AVFormatContext** fmtCtx;
+    AVIOContext** avioCtx;
+    int* ownedFd;
+    ~ProbeCleanup() {
+      if (fmtCtx && *fmtCtx) avformat_close_input(fmtCtx);
+      if (avioCtx && *avioCtx) avio_context_free(avioCtx);
+      if (ownedFd && *ownedFd >= 0) {
+        close(*ownedFd);
+        *ownedFd = -1;
+      }
+    }
+  };
+  ProbeCleanup cleanup{&fmtCtx, &avioCtx, &ownedFd};
+
+  if (inputFd >= 0) {
+    ownedFd = dup(inputFd);
+    if (ownedFd < 0) {
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot duplicate input fd");
+    }
+    fdAvioContext.fd = ownedFd;
+
+    const int avioBufferSize = 32768;
+    uint8_t* avioBuffer = static_cast<uint8_t*>(av_malloc(avioBufferSize));
+    if (!avioBuffer) {
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to allocate AVIO buffer");
+    }
+
+    avioCtx = avio_alloc_context(
+        avioBuffer, avioBufferSize, 0, &fdAvioContext, avioReadFromFd, nullptr, avioSeekFd);
+    if (!avioCtx) {
+      av_free(avioBuffer);
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to create AVIO context");
+    }
+
+    fmtCtx = avformat_alloc_context();
+    if (!fmtCtx) {
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to allocate format context");
+    }
+    fmtCtx->pb = avioCtx;
+
+    const auto openResult = openGuardedFdFormatInput(&fmtCtx, path, "PROBE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
+    }
+  } else {
+    const auto openResult = openGuardedFormatInput(&fmtCtx, path, "PROBE");
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
+    }
+  }
+
+  AVDictionary* opts = nullptr;
+  av_dict_set(&opts, "analyzeduration", "2000000", 0);
+  av_dict_set(&opts, "probesize", "32768", 0);
+  if (avformat_find_stream_info(fmtCtx, &opts) < 0) {
+    av_dict_free(&opts);
+    throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
+  }
+  av_dict_free(&opts);
+
+  int audioStreamIdx = -1;
+  for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
+    if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+      audioStreamIdx = static_cast<int>(i);
+      break;
+    }
+  }
+  if (audioStreamIdx < 0) {
+    throw std::runtime_error("PROBE_NO_AUDIO_STREAM: No audio stream found");
+  }
+
+  AudioFileProbeResult result;
+  AVStream* stream = fmtCtx->streams[audioStreamIdx];
+  if (stream->duration != AV_NOPTS_VALUE && stream->duration > 0 &&
+      stream->time_base.num > 0) {
+    const double sec = stream->duration * av_q2d(stream->time_base);
+    if (sec > 0) {
+      result.durationMs = static_cast<int64_t>(sec * 1000.0);
+      result.isExact = true;
+      return result;
+    }
+  }
+
+  if (fmtCtx->duration > 0) {
+    const double sec = static_cast<double>(fmtCtx->duration) / AV_TIME_BASE;
+    if (sec > 0) {
+      result.durationMs = static_cast<int64_t>(sec * 1000.0);
+      result.isExact = true;
+      return result;
+    }
+  }
+
+  if (fmtCtx->bit_rate > 0) {
+    struct stat st;
+    const bool hasSize =
+        (ownedFd >= 0 && fstat(ownedFd, &st) == 0 && st.st_size > 0) ||
+        (ownedFd < 0 && path && stat(path, &st) == 0 && st.st_size > 0);
+    if (hasSize) {
+      const double sec =
+          static_cast<double>(st.st_size * 8) / static_cast<double>(fmtCtx->bit_rate);
+      if (sec > 0) {
+        result.durationMs = static_cast<int64_t>(sec * 1000.0);
+        result.isExact = false;
+        return result;
+      }
+    }
+  }
+
+  throw std::runtime_error("PROBE_DURATION_UNKNOWN: Could not determine duration");
+}
+
+AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd) {
+  AVFormatContext* fmtCtx = nullptr;
+  AVIOContext* avioCtx = nullptr;
+  int ownedFd = -1;
+  FdAvioContext fdAvioContext{};
+
+  struct ProbeCleanup {
+    AVFormatContext** fmtCtx;
+    AVIOContext** avioCtx;
+    int* ownedFd;
+    ~ProbeCleanup() {
+      if (fmtCtx && *fmtCtx) avformat_close_input(fmtCtx);
+      if (avioCtx && *avioCtx) avio_context_free(avioCtx);
+      if (ownedFd && *ownedFd >= 0) {
+        close(*ownedFd);
+        *ownedFd = -1;
+      }
+    }
+  };
+  ProbeCleanup cleanup{&fmtCtx, &avioCtx, &ownedFd};
+
+  // Sniff container from bytes only — do not open via extension demuxer first
+  // (mislabeled .mp3 + Ogg/Opus would otherwise report mp3/mp3).
+  constexpr bool kAllowDemuxerAutoProbe = true;
+  constexpr bool kTryExtensionDemuxerFirst = false;
+
+  if (inputFd >= 0) {
+    ownedFd = dup(inputFd);
+    if (ownedFd < 0) {
+      throw std::runtime_error("PROBE_NOT_FOUND: Cannot duplicate input fd");
+    }
+    fdAvioContext.fd = ownedFd;
+
+    const int avioBufferSize = 32768;
+    uint8_t* avioBuffer = static_cast<uint8_t*>(av_malloc(avioBufferSize));
+    if (!avioBuffer) {
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to allocate AVIO buffer");
+    }
+
+    avioCtx = avio_alloc_context(
+        avioBuffer, avioBufferSize, 0, &fdAvioContext, avioReadFromFd, nullptr, avioSeekFd);
+    if (!avioCtx) {
+      av_free(avioBuffer);
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to create AVIO context");
+    }
+
+    fmtCtx = avformat_alloc_context();
+    if (!fmtCtx) {
+      throw std::runtime_error("PROBE_INTERNAL_ERROR: Failed to allocate format context");
+    }
+    fmtCtx->pb = avioCtx;
+
+    const auto openResult = openGuardedFdFormatInput(
+        &fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe, kTryExtensionDemuxerFirst);
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
+    }
+  } else {
+    const auto openResult = openGuardedFormatInput(
+        &fmtCtx, path, "PROBE", kAllowDemuxerAutoProbe, kTryExtensionDemuxerFirst);
+    if (!openResult.ok) {
+      throw std::runtime_error(openResult.errorMessage);
+    }
+  }
+
+  AVDictionary* opts = nullptr;
+  av_dict_set(&opts, "analyzeduration", "2000000", 0);
+  av_dict_set(&opts, "probesize", "32768", 0);
+  if (avformat_find_stream_info(fmtCtx, &opts) < 0) {
+    av_dict_free(&opts);
+    throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
+  }
+  av_dict_free(&opts);
+
+  int audioStreamIdx = -1;
+  for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
+    if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+      audioStreamIdx = static_cast<int>(i);
+      break;
+    }
+  }
+  if (audioStreamIdx < 0) {
+    throw std::runtime_error("PROBE_NO_AUDIO_STREAM: No audio stream found");
+  }
+
+  AudioContainerProbeResult result;
+  if (fmtCtx->iformat && fmtCtx->iformat->name && fmtCtx->iformat->name[0] != '\0') {
+    result.inputFormatName = fmtCtx->iformat->name;
+  } else {
+    result.inputFormatName = "unknown";
+  }
+
+  const AVCodecParameters* par = fmtCtx->streams[audioStreamIdx]->codecpar;
+  if (par) {
+    const AVCodec* decoder = avcodec_find_decoder(par->codec_id);
+    if (decoder && decoder->name && decoder->name[0] != '\0') {
+      result.codecName = decoder->name;
+    } else {
+      const char* name = avcodec_get_name(par->codec_id);
+      result.codecName = (name && name[0] != '\0') ? name : "unknown";
+    }
+  } else {
+    result.codecName = "unknown";
+  }
+
   return result;
 }
 
@@ -622,6 +950,48 @@ AudioDecodeResult decodeFile(
   return decodeFileFFmpeg(pathOrFd, inputFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
 #else
   throw std::runtime_error("DECODE_INTERNAL_ERROR: FFmpeg not available in this build");
+#endif
+}
+
+AudioFileProbeResult probeFileDuration(const char* pathOrFd, int inputFd) {
+  if ((!pathOrFd || pathOrFd[0] == '\0') && inputFd < 0) {
+    throw std::runtime_error("PROBE_NOT_FOUND: Empty file path and invalid fd");
+  }
+
+  auto wavResult = probeWavDuration(pathOrFd, inputFd);
+  if (wavResult.durationMs >= 0) {
+    return wavResult;
+  }
+
+  if (inputFd >= 0 && lseek(inputFd, 0, SEEK_SET) < 0) {
+    throw std::runtime_error("PROBE_INVALID_SOURCE: Input fd is not seekable");
+  }
+
+#ifdef HAVE_FFMPEG
+  return probeFileDurationFFmpeg(pathOrFd, inputFd);
+#else
+  throw std::runtime_error("PROBE_UNSUPPORTED: FFmpeg not available in this build");
+#endif
+}
+
+AudioContainerProbeResult probeFileContainer(const char* pathOrFd, int inputFd) {
+  if ((!pathOrFd || pathOrFd[0] == '\0') && inputFd < 0) {
+    throw std::runtime_error("PROBE_NOT_FOUND: Empty file path and invalid fd");
+  }
+
+  auto wavResult = probeWavContainer(pathOrFd, inputFd);
+  if (!wavResult.inputFormatName.empty()) {
+    return wavResult;
+  }
+
+  if (inputFd >= 0 && lseek(inputFd, 0, SEEK_SET) < 0) {
+    throw std::runtime_error("PROBE_INVALID_SOURCE: Input fd is not seekable");
+  }
+
+#ifdef HAVE_FFMPEG
+  return probeFileContainerFFmpeg(pathOrFd, inputFd);
+#else
+  throw std::runtime_error("PROBE_UNSUPPORTED: FFmpeg not available in this build");
 #endif
 }
 

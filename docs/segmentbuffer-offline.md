@@ -1,5 +1,7 @@
 # Pipeline segment buffers — offline (`segmentbuffer`)
 
+## Introduction
+
 **Offline segment buffers** are immutable segment snapshots used by batch consumers, export, and deterministic replay.
 
 **Import path:** `react-native-sherpa-onnx/segmentbuffer`
@@ -39,6 +41,34 @@ Conversion mode:
 - `getOfflineSegmentBufferSegments`
 
 Types: see [`src/segmentbuffer/types.ts`](../src/segmentbuffer/types.ts). Buffer arguments use matching `*IdSource` unions (ref, branded handle, or raw id string). `sourceAudioBufferId` supports `PipelineAudioBufferIdSource` (for example audio buffer ref or id).
+
+---
+
+## Quick start
+
+```ts
+import {
+  createEmptyOfflineSegmentBuffer,
+  createOfflineSegmentBufferFromLive,
+  getOfflineSegmentBufferSegments,
+  getPipelineSegmentBufferInfo,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+// 1) Create empty offline segment buffer (optional source audio association).
+const offline = await createEmptyOfflineSegmentBuffer();
+
+// 2) Or snapshot a live segment stream to immutable offline buffer.
+const snapshot = await createOfflineSegmentBufferFromLive(liveSegments, 'fullIfSpooled');
+
+// 3) Read segment window and inspect metadata.
+const segments = await getOfflineSegmentBufferSegments(snapshot, 0, 64);
+const info = await getPipelineSegmentBufferInfo(snapshot);
+console.log(info.kind, info.segmentCount, segments.length);
+
+await releasePipelineSegmentBuffer(snapshot);
+await releasePipelineSegmentBuffer(offline);
+```
 
 ---
 
@@ -135,7 +165,29 @@ for (const seg of segments) {
 
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  OfflineSegmentBufferRef, // immutable offline segment buffer ref
+  OfflineSegmentBufferInfo, // offline segment buffer metadata
+  OfflineSegmentBufferIdSource, // ref/handle/id accepted by offline APIs
+  OfflineSegmentBufferFromLiveMode, // conversion mode from live to offline
+  SegmentMeta, // returned segment metadata union (speech/alignment)
+  SpeechSegmentMeta, // speech segment metadata subtype
+  AlignmentSegmentMeta, // alignment segment metadata subtype
+  SpeechSegmentPayload, // strict payload contract for speech segments
+  AlignmentSegmentPayload, // strict payload contract for alignment segments
+  PipelineSegmentBufferInfo, // offline/live metadata union
+  PipelineSegmentErrorCodeValue, // string union of segmentbuffer error codes
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+import {
+  PipelineSegmentErrorCode, // runtime constants for code-based error handling
+} from 'react-native-sherpa-onnx/segmentbuffer';
+```
+
+## Error codes
 
 The following codes are the relevant runtime outcomes for offline reads and live-to-offline conversion in this page.
 
@@ -159,3 +211,34 @@ The following codes are the relevant runtime outcomes for offline reads and live
 
 - [Pipeline segment buffers — live / streaming](segmentbuffer-streaming.md)
 - [Voice Activity Detection (streaming)](vad-streaming.md)
+
+## Use case examples
+
+<details>
+<summary>Persist finalized live VAD segments for deterministic replay</summary>
+
+```ts
+await finalizeLiveSegmentBuffer(liveSegments);
+const offline = await createOfflineSegmentBufferFromLive(liveSegments, 'fullIfSpooled');
+const segments = await getOfflineSegmentBufferSegments(offline, 0, 256);
+console.log(segments.length);
+await releasePipelineSegmentBuffer(offline);
+```
+
+</details>
+
+<details>
+<summary>Read only alignment segments from an offline segment snapshot</summary>
+
+```ts
+const items = await getOfflineSegmentBufferSegments(offlineSegments, 0, 512);
+const alignmentOnly = items.filter((s) => s.kind === 'alignment');
+alignmentOnly.forEach((seg) => console.log(seg.payload?.text, seg.payload?.timingMode));
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

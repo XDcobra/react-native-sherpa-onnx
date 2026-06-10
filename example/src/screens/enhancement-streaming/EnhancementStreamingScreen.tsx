@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Text,
   View,
@@ -6,25 +6,18 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
-  Platform,
   StyleSheet,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
-  autoModelPath,
   getAssetPackPath,
   listAssetModels,
-  resolveModelPath,
   listModelsAtPath,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  DocumentDirectoryPath,
-  DownloadDirectoryPath,
-  mkdir,
-} from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
   ModelCategory,
@@ -33,10 +26,15 @@ import {
 import {
   createStreamingEnhancement,
   detectEnhancementModel,
+  assertEnhancementCustomConfig,
   type StreamingEnhancementEngine,
   type EnhancementPipelineHandle,
   type EnhancementModelType,
 } from 'react-native-sherpa-onnx/enhancement';
+import {
+  EngineModeModelSelector,
+  type EngineMode,
+} from '../../components/EngineModeModelSelector';
 import {
   createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromLive,
@@ -47,7 +45,11 @@ import {
   type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
+import { formatResolvedLocation } from '../../components/audioSaveUtils';
+import { getSegments } from 'react-native-sherpa-onnx/segment';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -68,9 +70,29 @@ import {
   type AudioRouteDevice,
 } from '../../utils/audioDevices';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import {
+  SegmentationPolicyControls,
+  buildSegmentationOption,
+  type SegmentationControlConfig,
+} from '../../components/SegmentationPolicyControls';
+import {
+  InitModeSelector,
+  EnhancementCustomInitForm,
+  type ModelInitMode,
+  type EnhancementCustomInitFormState,
+} from '../../components/modelInit';
+import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
+
+const DEFAULT_ENHANCEMENT_CUSTOM_INIT: EnhancementCustomInitFormState = {
+  modelType: 'gtcrn',
+  fileSources: {},
+};
+
+const ENHANCEMENT_STREAMING_MODE_HINT =
+  'Streaming mode lists models with isStreaming=true from detectEnhancementModel. Live Overload lists all detected enhancement models and runs mandatory audio segmentation (continuous_frames by default) on the same streaming pipeline.';
 
 type SelectedEnhancementInput = {
   source: FileSource;
@@ -110,6 +132,19 @@ const PIPELINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export default function EnhancementStreamingScreen() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [customInitForm, setCustomInitForm] =
+    useState<EnhancementCustomInitFormState>(DEFAULT_ENHANCEMENT_CUSTOM_INIT);
+  const [customFillLoading, setCustomFillLoading] = useState(false);
+  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [initializedSummary, setInitializedSummary] = useState<string | null>(
+    null
+  );
+  const [streamingEnhancementModelIds, setStreamingEnhancementModelIds] =
+    useState<Set<string>>(new Set());
+  const [offlineEnhancementModelIds, setOfflineEnhancementModelIds] = useState<
+    Set<string>
+  >(new Set());
   const [padModelIds, setPadModelIds] = useState<string[]>([]);
   const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
   const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
@@ -147,16 +182,20 @@ export default function EnhancementStreamingScreen() {
     string | null
   >(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
+  const [segStreamingConfig, setSegStreamingConfig] =
+    useState<SegmentationControlConfig>({ mode: 'off' });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
-  const [outputWavPath, setOutputWavPath] = useState<string | null>(null);
   const [lastInputPath, setLastInputPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
     outputBufferId: string;
     sampleRate: number;
     numSamples: number;
   } | null>(null);
+  const [activePlaybackKind, setActivePlaybackKind] = useState<
+    'original' | 'enhanced' | null
+  >(null);
 
-  const [saving, setSaving] = useState(false);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
     string | null
@@ -164,33 +203,33 @@ export default function EnhancementStreamingScreen() {
 
   const engineRef = useRef<StreamingEnhancementEngine | null>(null);
   const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const enhancedOutputPlayerRef = useRef<PcmPlayer | null>(null);
   const fileIngestRef = useRef<FileIngestHandle | null>(null);
   const outputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const pipelineRef = useRef<EnhancementPipelineHandle | null>(null);
   const finalizedOutputBufferIdRef = useRef<string | null>(null);
 
-  const getDisplayPath = (path: string) => {
-    try {
-      return decodeURIComponent(path);
-    } catch {
-      return path;
-    }
-  };
-
   const stopActivePlayback = async () => {
-    if (!pcmPlaybackRef.current) return;
-    const activePlayback = pcmPlaybackRef.current;
-    pcmPlaybackRef.current = null;
-    await stopPcmFilePlayback(activePlayback);
+    const enhanced = enhancedOutputPlayerRef.current;
+    enhancedOutputPlayerRef.current = null;
+    if (enhanced) {
+      await enhanced.destroy().catch(() => {});
+    }
+    if (pcmPlaybackRef.current) {
+      const activePlayback = pcmPlaybackRef.current;
+      pcmPlaybackRef.current = null;
+      await stopPcmFilePlayback(activePlayback);
+    }
+    setActivePlaybackKind(null);
   };
 
-  const refreshOutputDevices = async () => {
+  const refreshOutputDevices = useCallback(async () => {
     const nextOutputDevices = await fetchOutputDevices();
     setOutputDevices(nextOutputDevices);
     setSelectedOutputDeviceId((prev) =>
       keepValidDeviceSelection(prev, nextOutputDevices)
     );
-  };
+  }, []);
 
   const clearFinalizedOutput = async () => {
     const existingOutputBufferId = finalizedOutputBufferIdRef.current;
@@ -199,7 +238,6 @@ export default function EnhancementStreamingScreen() {
       await releasePipelineAudioBuffer(existingOutputBufferId).catch(() => {});
     }
     setLastEnhancedAudio(null);
-    setOutputWavPath(null);
     setEnhanceResult(null);
   };
 
@@ -311,13 +349,16 @@ export default function EnhancementStreamingScreen() {
     }
 
     if (effectiveSelectedAudio) {
-      const audioPathConfig = autoModelPath(effectiveSelectedAudio.id);
-      const resolvedPath = await resolveModelPath(audioPathConfig);
+      const source: FileSource = {
+        kind: 'app',
+        base: 'files',
+        path: effectiveSelectedAudio.id,
+      };
       return {
-        source: { kind: 'fs', path: resolvedPath },
+        source,
         sourceType: 'example',
         sourceLabel: effectiveSelectedAudio.name,
-        sourcePathForPlayback: resolvedPath,
+        sourcePathForPlayback: effectiveSelectedAudio.id,
         selectedAudioId: effectiveSelectedAudio.id,
         customAudioPath: null,
         customAudioName: null,
@@ -327,105 +368,44 @@ export default function EnhancementStreamingScreen() {
     throw new Error('Select example audio or a local WAV file');
   };
 
-  const pickSaveDirectory = async (): Promise<{
-    directoryPath: string | null;
-    directoryUri: string | null;
-  }> => {
-    let directoryPath: string | null = null;
-    let directoryUri: string | null = null;
-    try {
-      const picked = await DocumentPicker.pickDirectory();
-      if (picked?.uri) {
-        if (picked.uri.startsWith('file://')) {
-          directoryPath = decodeURI(picked.uri.replace('file://', ''));
-        } else if (picked.uri.startsWith('content://')) {
-          directoryUri = picked.uri;
+  // Auto-enforce segmentation when switching to Live Overload mode
+  useEffect(() => {
+    if (engineMode === 'offline') {
+      setSegStreamingConfig((prev) => {
+        if (prev.mode === 'off') {
+          return {
+            mode: 'auto',
+            policy: { evaluator: 'continuous_frames' },
+          };
         }
-      }
-    } catch (pickerErr) {
-      const isCancel = (DocumentPicker as any).isCancel?.(pickerErr);
-      if (!isCancel) {
-        console.warn(
-          'EnhancementStreamingScreen: directory picker error',
-          pickerErr
-        );
-      }
-    }
-    return { directoryPath, directoryUri };
-  };
-
-  const getFallbackDirectory = () => {
-    if (Platform.OS === 'android' && DownloadDirectoryPath) {
-      return DownloadDirectoryPath;
-    }
-    return DocumentDirectoryPath;
-  };
-
-  const handleSaveEnhanced = async () => {
-    if (!lastEnhancedAudio?.outputBufferId) {
-      Alert.alert('Error', 'No enhanced audio to save. Run enhancement first.');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const timestamp = Date.now();
-      const filename = `sherpa_streaming_enhanced_${timestamp}.wav`;
-      const { directoryPath, directoryUri } = await pickSaveDirectory();
-
-      const saveBufferToPath = async (path: string) => {
-        await saveAudioAsFile(
-          lastEnhancedAudio.outputBufferId,
-          { kind: 'fs', path },
-          'wav'
-        );
-      };
-
-      if (directoryUri) {
-        const tmpPath = `${DocumentDirectoryPath}/${filename}`;
-        await saveBufferToPath(tmpPath);
-        Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(tmpPath)}`);
-        return;
-      }
-
-      const targetDirectory = directoryPath ?? getFallbackDirectory();
-      if (!directoryPath) {
-        Alert.alert(
-          'Notice',
-          'No folder was selected. Saving to the app default directory.'
-        );
-      }
-      await mkdir(targetDirectory);
-      const filePath = `${targetDirectory}/${filename}`;
-      await saveBufferToPath(filePath);
-      Alert.alert('Saved', `Audio saved to:\n${getDisplayPath(filePath)}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      Alert.alert('Save failed', msg);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  useEffect(() => {
-    loadAvailableModels();
-    refreshOutputDevices().catch(() => {
-      // Ignore unsupported-platform lookup failures.
-    });
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Enhancement) return;
-      loadAvailableModels().catch(() => {
-        // Ignore refresh errors.
+        return prev;
       });
+    }
+  }, [engineMode]);
+
+  useEffect(() => {
+    setSelectedModelForInit((prev) => {
+      if (!prev) return prev;
+      if (
+        engineMode === 'streaming' &&
+        !streamingEnhancementModelIds.has(prev)
+      ) {
+        return null;
+      }
+      if (engineMode === 'offline' && !offlineEnhancementModelIds.has(prev)) {
+        return null;
+      }
+      return prev;
     });
-    return unsubscribe;
-  }, []);
+  }, [engineMode, streamingEnhancementModelIds, offlineEnhancementModelIds]);
 
   useEffect(() => {
     return () => {
+      const ep = enhancedOutputPlayerRef.current;
+      enhancedOutputPlayerRef.current = null;
+      if (ep) {
+        ep.destroy().catch(() => {});
+      }
       if (pcmPlaybackRef.current) {
         stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
         pcmPlaybackRef.current = null;
@@ -444,23 +424,143 @@ export default function EnhancementStreamingScreen() {
     };
   }, []);
 
-  const resolveEnhancementModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(
-            modelFolder,
-            ModelCategory.Enhancement,
-            padModelsPath
-          )
-        : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+  const resolveEnhancementModelPath = useCallback(
+    (modelFolder: string) => {
+      if (padModelIds.includes(modelFolder)) {
+        return padModelsPath
+          ? getFileModelPath(
+              modelFolder,
+              ModelCategory.Enhancement,
+              padModelsPath
+            )
+          : getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      if (downloadedModelIds.includes(modelFolder)) {
+        return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+      }
+      return getAssetModelPath(modelFolder);
+    },
+    [downloadedModelIds, padModelIds, padModelsPath]
+  );
+
+  const handleFillFromSelectedModel = useCallback(async () => {
+    const modelFolder = selectedModelForInit;
+    if (!modelFolder) {
+      Alert.alert('Select a model', 'Pick a catalog model folder first.');
+      return;
     }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Enhancement);
+
+    setCustomFillLoading(true);
+    setCustomFillHint(null);
+    setError(null);
+    setErrorSource(null);
+    try {
+      const modelPath = resolveEnhancementModelPath(modelFolder);
+      const fillResult = await fillEnhancementCustomConfigFromModelFolder(
+        await toDetectSource(modelPath),
+        { modelTypeOverride: customInitForm.modelType }
+      );
+      setCustomInitForm({
+        modelType: fillResult.modelType,
+        fileSources: fillResult.customConfig,
+      });
+      const missing =
+        fillResult.missingKeys.length > 0
+          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
+          : '';
+      setCustomFillHint(
+        `Filled from ${getModelDisplayName(modelFolder)} (${
+          fillResult.modelDir
+        }).${missing}`
+      );
+    } catch (fillErr) {
+      setCustomFillHint(null);
+      const message =
+        fillErr instanceof Error ? fillErr.message : String(fillErr);
+      setErrorSource('init');
+      setError(message);
+    } finally {
+      setCustomFillLoading(false);
     }
-    return getAssetModelPath(modelFolder);
+  }, [
+    customInitForm.modelType,
+    resolveEnhancementModelPath,
+    selectedModelForInit,
+  ]);
+
+  const handlePrepareScatteredTest = useCallback(() => {
+    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
+    setCustomFillHint(
+      'Scattered test: pick the model file from a different location, then Initialize.'
+    );
+  }, []);
+
+  const handleInitializeCustom = async () => {
+    setLoading(true);
+    setError(null);
+    setErrorSource(null);
+    setInitResult(null);
+    setDetectedModels([]);
+    setSelectedModelKind(null);
+    setInitializedSummary(null);
+
+    try {
+      const previous = engineRef.current;
+      if (previous) {
+        await previous.destroy();
+        engineRef.current = null;
+      }
+
+      const customConfig = {
+        ...customInitForm.fileSources,
+      };
+      assertEnhancementCustomConfig(
+        customConfig as unknown as Record<string, unknown>
+      );
+
+      const engine = await createStreamingEnhancement({
+        initMode: 'custom',
+        modelType: customInitForm.modelType,
+        customConfig: customConfig as { model: FileSource },
+        numThreads: NUM_THREADS,
+      });
+
+      engineRef.current = engine;
+      setCurrentModelFolder(null);
+      setSelectedModelKind(customInitForm.modelType);
+      setDetectedModels([
+        { type: customInitForm.modelType, modelDir: 'custom' },
+      ]);
+      setInitializedSummary(`custom:${customInitForm.modelType}`);
+      setInitResult(
+        `Initialized streaming (custom): ${customInitForm.modelType}\nFile: model`
+      );
+
+      setAudioSourceType(null);
+      setSelectedAudio(null);
+      setCustomAudioPath(null);
+      setCustomAudioName(null);
+      setEnhanceResult(null);
+      setLastInputPath(null);
+      await clearFinalizedOutput();
+    } catch (err) {
+      console.error('EnhancementStreaming custom init error:', err);
+      let errorMessage = 'Unknown error';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        if ('code' in err) {
+          errorMessage = `[${(err as { code?: string }).code}] ${errorMessage}`;
+        }
+      }
+      setErrorSource('init');
+      setError(errorMessage);
+      setInitResult(`Custom initialization failed: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const loadAvailableModels = async () => {
+  const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
     setError(null);
     setErrorSource(null);
@@ -520,30 +620,38 @@ export default function EnhancementStreamingScreen() {
         ),
       ];
 
-      const streamingModels: string[] = [];
+      const streamingSet = new Set<string>();
+      const detectedOrdered: string[] = [];
       for (const modelFolder of combined) {
         try {
           const detection = await detectEnhancementModel(
             await toDetectSource(resolvePathForCandidate(modelFolder)),
             { modelType: 'auto' }
           );
-          if (detection.success && detection.isStreaming) {
-            streamingModels.push(modelFolder);
+          if (detection.success) {
+            detectedOrdered.push(modelFolder);
+            if (detection.isStreaming) {
+              streamingSet.add(modelFolder);
+            }
           }
         } catch {
           // Ignore models that cannot be detected.
         }
       }
 
+      const allDetectedSet = new Set(detectedOrdered);
+
       setPadModelIds(padFolders);
       setDownloadedModelIds(downloadedFolders);
       setPadModelsPath(resolvedPadPath);
-      setAvailableModels(streamingModels);
+      setStreamingEnhancementModelIds(streamingSet);
+      setOfflineEnhancementModelIds(allDetectedSet);
+      setAvailableModels(detectedOrdered);
 
-      if (streamingModels.length === 0) {
+      if (detectedOrdered.length === 0) {
         setErrorSource('init');
         setError(
-          'No streaming enhancement models found. Use a model that reports isStreaming=true via detectEnhancementModel.'
+          'No enhancement models found. Add a model under assets, PAD, or downloads (category: enhancement).'
         );
       }
     } catch (err) {
@@ -551,10 +659,29 @@ export default function EnhancementStreamingScreen() {
       setErrorSource('init');
       setError('Failed to load available models');
       setAvailableModels([]);
+      setStreamingEnhancementModelIds(new Set());
+      setOfflineEnhancementModelIds(new Set());
     } finally {
       setLoadingModels(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadAvailableModels().catch(() => {});
+    refreshOutputDevices().catch(() => {
+      // Ignore unsupported-platform lookup failures.
+    });
+  }, [loadAvailableModels, refreshOutputDevices]);
+
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Enhancement) return;
+      loadAvailableModels().catch(() => {
+        // Ignore refresh errors.
+      });
+    });
+    return unsubscribe;
+  }, [loadAvailableModels]);
 
   const handleInitialize = async (modelFolder: string) => {
     setLoading(true);
@@ -572,11 +699,11 @@ export default function EnhancementStreamingScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(modelFolder);
+      const modelSource = await toDetectSource(modelPath);
 
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: 'auto' }
-      );
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: 'auto',
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         setErrorSource('init');
         setError('No enhancement models detected in the directory');
@@ -593,7 +720,7 @@ export default function EnhancementStreamingScreen() {
       }
 
       const engine = await createStreamingEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: 'auto',
       });
@@ -611,6 +738,7 @@ export default function EnhancementStreamingScreen() {
       engineRef.current = engine;
       setDetectedModels(normalized);
       setCurrentModelFolder(modelFolder);
+      setInitializedSummary(null);
       setSelectedModelForInit(modelFolder);
 
       if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
@@ -635,7 +763,6 @@ export default function EnhancementStreamingScreen() {
       setCustomAudioName(null);
 
       setEnhanceResult(null);
-      setOutputWavPath(null);
       setLastInputPath(null);
       await clearFinalizedOutput();
     } catch (err) {
@@ -677,10 +804,10 @@ export default function EnhancementStreamingScreen() {
       }
 
       const modelPath = resolveEnhancementModelPath(currentModelFolder);
-      const detectResult = await detectEnhancementModel(
-        await toDetectSource(modelPath),
-        { modelType: kind }
-      );
+      const modelSource = await toDetectSource(modelPath);
+      const detectResult = await detectEnhancementModel(modelSource, {
+        modelType: kind,
+      });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
         setErrorSource('init');
         setError('No enhancement models detected for the selected type');
@@ -695,7 +822,7 @@ export default function EnhancementStreamingScreen() {
       }
 
       const engine = await createStreamingEnhancement({
-        modelPath,
+        modelSource,
         numThreads: NUM_THREADS,
         modelType: kind,
       });
@@ -766,8 +893,12 @@ export default function EnhancementStreamingScreen() {
     }
   };
 
-  const playPath = async (path: string | null) => {
+  const playPath = async (
+    path: string | null,
+    options?: { bindResultOriginalUi?: boolean }
+  ) => {
     if (!path) return;
+    const bindResult = options?.bindResultOriginalUi === true;
     try {
       await stopActivePlayback();
       let nextPlayback: ActivePcmFilePlayback | null = null;
@@ -777,12 +908,55 @@ export default function EnhancementStreamingScreen() {
           if (pcmPlaybackRef.current === nextPlayback) {
             pcmPlaybackRef.current = null;
           }
+          if (bindResult) {
+            setActivePlaybackKind(null);
+          }
         },
         {
           outputDeviceId: selectedOutputDeviceId ?? undefined,
         }
       );
       pcmPlaybackRef.current = nextPlayback;
+      if (bindResult) {
+        setActivePlaybackKind('original');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert('Playback failed', msg);
+    }
+  };
+
+  const togglePlayOriginalPath = async () => {
+    if (!lastInputPath) return;
+    if (pcmPlaybackRef.current) {
+      await stopActivePlayback();
+      return;
+    }
+    await playPath(lastInputPath, { bindResultOriginalUi: true });
+  };
+
+  const togglePlayEnhancedOutput = async () => {
+    const bufferId = lastEnhancedAudio?.outputBufferId;
+    if (!bufferId) return;
+    if (enhancedOutputPlayerRef.current) {
+      await stopActivePlayback();
+      return;
+    }
+    try {
+      await stopActivePlayback();
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: selectedOutputDeviceId ?? null,
+      }).catch(() => {});
+      const player = await createPcmPlayer(bufferId, {
+        onEnded: () => {
+          if (enhancedOutputPlayerRef.current === player) {
+            enhancedOutputPlayerRef.current = null;
+          }
+          setActivePlaybackKind(null);
+        },
+      });
+      enhancedOutputPlayerRef.current = player;
+      setActivePlaybackKind('enhanced');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -814,7 +988,6 @@ export default function EnhancementStreamingScreen() {
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastInputPath(null);
     setInputBufferBuildProgress(0);
     setInputBufferBuildStatus('Preparing streaming pipeline...');
@@ -861,7 +1034,10 @@ export default function EnhancementStreamingScreen() {
       setInputBufferBuildStatus('Starting enhancement pipeline...');
       const pipeline = await engine.enhance(
         inputLive.bufferId,
-        outputLive.bufferId
+        outputLive.bufferId,
+        segStreamingConfig.mode === 'off'
+          ? undefined
+          : { segmentation: buildSegmentationOption(segStreamingConfig) }
       );
       pipelineRef.current = pipeline;
       setInputBufferBuildStatus(
@@ -921,6 +1097,14 @@ export default function EnhancementStreamingScreen() {
 
       pipelineRef.current = null;
 
+      const checkpointCount =
+        segStreamingConfig.mode !== 'off' &&
+        segStreamingConfig.policy?.evaluator === 'continuous_frames'
+          ? (
+              await getSegments(inputLive.bufferId, 0, 100000).catch(() => [])
+            ).filter((segment) => segment.reason === 'policy_checkpoint').length
+          : 0;
+
       setInputBufferBuildProgress(100);
       setInputBufferBuildStatus('Finalizing output...');
       await finalizeLiveAudioBuffer(outputLive.bufferId).catch(() => {});
@@ -938,23 +1122,15 @@ export default function EnhancementStreamingScreen() {
       const durationSeconds =
         outputSampleRate > 0 ? (numSamples / outputSampleRate).toFixed(2) : '?';
 
-      const outputPath = `${DocumentDirectoryPath}/sherpa_streaming_enhanced_${Date.now()}.wav`;
-      await saveAudioAsFile(
-        offlineOutput.bufferId,
-        { kind: 'fs', path: outputPath },
-        'wav'
-      );
-
       finalizedOutputBufferIdRef.current = offlineOutput.bufferId;
       setLastEnhancedAudio({
         outputBufferId: offlineOutput.bufferId,
         sampleRate: outputSampleRate,
         numSamples,
       });
-      setOutputWavPath(outputPath);
       setLastInputPath(selectedInput.sourcePathForPlayback);
       setEnhanceResult(
-        `Pipeline: streaming enhancement\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nApp copy: ${outputPath}`
+        `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nUse “Save to” below to export a file.`
       );
       producedOfflineBufferId = null;
       setInputBufferBuildProgress(null);
@@ -1009,6 +1185,7 @@ export default function EnhancementStreamingScreen() {
     engineRef.current = null;
 
     setCurrentModelFolder(null);
+    setInitializedSummary(null);
     setSelectedModelForInit(null);
     setDetectedModels([]);
     setSelectedModelKind(null);
@@ -1019,11 +1196,12 @@ export default function EnhancementStreamingScreen() {
     setCustomAudioPath(null);
     setCustomAudioName(null);
     setEnhanceResult(null);
-    setOutputWavPath(null);
     setLastInputPath(null);
   };
 
-  const engineReady = currentModelFolder != null && engineRef.current != null;
+  const engineReady =
+    (currentModelFolder != null || initializedSummary != null) &&
+    engineRef.current != null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
@@ -1038,7 +1216,7 @@ export default function EnhancementStreamingScreen() {
           style={styles.scrollView}
           keyboardShouldPersistTaps="handled"
         >
-          {currentModelFolder != null && (
+          {currentModelFolder != null || initializedSummary != null ? (
             <TouchableOpacity
               style={styles.freeButton}
               onPress={handleFree}
@@ -1046,19 +1224,29 @@ export default function EnhancementStreamingScreen() {
             >
               <Text style={styles.freeButtonText}>Release model</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. Initialize model</Text>
+            <InitModeSelector
+              value={initMode}
+              onChange={setInitMode}
+              disabled={loading || enhancing || customFillLoading}
+            />
             <Text style={styles.hint}>
-              Streaming enhancement for long-form audio. Only models with
-              isStreaming=true are shown here.
+              {initMode === 'auto'
+                ? 'Select a streaming-capable folder, then tap "Use model".'
+                : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
             </Text>
 
-            {(currentModelFolder || selectedModelForInit) && (
+            {(initializedSummary ||
+              currentModelFolder ||
+              selectedModelForInit) && (
               <View style={styles.currentModelContainer}>
                 <Text style={styles.currentModelText}>
-                  {currentModelFolder
+                  {initializedSummary
+                    ? `Initialized: ${initializedSummary}`
+                    : currentModelFolder
                     ? `Loaded: ${getModelDisplayName(currentModelFolder)}`
                     : `Selected: ${
                         selectedModelForInit
@@ -1069,68 +1257,61 @@ export default function EnhancementStreamingScreen() {
               </View>
             )}
 
-            {loadingModels ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>
-                  Discovering streaming enhancement models...
-                </Text>
-              </View>
-            ) : availableModels.length === 0 ? (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No streaming enhancement models in assets or PAD. Add a model
-                  directory that reports isStreaming=true in
-                  detectEnhancementModel.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.modelButtons}>
-                {availableModels.map((modelFolder) => {
-                  const isSelected = selectedModelForInit === modelFolder;
-                  const isInitialized = currentModelFolder === modelFolder;
-                  return (
-                    <TouchableOpacity
-                      key={modelFolder}
-                      style={[
-                        styles.modelButton,
-                        isSelected && styles.modelButtonActive,
-                        isInitialized && styles.modelButtonInitialized,
-                        loading && styles.buttonDisabled,
-                      ]}
-                      onPress={() => setSelectedModelForInit(modelFolder)}
-                      disabled={loading || enhancing}
-                    >
-                      <Text
-                        style={[
-                          styles.modelButtonText,
-                          isSelected && styles.modelButtonTextActive,
-                        ]}
-                      >
-                        {getModelDisplayName(modelFolder)}
-                      </Text>
-                      <Text style={styles.modelFolderText}>{modelFolder}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+            <EngineModeModelSelector
+              label="Enhancement Engine"
+              engineMode={engineMode}
+              onEngineModeChange={setEngineMode}
+              models={availableModels}
+              selectedModel={selectedModelForInit}
+              onModelSelect={setSelectedModelForInit}
+              isModelStreamingCapable={(m) =>
+                streamingEnhancementModelIds.has(m)
+              }
+              isModelOfflineCapable={(m) => offlineEnhancementModelIds.has(m)}
+              loading={loadingModels}
+              disabled={loading || enhancing}
+              streamingHintOverride={ENHANCEMENT_STREAMING_MODE_HINT}
+              mandatorySegmentationHint="Live Overload uses mandatory segmentation to split audio into enhancement chunks."
+            />
+
+            {initMode === 'custom' ? (
+              <EnhancementCustomInitForm
+                value={customInitForm}
+                onChange={setCustomInitForm}
+                selectedCatalogModelId={selectedModelForInit}
+                onFillFromSelectedModel={() => {
+                  handleFillFromSelectedModel().catch(() => {});
+                }}
+                onPrepareScatteredTest={handlePrepareScatteredTest}
+                fillLoading={customFillLoading}
+                disabled={loading || enhancing}
+                fillHint={customFillHint}
+              />
+            ) : null}
 
             <TouchableOpacity
               style={[
                 styles.button,
                 styles.applyButton,
-                (loading || enhancing) && styles.buttonDisabled,
+                (loading || enhancing || customFillLoading) &&
+                  styles.buttonDisabled,
               ]}
-              onPress={() =>
+              onPress={() => {
+                if (initMode === 'custom') {
+                  handleInitializeCustom();
+                  return;
+                }
                 handleInitialize(
                   selectedModelForInit ?? currentModelFolder ?? ''
-                )
-              }
+                );
+              }}
               disabled={
                 loading ||
                 enhancing ||
-                (!selectedModelForInit && !currentModelFolder)
+                customFillLoading ||
+                (initMode === 'auto'
+                  ? !selectedModelForInit && !currentModelFolder
+                  : false)
               }
             >
               {loading ? (
@@ -1143,7 +1324,9 @@ export default function EnhancementStreamingScreen() {
                   <Text style={styles.buttonText}>Initializing...</Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>Use model</Text>
+                <Text style={styles.buttonText}>
+                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -1218,9 +1401,29 @@ export default function EnhancementStreamingScreen() {
             {!engineReady && (
               <View style={styles.warningContainer}>
                 <Text style={styles.warningText}>
-                  Initialize a streaming enhancement model first.
+                  Initialize an enhancement model first.
                 </Text>
               </View>
+            )}
+
+            {engineReady && engineMode === 'streaming' && (
+              <SegmentationPolicyControls
+                variant="speech-streaming"
+                value={segStreamingConfig}
+                onChange={setSegStreamingConfig}
+                disabled={enhancing || loading || preparingInputBuffer}
+              />
+            )}
+
+            {engineReady && engineMode === 'offline' && (
+              <SegmentationPolicyControls
+                variant="speech-offline"
+                value={segStreamingConfig}
+                onChange={setSegStreamingConfig}
+                disabled={enhancing || loading || preparingInputBuffer}
+                disableOff
+                offDisabledMessage="Live Overload requires mandatory segmentation to split audio into processable chunks."
+              />
             )}
 
             {engineReady &&
@@ -1351,10 +1554,8 @@ export default function EnhancementStreamingScreen() {
                       setAudioSourceType(null);
                       setSelectedAudio(null);
                       clearPreparedInputBuffer().catch(() => {});
-                      setEnhanceResult(null);
-                      setOutputWavPath(null);
+                      clearFinalizedOutput().catch(() => {});
                       setLastInputPath(null);
-                      setLastEnhancedAudio(null);
                     }}
                     disabled={preparingInputBuffer}
                   >
@@ -1424,10 +1625,8 @@ export default function EnhancementStreamingScreen() {
                       setCustomAudioPath(null);
                       setCustomAudioName(null);
                       clearPreparedInputBuffer().catch(() => {});
-                      setEnhanceResult(null);
-                      setOutputWavPath(null);
+                      clearFinalizedOutput().catch(() => {});
                       setLastInputPath(null);
-                      setLastEnhancedAudio(null);
                     }}
                     disabled={preparingInputBuffer}
                   >
@@ -1452,62 +1651,66 @@ export default function EnhancementStreamingScreen() {
                       localStyles.playHalf,
                       !lastInputPath && localStyles.playDisabled,
                     ]}
-                    onPress={() => playPath(lastInputPath)}
+                    onPress={() => togglePlayOriginalPath()}
                     disabled={!lastInputPath}
                   >
                     <View style={styles.rowAlignCenter}>
                       <Ionicons
-                        name="play"
+                        name={
+                          activePlaybackKind === 'original' ? 'stop' : 'play'
+                        }
                         size={16}
                         style={styles.iconInline}
                       />
-                      <Text style={styles.playButtonText}>Original</Text>
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'original'
+                          ? 'Stop'
+                          : 'Original'}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
                       styles.playButton,
                       localStyles.playHalf,
-                      !outputWavPath && localStyles.playDisabled,
+                      !lastEnhancedAudio && localStyles.playDisabled,
                     ]}
-                    onPress={() => playPath(outputWavPath)}
-                    disabled={!outputWavPath}
+                    onPress={() => togglePlayEnhancedOutput()}
+                    disabled={!lastEnhancedAudio}
                   >
                     <View style={styles.rowAlignCenter}>
                       <Ionicons
-                        name="play"
+                        name={
+                          activePlaybackKind === 'enhanced' ? 'stop' : 'play'
+                        }
                         size={16}
                         style={styles.iconInline}
                       />
-                      <Text style={styles.playButtonText}>Enhanced</Text>
+                      <Text style={styles.playButtonText}>
+                        {activePlaybackKind === 'enhanced'
+                          ? 'Stop'
+                          : 'Enhanced'}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryButton,
-                    styles.mt12,
-                    (saving || !lastEnhancedAudio) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSaveEnhanced}
-                  disabled={saving || !lastEnhancedAudio}
-                >
-                  {saving ? (
-                    <ActivityIndicator color="#666" />
-                  ) : (
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="save-outline"
-                        size={18}
-                        color="#666"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.secondaryButtonText}>
-                        Save enhanced WAV to...
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
+                {lastEnhancedAudio && (
+                  <View style={styles.mt12}>
+                    <AudioSaveDestinationPicker
+                      defaultDestinationKind="app"
+                      audioInput={lastEnhancedAudio.outputBufferId}
+                      filename={`sherpa_streaming_enhanced_${Date.now()}.wav`}
+                      format="wav"
+                      onSaveComplete={(result) => {
+                        const location = formatResolvedLocation(result);
+                        Alert.alert('Saved', `Audio saved to:\n${location}`);
+                      }}
+                      onError={(saveErr) => {
+                        Alert.alert('Save failed', saveErr.message);
+                      }}
+                    />
+                  </View>
+                )}
               </View>
             )}
 

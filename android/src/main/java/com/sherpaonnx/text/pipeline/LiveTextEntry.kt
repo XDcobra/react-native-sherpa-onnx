@@ -2,6 +2,7 @@ package com.sherpaonnx.text.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -64,7 +65,7 @@ enum class TextSpoolingMode {
 class LiveTextEntry(
   val bufferId: String,
   val windowMaxChars: Int = 65536,
-  val maxSegments: Int = 1000,
+  val maxSegments: Int = 4096,
   val emitPartialEvents: Boolean = false,
   val partialEventMinIntervalMs: Long = 0,
   private val spoolingMode: TextSpoolingMode = TextSpoolingMode.ON,
@@ -122,6 +123,10 @@ class LiveTextEntry(
   private val appendListeners = CopyOnWriteArrayList<Pair<Int, () -> Unit>>()
   private val nextListenerToken = AtomicInteger(0)
 
+  // ── Commit listeners (token-based, for JS segment events) ──
+  private val commitListeners = CopyOnWriteArrayList<Pair<Int, (TextSegment) -> Unit>>()
+  private val nextCommitListenerToken = AtomicInteger(0)
+
   // ── Text spool state ──
   private val spoolLock = Any()
   @Volatile
@@ -160,8 +165,11 @@ class LiveTextEntry(
   }
 
   private fun snapshotFullTextForSpool(): String {
-    val committed = synchronized(segmentLock) { buildCommittedTextFromSegmentsLocked() }
-    return committed + currentText
+    synchronized(segmentLock) {
+      val committed = buildCommittedTextFromSegmentsLocked()
+      val lastCommitted = segments.lastOrNull()?.text
+      return TextSpoolReplay.snapshotFullText(committed, currentText, lastCommitted)
+    }
   }
 
   private fun markSpoolFailureAndThrow(
@@ -177,21 +185,8 @@ class LiveTextEntry(
   private fun journalPath(): String? = spoolPath?.let { "$it.txtj" }
   private fun checkpointPath(): String? = spoolPath?.let { "$it.txtc" }
 
-  private fun buildCheckpointPayload(fullText: String): String {
-    val escaped = fullText.replace("\\", "\\\\").replace("\"", "\\\"")
-    return """{"fullText":"$escaped","totalCharsWritten":$totalCharsWritten,"revision":$revision}"""
-  }
-
-  private fun extractCheckpointText(payload: String): String {
-    val marker = """"fullText":""""
-    val idx = payload.indexOf(marker)
-    if (idx < 0) return ""
-    val start = payload.indexOf('"', idx + marker.length)
-    if (start < 0) return ""
-    val end = payload.indexOf('"', start + 1)
-    if (end < 0) return ""
-    return payload.substring(start + 1, end).replace("\\\"", "\"").replace("\\\\", "\\")
-  }
+  private fun buildCheckpointPayload(fullText: String): String =
+    TextSpoolReplay.buildCheckpointPayload(fullText, totalCharsWritten, revision)
 
   private fun appendSpoolRecordLocked(writer: TextSpoolWriter, recordType: Int, payload: String): Long {
     val payloadBytes = payload.toByteArray(StandardCharsets.UTF_8)
@@ -367,12 +362,21 @@ class LiveTextEntry(
     totalCharsWritten += text.length
     _revision.incrementAndGet()
 
-    writeTextSpoolOrThrow(
-      mayActivateAuto = true,
-      recordType = TEXT_SPOOL_PARTIAL_SET,
-      recordPayload = text,
-      checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
-    )
+    // Streaming STT clears the partial window after commitSegment with
+    // writePartial(""). Do not append TEXT_SPOOL_PARTIAL_SET with an empty
+    // payload: snapshotFullTextIfSpooled replays the journal by replacing with
+    // each PARTIAL_SET, so a trailing empty record would erase the transcript.
+    if (text.isNotEmpty()) {
+      writeTextSpoolOrThrow(
+        mayActivateAuto = true,
+        recordType = TEXT_SPOOL_PARTIAL_SET,
+        recordPayload = text,
+        checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
+      )
+    }
+
+    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    TextPipelineRegistry.notifyLivePartialWritten(this, "replace")
   }
 
   /**
@@ -397,6 +401,9 @@ class LiveTextEntry(
       recordPayload = text,
       checkpointPayload = buildCheckpointPayload(snapshotFullTextForSpool())
     )
+
+    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    TextPipelineRegistry.notifyLivePartialWritten(this, "append")
   }
 
   /**
@@ -414,6 +421,7 @@ class LiveTextEntry(
   ): Int {
     var committedSegmentIndex = -1
     var snapshotAfterCommit = ""
+    var committedSegment: TextSegment? = null
     synchronized(segmentLock) {
       if (state == State.FINISHED) throw IllegalStateException("Live text buffer is finalized: $bufferId")
       val segmentIndex = (evictedCount + segments.size).toInt()
@@ -426,10 +434,18 @@ class LiveTextEntry(
         meta = meta,
       )
       segments.add(segment)
+      committedSegment = segment
       committedSegmentIndex = segmentIndex
       // Capture full history snapshot before any ring eviction. This preserves
       // strict fullIfSpooled guarantees even when maxSegments is exceeded.
-      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + currentText
+      //
+      // Callers (e.g. streaming STT) typically still hold the just-committed
+      // utterance in [currentText] until they call writePartial(remainder).
+      // Concatenating segments + currentText verbatim would duplicate that tail
+      // in spool checkpoints and thus in snapshotFullTextIfSpooled replay.
+      val partialRemainder =
+        if (currentText.startsWith(text)) currentText.substring(text.length) else currentText
+      snapshotAfterCommit = buildCommittedTextFromSegmentsLocked() + partialRemainder
 
       // Evict oldest if over capacity
       if (segments.size > maxSegments) {
@@ -453,6 +469,7 @@ class LiveTextEntry(
       checkpointPayload = buildCheckpointPayload(snapshotAfterCommit)
     )
     notifyAppendListeners()
+    committedSegment?.let { notifyCommitListeners(it) }
     return committedSegmentIndex
   }
 
@@ -516,6 +533,22 @@ class LiveTextEntry(
     }
   }
 
+  fun addCommitListener(listener: (TextSegment) -> Unit): Int {
+    val token = nextCommitListenerToken.getAndIncrement()
+    commitListeners.add(Pair(token, listener))
+    return token
+  }
+
+  fun removeCommitListener(token: Int) {
+    commitListeners.removeAll { it.first == token }
+  }
+
+  private fun notifyCommitListeners(segment: TextSegment) {
+    for ((_, listener) in commitListeners) {
+      listener(segment)
+    }
+  }
+
   /**
    * Finalize: RECORDING → FINISHED. Notifies append listeners.
    * @throws IllegalStateException if already finalized.
@@ -543,6 +576,7 @@ class LiveTextEntry(
     }
 
     notifyAppendListeners()
+    SegmentationEngineRegistry.onBufferFinalized(bufferId)
   }
 
   fun toWritableMap(): WritableMap {
@@ -618,22 +652,10 @@ class LiveTextEntry(
     val hasSpool = File(cpPath).exists() || File(jPath).exists()
     if (hasSpool) {
       try {
-        var fullText = ""
-        val cpPayload = TextSpoolReader.readCheckpoint(cpPath)
-        if (cpPayload != null) {
-          fullText = extractCheckpointText(cpPayload)
-        }
-        TextSpoolReader.readJournal(jPath).forEach { rec ->
-          when (rec.type) {
-            TEXT_SPOOL_PARTIAL_SET -> fullText = rec.payload
-            TEXT_SPOOL_PARTIAL_APPEND -> fullText += rec.payload
-            TEXT_SPOOL_SEGMENT_COMMIT -> {
-              val obj = JSONObject(rec.payload)
-              fullText += obj.optString("text", "")
-            }
-          }
-        }
-        return fullText
+        return TextSpoolReplay.replayFullTextFromCheckpointAndJournal(
+          TextSpoolReader.readCheckpoint(cpPath),
+          TextSpoolReader.readJournal(jPath),
+        )
       } catch (e: TextPipelineException) {
         throw e
       } catch (e: Exception) {
@@ -674,6 +696,8 @@ class LiveTextEntry(
 
     cursors.clear()
     appendListeners.clear()
+    commitListeners.clear()
+    SegmentationEngineRegistry.onBufferReleased(bufferId)
   }
 }
 
@@ -743,12 +767,12 @@ private class TextSpoolWriter(filePath: String) {
   }
 }
 
-private object TextSpoolReader {
+internal data class TextSpoolJournalRecord(val type: Int, val payload: String)
+
+internal object TextSpoolReader {
   private const val TEXT_SPOOL_MAGIC = 0x32545854 // TXT2
   private const val TEXT_SPOOL_VERSION = 2
   private const val TEXT_SPOOL_CHECKPOINT = 4
-
-  data class JournalRecord(val type: Int, val payload: String)
 
   fun readCheckpoint(filePath: String): String? {
     val file = File(filePath)
@@ -774,11 +798,11 @@ private object TextSpoolReader {
     }
   }
 
-  fun readJournal(filePath: String): List<JournalRecord> {
+  fun readJournal(filePath: String): List<TextSpoolJournalRecord> {
     val file = File(filePath)
     if (!file.exists()) return emptyList()
     RandomAccessFile(file, "r").use { raf ->
-      val out = ArrayList<JournalRecord>()
+      val out = ArrayList<TextSpoolJournalRecord>()
       while (raf.filePointer < raf.length()) {
         if (raf.length() - raf.filePointer < 16) {
           throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Corrupted text journal header in $filePath")
@@ -800,7 +824,7 @@ private object TextSpoolReader {
         if (actual != checksum) {
           throw TextPipelineException(TextErrorCodes.SPOOL_CORRUPTED, "Text journal checksum mismatch in $filePath")
         }
-        out.add(JournalRecord(type, String(payload, StandardCharsets.UTF_8)))
+        out.add(TextSpoolJournalRecord(type, String(payload, StandardCharsets.UTF_8)))
       }
       return out
     }

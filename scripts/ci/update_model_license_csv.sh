@@ -149,7 +149,7 @@ declare -a release_assets=()
 declare -A asset_urls=()
 
 if [[ -f "$ASSET_LIST" ]]; then
-  while IFS='|' read -r name url; do
+  while IFS='|' read -r name url _asset_updated_at; do
     name="${name%$'\r'}"
     url="${url%$'\r'}"
     # trim spaces
@@ -455,7 +455,8 @@ apply_asr_license_line_to_qnn_asset() {
   line="${line%$'\r'}"
   local asr_asset license_type commercial_use confidence detection_source license_file remainder
   IFS=',' read -r asr_asset license_type commercial_use confidence detection_source license_file remainder <<< "$line"
-  if [[ -n "${remainder:-}" ]]; then
+  # Join excess fields when license_file contains commas; ignore trailing empty CSV columns.
+  if [[ -n "${remainder:-}" && "${remainder//,/}" != "" ]]; then
     license_file="${license_file},${remainder}"
   fi
   license_type="${license_type%\"}"; license_type="${license_type#\"}"

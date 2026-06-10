@@ -1,26 +1,48 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolvePipelineTextBufferId } from '../textbuffer';
+import {
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+  resolvePipelineTextBufferId,
+  subscribeLiveTextBufferEvents,
+} from '../textbuffer';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
+  LiveAudioBufferRef,
 } from '../audiobuffer/types';
+import type { PipelineAudioBufferIdSource } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
+  LiveTextBufferRef,
 } from '../textbuffer/types';
+import type { PipelineTextBufferIdSource } from '../textbuffer/types';
 import type {
   STTInitializeOptions,
   STTModelType,
   SttEngine,
-  SttModelOptions,
+  SttLivePipelineOptions,
+  SttTranscribeResult,
+  SttTranscribeOptions,
   SttRuntimeConfig,
 } from './types';
-import type { ModelPathConfig } from '../types';
+import { validateSegmentationConfig } from '../segment/validation';
+import { validateLiveOfflinePipelineOptions } from '../livePipeline';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import type { SttPipelineHandle } from './streamingTypes';
 import type { FileSource } from '../fileio/types';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
+import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
   isDetectionSource,
@@ -28,8 +50,148 @@ import {
   type DetectedModelEntry,
   type SttDetectModelResult,
 } from '../types/modelDetect';
+import { buildSttInitBridgeOptions } from './sttNativeBridge';
+import { runOfflineAudioToTextPipeline } from '../pipeline/offlineOrchestrator';
+import { addSegmentLink, createSegmentLinkMap } from '../segment';
+import type { TextSegment } from '../segment/segment';
+import { setOfflineTextSegments } from '../segment/runtime-state';
 
 let sttInstanceCounter = 0;
+
+function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveAudioBufferRef).info === 'object' &&
+    (buffer as LiveAudioBufferRef).info?.kind === 'livePcmBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLiveTextSource(buffer: unknown): buffer is LiveTextBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('txt_live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveTextBufferRef).info === 'object' &&
+    (buffer as LiveTextBufferRef).info?.kind === 'liveTextBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function createSttPipelineHandle(
+  instanceId: string,
+  pipelineId: string,
+  attachedEngineId?: string
+): SttPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus() {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
+
+async function transcribeLiveOverload(
+  instanceId: string,
+  audioIn: LiveAudioBufferIdSource,
+  textOut: LiveTextBufferIdSource,
+  options: SttLivePipelineOptions
+): Promise<SttPipelineHandle> {
+  const { policy } = validateLiveOfflinePipelineOptions({
+    featureName: 'live offline STT',
+    domain: 'speech',
+    segmentation: options.segmentation,
+  });
+
+  const audioInId = resolvePipelineAudioBufferId(
+    audioIn as PipelineAudioBufferIdSource
+  );
+  const textOutId = resolvePipelineTextBufferId(
+    textOut as PipelineTextBufferIdSource
+  );
+
+  const attached = await attachSegmentationEngine(
+    audioIn as PipelineAudioBufferIdSource,
+    { policy }
+  );
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'STT_TRANSCRIBE_FAILED: segmentation engine did not produce a segment buffer for speech domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startSttOfflineLivePipeline(
+      instanceId,
+      audioInId,
+      textOutId,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createSttPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
+
+  if (options.onSegment) {
+    const cb = options.onSegment;
+    const unsub = subscribeLiveTextBufferEvents(textOut, {
+      onSegment: (event) => cb(event.segment as TextSegment),
+    });
+    handle.completed.then(unsub, unsub);
+  }
+
+  return handle;
+}
 
 function normalizeOfflineBufferInput(
   buffer: OfflineAudioBufferRef | OfflineBufferHandle | string
@@ -107,9 +269,8 @@ export async function detectSttModel(
       ? raw.quantization
       : undefined;
 
-  // isStreaming is now provided by the native online-compatibility guard.
-  // Falls back to false when the native layer does not return the field.
   const isStreaming = raw.isStreaming === true;
+  const paths = readNonEmptyDetectPathsMap(raw.paths);
 
   return {
     success: raw.success,
@@ -123,13 +284,14 @@ export async function detectSttModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }
 
 /**
  * Create an STT engine instance. Call destroy() on the returned engine when done to free native resources.
  *
- * @param options - STT initialization options or model path configuration
+ * @param options - STT initialization options
  * @returns Promise resolving to an SttEngine instance
  * @example
  * ```typescript
@@ -139,7 +301,8 @@ export async function detectSttModel(
  *   getOfflineTextBufferTextSlice,
  * } from 'react-native-sherpa-onnx/textbuffer';
  * const stt = await createSTT({
- *   modelPath: { type: 'asset', path: 'models/whisper-tiny' },
+ *   modelSource: { kind: 'fs', path: '/path/to/model-dir' },
+ *   modelType: 'auto',
  * });
  * const audio = await createOfflineAudioBufferFromFile({
  *   kind: 'fs',
@@ -152,74 +315,12 @@ export async function detectSttModel(
  * ```
  */
 export async function createSTT(
-  options: STTInitializeOptions | ModelPathConfig
+  options: STTInitializeOptions
 ): Promise<SttEngine> {
   const instanceId = `stt_${++sttInstanceCounter}`;
+  const bridgeOptions = await buildSttInitBridgeOptions(options);
 
-  let modelPath: ModelPathConfig;
-  let preferInt8: boolean | undefined;
-  let modelType: STTModelType | undefined;
-  let hotwordsFile: string | undefined;
-  let hotwordsScore: number | undefined;
-  let numThreads: number | undefined;
-  let provider: string | undefined;
-  let ruleFsts: string | undefined;
-  let ruleFars: string | undefined;
-  let dither: number | undefined;
-  let modelOptions: SttModelOptions | undefined;
-  let modelingUnit: string | undefined;
-  let bpeVocab: string | undefined;
-
-  if ('modelPath' in options) {
-    modelPath = options.modelPath;
-    preferInt8 = options.preferInt8;
-    modelType = options.modelType;
-    hotwordsFile = options.hotwordsFile;
-    hotwordsScore = options.hotwordsScore;
-    numThreads = options.numThreads;
-    provider = options.provider;
-    ruleFsts = options.ruleFsts;
-    ruleFars = options.ruleFars;
-    dither = options.dither;
-    modelOptions = options.modelOptions;
-    modelingUnit = options.modelingUnit;
-    bpeVocab = options.bpeVocab;
-  } else {
-    modelPath = options;
-    preferInt8 = undefined;
-    modelType = undefined;
-    hotwordsFile = undefined;
-    hotwordsScore = undefined;
-    numThreads = undefined;
-    provider = undefined;
-    ruleFsts = undefined;
-    ruleFars = undefined;
-    dither = undefined;
-    modelOptions = undefined;
-    modelingUnit = undefined;
-    bpeVocab = undefined;
-  }
-
-  const debug = 'modelPath' in options ? options.debug : undefined;
-  const resolvedPath = await resolveModelPath(modelPath);
-
-  const result = await SherpaOnnx.initializeStt(
-    instanceId,
-    resolvedPath,
-    preferInt8,
-    modelType,
-    debug,
-    hotwordsFile,
-    hotwordsScore,
-    numThreads,
-    provider,
-    ruleFsts,
-    ruleFars,
-    dither,
-    modelOptions,
-    modelingUnit,
-    bpeVocab
-  );
+  const result = await SherpaOnnx.initializeStt(instanceId, bridgeOptions);
 
   if (!result.success) {
     const nativeError =
@@ -242,21 +343,220 @@ export async function createSTT(
     }
   };
 
-  const engine: SttEngine = {
+  const engine = {
     get instanceId() {
       return instanceId;
     },
 
     async transcribe(
-      buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
-      textOut: OfflineTextBufferRef | OfflineTextBufferHandle | string
-    ): Promise<void> {
+      buffer:
+        | OfflineAudioBufferRef
+        | OfflineBufferHandle
+        | LiveAudioBufferIdSource
+        | string,
+      textOut:
+        | OfflineTextBufferRef
+        | OfflineTextBufferHandle
+        | LiveTextBufferIdSource
+        | string,
+      transcribeOptions?: SttTranscribeOptions | SttLivePipelineOptions
+    ): Promise<SttTranscribeResult | SttPipelineHandle> {
       guard();
-      const bufferId = normalizeOfflineBufferInput(buffer);
-      const textOutBufferId = resolvePipelineTextBufferId(
-        typeof textOut === 'string' ? textOut : textOut.bufferId
+
+      const audioIsLive = isLiveAudioSource(buffer);
+      const textIsLive = isLiveTextSource(textOut);
+
+      if (audioIsLive || textIsLive) {
+        if (!(audioIsLive && textIsLive)) {
+          throw new Error(
+            'STT_INVALID_ARGUMENT: transcribe() overload mismatch. Use (OfflineAudio, OfflineText, options?) or (LiveAudio, LiveText, options).'
+          );
+        }
+        return transcribeLiveOverload(
+          instanceId,
+          buffer,
+          textOut,
+          transcribeOptions as SttLivePipelineOptions
+        );
+      }
+
+      // Batch path: narrow options to SttTranscribeOptions
+      const batchOptions = transcribeOptions as
+        | SttTranscribeOptions
+        | undefined;
+      const startedAtMs = Date.now();
+      const bufferId = normalizeOfflineBufferInput(
+        buffer as OfflineAudioBufferRef | OfflineBufferHandle | string
       );
-      await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
+      const textOutBufferId = resolvePipelineTextBufferId(
+        typeof textOut === 'string'
+          ? textOut
+          : String((textOut as OfflineTextBufferRef).bufferId ?? textOut)
+      );
+
+      const segmentation = validateSegmentationConfig({
+        mode: batchOptions?.segmentation?.mode,
+        policy: batchOptions?.segmentation?.policy,
+        featureName: 'offline STT',
+        domain: 'speech',
+        supportsManual: false,
+        defaultPolicy: {
+          evaluator: 'speech_energy_silence',
+          silenceThresholdMs: 500,
+          energyThresholdDb: -40,
+          minSegmentMs: 1000,
+          maxSegmentMs: 120000,
+          hangoverMs: 300,
+        },
+      });
+
+      const segmentationEnabled = segmentation.mode !== 'off';
+
+      if (!segmentationEnabled) {
+        if (batchOptions?.onProgress) {
+          batchOptions.onProgress({
+            currentSegment: 0,
+            totalSegments: 1,
+            fraction: 0,
+            elapsedMs: 0,
+            currentSegmentDurationMs: 0,
+          });
+        }
+        await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
+        if (batchOptions?.onProgress) {
+          batchOptions.onProgress({
+            currentSegment: 0,
+            totalSegments: 1,
+            fraction: 1,
+            elapsedMs: Date.now() - startedAtMs,
+            currentSegmentDurationMs: Date.now() - startedAtMs,
+          });
+        }
+        return {
+          status: 'complete',
+          totalSegments: 1,
+          completedSegments: 1,
+          skippedSegments: [],
+          processingTimeMs: Date.now() - startedAtMs,
+          linkMap: batchOptions?.linkMap,
+        };
+      }
+
+      const orchestrated = await runOfflineAudioToTextPipeline(
+        bufferId,
+        async (segIn, segOut) => {
+          await SherpaOnnx.transcribe(
+            instanceId,
+            segIn.bufferId,
+            segOut.bufferId
+          );
+        },
+        {
+          segmentation: {
+            mode: segmentation.mode,
+            policy: segmentation.policy,
+          },
+          errorRecovery: batchOptions?.errorRecovery,
+          maxRetriesPerSegment: batchOptions?.maxRetriesPerSegment,
+          retryExhaustedFallback: batchOptions?.retryExhaustedFallback,
+          abortSignal: batchOptions?.abortSignal,
+          onProgress: batchOptions?.onProgress,
+          textSkipPlaceholder: batchOptions?.textSkipPlaceholder,
+          linkMap: batchOptions?.linkMap,
+        }
+      );
+
+      if (orchestrated.status === 'failed') {
+        const message =
+          orchestrated.failedSegment?.error ??
+          'STT segmented transcription failed';
+        throw new Error(message);
+      }
+
+      let linkMap = batchOptions?.linkMap;
+      if (!linkMap?.linkMapId) {
+        linkMap = await createSegmentLinkMap({
+          audioBufferId: bufferId,
+          textBufferId: textOutBufferId,
+        });
+      }
+
+      const outputBuffer = orchestrated.outputBuffer;
+      let finalText = '';
+      if (outputBuffer) {
+        try {
+          const outInfo = await getPipelineTextBufferInfo(
+            outputBuffer.bufferId
+          );
+          if (outInfo.kind === 'offlineTextBuffer' && outInfo.utf16Length > 0) {
+            finalText = await getOfflineTextBufferTextSlice(
+              outputBuffer.bufferId,
+              0,
+              outInfo.utf16Length
+            );
+          }
+
+          await SherpaOnnx.populateOfflineTextBufferIfEmpty(
+            textOutBufferId,
+            finalText,
+            {}
+          );
+        } finally {
+          await releasePipelineTextBuffer(outputBuffer.bufferId);
+        }
+      } else {
+        await SherpaOnnx.populateOfflineTextBufferIfEmpty(
+          textOutBufferId,
+          '',
+          {}
+        );
+      }
+
+      let runningOffset = 0;
+      const textSegments: TextSegment[] = orchestrated.segmentMappings.map(
+        (mapping, index) => {
+          const segmentText = mapping.text;
+          const startOffset = runningOffset;
+          const endOffset = startOffset + segmentText.length;
+          runningOffset = endOffset;
+          return {
+            segmentId: `txtseg_${textOutBufferId}_${index}`,
+            domain: 'text',
+            startOffset,
+            endOffset,
+            reason: 'endpoint',
+            source: 'segmentation_engine',
+            createdAtMs: Date.now(),
+            segmentIndex: index,
+            text: segmentText,
+            utf16Length: segmentText.length,
+          };
+        }
+      );
+      setOfflineTextSegments(textOutBufferId, textSegments);
+
+      for (let i = 0; i < textSegments.length; i += 1) {
+        const textSegment = textSegments[i]!;
+        const mapping = orchestrated.segmentMappings[i];
+        if (!mapping) continue;
+        await addSegmentLink(linkMap, {
+          textSegmentId: textSegment.segmentId,
+          speechSegmentId: mapping.speechSegmentId,
+          linkType: 'stt_produced',
+        });
+      }
+
+      return {
+        status: orchestrated.status,
+        totalSegments: orchestrated.totalSegments,
+        completedSegments: orchestrated.completedSegments,
+        skippedSegments: orchestrated.skippedSegments,
+        ...(orchestrated.failedSegment
+          ? { failedSegment: orchestrated.failedSegment }
+          : {}),
+        processingTimeMs: orchestrated.processingTimeMs,
+        linkMap,
+      };
     },
 
     async setConfig(config: SttRuntimeConfig): Promise<void> {
@@ -282,7 +582,7 @@ export async function createSTT(
     },
   };
 
-  return engine;
+  return engine as unknown as SttEngine;
 }
 
 // Streaming (online) STT
@@ -291,6 +591,8 @@ export type {
   OnlineSTTModelType,
   LiveSttEngine,
   StreamingSttInitOptions,
+  StreamingSttAutoInitOptions,
+  StreamingSttCustomInitOptions,
   SttPipelineHandle,
   SttPipelineOptions,
   EndpointConfig,
@@ -301,16 +603,45 @@ export { ONLINE_STT_MODEL_TYPES } from './streamingTypes';
 // Export types and runtime type list
 export type {
   STTInitializeOptions,
+  STTAutoInitializeOptions,
+  STTCustomInitializeOptions,
+  STTConcreteModelType,
+  STTInitializeOptionsBase,
   STTModelType,
   SttModelOptions,
   SttQwen3AsrModelOptions,
   SttCohereTranscribeModelOptions,
-  SttTranscribeRef,
+  SttTranscribeOptions,
+  SttTranscribeResult,
+  SttSegmentationConfig,
   SttRuntimeConfig,
   SttEngine,
   SttInitResult,
   SttErrorCodeValue,
 } from './types';
+export type {
+  SttCustomConfig,
+  SttCustomConfigByModelType,
+  SttCustomPathKey,
+  SttTransducerCustomConfig,
+  SttWhisperCustomConfig,
+} from './customConfig';
+export {
+  assertSttCustomConfig,
+  resolveSttCustomConfigPaths,
+} from './customConfig';
+export type {
+  StreamingSttCustomConfig,
+  StreamingSttCustomConfigByModelType,
+  StreamingSttCustomPathKey,
+  StreamingTransducerCustomConfig,
+  StreamingParaformerCustomConfig,
+  StreamingSingleModelCustomConfig,
+} from './streamingCustomConfig';
+export {
+  assertStreamingSttCustomConfig,
+  resolveStreamingSttCustomConfigPaths,
+} from './streamingCustomConfig';
 export type { SttDetectModelResult } from '../types/modelDetect';
 export {
   STT_MODEL_TYPES,

@@ -1,10 +1,14 @@
 # Pipeline audio buffers — offline (`audiobuffer`)
 
+## Introduction
+
 **Immutable offline clips** (full PCM on the native side): file-backed or in-memory. Used as input/output for **batch** STT, TTS, alignment, and enhancement.
 
 **Import path:** `react-native-sherpa-onnx/audiobuffer`
 
-For decode helpers (FFmpeg, WAV conversion), see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). Overview of both buffer kinds: [Pipeline audio buffers — overview](audiobuffer.md).
+For decode/save helpers, see `react-native-sherpa-onnx/audio` and [audio-conversion.md](audio-conversion.md). For live/ring-buffer workflows, see [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md).
+
+Practical default policy: buffers are `16000` Hz unless you explicitly choose a different rate (`targetSampleRateHz: 0` to keep source/native rate, or `targetSampleRateHz > 0` for an explicit target).
 
 ---
 
@@ -39,6 +43,45 @@ Types: see [`src/audiobuffer/types.ts`](../src/audiobuffer/types.ts). Offline cr
 
 ---
 
+## Quick start
+
+```ts
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  createOfflineAudioBufferFromSamples,
+  getPipelineAudioBufferInfo,
+  getOfflineAudioBufferSamplesSlice,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+// 1) Decode once on native side (optional resample/downmix during decode).
+const fromFile = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/input.wav' },
+  { targetSampleRateHz: 16000, forceMono: true }
+);
+
+// 2) Prepare an empty output buffer for batch producers (for example TTS output).
+const output = await createEmptyOfflineAudioBuffer(16000);
+
+// 3) Read a small slice for UI/debug without copying full PCM into JS.
+const head = getOfflineAudioBufferSamplesSlice(fromFile, 0, 320);
+console.log(head.length);
+
+// 4) Inspect metadata and release when done.
+const info = await getPipelineAudioBufferInfo(fromFile);
+console.log(info.kind, info.sampleRate, info.durationMs);
+
+const fromSamples = createOfflineAudioBufferFromSamples(new Float32Array([0.1, 0.2, 0.3]), 16000);
+await releasePipelineAudioBuffer(fromFile);
+await releasePipelineAudioBuffer(fromSamples);
+await releasePipelineAudioBuffer(output);
+```
+
+The common pattern is: create/decode once, pass refs/ids to batch feature APIs, then release buffers explicitly.
+
+---
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/audiobuffer`. Unless noted, buffer arguments accept the matching `*IdSource` union (ref, info snapshot, handle, or string).
@@ -59,6 +102,8 @@ function getPipelineAudioBufferInfo(
 const info = await getPipelineAudioBufferInfo(offline);
 console.log(info.kind, info.state);
 ```
+
+Works for **live** buffers too (`kind: 'livePcmBuffer'`). For live buffers, `ref.info` from `createEmptyLiveAudioBuffer` is only a creation snapshot — see [`info` lifecycle](audiobuffer-streaming.md#info-lifecycle-live-buffers) and use `finalizeLiveAudioBuffer` / `refreshLiveAudioBufferInfo`.
 
 `OfflineAudioBufferInfo` includes an optional `storageKind?: 'ram' | 'mmap'`.
 - Default: `'ram'` (when `storageKind` is omitted / `undefined`)
@@ -109,20 +154,26 @@ const decoded = await createOfflineAudioBufferFromFile(
 
 The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
 
+When you only need **duration** and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer. To read **container format and codec** from file content before decode, use [`probeAudioFileContainer`](./audio-conversion.md#probeaudiofilecontainersource).
+
 Options:
 
-- `targetSampleRateHz`: resample during decode; omit or use `0` to keep the source rate
+- `targetSampleRateHz`: decode target rate semantics:
+  - omit / `undefined` → `16000` Hz
+  - `0` → keep source rate
+  - `> 0` → resample to that exact rate
 - `forceMono`: downmix during decode; default `true`
 - `onProgress`: receives `DecodeProgressEvent`
 - `signal`: aborts decode and rejects with `DECODE_CANCELLED`
 
-#### `createOfflineAudioBufferFromSamples(samples, sampleRate, channelCount?)`
+#### `createOfflineAudioBufferFromSamples(samples, inputSampleRateHz, channelCountOrOptions?, options?)`
 
 ```ts
 function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
-  sampleRate: number,
-  channelCount?: number
+  inputSampleRateHz: number,
+  channelCountOrOptions?: number | { targetSampleRateHz?: number },
+  options?: { targetSampleRateHz?: number }
 ): OfflineAudioBufferRef;
 ```
 
@@ -130,11 +181,18 @@ function createOfflineAudioBufferFromSamples(
 const offline = createOfflineAudioBufferFromSamples(
   new Float32Array([0.1, 0.2, 0.3]),
   16000,
-  1
+  1,
+  { targetSampleRateHz: 0 }
 );
 ```
 
 This path is synchronous and uses JSI (`ArrayBuffer`/`Float32Array`) for bulk sample transport.
+
+`targetSampleRateHz` semantics for samples import:
+
+- omit / `undefined` → `16000` Hz
+- `0` → keep `inputSampleRateHz`
+- `> 0` → resample to that exact rate before writing to the offline buffer
 
 #### `createEmptyOfflineAudioBuffer(sampleRate, channelCount?)`
 
@@ -196,9 +254,30 @@ function createOfflineAudioBufferFromLive(
 const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
 ```
 
+## Types and constants
+
+```ts
+import type {
+  OfflineAudioBufferRef, // created offline buffer ref { info, bufferId }
+  OfflineAudioBufferInfo, // metadata for immutable offline PCM buffer
+  OfflineAudioBufferIdSource, // ref/handle/id accepted by offline APIs
+  PipelineAudioBufferInfo, // discriminated union for offline/live info
+  PipelineAudioBufferIdSource, // ref/info/handle/id accepted by shared APIs
+  OfflineFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  AudioDecodeOptions, // decode options for createOfflineAudioBufferFromFile
+  DecodeProgressEvent, // progress payload during decode
+  PipelineAudioErrorCodeValue, // string union of audio error codes
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+import {
+  PipelineAudioErrorCode, // runtime constants for error-code checks
+  isJSIAvailable, // check whether JSI path is available
+} from 'react-native-sherpa-onnx/audiobuffer';
+```
+
 ---
 
-## Error code quick table
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -220,7 +299,43 @@ const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpoo
 
 ## See also
 
-- [Pipeline audio buffers — overview](audiobuffer.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
 - [Offline STT](stt-offline.md)
-- [PCM Player & `pcm-stream` import](pcm-stream.md)
+- [PCM Player (`react-native-sherpa-onnx/pcm`)](pcm-player.md)
+
+## Use case examples
+
+<details>
+<summary>Decode large audio once and reuse across multiple offline engines</summary>
+
+```ts
+const audio = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/meeting.wav' },
+  { targetSampleRateHz: 16000, forceMono: true }
+);
+
+// Reuse `audio` for multiple offline passes (STT, alignment, enhancement, etc.).
+// Release once all consumers are finished.
+await releasePipelineAudioBuffer(audio);
+```
+
+</details>
+
+<details>
+<summary>Snapshot a finalized live session into an offline buffer</summary>
+
+```ts
+// `live` is a finalized live audio buffer from a long recording session.
+const snapshot = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
+const info = await getPipelineAudioBufferInfo(snapshot);
+console.log(info.durationMs, info.sampleRate);
+await releasePipelineAudioBuffer(snapshot);
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

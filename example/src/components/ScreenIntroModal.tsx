@@ -38,20 +38,36 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen streams long audio through LiveAudioBuffer and LiveTextBuffer so transcription can start immediately without building a large offline decode buffer. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
   TTS: {
-    title: 'Text-to-Speech demo',
-    body: 'This screen shows batch and streaming TTS flows. It is useful for inspecting synthesis setup, generation modes, and how audio is produced for playback or export.',
+    title: 'Text-to-Speech (offline)',
+    body: 'This screen runs batch TTS: one-shot or segmented offline synthesis, buffer-to-buffer output, save/share, and voice-cloning options where the model supports them. Incremental streaming synthesis lives on the Text-to-Speech (Streaming) screen.',
   },
   TTSStreaming: {
     title: 'Text-to-Speech streaming demo',
-    body: 'This screen uses incremental TTS so synthesis can begin before the full prompt is assembled offline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
+    body: 'This screen uses incremental TTS with live text and audio buffers so playback can start before the full prompt is finished. Configure text segmentation (off/manual/auto) here. For chunked offline synthesis, use Text-to-Speech (Offline).',
   },
   Punctuation: {
-    title: 'Punctuation preview',
-    body: 'This placeholder screen marks where punctuation restoration will be integrated. It will focus on turning plain transcripts into more readable punctuated text.',
+    title: 'Offline punctuation',
+    body: 'This screen loads an offline CT-Transformer model, builds plain text into offline text buffers, runs the punctuation engine buffer-to-buffer, and shows a read-only punctuated result with a copy action. Re-run releases previous buffers; options mirror the library’s init and pass-through language field.',
   },
-  PipelineShowcase: {
-    title: 'End-to-end pipeline showcase',
-    body: 'This is the most complete pipeline demo in the app. It visualizes mic or file input feeding STT, incremental TTS output, PCM playback, and the cross-platform audio session coordination layer. You will see how all the pipeline layers work together at the same time.',
+  PunctuationStreaming: {
+    title: 'Streaming punctuation',
+    body: 'This screen runs online CNN-BiLSTM punctuation over live text buffers. It is useful for checking the LiveTextBuffer input/output contract, pipeline lifecycle, and optional segmentation attach.',
+  },
+  OfflinePipelineShowcase: {
+    title: 'Offline batch pipeline',
+    body: 'This screen runs a full offline batch pipeline: audio file → STT (with optional speech segmentation) → transcript → TTS (with optional text segmentation) → synthesized audio → playback. Enable segmentation on either stage to process large inputs in chunks and keep peak native RAM low.',
+  },
+  LivePipelineShowcase: {
+    title: 'Live streaming pipeline',
+    body: 'This screen runs the full end-to-end streaming pipeline concurrently: mic or file audio → StreamingSTT → committed text segments → StreamingTTS → live audio → real-time playback. The segment event log shows each STT commit and its forwarding to TTS. Optional text re-segmentation between STT and TTS aligns input at sentence boundaries.',
+  },
+  FileIO: {
+    title: 'File I/O sandbox',
+    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec assets or a picked file, then export via saveAudioAsFile to fs, app, contentUri, and other destination kinds.',
+  },
+  AudioVisualization: {
+    title: 'Audio visualization API',
+    body: 'The public SDK (`react-native-sherpa-onnx/visualization`) computes spectrum data in native code and returns `levels` plus optional timeline `frames` — it does not ship any UI widgets. Your app is responsible for drawing bars, heatmaps, scrubbers, or 3D views from that data. This screen demonstrates the API: pick audio, call `computeAudioVisualizationProfile`, then render the result yourself. The Static, Animated, Heatmap, and Skia-based 3D tabs here are example UI only, built for this demo app.',
   },
   GenerateTimestamp: {
     title: 'Alignment and subtitle generation',
@@ -64,6 +80,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   VAD: {
     title: 'Voice activity detection showcase',
     body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
+  },
+  SegmentationShowcase: {
+    title: 'Segmentation playground',
+    body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
   },
   Diarization: {
     title: 'Speaker diarization preview',

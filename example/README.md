@@ -1,90 +1,213 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Sherpa ONNX Example App
 
-# Getting Started
+This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, punctuation, VAD, timestamp/alignment generation, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
-## Step 1: Start Metro
+For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Run and setup
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+Run all commands from `example/`:
 
 ```sh
-# Using npm
-npm start
-
-# OR using Yarn
+yarn install
 yarn start
 ```
 
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+Android:
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
 yarn android
 ```
 
-### iOS
-
-Use the React Native CLI to build and run iOS (recommended). The CLI runs `pod install` automatically when needed, so you should not call `pod install` directly (that flow is deprecated).
-
-From the **example** directory:
+iOS:
 
 ```sh
-# One-time: install Ruby gems (CocoaPods) if you haven’t already
 bundle install
-
-# Run on simulator (triggers pod install if needed)
 yarn ios
-
-# Or build only (e.g. for CI), output in ios/build
-yarn build:ios
 ```
 
-For more on CocoaPods, see the [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Download manager showcase
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+| ![Download manager 1](../docs/images/example/download_1.png) | ![Download manager 2](../docs/images/example/download_2.png) | ![Download manager 3](../docs/images/example/download_3.png) |
+| --- | --- | --- |
+|     |     |     |
 
-## Step 3: Modify your app
 
-Now that you have successfully run the app, let's make changes!
+This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD feature screens.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Speech-to-Text (offline)
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+| ![STT offline 1](../docs/images/example/stt_1.png) | ![STT offline 2](../docs/images/example/stt_2.png) | ![STT offline 3](../docs/images/example/stt_3.png) |
+| --- | --- | --- |
+|     |     |     |
 
-## Congratulations! :tada:
 
-You've successfully run and modified your React Native App. :partying_face:
+This screen initializes offline STT engines and runs file-based transcription through pipeline buffers. It can work with bundled assets and downloaded model folders, detects STT model type, and supports offline text buffer inspection (text/tokens/timestamps/durations and metadata fields). It also includes playback and route-selection hooks used during local verification of [docs/stt-offline.md](../docs/stt-offline.md).
 
-### Now what?
+## Text-to-Speech (offline)
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
 
-# Troubleshooting
+| ![TTS offline 1](../docs/images/example/tts_1.png) | ![TTS offline 2](../docs/images/example/tts_2.png) | ![TTS offline 3](../docs/images/example/tts_3.png) |
+| --- | --- | --- |
+|     |     |     |
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
-# Learn More
+This screen focuses on offline synthesis with [docs/tts-offline.md](../docs/tts-offline.md) APIs. It supports model detection/initialization, synthesis options, optional voice-cloning inputs for supported model families, playback through PCM, and saving generated audio with [docs/audio-conversion.md](../docs/audio-conversion.md). It also exposes segmented synthesis toggles used for memory-conscious runs.
 
-To learn more about React Native, take a look at the following resources:
+## Speech-to-Text (streaming)
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+
+| ![STT streaming 1](../docs/images/example/stt_streaming_1.png) | ![STT streaming 2](../docs/images/example/stt_streaming_2.png) | ![STT streaming 3](../docs/images/example/stt_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen streams long files through LiveAudioBuffer to LiveTextBuffer with a streaming STT engine, mainly for low-latency transcript updates and avoiding large offline decode peaks. It shows segment count, committed transcript, and partial transcript state while ingesting audio, matching [docs/stt-streaming.md](../docs/stt-streaming.md).
+
+## Text-to-Speech (streaming)
+
+
+| ![TTS streaming 1](../docs/images/example/tts_streaming_1.png) | ![TTS streaming 2](../docs/images/example/tts_streaming_2.png) | ![TTS streaming 3](../docs/images/example/tts_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen tests live TTS by pushing text chunks into a live text pipeline and synthesizing into a live audio buffer. It is used to validate low time-to-first-audio behavior, flush/cancel lifecycle, and final buffer playback, aligned with the live-overload guidance in [docs/tts-offline.md](../docs/tts-offline.md).
+
+## Offline Pipeline Showcase (File -> STT -> TTS -> playback)
+
+
+| ![Pipeline offline 1](../docs/images/example/pipeline_offline_1.png) | ![Pipeline offline 2](../docs/images/example/pipeline_offline_2.png) | ![Pipeline offline 3](../docs/images/example/pipeline_offline_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen demonstrates an end-to-end offline chain from file input to offline STT, then offline TTS, followed by playback/final output handling. It is the reference for batch-style orchestration and segmented offline processing flows in a single pipeline scenario.
+
+## Live Pipeline Showcase (Mic/File -> STT -> TTS -> playback)
+
+
+| ![Pipeline streaming 1](../docs/images/example/pipeline_streaming_1.png) | ![Pipeline streaming 2](../docs/images/example/pipeline_streaming_2.png) | ![Pipeline streaming 3](../docs/images/example/pipeline_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen demonstrates an end-to-end live pipeline: source input (mic/file) to streaming STT, then incremental TTS, then PCM playback with runtime metrics and finalize/save output flow. It is the main integration example for live buffer chaining and low-latency pipeline orchestration.
+
+## Alignment (subtitles/timestamps)
+
+
+| ![Alignment 1](../docs/images/example/alignment_1.png) | ![Alignment 2](../docs/images/example/alignment_2.png) | ![Alignment 3](../docs/images/example/alignment_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen generates subtitle/timestamp segments from audio and transcript inputs. It validates alignment modes (`proportional`, `estimated`, and `accurate`) and includes anchor/VAD-assisted workflows where applicable. See [docs/alignment-offline.md](../docs/alignment-offline.md), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/vad-streaming.md](../docs/vad-streaming.md).
+
+## Speech enhancement (offline)
+
+
+| ![Enhancement offline 1](../docs/images/example/enhancement_offline_1.png) | ![Enhancement offline 2](../docs/images/example/enhancement_offline_2.png) | ![Enhancement offline 3](../docs/images/example/enhancement_offline_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen runs offline enhancement over prepared input buffers, supports segmented mode toggles, and allows saving/playback of enhanced output. It is used for validating GTCRN/DPDFNet model behavior via [docs/enhancement-offline.md](../docs/enhancement-offline.md).
+
+## Speech enhancement (streaming)
+
+
+| ![Enhancement streaming 1](../docs/images/example/enhancement_streaming_1.png) | ![Enhancement streaming 2](../docs/images/example/enhancement_streaming_2.png) | ![Enhancement streaming 3](../docs/images/example/enhancement_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen streams source audio through live enhancement pipelines, including ingest controls and output finalization. It is mainly used to test long-input handling and live pipeline lifecycle from [docs/enhancement-streaming.md](../docs/enhancement-streaming.md).
+
+## Voice Activity Detection
+
+
+| ![VAD 1](../docs/images/example/vad_1.png) | ![VAD 2](../docs/images/example/vad_2.png) | ![VAD 3](../docs/images/example/vad_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen supports both live and offline VAD flows, including file and microphone input for live mode, plus segment timeline inspection and status polling. It validates segment buffer behavior and VAD summaries against [docs/vad-streaming.md](../docs/vad-streaming.md).
+
+## Punctuation (offline)
+
+
+| ![Punctuation offline 1](../docs/images/example/punctuation_offline_1.png) | ![Punctuation offline 2](../docs/images/example/punctuation_offline_2.png) | ![Punctuation offline 3](../docs/images/example/punctuation_offline_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen tests offline CT-Transformer punctuation with text buffers, model detection, optional segmented processing, and copy/export flows for punctuated output. It maps to [docs/punctuation-offline.md](../docs/punctuation-offline.md).
+
+## Punctuation (streaming)
+
+
+| ![Punctuation streaming 1](../docs/images/example/punctuation_streaming_1.png) | ![Punctuation streaming 2](../docs/images/example/punctuation_streaming_2.png) | ![Punctuation streaming 3](../docs/images/example/punctuation_streaming_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen runs online punctuation over live text buffers. It shows incremental input append, optional segmentation attach mode, pipeline completion, and final live output extraction, aligned with [docs/punctuation-streaming.md](../docs/punctuation-streaming.md).
+
+## File I/O showcase
+
+
+| ![File I/O 1](../docs/images/example/fileio_1.png) | ![File I/O 2](../docs/images/example/fileio_2.png) | ![File I/O 3](../docs/images/example/fileio_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+This screen validates file and conversion workflows, including loading local assets/files and exporting generated or transformed audio outputs. It is the UI reference for [docs/fileio.md](../docs/fileio.md) and [docs/audio-conversion.md](../docs/audio-conversion.md).
+
+**Codec sandbox (`test_codec/`):** bundled samples for probe/decode/encode round-trips. Add files listed in `example/android/app/src/main/assets/test_codec/README.md` (Android) and `example/ios/sherpa_models/test_codec/README.md` (iOS), then rebuild. Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }` (APK `assets/`, not sandbox `files/`).
+
+## Audio visualization showcase
+
+
+| ![Audio visualization — static bars](../docs/images/example/vis_static.png) | ![Audio visualization — heatmap](../docs/images/example/vis_heatmap.png) | ![Audio visualization — pseudo-3D](../docs/images/example/vis_3d.png) |
+| --- | --- | --- |
+| Static (`levels`) | Heatmap (`frames`) | Pseudo-3D (`frames`, Skia) |
+
+
+Open **Audio visualization** from Home. The screen runs one `computeAudioVisualizationProfile` call (timeline enabled), then renders SDK data in four tabs: **Static**, **Animated**, **Heatmap**, and **3D**.
+
+- **Static** — mirrored bar chart from global `levels`.
+- **Animated** — same bars driven by timeline frame index (playback scrub).
+- **Heatmap** — time × frequency grid from `frames`.
+- **3D** — example UI only: isometric bars in Skia from per-frame levels; not a native SDK 3D feature.
+
+Implementation: `example/src/screens/audio-visualization/AudioVisualizationScreen.tsx` and `example/src/components/SpectrumBarsView.tsx`, `SpectrumHeatmapView.tsx`, `Spectrum3DView.tsx`. API reference: [docs/audio-visualization.md](../docs/audio-visualization.md).
+
+## Segmentation showcase
+
+
+| ![Segmentation audio 1](../docs/images/example/segmentation_audio_1.png) | ![Segmentation audio 2](../docs/images/example/segmentation_audio_2.png) | ![Segmentation audio 3](../docs/images/example/segmentation_audio_3.png) |
+| --- | --- | --- |
+| ![Segmentation text 1](../docs/images/example/segmentation_text_1.png) | ![Segmentation text 2](../docs/images/example/segmentation_text_2.png) | ![Segmentation text 3](../docs/images/example/segmentation_text_3.png) |
+
+
+This screen demonstrates segmentation policies for audio and text pipelines to keep processing bounded and memory usage predictable on long inputs. It maps to [docs/segmentation-engine.md](../docs/segmentation-engine.md).
+
+## Settings and provider diagnostics
+
+
+| ![Settings 1](../docs/images/example/settings_1.png) | ![Settings 2](../docs/images/example/settings_2.png) | ![Settings 3](../docs/images/example/settings_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+
+The Settings screen (gear button on Home) provides runtime diagnostics for acceleration backends and provider availability. It exposes checks for QNN, NNAPI, XNNPACK, Core ML, and available providers, plus app/SDK version display. This is used for environment verification before running model-heavy screens. See [docs/execution-providers.md](../docs/execution-providers.md).
+
+## Speaker diarization (coming soon)
+
+
+## Source separation (coming soon)

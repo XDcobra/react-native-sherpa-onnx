@@ -19,6 +19,30 @@
 #include <vector>
 #include <zlib.h>
 
+// Segmentation engine hooks are implemented in segmentbuffer bridge.
+void seg_engine_on_text_write(const std::string &liveBufferId);
+void seg_engine_on_buffer_finalized(const std::string &bufferId);
+void seg_engine_on_buffer_released(const std::string &bufferId);
+
+// Emits pipelineLiveTextPartial when partial events are enabled (throttled). Called after live partial text updates.
+void txt_dispatch_pipeline_live_text_partial(
+	const std::string &bufferId,
+	const char *source,
+	const std::string &partialText,
+	int64_t revisionValue,
+	int64_t partialEventMinIntervalMs);
+
+#ifdef __OBJC__
+@class SherpaOnnx;
+#ifdef __cplusplus
+extern "C" {
+#endif
+void txt_set_partial_event_module(SherpaOnnx *module);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 // Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
 struct TxtOfflineEntry;
 
@@ -133,9 +157,17 @@ struct TxtLiveEntry {
 		int token;
 		std::function<void()> callback;
 	};
+
+	struct NativeCommitListener {
+		int token;
+		std::function<void(const TextSegment &)> callback;
+	};
 	std::vector<NativeAppendListener> appendListeners;
+	std::vector<NativeCommitListener> commitListeners;
 	std::mutex appendListenerMutex;
+	std::mutex commitListenerMutex;
 	std::atomic<int> nextListenerToken{0};
+	std::atomic<int> nextCommitListenerToken{0};
 
 	int addAppendListener(std::function<void()> listener) {
 		int token = nextListenerToken.fetch_add(1);
@@ -160,6 +192,31 @@ struct TxtLiveEntry {
 			for (auto &l : appendListeners) callbacks.push_back(l.callback);
 		}
 		for (auto &cb : callbacks) cb();
+	}
+
+	int addCommitListener(std::function<void(const TextSegment &)> listener) {
+		int token = nextCommitListenerToken.fetch_add(1);
+		std::lock_guard<std::mutex> lock(commitListenerMutex);
+		commitListeners.push_back({token, std::move(listener)});
+		return token;
+	}
+
+	void removeCommitListener(int token) {
+		std::lock_guard<std::mutex> lock(commitListenerMutex);
+		commitListeners.erase(
+			std::remove_if(commitListeners.begin(), commitListeners.end(),
+						   [token](const NativeCommitListener &l) { return l.token == token; }),
+			commitListeners.end());
+	}
+
+	void notifyCommitListeners(const TextSegment &segment) {
+		std::vector<std::function<void(const TextSegment &)>> callbacks;
+		{
+			std::lock_guard<std::mutex> lock(commitListenerMutex);
+			callbacks.reserve(commitListeners.size());
+			for (auto &l : commitListeners) callbacks.push_back(l.callback);
+		}
+		for (auto &cb : callbacks) cb(segment);
 	}
 
 	static std::string spoolingModeRaw(SpoolingMode mode) {
@@ -198,9 +255,25 @@ struct TxtLiveEntry {
 		return committed;
 	}
 
+	std::string partialRemainderFromCurrentTextLocked() {
+		if (currentText.empty()) {
+			return "";
+		}
+		std::string lastCommitted;
+		if (!segments.empty()) {
+			lastCommitted = segments.back().text;
+		}
+		if (!lastCommitted.empty() &&
+			currentText.size() >= lastCommitted.size() &&
+			currentText.compare(0, lastCommitted.size(), lastCommitted) == 0) {
+			return currentText.substr(lastCommitted.size());
+		}
+		return currentText;
+	}
+
 	std::string currentFullSnapshotLocked() {
 		std::lock_guard<std::mutex> segmentLock(segmentMutex);
-		return committedTextFromSegmentsLocked() + currentText;
+		return committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked();
 	}
 
 	std::string journalPath() const { return spoolPath + ".txtj"; }
@@ -443,42 +516,74 @@ struct TxtLiveEntry {
 	}
 
 	void writePartial(const std::string &text) {
-		std::lock_guard<std::mutex> lock(stateMutex);
-		if (state == FINISHED) {
-			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+		bool shouldEmitPartial = false;
+		int64_t minIntervalMs = 0;
+		std::string bid;
+		std::string partialSnap;
+		int64_t revSnap = 0;
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+			if (state == FINISHED) {
+				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+			}
+			NSString *ns = [NSString stringWithUTF8String:text.c_str()];
+			int len = ns ? (int)[ns length] : 0;
+			if (len > windowMaxChars) {
+				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+				currentText = [trimmed UTF8String] ?: "";
+			} else {
+				currentText = text;
+			}
+			totalCharsWritten += len;
+			revision.fetch_add(1);
+			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			seg_engine_on_text_write(bufferId);
+			shouldEmitPartial = emitPartialEvents;
+			minIntervalMs = partialEventMinIntervalMs;
+			bid = bufferId;
+			partialSnap = currentText;
+			revSnap = (int64_t)revision.load();
 		}
-		NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-		int len = ns ? (int)[ns length] : 0;
-		if (len > windowMaxChars) {
-			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-			currentText = [trimmed UTF8String] ?: "";
-		} else {
-			currentText = text;
+		if (shouldEmitPartial) {
+			txt_dispatch_pipeline_live_text_partial(bid, "replace", partialSnap, revSnap, minIntervalMs);
 		}
-		totalCharsWritten += len;
-		revision.fetch_add(1);
-		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
 	}
 
 	void appendText(const std::string &text) {
-		std::lock_guard<std::mutex> lock(stateMutex);
-		if (state == FINISHED) {
-			throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+		bool shouldEmitPartial = false;
+		int64_t minIntervalMs = 0;
+		std::string bid;
+		std::string partialSnap;
+		int64_t revSnap = 0;
+		{
+			std::lock_guard<std::mutex> lock(stateMutex);
+			if (state == FINISHED) {
+				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
+			}
+			std::string combined = currentText + text;
+			NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
+			int len = ns ? (int)[ns length] : 0;
+			NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
+			int appendLen = textNs ? (int)[textNs length] : 0;
+			if (len > windowMaxChars) {
+				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
+				currentText = [trimmed UTF8String] ?: "";
+			} else {
+				currentText = combined;
+			}
+			totalCharsWritten += appendLen;
+			revision.fetch_add(1);
+			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			seg_engine_on_text_write(bufferId);
+			shouldEmitPartial = emitPartialEvents;
+			minIntervalMs = partialEventMinIntervalMs;
+			bid = bufferId;
+			partialSnap = currentText;
+			revSnap = (int64_t)revision.load();
 		}
-		std::string combined = currentText + text;
-		NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
-		int len = ns ? (int)[ns length] : 0;
-		NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-		int appendLen = textNs ? (int)[textNs length] : 0;
-		if (len > windowMaxChars) {
-			NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-			currentText = [trimmed UTF8String] ?: "";
-		} else {
-			currentText = combined;
+		if (shouldEmitPartial) {
+			txt_dispatch_pipeline_live_text_partial(bid, "append", partialSnap, revSnap, minIntervalMs);
 		}
-		totalCharsWritten += appendLen;
-		revision.fetch_add(1);
-		maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
 	}
 
 	int commitSegment(const std::string &text,
@@ -487,6 +592,8 @@ struct TxtLiveEntry {
 					  const std::string &source = "unknown",
 					  NSDictionary *meta = nil) {
 		int committedSegmentIndex = -1;
+		TextSegment committedSegment;
+		bool hasCommittedSegment = false;
 		{
 			std::lock_guard<std::mutex> stateLock(stateMutex);
 			if (state == FINISHED) {
@@ -501,6 +608,8 @@ struct TxtLiveEntry {
 				seg.source = source;
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
 				seg.meta = meta;
+				committedSegment = seg;
+				hasCommittedSegment = true;
 				committedSegmentIndex = seg.segmentIndex;
 				segments.push_back(std::move(seg));
 				if ((int)segments.size() > maxSegments) {
@@ -517,10 +626,20 @@ struct TxtLiveEntry {
 				int charLen = textNs ? (int)[textNs length] : 0;
 				totalCharsWritten += charLen;
 				revision.fetch_add(1);
-				maybeWriteSnapshotToSpool(committedTextFromSegmentsLocked() + currentText, true);
+				// Same as Android LiveTextEntry.commitSegment: callers often still
+				// hold the committed utterance in currentText until writePartial.
+				std::string partialRemainder = currentText;
+				if (currentText.size() >= text.size() &&
+					currentText.compare(0, text.size(), text) == 0) {
+					partialRemainder = currentText.substr(text.size());
+				}
+				maybeWriteSnapshotToSpool(committedTextFromSegmentsLocked() + partialRemainder, true);
 			}
 		}
 		notifyAppendListeners();
+		if (hasCommittedSegment) {
+			notifyCommitListeners(committedSegment);
+		}
 		return committedSegmentIndex;
 	}
 
@@ -545,6 +664,7 @@ struct TxtLiveEntry {
 		}
 
 		notifyAppendListeners();
+		seg_engine_on_buffer_finalized(bufferId);
 	}
 
 	std::string snapshotText() {
@@ -687,10 +807,27 @@ struct TxtLiveEntry {
 						throw makeCodedError("TEXT_SPOOL_CORRUPTED", "Text journal checksum mismatch for " + bufferId);
 					}
 
-					if (recordType == kTextSpoolRecordPartialSet ||
-						recordType == kTextSpoolRecordPartialAppend ||
-						recordType == kTextSpoolRecordSegmentCommit) {
-						latest = payload;
+					if (recordType == kTextSpoolRecordPartialSet) {
+						// Journal payloads are full snapshots from currentFullSnapshotLocked().
+						// Never shrink below the checkpoint baseline (stale partial windows).
+						if (payload.size() >= latest.size()) {
+							latest = payload;
+						}
+					} else if (recordType == kTextSpoolRecordPartialAppend) {
+						latest += payload;
+					} else if (recordType == kTextSpoolRecordSegmentCommit) {
+						// Android-compatible journal rows (segment JSON); iOS normally
+						// checkpoints full snapshots instead.
+						const std::string marker = "\"text\":";
+						const size_t idx = payload.find(marker);
+						if (idx != std::string::npos) {
+							const size_t start = payload.find('"', idx + marker.size());
+							const size_t end =
+								start == std::string::npos ? std::string::npos : payload.find('"', start + 1);
+							if (start != std::string::npos && end != std::string::npos && end > start) {
+								latest += payload.substr(start + 1, end - start - 1);
+							}
+						}
 					}
 				}
 				fclose(jr);
@@ -762,6 +899,11 @@ struct TxtLiveEntry {
 			std::lock_guard<std::mutex> lock(appendListenerMutex);
 			appendListeners.clear();
 		}
+		{
+			std::lock_guard<std::mutex> lock(commitListenerMutex);
+			commitListeners.clear();
+		}
+		seg_engine_on_buffer_released(bufferId);
 	}
 };
 
@@ -792,6 +934,14 @@ bool txt_live_commit_segment(
 bool txt_read_offline_text(
 	const std::string &bufferId,
 	std::string *text,
+	std::string *error = nullptr
+);
+
+// Like txt_read_offline_text but also returns `lang` for downstream pass-through.
+bool txt_read_offline_text_with_lang(
+	const std::string &bufferId,
+	std::string *text,
+	std::string *lang,
 	std::string *error = nullptr
 );
 

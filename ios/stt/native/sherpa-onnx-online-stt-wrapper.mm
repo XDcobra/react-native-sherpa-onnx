@@ -7,6 +7,7 @@
 
 #include "sherpa-onnx-online-stt-wrapper.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-validate-online-stt.h"
 
 #include "sherpa-onnx/c-api/cxx-api.h"
 
@@ -41,7 +42,7 @@ std::unordered_map<std::string, std::string> scanOnlineModelPaths(const std::str
     };
     std::string tokensPath = FindFileEndingWith(files, "tokens.txt");
 
-    if (modelType == "transducer") {
+    if (modelType == "transducer" || modelType == "nemo_transducer") {
         std::string enc = firstOnnx({"encoder"});
         std::string dec = firstOnnx({"decoder"});
         std::string join = firstOnnx({"joiner"});
@@ -75,6 +76,115 @@ std::unordered_map<std::string, std::string> scanOnlineModelPaths(const std::str
         return out;
     }
     return {};
+}
+
+static std::unordered_map<std::string, std::string> onlinePathsToMap(
+    const OnlineSttModelPaths& paths
+) {
+    return {
+        {"encoder", paths.encoder},
+        {"decoder", paths.decoder},
+        {"joiner", paths.joiner},
+        {"tokens", paths.tokens},
+        {"model", paths.model},
+    };
+}
+
+static bool applyOnlineModelPathsToConfig(
+    const std::unordered_map<std::string, std::string>& paths,
+    const std::string& modelType,
+    sherpa_onnx::cxx::OnlineRecognizerConfig& config,
+    std::string& error
+) {
+    if (modelType == "transducer") {
+        config.model_config.transducer.encoder = paths.at("encoder");
+        config.model_config.transducer.decoder = paths.at("decoder");
+        config.model_config.transducer.joiner = paths.at("joiner");
+        config.model_config.model_type = "zipformer";
+    } else if (modelType == "nemo_transducer") {
+        config.model_config.transducer.encoder = paths.at("encoder");
+        config.model_config.transducer.decoder = paths.at("decoder");
+        config.model_config.transducer.joiner = paths.at("joiner");
+        config.model_config.model_type = "";
+    } else if (modelType == "paraformer") {
+        config.model_config.paraformer.encoder = paths.at("encoder");
+        config.model_config.paraformer.decoder = paths.at("decoder");
+        config.model_config.model_type = "paraformer";
+    } else if (modelType == "zipformer2_ctc") {
+        config.model_config.zipformer2_ctc.model = paths.at("model");
+        config.model_config.model_type = "zipformer2";
+    } else if (modelType == "nemo_ctc") {
+        config.model_config.nemo_ctc.model = paths.at("model");
+        config.model_config.model_type = "nemo_ctc";
+    } else if (modelType == "tone_ctc") {
+        config.model_config.t_one_ctc.model = paths.at("model");
+        config.model_config.model_type = "t_one";
+    } else {
+        error = "Unsupported online STT model type: " + modelType;
+        return false;
+    }
+    return true;
+}
+
+static OnlineSttInitResult createOnlineRecognizerFromPaths(
+    const std::unordered_map<std::string, std::string>& paths,
+    const std::string& modelType,
+    bool enableEndpoint,
+    const std::string& decodingMethod,
+    int32_t maxActivePaths,
+    const std::string& hotwordsFile,
+    float hotwordsScore,
+    int32_t numThreads,
+    const std::string& provider,
+    const std::string& ruleFsts,
+    const std::string& ruleFars,
+    float dither,
+    float blankPenalty,
+    bool debug,
+    float rule1MinTrailingSilence,
+    float rule2MinTrailingSilence,
+    float rule3MinUtteranceLength,
+    std::unique_ptr<sherpa_onnx::cxx::OnlineRecognizer>& recognizerOut,
+    int32_t& sampleRateOut
+) {
+    OnlineSttInitResult result;
+    sherpa_onnx::cxx::OnlineRecognizerConfig config;
+    config.feat_config.sample_rate = 16000;
+    config.feat_config.feature_dim = 80;
+    (void)dither;
+    config.decoding_method = decodingMethod.empty() ? "greedy_search" : decodingMethod;
+    config.max_active_paths = maxActivePaths;
+    config.enable_endpoint = enableEndpoint;
+    config.rule1_min_trailing_silence = rule1MinTrailingSilence > 0 ? rule1MinTrailingSilence : 2.4f;
+    config.rule2_min_trailing_silence = rule2MinTrailingSilence > 0 ? rule2MinTrailingSilence : 1.4f;
+    config.rule3_min_utterance_length = rule3MinUtteranceLength > 0 ? rule3MinUtteranceLength : 20.f;
+    config.hotwords_file = hotwordsFile;
+    config.hotwords_score = hotwordsScore;
+    config.rule_fsts = ruleFsts;
+    config.rule_fars = ruleFars;
+    config.blank_penalty = blankPenalty;
+    config.model_config.num_threads = numThreads <= 0 ? 1 : numThreads;
+    config.model_config.provider = provider.empty() ? "cpu" : provider;
+    config.model_config.debug = debug;
+    config.model_config.tokens = paths.count("tokens") ? paths.at("tokens") : "";
+
+    if (!applyOnlineModelPathsToConfig(paths, modelType, config, result.error)) {
+        return result;
+    }
+
+    try {
+        sherpa_onnx::cxx::OnlineRecognizer rec = sherpa_onnx::cxx::OnlineRecognizer::Create(config);
+        recognizerOut = std::make_unique<sherpa_onnx::cxx::OnlineRecognizer>(std::move(rec));
+        sampleRateOut = config.feat_config.sample_rate;
+        result.success = true;
+    } catch (const std::exception& e) {
+        result.error = std::string("OnlineRecognizer Create failed: ") + e.what();
+        LOGE("%s", result.error.c_str());
+    } catch (...) {
+        result.error = "OnlineRecognizer Create failed: unknown error";
+        LOGE("%s", result.error.c_str());
+    }
+    return result;
 }
 
 } // namespace
@@ -137,65 +247,101 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
         return result;
     }
 
-    sherpa_onnx::cxx::OnlineRecognizerConfig config;
-    config.feat_config.sample_rate = 16000;
-    config.feat_config.feature_dim = 80;
-    // Dither is not exposed on cxx::FeatureConfig in the bundled sherpa-onnx headers;
-    // Android applies it via JNI. iOS uses the library default (no dither from JS).
-    (void)dither;
-    config.decoding_method = decodingMethod.empty() ? "greedy_search" : decodingMethod;
-    config.max_active_paths = maxActivePaths;
-    config.enable_endpoint = enableEndpoint;
-    config.rule1_min_trailing_silence = rule1MinTrailingSilence > 0 ? rule1MinTrailingSilence : 2.4f;
-    config.rule2_min_trailing_silence = rule2MinTrailingSilence > 0 ? rule2MinTrailingSilence : 1.4f;
-    config.rule3_min_utterance_length = rule3MinUtteranceLength > 0 ? rule3MinUtteranceLength : 20.f;
-    config.hotwords_file = hotwordsFile;
-    config.hotwords_score = hotwordsScore;
-    config.rule_fsts = ruleFsts;
-    config.rule_fars = ruleFars;
-    config.blank_penalty = blankPenalty;
-    config.model_config.num_threads = numThreads <= 0 ? 1 : numThreads;
-    config.model_config.provider = provider.empty() ? "cpu" : provider;
-    config.model_config.debug = debug;
-    config.model_config.tokens = paths.count("tokens") ? paths["tokens"] : "";
+    auto initResult = createOnlineRecognizerFromPaths(
+        paths,
+        modelType,
+        enableEndpoint,
+        decodingMethod,
+        maxActivePaths,
+        hotwordsFile,
+        hotwordsScore,
+        numThreads,
+        provider,
+        ruleFsts,
+        ruleFars,
+        dither,
+        blankPenalty,
+        debug,
+        rule1MinTrailingSilence,
+        rule2MinTrailingSilence,
+        rule3MinUtteranceLength,
+        pImpl->recognizer,
+        pImpl->sampleRate
+    );
+    if (initResult.success) {
+        pImpl->initialized = true;
+    }
+    return initResult;
+}
 
-    if (modelType == "transducer") {
-        config.model_config.transducer.encoder = paths["encoder"];
-        config.model_config.transducer.decoder = paths["decoder"];
-        config.model_config.transducer.joiner = paths["joiner"];
-        config.model_config.model_type = "zipformer";
-    } else if (modelType == "paraformer") {
-        config.model_config.paraformer.encoder = paths["encoder"];
-        config.model_config.paraformer.decoder = paths["decoder"];
-        config.model_config.model_type = "paraformer";
-    } else if (modelType == "zipformer2_ctc") {
-        config.model_config.zipformer2_ctc.model = paths["model"];
-        config.model_config.model_type = "zipformer2";
-    } else if (modelType == "nemo_ctc") {
-        config.model_config.nemo_ctc.model = paths["model"];
-        config.model_config.model_type = "nemo_ctc";
-    } else if (modelType == "tone_ctc") {
-        config.model_config.t_one_ctc.model = paths["model"];
-        config.model_config.model_type = "t_one";
-    } else {
-        result.error = "Unsupported online STT model type: " + modelType;
+OnlineSttInitResult OnlineSttWrapper::initializeCustom(
+    const std::string& modelType,
+    const OnlineSttModelPaths& paths,
+    bool enableEndpoint,
+    const std::string& decodingMethod,
+    int32_t maxActivePaths,
+    const std::string& hotwordsFile,
+    float hotwordsScore,
+    int32_t numThreads,
+    const std::string& provider,
+    const std::string& ruleFsts,
+    const std::string& ruleFars,
+    float dither,
+    float blankPenalty,
+    bool debug,
+    bool /* rule1MustContainNonSilence */,
+    float rule1MinTrailingSilence,
+    float /* rule1MinUtteranceLength */,
+    bool /* rule2MustContainNonSilence */,
+    float rule2MinTrailingSilence,
+    float /* rule2MinUtteranceLength */,
+    bool /* rule3MustContainNonSilence */,
+    float /* rule3MinTrailingSilence */,
+    float rule3MinUtteranceLength
+) {
+    OnlineSttInitResult result;
+    if (pImpl->initialized) {
+        result.error = "Already initialized";
         return result;
     }
 
-    try {
-        sherpa_onnx::cxx::OnlineRecognizer rec = sherpa_onnx::cxx::OnlineRecognizer::Create(config);
-        pImpl->recognizer = std::make_unique<sherpa_onnx::cxx::OnlineRecognizer>(std::move(rec));
-        pImpl->sampleRate = config.feat_config.sample_rate;
-        pImpl->initialized = true;
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error = std::string("OnlineRecognizer Create failed: ") + e.what();
-        LOGE("%s", result.error.c_str());
-    } catch (...) {
-        result.error = "OnlineRecognizer Create failed: unknown error";
-        LOGE("%s", result.error.c_str());
+    const OnlineSttModelKind kind = ParseOnlineSttModelType(modelType);
+    if (kind == OnlineSttModelKind::kUnknown) {
+        result.error = "Unsupported custom streaming STT model type: " + modelType;
+        return result;
     }
-    return result;
+
+    const auto validation = ValidateOnlineSttPaths(kind, paths, "custom");
+    if (!validation.ok) {
+        result.error = validation.error;
+        return result;
+    }
+
+    auto initResult = createOnlineRecognizerFromPaths(
+        onlinePathsToMap(paths),
+        modelType,
+        enableEndpoint,
+        decodingMethod,
+        maxActivePaths,
+        hotwordsFile,
+        hotwordsScore,
+        numThreads,
+        provider,
+        ruleFsts,
+        ruleFars,
+        dither,
+        blankPenalty,
+        debug,
+        rule1MinTrailingSilence,
+        rule2MinTrailingSilence,
+        rule3MinUtteranceLength,
+        pImpl->recognizer,
+        pImpl->sampleRate
+    );
+    if (initResult.success) {
+        pImpl->initialized = true;
+    }
+    return initResult;
 }
 
 bool OnlineSttWrapper::createStream(const std::string& streamId, const std::string& hotwords) {

@@ -5,6 +5,16 @@ import {
   resolveOfflineSegmentBufferId,
 } from '../segmentbuffer';
 import { resolvePipelineTextBufferId } from '../textbuffer';
+import { runAccurateAsrMediated } from './asrMediated/driver';
+import { runAccurateChunkedForcedCtc } from './chunkedForcedCtc/driver';
+import {
+  createAlignmentProgressSession,
+  type AlignmentProgressSession,
+} from './progress';
+import {
+  accurateOptionsToModelConfig,
+  resolveAlignmentOnnxPath,
+} from './resolveAlignmentOnnxPath';
 import type {
   AlignTextToAudioFn,
   AlignTextToAudioOptions,
@@ -26,7 +36,7 @@ function normalizeGranularity(
 /**
  * Character granularity requires accurate (CTC) mode.
  */
-export function assertAlignmentGranularityForMode(
+function assertAlignmentGranularityForMode(
   mode: 'proportional' | 'estimated' | 'aligned' | 'off' | 'vad',
   granularity: AlignmentGranularity
 ): void {
@@ -51,46 +61,30 @@ function toNativeMode(
   throw new Error(`Unsupported alignment mode: ${String(mode)}`);
 }
 
-function buildNativeOptions(
+function emitSingleStepNativeAlignmentStart(
+  progressSession: AlignmentProgressSession
+): void {
+  progressSession.emitStep(0, 1, 0);
+}
+
+async function buildNativeOptions(
   options: AlignTextToAudioOptions
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const language =
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const alignmentModelPath = options.alignmentModelPath?.trim();
-    if (!alignmentModelPath) {
-      throw new Error(
-        'ALIGNMENT_MODEL_MISSING: Provide options.alignmentModelPath for accurate alignment.'
-      );
-    }
+    const onnxPath = await resolveAlignmentOnnxPath(
+      accurateOptionsToModelConfig(options)
+    );
     const base: Record<string, unknown> = {
-      alignmentModelPath,
+      modelPath: onnxPath,
       ...(language.length > 0 ? { language } : {}),
     };
-    const hasSegmentation = Object.prototype.hasOwnProperty.call(
-      options,
-      'segmentation'
-    );
-    if (hasSegmentation && options.segmentation?.source !== 'vad') {
+    if (options.segmentation?.mode !== 'off' && options.segmentation != null) {
       throw new Error(
-        'ALIGNMENT_ERROR: accurate+segmentation requires options.segmentation.source="vad".'
+        'ALIGNMENT_OPTIONS_INVALID: accurate segmentation options are routed by the strategy drivers and cannot be sent through native options directly.'
       );
-    }
-    if (options.segmentation?.source === 'vad') {
-      const segmentationBufferId = resolveOfflineSegmentBufferId(
-        options.segmentation.segmentBuffer
-      );
-      const rawMinAnchors = options.segmentation.minAnchors;
-      const minAnchors = rawMinAnchors == null ? 2 : Number(rawMinAnchors);
-      if (!Number.isInteger(minAnchors) || minAnchors < 1 || minAnchors > 10) {
-        throw new Error(
-          'ALIGNMENT_ERROR: segmentation.minAnchors must be an integer between 1 and 10.'
-        );
-      }
-      base.segmentationSource = 'vad';
-      base.segmentationBufferId = segmentationBufferId;
-      base.minAnchors = minAnchors;
     }
     return base;
   }
@@ -138,12 +132,47 @@ function buildNativeOptions(
 /**
  * Build alignment segments into a caller-provided offline segment buffer.
  */
-export const alignTextToAudio: AlignTextToAudioFn = async (
+export const runAlignTextToAudio: AlignTextToAudioFn = async (
   textIn,
   audioIn,
   segmentOut,
   options
 ) => {
+  if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
+    const onProgress = options.onProgress;
+    const model = accurateOptionsToModelConfig(options);
+    if (options.segmentation.mappingStrategy === 'asr_mediated') {
+      return runAccurateAsrMediated({
+        textIn,
+        audioIn,
+        segmentOut,
+        anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
+        hypothesisTextBuffer: options.segmentation.asr.hypothesisTextBuffer,
+        model,
+        granularity: options.granularity === 'word' ? 'word' : 'sentence',
+        ...(onProgress ? { onProgress } : {}),
+        ...(typeof options.language === 'string'
+          ? { language: options.language }
+          : {}),
+      });
+    }
+
+    return runAccurateChunkedForcedCtc({
+      textIn,
+      audioIn,
+      segmentOut,
+      anchorSegmentBuffer: options.segmentation.anchorSegmentBuffer,
+      model,
+      granularity: options.granularity === 'word' ? 'word' : 'sentence',
+      ...(onProgress ? { onProgress } : {}),
+      ...(typeof options.language === 'string'
+        ? { language: options.language }
+        : {}),
+    });
+  }
+
+  const progressSession = createAlignmentProgressSession(options.onProgress);
+
   const mode = toNativeMode(options.mode);
   const granularity = normalizeGranularity(options.granularity);
   const normalizedMode = mode === 'accurate' ? 'aligned' : mode;
@@ -153,24 +182,7 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
       'ALIGNMENT_ERROR: mode=vad supports only sentence or word granularity.'
     );
   }
-  if (
-    mode === 'accurate' &&
-    options.segmentation?.source === 'vad' &&
-    granularity === 'character'
-  ) {
-    throw new Error(
-      'ALIGNMENT_ERROR: accurate+vad supports only sentence or word granularity.'
-    );
-  }
-  if (
-    mode === 'vad' &&
-    (!options.segmentation || options.segmentation.source !== 'vad')
-  ) {
-    throw new Error(
-      'ALIGNMENT_ERROR: mode=vad requires options.segmentation with source="vad".'
-    );
-  }
-  if (mode === 'vad') {
+  if (options.mode === 'vad') {
     const segmentation = options.segmentation;
     if (!segmentation || segmentation.source !== 'vad') {
       throw new Error(
@@ -197,7 +209,9 @@ export const alignTextToAudio: AlignTextToAudioFn = async (
   const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
   const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
 
-  const nativeOptions = buildNativeOptions(options);
+  const nativeOptions = await buildNativeOptions(options);
+
+  emitSingleStepNativeAlignmentStart(progressSession);
 
   return SherpaOnnx.alignOfflineTextToAudio(
     textInBufferId,

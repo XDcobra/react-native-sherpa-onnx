@@ -45,6 +45,19 @@ export type ExtractProgressEvent = {
   operationId?: string;
 };
 
+/** Result from unified archive extraction (path or asset stream) — native TurboModule payload. */
+export type ExtractArchiveResult = {
+  success: boolean;
+  /** True when extraction stopped due to cancel (resume with skipEntries = lastEntryIndex + 1). */
+  paused: boolean;
+  lastEntryIndex: number;
+  lastEntryPath: string;
+  bytesExtracted: number;
+  path?: string;
+  sha256?: string;
+  reason?: string;
+};
+
 /**
  * Result returned by `extractArchive` / `extractTarBz2`.
  * Failures other than native pause throw; `paused` is returned so callers can persist resume metadata.

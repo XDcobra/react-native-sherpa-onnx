@@ -1,5 +1,7 @@
 # Pipeline text buffers — offline (`textbuffer`)
 
+## Introduction
+
 **Immutable offline text payloads** with optional metadata (tokens, timestamps, durations, lang, emotion, event). Used for **batch** STT outputs and consumers like alignment or offline TTS.
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
@@ -19,7 +21,9 @@ Offline buffers are read-heavy: you create/populate once, then access content wi
 
 ---
 
-## Quick start: STT -> OfflineTextBuffer
+## Quick start
+
+### STT -> OfflineTextBuffer
 
 ```ts
 import { createSTT } from 'react-native-sherpa-onnx/stt';
@@ -36,7 +40,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/sherpa-onnx-whisper-tiny-en' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' },
   modelType: 'auto',
 });
 
@@ -104,6 +108,25 @@ function createEmptyOfflineTextBuffer(): Promise<OfflineTextBufferRef>;
 ```ts
 const out = await createEmptyOfflineTextBuffer();
 console.log(out.info.kind, out.bufferId);
+```
+
+#### `createOfflineTextBufferFromText(text, options?)`
+
+Creates an **immutable** offline buffer already populated with `text` (e.g. offline TTS input or [`segmentOfflineBuffer`](segmentation-engine.md) on text). `text` must not be empty.
+
+```ts
+function createOfflineTextBufferFromText(
+  text: string,
+  options?: { lang?: string; emotion?: string; event?: string }
+): Promise<OfflineTextBufferRef>;
+```
+
+```ts
+import { createOfflineTextBufferFromText } from 'react-native-sherpa-onnx/textbuffer';
+
+const buf = await createOfflineTextBufferFromText('Hello world.', {
+  lang: 'en',
+});
 ```
 
 ### Offline buffer getters
@@ -202,7 +225,27 @@ const windowOnly = await createOfflineTextBufferFromLive(live, 'windowSnapshot')
 
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  OfflineTextBufferRef, // offline text buffer ref { info, bufferId }
+  OfflineTextBufferInfo, // metadata for immutable offline text payload
+  OfflineTextBufferIdSource, // ref/handle/id accepted by offline text APIs
+  OfflineTextBufferFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  PipelineTextBufferInfo, // offline/live info union for shared info APIs
+  PipelineTextBufferIdSource, // ref/info/handle/id accepted by shared APIs
+  PipelineTextErrorCodeValue, // string union of textbuffer error codes
+} from 'react-native-sherpa-onnx/textbuffer';
+
+import {
+  PipelineTextErrorCode, // runtime constants for code-based error handling
+  TEXT_DEFAULT_SLICE_COUNT, // default slice size helper
+  TEXT_MAX_SLICE_COUNT, // maximum safe slice size helper
+} from 'react-native-sherpa-onnx/textbuffer';
+```
+
+## Error codes
 
 The following codes are the relevant runtime outcomes for offline text-buffer reads and live-to-offline conversion in this document.
 
@@ -228,3 +271,36 @@ The following codes are the relevant runtime outcomes for offline text-buffer re
 - [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Offline STT](stt-offline.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
+
+## Use case examples
+
+<details>
+<summary>Read transcript and token metadata from offline buffer in slices</summary>
+
+```ts
+const info = await getPipelineTextBufferInfo(textOut);
+const fullText = await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length);
+const firstTokens = await getOfflineTextBufferTokensSlice(textOut, 0, 64);
+const firstTimestamps = await getOfflineTextBufferTimestampsSlice(textOut, 0, 64);
+console.log(fullText, firstTokens.length, firstTimestamps.length);
+```
+
+</details>
+
+<details>
+<summary>Create offline snapshot from live text with strict spool mode</summary>
+
+```ts
+// Throws TEXT_SPOOL_* if spool is unavailable or corrupted.
+const snapshot = await createOfflineTextBufferFromLive(liveText, 'fullIfSpooled');
+const text = await getOfflineTextBufferTextSlice(snapshot, 0, 1024);
+console.log(text);
+await releasePipelineTextBuffer(snapshot);
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

@@ -22,6 +22,23 @@ struct AlignmentResult {
   std::string timing_mode;
 };
 
+struct ForcedCtcToken {
+  std::string text;
+  double start_ms = 0.0;
+  double end_ms = 0.0;
+};
+
+struct ForcedCtcDiagnostics {
+  double ctc_blank_ratio = 0.0;
+  int32_t frames_processed = 0;
+};
+
+struct ForcedCtcResult {
+  std::vector<ForcedCtcToken> tokens;
+  int32_t consumed_token_count = 0;
+  ForcedCtcDiagnostics diagnostics;
+};
+
 AlignmentResult AlignProportional(
     const std::string& text,
     int32_t total_samples,
@@ -50,6 +67,16 @@ AlignmentResult AlignAccurateFromFile(
     const std::string& text,
     const std::string& audio_path,
     const std::string& granularity  // sentence | word | character
+);
+
+ForcedCtcResult AlignAccurateForcedCtcFromPcm(
+  const std::string& model_path,
+  const std::string& window_text,
+  const float* samples,
+  size_t sample_count,
+  int32_t sample_rate,
+  const std::string& granularity,
+  const std::string& language = ""
 );
 
 }  // namespace alignment

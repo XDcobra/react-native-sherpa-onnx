@@ -1,423 +1,359 @@
-# Model Setup
+# Model setup
 
-Discover, resolve, and validate model paths across bundled assets, Play Asset Delivery (PAD), and downloaded models.
+Discover model locations, build `FileSource` descriptors, and list available packs — **before** detection or engine init.
 
-**Import path:** `react-native-sherpa-onnx`
+| Doc | Question it answers |
+| --- | --- |
+| **This page** | Where is my model? How do I point the SDK at it? |
+| [model-detect.md](model-detect.md) | What model type is this? Is it valid? How do I init (auto vs custom)? |
+| [model-languages.md](model-languages.md) | Which language codes / pickers apply to a model family? |
+| [model-delivery-pad-odr.md](model-delivery-pad-odr.md) | How do I ship large models via PAD (Android) or ODR (iOS)? |
 
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-  - [Path Helpers](#path-helpers)
-  - [Asset Discovery](#asset-discovery)
-  - [Play Asset Delivery (PAD)](#play-asset-delivery-pad)
-  - [Model Detection](#model-detection)
-  - [Model detection internals](#model-detection-internals)
-- [Model Sources at a Glance](#model-sources-at-a-glance)
-- [Detailed Examples](#detailed-examples)
-- [Troubleshooting & Tuning](#troubleshooting--tuning)
-- [See Also](#see-also)
+**Imports:** path helpers → `react-native-sherpa-onnx/utils` · `FileSource` type → `react-native-sherpa-onnx/fileio`
 
 ---
 
-## Overview
+## Table of contents
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Asset model path | ✅ | `assetModelPath()` — bundled in app |
-| File model path | ✅ | `fileModelPath()` — absolute filesystem path |
-| Auto model path | ✅ | `autoModelPath()` — tries asset then filesystem |
-| Path resolution | ✅ | `resolveModelPath()` — returns native-usable absolute path |
-| Asset listing | ✅ | `listAssetModels()` — scans `assets/models/` (Android) / bundle `models/` (iOS) |
-| Filesystem listing | ✅ | `listModelsAtPath()` — scans any directory |
-| PAD support | ✅ | See [Extraction API](extraction.md) for more details - Android only |
-| STT model detection | ✅ | `detectSttModel()` — file-based type detection + required-file validation |
-| TTS model detection | ✅ | `detectTtsModel()` — file-based type detection |
+- [Quick start](#quick-start)
+- [FileSource — the common thread](#filesource--the-common-thread)
+- [Model sources at a glance](#model-sources-at-a-glance)
+- [Expected folder layouts](#expected-folder-layouts)
+- [PAD / ODR (large models)](#pad--odr-large-models)
+- [API reference](#api-reference)
+- [Troubleshooting](#troubleshooting)
+- [See also](#see-also)
 
 ---
 
-## Quick Start
+## Quick start
 
 ```typescript
 import {
-  assetModelPath,
+  bundledModelFileSource,
   listAssetModels,
-  resolveModelPath,
-} from 'react-native-sherpa-onnx';
-import { detectSttModel } from 'react-native-sherpa-onnx/stt';
+} from 'react-native-sherpa-onnx/utils';
+import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
 
 // 1) Discover bundled models
 const models = await listAssetModels();
-// [{ folder: 'sherpa-onnx-whisper-tiny-en', hint: 'stt' }, ...]
+// [{ folder: 'sherpa-onnx-whisper-tiny-en', hint: 'stt' }, …]
 
-// 2) Detect model type before loading (FileSource)
-const detection = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/model' });
-console.log(detection.modelType);    // 'whisper'
-console.log(detection.isStreaming);   // false (whisper is offline-only)
+// 2) Build a FileSource for the pack you want
+const modelSource = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
 
-// 3) Create engine
-const modelPath = assetModelPath('models/sherpa-onnx-whisper-tiny-en');
-const stt = await createSTT({
-  modelPath,
-  modelType: 'auto', // uses detected type
-});
+// 3) Optional cheap pre-check (no engine load) — see model-detect.md
+const detection = await detectSttModel(modelSource);
+if (!detection.success) throw new Error(detection.error ?? 'Invalid pack');
+
+// 4) Create engine (auto mode — SDK detects type from folder)
+const stt = await createSTT({ modelSource, modelType: 'auto' });
 ```
 
 ---
 
-## API Reference
+## FileSource — the common thread
 
-### Path Helpers
+Every model path in the SDK is a **`FileSource`** — a small descriptor that tells native code **where** to read files. The same type is used for detection, engine init, alignment, and segmentation policy.
 
-#### `assetModelPath(assetPath)`
-
-Create a `ModelPathConfig` pointing to a model bundled in app assets.
-
-```ts
-function assetModelPath(assetPath: string): ModelPathConfig;
-// Returns { type: 'asset', path: assetPath }
+```typescript
+type FileSource =
+  | { kind: 'fs'; path: string }                              // absolute path on disk
+  | { kind: 'app'; base: AppBaseDir; path: string }           // app sandbox or bundled tree
+  | { kind: 'contentUri'; uri: string }                       // Android SAF document (Android only)
+  | { kind: 'securityScoped'; uri: string }                   // iOS security-scoped URL (iOS only)
+  | { kind: 'pad'; packName: string; path: string }            // installed PAD pack (Android only)
+  | { kind: 'auto'; path: string; tryOrder: AutoTryTarget[] }; // probe multiple locations
 ```
 
-**Android:** relative to `assets/` (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
-**iOS:** relative to the app bundle (e.g. `'models/sherpa-onnx-whisper-tiny-en'`).
+| `kind` | Typical use | Platform |
+| --- | --- | --- |
+| `fs` | Downloaded / extracted models | Both |
+| `app` + `apkAsset` | Models in `android/app/src/main/assets/` | Android |
+| `app` + `appBundle` | Models in the iOS app bundle (Copy Bundle Resources) | iOS |
+| `app` + `files` / `documents` | App sandbox after download or extract | Both |
+| `pad` | Read from an **already installed** PAD pack | Android |
+| `auto` | Try bundled → sandbox → PAD → fs in order | Detect/init only |
 
-#### `fileModelPath(filePath)`
+> [!NOTE]
+> **`FileSource` describes a location, not a single file.** For auto init you pass a **folder**; native detection scans it. For custom init you pass one `FileSource` **per required file** — see [Init modes](model-detect.md#init-modes-auto-vs-custom) in model-detect.md.
 
-Create a `ModelPathConfig` pointing to a model on the filesystem.
+Full `FileSource` / copy / share API: [fileio.md](fileio.md).
 
-```ts
-function fileModelPath(filePath: string): ModelPathConfig;
-// Returns { type: 'file', path: filePath }
+### Bundled bases (`apkAsset` vs `appBundle`)
+
+| `AppBaseDir` | Resolves to | Platform |
+| --- | --- | --- |
+| `apkAsset` | APK `assets/<path>` | Android only |
+| `appBundle` | Main bundle `<path>` | iOS only |
+| `files`, `cache`, `documents`, … | App sandbox | Both — **no** bundle fallback |
+
+Use **`bundledModelFileSource('models/my-pack')`** when you know the model ships inside the app — it picks the correct base per platform.
+
+---
+
+## Model sources at a glance
+
+| Source | Helper | Discovery | When to use |
+| --- | --- | --- | --- |
+| **Bundled** | `bundledModelFileSource(path)` | `listAssetModels()` | Small models shipped with the app |
+| **Downloaded** | `{ kind: 'fs', path }` | [download-manager.md](download-manager.md) | User downloads at runtime |
+| **PAD / ODR** | `getAssetPackPath(pack)` → `listModelsAtPath` | `fetchAssetPack` + `ensureAssetPackReady` | Large tiered ship packs — see [PAD/ODR section](#pad--odr-large-models) |
+| **Multi-location** | `autoModelFileSource(path, tryOrder)` | — | Same folder name in bundle, sandbox, and/or PAD |
+
+```typescript
+import {
+  bundledModelFileSource,
+  autoModelFileSource,
+  listAssetModels,
+  listModelsAtPath,
+  getAssetPackPath,
+} from 'react-native-sherpa-onnx/utils';
+import { listDownloadedModelsByCategory, ModelCategory } from 'react-native-sherpa-onnx/download';
+
+// Bundled
+const bundled = await listAssetModels();
+
+// On-demand pack (fetch first — see model-delivery-pad-odr.md)
+const packPath = await getAssetPackPath('core_models');
+const packModels = packPath ? await listModelsAtPath(packPath, true) : [];
+
+// Downloaded
+const downloaded = await listDownloadedModelsByCategory(ModelCategory.Stt);
 ```
 
-Use absolute paths (e.g. from downloads or PAD). On iOS, use the Documents directory path.
+### `kind: 'auto'` — probe multiple locations
 
-#### `autoModelPath(path)`
+When the same folder name may exist in the bundle, sandbox, PAD, or as an absolute path:
 
-Create a `ModelPathConfig` that tries asset first, then filesystem.
+```typescript
+import { autoModelFileSource } from 'react-native-sherpa-onnx/utils';
 
-```ts
-function autoModelPath(path: string): ModelPathConfig;
-// Returns { type: 'auto', path }
+const modelSource = autoModelFileSource('models/my-pack', [
+  'apkAsset',              // Android APK assets/models/my-pack
+  'appBundle',             // iOS bundle models/my-pack (skipped on Android)
+  'files',                 // app sandbox files/models/my-pack
+  { pad: 'sherpa_models' }, // Android PAD pack (skipped on iOS)
+  'fs',                    // treat path as absolute directory
+]);
 ```
 
-#### `resolveModelPath(config)`
-
-Resolve a `ModelPathConfig` to an absolute filesystem path that native code can use.
-
-```ts
-function resolveModelPath(config: ModelPathConfig): Promise<string>;
-```
-
-| `type` | Resolution |
+| Rule | Detail |
 | --- | --- |
-| `'asset'` | Native copies/locates the asset and returns an absolute path |
-| `'file'` | Returns the path as-is |
-| `'auto'` | Tries asset first; falls back to file |
+| `tryOrder` required | Missing or empty → `FILEIO_INVALID_ARGUMENT` |
+| First match wins | First target that resolves to an **existing directory** |
+| Platform skips | Unsupported targets (e.g. `appBundle` on Android) are skipped silently |
+| Scope | Model detect/init only — **not** `copyFile` / `shareFile` |
 
-#### `getDefaultModelPath()`
+Typical Android: `['apkAsset', 'files', { pad: 'sherpa_models' }, 'fs']`  
+Typical iOS: `['appBundle', 'files', 'fs']`
 
-Returns the platform-specific default model directory.
-
-```ts
-function getDefaultModelPath(): string;
-// iOS: 'Documents/models'
-// Android: 'models'
-```
+Prefer **`bundledModelFileSource()`** when you know the model is in the app package — fully deterministic, no probing.
 
 ---
 
-### Asset Discovery
+## Expected folder layouts
 
-#### `listAssetModels()`
+Auto init expects a **directory** containing the ONNX files and sidecar files for one Sherpa model family. Native detection scans recursively and maps filenames to roles.
 
-Scan the bundled assets model directory and return discovered model folders with a hint.
+### Bundled (`apkAsset` / `appBundle`)
 
-```ts
+```
+assets/models/                          ← Android root (iOS: bundle models/)
+└── sherpa-onnx-whisper-tiny-en/        ← one folder = one model pack
+    ├── tiny-encoder.onnx
+    ├── tiny-decoder.onnx
+    └── tiny-tokens.txt
+```
+
+```typescript
+const source = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
+// Android → { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' }
+// iOS     → { kind: 'app', base: 'appBundle', path: 'models/sherpa-onnx-whisper-tiny-en' }
+```
+
+### Downloaded / extracted (`fs`)
+
+```
+/data/user/0/com.myapp/files/models/
+└── sherpa-onnx-streaming-zipformer-en/
+    ├── encoder-epoch-99-avg-1.onnx
+    ├── decoder-epoch-99-avg-1.onnx
+    ├── joiner-epoch-99-avg-1.onnx
+    └── tokens.txt
+```
+
+```typescript
+const source = { kind: 'fs', path: '/data/user/0/com.myapp/files/models/sherpa-onnx-streaming-zipformer-en' };
+```
+
+### PAD / ODR pack (after fetch)
+
+Uncompressed folders:
+
+```
+…/core_models/models/
+└── sherpa-onnx-whisper-tiny-en/
+    ├── tiny-encoder.onnx
+    ├── tiny-decoder.onnx
+    └── tiny-tokens.txt
+```
+
+Compressed ship archives (`.tar.zst`):
+
+```
+…/core_models/models/
+└── studio_models.tar.zst    ← extract first, then use fs path
+```
+
+After extract → `{ kind: 'fs', path: '<sandbox>/models/<modelId>' }`. See [extraction.md](extraction.md).
+
+> [!CAUTION]
+> **Custom init (`initMode: 'custom'`)** does **not** require a detectable folder layout. You pass explicit `FileSource` per file instead. See [Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+Required files per model type: feature docs (e.g. [STT required files](stt-offline.md#validation-required-files)) and [model-detect.md — Required files](model-detect.md#required-files-per-feature).
+
+---
+
+## PAD / ODR (large models)
+
+For models too large to ship in the main APK/IPA, use **Play Asset Delivery** (Android) or **On-Demand Resources** (iOS). The SDK provides transport APIs; your app orchestrates fetch, extract, and init.
+
+| Step | API | Notes |
+| --- | --- | --- |
+| Fetch | `fetchAssetPack` / `ensureAssetPackReady` | On-demand packs download at runtime |
+| Resolve path | `getAssetPackPath(packName)` | Returns `…/models/` or `null` if not ready |
+| List | `listModelsAtPath(packPath)` or `listBundledArchives(packPath)` | Folders vs compressed archives |
+| Extract (optional) | `extractArchive(archive, targetDir)` | For `.tar.zst` ship packs |
+| Init | `{ kind: 'fs', path: extractedDir }` | Same as any downloaded model |
+
+```typescript
+import { ensureAssetPackReady, getAssetPackPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
+
+await ensureAssetPackReady('core_models', {
+  onProgress: (_state, percent) => console.log('download', percent),
+});
+
+const packPath = await getAssetPackPath('core_models');
+if (!packPath) throw new Error('Pack not available');
+
+const models = await listModelsAtPath(packPath, true);
+// → [{ folder: 'sherpa-onnx-whisper-tiny-en', hint: 'stt' }, …]
+```
+
+Full guide: **[model-delivery-pad-odr.md](model-delivery-pad-odr.md)** (delivery modes, native setup, troubleshooting).
+
+---
+
+## API reference
+
+### `bundledModelFileSource(relativePath)`
+
+```typescript
+function bundledModelFileSource(relativePath: string): FileSource;
+```
+
+```typescript
+const source = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
+// Android: { kind: 'app', base: 'apkAsset', path: '…' }
+// iOS:     { kind: 'app', base: 'appBundle', path: '…' }
+```
+
+Returns a platform-correct `FileSource` for models inside the app package. Prefer this over hardcoding `apkAsset` / `appBundle`.
+
+---
+
+### `autoModelFileSource(path, tryOrder)`
+
+```typescript
+function autoModelFileSource(
+  path: string,
+  tryOrder: AutoTryTarget[]
+): FileSource;
+```
+
+```typescript
+const source = autoModelFileSource('models/my-pack', ['apkAsset', 'files', 'fs']);
+const stt = await createSTT({ modelSource: source, modelType: 'auto' });
+```
+
+Builds `{ kind: 'auto', path, tryOrder }`. First existing directory wins. Detect/init only.
+
+---
+
+### `listAssetModels()`
+
+```typescript
 function listAssetModels(): Promise<Array<{
   folder: string;
   hint: 'stt' | 'tts' | 'unknown';
 }>>;
 ```
 
-On Android scans `assets/models/`; on iOS scans the `models/` bundle directory.
+```typescript
+const models = await listAssetModels();
+// Android: scans assets/models/ · iOS: scans bundle models/
+```
 
-#### `listModelsAtPath(path, recursive?)`
+Returns folder names with a best-effort category hint. Use `detect*Model` or `detectModel` for definitive type detection — hints are naming heuristics only.
 
-Scan a filesystem directory for model folders.
+---
 
-```ts
+### `listModelsAtPath(path, recursive?)`
+
+```typescript
 function listModelsAtPath(
   path: string,
   recursive?: boolean
 ): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>>;
 ```
 
-When `recursive` is `true`, returns relative folder paths under the base path. Useful for listing downloaded or PAD-delivered models.
+```typescript
+const packPath = await getAssetPackPath('core_models');
+const models = packPath ? await listModelsAtPath(packPath, true) : [];
+```
+
+Scans any filesystem directory. `recursive: true` returns relative paths under the base.
 
 ---
 
-### Play Asset Delivery (PAD)
+### `getAssetPackPath(packName)`
 
-#### `getAssetPackPath(packName)`
-
-Returns the path to the models directory inside an Android asset pack, or `null` if unavailable (iOS always returns `null`).
-
-```ts
+```typescript
 function getAssetPackPath(packName: string): Promise<string | null>;
 ```
 
-Alias: `getPlayAssetDeliveryModelsPath` (same function).
-
-Use with `listModelsAtPath` to enumerate PAD-delivered models:
-
 ```typescript
-const padPath = await getAssetPackPath('sherpa_models');
-if (padPath) {
-  const padModels = await listModelsAtPath(padPath, true);
-  console.log('PAD models:', padModels);
-}
+const packPath = await getAssetPackPath('core_models');
+// Android: PAD STORAGE_FILES path …/models
+// iOS: ODR tag path …/{tag}/models
+// null until pack is fetched / ready
 ```
+
+Returns the `models` directory inside an installed pack. Alias: `getPlayAssetDeliveryModelsPath`.
+
+Fetch workflow: [model-delivery-pad-odr.md](model-delivery-pad-odr.md).
 
 ---
 
-### Model Detection
-
-#### `detectSttModel(source, options?)`
-
-Detect the STT model type and validate required files without loading the model.
-
-```ts
-function detectSttModel(
-  source: FileSource,
-  options?: { preferInt8?: boolean; modelType?: STTModelType }
-): Promise<{
-  success: boolean;
-  /** When `success` is `false`: native validation/detect message. Omitted if the native layer returned an empty string. */
-  error?: string;
-  /** Unsupported-hardware model (e.g. RK35xx, Ascend); from native when applicable. */
-  isHardwareSpecificUnsupported?: boolean;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-  /** `true` when the detected model type is a streaming-capable online engine (transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc). */
-  isStreaming: boolean;
-}>;
-```
-
-Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
-
-For `FileSource` resolution problems (unsupported location kind/platform, traversal, permissions, path resolution), the promise can reject with `FILEIO_*` errors before native model detection runs.
-
-#### `detectTtsModel(source, options?)`
-
-Detect the TTS model type without loading.
-
-```ts
-function detectTtsModel(
-  source: FileSource,
-  options?: { modelType?: TTSModelType }
-): Promise<{
-  success: boolean;
-  /** When `success` is `false`: native validation/detect message. Omitted if the native layer returned an empty string. */
-  error?: string;
-  detectedModels: Array<{ type: string; modelDir: string }>;
-  modelType?: string;
-  lexiconLanguageCandidates?: string[];
-  /** Always `true` for TTS models. */
-  isStreaming: boolean;
-}>;
-```
-
-Returns `success: false` when required files are missing or validation fails; use **`error`** for the user-facing message when present.
-
-For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors (for example `FILEIO_UNSUPPORTED_ON_PLATFORM`, `FILEIO_PATH_TRAVERSAL_BLOCKED`, `FILEIO_PERMISSION_DENIED`, `FILEIO_NOT_FOUND`, `FILEIO_RESOLVE_ERROR`).
-
-`lexiconLanguageCandidates` is present for Kokoro/Kitten models — contains language IDs from detected lexicon files (e.g. `"us-en"`, `"zh"`).
-
-### Model detection internals
-
-Native code scans the **resolved** model directory (recursive), maps filenames to engine roles, then (a) lists **every** engine kind that *could* fit --> `detectedModels`, and (b) picks based on the highest probability **one** kind for validation --> `modelType` (same rules as `createSTT` / `createTTS` with `modelType: 'auto'`). Full pipeline: comments at the top of `sherpa-onnx-model-detect-stt.cpp` / `sherpa-onnx-model-detect-tts.cpp`.
-
-**Why `detectSttModel` / `detectTtsModel` if `createSTT` / `createTTS` already support `modelType: 'auto'`?**  
-Detection is a **cheap preflight**: no recognizer / TTS engine allocation, faster when probing many folders, and you get **`success` / `error` / `isHardwareSpecificUnsupported`** (STT) before paying for full init. Use it for validation UI, model pickers, and diagnostics; skip it if you only need to load one known-good pack.
-
-**STT — return shape, options, and matching `createSTT`:**
-
-```typescript
-import { assetModelPath } from 'react-native-sherpa-onnx';
-import { detectSttModel, createSTT } from 'react-native-sherpa-onnx/stt';
-
-const modelPath = assetModelPath('models/my-pack');
-// detectSttModel resolves the FileSource internally, then runs native file scan (no recognizer init).
-
-const det = await detectSttModel({ kind: 'fs', path: '/absolute/path/to/my-pack' }, {
-  // preferInt8 omitted: do not filter by int8 in filenames (native picks among matches by its own rule).
-  // preferInt8: true  --> use int8-named ONNX where applicable (e.g. *-int8.onnx).
-  // preferInt8: false --> skip int8-named ONNX files (float / full-precision variants).
-  preferInt8: true,
-
-  // modelType omitted or 'auto': choose kind from folder-name hints, else fixed fallback order.
-  // modelType: 'whisper' | 'nemo_transducer' | … --> use only if that engine is supported by the files.
-  modelType: 'auto',
-});
-
-// Array = all engine types this folder might represent (often length 1). Same modelDir per entry;
-// multiple entries = ambiguous pack — e.g. build a picker from det.detectedModels.map(m => m.type).
-const candidates = det.detectedModels;
-
-// Kind native used for validation (informative). Usually you do NOT pass this into createSTT — see below.
-const chosen = det.modelType;
-
-if (!det.success) {
-  console.error(det.error, det.isHardwareSpecificUnsupported); // wrong/missing files or unsupported HW pack
-} else {
-  // Same preferInt8 as detectSttModel so the same ONNX files are chosen for init.
-  //
-  // Prefer modelType: 'auto' here (not det.modelType): createSTT re-runs the same native auto-selection
-  // on this path + preferInt8, so behavior stays one code path and matches future heuristic changes.
-  // Pass an explicit modelType only when the user overrides auto, e.g. picked from det.detectedModels.
-  await createSTT({ modelPath, modelType: 'auto', preferInt8: true });
-}
-```
-
-**TTS — same split (`detectedModels` vs `modelType`) plus lexicon languages:**
-
-```typescript
-import { detectTtsModel, createTTS } from 'react-native-sherpa-onnx/tts';
-
-const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/tts-pack' }, {
-  // 'auto' vs 'vits' | 'matcha' | 'kokoro' | 'kitten' | 'pocket' | 'zipvoice' — same idea as STT.
-  modelType: 'auto',
-});
-
-// Same pattern as STT: use modelType: 'auto' on createTTS unless the user picked a candidate from
-// det.detectedModels. detectTtsModel is still useful for cheap checks + lexiconLanguageCandidates.
-// Kokoro/Kitten: optional language ids from lexicon files for a dropdown (e.g. "us-en", "zh", "default").
-const langs = det.lexiconLanguageCandidates;
-```
-
----
-
-## Model Sources at a Glance
-
-| Source | Path Helper | Discovery | Use Case |
-| --- | --- | --- | --- |
-| Bundled assets | `assetModelPath()` | `listAssetModels()` | Ship models with the app |
-| Play Asset Delivery | `fileModelPath()` | `getAssetPackPath()` + `listModelsAtPath()` | Large models on Android (on-demand packs) |
-| PAD compressed archives | — | `getBundledArchives()` + `extractArchive()` from `react-native-sherpa-onnx/extraction` | PAD packs with .tar.zst/.tar.bz2; extract to a dir then use `listModelsAtPath` + `autoModelPath` |
-| Downloaded models | `fileModelPath()` | `listModelsAtPath()` or Download Manager | User-selected models at runtime |
-| Fallback / auto | `autoModelPath()` | — | Try asset first, then file |
-
-Combining multiple sources:
-
-```typescript
-import {
-  listAssetModels,
-  getAssetPackPath,
-  listModelsAtPath,
-  fileModelPath,
-  assetModelPath,
-} from 'react-native-sherpa-onnx';
-import { getLocalModelPathByCategory, listDownloadedModelsByCategory, ModelCategory } from 'react-native-sherpa-onnx/download';
-
-// Bundled
-const bundled = await listAssetModels();
-
-// PAD (Android)
-const padPath = await getAssetPackPath('sherpa_models');
-const padModels = padPath ? await listModelsAtPath(padPath, true) : [];
-
-// Downloaded
-const downloaded = await listDownloadedModelsByCategory(ModelCategory.Stt);
-```
-
----
-
-## Detailed Examples
-
-### Auto-detect and init the first available STT model
-
-```typescript
-import { listAssetModels, assetModelPath } from 'react-native-sherpa-onnx';
-import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
-
-const models = await listAssetModels();
-const sttModels = models.filter((m) => m.hint === 'stt');
-
-for (const m of sttModels) {
-  const mp = assetModelPath(`models/${m.folder}`);
-  const detection = await detectSttModel(mp, { preferInt8: true });
-  if (detection.success) {
-    const stt = await createSTT({ modelPath: mp, modelType: 'auto', preferInt8: true });
-    return stt;
-  }
-}
-throw new Error('No valid STT model found');
-```
-
-### PAD model loading with detection
-
-```typescript
-const padPath = await getAssetPackPath('sherpa_models');
-if (!padPath) throw new Error('Asset pack not available');
-
-const models = await listModelsAtPath(padPath, true);
-const sttFolder = models.find((m) => m.hint === 'stt');
-
-if (sttFolder) {
-  const fullPath = `${padPath}/${sttFolder.folder}`;
-  const stt = await createSTT({
-    modelPath: fileModelPath(fullPath),
-    modelType: 'auto',
-  });
-}
-```
-
-### Validation: check before init
-
-```typescript
-const detection = await detectSttModel(
-  assetModelPath('models/my-model'),
-  { preferInt8: true }
-);
-
-if (!detection.success) {
-  // detection contains error info about missing files
-  console.error('Model validation failed:', detection);
-  return;
-}
-```
-
----
-
-## Troubleshooting & Tuning
+## Troubleshooting
 
 | Issue | Solution |
 | --- | --- |
-| `listAssetModels()` returns empty | Ensure models are in `android/app/src/main/assets/models/` or the iOS bundle `models/` group |
-| `resolveModelPath()` fails | Check that the model directory exists at the expected location on the platform |
-| PAD returns `null` | PAD requires `play-core` dependency and correct `build.gradle` asset pack config; iOS always returns `null` |
-| `detectSttModel` says missing files | The model directory doesn't contain all required files for the detected type; check the [STT doc](stt-offline.md#validation-required-files) for the file-per-type table |
-| Int8 model not found | Set `preferInt8: true` and ensure `*-int8.onnx` variants are present |
-| Wrong `hint` value | `hint` is a best-effort heuristic based on folder naming; use `detectSttModel`/`detectTtsModel` for definitive type detection |
-| TTS init fails with `Error processing file '/usr/share/espeak-ng-data/phontab'` | Path to `espeak-ng-data` is too long; espeak-ng truncates it and falls back to `/usr/share`. See [issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) for workarounds. |
-
-**Tips:**
-
-- Use `listAssetModels()` for discovery, then `detectSttModel()`/`detectTtsModel()` for accurate type detection — the `hint` is based on naming heuristics only
-- Always prefer `modelType: 'auto'` with `detectSttModel()`/`detectTtsModel()` rather than hardcoding model types
-- Combine bundled assets, PAD, and downloads into a single model picker by merging all sources
+| `listAssetModels()` returns empty | Models must be in `android/app/src/main/assets/models/` or iOS bundle `models/` group |
+| Bundled resolution fails | Verify folder exists; use `bundledModelFileSource('models/…')` |
+| `getAssetPackPath` returns `null` | Run `fetchAssetPack` + `ensureAssetPackReady` first — [model-delivery-pad-odr.md](model-delivery-pad-odr.md) |
+| `FILEIO_NOT_FOUND` with `kind: 'auto'` | No location in `tryOrder` matched; check each target path |
+| `detect*Model` says missing files | Folder layout doesn't match expected files — see feature [required files](stt-offline.md#validation-required-files) table |
+| Wrong `hint` from listing | Hint is naming heuristic only; run feature detect for definitive type |
 
 ---
 
-## See Also
+## See also
 
-- [Extraction API](extraction.md) — `getBundledArchives`, `listBundledArchives`, `extractArchive` for PAD or bundle .tar.zst/.tar.bz2
-- [STT](stt-offline.md) — Speech-to-Text API
-- [TTS](tts.md) — Text-to-Speech API
-- [Download Manager](download-manager.md) — Download models in-app
-- [Execution Providers](execution-providers.md) — QNN, NNAPI, XNNPACK, Core ML
-- [Issue: TTS espeak-ng path length](../third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md) — When TTS init fails due to long `data_dir` path (phontab /usr/share error)
+- [Model detection & init](model-detect.md) — detect, validate, auto vs custom init
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md)
+- [Extraction API](extraction.md) — `.tar.zst` / `.tar.bz2` archives
+- [Download Manager](download-manager.md) — runtime model downloads
+- [File I/O](fileio.md) — `FileSource` shapes, copy/share
+- [SDK init bridge](sdk-init-bridge.md) — `create*` vs native `initialize*` maps

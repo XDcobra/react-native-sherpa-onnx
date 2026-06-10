@@ -4,6 +4,11 @@
 #include "../core/EnhancementBridgeState.h"
 #include "../core/EnhancementBridgeUtils.h"
 
+#include "sherpa-onnx-model-path-fill.h"
+#include "sherpa-onnx-validate-enhancement.h"
+
+#include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -16,13 +21,48 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
   return std::string([value UTF8String]);
 }
 
+void FillEnhancementModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::EnhancementModelPaths &paths
+) {
+  if (![dict isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  std::map<std::string, std::string> pathMap;
+  for (NSString *key in dict) {
+    id value = dict[key];
+    if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+      pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+    }
+  }
+  sherpaonnx::FillEnhancementModelPathsFromStringMap(pathMap, paths);
+}
+
+struct EnhancementInitScalars {
+  int32_t numThreads = 1;
+  bool debug = false;
+  std::optional<std::string> provider;
+};
+
+EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
+  EnhancementInitScalars scalars;
+  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
+    scalars.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  }
+  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
+    scalars.debug = [options[@"debug"] boolValue];
+  }
+  scalars.provider = OptionalUtf8String(options[@"provider"]);
+  return scalars;
+}
+
 }  // namespace
 
 @implementation SherpaOnnx (Enhancement)
 
 - (void)detectEnhancementModel:(NSString *)modelDir
-                     assetName:(NSString *)assetName
-                     modelType:(NSString *)modelType
+                     assetName:(NSString * _Nullable)assetName
+                     modelType:(NSString * _Nullable)modelType
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
@@ -41,29 +81,22 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 }
 
 - (void)initializeEnhancement:(NSString *)instanceId
-                     modelDir:(NSString *)modelDir
-                    modelType:(NSString *)modelType
-                   numThreads:(NSNumber *)numThreads
-                     provider:(NSString *)provider
-                        debug:(NSNumber *)debug
-                      resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
+                    options:(NSDictionary *)options
+                    resolve:(RCTPromiseResolveBlock)resolve
+                     reject:(RCTPromiseRejectBlock)reject
 {
   if (instanceId == nil || [instanceId length] == 0) {
     reject(@"ENHANCEMENT_INIT_ERROR", @"instanceId is required", nil);
     return;
   }
-  if (modelDir == nil || [modelDir length] == 0) {
-    reject(@"ENHANCEMENT_INIT_ERROR", @"modelDir is required", nil);
-    return;
-  }
 
-  std::string instanceIdStr = [instanceId UTF8String];
-  std::string modelDirStr = [modelDir UTF8String];
-  std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
-  int32_t numThreadsVal = numThreads != nil ? [numThreads intValue] : 1;
-  bool debugVal = debug != nil && [debug boolValue];
-  std::optional<std::string> providerOpt = OptionalUtf8String(provider);
+  NSString *initMode = options[@"initMode"];
+  if (initMode == nil || [initMode length] == 0) {
+    initMode = @"auto";
+  }
+  const bool isCustomInit = [initMode isEqualToString:@"custom"];
+  const std::string instanceIdStr = [instanceId UTF8String];
+  const EnhancementInitScalars scalars = ParseEnhancementInitScalars(options);
 
   @try {
     std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
@@ -78,12 +111,44 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
       inst->wrapper = std::make_unique<sherpaonnx::EnhancementWrapper>();
     }
 
-    auto result = inst->wrapper->initialize(
-        modelDirStr,
-        modelTypeStr,
-        numThreadsVal,
-        providerOpt,
-        debugVal);
+    sherpaonnx::EnhancementInitializeResult result;
+    if (isCustomInit) {
+      NSString *modelType = options[@"modelType"];
+      if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
+        reject(@"ENHANCEMENT_INIT_ERROR", @"modelType is required for initMode custom", nil);
+        return;
+      }
+      id pathsRaw = options[@"modelPaths"];
+      NSDictionary *pathsDict =
+          [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+      if (pathsDict == nil || pathsDict.count == 0) {
+        reject(@"ENHANCEMENT_INIT_ERROR", @"modelPaths is required for initMode custom", nil);
+        return;
+      }
+
+      sherpaonnx::EnhancementModelPaths paths;
+      FillEnhancementModelPathsFromDict(pathsDict, paths);
+      result = inst->wrapper->initializeCustom(
+          std::string([modelType UTF8String]),
+          paths,
+          scalars.numThreads,
+          scalars.provider,
+          scalars.debug);
+    } else {
+      NSString *modelDir = options[@"modelDir"];
+      if (modelDir == nil || [modelDir length] == 0) {
+        reject(@"ENHANCEMENT_INIT_ERROR", @"modelDir is required for initMode auto", nil);
+        return;
+      }
+      NSString *modelType = options[@"modelType"];
+      std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
+      result = inst->wrapper->initialize(
+          std::string([modelDir UTF8String]),
+          modelTypeStr,
+          scalars.numThreads,
+          scalars.provider,
+          scalars.debug);
+    }
 
     if (!result.success) {
       NSString *errorMsg = result.error.empty()
@@ -115,11 +180,7 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 }
 
 - (void)initializeOnlineEnhancement:(NSString *)instanceId
-                           modelDir:(NSString *)modelDir
-                          modelType:(NSString *)modelType
-                         numThreads:(NSNumber *)numThreads
-                           provider:(NSString *)provider
-                              debug:(NSNumber *)debug
+                            options:(NSDictionary *)options
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject
 {
@@ -127,17 +188,14 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
     reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"instanceId is required", nil);
     return;
   }
-  if (modelDir == nil || [modelDir length] == 0) {
-    reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelDir is required", nil);
-    return;
-  }
 
-  std::string instanceIdStr = [instanceId UTF8String];
-  std::string modelDirStr = [modelDir UTF8String];
-  std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
-  int32_t numThreadsVal = numThreads != nil ? [numThreads intValue] : 1;
-  bool debugVal = debug != nil && [debug boolValue];
-  std::optional<std::string> providerOpt = OptionalUtf8String(provider);
+  NSString *initMode = options[@"initMode"];
+  if (initMode == nil || [initMode length] == 0) {
+    initMode = @"auto";
+  }
+  const bool isCustomInit = [initMode isEqualToString:@"custom"];
+  const std::string instanceIdStr = [instanceId UTF8String];
+  const EnhancementInitScalars scalars = ParseEnhancementInitScalars(options);
 
   @try {
     std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
@@ -152,12 +210,44 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
       inst->wrapper = std::make_shared<sherpaonnx::OnlineEnhancementWrapper>();
     }
 
-    auto result = inst->wrapper->initialize(
-        modelDirStr,
-        modelTypeStr,
-        numThreadsVal,
-        providerOpt,
-        debugVal);
+    sherpaonnx::EnhancementInitializeResult result;
+    if (isCustomInit) {
+      NSString *modelType = options[@"modelType"];
+      if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
+        reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelType is required for initMode custom", nil);
+        return;
+      }
+      id pathsRaw = options[@"modelPaths"];
+      NSDictionary *pathsDict =
+          [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+      if (pathsDict == nil || pathsDict.count == 0) {
+        reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelPaths is required for initMode custom", nil);
+        return;
+      }
+
+      sherpaonnx::EnhancementModelPaths paths;
+      FillEnhancementModelPathsFromDict(pathsDict, paths);
+      result = inst->wrapper->initializeCustom(
+          std::string([modelType UTF8String]),
+          paths,
+          scalars.numThreads,
+          scalars.provider,
+          scalars.debug);
+    } else {
+      NSString *modelDir = options[@"modelDir"];
+      if (modelDir == nil || [modelDir length] == 0) {
+        reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelDir is required for initMode auto", nil);
+        return;
+      }
+      NSString *modelType = options[@"modelType"];
+      std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
+      result = inst->wrapper->initialize(
+          std::string([modelDir UTF8String]),
+          modelTypeStr,
+          scalars.numThreads,
+          scalars.provider,
+          scalars.debug);
+    }
 
     if (!result.success) {
       NSString *errorMsg = result.error.empty()

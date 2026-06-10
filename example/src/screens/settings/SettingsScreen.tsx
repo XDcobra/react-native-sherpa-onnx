@@ -8,14 +8,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { AccelerationSupport } from 'react-native-sherpa-onnx/provider';
 import {
-  type AccelerationSupport,
   getQnnSupport,
   getNnapiSupport,
   getXnnpackSupport,
   getCoreMlSupport,
   getAvailableProviders,
-} from 'react-native-sherpa-onnx';
+} from 'react-native-sherpa-onnx/provider';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 
 const appPkg = (() => {

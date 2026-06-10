@@ -1,17 +1,19 @@
 #import <React/RCTEventEmitter.h>
 
-// The codegen-generated header `SherpaOnnxSpec/SherpaOnnxSpec.h` is produced
-// by React Native's codegen. In some build setups (CI or a fresh checkout)
-// it may be missing until the iOS codegen step runs. Guard the import so
-// the library can still compile (useful for IDEs and quick static checks).
+// Codegen policy:
+// - Local Debug/dev: allow a minimal fallback protocol to keep iteration fast.
+// - Release/CI: fail hard if the generated header is missing.
 #if __has_include(<SherpaOnnxSpec/SherpaOnnxSpec.h>)
 #import <SherpaOnnxSpec/SherpaOnnxSpec.h>
-#else
-// Minimal fallback to allow compilation before codegen runs.
+#elif DEBUG
 @protocol NativeSherpaOnnxSpec
 @end
+#else
+#error "Missing codegen header <SherpaOnnxSpec/SherpaOnnxSpec.h>. Run React Native codegen (yarn prepare) before building iOS."
 #endif
 
 @interface SherpaOnnx : RCTEventEmitter <NativeSherpaOnnxSpec>
+
++ (void)removeForegroundDownloadState:(NSString *)downloadId;
 
 @end

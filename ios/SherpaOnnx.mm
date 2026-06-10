@@ -1,7 +1,7 @@
 /**
  * SherpaOnnx.mm
  *
- * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveModelPath (delegates to
+ * Purpose: Main React Native TurboModule for SherpaOnnx. Implements resolveBundledAssetPath (delegates to
  * ios/assets/bridge), extractArchive/computeFileSha256 via sherpa-onnx-archive-helper, capability
  * stubs (QNN/NNAPI/XNNPACK/CoreML), and event registration. Asset/path logic lives in
  * ios/assets/{bridge,core}; pipeline audio in ios/audio/{bridge,pipeline}; STT in ios/stt/bridge
@@ -11,6 +11,7 @@
 
 #import "SherpaOnnx.h"
 #import "assets/bridge/SherpaOnnx+Assets.h"
+#import "assets/core/OdrDelivery.h"
 #import "fileio/FileIOResolver.h"
 #import "sherpa-onnx-archive-helper.h"
 #import <React/RCTLog.h>
@@ -26,6 +27,11 @@
 
 // Defined in SherpaOnnx+PipelineAudioMic.mm
 extern void paMicStopQueue(void);
+// ios/punctuation/bridge/SherpaOnnx+OfflinePunctuation.mm
+extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
+extern "C" void sherpaonnx_punct_online_invalidate_all(void);
+// ios/segment/bridge/SherpaOnnx+SegmentLinkMap.mm
+extern "C" void slm_release_all_link_maps(void);
 
 @interface SherpaOnnx (JSI)
 - (BOOL)autoInstallJSI;
@@ -42,18 +48,25 @@ extern void paMicStopQueue(void);
 {
     self = [super initWithDisabledObservation];
     if (self) {
+        txt_set_partial_event_module(self);
         [self autoInstallJSI];
         // Sweep orphaned mmap temp files from previous sessions
         pa_sweepOrphanedTempFiles();
+        // Sweep orphaned orchestration temp files from previous sessions
+        pa_cleanupOrphanedOrchestrationFiles();
     }
     return self;
 }
 
 - (void)invalidate
 {
+    txt_set_partial_event_module(nil);
     paMicStopQueue();
+    sherpaonnx_punct_offline_invalidate_all();
+    sherpaonnx_punct_online_invalidate_all();
     txt_release_all_entries();
     seg_release_all_entries();
+    slm_release_all_link_maps();
     pcmPlayerDestroyAll();
     [[PaAudioSessionCoordinator shared] resetAll];
     [super invalidate];
@@ -73,35 +86,30 @@ extern void paMicStopQueue(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError", @"sherpaAssetPackDeliveryProgress" ];
 }
 
-- (void)resolveModelPath:(JS::NativeSherpaOnnx::SpecResolveModelPathConfig &)config
-                 resolve:(RCTPromiseResolveBlock)resolve
-                  reject:(RCTPromiseRejectBlock)reject
+- (void)addListener:(NSString *)eventName
 {
-    NSString *type = config.type() ?: @"auto";
-    NSString *path = config.path();
+    (void)eventName;
+}
 
-    if (!path) {
-        reject(@"PATH_REQUIRED", @"Path is required", nil);
+- (void)removeListeners:(double)count
+{
+    (void)count;
+}
+
+- (void)resolveBundledAssetPath:(NSString *)relativePath
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject
+{
+    if (!relativePath || relativePath.length == 0) {
+        reject(@"PATH_REQUIRED", @"Relative path is required", nil);
         return;
     }
 
     NSError *error = nil;
-    NSString *resolvedPath = nil;
-
-    if ([type isEqualToString:@"asset"]) {
-        resolvedPath = [self resolveAssetPath:path error:&error];
-    } else if ([type isEqualToString:@"file"]) {
-        resolvedPath = [self resolveFilePath:path error:&error];
-    } else if ([type isEqualToString:@"auto"]) {
-        resolvedPath = [self resolveAutoPath:path error:&error];
-    } else {
-        NSString *errorMsg = [NSString stringWithFormat:@"Unknown path type: %@", type];
-        reject(@"INVALID_TYPE", errorMsg, nil);
-        return;
-    }
+    NSString *resolvedPath = [self resolveAssetPath:relativePath error:&error];
 
     if (error) {
         reject(@"PATH_RESOLVE_ERROR", error.localizedDescription, error);
@@ -255,16 +263,29 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
-    // Play Asset Delivery is Android-only; on iOS there is no asset pack path.
-    resolve([NSNull null]);
+    NSString *path = [[SherpaOnnxOdrDelivery shared] assetPackModelsPath:packName];
+    if (path.length > 0) {
+        resolve(path);
+    } else {
+        resolve([NSNull null]);
+    }
 }
 
-- (void)listBundledArchiveAssetPaths:(NSString *)packName
-                             resolve:(RCTPromiseResolveBlock)resolve
-                              reject:(RCTPromiseRejectBlock)reject
+- (void)listApkAssetPaths:(NSString *)assetPrefix
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject
 {
-    // PAD APK_ASSETS listing is Android-only.
+    // APK AssetManager listing is Android-only.
     resolve(@[]);
+}
+
+- (void)listOdrDeliverySnapshot:(NSString *)tag
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+    [[SherpaOnnxOdrDelivery shared] listOdrDeliverySnapshot:tag
+                                                resolve:resolve
+                                                 reject:reject];
 }
 
 // ─── FileSource helpers ──────────────────────────────────────────────
@@ -284,6 +305,16 @@ showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
         dirPath = NSTemporaryDirectory();
     } else if ([base isEqualToString:@"externalFiles"]) {
         reject(kFIOErrUnsupportedOnPlatform, @"externalFiles is not supported on iOS", nil);
+        return;
+    } else if ([base isEqualToString:@"apkAsset"]) {
+        reject(kFIOErrUnsupportedOnPlatform,
+               @"apkAsset is Android-only and does not map to an iOS app base directory",
+               nil);
+        return;
+    } else if ([base isEqualToString:@"appBundle"]) {
+        reject(kFIOErrUnsupportedOnPlatform,
+               @"appBundle does not map to an iOS sandbox directory. Use FileSource app:appBundle for reads.",
+               nil);
         return;
     } else {
         reject(kFIOErrUnsupportedLocationKind,

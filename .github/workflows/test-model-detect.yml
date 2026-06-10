@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 # No concurrency here to avoid deadlock with workflow_call: the called workflow (test-asr-model-detect) has its own group.
 jobs:

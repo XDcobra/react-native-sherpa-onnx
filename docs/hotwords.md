@@ -1,12 +1,14 @@
 # Hotwords (Contextual Biasing)
 
+## Introduction
+
 Boost recognition of specific words and phrases during transducer-based speech recognition.
 
 **Import path:** `react-native-sherpa-onnx/stt`
 
 ---
 
-## Table of Contents
+## Table of contents
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
@@ -40,13 +42,13 @@ Hotwords boost the probability of specified phrases during decoding. This is use
 
 ---
 
-## Quick Start
+## Quick start
 
 ```typescript
 import { createSTT, sttSupportsHotwords } from 'react-native-sherpa-onnx/stt';
 
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/sherpa-onnx-streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   hotwordsScore: 2.0,
@@ -68,7 +70,7 @@ zipformer
 
 ---
 
-## API Reference
+## API reference
 
 ### `sttSupportsHotwords(modelType)`
 
@@ -134,6 +136,30 @@ Validation checks (native side):
 3. File is readable
 4. File contains no null bytes (must be valid text)
 
+## Types and constants
+
+```ts
+import {
+  sttSupportsHotwords, // support check by STT model type
+  STT_HOTWORDS_MODEL_TYPES, // model types that support hotwords
+} from 'react-native-sherpa-onnx/stt';
+
+import type {
+  STTModelType, // supported STT model type union
+  STTInitializeOptions, // STT init options containing hotwords fields
+  SttRuntimeConfig, // runtime setConfig shape containing hotwords fields
+} from 'react-native-sherpa-onnx/stt';
+```
+
+## Error codes
+
+The native STT layer validates hotword configuration during initialization and runtime updates.
+
+| Code | Meaning |
+| --- | --- |
+| `HOTWORDS_NOT_SUPPORTED` | Model type does not support hotwords (`transducer`/`nemo_transducer` only) |
+| `INVALID_HOTWORDS_FILE` | Hotwords file does not exist, is unreadable, is not a regular file, or contains null bytes |
+
 ---
 
 ## Hotwords File Format
@@ -176,7 +202,7 @@ The `bpeVocab` file is typically distributed with the model (e.g. `bpe.vocab` in
 
 ```typescript
 const stt = await createSTT({
-  modelPath: { type: 'asset', path: 'models/zipformer-bilingual' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/zipformer-bilingual' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   modelingUnit: 'cjkchar+bpe',
@@ -219,14 +245,17 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 
 const recognizer = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/streaming-zipformer-en' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-zipformer-en' },
   modelType: 'transducer',
   hotwordsFile: '/path/to/hotwords.txt',
   hotwordsScore: 2.0,
 });
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
-const textOut = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[segment]', e.segment.text),
+});
 
 const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });
 
@@ -290,8 +319,53 @@ await stt.setConfig({ hotwordsFile: hotwordsPath });
 
 ---
 
-## See Also
+## See also
 
 - [STT](stt-offline.md) — Offline speech recognition API
 - [Streaming STT](stt-streaming.md) — Real-time recognition with hotwords
 - [Model Setup](model-setup.md) — Model discovery and paths
+
+## Use case examples
+
+<details>
+<summary>Enable hotwords only when detected model supports them</summary>
+
+```ts
+const detection = await detectSttModel({ kind: 'fs', path: modelDir });
+
+const supportsHotwords =
+  detection.success && detection.modelType != null
+    ? sttSupportsHotwords(detection.modelType)
+    : false;
+
+const stt = await createSTT({
+  modelSource: { kind: 'fs', path: modelDir },
+  modelType: 'auto',
+  ...(supportsHotwords
+    ? { hotwordsFile: '/path/to/hotwords.txt', hotwordsScore: 1.8 }
+    : {}),
+});
+```
+
+</details>
+
+<details>
+<summary>Rotate session hotwords without recreating the STT engine</summary>
+
+```ts
+await stt.setConfig({
+  hotwordsFile: '/tmp/session-hotwords.txt',
+  hotwordsScore: 2.0,
+});
+
+await stt.setConfig({
+  hotwordsFile: '/tmp/session-hotwords-updated.txt',
+});
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

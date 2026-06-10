@@ -22,13 +22,20 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
+#include "sherpa-onnx-model-detect-unified.h"
+#include "sherpa-onnx-unified-detect-wrapper.h"
+#include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-validate-custom.h"
+#include "../diagnostic/NativeDiagnostic.h"
 
 extern "C" {
 
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeTestSherpaInit(JNIEnv* env, jobject /* this */) {
+  SHERPA_DIAG("module.init", "libs_loaded");
   return env->NewStringUTF("sherpa-onnx native (libsherpaonnx) loaded");
 }
 
@@ -177,12 +184,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
   if (j_has_prefer_int8) prefer_int8 = (j_prefer_int8 == JNI_TRUE);
   if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
+  SHERPA_DIAG("stt.detect", "start");
   sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(
       model_dir,
       asset_name,
       model_type,
       prefer_int8,
       (j_debug == JNI_TRUE));
+  SHERPA_DIAG("stt.detect", "end");
   return sherpaonnx::SttDetectResultToJava(env, result);
 }
 
@@ -244,6 +253,36 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
 }
 
+// Punctuation: CT-transformer (offline) or CNN-BiLSTM (online) layout. Returns HashMap with detect fields.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectPunctuationModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  if (j_model_dir) {
+    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
+    if (c && c[0] != '\0') model_dir = std::string(c);
+    env->ReleaseStringUTFChars(j_model_dir, c);
+  }
+  if (j_asset_name) {
+    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
+    if (c && c[0] != '\0') asset_name = std::string(c);
+    env->ReleaseStringUTFChars(j_asset_name, c);
+  }
+  const char* model_type_c =
+      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
+  std::string model_type(model_type_c ? model_type_c : "auto");
+  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
+
+  sherpaonnx::PunctuationDetectResult result =
+      sherpaonnx::DetectPunctuationModel(model_dir, asset_name, model_type);
+  return sherpaonnx::PunctuationDetectResultToJava(env, result);
+}
+
 // Detect VAD model from optional directory and/or asset name. Returns HashMap with unified detect fields.
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectVadModel(
@@ -292,6 +331,161 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
   sherpaonnx::AlignmentDetectResult result =
       sherpaonnx::DetectAlignmentModel(model_dir, model_type);
   return sherpaonnx::AlignmentDetectResultToJava(env, result);
+}
+
+}  // extern "C"
+
+namespace {
+
+std::optional<std::string> OptionalJstring(JNIEnv* env, jstring value) {
+  if (!value) return std::nullopt;
+  const char* c = env->GetStringUTFChars(value, nullptr);
+  if (!c || c[0] == '\0') {
+    if (c) env->ReleaseStringUTFChars(value, c);
+    return std::nullopt;
+  }
+  std::string out(c);
+  env->ReleaseStringUTFChars(value, c);
+  return out;
+}
+
+std::optional<std::string> HashMapGetString(
+    JNIEnv* env,
+    jobject map,
+    jmethodID get,
+    const char* key) {
+  jstring jkey = env->NewStringUTF(key);
+  if (!jkey) return std::nullopt;
+  jobject jval = env->CallObjectMethod(map, get, jkey);
+  env->DeleteLocalRef(jkey);
+  if (!jval) return std::nullopt;
+  auto str = OptionalJstring(env, static_cast<jstring>(jval));
+  env->DeleteLocalRef(jval);
+  return str;
+}
+
+}  // namespace
+
+extern "C" {
+
+// Unified model detection (TTS→STT→VAD→Punctuation→Enhancement→Alignment). Returns HashMap.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name) {
+  auto model_dir = OptionalJstring(env, j_model_dir);
+  auto asset_name = OptionalJstring(env, j_asset_name);
+  sherpaonnx::UnifiedModelDetectResult result =
+      sherpaonnx::DetectModel(model_dir, asset_name);
+  return sherpaonnx::UnifiedDetectResultToJava(env, result);
+}
+
+// Batch unified detection. Input: ArrayList<HashMap> with modelDir/assetName keys.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModelsBatch(
+    JNIEnv* env,
+    jobject /* this */,
+    jobject j_inputs) {
+  if (!j_inputs) {
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    if (!listClass) return nullptr;
+    jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+    jobject empty = listInit ? env->NewObject(listClass, listInit) : nullptr;
+    env->DeleteLocalRef(listClass);
+    return empty;
+  }
+
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!listClass || !mapClass) return nullptr;
+  jmethodID listSize = env->GetMethodID(listClass, "size", "()I");
+  jmethodID listGet = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+  jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  jmethodID mapGet = env->GetMethodID(
+      mapClass,
+      "get",
+      "(Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!listSize || !listGet || !listInit || !listAdd || !mapGet) {
+    env->DeleteLocalRef(listClass);
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  const jint count = env->CallIntMethod(j_inputs, listSize);
+  std::vector<sherpaonnx::UnifiedModelDetectInput> inputs;
+  inputs.reserve(static_cast<size_t>(count > 0 ? count : 0));
+  for (jint i = 0; i < count; ++i) {
+    jobject entry = env->CallObjectMethod(j_inputs, listGet, i);
+    if (!entry) continue;
+    sherpaonnx::UnifiedModelDetectInput input;
+    input.model_dir = HashMapGetString(env, entry, mapGet, "modelDir");
+    input.asset_name = HashMapGetString(env, entry, mapGet, "assetName");
+    inputs.push_back(std::move(input));
+    env->DeleteLocalRef(entry);
+  }
+
+  std::vector<sherpaonnx::UnifiedModelDetectResult> results =
+      sherpaonnx::DetectModelsBatch(inputs);
+
+  jobject outList = env->NewObject(listClass, listInit);
+  env->DeleteLocalRef(listClass);
+  env->DeleteLocalRef(mapClass);
+  if (!outList) return nullptr;
+
+  for (const auto& result : results) {
+    jobject map = sherpaonnx::UnifiedDetectResultToJava(env, result);
+    if (map) {
+      env->CallBooleanMethod(outList, listAdd, map);
+      env->DeleteLocalRef(map);
+    }
+  }
+  return outList;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeValidateCustomModelPaths(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_category,
+    jstring j_model_type,
+    jobject j_paths) {
+  auto category = OptionalJstring(env, j_category);
+  auto modelType = OptionalJstring(env, j_model_type);
+  if (!category || !modelType) {
+    sherpaonnx::CustomModelValidationResult invalid;
+    invalid.ok = false;
+    invalid.error = "category and modelType are required";
+    return sherpaonnx::BuildCustomValidationResultMap(env, invalid);
+  }
+
+  const auto paths = sherpaonnx::JavaHashMapToStringMap(env, j_paths);
+  const auto result = sherpaonnx::ValidateCustomModelPaths(
+      *category,
+      *modelType,
+      paths,
+      "custom");
+  return sherpaonnx::BuildCustomValidationResultMap(env, result);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeGetCustomModelPathRequirements(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_category,
+    jstring j_model_type) {
+  auto category = OptionalJstring(env, j_category);
+  auto modelType = OptionalJstring(env, j_model_type);
+  if (!category || !modelType) {
+    return sherpaonnx::BuildCustomPathRequirementsMap(env, {});
+  }
+
+  const auto requirements = sherpaonnx::GetCustomModelPathRequirements(
+      *category,
+      *modelType);
+  return sherpaonnx::BuildCustomPathRequirementsMap(env, requirements);
 }
 
 }  // extern "C"

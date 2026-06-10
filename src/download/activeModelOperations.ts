@@ -8,24 +8,27 @@ const activePostProcessCounts = new Map<string, number>();
 
 export function makeModelOperationKey(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId = 'default'
 ): string {
-  return `${category}:${modelId}`;
+  return `${category}:${sourceId}:${modelId}`;
 }
 
 export function registerActivePostProcess(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId = 'default'
 ): void {
-  const key = makeModelOperationKey(category, modelId);
+  const key = makeModelOperationKey(category, modelId, sourceId);
   activePostProcessCounts.set(key, (activePostProcessCounts.get(key) ?? 0) + 1);
 }
 
 export function unregisterActivePostProcess(
   category: ModelCategory,
-  modelId: string
+  modelId: string,
+  sourceId = 'default'
 ): void {
-  const key = makeModelOperationKey(category, modelId);
+  const key = makeModelOperationKey(category, modelId, sourceId);
   const count = activePostProcessCounts.get(key) ?? 0;
 
   if (count <= 1) {

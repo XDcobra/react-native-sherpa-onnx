@@ -1,5 +1,7 @@
 # Pipeline segment buffers — live / streaming (`segmentbuffer`)
 
+## Introduction
+
 **Live segment buffers** store incremental segment events for long-running pipelines such as VAD and future streaming alignment flows.
 
 **Import path:** `react-native-sherpa-onnx/segmentbuffer`
@@ -8,14 +10,18 @@
 
 | Kind | What it is | Typical use |
 | --- | --- | --- |
-| **[Offline segment buffer](segmentbuffer-offline.md)** | Mutable segment stream (`recording` -> `finished`) with bounded in-memory log and optional spool-backed full history. | VAD live segmentation, runtime subtitle boundaries, incremental post-processing. |
-| **[Live segment buffer](segmentbuffer-streaming.md)** | Immutable snapshot of segments. | Batch consumers, export, deterministic replay. |
+| **[Offline segment buffer](segmentbuffer-offline.md)** | Immutable snapshot of segments (`state: immutable`). | Batch consumers, export, deterministic replay. |
+| **[Live segment buffer](segmentbuffer-streaming.md)** | Mutable segment stream (`recording` -> `finished`) with bounded in-memory log and optional spool-backed full history. | VAD live segmentation, runtime subtitle boundaries, incremental post-processing. |
 
 `fullIfSpooled` is strict: if spool is unavailable, conversion rejects with `SEGMENT_SPOOL_*`.
 
 **Live events (opt-in):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (`enabled` + `minIntervalMs`).
 
 `sourceAudioBufferId` accepts `PipelineAudioBufferIdSource` (audio ref/info/handle/id), not only raw strings.
+
+## Relation to streaming pipelines
+
+Live segment buffers collect **time-range events** (VAD, future streaming alignment) produced by native workers. Workers are **started and drained** via feature **pipeline handles**; this page documents **buffer** create/finalize/snapshot only. See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
 
 ---
 
@@ -57,7 +63,9 @@ Runtime validation behavior:
 
 ---
 
-## Quick start: append + snapshot
+## Quick start
+
+### Append + snapshot
 
 ```ts
 import {
@@ -249,7 +257,28 @@ console.log(info.kind, info.state);
 
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  LiveSegmentBufferRef, // live segment buffer ref with info + recording handle
+  LiveSegmentBufferInfo, // live segment buffer metadata (state, spool, counts)
+  LiveSegmentBufferIdSource, // ref/handle/id accepted by live APIs
+  LiveSegmentBufferRecordingSource, // recording-only source for append/finalize APIs
+  SegmentInput, // input payload type for appendLiveSegment
+  SegmentMeta, // returned segment metadata union
+  SpeechSegmentPayload, // strict speech payload by source discriminator
+  AlignmentSegmentPayload, // strict alignment payload contract
+  PipelineSegmentBufferInfo, // offline/live info union
+  PipelineSegmentErrorCodeValue, // string union of segmentbuffer error codes
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+import {
+  PipelineSegmentErrorCode, // runtime constants for code-based error handling
+} from 'react-native-sherpa-onnx/segmentbuffer';
+```
+
+## Error codes
 
 The following codes are the relevant runtime outcomes for live/streaming segment-buffer operations in this document (`create`, `append`, `finalize`, `slice`, `createOfflineFromLive`, `release`).
 
@@ -266,3 +295,44 @@ The following codes are the relevant runtime outcomes for live/streaming segment
 | `SEGMENT_SPOOL_READ_FAILED` | Spool read failed |
 | `SEGMENT_SPOOL_CORRUPTED` | Spool data is corrupted |
 | `SEGMENT_INTERNAL_ERROR` | Generic native segment buffer failure |
+
+## See also
+
+- [Pipeline segment buffers — offline](segmentbuffer-offline.md)
+- [Voice Activity Detection (streaming)](vad-streaming.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
+
+## Use case examples
+
+<details>
+<summary>Stream VAD segments and mirror to UI in real time</summary>
+
+```ts
+const liveSegments = await createLiveSegmentBuffer({
+  sourceAudioBufferId: liveAudio,
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: (e) => {
+    console.log(e.segmentIndex, e.kind, `${e.durationMs}ms`);
+  },
+});
+```
+
+</details>
+
+<details>
+<summary>Convert live segment stream to offline snapshot for batch processing</summary>
+
+```ts
+await finalizeLiveSegmentBuffer(liveSegments);
+const offline = await createOfflineSegmentBufferFromLive(liveSegments, 'fullIfSpooled');
+const items = await getOfflineSegmentBufferSegments(offline, 0, 128);
+console.log(items.length);
+await releasePipelineSegmentBuffer(offline);
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

@@ -1,5 +1,9 @@
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import {
+  assertFileDestinationSupportedOnPlatform,
+  assertFileSourceSupportedOnPlatform,
+} from '../fileio/platformValidation';
 import type {
   AudioOutputFormat,
   AudioSaveInput,
@@ -85,6 +89,8 @@ export async function saveAudioAsFile(
   format: AudioOutputFormat,
   options?: SaveAudioOptions
 ): Promise<ResolvedFileRef> {
+  assertFileDestinationSupportedOnPlatform(output);
+
   const operationId = generateOperationId();
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
   const bitrate = options?.bitrate ?? 0;
@@ -124,6 +130,7 @@ export async function saveAudioAsFile(
     let result: { outputKind: string; outputPath: string };
 
     if (isFileSource(input)) {
+      assertFileSourceSupportedOnPlatform(input);
       // File-to-file path: AudioDecodeSession → AudioEncodeSession, no buffer registry
       result = await SherpaOnnx.saveFileAsAudioFile(
         input as any,
@@ -265,3 +272,10 @@ export async function listAvailableOutputDevices(): Promise<
     canSelect: Boolean(device.canSelect),
   }));
 }
+
+export {
+  probeAudioFileDuration,
+  probeAudioFileContainer,
+  type AudioFileDurationProbe,
+  type AudioFileContainerProbe,
+} from './probe';

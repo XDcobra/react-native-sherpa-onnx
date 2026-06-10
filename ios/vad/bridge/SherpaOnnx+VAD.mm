@@ -11,8 +11,12 @@
 #include <unordered_map>
 #include <optional>
 #include <future>
+#include <algorithm>
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
+#include "sherpa-onnx-validate-vad.h"
+#include <map>
 
 namespace {
 std::optional<std::string> OptionalUtf8String(NSString *value) {
@@ -31,6 +35,26 @@ NSString *VadModelKindToNSString(sherpaonnx::VadModelKind kind) {
     default:
       return @"unknown";
   }
+}
+
+sherpaonnx::VadModelKind ParseVadModelTypeFromString(const std::string &modelType) {
+  if (modelType == "silero_vad") return sherpaonnx::VadModelKind::kSileroVad;
+  if (modelType == "ten_vad") return sherpaonnx::VadModelKind::kTenVad;
+  return sherpaonnx::VadModelKind::kUnknown;
+}
+
+void FillVadModelPathsFromDict(NSDictionary *dict, sherpaonnx::VadModelPaths &paths) {
+  if (![dict isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+  std::map<std::string, std::string> pathMap;
+  for (NSString *key in dict) {
+    id value = dict[key];
+    if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+      pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+    }
+  }
+  sherpaonnx::FillVadModelPathsFromStringMap(pathMap, paths);
 }
 
 struct VadInstanceState {
@@ -63,6 +87,76 @@ std::unordered_map<std::string, VadInstanceState> g_vad_instances;
 std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
 std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
 
+void ApplyVadInitScalars(VadInstanceState &state, NSDictionary *options, NSString *resolvedModelType) {
+  if ([options[@"sampleRate"] respondsToSelector:@selector(intValue)]) {
+    state.sampleRate = MAX(1, [options[@"sampleRate"] intValue]);
+  }
+  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
+    state.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  }
+  if ([options[@"provider"] isKindOfClass:[NSString class]] &&
+      [options[@"provider"] length] > 0) {
+    state.provider = std::string([options[@"provider"] UTF8String]);
+  }
+  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
+    state.debug = [options[@"debug"] boolValue];
+  }
+  if ([options[@"threshold"] respondsToSelector:@selector(doubleValue)]) {
+    state.scoreThreshold = MAX(0.0, [options[@"threshold"] doubleValue]);
+  }
+  if ([options[@"minSpeechDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSpeechDurationMs = MAX(0, [options[@"minSpeechDurationMs"] intValue]);
+  } else if ([options[@"speechDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSpeechDurationMs = MAX(0, [options[@"speechDurationMs"] intValue]);
+  }
+  if ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)]) {
+    state.minSilenceDurationMs = MAX(0, [options[@"silenceDurationMs"] intValue]);
+  }
+  if ([options[@"windowSize"] respondsToSelector:@selector(intValue)]) {
+    state.windowSize = MAX(1, [options[@"windowSize"] intValue]);
+  } else if ([resolvedModelType isEqualToString:@"ten_vad"]) {
+    state.windowSize = 256;
+  }
+  if ([options[@"maxSpeechDurationS"] respondsToSelector:@selector(doubleValue)]) {
+    state.maxSpeechDurationMs =
+        MAX(0, (int)llround([options[@"maxSpeechDurationS"] doubleValue] * 1000.0));
+  }
+}
+
+bool FinishVadInitialize(
+    const std::string &instanceIdStr,
+    VadInstanceState state,
+    RCTPromiseResolveBlock resolve,
+    RCTPromiseRejectBlock reject
+) {
+  VadRuntimeConfig runtimeCfg;
+  runtimeCfg.modelType = state.modelType;
+  runtimeCfg.modelPath = state.modelPath;
+  runtimeCfg.sampleRate = state.sampleRate;
+  runtimeCfg.numThreads = state.numThreads;
+  runtimeCfg.provider = state.provider;
+  runtimeCfg.debug = state.debug;
+  runtimeCfg.scoreThreshold = state.scoreThreshold;
+  runtimeCfg.minSpeechDurationMs = state.minSpeechDurationMs;
+  runtimeCfg.minSilenceDurationMs = state.minSilenceDurationMs;
+  runtimeCfg.maxSpeechDurationMs = state.maxSpeechDurationMs;
+  runtimeCfg.windowSize = state.windowSize;
+  std::string runtimeErr;
+  state.runtime = VadRuntime::Create(runtimeCfg, &runtimeErr);
+  if (!state.runtime) {
+    reject(
+      @"VAD_MODEL_INIT_FAILED",
+      [NSString stringWithUTF8String:(runtimeErr.empty() ? "Failed to create iOS VAD runtime" : runtimeErr.c_str())],
+      nil
+    );
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_vad_mutex);
+  g_vad_instances[instanceIdStr] = state;
+  resolve(nil);
+  return true;
+}
+
 std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   const std::string &pipelineId,
   std::string *instanceIdOut = nullptr
@@ -91,8 +185,8 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 @implementation SherpaOnnx (VAD)
 
 - (void)detectVadModel:(NSString *)modelDir
-             assetName:(NSString *)assetName
-             modelType:(NSString *)modelType
+             assetName:(NSString * _Nullable)assetName
+             modelType:(NSString * _Nullable)modelType
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
@@ -165,9 +259,54 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     reject(@"VAD_INVALID_ARGUMENT", @"instanceId is required", nil);
     return;
   }
+
+  NSString *initMode = options[@"initMode"];
+  if (initMode == nil || [initMode length] == 0) {
+    initMode = @"auto";
+  }
+  const bool isCustomInit = [initMode isEqualToString:@"custom"];
+  const std::string instanceIdStr = [instanceId UTF8String];
+
+  if (isCustomInit) {
+    NSString *modelType = options[@"modelType"];
+    if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
+      reject(@"VAD_MODEL_INIT_FAILED", @"modelType is required for initMode custom", nil);
+      return;
+    }
+    id pathsRaw = options[@"modelPaths"];
+    NSDictionary *pathsDict =
+        [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+    if (pathsDict == nil || pathsDict.count == 0) {
+      reject(@"VAD_MODEL_INIT_FAILED", @"modelPaths is required for initMode custom", nil);
+      return;
+    }
+
+    const std::string modelTypeStr = [modelType UTF8String];
+    const sherpaonnx::VadModelKind selectedKind = ParseVadModelTypeFromString(modelTypeStr);
+    if (selectedKind == sherpaonnx::VadModelKind::kUnknown) {
+      reject(@"VAD_MODEL_INIT_FAILED", @"Unsupported custom VAD model type", nil);
+      return;
+    }
+
+    sherpaonnx::VadModelPaths paths;
+    FillVadModelPathsFromDict(pathsDict, paths);
+    auto validation = sherpaonnx::ValidateVadPaths(selectedKind, paths, "custom");
+    if (!validation.ok) {
+      reject(@"VAD_MODEL_INIT_FAILED", [NSString stringWithUTF8String:validation.error.c_str()], nil);
+      return;
+    }
+
+    VadInstanceState state;
+    state.modelType = modelTypeStr;
+    state.modelPath = paths.model;
+    ApplyVadInitScalars(state, options, modelType);
+    FinishVadInitialize(instanceIdStr, state, resolve, reject);
+    return;
+  }
+
   NSString *modelDir = options[@"modelDir"];
   if (modelDir == nil || [modelDir length] == 0) {
-    reject(@"VAD_MODEL_INIT_FAILED", @"modelDir is required for VAD initialization", nil);
+    reject(@"VAD_MODEL_INIT_FAILED", @"modelDir is required for initMode auto", nil);
     return;
   }
 
@@ -198,65 +337,8 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   VadInstanceState state;
   state.modelType = [resolvedModelType UTF8String];
   state.modelPath = detect.paths.model;
-  if ([options[@"sampleRate"] respondsToSelector:@selector(intValue)]) {
-    state.sampleRate = MAX(1, [options[@"sampleRate"] intValue]);
-  }
-  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
-    state.numThreads = MAX(1, [options[@"numThreads"] intValue]);
-  }
-  if ([options[@"provider"] isKindOfClass:[NSString class]] &&
-      [options[@"provider"] length] > 0) {
-    state.provider = std::string([options[@"provider"] UTF8String]);
-  }
-  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
-    state.debug = [options[@"debug"] boolValue];
-  }
-  if ([options[@"threshold"] respondsToSelector:@selector(doubleValue)]) {
-    state.scoreThreshold = MAX(0.0, [options[@"threshold"] doubleValue]);
-  }
-  if ([options[@"minSpeechDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSpeechDurationMs = MAX(0, [options[@"minSpeechDurationMs"] intValue]);
-  } else if ([options[@"speechDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSpeechDurationMs = MAX(0, [options[@"speechDurationMs"] intValue]);
-  }
-  if ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSilenceDurationMs = MAX(0, [options[@"silenceDurationMs"] intValue]);
-  }
-  if ([options[@"windowSize"] respondsToSelector:@selector(intValue)]) {
-    state.windowSize = MAX(1, [options[@"windowSize"] intValue]);
-  } else if ([resolvedModelType isEqualToString:@"ten_vad"]) {
-    state.windowSize = 256;
-  }
-  if ([options[@"maxSpeechDurationS"] respondsToSelector:@selector(doubleValue)]) {
-    state.maxSpeechDurationMs =
-        MAX(0, (int)llround([options[@"maxSpeechDurationS"] doubleValue] * 1000.0));
-  }
-
-  VadRuntimeConfig runtimeCfg;
-  runtimeCfg.modelType = state.modelType;
-  runtimeCfg.modelPath = state.modelPath;
-  runtimeCfg.sampleRate = state.sampleRate;
-  runtimeCfg.numThreads = state.numThreads;
-  runtimeCfg.provider = state.provider;
-  runtimeCfg.debug = state.debug;
-  runtimeCfg.scoreThreshold = state.scoreThreshold;
-  runtimeCfg.minSpeechDurationMs = state.minSpeechDurationMs;
-  runtimeCfg.minSilenceDurationMs = state.minSilenceDurationMs;
-  runtimeCfg.maxSpeechDurationMs = state.maxSpeechDurationMs;
-  runtimeCfg.windowSize = state.windowSize;
-  std::string runtimeErr;
-  state.runtime = VadRuntime::Create(runtimeCfg, &runtimeErr);
-  if (!state.runtime) {
-    reject(
-      @"VAD_MODEL_INIT_FAILED",
-      [NSString stringWithUTF8String:(runtimeErr.empty() ? "Failed to create iOS VAD runtime" : runtimeErr.c_str())],
-      nil
-    );
-    return;
-  }
-  std::lock_guard<std::mutex> lock(g_vad_mutex);
-  g_vad_instances[[instanceId UTF8String]] = state;
-  resolve(nil);
+  ApplyVadInitScalars(state, options, resolvedModelType);
+  FinishVadInitialize(instanceIdStr, state, resolve, reject);
 }
 
 - (void)startVadPipeline:(NSString *)instanceId
@@ -304,7 +386,11 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 
   auto liveAudio = pa_get_live_entry(aid);
   if (!liveAudio) {
-    reject(@"VAD_BUFFER_NOT_FOUND", @"Input live audio buffer not found", nil);
+    if (pa_is_live_invalidated(aid)) {
+      reject(@"BUFFER_INVALIDATED", @"Input live audio buffer is invalidated after transfer", nil);
+    } else {
+      reject(@"VAD_BUFFER_NOT_FOUND", @"Input live audio buffer not found", nil);
+    }
     return;
   }
   {
@@ -416,9 +502,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     return;
   }
   if (sampleRate > 0) cfg.sampleRate = sampleRate;
-  const int chunkSize = ([options[@"chunkSize"] respondsToSelector:@selector(intValue)]
-                             ? MAX(1, [options[@"chunkSize"] intValue])
-                             : 512);
+  const int frameSize = MAX(1, cfg.windowSize);
   if (!cfg.runtime) {
     reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
     return;
@@ -428,11 +512,9 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   int64_t speechDurationMs = 0;
   int chunksProcessed = 0;
   std::vector<SegRecord> records;
-  for (int i = 0; i < (int)samples.size(); i += chunkSize) {
-    const int n = std::min(chunkSize, static_cast<int>(samples.size()) - i);
-    cfg.runtime->AcceptWaveform(samples.data() + i, n);
-    chunksProcessed += 1;
-    const auto segments = cfg.runtime->PopSegments();
+  std::vector<float> pending;
+  pending.insert(pending.end(), samples.begin(), samples.end());
+  auto appendSegments = [&](const std::vector<VadRuntimeSegment> &segments) {
     for (const auto &segment : segments) {
       SegRecord r;
       r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
@@ -450,6 +532,20 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
       segmentCount++;
       speechDurationMs += segment.durationMs;
     }
+  };
+  while ((int)pending.size() >= frameSize) {
+    cfg.runtime->AcceptWaveform(pending.data(), frameSize);
+    chunksProcessed += 1;
+    appendSegments(cfg.runtime->PopSegments());
+    pending.erase(pending.begin(), pending.begin() + frameSize);
+  }
+  if (!pending.empty()) {
+    std::vector<float> tail(frameSize, 0.0f);
+    std::copy(pending.begin(), pending.end(), tail.begin());
+    cfg.runtime->AcceptWaveform(tail.data(), frameSize);
+    chunksProcessed += 1;
+    appendSegments(cfg.runtime->PopSegments());
+    pending.clear();
   }
   cfg.runtime->Flush();
   const auto finalSegments = cfg.runtime->PopSegments();
@@ -739,7 +835,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     if (w) w->stop();
   }
   if (runtimeToClose) {
-    runtimeToClose->close();
+    runtimeToClose->Reset();
   }
   resolve(nil);
 }

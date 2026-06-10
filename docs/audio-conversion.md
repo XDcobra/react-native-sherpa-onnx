@@ -1,13 +1,17 @@
-# Audio save (`react-native-sherpa-onnx/audio`)
+# Audio (`react-native-sherpa-onnx/audio`)
 
-This module saves audio buffers or source files to encoded output files.
+## Introduction
 
-Input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
+Import from `react-native-sherpa-onnx/audio`. This page documents **save/encode**, **duration probe**, and **container probe**. Session/route coordination is in [audio-session.md](./audio-session.md).
+
+Save/encode input can be either a pipeline audio buffer reference or a `FileSource`. Output is always a `FileDestination` from `react-native-sherpa-onnx/fileio`.
 
 ## Overview
 
 Exports:
 
+- `probeAudioFileDuration(source)` → `Promise<AudioFileDurationProbe | null>`
+- `probeAudioFileContainer(source)` → `Promise<AudioFileContainerProbe | null>`
 - `saveAudioAsFile(input, output, format, options?)` → `Promise<ResolvedFileRef>`
 - `saveAudioAsWav16k(input, output)` → `Promise<ResolvedFileRef>`
 - `AudioOutputFormat`
@@ -27,7 +31,7 @@ Key behavior:
 - WAV uses a direct native fast path; lossy formats use the shared encode pipeline.
 - Progress events are emitted on the `audioSaveProgress` channel with `decode`, `encode`, and `finalize` phases.
 
-## Examples
+## Quick start
 
 ### Offline buffer to MP3
 
@@ -81,7 +85,8 @@ const live = await createEmptyLiveAudioBuffer({ sampleRate: 44100 });
 await startMicToLiveAudioBuffer(live);
 // recording...
 await stopMicToLiveAudioBuffer();
-await finalizeLiveAudioBuffer(live);
+const finished = await finalizeLiveAudioBuffer(live);
+console.log(finished.info.durationMs);
 
 try {
   await saveAudioAsFile(live, { kind: 'fs', path: '/tmp/recording.flac' }, 'flac');
@@ -184,6 +189,61 @@ saveAudioAsFile(input, output, 'wav', { outputSampleRateHz: 16000 })
 
 Use this for STT-ready 16 kHz mono WAV output.
 
+### `probeAudioFileDuration(source)`
+
+Read file duration from container metadata only (WAV header or FFmpeg demux) — no PCM decode, no offline buffer. Use for usage estimates or planners before `createOfflineAudioBufferFromFile`.
+
+```ts
+export type AudioFileDurationProbe = {
+  durationMs: number;
+  isExact: boolean;
+};
+
+export async function probeAudioFileDuration(
+  source: FileSource
+): Promise<AudioFileDurationProbe | null>;
+```
+
+- `source`: `FileSource` from `react-native-sherpa-onnx/fileio` (`fs`, `contentUri`, … — same resolver as decode).
+- Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
+- `isExact`: `true` for WAV header math or stream/container duration; `false` when estimated from file size + bitrate.
+
+### `probeAudioFileContainer(source)`
+
+Read the detected **container format** and **primary audio codec** from file content (WAV header or FFmpeg demux). No PCM decode and no offline buffer allocation.
+
+Use this to compare probe results against a filename extension, an allowlist, or other rules **in your app** — the SDK only returns neutral metadata (`inputFormatName`, `codecName`).
+
+```ts
+export type AudioFileContainerProbe = {
+  /** FFmpeg `iformat->name`, e.g. `ogg`, `mp3`, `mov`, `matroska`, `wav`. */
+  inputFormatName: string;
+  /** Primary audio codec short name, e.g. `opus`, `aac`, `mp3`, `pcm_s16le`. */
+  codecName: string;
+};
+
+export async function probeAudioFileContainer(
+  source: FileSource
+): Promise<AudioFileContainerProbe | null>;
+```
+
+- `source`: `FileSource` from `react-native-sherpa-onnx/fileio` (`fs`, `contentUri`, … — same resolver as decode).
+- Returns `null` on failure (wrapper swallows native `PROBE_*` rejections).
+- Container probe uses FFmpeg **content sniffing only** (auto-probe); it does **not** open via the filename extension demuxer first, so a mislabeled `.mp3` that is really Ogg/Opus is reported as `ogg` + `opus`, not `mp3` + `mp3`.
+- Common result pairs (illustrative, not exhaustive): `wav` + `pcm_s16le`; `mp3` + `mp3`; `ogg` + `opus`; `mov` + `aac`; `matroska` + `opus`.
+
+For `contentUri` / `securityScoped` sources, optional `displayName` on `FileSource` supplies a path extension hint when the resolved temp path has none:
+
+```ts
+await probeAudioFileContainer({
+  kind: 'contentUri',
+  uri: contentUri,
+  displayName: 'recording.mp3',
+});
+```
+
+Related decode option (optional, default `true`): `allowDemuxerAutoProbe` on `AudioDecodeOptions` / `FileIngestOptions`. When `false`, `avformat_open_input` does not fall back to auto-probe after the extension-specific demuxer fails (stricter open behavior; may reject files that only open via content sniffing).
+
 ## Sample-rate semantics
 
 - `wav`: `0` uses the source sample rate; explicit values resample.
@@ -199,6 +259,28 @@ Use this for STT-ready 16 kHz mono WAV output.
   - Opus: `low=24`, `medium=64`, `high=128`
 - `quality` and `bitrate` are ignored for `wav` and `flac`.
 
+## Types and constants
+
+```ts
+import {
+  probeAudioFileDuration,
+  probeAudioFileContainer,
+  saveAudioAsFile,
+  saveAudioAsWav16k,
+  AudioSaveErrorCode,
+} from 'react-native-sherpa-onnx/audio';
+
+import type {
+  AudioFileDurationProbe,
+  AudioFileContainerProbe,
+  AudioOutputFormat,
+  AudioSaveInput,
+  SaveAudioOptions,
+  AudioSaveProgressEvent,
+  AudioSaveErrorCodeValue,
+} from 'react-native-sherpa-onnx/audio';
+```
+
 ## Error codes
 
 Promise rejections use `AUDIO_SAVE_*` codes:
@@ -208,6 +290,7 @@ Promise rejections use `AUDIO_SAVE_*` codes:
 | `AUDIO_SAVE_INVALID_ARGUMENT` | Invalid input arguments or malformed source/destination objects. |
 | `AUDIO_SAVE_BUFFER_NOT_FOUND` | The referenced audio buffer does not exist in the native registry. |
 | `AUDIO_SAVE_BUFFER_NOT_FINALIZED` | A live buffer is still recording and must be finalized first. |
+| `AUDIO_SAVE_BUFFER_INVALIDATED` | A live buffer became invalid after transfer/disposal and can no longer be saved. |
 | `AUDIO_SAVE_BUFFER_EMPTY` | The resolved input contains zero samples. |
 | `AUDIO_SAVE_SOURCE_NOT_FOUND` | A `FileSource` input could not be resolved or decoded. |
 | `AUDIO_SAVE_UNSUPPORTED_FORMAT` | The requested output format is not supported. |
@@ -215,6 +298,7 @@ Promise rejections use `AUDIO_SAVE_*` codes:
 | `AUDIO_SAVE_INVALID_QUALITY` | `quality` or `bitrate` values are invalid. |
 | `AUDIO_SAVE_ENCODE_ERROR` | Native decode or encode processing failed. |
 | `AUDIO_SAVE_FILE_WRITE_ERROR` | The destination file could not be written. |
+| `AUDIO_SAVE_DESTINATION_INVALID` | Destination resolution produced an invalid output path. |
 | `AUDIO_SAVE_CANCELLED` | The operation was cancelled via `AbortSignal`. |
 
 Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable comparisons.
@@ -228,7 +312,47 @@ Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable compar
 
 ## Related
 
+- [audio-session.md](audio-session.md)
 - [audiobuffer-offline.md](audiobuffer-offline.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
 - [fileio.md](fileio.md)
 - [disable-ffmpeg.md](disable-ffmpeg.md)
+
+## Use case examples
+
+<details>
+<summary>Normalize user-uploaded media to STT-friendly WAV 16 kHz output</summary>
+
+```ts
+const wavRef = await saveAudioAsWav16k(
+  { kind: 'fs', path: '/tmp/uploaded-video-audio.m4a' },
+  { kind: 'fs', path: '/tmp/stt-input.wav' }
+);
+
+console.log(wavRef);
+```
+
+</details>
+
+<details>
+<summary>Export finalized live recording to compressed Opus with progress UI</summary>
+
+```ts
+const exported = await saveAudioAsFile(
+  liveBuffer,
+  { kind: 'fs', path: '/tmp/recording.opus' },
+  'opus',
+  {
+    quality: 'medium',
+    onProgress: (event) => console.log(event.phase, event.percent),
+  }
+);
+
+console.log(exported);
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

@@ -77,18 +77,30 @@
 
     auto inIt = g_pa_live.find(inputIdStr);
     if (inIt == g_pa_live.end()) {
-      reject(@"AUDIO_BUFFER_NOT_FOUND",
-             [NSString stringWithFormat:@"Input live buffer '%@' not found", inputBufferId],
-             nil);
+      if (g_pa_invalidated_live_ids.find(inputIdStr) != g_pa_invalidated_live_ids.end()) {
+        reject(@"BUFFER_INVALIDATED",
+               [NSString stringWithFormat:@"Input live buffer '%@' is invalidated after transfer", inputBufferId],
+               nil);
+      } else {
+        reject(@"AUDIO_BUFFER_NOT_FOUND",
+               [NSString stringWithFormat:@"Input live buffer '%@' not found", inputBufferId],
+               nil);
+      }
       return;
     }
     inputEntry = inIt->second;
 
     auto outIt = g_pa_live.find(outputIdStr);
     if (outIt == g_pa_live.end()) {
-      reject(@"AUDIO_BUFFER_NOT_FOUND",
-             [NSString stringWithFormat:@"Output live buffer '%@' not found", outputBufferId],
-             nil);
+      if (g_pa_invalidated_live_ids.find(outputIdStr) != g_pa_invalidated_live_ids.end()) {
+        reject(@"BUFFER_INVALIDATED",
+               [NSString stringWithFormat:@"Output live buffer '%@' is invalidated after transfer", outputBufferId],
+               nil);
+      } else {
+        reject(@"AUDIO_BUFFER_NOT_FOUND",
+               [NSString stringWithFormat:@"Output live buffer '%@' not found", outputBufferId],
+               nil);
+      }
       return;
     }
     outputEntry = outIt->second;

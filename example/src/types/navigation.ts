@@ -5,15 +5,20 @@ export type RootStackParamList = {
   STTStreaming: undefined;
   TTSStreaming: undefined;
   Punctuation: undefined;
-  PipelineShowcase: undefined;
+  PunctuationStreaming: undefined;
+  OfflinePipelineShowcase: undefined;
+  LivePipelineShowcase: undefined;
   GenerateTimestamp: undefined;
   DownloadShowcase: undefined;
   VAD: undefined;
+  SegmentationShowcase: undefined;
   Diarization: undefined;
   Enhancement: undefined;
   EnhancementStreaming: undefined;
   Separation: undefined;
   Settings: undefined;
+  FileIO: undefined;
+  AudioVisualization: undefined;
 };
 
 export type FeatureId =
@@ -22,14 +27,19 @@ export type FeatureId =
   | 'stt_streaming'
   | 'tts_streaming'
   | 'punctuation'
-  | 'pipeline_showcase'
+  | 'punctuation_streaming'
+  | 'offline_pipeline_showcase'
+  | 'live_pipeline_showcase'
   | 'generate_timestamp'
   | 'download_showcase'
   | 'vad'
+  | 'segmentation_showcase'
   | 'diarization'
   | 'enhancement'
   | 'enhancement_streaming'
-  | 'separation';
+  | 'separation'
+  | 'fileio'
+  | 'audio_visualization';
 
 export interface Feature {
   id: FeatureId;

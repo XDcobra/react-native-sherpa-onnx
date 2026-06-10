@@ -44,7 +44,8 @@ private:
   };
 
   void runLoop();
-  void autoFlushAndCommit();
+  /** @param endOfAudio if true, call InputFinished() before final decode (live buffer finalized). */
+  void autoFlushAndCommit(bool endOfAudio);
   void processCommands();
   void drainRemainingCommands();
   void joinThread();
@@ -53,7 +54,7 @@ private:
   std::string streamId_;
   std::shared_ptr<PaLiveEntry> inputEntry_;
   std::shared_ptr<TxtLiveEntry> outputEntry_;
-  int chunkSize_ = 3200;
+  int chunkSize_ = 6400;
 
   std::thread workerThread_;
   std::mutex mtx_;
@@ -70,6 +71,10 @@ private:
   int64_t unitsRead_ = 0;
   int64_t unitsWritten_ = 0;
   std::string error_;
+
+  /** First non-blank streaming hypothesis (for sessionEnd summary). */
+  std::string dbgFirstHypothesis_;
+  int dbgEndpointCommits_ = 0;
 
   std::once_flag stopOnce_;
 };

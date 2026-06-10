@@ -1,14 +1,33 @@
-import { NativeEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
+import { buildVadInitBridgeOptions } from './vadNativeBridge';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import { resolvePipelineSegmentBufferId } from '../segmentbuffer';
+import {
+  createOfflineAudioBufferFromSamples,
+  getOfflineAudioBufferSamplesSlice,
+  releasePipelineAudioBuffer,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
+import { getSegments, segmentOfflineBuffer } from '../segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { SpeechSegment } from '../segment/segment';
+import {
+  appendLiveSegment,
+  createEmptyOfflineSegmentBuffer,
+  createLiveSegmentBuffer,
+  finalizeLiveSegmentBuffer,
+  getOfflineSegmentBufferSegments,
+  populateOfflineSegmentBufferIfEmpty,
+  releasePipelineSegmentBuffer,
+  resolvePipelineSegmentBufferId,
+} from '../segmentbuffer';
+import { validateSegmentationConfig } from '../segment/validation';
 import type {
   DetectedModelEntry,
   DetectionSource,
+  OrchestrationProgress,
   VADDetectResult,
   VADEngine,
   VADInitializeOptions,
@@ -17,13 +36,103 @@ import type {
   VADOfflineResult,
   VADPipelineHandle,
   VADPipelineStatus,
-  VADModelType,
   VADSummary,
 } from './types';
 import type { FileSource } from '../fileio/types';
 import { isDetectionSource } from './types';
 
 let vadInstanceCounter = 0;
+const SEGMENT_PAGE_SIZE = 4096;
+
+type OfflineVadNativeSummary = {
+  chunksProcessed: number;
+  unitsRead: number;
+  unitsWritten: number;
+  segmentCount: number;
+  speechDurationMs: number;
+};
+
+interface VadProgressSession {
+  emitStep(
+    currentSegment: number,
+    totalSegments: number,
+    currentSegmentDurationMs: number
+  ): void;
+}
+
+function isAbortRequested(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
+
+function createVadProgressSession(
+  onProgress: ((progress: OrchestrationProgress) => void) | undefined,
+  startedAtMs: number = Date.now()
+): VadProgressSession {
+  return {
+    emitStep(
+      currentSegment: number,
+      totalSegments: number,
+      currentSegmentDurationMs: number
+    ): void {
+      if (!onProgress) {
+        return;
+      }
+
+      const fraction = totalSegments > 0 ? currentSegment / totalSegments : 1;
+      onProgress({
+        currentSegment,
+        totalSegments,
+        fraction,
+        currentSegmentDurationMs,
+        elapsedMs: Date.now() - startedAtMs,
+      });
+    },
+  };
+}
+
+async function collectSpeechSegmentsForOfflineAudio(
+  audioInBufferId: string,
+  segmentationPolicy: SegmentationPolicy
+): Promise<SpeechSegment[]> {
+  const segmentRef = await segmentOfflineBuffer(
+    audioInBufferId,
+    segmentationPolicy
+  );
+
+  const speechSegments: SpeechSegment[] = [];
+  let startIndex = 0;
+
+  while (true) {
+    const page = await getSegments(segmentRef, startIndex, SEGMENT_PAGE_SIZE);
+    if (page.length === 0) {
+      break;
+    }
+
+    for (const segment of page) {
+      if (segment.domain === 'speech') {
+        speechSegments.push(segment);
+      }
+    }
+
+    startIndex += page.length;
+    if (page.length < SEGMENT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return speechSegments;
+}
+
+function accumulateVadSummary(
+  aggregate: VADSummary,
+  chunk: OfflineVadNativeSummary
+): void {
+  aggregate.chunksProcessed += chunk.chunksProcessed;
+  aggregate.unitsRead += chunk.unitsRead;
+  aggregate.unitsWritten += chunk.unitsWritten;
+  aggregate.segmentCount += chunk.segmentCount;
+  aggregate.speechDurationMs += chunk.speechDurationMs;
+}
 
 function toStatus(raw: any): VADPipelineStatus {
   return {
@@ -61,35 +170,6 @@ function toSummary(raw: any): VADSummary {
         ? Math.trunc(raw.speechDurationMs)
         : 0,
   };
-}
-
-function resolveRuntimeTuningOptions(
-  runtimeOptions: VADInitializeOptions['runtimeOptions'],
-  modelType: VADModelType
-) {
-  if (!runtimeOptions) {
-    return undefined;
-  }
-  if (modelType === 'silero_vad') {
-    if ('sileroVad' in runtimeOptions) {
-      return runtimeOptions.sileroVad;
-    }
-    throw Object.assign(
-      new Error(
-        'VAD runtime options mismatch: expected sileroVad options for silero_vad model'
-      ),
-      { code: 'VAD_INVALID_OPTIONS' }
-    );
-  }
-  if ('tenVad' in runtimeOptions) {
-    return runtimeOptions.tenVad;
-  }
-  throw Object.assign(
-    new Error(
-      'VAD runtime options mismatch: expected tenVad options for ten_vad model'
-    ),
-    { code: 'VAD_INVALID_OPTIONS' }
-  );
 }
 
 export async function detectVadModel(
@@ -165,45 +245,8 @@ export async function createStreamingVAD(
   options: VADInitializeOptions
 ): Promise<VADEngine> {
   const instanceId = `vad_${++vadInstanceCounter}`;
-  const modelDir = await resolveModelPath(options.modelPath);
-  let resolvedModelType: 'auto' | VADModelType = options.modelType ?? 'auto';
-  if (resolvedModelType === 'auto') {
-    const detect = await SherpaOnnx.detectVadModel(modelDir, null, 'auto');
-    if (
-      !detect.success ||
-      detect.modelType == null ||
-      detect.modelType === ''
-    ) {
-      const reason =
-        (typeof detect.error === 'string' ? detect.error.trim() : '') ||
-        'Failed to detect VAD model type in auto mode';
-      throw Object.assign(new Error(reason), {
-        code: 'VAD_MODEL_INIT_FAILED',
-      });
-    }
-    resolvedModelType = detect.modelType as VADModelType;
-  }
-  const runtimeTuning = resolveRuntimeTuningOptions(
-    options.runtimeOptions,
-    resolvedModelType
-  );
-  await SherpaOnnx.initializeVad(instanceId, {
-    modelDir,
-    modelType: resolvedModelType,
-    sampleRate: options.sampleRate,
-    silenceDurationMs: runtimeTuning?.minSilenceDurationMs,
-    speechDurationMs: runtimeTuning?.minSpeechDurationMs,
-    maxSpeechDurationS:
-      typeof runtimeTuning?.maxSpeechDurationMs === 'number'
-        ? runtimeTuning.maxSpeechDurationMs / 1000
-        : undefined,
-    minSpeechDurationMs: runtimeTuning?.minSpeechDurationMs,
-    threshold: runtimeTuning?.scoreThreshold,
-    windowSize: runtimeTuning?.windowSize,
-    provider: options.provider,
-    numThreads: options.numThreads,
-    debug: options.debug,
-  });
+  const bridgeOptions = await buildVadInitBridgeOptions(options);
+  await SherpaOnnx.initializeVad(instanceId, bridgeOptions);
 
   let destroyed = false;
   let activePipelineId: string | null = null;
@@ -250,7 +293,7 @@ export async function createStreamingVAD(
         const pipelineId = started.pipelineId;
         activePipelineId = pipelineId;
 
-        const emitter = new NativeEventEmitter();
+        const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
         const speechStateMin = Math.max(
           0,
           typeof liveOptions.speechStateEventMinIntervalMs === 'number'
@@ -367,11 +410,245 @@ export async function createStreamingVAD(
         return handle;
       }
 
+      const offlineOptions = (input as VADOfflineProcessInput).options ?? {};
+      if (
+        offlineOptions.onProgress != null &&
+        typeof offlineOptions.onProgress !== 'function'
+      ) {
+        throw Object.assign(
+          new Error(
+            'VAD_INVALID_OPTIONS: options.onProgress must be a function'
+          ),
+          { code: 'VAD_INVALID_OPTIONS' }
+        );
+      }
+
+      const segmentation = validateSegmentationConfig({
+        mode: offlineOptions.segmentation?.mode,
+        policy: offlineOptions.segmentation?.policy,
+        featureName: 'offline VAD',
+        domain: 'speech',
+        supportsManual: false,
+        defaultPolicy: {
+          evaluator: 'speech_energy_silence',
+          silenceThresholdMs: 500,
+          energyThresholdDb: -40,
+          minSegmentMs: 1000,
+          maxSegmentMs: 120000,
+          hangoverMs: 300,
+        },
+      });
+
+      const nativeOfflineOptions =
+        typeof offlineOptions.sourceTag === 'string' &&
+        offlineOptions.sourceTag.trim().length > 0
+          ? { sourceTag: offlineOptions.sourceTag }
+          : {};
+
+      if (segmentation.mode !== 'off') {
+        const segmentationPolicy = segmentation.policy;
+        if (!segmentationPolicy) {
+          throw Object.assign(
+            new Error(
+              'SEGMENTATION_POLICY_INVALID: offline VAD requires segmentation.policy when segmentation.mode=auto'
+            ),
+            { code: 'SEGMENTATION_POLICY_INVALID' }
+          );
+        }
+        if (isAbortRequested(offlineOptions.abortSignal)) {
+          throw Object.assign(
+            new Error(
+              'VAD_ABORTED: offline VAD segmentation run was aborted before processing'
+            ),
+            { code: 'VAD_ABORTED' }
+          );
+        }
+        const speechSegments = await collectSpeechSegmentsForOfflineAudio(
+          audioInBufferId,
+          segmentationPolicy
+        );
+        const progressSession = createVadProgressSession(
+          offlineOptions.onProgress
+        );
+        const totalSegments = speechSegments.length;
+
+        const aggregated: VADSummary = {
+          chunksProcessed: 0,
+          unitsRead: 0,
+          unitsWritten: 0,
+          segmentCount: 0,
+          speechDurationMs: 0,
+        };
+
+        const outputIsOffline = segmentOutBufferId.startsWith('seg_off_');
+        let stagingLiveBufferId: string | undefined;
+
+        const ensureLiveMergeTarget = async (): Promise<string> => {
+          if (!outputIsOffline) {
+            return segmentOutBufferId;
+          }
+          if (stagingLiveBufferId != null) {
+            return stagingLiveBufferId;
+          }
+          const staging = await createLiveSegmentBuffer({
+            sourceAudioBufferId: audioInBufferId,
+            spooling: { mode: 'on' },
+          });
+          stagingLiveBufferId = staging.bufferId;
+          return stagingLiveBufferId;
+        };
+
+        try {
+          for (const [
+            segmentIndex,
+            speechSegment,
+          ] of speechSegments.entries()) {
+            if (isAbortRequested(offlineOptions.abortSignal)) {
+              throw Object.assign(
+                new Error(
+                  `VAD_ABORTED: offline VAD segmentation run aborted before segment ${segmentIndex}`
+                ),
+                { code: 'VAD_ABORTED' }
+              );
+            }
+            const startSample = Math.max(
+              0,
+              Math.trunc(speechSegment.startOffset)
+            );
+            const endSample = Math.max(
+              startSample,
+              Math.trunc(speechSegment.endOffset)
+            );
+            const frameCount = endSample - startSample;
+            const sampleRate = Math.max(
+              1,
+              Math.trunc(speechSegment.sampleRate)
+            );
+            let currentSegmentDurationMs = 0;
+            if (
+              typeof speechSegment.durationMs === 'number' &&
+              Number.isFinite(speechSegment.durationMs)
+            ) {
+              currentSegmentDurationMs = speechSegment.durationMs;
+            } else if (frameCount > 0) {
+              currentSegmentDurationMs = (frameCount / sampleRate) * 1000;
+            }
+            progressSession.emitStep(
+              segmentIndex,
+              totalSegments,
+              currentSegmentDurationMs
+            );
+
+            if (frameCount <= 0) {
+              continue;
+            }
+
+            const sliceSamples = getOfflineAudioBufferSamplesSlice(
+              audioInBufferId,
+              startSample,
+              frameCount
+            );
+
+            if (sliceSamples.length <= 0) {
+              continue;
+            }
+            const sliceAudio = createOfflineAudioBufferFromSamples(
+              sliceSamples,
+              sampleRate,
+              { targetSampleRateHz: 0 }
+            );
+
+            const sliceSegmentOut = await createEmptyOfflineSegmentBuffer({
+              sourceAudioBufferId: sliceAudio.bufferId,
+            });
+
+            try {
+              const raw = (await SherpaOnnx.runVadOffline(
+                instanceId,
+                sliceAudio.bufferId,
+                sliceSegmentOut.bufferId,
+                nativeOfflineOptions
+              )) as OfflineVadNativeSummary;
+
+              accumulateVadSummary(aggregated, raw);
+
+              if (raw.segmentCount <= 0) {
+                continue;
+              }
+
+              const mergeTargetId = await ensureLiveMergeTarget();
+              let offset = 0;
+
+              while (offset < raw.segmentCount) {
+                const chunk = await getOfflineSegmentBufferSegments(
+                  sliceSegmentOut.bufferId,
+                  offset,
+                  Math.min(SEGMENT_PAGE_SIZE, raw.segmentCount - offset)
+                );
+
+                if (chunk.length === 0) {
+                  break;
+                }
+
+                offset += chunk.length;
+
+                for (const segment of chunk) {
+                  if (segment.kind !== 'speech') {
+                    continue;
+                  }
+
+                  const segmentSampleRate =
+                    segment.sampleRate > 0 ? segment.sampleRate : sampleRate;
+                  await appendLiveSegment(mergeTargetId, {
+                    kind: 'speech',
+                    sourceAudioBufferId: audioInBufferId,
+                    startSample: startSample + segment.startSample,
+                    endSample: startSample + segment.endSample,
+                    sampleRate: segmentSampleRate,
+                    durationMs: segment.durationMs,
+                    confidence: segment.confidence,
+                    ...(segment.payload != null
+                      ? { payload: segment.payload }
+                      : {}),
+                  });
+                }
+              }
+            } finally {
+              await releasePipelineSegmentBuffer(
+                sliceSegmentOut.bufferId
+              ).catch(() => undefined);
+              await releasePipelineAudioBuffer(sliceAudio.bufferId).catch(
+                () => undefined
+              );
+            }
+          }
+
+          if (outputIsOffline && stagingLiveBufferId != null) {
+            await finalizeLiveSegmentBuffer(stagingLiveBufferId);
+            await populateOfflineSegmentBufferIfEmpty(
+              segmentOutBufferId,
+              stagingLiveBufferId
+            );
+          }
+
+          return {
+            summary: aggregated,
+            segmentBufferId: segmentOutBufferId,
+          };
+        } finally {
+          if (stagingLiveBufferId != null) {
+            await releasePipelineSegmentBuffer(stagingLiveBufferId).catch(
+              () => undefined
+            );
+          }
+        }
+      }
+
       const result = await SherpaOnnx.runVadOffline(
         instanceId,
         audioInBufferId,
         segmentOutBufferId,
-        (input as VADOfflineProcessInput).options ?? {}
+        nativeOfflineOptions
       );
       return {
         summary: toSummary(result),

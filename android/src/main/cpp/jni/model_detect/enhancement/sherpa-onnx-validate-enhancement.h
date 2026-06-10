@@ -2,6 +2,7 @@
 #define SHERPA_ONNX_VALIDATE_ENHANCEMENT_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-validate-custom-types.h"
 #include <string>
 #include <vector>
 
@@ -23,6 +24,10 @@ EnhancementValidationResult ValidateEnhancementPaths(
     EnhancementModelKind kind,
     const EnhancementModelPaths& paths,
     const std::string& modelDir
+);
+
+std::vector<CustomPathFieldSpec> GetEnhancementPathRequirements(
+    EnhancementModelKind kind
 );
 
 } // namespace sherpaonnx

@@ -7,6 +7,8 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { Segment } from '../segment/segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 // ========== Buffer Kinds ==========
 
@@ -47,12 +49,30 @@ export interface OfflineAudioBufferRef {
 /**
  * Strongly-typed reference returned by `createEmptyLiveAudioBuffer` (recording state).
  * Includes metadata, branded recording handle, and event unsubscribe.
+ *
+ * `info` is a snapshot from buffer creation (or from your last call to
+ * `refreshLiveAudioBufferInfo` / `refreshLiveAudioBufferRef`). It is not updated
+ * when samples are appended. After finalize, use the return value of
+ * `finalizeLiveAudioBuffer` (`LiveAudioBufferFinishedRef.info`), not this snapshot.
+ *
+ * For live duration while recording, prefer `onFramesAppended` → `totalSamplesWritten`.
  */
 export interface LiveAudioBufferRef {
   info: LiveAudioBufferInfo;
   bufferId: LiveBufferHandleRecording;
   unsubscribeEvents: () => void;
 }
+
+/** Alias for a live buffer still in `recording` state (before finalize). */
+export type LiveAudioBufferRecordingRef = LiveAudioBufferRef;
+
+/**
+ * Authoritative metadata after `finalizeLiveAudioBuffer` (`state === 'finished'`).
+ */
+export type LiveAudioBufferFinishedRef = {
+  bufferId: LiveBufferHandleFinished;
+  info: LiveAudioBufferInfo;
+};
 
 /** Argument that resolves to an offline audio buffer native id. */
 export type OfflineAudioBufferIdSource =
@@ -167,7 +187,21 @@ export interface LiveAudioBufferErrorEvent {
 /** Callback set for live buffer append/error events. */
 export interface LiveAudioBufferCallbacks {
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   onError?: (event: LiveAudioBufferErrorEvent) => void;
+}
+
+export type AudioSegmentationMode = 'off' | 'manual' | 'auto';
+
+export interface AudioSegmentationConfig {
+  mode?: AudioSegmentationMode;
+  policy?: SegmentationPolicy;
+}
+
+export interface LiveAudioBufferSegmentEvent {
+  bufferId: string;
+  segment: Segment;
+  totalSegments: number;
 }
 
 // ========== Creation Options ==========
@@ -199,8 +233,11 @@ export type AppendBackpressure = 'none' | 'block';
 
 /** Options for creating an empty live audio buffer. */
 export interface CreateEmptyLiveAudioBufferOptions {
-  /** Sample rate in Hz (e.g. 16000, 44100). */
-  sampleRate: number;
+  /**
+   * Sample rate in Hz (e.g. 16000, 44100).
+   * Default: 16000 when omitted.
+   */
+  sampleRate?: number;
   /** Number of channels. Only 1 (mono) is supported. */
   channelCount?: number;
   /**
@@ -223,8 +260,16 @@ export interface CreateEmptyLiveAudioBufferOptions {
     framesAppended?: StreamEventSpec;
   };
 
+  /**
+   * Segmentation mode for this live audio buffer.
+   * Default: `off`.
+   */
+  segmentation?: AudioSegmentationConfig;
+
   /** Optional JS callback for producer-agnostic append events. */
   onFramesAppended?: (event: LiveAudioBufferFramesAppendedEvent) => void;
+  /** Optional JS callback for segment commit events. */
+  onSegment?: (event: LiveAudioBufferSegmentEvent) => void;
   /** Optional JS callback for live-buffer errors. */
   onError?: (event: LiveAudioBufferErrorEvent) => void;
 }
@@ -237,6 +282,9 @@ export interface StartMicToLiveOptions {
 
 /** Mode for creating an offline buffer from a live buffer. */
 export type OfflineFromLiveMode = 'fullIfSpooled' | 'windowSnapshot';
+
+/** Mode for transferring a live spool into a new offline buffer (ownership handover). */
+export type OfflineTransferFromLiveMode = 'fullIfSpooled';
 
 // ========== Error Codes ==========
 
@@ -253,6 +301,10 @@ export const PipelineAudioErrorCode = {
   CAPTURE_ERROR: 'AUDIO_CAPTURE_ERROR',
   ALREADY_FINALIZED: 'AUDIO_ALREADY_FINALIZED',
   CURSOR_LAG_EXCEEDED: 'AUDIO_CURSOR_LAG_EXCEEDED',
+  TRANSFER_INVALID_STATE: 'TRANSFER_INVALID_STATE',
+  TRANSFER_SPOOL_UNAVAILABLE: 'TRANSFER_SPOOL_UNAVAILABLE',
+  TRANSFER_CURSORS_ACTIVE: 'TRANSFER_CURSORS_ACTIVE',
+  BUFFER_INVALIDATED: 'BUFFER_INVALIDATED',
   INTERNAL_ERROR: 'AUDIO_INTERNAL_ERROR',
 } as const;
 
@@ -264,8 +316,12 @@ export type PipelineAudioErrorCodeValue =
 /** Options for decoding an audio file into a pipeline buffer. */
 export interface AudioDecodeOptions {
   /**
-   * Target sample rate in Hz. If omitted or 0, keeps the source file's native sample rate.
-   * When specified, FFmpeg SwrContext resamples during decode (no second pass).
+   * Target sample rate in Hz for decode output.
+   * - omitted / undefined: defaults to 16000 Hz
+   * - 0: keep source file's native sample rate
+   * - > 0: resample to exactly this rate
+   *
+   * FFmpeg SwrContext resamples during decode (no second pass).
    */
   targetSampleRateHz?: number;
 
@@ -287,6 +343,23 @@ export interface AudioDecodeOptions {
    * does not declare duration).
    */
   onProgress?: (event: DecodeProgressEvent) => void;
+
+  /**
+   * When `false`, FFmpeg will not fall back to `avformat_open_input` auto-probe
+   * after the extension-specific demuxer fails. Default: `true`.
+   */
+  allowDemuxerAutoProbe?: boolean;
+}
+
+/** Options for `createOfflineAudioBufferFromSamples`. */
+export interface OfflineFromSamplesOptions {
+  /**
+   * Target sample rate in Hz for the created offline buffer.
+   * - omitted / undefined: defaults to 16000 Hz
+   * - 0: keep the provided input sample rate
+   * - > 0: resample to exactly this rate before creating the buffer
+   */
+  targetSampleRateHz?: number;
 }
 
 /** Progress event emitted during audio file decode. */

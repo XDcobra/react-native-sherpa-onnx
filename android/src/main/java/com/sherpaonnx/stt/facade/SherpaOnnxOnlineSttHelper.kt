@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
@@ -11,22 +12,26 @@ import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.stt.config.OnlineSttInitOptionsParser
 import com.sherpaonnx.stt.pipeline.SttPipelineWorker
 import com.sherpaonnx.stt.core.OnlineSttRecognizerConfigFactory
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
+import com.sherpaonnx.text.pipeline.TextSegment
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Helper for streaming (online) STT using sherpa-onnx OnlineRecognizer + OnlineStream.
- * Manages recognizer instances and streams; resolves model paths by scanning the model directory.
+ * Manages recognizer instances and streams; auto mode scans the model directory.
  */
 internal class SherpaOnnxOnlineSttHelper(
   private val context: ReactApplicationContext,
   private val logTag: String
 ) {
+  private val maxEventTextChars = 4096
 
   private data class OnlineSttInstance(
     val recognizer: OnlineRecognizer,
@@ -41,59 +46,143 @@ internal class SherpaOnnxOnlineSttHelper(
   private val pathResolver = SttPathResolver(context)
   private val configFactory = OnlineSttRecognizerConfigFactory(pathResolver)
 
-  fun initializeOnlineStt(
-    instanceId: String,
-    modelDir: String,
-    modelType: String,
-    enableEndpoint: Boolean,
-    decodingMethod: String,
-    maxActivePaths: Int,
-    hotwordsFile: String?,
-    hotwordsScore: Double?,
-    numThreads: Double?,
-    provider: String?,
-    ruleFsts: String?,
-    ruleFars: String?,
-    dither: Double?,
-    blankPenalty: Double?,
-    debug: Boolean?,
-    rule1MustContainNonSilence: Boolean?,
-    rule1MinTrailingSilence: Double?,
-    rule1MinUtteranceLength: Double?,
-    rule2MustContainNonSilence: Boolean?,
-    rule2MinTrailingSilence: Double?,
-    rule2MinUtteranceLength: Double?,
-    rule3MustContainNonSilence: Boolean?,
-    rule3MinTrailingSilence: Double?,
-    rule3MinUtteranceLength: Double?,
-    promise: Promise
+  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
+    if (text.length <= maxEventTextChars) {
+      return Pair(text, false)
+    }
+    return Pair(text.substring(0, maxEventTextChars), true)
+  }
+
+  private fun emitLiveTextSegmentEvent(
+    liveBufferId: String,
+    segment: TextSegment,
+    totalSegments: Int,
   ) {
     try {
-      val config = configFactory.buildOnlineRecognizerConfig(
-        modelDir = modelDir,
-        modelType = modelType,
-        enableEndpoint = enableEndpoint,
-        decodingMethod = decodingMethod,
-        maxActivePaths = maxActivePaths,
-        hotwordsFile = hotwordsFile,
-        hotwordsScore = hotwordsScore?.toFloat(),
-        numThreads = numThreads?.toInt(),
-        provider = provider,
-        ruleFsts = ruleFsts,
-        ruleFars = ruleFars,
-        dither = dither?.toFloat(),
-        blankPenalty = blankPenalty?.toFloat(),
-        debug = debug,
-        rule1MustContainNonSilence = rule1MustContainNonSilence,
-        rule1MinTrailingSilence = rule1MinTrailingSilence?.toFloat(),
-        rule1MinUtteranceLength = rule1MinUtteranceLength?.toFloat(),
-        rule2MustContainNonSilence = rule2MustContainNonSilence,
-        rule2MinTrailingSilence = rule2MinTrailingSilence?.toFloat(),
-        rule2MinUtteranceLength = rule2MinUtteranceLength?.toFloat(),
-        rule3MustContainNonSilence = rule3MustContainNonSilence,
-        rule3MinTrailingSilence = rule3MinTrailingSilence?.toFloat(),
-        rule3MinUtteranceLength = rule3MinUtteranceLength?.toFloat()
+      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
+      val payload = Arguments.createMap().apply {
+        putString("liveBufferId", liveBufferId)
+        putInt("totalSegments", totalSegments)
+        putString("text", eventText)
+        if (textTruncated) {
+          putBoolean("textTruncated", true)
+        }
+        putString("source", segment.source)
+        putInt("segmentIndex", segment.segmentIndex)
+
+        if (segment.tokens.isNotEmpty()) {
+          val tokenArray = Arguments.createArray()
+          segment.tokens.forEach { tokenArray.pushString(it) }
+          putArray("tokens", tokenArray)
+        }
+
+        if (segment.timestamps.isNotEmpty()) {
+          val tsArray = Arguments.createArray()
+          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+          putArray("timestamps", tsArray)
+        }
+
+        segment.meta?.let { rawMeta ->
+          try {
+            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+          } catch (_: Exception) {
+            // Ignore non-serializable meta values.
+          }
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("pipelineLiveTextSegmentAppended", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
+    }
+  }
+
+  fun initializeOnlineStt(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    val parsed = OnlineSttInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        SttErrorCodes.INIT_FAILED,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        }
       )
+      return
+    }
+
+    val modelType = parsed.modelType?.trim().orEmpty().ifEmpty { "transducer" }
+    val enableEndpoint = parsed.enableEndpoint ?: true
+    val decodingMethod = parsed.decodingMethod?.trim().orEmpty().ifEmpty { "greedy_search" }
+    val maxActivePaths = parsed.maxActivePaths ?: 4
+
+    try {
+      val config = if (parsed.initMode == "custom") {
+        val pathStrings = parsed.modelPaths.orEmpty()
+        ModelPathValidationNative.validate("stt_streaming", modelType, pathStrings)?.let { errorMsg ->
+          Log.e(logTag, errorMsg)
+          promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
+          return
+        }
+        configFactory.buildOnlineRecognizerConfigFromPaths(
+          paths = pathStrings,
+          modelType = modelType,
+          enableEndpoint = enableEndpoint,
+          decodingMethod = decodingMethod,
+          maxActivePaths = maxActivePaths,
+          hotwordsFile = parsed.hotwordsFile,
+          hotwordsScore = parsed.hotwordsScore?.toFloat(),
+          numThreads = parsed.numThreads?.toInt(),
+          provider = parsed.provider,
+          ruleFsts = parsed.ruleFsts,
+          ruleFars = parsed.ruleFars,
+          dither = parsed.dither?.toFloat(),
+          blankPenalty = parsed.blankPenalty?.toFloat(),
+          debug = parsed.debug,
+          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence,
+          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat(),
+          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat(),
+          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence,
+          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat(),
+          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat(),
+          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence,
+          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat(),
+          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat()
+        )
+      } else {
+        configFactory.buildOnlineRecognizerConfig(
+          modelDir = parsed.modelDir.orEmpty(),
+          modelType = modelType,
+          enableEndpoint = enableEndpoint,
+          decodingMethod = decodingMethod,
+          maxActivePaths = maxActivePaths,
+          hotwordsFile = parsed.hotwordsFile,
+          hotwordsScore = parsed.hotwordsScore?.toFloat(),
+          numThreads = parsed.numThreads?.toInt(),
+          provider = parsed.provider,
+          ruleFsts = parsed.ruleFsts,
+          ruleFars = parsed.ruleFars,
+          dither = parsed.dither?.toFloat(),
+          blankPenalty = parsed.blankPenalty?.toFloat(),
+          debug = parsed.debug,
+          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence,
+          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat(),
+          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat(),
+          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence,
+          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat(),
+          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat(),
+          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence,
+          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat(),
+          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat()
+        )
+      }
+
       val recognizer = OnlineRecognizer(assetManager = null, config = config)
       instances[instanceId] = OnlineSttInstance(recognizer = recognizer, config = config)
       promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
@@ -102,7 +191,6 @@ internal class SherpaOnnxOnlineSttHelper(
       promise.reject(SttErrorCodes.INIT_FAILED, "Online STT init failed: ${e.message}", e)
     }
   }
-
 
   fun unloadOnlineStt(instanceId: String, promise: Promise) {
     try {
@@ -199,7 +287,10 @@ internal class SherpaOnnxOnlineSttHelper(
         stream = stream,
         inputEntry = inputEntry,
         outputEntry = outputEntry,
-        chunkSize = chunkSize ?: 3200,
+        chunkSize = chunkSize ?: 6400,
+        onSegmentCommitted = { segment, totalSegments ->
+          emitLiveTextSegmentEvent(textOutLiveBufferId, segment, totalSegments)
+        },
       )
 
       StreamingPipelineRegistry.registerAndStart(worker) {

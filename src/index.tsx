@@ -1,115 +1,12 @@
+// Package root: `testSherpaInit` only. Import feature APIs from subpaths (e.g.
+// `react-native-sherpa-onnx/fileio`, `react-native-sherpa-onnx/utils`, `react-native-sherpa-onnx/provider`).
+
 import SherpaOnnx from './NativeSherpaOnnx';
-import type { AccelerationSupport } from './NativeSherpaOnnx';
-
-// Export common types and utilities
-export type {
-  AccelerationSupport,
-  ExtractArchiveResult,
-} from './NativeSherpaOnnx';
-export type { ModelPathConfig } from './types';
 export {
-  assetModelPath,
-  autoModelPath,
-  fileModelPath,
-  getAssetPackPath,
-  getDefaultModelPath,
-  getPlayAssetDeliveryModelsPath,
-  listAssetModels,
-  listModelsAtPath,
-  resolveModelPath,
-} from './utils';
+  LIVE_OFFLINE_SEGMENTATION_REQUIRED,
+  LiveOfflinePipelineError,
+} from './livePipeline';
 
-export { copyFile, saveText, shareFile } from './fileio';
-export type {
-  FileSource,
-  FileDestination,
-  AppBaseDir,
-  ResolvedFileRef,
-  CopyFileOptions,
-  CopyFileResult,
-  SaveTextOptions,
-  ShareFileOptions,
-  FileIOProgressEvent,
-} from './fileio';
-export { FileIOErrorCode } from './fileio';
-export * from './alignment';
-
-export { getModelLicenses, type ModelLicense } from './licenses';
-// Note: Feature-specific exports are available via subpath imports:
-// - import { createSTT, createStreamingSTT, ... } from 'react-native-sherpa-onnx/stt'
-// - import { createTTS, ... } from 'react-native-sherpa-onnx/tts'
-// - import { detectAlignmentModel, ... } from 'react-native-sherpa-onnx/alignment'
-// - import { ... } from 'react-native-sherpa-onnx/download'
-// - import { copyFile, saveText, shareFile, ... } from 'react-native-sherpa-onnx/fileio'
-// - import { getBundledArchives, listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction'
-// - import { ... } from 'react-native-sherpa-onnx/vad'
-// - import { ... } from 'react-native-sherpa-onnx/diarization'
-// - import { ... } from 'react-native-sherpa-onnx/enhancement'
-// - import { ... } from 'react-native-sherpa-onnx/separation'
-// - import { ... } from 'react-native-sherpa-onnx/audiobuffer'  // offline/live pipeline buffers
-// - import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'  // play from pipeline buffers
-
-/**
- * Test method to verify sherpa-onnx native library is loaded.
- */
 export function testSherpaInit(): Promise<string> {
   return SherpaOnnx.testSherpaInit();
-}
-
-/**
- * QNN support (Android). Optional modelBase64 for canInit (session test); if omitted, SDK uses embedded test model.
- */
-export function getQnnSupport(
-  modelBase64?: string
-): Promise<AccelerationSupport> {
-  return SherpaOnnx.getQnnSupport(modelBase64);
-}
-
-/**
- * Device SoC result: soc is always the device SoC string when available (Android 12+); on iOS or when unavailable, soc is null.
- * isSupported is true when the SoC is SM8xxx (supported for QNN models). Use soc for the label; use isSupported to decide whether to auto-select in the download manager.
- */
-export type DeviceQnnSocResult = {
-  soc: string | null;
-  isSupported: boolean;
-};
-
-export function getDeviceQnnSoc(): Promise<DeviceQnnSocResult> {
-  return SherpaOnnx.getDeviceQnnSoc();
-}
-
-/**
- * Return the list of available ONNX Runtime execution providers
- * (e.g. "CPU", "NNAPI", "QNN", "XNNPACK").
- * Requires the ORT Java bridge from the onnxruntime AAR.
- */
-export function getAvailableProviders(): Promise<string[]> {
-  return SherpaOnnx.getAvailableProviders();
-}
-
-/**
- * NNAPI support (Android). Optional modelBase64 for canInit (session test). On iOS returns all false.
- */
-export function getNnapiSupport(
-  modelBase64?: string
-): Promise<AccelerationSupport> {
-  return SherpaOnnx.getNnapiSupport(modelBase64);
-}
-
-/**
- * XNNPACK support. hasAccelerator = true when providerCompiled (CPU-optimized). Optional modelBase64 for canInit. On iOS returns all false.
- */
-export function getXnnpackSupport(
-  modelBase64?: string
-): Promise<AccelerationSupport> {
-  return SherpaOnnx.getXnnpackSupport(modelBase64);
-}
-
-/**
- * Core ML support (iOS). providerCompiled = true (Core ML on iOS 11+), hasAccelerator = Apple Neural Engine. Optional modelBase64 for canInit. On Android returns all false.
- */
-export function getCoreMlSupport(
-  modelBase64?: string
-): Promise<AccelerationSupport> {
-  return SherpaOnnx.getCoreMlSupport(modelBase64);
 }

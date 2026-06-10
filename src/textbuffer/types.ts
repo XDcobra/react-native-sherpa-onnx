@@ -10,6 +10,8 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
+import type { Segment } from '../segment/segment';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 // ========== Buffer Kinds ==========
 
@@ -101,6 +103,8 @@ export interface LiveTextBufferInfo {
 /** A committed text segment from a live text buffer segment log. */
 export interface LiveTextSegment {
   text: string;
+  /** True when event payload text was truncated by maxEventTextChars. */
+  textTruncated?: boolean;
   source: LiveTextBufferPartialSource;
   segmentIndex: number;
   tokens?: string[];
@@ -231,7 +235,21 @@ export interface LiveTextBufferErrorEvent {
 /** Callback set for live text buffer partial/error events. */
 export interface LiveTextBufferCallbacks {
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
+  onSegment?: (event: LiveTextBufferSegmentEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
+}
+
+export type TextSegmentationMode = 'off' | 'manual' | 'auto';
+
+export interface TextSegmentationConfig {
+  mode?: TextSegmentationMode;
+  policy?: SegmentationPolicy;
+}
+
+export interface LiveTextBufferSegmentEvent {
+  bufferId: string;
+  segment: Segment;
+  totalSegments: number;
 }
 
 // ========== Creation Options ==========
@@ -240,7 +258,7 @@ export interface LiveTextBufferCallbacks {
 export interface CreateLiveTextBufferOptions {
   /** Max held UTF-16 characters for partial history (ring). Default: native/SDK. */
   windowMaxChars?: number;
-  /** Max committed segments retained in the live segment log. Default: 1000. */
+  /** Max committed segments retained in the live segment log. Default: 4096. */
   maxSegments?: number;
   /** Optional spooling config (default is native `mode: "on"`). */
   spooling?: TextBufferSpoolingOptions;
@@ -251,7 +269,13 @@ export interface CreateLiveTextBufferOptions {
   streamEvents?: {
     partial?: StreamEventSpec;
   };
+  /**
+   * Segmentation mode for this live text buffer.
+   * Default: `manual`.
+   */
+  segmentation?: TextSegmentationConfig;
   onPartial?: (event: LiveTextBufferPartialEvent) => void;
+  onSegment?: (event: LiveTextBufferSegmentEvent) => void;
   onError?: (event: LiveTextBufferErrorEvent) => void;
 }
 
@@ -282,5 +306,5 @@ export type PipelineTextErrorCodeValue =
 
 // ========== Slice Constants ==========
 
-export const TEXT_DEFAULT_SLICE_COUNT = 1024;
+export const TEXT_DEFAULT_SLICE_COUNT = 4096;
 export const TEXT_MAX_SLICE_COUNT = 16384;

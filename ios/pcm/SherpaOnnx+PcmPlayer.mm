@@ -317,7 +317,8 @@ void pcmPlayerStopAllDrainWorkers() {
 
 static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
 static NSString *const kOfflinePlaybackOomMessage =
-    @"Not enough memory for offline playback buffering. Please use a streaming playback path for large audio inputs.";
+    @"Not enough memory for offline playback buffering. Please use a streaming playback path for large audio inputs. "
+    @"For large offline feature workloads, consider the segmentation engine (docs/segmentation-engine.md).";
 
 static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &session, RCTPromiseRejectBlock reject) {
     if (!session || !session->terminalOom.load()) {
@@ -354,6 +355,14 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
     if (liveEntry) {
         sampleRate = liveEntry->sampleRate;
     } else {
+        if (pa_is_live_invalidated(bufferId)) {
+            reject(
+                @"BUFFER_INVALIDATED",
+                [NSString stringWithFormat:@"Audio buffer is invalidated after transfer: %@", audioBufferId],
+                nil
+            );
+            return;
+        }
         hasOfflineSource = true;
         std::string errorCode;
         std::string errorMessage;

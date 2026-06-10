@@ -1,10 +1,26 @@
-import { NativeEventEmitter } from 'react-native';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   StreamingPipelineCompletion,
   StreamingPipelineCompletionReason,
   StreamingPipelineStatus,
 } from './streamingPipelineTypes';
+
+function logStreamingPipelineCompletion(
+  completion: StreamingPipelineCompletion
+): void {
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    return;
+  }
+  console.warn('[SherpaOnnx:StreamingPipeline] completed', {
+    pipelineId: completion.pipelineId,
+    reason: completion.reason,
+    chunksProcessed: completion.chunksProcessed,
+    unitsRead: completion.unitsRead,
+    unitsWritten: completion.unitsWritten,
+    error: completion.error,
+  });
+}
 
 type NativeSubscription = { remove: () => void };
 
@@ -92,6 +108,7 @@ function settlePendingCompletion(
   pendingCompletions.delete(completion.pipelineId);
 
   if (completion.reason === 'error') {
+    logStreamingPipelineCompletion(completion);
     const error = Object.assign(
       new Error(
         completion.error ??
@@ -104,6 +121,7 @@ function settlePendingCompletion(
     );
     pending.reject(error);
   } else {
+    logStreamingPipelineCompletion(completion);
     pending.resolve(completion);
   }
 
@@ -113,7 +131,7 @@ function settlePendingCompletion(
 function ensureCompletionSubscription(): void {
   if (completionSubscription) return;
 
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
   completionSubscription = emitter.addListener(
     'streamingPipelineCompleted',
     (event: unknown) => {

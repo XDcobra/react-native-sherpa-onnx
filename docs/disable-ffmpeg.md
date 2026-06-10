@@ -67,3 +67,8 @@ The helpers above are exposed from **`react-native-sherpa-onnx/audio`**. STT, ar
 |--------|--------|
 | **Android:** `sherpaOnnxDisableFfmpeg=true`<br>**iOS:** `SHERPA_ONNX_DISABLE_FFMPEG=1 pod install` | No FFmpeg linked or shipped. `saveAudioAsFile` rejects for FFmpeg-backed formats. Use to reduce app size or when you have another FFmpeg in the app to avoid symbol clashes. |
 | **Default (Flag unset / false)** | FFmpeg is bundled automatically. Audio save APIs work for all documented formats. Do not combine with another FFmpeg in the same process unless you accept the risk of symbol clashes. |
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

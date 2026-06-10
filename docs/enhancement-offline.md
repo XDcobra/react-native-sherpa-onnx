@@ -1,40 +1,22 @@
 # Speech enhancement (offline)
 
-On-device batch speech denoising with a **pipeline-first** API:
+## Introduction
 
-- **Input:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — populated noisy PCM (file-backed or in-memory).
-- **Output:** offline pipeline audio buffer ([`audiobuffer` — offline](audiobuffer-offline.md)) — empty buffer at the denoiser sample rate (`createEmptyOfflineAudioBuffer`); **`enhance`** writes denoised PCM once.
-- **Engine:** `createEnhancement` exposes **`enhance(audioIn, audioOut)`** (plus `getSampleRate` / `destroy`). There is **no** JS-side API that returns denoised samples; read the result from **`audioOut`** through buffer info and conversion helpers.
+On-device batch speech denoising with a **pipeline-first** API.
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
+| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate (`createEmptyOfflineAudioBuffer`); `enhance` writes denoised PCM once |
+| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy`; returns `EnhancementResult` with segment stats |
 
 Import path: `react-native-sherpa-onnx/enhancement`
 
-For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer` via **`enhance`**), see [Speech enhancement (streaming)](enhancement-streaming.md).
+For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer`), see [Speech enhancement (streaming)](enhancement-streaming.md).
 
-For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment.md](alignment.md).
+For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
 
-## Models and paths
-
-- **`FileSource`:** `{ kind: 'fs' | 'app' | 'contentUri' | 'securityScoped' | 'pad', ... }` (from `react-native-sherpa-onnx`) — used by all detect functions.
-- In-app downloads: [download-manager.md](download-manager.md) with category **`ModelCategory.Enhancement`** (when exposed in your app catalog).
-- Model detection without loading the denoiser: **`detectEnhancementModel(...)`**.
-- File expectations per family: [model-setup.md](model-setup.md) where applicable.
-
----
-
-## Model detection
-
-`detectEnhancementModel` does **not** load the denoiser — use it as a **pre-check** before **`createEnhancement`** (same idea as `detectTtsModel` / `detectSttModel`).
-
-**Rules (directory scan):**
-
-- Recursively finds `.onnx` under the resolved model directory (depth 4, same family as other detectors).
-- Filename / path contains `gtcrn` → candidate **`gtcrn`**; contains `dpdfnet` or `dpcrn` → candidate **`dpdfnet`**.
-- **`modelType: 'auto'`** (default): prefers **`gtcrn`** if both ONNX stacks are present, else **`dpdfnet`**.
-- **`assetName`:** optional. If omitted, native catalog hints use the **last segment** of `modelPath.path` (with common archive suffixes stripped). If set, that string wins for **`languages`** / **`quantization`** when both directory and asset id are passed to native.
-
-**`detectionSources`:** optional ordered trace (`fileListing`, `dirName`, `fallbackOrder`, `explicitModelType`, `nameOnly`). **`nameOnly`** means no file list was scanned — see native `error` when `success` is false.
-
----
+If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offline buffer `sampleRate` from `getSampleRate()`) explicitly to the model rate.
 
 ## Quick start
 
@@ -54,13 +36,13 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
-const modelPath = { type: 'file' as const, path: '/absolute/path/to/enhancement-model-dir' };
+const modelPath = { kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' };
 
 const det = await detectEnhancementModel({ kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' }, { modelType: 'auto' });
 if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 
 const enhancement = await createEnhancement({
-  modelPath,
+  modelSource: modelPath,
   modelType: (det.modelType as any) ?? 'auto',
   numThreads: 2,
   provider: 'cpu',
@@ -87,26 +69,6 @@ try {
   await enhancement.destroy();
 }
 ```
-
----
-
-## Data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
-| **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
-| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
-
----
-
-## Setup (iOS and Android)
-
-| Topic | Requirement |
-| --- | --- |
-| Execution provider | Optional **`provider`** on init; see [execution-providers.md](execution-providers.md) |
-| Input format | Any format supported by **`createOfflineAudioBufferFromFile()`** (WAV, etc.) |
-| Instance lifetime | Always **`destroy()`** the offline engine; **`releasePipelineAudioBuffer()`** on created buffers |
 
 ---
 
@@ -139,7 +101,7 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.isStreaming, det.detectedModels);
+console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.detectedModels);
 ```
 
 ```ts
@@ -161,7 +123,7 @@ function createEnhancement(
 
 ```ts
 const enhancement = await createEnhancement({
-  modelPath: { type: 'file', path: '/absolute/path/to/model-dir' },
+  modelSource: { kind: 'fs', path: '/absolute/path/to/model-dir' },
   modelType: 'auto',
   numThreads: 1,
   provider: 'cpu',
@@ -176,8 +138,9 @@ const enhancement = await createEnhancement({
 ```ts
 enhance(
   audioIn: OfflineAudioBufferIdSource,
-  audioOut: OfflineAudioBufferIdSource
-): Promise<void>;
+  audioOut: OfflineAudioBufferIdSource,
+  options?: EnhanceOptions
+): Promise<EnhancementResult>;
 ```
 
 ```ts
@@ -198,7 +161,7 @@ await enhancement.enhance(audioIn, audioOut);
 
 - **`audioIn`:** populated **`OfflineAudioBuffer`** (file-backed or RAM); must be **mono** at a rate the denoiser accepts.
 - **`audioOut`:** **empty** offline buffer with **`sampleRate`** matching the denoiser's rate (from **`getSampleRate()`**).
-- **Returns:** `Promise<void>`. Inspect result via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
+- **Returns:** `EnhancementResult` with orchestration status and segment counters. Read PCM via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
 
 ---
 
@@ -238,7 +201,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 ```
 
-See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
 
 **Audio output**
 
@@ -251,7 +214,159 @@ import {
 import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 ```
 
-See [audiobuffer — offline](audiobuffer-offline.md) and [overview](audiobuffer.md).
+See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
+
+### Buffer data model and lifetime
+
+| Item | Behaviour |
+| --- | --- |
+| **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
+| **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
+| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
+
+## Models and paths
+
+- **`FileSource`** — [model-setup.md](model-setup.md)
+- **Detection & init** — [model-detect.md](model-detect.md)
+- Downloads: [download-manager.md](download-manager.md) · `ModelCategory.Enhancement`
+
+## Validation required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | — | `model` |
+| `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | — | `model` |
+
+Auto mode prefers `gtcrn` when both ONNX stacks are present.
+
+## Model detection
+
+`detectEnhancementModel` is a pre-check before `createEnhancement` — no denoiser load. Unified catalog: [model-detect.md](model-detect.md).
+
+On filesystem-backed detection, the result includes `paths.model` (resolved `.onnx` file) when native file listing finds one. Name-only heuristics may omit `paths`.
+
+Filename rules: recursive `.onnx` scan (depth 4); `gtcrn` in path → `gtcrn`; `dpdfnet`/`dpcrn` → `dpdfnet`. Optional `assetName` for catalog hints.
+
+## Custom initialization (`initMode: 'custom'`)
+
+Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
+
+| `modelType` | Custom-init keys |
+| --- | --- |
+| `gtcrn`, `dpdfnet` | `model` |
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+});
+```
+
+## Segmentation
+
+Enhancement models in this SDK are primarily **offline-first**. Running enhancement on very large offline buffers can exceed memory limits on mobile devices (**OOM**). Segmentation mitigates this by splitting input audio into bounded chunks, running the offline denoiser per chunk, then assembling output in order. This lowers peak RAM, with a small quality tradeoff around segment boundaries.
+
+Supported modes for offline enhancement:
+
+- `'off'` (default): one full pass over the input buffer.
+- `'auto'`: split input by segmentation policy and process chunk by chunk.
+
+`'manual'` is not supported for offline enhancement.
+
+Default policy evaluator: `speech_energy_silence`.
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const engine = await createEnhancement({
+  modelSource: { kind: 'fs', path: '/path/to/enhancement-model' },
+  modelType: 'auto',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/long-input.wav' });
+const sampleRate = await engine.getSampleRate();
+const outBuf = await createEmptyOfflineAudioBuffer(sampleRate);
+
+try {
+  const result = await engine.enhance(inBuf, outBuf, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+    maxRetriesPerSegment: 2,
+  });
+  console.log(result.status, result.completedSegments, result.totalSegments);
+} finally {
+  await releasePipelineAudioBuffer(inBuf);
+  await releasePipelineAudioBuffer(outBuf);
+  await engine.destroy();
+}
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for policy details and [memory-and-models.md](memory-and-models.md) for RAM planning.
+
+## Live overload on offline enhancement (offline weights, live consumption)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline denoiser can drive a live pipeline directly. This is useful when you want to process a live audio stream using a monolithic offline model.
+
+> [!WARNING]
+> Because offline models are designed for whole-utterance processing, using them in live contexts via segmentation can introduce audible artifacts at segment boundaries.
+
+```ts
+const denoiser = await createEnhancement({
+  modelSource: { kind: 'fs', path: '/absolute/path/to/gtcrn' },
+});
+
+const handle = await denoiser.enhance(liveAudioIn, liveAudioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+});
+
+// handle.stop() / .flush() / .completed as usual
+const completion = await handle.completed;
+console.log(`Denoised ${completion.unitsRead} samples`);
+```
+
+
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| File decode path | `OfflineAudioBuffer` (`off_*`) | Typical input via `createOfflineAudioBufferFromFile(...)`. |
+| Sample ingestion path | `OfflineAudioBuffer` (`off_*`) | Use `createOfflineAudioBufferFromSamples(...)` for app-owned PCM. |
+| Segmented offline source | `OfflineAudioBuffer` (`off_*`) | Use `segmentation.mode: 'auto'` for large files. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Clean batch output | `OfflineAudioBuffer` (`off_*`) | `audioOut` must be empty before `enhance(...)`. |
+| Offline STT | `OfflineAudioBuffer` (`off_*`) | Common denoise-before-transcribe workflow. |
+| File export | `saveAudioAsFile(...)` | Persist enhanced audio for external use. |
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer noisy] --> B[createEnhancement().enhance]
+  B --> C[OfflineAudioBuffer clean]
+  C --> D[Offline STT or saveAudioAsFile]
+```
+
+More end-to-end patterns: [feature-pipelines.md#enhancement-offline-patterns](feature-pipelines.md#enhancement-offline-patterns).
 
 ## Types and constants
 
@@ -285,7 +400,7 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `ENHANCEMENT_BUFFER_KIND_MISMATCH` | A non-offline buffer was passed to offline `enhance(...)`. |
 | `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty before calling `enhance(...)`. |
-| `OFFLINE_OOM` | Not enough memory for offline enhancement. Use streaming enhancement for large audio inputs. |
+| `OFFLINE_OOM` | Not enough memory for offline enhancement. Use streaming enhancement for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md](enhancement-streaming.md).
 
@@ -294,9 +409,68 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 ## See also
 
 - [Speech enhancement (streaming / live)](enhancement-streaming.md)
-- [Speech enhancement (overview)](speech-enhancement.md)
+- [Speech enhancement (streaming)](enhancement-streaming.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [TTS offline](tts-offline.md)
-- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [overview](audiobuffer.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
 - [Execution providers](execution-providers.md)
 - [Model setup](model-setup.md)
+
+## Use case examples
+
+<details>
+<summary>Denoise a long recording with segmented offline processing</summary>
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+
+const engine = await createEnhancement({
+  modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
+  modelType: 'gtcrn',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/noisy-long.wav' });
+const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
+
+try {
+  await engine.enhance(inBuf, outBuf, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+  });
+  await saveAudioAsFile(outBuf, { kind: 'fs', path: '/path/to/clean.wav' }, 'wav');
+} finally {
+  await releasePipelineAudioBuffer(inBuf);
+  await releasePipelineAudioBuffer(outBuf);
+  await engine.destroy();
+}
+```
+
+</details>
+
+<details>
+<summary>Single-pass enhancement for short clips</summary>
+
+```ts
+const engine = await createEnhancement({
+  modelSource: { kind: 'fs', path: '/path/to/model' },
+  modelType: 'auto',
+});
+
+const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/short.wav' });
+const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
+
+await engine.enhance(inBuf, outBuf, { segmentation: { mode: 'off' } });
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

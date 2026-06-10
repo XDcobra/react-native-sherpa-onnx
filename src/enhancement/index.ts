@@ -1,21 +1,157 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
-import { resolveModelPath } from '../utils';
-import { resolveFileSourceForDetect } from '../detect';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import { resolvePublicLanguageHints } from '../model-languages';
 import { ModelCategory } from '../download/types';
 import { isDetectionSource } from './types';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  releasePipelineAudioBuffer,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
+import type { SpeechSegment } from '../segment/segment';
 import type {
   DetectedModelEntry,
   DetectionSource,
   EnhancementDetectResult,
   EnhancementEngine,
   EnhancementInitializeOptions,
+  EnhanceOptions,
+  EnhancementResult,
 } from './types';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  OfflineAudioBufferIdSource,
+  LiveAudioBufferIdSource,
+  LiveAudioBufferRef,
+} from '../audiobuffer/types';
+import { runOfflineEnhancementPipeline } from './orchestrate';
+import { validateLiveOfflinePipelineOptions } from '../livePipeline';
+import { subscribeLiveAudioBufferEvents } from '../audiobuffer';
+import type { EnhancementLivePipelineOptions } from './types';
+import type { EnhancementPipelineHandle } from './streamingTypes';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
 
 let enhancementInstanceCounter = 0;
+
+function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveAudioBufferRef).info === 'object' &&
+    (buffer as LiveAudioBufferRef).info?.kind === 'livePcmBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function createEnhancementPipelineHandle(
+  instanceId: string,
+  pipelineId: string,
+  attachedEngineId?: string
+): EnhancementPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus() {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
+
+async function enhanceLiveOverload(
+  instanceId: string,
+  audioIn: LiveAudioBufferIdSource,
+  audioOut: LiveAudioBufferIdSource,
+  options: EnhancementLivePipelineOptions
+): Promise<EnhancementPipelineHandle> {
+  const { policy } = validateLiveOfflinePipelineOptions({
+    featureName: 'live offline enhancement',
+    domain: 'speech',
+    supportedEvaluators: ['continuous_frames'],
+    segmentation: options.segmentation,
+  });
+
+  const inId = resolvePipelineAudioBufferId(audioIn);
+  const outId = resolvePipelineAudioBufferId(audioOut);
+
+  const attached = await attachSegmentationEngine(audioIn, { policy });
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'ENHANCEMENT_ERROR: segmentation engine did not produce a segment buffer for speech domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startEnhancementOfflineLivePipeline(
+      instanceId,
+      inId,
+      outId,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createEnhancementPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
+
+  if (options.onSegment) {
+    const cb = options.onSegment;
+    const unsub = subscribeLiveAudioBufferEvents(outId, {
+      onSegment: (event) => cb(event.segment as SpeechSegment),
+    });
+    handle.completed.then(unsub, unsub);
+  }
+
+  return handle;
+}
 
 export async function detectEnhancementModel(
   source: FileSource,
@@ -64,6 +200,8 @@ export async function detectEnhancementModel(
     typeof raw.quantization === 'string' && raw.quantization.length > 0
       ? raw.quantization
       : undefined;
+  const modelFilePath =
+    typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -76,6 +214,7 @@ export async function detectEnhancementModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
   };
 }
 
@@ -83,14 +222,10 @@ export async function createEnhancement(
   options: EnhancementInitializeOptions
 ): Promise<EnhancementEngine> {
   const instanceId = `enhancement_${++enhancementInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const init = await SherpaOnnx.initializeEnhancement(
     instanceId,
-    resolvedPath,
-    options.modelType ?? 'auto',
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!init.success) {
@@ -115,15 +250,83 @@ export async function createEnhancement(
     get instanceId() {
       return instanceId;
     },
-    async enhance(
-      audioIn: OfflineAudioBufferIdSource,
-      audioOut: OfflineAudioBufferIdSource
-    ): Promise<void> {
+    enhance: (async (
+      audioIn: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
+      audioOut: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
+      enhanceOptions?: EnhanceOptions | EnhancementLivePipelineOptions
+    ): Promise<EnhancementResult | EnhancementPipelineHandle> => {
       guard();
-      const inId = resolvePipelineAudioBufferId(audioIn);
-      const outId = resolvePipelineAudioBufferId(audioOut);
-      await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
-    },
+
+      const inIsLive = isLiveAudioSource(audioIn);
+      const outIsLive = isLiveAudioSource(audioOut);
+
+      if (inIsLive || outIsLive) {
+        if (!(inIsLive && outIsLive)) {
+          throw new Error(
+            'ENHANCE_INVALID_ARGUMENT: enhance() overload mismatch. Use (OfflineAudio, OfflineAudio, options?) or (LiveAudio, LiveAudio, options).'
+          );
+        }
+        return enhanceLiveOverload(
+          instanceId,
+          audioIn as LiveAudioBufferIdSource,
+          audioOut as LiveAudioBufferIdSource,
+          enhanceOptions as EnhancementLivePipelineOptions
+        );
+      }
+
+      const startedAtMs = Date.now();
+      const inId = resolvePipelineAudioBufferId(
+        audioIn as OfflineAudioBufferIdSource
+      );
+      const outId = resolvePipelineAudioBufferId(
+        audioOut as OfflineAudioBufferIdSource
+      );
+
+      const segmentationMode = enhanceOptions?.segmentation?.mode ?? 'off';
+      if (segmentationMode === 'off') {
+        await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
+        return {
+          status: 'complete',
+          totalSegments: 1,
+          completedSegments: 1,
+          skippedSegments: [],
+          processingTimeMs: Date.now() - startedAtMs,
+        };
+      }
+
+      const orchestrated = await runOfflineEnhancementPipeline(
+        inId,
+        instanceId,
+        enhanceOptions ?? {}
+      );
+
+      const outputBuffer = orchestrated.outputBuffer;
+      if (outputBuffer) {
+        try {
+          await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
+            outId,
+            outputBuffer.bufferId,
+            undefined
+          );
+        } finally {
+          // Source may already be consumed by populate; release is best-effort cleanup.
+          await releasePipelineAudioBuffer(outputBuffer.bufferId).catch(
+            () => undefined
+          );
+        }
+      }
+
+      return {
+        status: orchestrated.status,
+        totalSegments: orchestrated.totalSegments,
+        completedSegments: orchestrated.completedSegments,
+        skippedSegments: orchestrated.skippedSegments,
+        ...(orchestrated.failedSegment
+          ? { failedSegment: orchestrated.failedSegment }
+          : {}),
+        processingTimeMs: orchestrated.processingTimeMs,
+      };
+    }) as EnhancementEngine['enhance'],
     async getSampleRate(): Promise<number> {
       guard();
       return SherpaOnnx.getEnhancementSampleRate(instanceId);
@@ -140,13 +343,28 @@ export { createStreamingEnhancement } from './streaming';
 export type {
   StreamingEnhancementEngine,
   StreamingEnhancementInitializeOptions,
+  StreamingEnhancementEnhanceOptions,
   EnhancementPipelineHandle,
 } from './streamingTypes';
 
 export type {
   EnhancementModelType,
+  EnhancementConcreteModelType,
+  EnhancementInitOptionsShared,
+  EnhancementAutoInitializeOptions,
+  EnhancementCustomInitializeOptions,
   EnhancementInitializeOptions,
   EnhancementDetectResult,
   EnhancementEngine,
+  EnhanceOptions,
+  EnhancementResult,
+  EnhanceSegmentationConfig,
 } from './types';
+export {
+  assertEnhancementCustomConfig,
+  resolveEnhancementCustomConfigPaths,
+  EnhancementErrorCode,
+  type EnhancementCustomConfig,
+  type EnhancementCustomPathKey,
+} from './customConfig';
 export { ENHANCEMENT_MODEL_TYPES } from './types';

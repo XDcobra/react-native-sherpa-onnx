@@ -1,6 +1,10 @@
 # File I/O (`react-native-sherpa-onnx/fileio`)
 
+## Introduction
+
 Generic file operations using **`FileSource`** and **`FileDestination`** descriptors. Supports filesystem paths, app directories, Android `content://` URIs, Android SAF directory trees, iOS security-scoped URLs, and Android Play Asset Delivery (`pad`) sources.
+
+**PAD / ODR delivery** (install-time or fetch) is **not** part of fileio — see [model-delivery-pad-odr.md](./model-delivery-pad-odr.md).
 
 **Import path:** `react-native-sherpa-onnx/fileio`
 
@@ -25,7 +29,7 @@ type FileDestination =
   | { kind: 'contentTree'; treeUri: string; filename: string; mimeType: string }
   | { kind: 'securityScoped'; uri: string };
 
-type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles';
+type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'apkAsset' | 'appBundle';
 ```
 
 ## Platform notes
@@ -33,11 +37,11 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles';
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset`; iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
 | `contentUri` | SAF document URI | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
-| `pad` | Play Asset Delivery pack | Rejects |
+| `pad` | Installed PAD pack path (Android) | Rejects — use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) on iOS |
 
 ## Quick start
 
@@ -144,7 +148,24 @@ Open the system share sheet for the given file.
 
 - `mimeType?: string` — MIME type hint
 
-## Types
+## Types and constants
+
+```ts
+import { copyFile, saveText, shareFile, FileIOErrorCode } from 'react-native-sherpa-onnx/fileio'; // runtime APIs + error code constants
+
+import type {
+  FileSource, // unified input source descriptor
+  FileDestination, // unified output destination descriptor
+  AppBaseDir, // app-relative base folders for kind='app'
+  ResolvedFileRef, // resolved output reference returned by write operations
+  CopyFileOptions, // copyFile options (progress, cancellation, overwrite, parent dirs)
+  CopyFileResult, // bytesCopied + resolved output reference
+  SaveTextOptions, // saveText options (encoding, overwrite)
+  ShareFileOptions, // share sheet options
+  FileIOProgressEvent, // copy progress payload
+  FileIOErrorCodeValue, // string union of FILEIO_* codes
+} from 'react-native-sherpa-onnx/fileio';
+```
 
 ### `ResolvedFileRef`
 
@@ -175,7 +196,7 @@ interface FileIOProgressEvent {
 }
 ```
 
-### `FileIOErrorCode`
+## Error codes
 
 Error codes thrown by file I/O operations:
 
@@ -204,4 +225,45 @@ Error codes thrown by file I/O operations:
 
 - [Audio conversion](audio-conversion.md) (`react-native-sherpa-onnx/audio`)
 - [Offline audio buffers](audiobuffer-offline.md) (`react-native-sherpa-onnx/audiobuffer`)
-- [Migration guide](migration.md)
+
+## Use case examples
+
+<details>
+<summary>Copy model archive from SAF picker into app documents directory</summary>
+
+```ts
+const copied = await copyFile(
+  { kind: 'contentUri', uri: pickedArchiveUri },
+  { kind: 'app', base: 'documents', path: 'models/whisper-tiny.tar.zst' },
+  { createParentDirectories: true }
+);
+
+console.log(copied.bytesCopied, copied.output);
+```
+
+</details>
+
+<details>
+<summary>Cancel long copy operation with AbortController</summary>
+
+```ts
+const controller = new AbortController();
+const promise = copyFile(
+  { kind: 'fs', path: '/tmp/huge.wav' },
+  { kind: 'contentTree', treeUri: exportTreeUri, filename: 'huge.wav', mimeType: 'audio/wav' },
+  {
+    signal: controller.signal,
+    onProgress: (p) => console.log(p.percent),
+  }
+);
+
+controller.abort();
+await promise;
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

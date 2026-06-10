@@ -1,4 +1,8 @@
-import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { PipelineSegmentErrorCode } from './types';
@@ -382,6 +386,21 @@ function mapPipelineInfo(raw: {
   return mapOfflineInfo(raw);
 }
 
+function normalizeOfflineFromLiveMode(
+  mode: OfflineSegmentBufferFromLiveMode
+): OfflineSegmentBufferFromLiveMode {
+  if (mode === 'fullIfSpooled' || mode === 'windowSnapshot') {
+    return mode;
+  }
+  throw new Error(
+    `${
+      PipelineSegmentErrorCode.INVALID_ARGUMENT
+    }: mode must be 'fullIfSpooled' or 'windowSnapshot'; received "${String(
+      mode
+    )}".`
+  );
+}
+
 export function resolveOfflineSegmentBufferId(
   source: OfflineSegmentBufferIdSource
 ): string {
@@ -453,15 +472,16 @@ let segmentErrorSub: NativeSubscription | null = null;
 
 function ensureLiveSegmentEventSubscriptions(): void {
   if (segmentAppendedSub && segmentErrorSub) return;
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
 
   if (!segmentAppendedSub) {
     segmentAppendedSub = emitter.addListener(
       'pipelineLiveSegmentAppended',
       (raw: {
-        liveBufferId?: string;
+        segmentBufferId?: string;
         segmentId?: string;
         segmentIndex?: number;
+        totalSegments?: number;
         sourceAudioBufferId?: string;
         kind?: string;
         startSample?: number;
@@ -471,21 +491,26 @@ function ensureLiveSegmentEventSubscriptions(): void {
         confidence?: number;
         payload?: Record<string, unknown>;
       }) => {
-        const liveBufferId = raw?.liveBufferId;
-        if (!liveBufferId) return;
-        const cbs = segmentAppendedCallbacks.get(liveBufferId);
+        const segmentBufferId = raw?.segmentBufferId;
+        if (!segmentBufferId) return;
+        const cbs = segmentAppendedCallbacks.get(segmentBufferId);
         if (!cbs || cbs.size === 0) return;
         const eventKind = assertValidSegmentKind(
           raw.kind ?? 'speech',
           'event.kind'
         );
+        const segmentIndexTrunc =
+          typeof raw.segmentIndex === 'number'
+            ? Math.trunc(raw.segmentIndex)
+            : 0;
         const eventBase = {
-          liveBufferId,
+          segmentBufferId,
+          totalSegments:
+            typeof raw.totalSegments === 'number'
+              ? Math.trunc(raw.totalSegments)
+              : Math.max(1, segmentIndexTrunc + 1),
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
-          segmentIndex:
-            typeof raw.segmentIndex === 'number'
-              ? Math.trunc(raw.segmentIndex)
-              : 0,
+          segmentIndex: segmentIndexTrunc,
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId
@@ -540,13 +565,13 @@ function ensureLiveSegmentEventSubscriptions(): void {
   if (!segmentErrorSub) {
     segmentErrorSub = emitter.addListener(
       'pipelineLiveSegmentError',
-      (raw: { liveBufferId?: string; message?: string }) => {
-        const id = raw?.liveBufferId;
+      (raw: { segmentBufferId?: string; message?: string }) => {
+        const id = raw?.segmentBufferId;
         if (typeof id !== 'string' || id.length === 0) return;
         const cbs = segmentErrorCallbacks.get(id);
         if (!cbs || cbs.size === 0) return;
         const e: LiveSegmentBufferErrorEvent = {
-          liveBufferId: id,
+          segmentBufferId: id,
           message: raw?.message ?? 'Unknown live segment buffer error',
         };
         for (const cb of cbs) cb(e);
@@ -556,7 +581,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
 }
 
 function registerLiveSegmentBufferCallbacks(
-  liveBufferId: string,
+  segmentBufferId: string,
   callbacks: {
     onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
     onError?: (event: LiveSegmentBufferErrorEvent) => void;
@@ -564,35 +589,35 @@ function registerLiveSegmentBufferCallbacks(
 ): () => void {
   if (callbacks.onSegmentAppended) {
     ensureLiveSegmentEventSubscriptions();
-    let set = segmentAppendedCallbacks.get(liveBufferId);
+    let set = segmentAppendedCallbacks.get(segmentBufferId);
     if (!set) {
       set = new Set();
-      segmentAppendedCallbacks.set(liveBufferId, set);
+      segmentAppendedCallbacks.set(segmentBufferId, set);
     }
     set.add(callbacks.onSegmentAppended);
   }
   if (callbacks.onError) {
     ensureLiveSegmentEventSubscriptions();
-    let setE = segmentErrorCallbacks.get(liveBufferId);
+    let setE = segmentErrorCallbacks.get(segmentBufferId);
     if (!setE) {
       setE = new Set();
-      segmentErrorCallbacks.set(liveBufferId, setE);
+      segmentErrorCallbacks.set(segmentBufferId, setE);
     }
     setE.add(callbacks.onError);
   }
   return () => {
     if (callbacks.onSegmentAppended) {
-      const set = segmentAppendedCallbacks.get(liveBufferId);
+      const set = segmentAppendedCallbacks.get(segmentBufferId);
       if (set) {
         set.delete(callbacks.onSegmentAppended);
-        if (set.size === 0) segmentAppendedCallbacks.delete(liveBufferId);
+        if (set.size === 0) segmentAppendedCallbacks.delete(segmentBufferId);
       }
     }
     if (callbacks.onError) {
-      const setE = segmentErrorCallbacks.get(liveBufferId);
+      const setE = segmentErrorCallbacks.get(segmentBufferId);
       if (setE) {
         setE.delete(callbacks.onError);
-        if (setE.size === 0) segmentErrorCallbacks.delete(liveBufferId);
+        if (setE.size === 0) segmentErrorCallbacks.delete(segmentBufferId);
       }
     }
   };
@@ -628,12 +653,15 @@ export async function createLiveSegmentBuffer(
     segmentEventMinIntervalMs,
   });
 
-  const liveBufferId = raw.bufferId as string;
+  const segmentBufferId = raw.bufferId as string;
 
-  const unsubscribeEvents = registerLiveSegmentBufferCallbacks(liveBufferId, {
-    onSegmentAppended: options.onSegmentAppended,
-    onError: options.onError,
-  });
+  const unsubscribeEvents = registerLiveSegmentBufferCallbacks(
+    segmentBufferId,
+    {
+      onSegmentAppended: options.onSegmentAppended,
+      onError: options.onError,
+    }
+  );
 
   return {
     info: mapLiveInfo(raw),
@@ -706,11 +734,30 @@ export async function createOfflineSegmentBufferFromLive(
   mode: OfflineSegmentBufferFromLiveMode = 'fullIfSpooled'
 ): Promise<OfflineSegmentBufferRef> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
-  const raw = await getNative().createOfflineSegmentBufferFromLive(id, mode);
+  const normalizedMode = normalizeOfflineFromLiveMode(mode);
+  const raw = await getNative().createOfflineSegmentBufferFromLive(
+    id,
+    normalizedMode
+  );
   return {
     info: mapOfflineInfo(raw),
     bufferId: raw.bufferId as OfflineSegmentBufferRef['bufferId'],
   };
+}
+
+export async function populateOfflineSegmentBufferIfEmpty(
+  targetBuffer: OfflineSegmentBufferIdSource,
+  liveBuffer: LiveSegmentBufferIdSource,
+  mode: OfflineSegmentBufferFromLiveMode = 'fullIfSpooled'
+): Promise<void> {
+  const targetId = resolveOfflineSegmentBufferId(targetBuffer);
+  const liveId = resolveLiveSegmentBufferId(liveBuffer);
+  const normalizedMode = normalizeOfflineFromLiveMode(mode);
+  await getNative().populateOfflineSegmentBufferIfEmpty(
+    targetId,
+    liveId,
+    normalizedMode
+  );
 }
 
 export async function getPipelineSegmentBufferInfo(
@@ -724,13 +771,17 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 1024
+  maxCount = 4096
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
+  const sliceMaxCount =
+    maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
+      ? 4096
+      : maxCount;
   const raw = await getNative().getOfflineSegmentBufferSegments(
     id,
     start,
-    maxCount
+    sliceMaxCount
   );
   return raw.segments.map((segment) => {
     const kind = assertValidSegmentKind(segment.kind, 'segment.kind');
@@ -743,6 +794,16 @@ export async function getOfflineSegmentBufferSegments(
       sampleRate: segment.sampleRate,
       durationMs: segment.durationMs,
       ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+      ...(typeof segment.reason === 'string' && segment.reason.length > 0
+        ? { reason: segment.reason }
+        : {}),
+      ...(typeof segment.source === 'string' && segment.source.length > 0
+        ? { source: segment.source }
+        : {}),
+      ...(typeof segment.createdAtMs === 'number' &&
+      Number.isFinite(segment.createdAtMs)
+        ? { createdAtMs: Math.trunc(segment.createdAtMs) }
+        : {}),
     };
     if (kind === 'alignment') {
       const payload =
@@ -771,10 +832,14 @@ export async function getLiveSegmentBufferSegments(
   maxCount: number
 ): Promise<SegmentMeta[]> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
+  const sliceMaxCount =
+    maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
+      ? 4096
+      : maxCount;
   const raw = await getNative().getLiveSegmentBufferSegments(
     id,
     startIndex,
-    maxCount
+    sliceMaxCount
   );
   return raw.segments.map((segment) => {
     const kind = assertValidSegmentKind(segment.kind, 'segment.kind');
@@ -787,6 +852,16 @@ export async function getLiveSegmentBufferSegments(
       sampleRate: segment.sampleRate,
       durationMs: segment.durationMs,
       ...(segment.confidence != null ? { confidence: segment.confidence } : {}),
+      ...(typeof segment.reason === 'string' && segment.reason.length > 0
+        ? { reason: segment.reason }
+        : {}),
+      ...(typeof segment.source === 'string' && segment.source.length > 0
+        ? { source: segment.source }
+        : {}),
+      ...(typeof segment.createdAtMs === 'number' &&
+      Number.isFinite(segment.createdAtMs)
+        ? { createdAtMs: Math.trunc(segment.createdAtMs) }
+        : {}),
     };
     if (kind === 'alignment') {
       const payload =

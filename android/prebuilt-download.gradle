@@ -33,6 +33,7 @@ def onnxruntimeClassesDir = file("${project.buildDir}/onnxruntime-classes")
 def thirdPartyDir = file("${project.projectDir.parent}/third_party")
 def thirdPartySherpaDir = new File(thirdPartyDir, "sherpa-onnx-prebuilt/android")
 def thirdPartyFfmpegDir = new File(thirdPartyDir, "ffmpeg_prebuilt/android")
+def thirdPartyShineDir = new File(thirdPartyDir, "shine_prebuilt/android")
 def thirdPartyLibarchiveDir = new File(thirdPartyDir, "libarchive_prebuilt/android")
 def thirdPartyOrtDir = new File(thirdPartyDir, "onnxruntime_prebuilt/android")
 
@@ -107,6 +108,50 @@ def hasAllLibsUnder = { File baseDir, List<String> requiredSo ->
     }
   }
   return true
+}
+
+/** Resolve FFmpeg .so dir for one ABI: jni/<abi>/ (release layout) or <abi>/lib/ (build_ffmpeg.sh output). */
+def ffmpegThirdPartySoDirForAbi = { File ffmpegBase, String abi ->
+  def jniDir = new File(ffmpegBase, "jni/${abi}")
+  if (jniDir.exists()) return jniDir
+  def abiLibDir = new File(ffmpegBase, "${abi}/lib")
+  if (abiLibDir.exists()) return abiLibDir
+  return null
+}
+
+/** THIRD_PARTY FFmpeg: jni/<abi>/ or <abi>/lib/; libshine may live under shine_prebuilt/android/<abi>/lib/. */
+def hasFfmpegThirdPartyLibs = {
+  for (abi in requiredAbis) {
+    def soDir = ffmpegThirdPartySoDirForAbi(thirdPartyFfmpegDir, abi)
+    if (!soDir) return false
+    for (soName in requiredFfmpegSoFiles) {
+      if (new File(soDir, soName).exists()) continue
+      if (soName == 'libshine.so') {
+        def shineDir = ffmpegThirdPartySoDirForAbi(thirdPartyShineDir, abi)
+        if (shineDir != null && new File(shineDir, soName).exists()) continue
+      }
+      return false
+    }
+  }
+  return true
+}
+
+def copyFfmpegThirdPartyLibsToJniLibs = {
+  requiredAbis.each { abi ->
+    def dest = new File(jniLibsDir, abi)
+    dest.mkdirs()
+    def soDir = ffmpegThirdPartySoDirForAbi(thirdPartyFfmpegDir, abi)
+    if (soDir) {
+      copy { from soDir; into dest; include '*.so' }
+    }
+    def shineSo = new File(dest, 'libshine.so')
+    if (!shineSo.exists()) {
+      def shineDir = ffmpegThirdPartySoDirForAbi(thirdPartyShineDir, abi)
+      if (shineDir != null) {
+        copy { from shineDir; into dest; include 'libshine.so' }
+      }
+    }
+  }
 }
 
 def getGitHubRepo = {
@@ -248,13 +293,11 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       ffmpegResolved = true
       println "[FFmpeg] .................................... skipped (sherpaOnnxDisableFfmpeg=true)"
     } else if (ffmpegNeedsUpdate) {
-      // Stage 1: THIRD_PARTY
-      def tpJni = hasAllLibsUnder(thirdPartyFfmpegDir, requiredFfmpegSoFiles)
+      // Stage 1: THIRD_PARTY (jni/<abi>/ or build_ffmpeg.sh <abi>/lib/; libshine from shine_prebuilt if needed)
+      def tpJni = hasFfmpegThirdPartyLibs()
       def tpHdr = new File(thirdPartyFfmpegDir, "include/libavcodec/avcodec.h").exists()
       if (tpJni && tpHdr) {
-        requiredAbis.each { abi ->
-          copy { from new File(thirdPartyFfmpegDir, "jni/${abi}"); into new File(jniLibsDir, abi) }
-        }
+        copyFfmpegThirdPartyLibsToJniLibs()
         def ffmpegIncludeDir = file("${project.projectDir}/src/main/cpp/include/ffmpeg")
         ffmpegIncludeDir.mkdirs()
         copy { from new File(thirdPartyFfmpegDir, "include"); into ffmpegIncludeDir }
@@ -555,7 +598,17 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       def zipFile = new File(downloadDir, "ffmpeg-android.zip")
       def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
       project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
-      if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+      if (!zipFile.exists() || zipFile.length() == 0) {
+        throw new RuntimeException("Download failed or empty: ${url}")
+      }
+      // curl -sSL writes HTML error pages (e.g. 404) without failing; reject non-ZIP payloads.
+      def zipMagic = new byte[2]
+      zipFile.withInputStream { it.read(zipMagic) }
+      if (zipMagic[0] != (byte) 0x50 || zipMagic[1] != (byte) 0x4B) {
+        zipFile.delete()
+        throw new RuntimeException(
+            "Download is not a ZIP (got ${zipFile.length()} bytes). Release asset missing? ${url} — publish via build-ffmpeg-android-release workflow or use THIRD_PARTY under third_party/ffmpeg_prebuilt/android.")
+      }
       def ffmpegExtractDir = new File(downloadDir, "ffmpeg-extract")
       if (ffmpegExtractDir.exists()) ffmpegExtractDir.deleteDir()
       ffmpegExtractDir.mkdirs()

@@ -2,4 +2,4 @@
 # BEFORE applying build-ios-patched.sh (vanilla upstream: ORT 1.17.1 tar.bz2 layout).
 # If the submodule advances and this file changes, CI fails: re-diff upstream build-ios.sh,
 # merge any upstream fixes into build-ios-patched.sh, then update this hash to the new upstream value.
-23489b5aef0b156fa9c151573f2166014649811f9e1e1b614a723f692d9d8f9a
+a57cda69f55a9017c3e2534ff874d33e4ccd1ac1b5c30ebca71bb713dc45eedc

@@ -2,6 +2,11 @@
 # Fetch one GitHub release from k2-fsa/sherpa-onnx (or --github-repo), refresh tree listings,
 # aggregate structure + expected CSV, optionally run update_model_license_csv.sh (in this directory).
 # Paths are relative to repository root (--repo-root).
+#
+# Tree-cache skip policy: skip download only when tree-cache/<safe>.txt exists AND the stored
+# updated_at matches the GitHub release asset (from test/fixtures *-structure.txt "# updated_at:"
+# lines, persisted across CI runs). Re-uploads change updated_at and trigger a refresh. Assets
+# without a stored updated_at are always re-downloaded (one-time migration after this format).
 set -euo pipefail
 
 GITHUB_REPO="k2-fsa/sherpa-onnx"
@@ -66,7 +71,7 @@ fi
 
 RESP="$(curl -sSL "${API_AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}")"
 if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
-  LIST="$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)"')"
+  LIST="$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)|\(.updated_at)"')"
   if [[ -z "$_ASSET_LIMIT" || "$_ASSET_LIMIT" == "0" ]]; then
     printf '%s\n' "$LIST" > "$ASSET_LIST"
     echo "  Asset list: no limit ($(wc -l < "$ASSET_LIST" | tr -d ' ') lines)"
@@ -91,6 +96,8 @@ if [[ -f "$_abs_structure" ]]; then
       safe="${cur//\//-}"
       safe="${safe//\\/-}"
       : > "${_abs_tree}/${safe}.txt"
+    elif [[ "$line" =~ ^#\ updated_at:\ (.+)$ ]] && [[ -n "$safe" ]]; then
+      printf '%s' "${BASH_REMATCH[1]}" > "${_abs_tree}/${safe}.updated_at"
     elif [[ -n "$cur" ]]; then
       printf '%s\n' "$line" >> "${_abs_tree}/${safe}.txt"
     fi
@@ -101,16 +108,30 @@ else
 fi
 
 mkdir -p "$WORK/dl"
-while IFS='|' read -r name url; do
+while IFS='|' read -r name url asset_updated_at; do
   [[ -z "$name" ]] && continue
   name="${name%$'\r'}"
   url="${url%$'\r'}"
+  asset_updated_at="${asset_updated_at%$'\r'}"
   safe="${name//\//-}"
   safe="${safe//\\/-}"
   cache_file="${_abs_tree}/${safe}.txt"
-  if [[ -f "$cache_file" ]]; then
-    echo "  Skip (cache hit): $name"
+  meta_file="${_abs_tree}/${safe}.updated_at"
+  stored=""
+  if [[ -f "$meta_file" ]]; then
+    stored="$(cat "$meta_file")"
+  fi
+  if [[ -f "$cache_file" && -n "$asset_updated_at" && -n "$stored" && "$stored" == "$asset_updated_at" ]]; then
+    echo "  Skip (unchanged): $name"
     continue
+  fi
+  if [[ -f "$cache_file" ]]; then
+    if [[ -n "$stored" && -n "$asset_updated_at" ]]; then
+      echo "  Re-process (asset updated on release): $name"
+    else
+      echo "  Re-process (no stored updated_at): $name"
+    fi
+    rm -f "$cache_file" "$meta_file"
   fi
   echo "  Download: $name"
   dl="$WORK/dl/$safe"
@@ -138,6 +159,9 @@ while IFS='|' read -r name url; do
     rm -f "$dl"
     continue
   fi
+  if [[ -n "$asset_updated_at" ]]; then
+    printf '%s' "$asset_updated_at" > "$meta_file"
+  fi
   rm -f "$dl"
 done < "$ASSET_LIST"
 
@@ -149,8 +173,12 @@ while IFS='|' read -r name _; do
   safe="${name//\//-}"
   safe="${safe//\\/-}"
   cache_file="${_abs_tree}/${safe}.txt"
+  meta_file="${_abs_tree}/${safe}.updated_at"
   [[ -f "$cache_file" ]] || continue
   echo "# Asset: $name" >> "$_abs_structure"
+  if [[ -f "$meta_file" ]]; then
+    echo "# updated_at: $(cat "$meta_file")" >> "$_abs_structure"
+  fi
   cat "$cache_file" >> "$_abs_structure"
 done < "$ASSET_LIST"
 echo "  Wrote aggregated structure ($(wc -l < "$_abs_structure" | tr -d ' ') lines)"

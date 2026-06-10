@@ -1,6 +1,6 @@
 {
   "name": "react-native-sherpa-onnx",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Offline Speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD with sherpa-onnx for React NativeSpeech-to-Text with sherpa-onnx for React Native",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -9,6 +9,21 @@
       "source": "./src/index.tsx",
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
+    },
+    "./provider": {
+      "source": "./src/provider.ts",
+      "types": "./lib/typescript/src/provider.d.ts",
+      "default": "./lib/module/provider.js"
+    },
+    "./utils": {
+      "source": "./src/utils.ts",
+      "types": "./lib/typescript/src/utils.d.ts",
+      "default": "./lib/module/utils.js"
+    },
+    "./licenses": {
+      "source": "./src/licenses.ts",
+      "types": "./lib/typescript/src/licenses.d.ts",
+      "default": "./lib/module/licenses.js"
     },
     "./stt": {
       "source": "./src/stt/index.ts",
@@ -45,10 +60,20 @@
       "types": "./lib/typescript/src/enhancement/index.d.ts",
       "default": "./lib/module/enhancement/index.js"
     },
+    "./punctuation": {
+      "source": "./src/punctuation/index.ts",
+      "types": "./lib/typescript/src/punctuation/index.d.ts",
+      "default": "./lib/module/punctuation/index.js"
+    },
     "./separation": {
       "source": "./src/separation/index.ts",
       "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
+    },
+    "./detect": {
+      "source": "./src/detect/index.ts",
+      "types": "./lib/typescript/src/detect/index.d.ts",
+      "default": "./lib/module/detect/index.js"
     },
     "./download": {
       "source": "./src/download/index.ts",
@@ -64,6 +89,16 @@
       "source": "./src/audio/index.ts",
       "types": "./lib/typescript/src/audio/index.d.ts",
       "default": "./lib/module/audio/index.js"
+    },
+    "./visualization": {
+      "source": "./src/visualization/index.ts",
+      "types": "./lib/typescript/src/visualization/index.d.ts",
+      "default": "./lib/module/visualization/index.js"
+    },
+    "./diagnostics": {
+      "source": "./src/diagnostics/index.ts",
+      "types": "./lib/typescript/src/diagnostics/index.d.ts",
+      "default": "./lib/module/diagnostics/index.js"
     },
     "./fileio": {
       "source": "./src/fileio/index.ts",
@@ -89,6 +124,11 @@
       "source": "./src/segmentbuffer/index.ts",
       "types": "./lib/typescript/src/segmentbuffer/index.d.ts",
       "default": "./lib/module/segmentbuffer/index.js"
+    },
+    "./segment": {
+      "source": "./src/segment/index.ts",
+      "types": "./lib/typescript/src/segment/index.d.ts",
+      "default": "./lib/module/segment/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -150,6 +190,7 @@
     "lint:fix": "eslint --fix --ignore-pattern \"sherpa-onnx/**\" \"**/*.{js,ts,tsx}\"",
     "prettier": "npx prettier --write \"src/**/*.{js,ts,tsx}\" \"example/src/**/*.{js,ts,tsx}\" \"scripts/**/*.{js,ts,tsx}\"",
     "test": "jest",
+    "check:ios-turbo-signatures": "node scripts/check-ios-turbo-signatures.mjs",
     "verdaccio:start": "VERDACCIO_BODY_SIZE_LIMIT=100mb verdaccio --config verdaccio.config.yaml",
     "registry:local": "node scripts/switch-registry.js local",
     "registry:public": "node scripts/switch-registry.js public",
@@ -179,7 +220,6 @@
     "@eslint/compat": "^1.3.2",
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.35.0",
-    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "@react-native-community/cli": "^20.1.1",
     "@react-native/babel-preset": "0.83.0",
     "@react-native/eslint-config": "0.83.0",
@@ -206,7 +246,6 @@
   },
   "peerDependencies": {
     "@dr.pogodin/react-native-fs": "*",
-    "@kesha-antonov/react-native-background-downloader": "^4.5.4",
     "react": "*",
     "react-native": ">=0.73.0"
   },
@@ -252,6 +291,16 @@
     "modulePathIgnorePatterns": [
       "<rootDir>/example/node_modules",
       "<rootDir>/lib/"
+    ],
+    "testPathIgnorePatterns": [
+      "<rootDir>/third_party/",
+      "<rootDir>/example/",
+      "<rootDir>/android/",
+      "<rootDir>/ios/",
+      "<rootDir>/lib/"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
     ]
   },
   "commitlint": {

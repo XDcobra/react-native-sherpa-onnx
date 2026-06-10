@@ -35,6 +35,17 @@ static const char *kPaAppendSourceFileIngest = "file_ingest";
 static const char *kPaAppendSourceUnknown = "unknown";
 static const char *kPaAppendSourceMixed = "mixed";
 
+// Segmentation engine hooks are implemented in segmentbuffer bridge.
+void seg_engine_on_audio_append(
+  const std::string &liveBufferId,
+  const float *samples,
+  size_t count,
+  int sampleRate,
+  int64_t totalSamplesWritten
+);
+void seg_engine_on_buffer_finalized(const std::string &bufferId);
+void seg_engine_on_buffer_released(const std::string &bufferId);
+
 // ==================== Inline utility functions ====================
 
 inline std::vector<float> pa_resampleLinear(const float *input, size_t inputSize, int inputRate, int outputRate) {
@@ -365,6 +376,7 @@ struct PaLiveEntry {
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
+    seg_engine_on_audio_append(bufferId, toAppend, appendCount, sampleRate, totalSamplesWritten);
     return AppendResult::APPENDED;
   }
 
@@ -485,6 +497,8 @@ struct PaLiveEntry {
 
     // Wake pipeline workers so they detect the FINISHED state immediately
     notifyAppendListeners();
+
+    seg_engine_on_buffer_finalized(bufferId);
   }
 
   std::vector<float> snapshotRing() {
@@ -519,11 +533,16 @@ struct PaLiveEntry {
     std::lock_guard<std::mutex> cLock(cursorMutex);
     int id = nextCursorId++;
     // When spool is active, start from absolute 0 so cursor can read all data.
-    // Without spool, start from oldest sample in the ring (legacy behavior).
+    // Ring-only: start at the oldest sample still retained in the ring.
     int64_t startPos = hasActiveSpool ? 0
       : ((totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0);
     cursors[id] = { id, startPos };
     return id;
+  }
+
+  int activeCursorCount() {
+    std::lock_guard<std::mutex> cLock(cursorMutex);
+    return (int)cursors.size();
   }
 
   std::vector<float> drainCursor(int cursorId, int maxSamples) {
@@ -573,7 +592,7 @@ struct PaLiveEntry {
           throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
         }
       } else {
-        // Ring-only buffer: snap forward (legacy behavior)
+        // Ring-only: snap read position forward to the oldest ring sample
         std::lock_guard<std::mutex> lock(ringMutex);
         int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
         int available = (int)std::max((int64_t)0, totalSamplesWritten - oldestInRingLocked);
@@ -634,7 +653,7 @@ struct PaLiveEntry {
       throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
     }
 
-    // Ring-only: snap forward (legacy)
+    // Ring-only: snap forward to ring window (peek; no advance)
     {
       std::lock_guard<std::mutex> lock(ringMutex);
       int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
@@ -680,5 +699,21 @@ struct PaLiveEntry {
       std::remove(spoolPath.c_str());
     }
     cursors.clear();
+    seg_engine_on_buffer_released(bufferId);
+  }
+
+  void detachSpoolForTransfer() {
+    if (spoolFile.is_open()) {
+      spoolFile.close();
+    }
+    {
+      std::lock_guard<std::mutex> lock(spoolReadMutex);
+      if (spoolReadFile.is_open()) {
+        spoolReadFile.close();
+      }
+      spoolReadFileOpen = false;
+    }
+    hasActiveSpool = false;
+    isTemporarySpool = false;
   }
 };

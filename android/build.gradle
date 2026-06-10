@@ -24,7 +24,7 @@ buildscript {
   repositories {
     google()
     mavenCentral()
-    maven { url 'https://plugins.gradle.org/m2/' }
+    maven { url = 'https://plugins.gradle.org/m2/' }
   }
 
   dependencies {
@@ -42,9 +42,9 @@ apply plugin: "kotlin-android"
 apply plugin: "com.facebook.react"
 
 android {
-  namespace "com.sherpaonnx"
+  namespace = "com.sherpaonnx"
 
-  compileSdkVersion getExtOrDefault("compileSdkVersion")
+  compileSdk = getExtOrDefault("compileSdkVersion")
 
   // Native .so and headers: prebuilt-download.gradle (local jniLibs, Maven AAR, or GitHub release); npm package may ship jniLibs.
 
@@ -54,14 +54,14 @@ android {
   def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
 
   defaultConfig {
-    minSdkVersion getExtOrDefault("minSdkVersion")
-    targetSdkVersion getExtOrDefault("targetSdkVersion")
+    minSdkVersion = getExtOrDefault("minSdkVersion")
+    targetSdkVersion = getExtOrDefault("targetSdkVersion")
 
     // ProGuard rules to preserve classes/methods called from JNI
-    consumerProguardFiles 'proguard-rules.pro'
+    consumerProguardFiles += "proguard-rules.pro"
 
     // NDK configuration
-    ndkVersion getExtOrDefault("ndkVersion")
+    ndkVersion = getExtOrDefault("ndkVersion")
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
@@ -74,26 +74,26 @@ android {
 
     // Supported ABIs
     ndk {
-      abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
+      abiFilters.addAll(["arm64-v8a", "armeabi-v7a", "x86", "x86_64"])
     }
   }
 
   buildFeatures {
-    buildConfig true
-    prefab true
+    buildConfig = true
+    prefab = true
   }
 
   // CMake configuration
   externalNativeBuild {
     cmake {
-      path "src/main/cpp/CMakeLists.txt"
-      version "3.22.1"
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
     }
   }
 
   buildTypes {
     release {
-      minifyEnabled false
+      minifyEnabled = false
     }
   }
 
@@ -119,12 +119,12 @@ android {
   }
 
   lint {
-    disable "GradleCompatible"
+    disable.add("GradleCompatible")
   }
 
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_17
-    targetCompatibility JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
   }
 
   kotlinOptions {
@@ -135,7 +135,7 @@ android {
 // Resolve com.xdcobra.sherpa only from this repo (never from JitPack or other app repos).
 repositories {
   exclusiveContent {
-    forRepository { maven { url "https://xdcobra.github.io/maven" } }
+    forRepository { maven { url = "https://xdcobra.github.io/maven" } }
     filter {
       includeGroup "com.xdcobra.sherpa"
     }
@@ -178,10 +178,9 @@ dependencies {
   // Play Asset Delivery: optional for getAssetPackPath (returns null if not used)
   implementation "com.google.android.play:asset-delivery:2.3.0"
 
-  // MMKV required by @kesha-antonov/react-native-background-downloader on Android.
-  // Kept in SDK so it is merged into this library AAR instead of adding a new app-level package;
-  // adding it only in the app can shift resource package IDs and cause "No package ID 6a found" / white screen.
-  implementation "com.tencent:mmkv-shared:1.3.16"
+  implementation "com.squareup.okhttp3:okhttp:4.12.0"
+
+  testImplementation "junit:junit:4.13.2"
 }
 
 // Wire prebuilt tasks: extractSherpaOnnxClasses --> downloadNativeLibsIfNeeded;

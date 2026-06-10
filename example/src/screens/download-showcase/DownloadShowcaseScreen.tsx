@@ -39,6 +39,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Stt]: 'Speech-to-text (STT)',
   [ModelCategory.Tts]: 'Text-to-speech (TTS)',
   [ModelCategory.Vad]: 'VAD',
+  [ModelCategory.Punctuation]: 'Punctuation',
   [ModelCategory.Diarization]: 'Diarization',
   [ModelCategory.Enhancement]: 'Enhancement',
   [ModelCategory.Separation]: 'Separation',
@@ -160,7 +161,7 @@ export default function DownloadShowcaseScreen() {
       setRunPhase('idle');
       activeKeyRef.current = null;
       setDownloadPct(100);
-      if (meta.archiveExt === 'tar.bz2') {
+      if (meta.layout.kind === 'archive' && meta.layout.extract) {
         setExtractPct(100);
       }
       await loadDownloaded();

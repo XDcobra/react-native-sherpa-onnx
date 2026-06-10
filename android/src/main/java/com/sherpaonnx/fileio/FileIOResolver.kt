@@ -17,11 +17,6 @@ import java.io.OutputStream
  */
 internal class FileIOResolver(private val context: ReactApplicationContext) {
 
-  enum class WriteMode {
-    SEQUENTIAL,
-    SEEKABLE,
-  }
-
   /** Resolved read handle. Caller must close. */
   sealed class ReadHandle : Closeable {
     /** Local file — can be passed to APIs that require a path. */
@@ -49,15 +44,6 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     /** Local file path. */
     class FilePath(val file: File) : WriteHandle() {
       override fun close() {}
-    }
-
-    /** Seekable file descriptor path (e.g. /proc/self/fd/<n>). */
-    class FileDescriptor(
-      val pfd: ParcelFileDescriptor,
-      val fdPath: String,
-      val resultUri: Uri,
-    ) : WriteHandle() {
-      override fun close() = pfd.close()
     }
 
     /** SAF output stream — for streaming writes. */
@@ -88,7 +74,14 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'base' in app source")
         val path = source.getString("path")
           ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Missing 'path' in app source")
-        val file = resolveAppPath(base, path)
+        val file = when (base) {
+          "apkAsset" -> resolveApkAssetFile(path)
+          "appBundle" -> throw FileIOException(
+            FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+            "appBundle is iOS-only"
+          )
+          else -> resolveAppPath(base, path)
+        }
         if (!file.exists()) throw FileIOException(FileIOErrorCodes.NOT_FOUND, "Source file not found: ${file.absolutePath}")
         if (!file.canRead()) throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "Cannot read file: ${file.absolutePath}")
         ReadHandle.FilePath(file)
@@ -162,7 +155,6 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
 
   fun resolveDestination(
     destination: ReadableMap,
-    mode: WriteMode = WriteMode.SEQUENTIAL,
     overwrite: Boolean = true,
     createParentDirectories: Boolean = false,
   ): WriteHandle {
@@ -204,35 +196,16 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         val uri = Uri.parse(uriStr)
         val resolver = context.contentResolver
 
-        if (mode == WriteMode.SEEKABLE) {
-          val pfd = try {
-            resolver.openFileDescriptor(uri, "rw")
-          } catch (_: Exception) {
-            null
-          }
-
-          if (pfd != null) {
-            WriteHandle.FileDescriptor(
-              pfd = pfd,
-              fdPath = "/proc/self/fd/${pfd.fd}",
-              resultUri = uri,
-            )
-          } else {
-            val outputStream = try {
-              resolver.openOutputStream(uri, "w")
-            } catch (e: SecurityException) {
-              throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
-            WriteHandle.Stream(outputStream, uri)
-          }
-        } else {
-          val outputStream = try {
-            resolver.openOutputStream(uri, "w")
-          } catch (e: SecurityException) {
-            throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
-          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
-          WriteHandle.Stream(outputStream, uri)
-        }
+        // Always use OutputStream for content:// document targets (same strategy as contentTree).
+        // Do not use openFileDescriptor(rw) for seekable audio encode: native encoders fopen("/proc/self/fd/…")
+        // is unreliable for many provider-backed URIs. SherpaOnnxModule resolves Stream destinations to a
+        // cache temp file for encode, then copies bytes into this stream.
+        val outputStream = try {
+          resolver.openOutputStream(uri, "w")
+        } catch (e: SecurityException) {
+          throw FileIOException(FileIOErrorCodes.PERMISSION_DENIED, "No permission for URI: $uriStr", e)
+        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for URI: $uriStr")
+        WriteHandle.Stream(outputStream, uri)
       }
 
       "contentTree" -> {
@@ -253,35 +226,13 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
           throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Failed to create document in tree: ${e.message}", e)
         }
 
-        if (mode == WriteMode.SEEKABLE) {
-          val pfd = try {
-            resolver.openFileDescriptor(docUri, "rw")
-          } catch (_: Exception) {
-            null
-          }
-
-          if (pfd != null) {
-            WriteHandle.FileDescriptor(
-              pfd = pfd,
-              fdPath = "/proc/self/fd/${pfd.fd}",
-              resultUri = docUri,
-            )
-          } else {
-            val outputStream = try {
-              resolver.openOutputStream(docUri, "w")
-            } catch (e: Exception) {
-              throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
-            } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
-            WriteHandle.Stream(outputStream, docUri)
-          }
-        } else {
-          val outputStream = try {
-            resolver.openOutputStream(docUri, "w")
-          } catch (e: Exception) {
-            throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
-          } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
-          WriteHandle.Stream(outputStream, docUri)
-        }
+        // SAF tree document: always OutputStream. Audio encode uses a temp file then copies (see SherpaOnnxModule).
+        val outputStream = try {
+          resolver.openOutputStream(docUri, "w")
+        } catch (e: Exception) {
+          throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Cannot open output stream for created document", e)
+        } ?: throw FileIOException(FileIOErrorCodes.WRITE_ERROR, "Output stream is null for created document")
+        WriteHandle.Stream(outputStream, docUri)
       }
 
       "securityScoped" -> throw FileIOException(
@@ -335,6 +286,14 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       "tmp" -> File(context.cacheDir, "tmp")
       "externalFiles" -> context.getExternalFilesDir(null)
         ?: throw FileIOException(FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM, "No external files directory available")
+      "apkAsset" -> throw FileIOException(
+        FileIOErrorCodes.INVALID_ARGUMENT,
+        "apkAsset must be resolved via resolveApkAssetFile(), not resolveAppPath()"
+      )
+      "appBundle" -> throw FileIOException(
+        FileIOErrorCodes.UNSUPPORTED_ON_PLATFORM,
+        "appBundle is iOS-only"
+      )
       else -> throw FileIOException(FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND, "Unknown AppBaseDir: $base")
     }
     val resolved = File(baseDir, relativePath).canonicalFile
@@ -342,6 +301,52 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "Path escapes base directory")
     }
     return resolved
+  }
+
+  /**
+   * Materialize a path under `android/app/src/main/assets/` to a readable cache file.
+   * Used for {@code app} + {@code apkAsset} {@link FileSource} reads (probe/decode/encode/copy).
+   */
+  private fun resolveApkAssetFile(relativePath: String): File {
+    val assetPath = relativePath.trim().removePrefix("/")
+    if (assetPath.isEmpty() || assetPath.contains("..")) {
+      throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "Invalid apkAsset path: $relativePath")
+    }
+    val cacheRoot = File(context.cacheDir, "fileio_apkasset").canonicalFile
+    val outFile = File(cacheRoot, assetPath.replace('/', File.separatorChar)).canonicalFile
+    if (!outFile.path.startsWith(cacheRoot.path)) {
+      throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "apkAsset path escapes cache root")
+    }
+    if (outFile.exists() && outFile.isFile) {
+      return outFile
+    }
+    outFile.parentFile?.mkdirs()
+    try {
+      context.assets.open(assetPath).use { input ->
+        outFile.outputStream().use { output ->
+          input.copyTo(output)
+        }
+      }
+    } catch (e: java.io.FileNotFoundException) {
+      throw FileIOException(
+        FileIOErrorCodes.NOT_FOUND,
+        "APK asset not found: $assetPath (expected under app/src/main/assets/)",
+        e,
+      )
+    } catch (e: java.io.IOException) {
+      throw FileIOException(
+        FileIOErrorCodes.WRITE_ERROR,
+        "Failed to materialize APK asset to cache: $assetPath — ${e.message}",
+        e,
+      )
+    } catch (e: Exception) {
+      throw FileIOException(
+        FileIOErrorCodes.READ_ERROR,
+        "Failed to read APK asset: $assetPath — ${e.message}",
+        e,
+      )
+    }
+    return outFile
   }
 
   private fun queryContentLength(uri: Uri): Long? {

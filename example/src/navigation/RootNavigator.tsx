@@ -3,19 +3,24 @@ import type { RootStackParamList } from '../types/navigation';
 
 import HomeScreen from '../screens/home/HomeScreen';
 import STTScreen from '../screens/stt/STTScreen';
-import TTSScreen from '../screens/tts/TTSScreen';
+import OfflineTTSScreen from '../screens/tts/OfflineTTSScreen';
 import STTStreamingScreen from '../screens/stt-streaming/STTStreamingScreen';
-import TTSStreamingScreen from '../screens/tts-streaming/TTSStreamingScreen';
+import StreamingTTSScreen from '../screens/tts-streaming/StreamingTTSScreen';
 import PunctuationScreen from '../screens/punctuation/PunctuationScreen';
-import PipelineShowcaseScreen from '../screens/pipeline-showcase/PipelineShowcaseScreen';
+import PunctuationStreamingScreen from '../screens/punctuation-streaming/PunctuationStreamingScreen';
+import OfflinePipelineShowcaseScreen from '../screens/offline-pipeline-showcase/OfflinePipelineShowcaseScreen';
+import LivePipelineShowcaseScreen from '../screens/live-pipeline-showcase/LivePipelineShowcaseScreen';
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
+import SegmentationShowcaseScreen from '../screens/segmentation-showcase/SegmentationShowcaseScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import FileIOScreen from '../screens/fileio/FileIOScreen';
+import AudioVisualizationScreen from '../screens/audio-visualization/AudioVisualizationScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -56,14 +61,14 @@ export default function RootNavigator() {
       />
       <Stack.Screen
         name="TTS"
-        component={TTSScreen}
+        component={OfflineTTSScreen}
         options={{
-          title: 'Text-to-Speech',
+          title: 'Text-to-Speech (Offline)',
         }}
       />
       <Stack.Screen
         name="TTSStreaming"
-        component={TTSStreamingScreen}
+        component={StreamingTTSScreen}
         options={{
           title: 'Text-to-Speech (Streaming)',
         }}
@@ -72,14 +77,28 @@ export default function RootNavigator() {
         name="Punctuation"
         component={PunctuationScreen}
         options={{
-          title: 'Punctuation',
+          title: 'Punctuation (offline)',
         }}
       />
       <Stack.Screen
-        name="PipelineShowcase"
-        component={PipelineShowcaseScreen}
+        name="PunctuationStreaming"
+        component={PunctuationStreamingScreen}
         options={{
-          title: 'Pipeline Showcase',
+          title: 'Punctuation (Streaming)',
+        }}
+      />
+      <Stack.Screen
+        name="OfflinePipelineShowcase"
+        component={OfflinePipelineShowcaseScreen}
+        options={{
+          title: 'Offline Pipeline Showcase',
+        }}
+      />
+      <Stack.Screen
+        name="LivePipelineShowcase"
+        component={LivePipelineShowcaseScreen}
+        options={{
+          title: 'Live Pipeline Showcase',
         }}
       />
       <Stack.Screen
@@ -101,6 +120,13 @@ export default function RootNavigator() {
         component={VADScreen}
         options={{
           title: 'Voice Activity Detection',
+        }}
+      />
+      <Stack.Screen
+        name="SegmentationShowcase"
+        component={SegmentationShowcaseScreen}
+        options={{
+          title: 'Segmentation Showcase',
         }}
       />
       <Stack.Screen
@@ -136,6 +162,20 @@ export default function RootNavigator() {
         component={SettingsScreen}
         options={{
           title: 'Settings',
+        }}
+      />
+      <Stack.Screen
+        name="FileIO"
+        component={FileIOScreen}
+        options={{
+          title: 'File I/O',
+        }}
+      />
+      <Stack.Screen
+        name="AudioVisualization"
+        component={AudioVisualizationScreen}
+        options={{
+          title: 'Audio Visualization',
         }}
       />
     </Stack.Navigator>

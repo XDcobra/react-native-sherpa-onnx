@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { VadDetectModelResult } from '../types/modelDetect';
 import type {
   LiveAudioBufferIdSource,
@@ -8,6 +8,8 @@ import type {
   LiveSegmentBufferIdSource,
   OfflineSegmentBufferIdSource,
 } from '../segmentbuffer/types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
 
 export {
   DETECTION_SOURCES,
@@ -64,9 +66,11 @@ export type TenVadRuntimeOptions = {
 
 export type VADRuntimeOptions = SileroVadRuntimeOptions | TenVadRuntimeOptions;
 
-export type VADInitializeOptions = {
-  modelPath: ModelPathConfig;
-  modelType?: VADModelType | 'auto';
+/** Concrete VAD model types (excludes `'auto'`). */
+export type VADConcreteModelType = VADModelType;
+
+/** Shared VAD init fields for auto and custom modes. */
+export type VADInitOptionsShared = {
   sampleRate?: number;
   runtimeOptions?: VADRuntimeOptions;
   provider?: string;
@@ -74,7 +78,33 @@ export type VADInitializeOptions = {
   debug?: boolean;
 };
 
+/** Automatic model detection from a model directory (default). */
+export type VADAutoInitializeOptions = VADInitOptionsShared & {
+  initMode?: 'auto';
+  modelSource: FileSource;
+  modelType?: VADModelType | 'auto';
+};
+
+/** Explicit model file path; skips native auto-detection. */
+export type VADCustomInitializeOptions = VADInitOptionsShared & {
+  initMode: 'custom';
+  modelType: VADConcreteModelType;
+  customConfig: import('./customConfig').VadCustomConfig;
+};
+
+/**
+ * Configuration for VAD initialization. Discriminated by `initMode`:
+ * auto mode scans a model directory; custom mode supplies an explicit {@link FileSource} for the ONNX file.
+ */
+export type VADInitializeOptions =
+  | VADAutoInitializeOptions
+  | VADCustomInitializeOptions;
+
 export type VADLiveRunOptions = {
+  /**
+   * How many samples to drain from the live audio cursor per pump (streaming pipeline only).
+   * Offline `createStreamingVAD().process()` uses the model `windowSize` from runtime options, not this field.
+   */
   chunkSize?: number;
   autoFlushOnInputEnded?: boolean;
   sourceTag?: string;
@@ -86,8 +116,27 @@ export type VADLiveRunOptions = {
 };
 
 export type VADOfflineRunOptions = {
-  chunkSize?: number;
   sourceTag?: string;
+  /**
+   * When omitted or `mode: 'off'`, offline VAD runs a single native pass over the full buffer.
+   * When `mode: 'auto'`, the segmentation engine splits offline audio into speech segments and
+   * runs VAD per segment (see `src/vad/engine.ts` offline branch).
+   */
+  segmentation?: {
+    mode?: 'off' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  /**
+   * Emitted only for **segmented** offline runs (`segmentation.mode: 'auto'` with at least one
+   * speech segment). Not called for `mode: 'off'` (single native pass), matching offline STT
+   * single-pass behaviour. Payload matches `OrchestrationProgress` in `pipeline/offlineOrchestrator.ts`.
+   */
+  onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * When set, checked before the segmented loop and before each segment's native VAD call;
+   * aborted runs throw with code `VAD_ABORTED`.
+   */
+  abortSignal?: AbortSignal;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
@@ -105,6 +154,8 @@ export type VADOfflineResult = {
 };
 
 export type VADDetectResult = VadDetectModelResult;
+
+export type { OrchestrationProgress };
 
 export type VADPipelineHandle = {
   instanceId: string;

@@ -4,340 +4,61 @@ import {
   readFile,
   writeFile,
 } from '@dr.pogodin/react-native-fs';
-import {
-  CACHE_TTL_MINUTES,
-  MODEL_ARCHIVE_EXT,
-  MODEL_ONNX_EXT,
-} from './constants';
+import { CACHE_TTL_MINUTES } from './constants';
 import { emitModelsListUpdated } from './downloadEvents';
+import { getCacheDir, getCachePath, getPrimaryAssetFilename } from './paths';
 import {
-  CATEGORY_CONFIG,
-  getArchiveFilename,
-  getCacheDir,
-  getCachePath,
-  getReleaseUrl,
-} from './paths';
-import { retryWithBackoff } from './retry';
+  DownloadError,
+  DOWNLOAD_ERROR_CODES,
+  type RequestPolicy,
+  type SourceModel,
+} from './sources';
+import {
+  buildSourceFetchContext,
+  ensureBuiltinSourcesRegistered,
+  getDefaultSourceForCategory,
+  getSource,
+} from './sources/registry';
 import {
   ModelCategory,
   type CachePayload,
   type CacheStatus,
   type ModelMeta,
-  type Quantization,
-  type SizeTier,
-  type TtsModelType,
 } from './types';
-import { parseChecksumFile } from './validation';
-import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolvePublicLanguageHints } from '../model-languages';
+
+type SourceSelector = {
+  source?: string | 'default';
+};
 
 export type RefreshModelsOptions = {
   forceRefresh?: boolean;
   cacheTtlMinutes?: number;
-  maxRetries?: number;
   signal?: AbortSignal;
+  requestPolicy?: RequestPolicy;
+} & SourceSelector;
+
+type CachePayloadWithSource = CachePayload & {
+  sourceId?: string;
 };
 
-type ReleaseAsset = {
-  name: string;
-  size: number;
-  browser_download_url: string;
-  digest?: string;
-};
+const memoryCacheBySourceCategory = new Map<string, CachePayload>();
+const checksumCacheBySourceCategory = new Map<string, Map<string, string>>();
 
-type NativeTtsCatalogHint = {
-  modelId: string;
-  modelType: string;
-  languages: string[];
-  quantization: string;
-  sizeTier: string;
-};
-
-const memoryCacheByCategory: Partial<Record<ModelCategory, CachePayload>> = {};
-const checksumCacheByCategory: Partial<
-  Record<ModelCategory, Map<string, string>>
-> = {};
-
-const DEFAULT_RELEASE_REPO = 'k2-fsa/sherpa-onnx';
-
-function getReleaseRepoFromConfig(category: ModelCategory): string {
-  const releaseApiBase = CATEGORY_CONFIG[category].releaseApiBase;
-  if (!releaseApiBase) {
-    return DEFAULT_RELEASE_REPO;
-  }
-
-  const match = releaseApiBase.match(
-    /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/releases\/tags\/?$/
-  );
-  return match?.[1] ?? DEFAULT_RELEASE_REPO;
+function cacheKey(category: ModelCategory, sourceId: string): string {
+  return `${sourceId}:${category}`;
 }
 
-function getChecksumUrl(category: ModelCategory): string {
-  const tag = CATEGORY_CONFIG[category].tag;
-  const repo = getReleaseRepoFromConfig(category);
-  return `https://github.com/${repo}/releases/download/${tag}/checksum.txt`;
-}
-
-export async function fetchChecksumsFromRelease(
-  category: ModelCategory
-): Promise<Map<string, string>> {
-  if (category === ModelCategory.Qnn) {
-    return new Map<string, string>();
-  }
-
-  const cached = checksumCacheByCategory[category];
-  if (cached) {
-    return cached;
-  }
-
-  try {
-    const checksums = await retryWithBackoff(
-      async () => {
-        const response = await fetch(getChecksumUrl(category));
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch checksum.txt for ${category}: ${response.status}`
-          );
-        }
-
-        const content = await response.text();
-        return parseChecksumFile(content);
-      },
-      {
-        maxRetries: 3,
-        initialDelayMs: 1000,
-      }
-    );
-
-    checksumCacheByCategory[category] = checksums;
-    return checksums;
-  } catch (error) {
-    console.warn(
-      `SherpaOnnxChecksum: Error fetching checksums for ${category}:`,
-      error
-    );
-    return new Map<string, string>();
-  }
-}
-
-function toTitleCase(value: string): string {
-  return value
-    .split(/[-_\s]+/g)
-    .filter(Boolean)
-    .map((token) => {
-      const first = token[0] ?? '';
-      return first.toUpperCase() + token.slice(1);
-    })
-    .join(' ');
-}
-
-function deriveDisplayName(id: string): string {
-  const cleaned = id.replace(/^sherpa-onnx-/, '');
-  return toTitleCase(cleaned);
-}
-
-async function buildTtsCatalogHintsMap(
-  ids: string[]
-): Promise<Map<string, NativeTtsCatalogHint>> {
-  const map = new Map<string, NativeTtsCatalogHint>();
-  for (const id of ids) {
-    const raw = await SherpaOnnx.detectTtsModel('', id, 'auto');
-    const modelType =
-      typeof raw.modelType === 'string' && raw.modelType.length > 0
-        ? raw.modelType
-        : 'unknown';
-    const rawLangs = Array.isArray(raw.languages)
-      ? raw.languages.filter((x): x is string => typeof x === 'string')
-      : [];
-    const languageRows = resolvePublicLanguageHints({
-      domain: ModelCategory.Tts,
-      modelType: modelType !== 'unknown' ? modelType : undefined,
-      rawFromNative: rawLangs,
-    });
-    const languages = languageRows.map((r) => r.iso6391Hint);
-    const quantization =
-      typeof raw.quantization === 'string' && raw.quantization.length > 0
-        ? raw.quantization
-        : 'unknown';
-    const sizeTier =
-      typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
-        ? raw.sizeTier
-        : 'unknown';
-    map.set(id, {
-      modelId: id,
-      modelType,
-      languages,
-      quantization,
-      sizeTier,
-    });
-  }
-  return map;
-}
-
-function collectTtsModelIdsFromAssets(assets: ReleaseAsset[]): string[] {
-  const out: string[] = [];
-  for (const asset of assets) {
-    const archiveExt = getAssetExtension(asset.name);
-    if (archiveExt !== 'tar.bz2') {
-      continue;
-    }
-    if (
-      !isAssetSupportedForCategory(ModelCategory.Tts, asset.name, archiveExt)
-    ) {
-      continue;
-    }
-    out.push(stripAssetExtension(asset.name, archiveExt));
-  }
-  return out;
-}
-
-function getAssetExtension(name: string): 'tar.bz2' | 'onnx' | null {
-  if (name.endsWith(MODEL_ARCHIVE_EXT)) return 'tar.bz2';
-  if (name.endsWith(MODEL_ONNX_EXT)) return 'onnx';
-  return null;
-}
-
-function stripAssetExtension(name: string, ext: 'tar.bz2' | 'onnx'): string {
-  const suffix = `.${ext}`;
-  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
-}
-
-function isAssetSupportedForCategory(
+function resolveSourceId(
   category: ModelCategory,
-  name: string,
-  ext: 'tar.bz2' | 'onnx'
-): boolean {
-  const lower = name.toLowerCase();
+  source?: string | 'default'
+): string {
+  ensureBuiltinSourcesRegistered();
 
-  switch (category) {
-    case ModelCategory.Tts:
-      return ext === 'tar.bz2';
-    case ModelCategory.Stt:
-      return ext === 'tar.bz2' && !lower.includes('vad');
-    case ModelCategory.Vad:
-      return ext === 'onnx' && lower.includes('vad');
-    case ModelCategory.Diarization:
-      return ext === 'tar.bz2';
-    case ModelCategory.Enhancement:
-      return ext === 'onnx';
-    case ModelCategory.Separation:
-      return ext === 'tar.bz2' || ext === 'onnx';
-    case ModelCategory.Qnn:
-      return (
-        ext === 'tar.bz2' &&
-        lower.includes('sherpa-onnx-qnn') &&
-        lower.includes('binary') &&
-        lower.includes('seconds')
-      );
-    case ModelCategory.Alignment:
-      return ext === 'tar.bz2';
-    default:
-      return false;
-  }
-}
-
-function parseDigestSha256(value?: string): string | undefined {
-  if (!value) {
-    return undefined;
+  if (!source || source === 'default') {
+    return getDefaultSourceForCategory(category);
   }
 
-  const match = value.match(/^sha256:([a-f0-9]{64})$/i);
-  return match?.[1]?.toLowerCase();
-}
-
-function toTtsModelMeta(
-  asset: ReleaseAsset,
-  archiveExt: 'tar.bz2',
-  hints: Map<string, NativeTtsCatalogHint>
-): ModelMeta {
-  const id = stripAssetExtension(asset.name, archiveExt);
-  const hint = hints.get(id);
-  if (!hint) {
-    throw new Error(
-      `Missing native TTS catalog hints for "${id}" — detectTtsModel did not produce metadata for this id.`
-    );
-  }
-
-  return {
-    id,
-    displayName: deriveDisplayName(id),
-    downloadUrl: asset.browser_download_url,
-    archiveExt,
-    bytes: asset.size,
-    sha256: parseDigestSha256(asset.digest),
-    category: ModelCategory.Tts,
-    type: hint.modelType as TtsModelType,
-    languages: [...hint.languages],
-    quantization: hint.quantization as Quantization,
-    sizeTier: hint.sizeTier as SizeTier,
-  };
-}
-
-function toGenericModelMeta(
-  category: ModelCategory,
-  asset: ReleaseAsset,
-  archiveExt: 'tar.bz2' | 'onnx'
-): ModelMeta {
-  const id = stripAssetExtension(asset.name, archiveExt);
-
-  return {
-    id,
-    displayName: deriveDisplayName(id),
-    downloadUrl: asset.browser_download_url,
-    archiveExt,
-    bytes: asset.size,
-    sha256: parseDigestSha256(asset.digest),
-    category,
-  };
-}
-
-function toModelMeta(
-  category: ModelCategory,
-  asset: ReleaseAsset,
-  ttsHints: Map<string, NativeTtsCatalogHint>
-): ModelMeta | null {
-  const archiveExt = getAssetExtension(asset.name);
-  if (!archiveExt) {
-    return null;
-  }
-
-  if (!isAssetSupportedForCategory(category, asset.name, archiveExt)) {
-    return null;
-  }
-
-  if (category === ModelCategory.Tts && archiveExt === 'tar.bz2') {
-    return toTtsModelMeta(asset, archiveExt, ttsHints);
-  }
-
-  return toGenericModelMeta(category, asset, archiveExt);
-}
-
-async function loadCacheFromDisk(
-  category: ModelCategory
-): Promise<CachePayload | null> {
-  const memoryCache = memoryCacheByCategory[category];
-  if (memoryCache) {
-    return memoryCache;
-  }
-
-  const cachePath = getCachePath(category);
-  if (!(await exists(cachePath))) {
-    return null;
-  }
-
-  const raw = await readFile(cachePath, 'utf8');
-  const parsed = JSON.parse(raw) as CachePayload;
-  memoryCacheByCategory[category] = parsed;
-  return parsed;
-}
-
-async function saveCache(
-  category: ModelCategory,
-  payload: CachePayload
-): Promise<void> {
-  await mkdir(getCacheDir());
-  await writeFile(getCachePath(category), JSON.stringify(payload), 'utf8');
-  memoryCacheByCategory[category] = payload;
+  return source;
 }
 
 function isCacheFresh(payload: CachePayload, ttlMinutes: number): boolean {
@@ -350,10 +71,127 @@ function isCacheFresh(payload: CachePayload, ttlMinutes: number): boolean {
   return ageMs < ttlMinutes * 60 * 1000;
 }
 
+function toModelMeta(
+  sourceId: string,
+  sourceModel: SourceModel
+): ModelMeta | null {
+  const primaryAsset = sourceModel.assets[0];
+  if (!primaryAsset) {
+    return null;
+  }
+
+  return {
+    id: sourceModel.id,
+    displayName: sourceModel.displayName,
+    sourceId,
+    layout: sourceModel.layout,
+    assets: sourceModel.assets,
+    bytes: sourceModel.bytes,
+    sha256: primaryAsset.sha256,
+    category: sourceModel.category,
+    modelType: sourceModel.modelType,
+    languages: sourceModel.languages,
+    quantization: sourceModel.quantization,
+    sizeTier: sourceModel.sizeTier,
+    isStreaming: sourceModel.isStreaming,
+    supportsQnn: sourceModel.supportsQnn,
+    isHardwareSpecificUnsupported: sourceModel.isHardwareSpecificUnsupported,
+  };
+}
+
+function toRequestPolicy(options?: RefreshModelsOptions): RequestPolicy {
+  return options?.requestPolicy ?? { retries: 0 };
+}
+
+async function loadCacheFromDisk(
+  category: ModelCategory,
+  sourceId: string
+): Promise<CachePayload | null> {
+  const key = cacheKey(category, sourceId);
+  const memoryCache = memoryCacheBySourceCategory.get(key);
+  if (memoryCache) {
+    return memoryCache;
+  }
+
+  const cachePath = getCachePath(category, sourceId);
+  if (!(await exists(cachePath))) {
+    return null;
+  }
+
+  const raw = await readFile(cachePath, 'utf8');
+  const parsed = JSON.parse(raw) as CachePayloadWithSource;
+
+  const payload: CachePayload = {
+    lastUpdated: parsed.lastUpdated,
+    models: parsed.models,
+  };
+
+  memoryCacheBySourceCategory.set(key, payload);
+  return payload;
+}
+
+async function saveCache(
+  category: ModelCategory,
+  sourceId: string,
+  payload: CachePayload
+): Promise<void> {
+  await mkdir(getCacheDir());
+  await writeFile(
+    getCachePath(category, sourceId),
+    JSON.stringify({
+      ...payload,
+      sourceId,
+    }),
+    'utf8'
+  );
+
+  memoryCacheBySourceCategory.set(cacheKey(category, sourceId), payload);
+}
+
+async function getChecksumsForSource(
+  category: ModelCategory,
+  sourceId: string,
+  options?: RefreshModelsOptions
+): Promise<Map<string, string>> {
+  const key = cacheKey(category, sourceId);
+  const cached = checksumCacheBySourceCategory.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const provider = getSource(sourceId);
+  if (!provider.getChecksums) {
+    return new Map<string, string>();
+  }
+
+  try {
+    const ctx = buildSourceFetchContext(sourceId, provider, {
+      signal: options?.signal,
+      requestPolicy: toRequestPolicy(options),
+    });
+
+    const checksums =
+      (await provider.getChecksums?.(category, ctx)) ??
+      new Map<string, string>();
+
+    checksumCacheBySourceCategory.set(key, checksums);
+    return checksums;
+  } catch (error) {
+    console.warn(
+      `SherpaOnnxChecksum: Error fetching checksums for ${sourceId}:${category}:`,
+      error
+    );
+    return new Map<string, string>();
+  }
+}
+
 export async function listModels(
-  category: ModelCategory
+  category: ModelCategory,
+  options?: SourceSelector
 ): Promise<ModelMeta[]> {
-  const cache = await loadCacheFromDisk(category);
+  ensureBuiltinSourcesRegistered();
+  const sourceId = resolveSourceId(category, options?.source);
+  const cache = await loadCacheFromDisk(category, sourceId);
   return cache?.models ?? [];
 }
 
@@ -361,50 +199,52 @@ export async function refreshModels(
   category: ModelCategory,
   options?: RefreshModelsOptions
 ): Promise<ModelMeta[]> {
+  ensureBuiltinSourcesRegistered();
+
+  const sourceId = resolveSourceId(category, options?.source);
+  const provider = getSource(sourceId);
+
+  if (!provider.supportsCategory(category)) {
+    throw new DownloadError(
+      DOWNLOAD_ERROR_CODES.SOURCE_LIST_FAILED,
+      `Source ${sourceId} does not support category ${category}`,
+      {
+        source: sourceId,
+        category,
+      }
+    );
+  }
+
   const ttl = options?.cacheTtlMinutes ?? CACHE_TTL_MINUTES;
-  const cached = await loadCacheFromDisk(category);
+  const cached = await loadCacheFromDisk(category, sourceId);
 
   if (!options?.forceRefresh && cached && isCacheFresh(cached, ttl)) {
     return cached.models;
   }
 
   try {
-    const body = await retryWithBackoff(
-      async () => {
-        const response = await fetch(getReleaseUrl(category));
-        if (!response.ok) {
-          throw new Error(`Failed to fetch models: ${response.status}`);
-        }
-        return response.json();
-      },
-      {
-        maxRetries: options?.maxRetries ?? 3,
-        initialDelayMs: 1000,
-        signal: options?.signal,
-      }
-    );
+    const ctx = buildSourceFetchContext(sourceId, provider, {
+      signal: options?.signal,
+      requestPolicy: toRequestPolicy(options),
+    });
+    const sourceModels = await provider.listModels(category, ctx);
 
-    const assets = Array.isArray(body?.assets)
-      ? (body.assets as ReleaseAsset[])
-      : [];
+    const models = sourceModels
+      .map((sourceModel) => toModelMeta(sourceId, sourceModel))
+      .filter((model): model is ModelMeta => model != null)
+      .filter((model) => model.isHardwareSpecificUnsupported !== true);
 
-    let ttsHints = new Map<string, NativeTtsCatalogHint>();
-    if (category === ModelCategory.Tts) {
-      const ttsIds = collectTtsModelIdsFromAssets(assets);
-      ttsHints = await buildTtsCatalogHintsMap(ttsIds);
-    }
-
-    const models = assets
-      .map((asset) => toModelMeta(category, asset, ttsHints))
-      .filter((model): model is ModelMeta => model != null);
-
-    const checksums = await fetchChecksumsFromRelease(category);
+    const checksums = await getChecksumsForSource(category, sourceId, options);
     for (const model of models) {
-      const archiveFilename = getArchiveFilename(model.id, model.archiveExt);
-      const sha256 = checksums.get(archiveFilename);
+      const archiveFilename = getPrimaryAssetFilename(
+        model.id,
+        model.layout,
+        model.assets
+      );
+      const checksum = checksums.get(archiveFilename);
 
-      if (sha256) {
-        model.sha256 = sha256;
+      if (checksum) {
+        model.sha256 = checksum;
       } else if (model.sha256) {
         model.sha256 = model.sha256.toLowerCase();
       }
@@ -415,13 +255,13 @@ export async function refreshModels(
       models,
     };
 
-    await saveCache(category, payload);
+    await saveCache(category, sourceId, payload);
     emitModelsListUpdated(category, models);
     return models;
   } catch (error) {
     if (cached) {
       console.warn(
-        `Failed to refresh models for ${category}, using cached data:`,
+        `Failed to refresh models for ${sourceId}:${category}, using cached data:`,
         error
       );
       return cached.models;
@@ -432,9 +272,12 @@ export async function refreshModels(
 }
 
 export async function getModelsCacheStatus(
-  category: ModelCategory
+  category: ModelCategory,
+  options?: SourceSelector
 ): Promise<CacheStatus> {
-  const cached = await loadCacheFromDisk(category);
+  const sourceId = resolveSourceId(category, options?.source);
+  const cached = await loadCacheFromDisk(category, sourceId);
+
   if (!cached) {
     return {
       lastUpdated: null,
@@ -450,13 +293,23 @@ export async function getModelsCacheStatus(
 
 export async function getModelById(
   category: ModelCategory,
-  id: string
+  id: string,
+  options?: SourceSelector
 ): Promise<ModelMeta | null> {
-  const models = await listModels(category);
+  const models = await listModels(category, options);
   return models.find((model) => model.id === id) ?? null;
 }
 
 export function clearMemoryCacheForCategory(category: ModelCategory): void {
-  delete memoryCacheByCategory[category];
-  delete checksumCacheByCategory[category];
+  for (const key of memoryCacheBySourceCategory.keys()) {
+    if (key.endsWith(`:${category}`)) {
+      memoryCacheBySourceCategory.delete(key);
+    }
+  }
+
+  for (const key of checksumCacheBySourceCategory.keys()) {
+    if (key.endsWith(`:${category}`)) {
+      checksumCacheBySourceCategory.delete(key);
+    }
+  }
 }

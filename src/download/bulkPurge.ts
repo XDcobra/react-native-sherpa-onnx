@@ -46,58 +46,90 @@ export async function purgeAll(opts?: {
     const downloaded = await listDownloadedModels(category);
 
     for (const model of downloaded) {
-      const key = makeModelOperationKey(category, model.id);
+      const sourceId = model.sourceId;
+      const key = makeModelOperationKey(category, model.id, sourceId);
       if (protect.has(key)) {
         result.skippedProtected += 1;
         continue;
       }
 
-      await deleteModel(category, model.id);
+      await deleteModel(category, model.id, sourceId);
       result.deletedComplete += 1;
     }
   }
 
   for (const category of categories) {
-    const incomplete = await getIncompleteDownloads(category);
+    const downloaded = await listDownloadedModels(category);
+    const sourceIds = new Set<string>(
+      downloaded.map((model) => model.sourceId)
+    );
+    sourceIds.add('default');
 
-    for (const state of incomplete) {
-      const key = makeModelOperationKey(category, state.modelId);
-      if (protect.has(key)) {
-        result.skippedProtected += 1;
-        continue;
+    for (const sourceId of sourceIds) {
+      const incomplete = await getIncompleteDownloads(category, {
+        source: sourceId,
+      });
+
+      for (const state of incomplete) {
+        const key = makeModelOperationKey(category, state.modelId, sourceId);
+        if (protect.has(key)) {
+          result.skippedProtected += 1;
+          continue;
+        }
+
+        await deleteIncompleteDownload(category, state.modelId, sourceId);
+        result.deletedIncompleteDownloads += 1;
       }
-
-      await deleteIncompleteDownload(category, state.modelId);
-      result.deletedIncompleteDownloads += 1;
     }
   }
 
   for (const category of categories) {
-    const extractions = await getIncompleteExtractions(category);
+    const downloaded = await listDownloadedModels(category);
+    const sourceIds = new Set<string>(
+      downloaded.map((model) => model.sourceId)
+    );
+    sourceIds.add('default');
 
-    for (const extraction of extractions) {
-      const key = makeModelOperationKey(category, extraction.modelId);
-      if (protect.has(key)) {
-        result.skippedProtected += 1;
-        continue;
-      }
+    for (const sourceId of sourceIds) {
+      const extractions = await getIncompleteExtractions(category, {
+        source: sourceId,
+      });
 
-      await deleteIncompleteExtraction(category, extraction.modelId);
-
-      try {
-        const archivePath = getArchivePath(
+      for (const extraction of extractions) {
+        const effectiveSourceId = extraction.model.sourceId ?? sourceId;
+        const key = makeModelOperationKey(
           category,
           extraction.modelId,
-          extraction.model.archiveExt
+          effectiveSourceId
         );
-        if (await exists(archivePath)) {
-          await unlink(archivePath);
+        if (protect.has(key)) {
+          result.skippedProtected += 1;
+          continue;
         }
-      } catch {
-        // non-fatal
-      }
 
-      result.deletedIncompleteExtractions += 1;
+        await deleteIncompleteExtraction(
+          category,
+          extraction.modelId,
+          effectiveSourceId
+        );
+
+        try {
+          const archivePath = getArchivePath(
+            category,
+            extraction.modelId,
+            extraction.model.layout,
+            extraction.model.assets,
+            effectiveSourceId
+          );
+          if (await exists(archivePath)) {
+            await unlink(archivePath);
+          }
+        } catch {
+          // non-fatal
+        }
+
+        result.deletedIncompleteExtractions += 1;
+      }
     }
   }
 

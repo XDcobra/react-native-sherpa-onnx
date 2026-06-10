@@ -52,7 +52,7 @@ COMMON_CONFIGURE=(
 --enable-swresample
 
 --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
---enable-demuxer=mov,mp3,ogg,flac,wav,matroska
+--enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
 --enable-muxer=wav,mp3,flac,mp4,ogg,matroska
 --enable-parser=aac,mpegaudio,vorbis,flac
 --enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus

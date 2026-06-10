@@ -9,29 +9,49 @@ import {
 import { emitModelsListUpdated } from './downloadEvents';
 import {
   getCachePath,
+  getCacheDir,
   getDownloadStatePath,
   getExtractionStatePath,
   getManifestPath,
   getModelDir,
   getModelsBaseDir,
   getNativeAssetExtractedModelDir,
-  getOnnxPath,
   getReadyMarkerPath,
-  getTarArchivePath,
+  getSourceModelsBaseDir,
 } from './paths';
 import { clearMemoryCacheForCategory } from './registry';
 import {
-  type ModelCategory,
+  ModelCategory,
   type ModelManifest,
   type ModelMeta,
   type ModelWithMetadata,
+  type SourceSelectorOptions,
 } from './types';
 import { removeDirectoryRecursive, resolveActualModelDir } from './validation';
 
-export async function listDownloadedModels(
-  category: ModelCategory
+function resolveSourceId(source?: string | 'default'): string {
+  if (!source || source === 'default') {
+    return 'default';
+  }
+
+  return source;
+}
+
+async function listSourceDirs(category: ModelCategory): Promise<string[]> {
+  const sourcesRoot = `${getModelsBaseDir(category)}/sources`;
+  if (!(await exists(sourcesRoot))) {
+    return [];
+  }
+
+  const entries = await readDir(sourcesRoot);
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.path);
+}
+
+async function listDownloadedModelsAtBase(
+  baseDir: string
 ): Promise<ModelMeta[]> {
-  const baseDir = getModelsBaseDir(category);
   if (!(await exists(baseDir))) {
     return [];
   }
@@ -44,7 +64,7 @@ export async function listDownloadedModels(
       continue;
     }
 
-    const manifestPath = getManifestPath(category, entry.name);
+    const manifestPath = `${entry.path}/manifest.json`;
     if (!(await exists(manifestPath))) {
       continue;
     }
@@ -53,7 +73,11 @@ export async function listDownloadedModels(
       const raw = await readFile(manifestPath, 'utf8');
       const manifest = JSON.parse(raw) as ModelManifest;
       if (manifest.model) {
-        models.push(manifest.model);
+        const sourceId = resolveSourceId(manifest.model.sourceId);
+        models.push({
+          ...manifest.model,
+          sourceId,
+        });
       }
     } catch {
       // ignore invalid manifest
@@ -63,31 +87,60 @@ export async function listDownloadedModels(
   return models;
 }
 
+export async function listDownloadedModels(
+  category: ModelCategory,
+  options?: SourceSelectorOptions
+): Promise<ModelMeta[]> {
+  const sourceId = options?.source;
+
+  if (sourceId) {
+    return listDownloadedModelsAtBase(
+      getSourceModelsBaseDir(category, resolveSourceId(sourceId))
+    );
+  }
+
+  const models: ModelMeta[] = [];
+  const sourceDirs = await listSourceDirs(category);
+  for (const sourceDir of sourceDirs) {
+    const group = await listDownloadedModelsAtBase(sourceDir);
+    models.push(...group);
+  }
+
+  return models;
+}
+
 export async function isModelDownloaded(
   category: ModelCategory,
-  id: string
+  id: string,
+  options?: SourceSelectorOptions
 ): Promise<boolean> {
-  return exists(getReadyMarkerPath(category, id));
+  return exists(
+    getReadyMarkerPath(category, id, resolveSourceId(options?.source))
+  );
 }
 
 export async function getModelPath(
   category: ModelCategory,
-  id: string
+  id: string,
+  options?: SourceSelectorOptions
 ): Promise<string | null> {
-  const ready = await isModelDownloaded(category, id);
+  const sourceId = resolveSourceId(options?.source);
+  const ready = await isModelDownloaded(category, id, { source: sourceId });
   if (!ready) {
     return null;
   }
 
-  await updateModelLastUsed(category, id);
-  return resolveActualModelDir(getModelDir(category, id));
+  await updateModelLastUsed(category, id, { source: sourceId });
+  return resolveActualModelDir(getModelDir(category, id, sourceId));
 }
 
 export async function updateModelLastUsed(
   category: ModelCategory,
-  id: string
+  id: string,
+  options?: SourceSelectorOptions
 ): Promise<void> {
-  const manifestPath = getManifestPath(category, id);
+  const sourceId = resolveSourceId(options?.source);
+  const manifestPath = getManifestPath(category, id, sourceId);
   if (!(await exists(manifestPath))) {
     return;
   }
@@ -103,9 +156,11 @@ export async function updateModelLastUsed(
 }
 
 export async function listDownloadedModelsWithMetadata(
-  category: ModelCategory
+  category: ModelCategory,
+  options?: SourceSelectorOptions
 ): Promise<ModelWithMetadata[]> {
-  const baseDir = getModelsBaseDir(category);
+  const sourceId = resolveSourceId(options?.source);
+  const baseDir = getSourceModelsBaseDir(category, sourceId);
   if (!(await exists(baseDir))) {
     return [];
   }
@@ -118,7 +173,7 @@ export async function listDownloadedModelsWithMetadata(
       continue;
     }
 
-    const manifestPath = getManifestPath(category, entry.name);
+    const manifestPath = getManifestPath(category, entry.name, sourceId);
     if (!(await exists(manifestPath))) {
       continue;
     }
@@ -153,9 +208,13 @@ export async function cleanupLeastRecentlyUsed(
     targetBytes?: number;
     maxModelsToDelete?: number;
     keepCount?: number;
+    source?: string | 'default';
   }
 ): Promise<string[]> {
-  const modelsWithMetadata = await listDownloadedModelsWithMetadata(category);
+  const sourceId = resolveSourceId(options?.source);
+  const modelsWithMetadata = await listDownloadedModelsWithMetadata(category, {
+    source: sourceId,
+  });
   if (modelsWithMetadata.length === 0) {
     return [];
   }
@@ -183,7 +242,7 @@ export async function cleanupLeastRecentlyUsed(
     }
 
     try {
-      await deleteModel(category, item.model.id);
+      await deleteModel(category, item.model.id, sourceId);
       deletedIds.push(item.model.id);
       bytesFreed += item.sizeOnDisk ?? 0;
 
@@ -203,22 +262,27 @@ export async function cleanupLeastRecentlyUsed(
 
 export async function deleteModel(
   category: ModelCategory,
-  id: string
+  id: string,
+  source = 'default'
 ): Promise<void> {
-  const modelDir = getModelDir(category, id);
-  const tarPath = getTarArchivePath(category, id);
-  const onnxPath = getOnnxPath(category, id);
-  const downloadStatePath = getDownloadStatePath(category, id);
-  const extractionStatePath = getExtractionStatePath(category, id);
+  const sourceId = resolveSourceId(source);
+  const modelDir = getModelDir(category, id, sourceId);
+  const legacyArchivePath = `${getSourceModelsBaseDir(
+    category,
+    sourceId
+  )}/${id}.tar.bz2`;
+  const legacyOnnxPath = `${modelDir}/${id}.onnx`;
+  const downloadStatePath = getDownloadStatePath(category, id, sourceId);
+  const extractionStatePath = getExtractionStatePath(category, id, sourceId);
 
   if (await exists(modelDir)) {
     await unlink(modelDir);
   }
-  if (await exists(tarPath)) {
-    await unlink(tarPath);
+  if (await exists(legacyArchivePath)) {
+    await unlink(legacyArchivePath);
   }
-  if (await exists(onnxPath)) {
-    await unlink(onnxPath);
+  if (await exists(legacyOnnxPath)) {
+    await unlink(legacyOnnxPath);
   }
   if (await exists(downloadStatePath)) {
     await unlink(downloadStatePath);
@@ -229,15 +293,43 @@ export async function deleteModel(
 
   await removeDirectoryRecursive(getNativeAssetExtractedModelDir(id));
 
-  const list = await listDownloadedModels(category);
+  const list = await listDownloadedModels(category, { source: sourceId });
   emitModelsListUpdated(category, list);
 }
 
-export async function clearModelsCache(category: ModelCategory): Promise<void> {
-  const cachePath = getCachePath(category);
-  if (await exists(cachePath)) {
-    await unlink(cachePath);
+export async function clearModelsCache(
+  category: ModelCategory,
+  options?: SourceSelectorOptions
+): Promise<void> {
+  const sourceId = options?.source;
+
+  if (sourceId) {
+    const cachePath = getCachePath(category, resolveSourceId(sourceId));
+    if (await exists(cachePath)) {
+      await unlink(cachePath);
+    }
+  } else {
+    const cacheDir = getCacheDir();
+    if (await exists(cacheDir)) {
+      const entries = await readDir(cacheDir);
+      const baseName = getCachePath(category).split('/').pop() ?? '';
+      const prefix = baseName.replace(/\.json$/i, '');
+
+      for (const entry of entries) {
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        if (
+          entry.name === `${prefix}.json` ||
+          entry.name.startsWith(`${prefix}--`)
+        ) {
+          await unlink(entry.path);
+        }
+      }
+    }
   }
+
   clearMemoryCacheForCategory(category);
 }
 

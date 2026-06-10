@@ -1,4 +1,4 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
@@ -6,22 +6,22 @@ import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTy
 /**
  * Online (streaming) STT model types.
  * These models use OnlineRecognizer + OnlineStream in sherpa-onnx.
- * Must match the native OnlineRecognizer model config (transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc).
+ * Must match the native OnlineRecognizer model config (transducer, nemo_transducer, paraformer, zipformer2_ctc, nemo_ctc, tone_ctc).
  */
 export type OnlineSTTModelType =
   | 'transducer'
+  | 'nemo_transducer'
   | 'paraformer'
   | 'zipformer2_ctc'
-  | 'wenet_ctc'
   | 'nemo_ctc'
   | 'tone_ctc';
 
 /** Runtime list of supported online STT model types. */
 export const ONLINE_STT_MODEL_TYPES: readonly OnlineSTTModelType[] = [
   'transducer',
+  'nemo_transducer',
   'paraformer',
   'zipformer2_ctc',
-  'wenet_ctc',
   'nemo_ctc',
   'tone_ctc',
 ] as const;
@@ -53,13 +53,9 @@ export interface EndpointConfig {
 }
 
 /**
- * Options for initializing the streaming (online) STT engine.
+ * Options shared by auto and custom streaming STT initialization.
  */
-export interface StreamingSttInitOptions {
-  /** Model path configuration (asset, file, or auto). */
-  modelPath: ModelPathConfig;
-  /** Online model type. Use 'auto' to detect from model directory (calls detectSttModel and maps to an online type). */
-  modelType: OnlineSTTModelType | 'auto';
+export interface StreamingSttInitOptionsBase {
   /** Enable endpoint detection. Default: true. */
   enableEndpoint?: boolean;
   /** Endpoint rules. Defaults match Kotlin (rule1: 2.4s silence, rule2: 1.4s + speech, rule3: 20s max). */
@@ -91,9 +87,35 @@ export interface StreamingSttInitOptions {
   debug?: boolean;
 }
 
-/** Options for starting a native STT pipeline worker. */
+/** Auto-detect model files from a directory-backed {@link FileSource}. */
+export interface StreamingSttAutoInitOptions
+  extends StreamingSttInitOptionsBase {
+  initMode?: 'auto';
+  /** Model source configuration. */
+  modelSource: FileSource;
+  /** Online model type. Use 'auto' to detect from model directory. */
+  modelType: OnlineSTTModelType | 'auto';
+}
+
+/** Explicit per-file paths; skips directory scan / detect. */
+export interface StreamingSttCustomInitOptions
+  extends StreamingSttInitOptionsBase {
+  initMode: 'custom';
+  /** Concrete online model type (not `'auto'`). */
+  modelType: OnlineSTTModelType;
+  customConfig: import('./streamingCustomConfig').StreamingSttCustomConfig;
+}
+
+/**
+ * Options for initializing the streaming (online) STT engine.
+ */
+export type StreamingSttInitOptions =
+  | StreamingSttAutoInitOptions
+  | StreamingSttCustomInitOptions;
+
+/** Options for starting a native **streaming (online)** STT pipeline worker. */
 export interface SttPipelineOptions {
-  /** Number of audio samples drained per worker loop. Default: 3200. */
+  /** Samples drained per worker loop. Default: 6400. Not used by offline live-overload STT. */
   chunkSize?: number;
 }
 

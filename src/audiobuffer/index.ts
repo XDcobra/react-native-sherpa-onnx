@@ -8,8 +8,23 @@
  * Buffers are pipeline building blocks: pass handles to STT, TTS, Enhancement, Alignment, PCM Player.
  */
 
-import { NativeEventEmitter, TurboModuleRegistry } from 'react-native';
+import {
+  NativeEventEmitter,
+  NativeModules,
+  TurboModuleRegistry,
+} from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import {
+  advanceAudioCommitStart,
+  annotateSpeechSegment,
+  consumeSpeechSegmentAnnotation,
+  getLiveAudioSegmentation,
+  registerAttachedSegmentationEngine,
+  normalizeSegmentationMode,
+  registerLiveAudioSegmentation,
+  releaseSegmentationStateForBuffer,
+  setAssociatedAudioSegmentBuffer,
+} from '../segment/runtime-state';
 import {
   installJSI as installJSIBindings,
   isJSIAvailable,
@@ -21,6 +36,7 @@ import type {
   OfflineAudioBufferRef,
   LiveAudioBufferInfo,
   LiveAudioBufferRef,
+  LiveAudioBufferFinishedRef,
   PipelineAudioBufferInfo,
   OfflineBufferHandle,
   LiveBufferHandleRecording,
@@ -32,9 +48,12 @@ import type {
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  OfflineTransferFromLiveMode,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
+  LiveAudioBufferSegmentEvent,
   LiveAudioBufferErrorEvent,
+  OfflineFromSamplesOptions,
 } from './types';
 
 const getNative = (): Spec =>
@@ -44,6 +63,16 @@ const AUDIO_BUFFER_ID_PATTERN =
   /^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 let opIdCounter = 0;
+const DEFAULT_PIPELINE_SAMPLE_RATE_HZ = 16000;
+
+const DEFAULT_SPEECH_SEGMENTATION_POLICY = {
+  evaluator: 'speech_energy_silence' as const,
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1000,
+  maxSegmentMs: 30000,
+  hangoverMs: 300,
+};
 
 function createInvalidAudioBufferIdError(
   sourceName: string,
@@ -126,6 +155,62 @@ function getFloat32ArrayBuffer(samples: Float32Array): ArrayBuffer {
   return copy.buffer;
 }
 
+function resolveTargetSampleRateHz(
+  targetSampleRateHz: number | undefined,
+  defaultValue: number
+): number {
+  return targetSampleRateHz === undefined ? defaultValue : targetSampleRateHz;
+}
+
+function resolveOfflineFromSamplesArgs(
+  channelCountOrOptions?: number | OfflineFromSamplesOptions,
+  options?: OfflineFromSamplesOptions
+): { channelCount: number; options: OfflineFromSamplesOptions | undefined } {
+  if (typeof channelCountOrOptions === 'number') {
+    return { channelCount: channelCountOrOptions, options };
+  }
+  return {
+    channelCount: 1,
+    options: channelCountOrOptions,
+  };
+}
+
+function resampleLinearFloat32Mono(
+  input: Float32Array,
+  inputRate: number,
+  outputRate: number
+): Float32Array {
+  if (!Number.isFinite(inputRate) || inputRate <= 0) {
+    throw new Error(
+      `${PipelineAudioErrorCode.INVALID_ARGUMENT}: inputSampleRateHz must be > 0.`
+    );
+  }
+  if (!Number.isFinite(outputRate) || outputRate <= 0) {
+    throw new Error(
+      `${PipelineAudioErrorCode.INVALID_ARGUMENT}: targetSampleRateHz must be > 0 when forcing resampling.`
+    );
+  }
+  if (inputRate === outputRate || input.length === 0) {
+    return input;
+  }
+
+  const ratio = outputRate / inputRate;
+  const outputLength = Math.max(1, Math.round(input.length * ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const pos = i / ratio;
+    const left = Math.floor(pos);
+    const right = Math.min(left + 1, input.length - 1);
+    const frac = pos - left;
+    const leftValue = input[left] ?? 0;
+    const rightValue = input[right] ?? leftValue;
+    output[i] = leftValue + (rightValue - leftValue) * frac;
+  }
+
+  return output;
+}
+
 type NativeSubscription = { remove: () => void };
 
 const framesCallbacks = new Map<
@@ -136,14 +221,50 @@ const errorCallbacks = new Map<
   string,
   Set<(event: LiveAudioBufferErrorEvent) => void>
 >();
+const segmentCallbacks = new Map<
+  string,
+  Set<(event: LiveAudioBufferSegmentEvent) => void>
+>();
 
 let framesSubscription: NativeSubscription | null = null;
 let errorSubscription: NativeSubscription | null = null;
+let segmentSubscription: NativeSubscription | null = null;
+
+function toSegmentReason(
+  raw: unknown
+):
+  | 'endpoint'
+  | 'punctuation'
+  | 'length_limit'
+  | 'vad_boundary'
+  | 'energy_silence'
+  | 'manual_commit'
+  | 'finalize'
+  | 'policy_checkpoint' {
+  return raw === 'endpoint' ||
+    raw === 'punctuation' ||
+    raw === 'length_limit' ||
+    raw === 'vad_boundary' ||
+    raw === 'energy_silence' ||
+    raw === 'manual_commit' ||
+    raw === 'finalize' ||
+    raw === 'policy_checkpoint'
+    ? raw
+    : 'manual_commit';
+}
+
+function toSegmentSource(
+  raw: unknown
+): 'segmentation_engine' | 'manual' | 'external' {
+  return raw === 'segmentation_engine' || raw === 'manual' || raw === 'external'
+    ? raw
+    : 'manual';
+}
 
 function ensureLiveEventSubscriptions(): void {
-  if (framesSubscription && errorSubscription) return;
+  if (framesSubscription && errorSubscription && segmentSubscription) return;
 
-  const emitter = new NativeEventEmitter();
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
 
   if (!framesSubscription) {
     framesSubscription = emitter.addListener(
@@ -214,6 +335,109 @@ function ensureLiveEventSubscriptions(): void {
       }
     );
   }
+
+  if (!segmentSubscription) {
+    segmentSubscription = emitter.addListener(
+      'pipelineLiveSegmentAppended',
+      (rawEvent: {
+        sourceAudioBufferId?: string;
+        segmentId?: string;
+        segmentIndex?: number;
+        totalSegments?: number;
+        startSample?: number;
+        endSample?: number;
+        sampleRate?: number;
+        durationMs?: number;
+        confidence?: number;
+        payload?: Record<string, unknown>;
+        reason?: string;
+        source?: string;
+        createdAtMs?: number;
+      }) => {
+        const sourceAudioBufferId = rawEvent?.sourceAudioBufferId;
+        if (!sourceAudioBufferId) return;
+
+        const callbacks = segmentCallbacks.get(sourceAudioBufferId);
+        if (!callbacks || callbacks.size === 0) return;
+
+        const segmentId =
+          typeof rawEvent.segmentId === 'string' ? rawEvent.segmentId : '';
+        const segmentIndex =
+          typeof rawEvent.segmentIndex === 'number'
+            ? Math.trunc(rawEvent.segmentIndex)
+            : 0;
+        const eventReason = toSegmentReason(rawEvent.reason);
+        const eventSource = toSegmentSource(rawEvent.source);
+        const eventCreatedAtMs =
+          typeof rawEvent.createdAtMs === 'number'
+            ? Math.trunc(rawEvent.createdAtMs)
+            : Date.now();
+
+        if (segmentId.length > 0 && rawEvent.reason && rawEvent.source) {
+          annotateSpeechSegment(
+            segmentId,
+            {
+              reason: eventReason,
+              source: eventSource,
+              createdAtMs: eventCreatedAtMs,
+              segmentIndex,
+            },
+            sourceAudioBufferId
+          );
+        }
+
+        const annotation =
+          segmentId.length > 0
+            ? consumeSpeechSegmentAnnotation(segmentId)
+            : undefined;
+
+        const segment = {
+          segmentId,
+          domain: 'speech' as const,
+          startOffset:
+            typeof rawEvent.startSample === 'number'
+              ? Math.trunc(rawEvent.startSample)
+              : 0,
+          endOffset:
+            typeof rawEvent.endSample === 'number'
+              ? Math.trunc(rawEvent.endSample)
+              : 0,
+          reason: annotation?.reason ?? eventReason,
+          source: annotation?.source ?? eventSource,
+          createdAtMs: annotation?.createdAtMs ?? eventCreatedAtMs,
+          segmentIndex,
+          sourceAudioBufferId,
+          sampleRate:
+            typeof rawEvent.sampleRate === 'number'
+              ? Math.trunc(rawEvent.sampleRate)
+              : 0,
+          durationMs:
+            typeof rawEvent.durationMs === 'number' ? rawEvent.durationMs : 0,
+          ...(typeof rawEvent.confidence === 'number'
+            ? { confidence: rawEvent.confidence }
+            : {}),
+          ...(rawEvent.payload != null
+            ? { meta: { payload: rawEvent.payload } }
+            : {}),
+        };
+
+        const totalSegments =
+          typeof rawEvent.totalSegments === 'number'
+            ? Math.trunc(rawEvent.totalSegments)
+            : Math.max(1, segmentIndex + 1);
+
+        const event: LiveAudioBufferSegmentEvent = {
+          bufferId: sourceAudioBufferId,
+          segment,
+          totalSegments,
+        };
+
+        for (const cb of callbacks) {
+          cb(event);
+        }
+      }
+    );
+  }
 }
 
 function maybeTearDownLiveEventSubscriptions(): void {
@@ -223,13 +447,18 @@ function maybeTearDownLiveEventSubscriptions(): void {
   const hasErrorCallbacks = [...errorCallbacks.values()].some(
     (set) => set.size > 0
   );
+  const hasSegmentCallbacks = [...segmentCallbacks.values()].some(
+    (set) => set.size > 0
+  );
 
-  if (hasFrameCallbacks || hasErrorCallbacks) return;
+  if (hasFrameCallbacks || hasErrorCallbacks || hasSegmentCallbacks) return;
 
   framesSubscription?.remove();
   errorSubscription?.remove();
+  segmentSubscription?.remove();
   framesSubscription = null;
   errorSubscription = null;
+  segmentSubscription = null;
 }
 
 function addFramesCallback(
@@ -250,9 +479,19 @@ function addErrorCallback(
   errorCallbacks.set(liveBufferId, set);
 }
 
+function addSegmentCallback(
+  liveBufferId: string,
+  callback: (event: LiveAudioBufferSegmentEvent) => void
+): void {
+  const set = segmentCallbacks.get(liveBufferId) ?? new Set();
+  set.add(callback);
+  segmentCallbacks.set(liveBufferId, set);
+}
+
 function clearLiveAudioBufferCallbacks(liveBufferId: string): void {
   framesCallbacks.delete(liveBufferId);
   errorCallbacks.delete(liveBufferId);
+  segmentCallbacks.delete(liveBufferId);
   maybeTearDownLiveEventSubscriptions();
 }
 
@@ -273,6 +512,9 @@ export function subscribeLiveAudioBufferEvents(
   if (callbacks.onError) {
     addErrorCallback(id, callbacks.onError);
   }
+  if (callbacks.onSegment) {
+    addSegmentCallback(id, callbacks.onSegment);
+  }
 
   return () => {
     if (callbacks.onFramesAppended) {
@@ -289,9 +531,64 @@ export function subscribeLiveAudioBufferEvents(
         errorCallbacks.delete(id);
       }
     }
+    if (callbacks.onSegment) {
+      const segmentSet = segmentCallbacks.get(id);
+      segmentSet?.delete(callbacks.onSegment);
+      if (segmentSet && segmentSet.size === 0) {
+        segmentCallbacks.delete(id);
+      }
+    }
 
     maybeTearDownLiveEventSubscriptions();
   };
+}
+
+async function commitFinalizeSegmentIfNeeded(
+  liveBufferId: string
+): Promise<void> {
+  const segmentationMode = normalizeSegmentationMode(
+    getLiveAudioSegmentation(liveBufferId)?.mode,
+    'off'
+  );
+  if (segmentationMode !== 'manual') return;
+
+  const info = await getPipelineAudioBufferInfo(liveBufferId);
+  if (info.kind !== 'livePcmBuffer') return;
+
+  const state = getLiveAudioSegmentation(liveBufferId);
+  const startSample = state?.nextCommitStartSample ?? 0;
+  const endSample = Math.trunc(info.totalSamplesWritten);
+  if (endSample <= startSample) return;
+
+  let segmentBufferId = state?.associatedSegmentBufferId;
+  if (!segmentBufferId) {
+    const created = await getNative().createLiveSegmentBuffer({
+      sourceAudioBufferId: liveBufferId,
+      emitSegmentAppendedEvents: true,
+      segmentEventMinIntervalMs: 0,
+    });
+    segmentBufferId = created.bufferId;
+    setAssociatedAudioSegmentBuffer(liveBufferId, segmentBufferId);
+  }
+
+  const durationMs = ((endSample - startSample) / info.sampleRate) * 1000;
+  await getNative().appendLiveSegment(
+    segmentBufferId,
+    'speech',
+    liveBufferId,
+    startSample,
+    endSample,
+    info.sampleRate,
+    durationMs,
+    undefined,
+    {
+      source: 'manual',
+      __annotationReason: 'finalize',
+      __annotationSource: 'manual',
+      __annotationCreatedAtMs: Date.now(),
+    }
+  );
+  advanceAudioCommitStart(liveBufferId, endSample);
 }
 
 // ==================== Offline Audio Buffer ====================
@@ -308,6 +605,11 @@ export function subscribeLiveAudioBufferEvents(
  * File source resolution uses the fileio resolver for all FileSource kinds.
  * Decode + resample + downmix happen in a single native pass (FFmpeg + SwrContext).
  *
+ * `options.targetSampleRateHz` semantics:
+ * - omitted / undefined -> defaults to 16000 Hz
+ * - 0 -> keep source sample rate
+ * - > 0 -> force that target sample rate
+ *
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
  * @param options - Decode options (sample rate, mono, cancellation, progress).
  * @returns Immutable offline buffer reference.
@@ -317,15 +619,19 @@ export async function createOfflineAudioBufferFromFile(
   options?: import('./types').AudioDecodeOptions
 ): Promise<OfflineAudioBufferRef> {
   const operationId = `decode_${Date.now()}_${++opIdCounter}`;
-  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
   const forceMono = options?.forceMono ?? true;
+  const allowDemuxerAutoProbe = options?.allowDemuxerAutoProbe ?? true;
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;
 
   try {
     if (options?.onProgress) {
-      const emitter = new NativeEventEmitter();
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
@@ -359,6 +665,7 @@ export async function createOfflineAudioBufferFromFile(
       source as any,
       targetSampleRateHz,
       forceMono,
+      allowDemuxerAutoProbe,
       operationId
     );
     const info = result as unknown as OfflineAudioBufferInfo;
@@ -373,17 +680,53 @@ export async function createOfflineAudioBufferFromFile(
 
 /**
  * Create an offline audio buffer from Float32 PCM samples.
+ *
+ * `inputSampleRateHz` is the natural source rate of `samples`.
+ * `options.targetSampleRateHz` semantics:
+ * - omitted / undefined -> defaults to 16000 Hz
+ * - 0 -> keep `inputSampleRateHz`
+ * - > 0 -> resample to that target rate before writing to the buffer
  */
 export function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
-  sampleRate: number,
+  inputSampleRateHz: number,
   channelCount?: number
+): OfflineAudioBufferRef;
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
+  inputSampleRateHz: number,
+  options?: OfflineFromSamplesOptions
+): OfflineAudioBufferRef;
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
+  inputSampleRateHz: number,
+  channelCountOrOptions?: number | OfflineFromSamplesOptions,
+  options?: OfflineFromSamplesOptions
 ): OfflineAudioBufferRef {
+  const resolved = resolveOfflineFromSamplesArgs(
+    channelCountOrOptions,
+    options
+  );
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    resolved.options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
+  const outputSampleRateHz =
+    targetSampleRateHz > 0 ? targetSampleRateHz : inputSampleRateHz;
+  const outputSamples =
+    outputSampleRateHz === inputSampleRateHz
+      ? samples
+      : resampleLinearFloat32Mono(
+          samples,
+          inputSampleRateHz,
+          outputSampleRateHz
+        );
+
   const jsi = requireJSI();
   const json = jsi.createOfflineFromSamples(
-    getFloat32ArrayBuffer(samples),
-    sampleRate,
-    channelCount ?? 1
+    getFloat32ArrayBuffer(outputSamples),
+    outputSampleRateHz,
+    resolved.channelCount
   );
 
   let info: OfflineAudioBufferInfo;
@@ -416,6 +759,21 @@ export async function createOfflineAudioBufferFromLive(
 }
 
 /**
+ * Transfer ownership of a finalized live spool into a new offline buffer without copying.
+ *
+ * On success, the source live buffer becomes invalidated and must no longer be used.
+ */
+export async function transferOfflineAudioBufferFromLive(
+  liveBufferId: LiveAudioBufferIdSource,
+  mode: OfflineTransferFromLiveMode = 'fullIfSpooled'
+): Promise<OfflineAudioBufferRef> {
+  const id = resolveLiveAudioBufferId(liveBufferId);
+  const result = await getNative().transferOfflineAudioBufferFromLive(id, mode);
+  const info = result as unknown as OfflineAudioBufferInfo;
+  return { info, bufferId: info.bufferId as OfflineBufferHandle };
+}
+
+/**
  * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
  * The buffer starts unpopulated (numSamples=0); native synthesis fills it exactly once.
  *
@@ -438,11 +796,13 @@ export async function createEmptyOfflineAudioBuffer(
 
 /**
  * Create a live audio buffer with a rolling-window ring buffer.
+ * `options.sampleRate` defaults to 16000 Hz when omitted.
  */
 export async function createEmptyLiveAudioBuffer(
   options: CreateEmptyLiveAudioBufferOptions
 ): Promise<LiveAudioBufferRef> {
-  const { onFramesAppended, onError, streamEvents, retention } = options;
+  const { onFramesAppended, onSegment, onError, streamEvents, retention } =
+    options;
 
   const fr = streamEvents?.framesAppended;
   const nativeEmitAppendedEvents =
@@ -487,7 +847,7 @@ export async function createEmptyLiveAudioBuffer(
   }
 
   const result = await getNative().createEmptyLiveAudioBuffer({
-    sampleRate: options.sampleRate,
+    sampleRate: options.sampleRate ?? DEFAULT_PIPELINE_SAMPLE_RATE_HZ,
     channelCount: options.channelCount,
     ringSeconds: options.ringSeconds,
     retentionMode,
@@ -501,10 +861,51 @@ export async function createEmptyLiveAudioBuffer(
 
   const info = result as unknown as LiveAudioBufferInfo;
 
+  const segmentationMode = normalizeSegmentationMode(
+    options.segmentation?.mode,
+    'off'
+  );
+  registerLiveAudioSegmentation(info.bufferId, segmentationMode);
+
+  if (segmentationMode === 'auto') {
+    try {
+      const attached = await getNative().attachSegmentationEngine(
+        info.bufferId,
+        'speech',
+        options.segmentation?.policy ?? DEFAULT_SPEECH_SEGMENTATION_POLICY
+      );
+      registerAttachedSegmentationEngine(
+        info.bufferId,
+        attached.engineId,
+        'speech',
+        {
+          associatedSegmentBufferId:
+            typeof attached.segmentBufferId === 'string'
+              ? attached.segmentBufferId
+              : undefined,
+        }
+      );
+      if (typeof attached.segmentBufferId === 'string') {
+        setAssociatedAudioSegmentBuffer(
+          info.bufferId,
+          attached.segmentBufferId
+        );
+      }
+    } catch (error) {
+      await getNative()
+        .releasePipelineAudioBuffer(info.bufferId)
+        .catch(() => {
+          // Best-effort cleanup if native engine attachment fails.
+        });
+      throw error;
+    }
+  }
+
   const unsubscribeEvents =
-    onFramesAppended || onError
+    onFramesAppended || onSegment || onError
       ? subscribeLiveAudioBufferEvents(info.bufferId, {
           onFramesAppended,
+          onSegment,
           onError,
         })
       : () => {};
@@ -544,14 +945,25 @@ export async function appendOfflineToLiveAudioBuffer(
 
 /**
  * Finalize a live audio buffer (recording → finished).
- * Returns a finished handle. No more appends allowed after this.
+ * Returns the finished handle plus fresh `info` from native (authoritative duration, etc.).
+ * No more appends allowed after this.
  */
 export async function finalizeLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource
-): Promise<LiveBufferHandleFinished> {
+): Promise<LiveAudioBufferFinishedRef> {
   const id = resolveLiveAudioBufferId(liveBufferId);
+  await commitFinalizeSegmentIfNeeded(id);
   await getNative().finalizeLiveAudioBuffer(id);
-  return id as LiveBufferHandleFinished;
+  const info = await refreshLiveAudioBufferInfo(id);
+  if (__DEV__ && info.state !== 'finished') {
+    console.warn(
+      `[audiobuffer] finalizeLiveAudioBuffer: expected state 'finished', got '${info.state}'`
+    );
+  }
+  return {
+    bufferId: id as LiveBufferHandleFinished,
+    info,
+  };
 }
 
 // ==================== Info / Release ====================
@@ -568,12 +980,45 @@ export async function getPipelineAudioBufferInfo(
 }
 
 /**
+ * Re-query native metadata for a live buffer (recording or finished).
+ *
+ * While `state === 'recording'`, `numSamples` reflects the ring window, not always
+ * total session length — use `onFramesAppended` → `totalSamplesWritten` for live timers.
+ */
+export async function refreshLiveAudioBufferInfo(
+  source: LiveAudioBufferIdSource
+): Promise<LiveAudioBufferInfo> {
+  const info = await getPipelineAudioBufferInfo(source);
+  if (info.kind !== 'livePcmBuffer') {
+    throw new Error(
+      `${PipelineAudioErrorCode.BUFFER_KIND_MISMATCH}: refreshLiveAudioBufferInfo requires a live buffer`
+    );
+  }
+  return info;
+}
+
+/**
+ * Same as {@link refreshLiveAudioBufferInfo}, merged into a recording ref (handle unchanged).
+ */
+export async function refreshLiveAudioBufferRef(
+  ref: LiveAudioBufferRef
+): Promise<LiveAudioBufferRef> {
+  const info = await refreshLiveAudioBufferInfo(ref);
+  return {
+    ...ref,
+    info,
+    bufferId: ref.bufferId,
+  };
+}
+
+/**
  * Release any pipeline audio buffer (offline or live).
  */
 export async function releasePipelineAudioBuffer(
   bufferId: PipelineAudioBufferIdSource
 ): Promise<void> {
   const id = resolvePipelineAudioBufferId(bufferId);
+  releaseSegmentationStateForBuffer(id);
   await getNative().releasePipelineAudioBuffer(id);
   clearLiveAudioBufferCallbacks(id);
 }
@@ -665,6 +1110,8 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
  * @param liveBuffer - Live buffer in recording state.
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
  * @param options - Decode + ingest options.
+ * targetSampleRateHz semantics are the same as `createOfflineAudioBufferFromFile`:
+ * omitted -> 16000, 0 -> keep source, >0 -> force explicit target.
  * @returns Handle to monitor/cancel the ingest operation.
  */
 export async function ingestFileToLiveAudioBuffer(
@@ -674,17 +1121,21 @@ export async function ingestFileToLiveAudioBuffer(
 ): Promise<import('./types').FileIngestHandle> {
   const operationId = `ingest_${Date.now()}_${++opIdCounter}`;
   const liveBufferId = resolveLiveAudioBufferId(liveBuffer);
-  const targetSampleRateHz = options?.targetSampleRateHz ?? 0;
+  const targetSampleRateHz = resolveTargetSampleRateHz(
+    options?.targetSampleRateHz,
+    DEFAULT_PIPELINE_SAMPLE_RATE_HZ
+  );
   const forceMono = options?.forceMono ?? true;
   const autoFinalize = options?.autoFinalize ?? false;
   const backpressure = options?.backpressure ?? 'block';
+  const allowDemuxerAutoProbe = options?.allowDemuxerAutoProbe ?? true;
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;
   const abortController = new AbortController();
 
   if (options?.onProgress) {
-    const emitter = new NativeEventEmitter();
+    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
     const onProgress = options.onProgress;
     progressSubscription = emitter.addListener(
       'decodeProgress',
@@ -723,13 +1174,14 @@ export async function ingestFileToLiveAudioBuffer(
     forceMono,
     autoFinalize,
     backpressure,
+    allowDemuxerAutoProbe,
     operationId
   );
 
   // The done promise listens for the native completion event
   const done = new Promise<import('./types').FileIngestResult>(
     (resolve, reject) => {
-      const emitter = new NativeEventEmitter();
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
       const sub = emitter.addListener('decodeComplete', (event: any) => {
         if (event?.operationId !== operationId) return;
         sub.remove();
@@ -785,6 +1237,8 @@ export type {
   OfflineAudioBufferRef,
   LiveAudioBufferInfo,
   LiveAudioBufferRef,
+  LiveAudioBufferRecordingRef,
+  LiveAudioBufferFinishedRef,
   PipelineAudioBufferInfo,
   OfflineAudioBufferIdSource,
   LiveAudioBufferIdSource,
@@ -801,12 +1255,17 @@ export type {
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  OfflineTransferFromLiveMode,
   LiveBufferAppendSource,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
+  LiveAudioBufferSegmentEvent,
   LiveAudioBufferErrorEvent,
+  AudioSegmentationMode,
+  AudioSegmentationConfig,
   PipelineAudioErrorCodeValue,
   AudioDecodeOptions,
+  OfflineFromSamplesOptions,
   DecodeProgressEvent,
   FileIngestHandle,
   FileIngestResult,

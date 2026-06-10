@@ -9,6 +9,8 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.vad.config.VadInitOptionsParser
 import com.sherpaonnx.vad.core.VadErrorCodes
 import com.sherpaonnx.vad.core.VadInstanceConfig
 import com.sherpaonnx.vad.core.VadRuntimeOptions
@@ -129,96 +131,147 @@ class SherpaOnnxVadHelper(
       promise.reject(VadErrorCodes.INVALID_ARGUMENT, "instanceId is required")
       return
     }
-    val sampleRate = options?.takeIf { it.hasKey("sampleRate") && !it.isNull("sampleRate") }?.getDouble("sampleRate")?.toInt()
-      ?: 16000
-    val threshold = options?.takeIf { it.hasKey("threshold") && !it.isNull("threshold") }?.getDouble("threshold")
-    val minSpeech = options?.takeIf { it.hasKey("minSpeechDurationMs") && !it.isNull("minSpeechDurationMs") }?.getDouble("minSpeechDurationMs")?.toInt()
-      ?: options?.takeIf { it.hasKey("speechDurationMs") && !it.isNull("speechDurationMs") }?.getDouble("speechDurationMs")?.toInt()
-      ?: 250
-    val minSilence = options?.takeIf { it.hasKey("silenceDurationMs") && !it.isNull("silenceDurationMs") }?.getDouble("silenceDurationMs")?.toInt()
-      ?: 250
-    val windowSize = options?.takeIf { it.hasKey("windowSize") && !it.isNull("windowSize") }?.getDouble("windowSize")?.toInt()
-    val maxSpeechDurationMs = options
-      ?.takeIf { it.hasKey("maxSpeechDurationS") && !it.isNull("maxSpeechDurationS") }
-      ?.getDouble("maxSpeechDurationS")
-      ?.times(1000.0)
-      ?.toInt()
-    val provider = options?.takeIf { it.hasKey("provider") && !it.isNull("provider") }?.getString("provider")
-      ?: "cpu"
-    val numThreads = options?.takeIf { it.hasKey("numThreads") && !it.isNull("numThreads") }?.getDouble("numThreads")?.toInt()
-      ?: 1
-    val debug = options?.takeIf { it.hasKey("debug") && !it.isNull("debug") }?.getBoolean("debug") ?: false
-    val modelDir = options?.takeIf { it.hasKey("modelDir") && !it.isNull("modelDir") }?.getString("modelDir")
-    val requestedModelType = options?.takeIf { it.hasKey("modelType") && !it.isNull("modelType") }?.getString("modelType")
-      ?: "auto"
-    if (modelDir.isNullOrBlank()) {
-      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "modelDir is required for VAD initialization")
+    val parsed = VadInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        VadErrorCodes.MODEL_INIT_FAILED,
+        if (options?.hasKey("initMode") == true && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        }
+      )
       return
     }
     try {
-      val detect = nativeDetectVadModel(modelDir, null, requestedModelType)
-      val ok = detect?.get("success") as? Boolean ?: false
-      if (!ok) {
-        val reason = detect?.get("error") as? String ?: "Failed to detect VAD model"
-        promise.reject(VadErrorCodes.MODEL_INIT_FAILED, reason)
-        return
+      if (parsed.initMode == "custom") {
+        initializeVadCustom(instanceId, parsed, promise)
+      } else {
+        initializeVadAuto(instanceId, parsed, promise)
       }
-      val resolvedModelType = (detect["modelType"] as? String)?.trim().orEmpty()
-      if (resolvedModelType != "silero_vad" && resolvedModelType != "ten_vad") {
-        promise.reject(
-          VadErrorCodes.MODEL_INIT_FAILED,
-          "Unsupported VAD model type: $resolvedModelType",
-        )
-        return
-      }
-      @Suppress("UNCHECKED_CAST")
-      val detectedPaths = detect["paths"] as? HashMap<String, Any?>
-      val modelPath = (detectedPaths?.get("model") as? String)?.takeIf { it.isNotBlank() } ?: modelDir
-      val baseRuntime = defaultRuntimeOptions(resolvedModelType)
-      val runtimeOptions = withRuntimeOverrides(
-        base = baseRuntime,
-        scoreThreshold = threshold,
-        minSpeechDurationMs = minSpeech,
-        minSilenceDurationMs = minSilence,
-        windowSize = windowSize,
-        maxSpeechDurationMs = maxSpeechDurationMs,
-      )
-      // Enforce strict model/options pairing.
-      val strictRuntimeOptions = when (resolvedModelType) {
-        "silero_vad" -> (runtimeOptions as? VadRuntimeOptions.Silero)
-        "ten_vad" -> (runtimeOptions as? VadRuntimeOptions.Ten)
-        else -> null
-      }
-      if (strictRuntimeOptions == null) {
-        promise.reject(
-          VadErrorCodes.MODEL_INIT_FAILED,
-          "VAD runtime options mismatch for model type: $resolvedModelType",
-        )
-        return
-      }
-      val runtime = createVadRuntime(
-        modelType = resolvedModelType,
-        modelPath = modelPath,
-        sampleRate = sampleRate,
-        provider = provider,
-        numThreads = numThreads,
-        debug = debug,
-        runtimeOptions = strictRuntimeOptions,
-      )
-      instances[instanceId] = VadInstanceConfig(
-        modelType = resolvedModelType,
-        modelDir = modelDir,
-        sampleRate = sampleRate,
-        provider = provider,
-        numThreads = numThreads,
-        debug = debug,
-        runtimeOptions = strictRuntimeOptions,
-        runtime = runtime,
-      )
-      promise.resolve(null)
     } catch (e: Exception) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "Failed to initialize VAD runtime: ${e.message}", e)
     }
+  }
+
+  private fun initializeVadCustom(
+    instanceId: String,
+    parsed: VadInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelTypeStr = parsed.modelType.trim()
+    if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "custom init requires a concrete modelType")
+      return
+    }
+    if (modelTypeStr != "silero_vad" && modelTypeStr != "ten_vad") {
+      promise.reject(
+        VadErrorCodes.MODEL_INIT_FAILED,
+        "Unsupported VAD model type: $modelTypeStr",
+      )
+      return
+    }
+
+    val pathStrings = parsed.modelPaths.orEmpty()
+    ModelPathValidationNative.validate("vad", modelTypeStr, pathStrings)?.let { errorMsg ->
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, errorMsg)
+      return
+    }
+
+    val modelPath = pathStrings["model"].orEmpty()
+    finishInitializeWithModelPath(
+      instanceId = instanceId,
+      modelDir = "custom",
+      resolvedModelType = modelTypeStr,
+      modelPath = modelPath,
+      parsed = parsed,
+      promise = promise,
+    )
+  }
+
+  private fun initializeVadAuto(
+    instanceId: String,
+    parsed: VadInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelDir = parsed.modelDir.orEmpty()
+    val detect = nativeDetectVadModel(modelDir, null, parsed.modelType)
+    val ok = detect?.get("success") as? Boolean ?: false
+    if (!ok) {
+      val reason = detect?.get("error") as? String ?: "Failed to detect VAD model"
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, reason)
+      return
+    }
+    val resolvedModelType = (detect["modelType"] as? String)?.trim().orEmpty()
+    if (resolvedModelType != "silero_vad" && resolvedModelType != "ten_vad") {
+      promise.reject(
+        VadErrorCodes.MODEL_INIT_FAILED,
+        "Unsupported VAD model type: $resolvedModelType",
+      )
+      return
+    }
+    @Suppress("UNCHECKED_CAST")
+    val detectedPaths = detect["paths"] as? HashMap<String, Any?>
+    val modelPath = (detectedPaths?.get("model") as? String)?.takeIf { it.isNotBlank() } ?: modelDir
+    finishInitializeWithModelPath(
+      instanceId = instanceId,
+      modelDir = modelDir,
+      resolvedModelType = resolvedModelType,
+      modelPath = modelPath,
+      parsed = parsed,
+      promise = promise,
+    )
+  }
+
+  private fun finishInitializeWithModelPath(
+    instanceId: String,
+    modelDir: String,
+    resolvedModelType: String,
+    modelPath: String,
+    parsed: VadInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val baseRuntime = defaultRuntimeOptions(resolvedModelType)
+    val runtimeOptions = withRuntimeOverrides(
+      base = baseRuntime,
+      scoreThreshold = parsed.threshold,
+      minSpeechDurationMs = parsed.minSpeechDurationMs,
+      minSilenceDurationMs = parsed.minSilenceDurationMs,
+      windowSize = parsed.windowSize,
+      maxSpeechDurationMs = parsed.maxSpeechDurationMs,
+    )
+    val strictRuntimeOptions = when (resolvedModelType) {
+      "silero_vad" -> (runtimeOptions as? VadRuntimeOptions.Silero)
+      "ten_vad" -> (runtimeOptions as? VadRuntimeOptions.Ten)
+      else -> null
+    }
+    if (strictRuntimeOptions == null) {
+      promise.reject(
+        VadErrorCodes.MODEL_INIT_FAILED,
+        "VAD runtime options mismatch for model type: $resolvedModelType",
+      )
+      return
+    }
+    val runtime = createVadRuntime(
+      modelType = resolvedModelType,
+      modelPath = modelPath,
+      sampleRate = parsed.sampleRate,
+      provider = parsed.provider,
+      numThreads = parsed.numThreads,
+      debug = parsed.debug,
+      runtimeOptions = strictRuntimeOptions,
+    )
+    instances[instanceId] = VadInstanceConfig(
+      modelType = resolvedModelType,
+      modelDir = modelDir,
+      sampleRate = parsed.sampleRate,
+      provider = parsed.provider,
+      numThreads = parsed.numThreads,
+      debug = parsed.debug,
+      runtimeOptions = strictRuntimeOptions,
+      runtime = runtime,
+    )
+    promise.resolve(null)
   }
 
   fun startVadPipeline(instanceId: String, audioInBufferId: String, segmentOutBufferId: String, options: ReadableMap?, promise: Promise) {
@@ -269,7 +322,13 @@ class SherpaOnnxVadHelper(
     promise.resolve(map)
   }
 
-  fun runVadOffline(instanceId: String, audioInBufferId: String, segmentOutBufferId: String, options: ReadableMap?, promise: Promise) {
+  fun runVadOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentOutBufferId: String,
+    @Suppress("UNUSED_PARAMETER") options: ReadableMap?,
+    promise: Promise,
+  ) {
     val cfg = instances[instanceId]
     if (cfg == null) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance not initialized: $instanceId")
@@ -291,13 +350,11 @@ class SherpaOnnxVadHelper(
       return
     }
     val records = mutableListOf<SegmentRecord>()
-    val chunkSize = options?.takeIf { it.hasKey("chunkSize") && !it.isNull("chunkSize") }?.getDouble("chunkSize")?.toInt() ?: 512
     val samples = audio.readAllSamples()
     cfg.runtime.reset()
     val stats = runModelInferenceSegmentation(
       cfg = cfg,
       samples = samples,
-      chunkSize = chunkSize,
       sourceAudioBufferId = audioInBufferId,
       liveOut = liveOut,
       records = records,
@@ -325,11 +382,14 @@ class SherpaOnnxVadHelper(
   private fun runModelInferenceSegmentation(
     cfg: VadInstanceConfig,
     samples: FloatArray,
-    chunkSize: Int,
     sourceAudioBufferId: String,
     liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
     records: MutableList<SegmentRecord>,
   ): OfflineInferenceStats {
+    // ONNX VAD expects a fixed window (Silero/Ten: cfg.runtimeOptions.windowSize).
+    // The last slice of the file is often shorter than one full window (e.g. 228 samples) which
+    // crashes compute — mirror VadPipelineWorker: pad the final partial window with zeros.
+    val frameSize = cfg.runtimeOptions.windowSize.coerceAtLeast(1)
     var idx = 0
     var inSpeech = false
     var segStart = 0
@@ -341,8 +401,12 @@ class SherpaOnnxVadHelper(
     var speechScoreSum = 0.0
     var speechScoreCount = 0
     while (idx < samples.size) {
-      val end = minOf(idx + chunkSize, samples.size)
-      val chunk = samples.copyOfRange(idx, end)
+      val end = minOf(idx + frameSize, samples.size)
+      val effectiveLen = end - idx
+      var chunk = samples.copyOfRange(idx, end)
+      if (chunk.size < frameSize) {
+        chunk = chunk.copyOf(frameSize)
+      }
       chunksProcessed += 1
       val decision = cfg.runtime.infer(chunk, cfg.sampleRate)
       if (decision.isSpeech) {
@@ -354,14 +418,14 @@ class SherpaOnnxVadHelper(
           speechScoreSum = 0.0
           speechScoreCount = 0
         }
-        speechSamples += (end - idx)
+        speechSamples += effectiveLen
         silenceSamples = 0
         if (decision.score != null) {
           speechScoreSum += decision.score
           speechScoreCount += 1
         }
       } else if (inSpeech) {
-        silenceSamples += (end - idx)
+        silenceSamples += effectiveLen
         val silenceMs = ((silenceSamples.toLong() * 1000L) / cfg.sampleRate.toLong()).toInt()
         if (silenceMs >= cfg.runtimeOptions.minSilenceDurationMs) {
           val segmentEnd = segStart + speechSamples

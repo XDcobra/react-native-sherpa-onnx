@@ -11,14 +11,15 @@
 
 @implementation SherpaOnnx (AudioSession)
 
-- (void)configurePipelineAudioSession:(NSDictionary *)config
+- (void)configurePipelineAudioSession:(JS::NativeSherpaOnnx::SpecConfigurePipelineAudioSessionConfig &)config
                               resolve:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject
 {
   PaAudioSessionPolicy *policy = [[PaAudioSessionPolicy alloc] init];
 
-  if ([config[@"keepActiveWhenIdle"] isKindOfClass:[NSNumber class]]) {
-    policy.keepActiveWhenIdle = [config[@"keepActiveWhenIdle"] boolValue];
+  auto keepActiveWhenIdle = config.keepActiveWhenIdle();
+  if (keepActiveWhenIdle.has_value()) {
+    policy.keepActiveWhenIdle = keepActiveWhenIdle.value();
   }
 
   NSError *error = nil;

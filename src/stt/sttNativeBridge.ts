@@ -1,0 +1,272 @@
+import type {
+  STTAutoInitializeOptions,
+  STTCustomInitializeOptions,
+  STTInitializeOptions,
+  STTInitializeOptionsBase,
+} from './types';
+import type {
+  OnlineSttInitBridgeOptions,
+  SttInitBridgeOptions,
+} from '../nativeBridge/initBridgeTypes';
+import type { StreamingSttInitOptions } from './streamingTypes';
+import { resolveStreamingSttCustomConfigPaths } from './streamingCustomConfig';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
+import {
+  resolveOptionalFileSourceList,
+  resolveOptionalFileSourcePath,
+} from '../nativeBridge/fileSourceBridgeHelpers';
+import { resolveSttCustomConfigPaths } from './customConfig';
+
+export type { OnlineSttInitBridgeOptions, SttInitBridgeOptions };
+
+function appendSharedInitBridgeFields(
+  options: STTInitializeOptionsBase,
+  resolved: {
+    hotwordsFile?: string;
+    bpeVocab?: string;
+    ruleFsts?: string;
+    ruleFars?: string;
+  }
+): Omit<
+  SttInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType' | 'preferInt8'
+> {
+  return {
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
+    ...(resolved.hotwordsFile !== undefined
+      ? { hotwordsFile: resolved.hotwordsFile }
+      : {}),
+    ...(options.hotwordsScore !== undefined
+      ? { hotwordsScore: options.hotwordsScore }
+      : {}),
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
+      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(resolved.ruleFsts !== undefined ? { ruleFsts: resolved.ruleFsts } : {}),
+    ...(resolved.ruleFars !== undefined ? { ruleFars: resolved.ruleFars } : {}),
+    ...(options.dither !== undefined ? { dither: options.dither } : {}),
+    ...(options.modelOptions !== undefined
+      ? { modelOptions: options.modelOptions }
+      : {}),
+    ...(options.modelingUnit !== undefined
+      ? { modelingUnit: options.modelingUnit }
+      : {}),
+    ...(resolved.bpeVocab !== undefined ? { bpeVocab: resolved.bpeVocab } : {}),
+  };
+}
+
+async function resolveSharedFilePaths(
+  options: STTInitializeOptionsBase
+): Promise<{
+  hotwordsFile?: string;
+  bpeVocab?: string;
+  ruleFsts?: string;
+  ruleFars?: string;
+}> {
+  const [hotwordsFile, bpeVocab, ruleFsts, ruleFars] = await Promise.all([
+    resolveOptionalFileSourcePath(options.hotwordsFile),
+    resolveOptionalFileSourcePath(options.bpeVocab),
+    resolveOptionalFileSourceList(options.ruleFsts),
+    resolveOptionalFileSourceList(options.ruleFars),
+  ]);
+  return {
+    ...(hotwordsFile !== undefined ? { hotwordsFile } : {}),
+    ...(bpeVocab !== undefined ? { bpeVocab } : {}),
+    ...(ruleFsts !== undefined ? { ruleFsts } : {}),
+    ...(ruleFars !== undefined ? { ruleFars } : {}),
+  };
+}
+
+export async function buildSttInitBridgeOptions(
+  options: STTInitializeOptions
+): Promise<SttInitBridgeOptions> {
+  const sharedPaths = await resolveSharedFilePaths(options);
+  const sharedFields = appendSharedInitBridgeFields(options, sharedPaths);
+
+  if (options.initMode === 'custom') {
+    const customOptions = options as STTCustomInitializeOptions;
+    const modelPaths = await resolveSttCustomConfigPaths(
+      customOptions.modelType,
+      customOptions.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: customOptions.modelType,
+      modelPaths,
+      ...sharedFields,
+    };
+  }
+
+  const autoOptions = options as STTAutoInitializeOptions;
+  const modelDir = await resolveFileSourceForModelInit(autoOptions.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    ...(autoOptions.preferInt8 !== undefined
+      ? { preferInt8: autoOptions.preferInt8 }
+      : {}),
+    ...(autoOptions.modelType !== undefined
+      ? { modelType: autoOptions.modelType }
+      : {}),
+    ...sharedFields,
+  };
+}
+
+/**
+ * Build bridge options for `initializeOnlineStt` (auto or custom init).
+ */
+export async function buildStreamingSttInitBridgeOptions(
+  options: StreamingSttInitOptions,
+  resolvedModelType: string
+): Promise<OnlineSttInitBridgeOptions> {
+  const shared = appendStreamingInitBridgeFields(options);
+
+  if (options.initMode === 'custom') {
+    const modelPaths = await resolveStreamingSttCustomConfigPaths(
+      options.modelType,
+      options.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: resolvedModelType,
+      modelPaths,
+      ...shared,
+    };
+  }
+
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    modelType: resolvedModelType,
+    ...shared,
+  };
+}
+
+function appendStreamingInitBridgeFields(
+  options: StreamingSttInitOptions
+): Omit<
+  OnlineSttInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
+> {
+  const ep = options.endpointConfig;
+  return {
+    ...(options.enableEndpoint !== undefined
+      ? { enableEndpoint: options.enableEndpoint }
+      : {}),
+    ...(options.decodingMethod !== undefined
+      ? { decodingMethod: options.decodingMethod }
+      : {}),
+    ...(options.maxActivePaths !== undefined
+      ? { maxActivePaths: options.maxActivePaths }
+      : {}),
+    ...(options.hotwordsFile !== undefined
+      ? { hotwordsFile: options.hotwordsFile }
+      : {}),
+    ...(options.hotwordsScore !== undefined
+      ? { hotwordsScore: options.hotwordsScore }
+      : {}),
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
+      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
+    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(options.dither !== undefined ? { dither: options.dither } : {}),
+    ...(options.blankPenalty !== undefined
+      ? { blankPenalty: options.blankPenalty }
+      : {}),
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
+    ...(ep?.rule1?.mustContainNonSilence !== undefined
+      ? { rule1MustContainNonSilence: ep.rule1.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule1?.minTrailingSilence !== undefined
+      ? { rule1MinTrailingSilence: ep.rule1.minTrailingSilence }
+      : {}),
+    ...(ep?.rule1?.minUtteranceLength !== undefined
+      ? { rule1MinUtteranceLength: ep.rule1.minUtteranceLength }
+      : {}),
+    ...(ep?.rule2?.mustContainNonSilence !== undefined
+      ? { rule2MustContainNonSilence: ep.rule2.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule2?.minTrailingSilence !== undefined
+      ? { rule2MinTrailingSilence: ep.rule2.minTrailingSilence }
+      : {}),
+    ...(ep?.rule2?.minUtteranceLength !== undefined
+      ? { rule2MinUtteranceLength: ep.rule2.minUtteranceLength }
+      : {}),
+    ...(ep?.rule3?.mustContainNonSilence !== undefined
+      ? { rule3MustContainNonSilence: ep.rule3.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule3?.minTrailingSilence !== undefined
+      ? { rule3MinTrailingSilence: ep.rule3.minTrailingSilence }
+      : {}),
+    ...(ep?.rule3?.minUtteranceLength !== undefined
+      ? { rule3MinUtteranceLength: ep.rule3.minUtteranceLength }
+      : {}),
+  };
+}
+
+/**
+ * Flatten public streaming init options for `initializeOnlineStt` (endpoint rules → top-level keys).
+ * @deprecated Prefer {@link buildStreamingSttInitBridgeOptions}.
+ */
+export function buildOnlineSttInitBridgeOptions(
+  modelDir: string,
+  options: StreamingSttInitOptions & { modelType: string }
+): OnlineSttInitBridgeOptions {
+  const ep = options.endpointConfig;
+  return {
+    initMode: 'auto',
+    modelDir,
+    modelType: options.modelType,
+    enableEndpoint: options.enableEndpoint ?? true,
+    decodingMethod: options.decodingMethod ?? 'greedy_search',
+    maxActivePaths: options.maxActivePaths ?? 4,
+    ...(options.hotwordsFile !== undefined
+      ? { hotwordsFile: options.hotwordsFile }
+      : {}),
+    ...(options.hotwordsScore !== undefined
+      ? { hotwordsScore: options.hotwordsScore }
+      : {}),
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
+      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
+    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(options.dither !== undefined ? { dither: options.dither } : {}),
+    ...(options.blankPenalty !== undefined
+      ? { blankPenalty: options.blankPenalty }
+      : {}),
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
+    ...(ep?.rule1?.mustContainNonSilence !== undefined
+      ? { rule1MustContainNonSilence: ep.rule1.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule1?.minTrailingSilence !== undefined
+      ? { rule1MinTrailingSilence: ep.rule1.minTrailingSilence }
+      : {}),
+    ...(ep?.rule1?.minUtteranceLength !== undefined
+      ? { rule1MinUtteranceLength: ep.rule1.minUtteranceLength }
+      : {}),
+    ...(ep?.rule2?.mustContainNonSilence !== undefined
+      ? { rule2MustContainNonSilence: ep.rule2.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule2?.minTrailingSilence !== undefined
+      ? { rule2MinTrailingSilence: ep.rule2.minTrailingSilence }
+      : {}),
+    ...(ep?.rule2?.minUtteranceLength !== undefined
+      ? { rule2MinUtteranceLength: ep.rule2.minUtteranceLength }
+      : {}),
+    ...(ep?.rule3?.mustContainNonSilence !== undefined
+      ? { rule3MustContainNonSilence: ep.rule3.mustContainNonSilence }
+      : {}),
+    ...(ep?.rule3?.minTrailingSilence !== undefined
+      ? { rule3MinTrailingSilence: ep.rule3.minTrailingSilence }
+      : {}),
+    ...(ep?.rule3?.minUtteranceLength !== undefined
+      ? { rule3MinUtteranceLength: ep.rule3.minUtteranceLength }
+      : {}),
+  };
+}

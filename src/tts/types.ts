@@ -1,13 +1,32 @@
-import type { ModelPathConfig } from '../types';
+import type { FileSource } from '../fileio/types';
 import type { DetectedModelEntry } from '../types/modelDetect';
 import type {
   OfflineAudioBufferRef,
   OfflineBufferHandle,
+  LiveAudioBufferIdSource,
 } from '../audiobuffer/types';
 import type {
   OfflineTextBufferRef,
   OfflineTextBufferHandle,
+  LiveTextBufferIdSource,
 } from '../textbuffer/types';
+import type {
+  ErrorRecoveryStrategy,
+  FailedSegmentInfo,
+  OrchestrationProgress,
+  RetryExhaustedFallback,
+  SkippedSegmentInfo,
+} from '../pipeline/offlineOrchestrator';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { SegmentLinkMapRef } from '../segment/segment-link';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type { SpeechSegment } from '../segment/segment';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+
+/** TTS-specific pipeline handle returned by live pipeline synthesis. */
+export interface TtsPipelineHandle extends StreamingPipelineHandle {
+  readonly instanceId: string;
+}
 
 /**
  * Supported TTS model types.
@@ -30,6 +49,9 @@ export type TTSModelType =
   | 'zipvoice'
   | 'supertonic'
   | 'auto';
+
+/** Concrete TTS model types (excludes `'auto'`). */
+export type TTSConcreteModelType = Exclude<TTSModelType, 'auto'>;
 
 export {
   DETECTION_SOURCES,
@@ -70,6 +92,15 @@ export type TtsExecutionProvider =
   | 'qnn'
   | (string & {});
 
+// ========== TTS language (init vs synthesize) ==========
+//
+// See `languagePolicy.ts`: lexicon file at init (`lexiconLanguageId`), Kokoro init lang
+// (`modelOptions.kokoro.lang`), runtime lang (`synthesize({ lang })` → extra["lang"]).
+//
+// Lexikon-Wechsel ⇒ re-init. eSpeak (data_dir) is init-only — not synthesize.lang. Runtime lang
+// is effective for kokoro + supertonic only; vits/matcha/kitten ignore extra["lang"]. Detect
+// `languages` is catalog metadata only. synthesize.lang does not replace lexicon file selection.
+
 // ========== Model-specific options (only applied when that model type is loaded) ==========
 
 /** Options for VITS models. Applied only when modelType is 'vits'. Kotlin OfflineTtsVitsModelConfig. */
@@ -90,10 +121,25 @@ export interface TtsMatchaModelOptions {
   lengthScale?: number;
 }
 
-/** Options for Kokoro models. Applied only when modelType is 'kokoro'. Kotlin OfflineTtsKokoroModelConfig. */
+/**
+ * Options for Kokoro models. Applied only when modelType is 'kokoro'.
+ * Kotlin OfflineTtsKokoroModelConfig.
+ *
+ * Init `lang` is separate from {@link TTSAutoInitOptionsBase.lexiconLanguageId} (lexicon file)
+ * and from {@link TtsSynthesisOptions.lang} (per-synthesis override).
+ */
 export interface TtsKokoroModelOptions {
   /** Length scale. If omitted, model default is used. */
   lengthScale?: number;
+  /**
+   * Kokoro init language / voice hint (`config.model.kokoro.lang`).
+   * Multi-Kokoro v2+: satisfies init when no lexicon path is set (upstream: lexicon or lang).
+   * Default for synthesis unless overridden by `tts.synthesize({ lang })`.
+   *
+   * No-op for non-kokoro model types. Does not load a different lexicon file — use
+   * `lexiconLanguageId` on the init options and re-initialize to switch lexicon-*.txt.
+   */
+  lang?: string;
 }
 
 /** Options for KittenTTS models. Applied only when modelType is 'kitten'. Kotlin OfflineTtsKittenModelConfig. */
@@ -125,14 +171,8 @@ export interface TtsModelOptions {
   supertonic?: TtsSupertonicModelOptions;
 }
 
-/** Shared init fields (excluding modelType / modelOptions). */
-export type TTSInitializeOptionsBase = {
-  /**
-   * Path to the model directory.
-   * Can be an asset path, file system path, or auto-detection path.
-   */
-  modelPath: ModelPathConfig;
-
+/** Shared TTS init fields for auto and custom modes. */
+export type TTSInitOptionsShared = {
   /**
    * Execution provider (e.g. `'cpu'`, `'coreml'`, `'xnnpack'`, `'nnapi'`, `'qnn'`).
    * Use getCoreMlSupport(), getXnnpackSupport(), etc. to check availability. See execution-providers.md.
@@ -181,52 +221,91 @@ export type TTSInitializeOptionsBase = {
   silenceScale?: number;
 };
 
+/** Automatic model detection from a model directory (default). */
+export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
+  initMode?: 'auto';
+  /**
+   * Path to the model directory.
+   * Can be an asset path, file system path, or auto-detection path.
+   */
+  modelSource: FileSource;
+
+  /**
+   * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`
+   *
+   * Supported model types: `vits`, `matcha`, `kokoro`, `zipvoice`. No-op for `kitten` (no lexicon
+   * field), `pocket`, `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
+   *
+   * Not the same as catalog `languages` hints or `synthesize({ lang })`. For VITS Piper, if the
+   * bundle uses `espeak-ng-data` (`data_dir`), upstream may ignore `lexicon` when `data_dir` is set.
+   */
+  lexiconLanguageId?: string;
+};
+
+/** Alias for auto-init shared fields (includes `modelSource`). */
+export type TTSInitializeOptionsBase = TTSAutoInitOptionsBase;
+
+type TtsCustomModelOptionsFor<T extends TTSConcreteModelType> = T extends 'vits'
+  ? { modelOptions?: { vits: TtsVitsModelOptions } }
+  : T extends 'matcha'
+  ? { modelOptions?: { matcha: TtsMatchaModelOptions } }
+  : T extends 'kokoro'
+  ? { modelOptions?: { kokoro: TtsKokoroModelOptions } }
+  : T extends 'kitten'
+  ? { modelOptions?: { kitten: TtsKittenModelOptions } }
+  : { modelOptions?: never };
+
+/** Explicit per-file paths; skips native auto-detection. */
+export type TTSCustomInitializeOptions<
+  T extends TTSConcreteModelType = TTSConcreteModelType
+> = TTSInitOptionsShared & {
+  initMode: 'custom';
+  modelType: T;
+  customConfig: import('./customConfig').TtsCustomConfigByModelType[T];
+} & TtsCustomModelOptionsFor<T>;
+
 /** `modelType` omitted or `'auto'`: no `modelOptions` (set an explicit `modelType` to pass scales). */
-export type TTSInitializeOptionsAuto = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsAuto = TTSAutoInitOptionsBase & {
   modelType?: 'auto' | undefined;
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsVits = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsVits = TTSAutoInitOptionsBase & {
   modelType: 'vits';
   modelOptions?: { vits: TtsVitsModelOptions };
 };
 
-export type TTSInitializeOptionsMatcha = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsMatcha = TTSAutoInitOptionsBase & {
   modelType: 'matcha';
   modelOptions?: { matcha: TtsMatchaModelOptions };
 };
 
-export type TTSInitializeOptionsKokoro = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsKokoro = TTSAutoInitOptionsBase & {
   modelType: 'kokoro';
   modelOptions?: { kokoro: TtsKokoroModelOptions };
 };
 
-export type TTSInitializeOptionsKitten = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsKitten = TTSAutoInitOptionsBase & {
   modelType: 'kitten';
   modelOptions?: { kitten: TtsKittenModelOptions };
 };
 
-export type TTSInitializeOptionsPocket = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsPocket = TTSAutoInitOptionsBase & {
   modelType: 'pocket';
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsZipvoice = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsZipvoice = TTSAutoInitOptionsBase & {
   modelType: 'zipvoice';
   modelOptions?: never;
 };
 
-export type TTSInitializeOptionsSupertonic = TTSInitializeOptionsBase & {
+export type TTSInitializeOptionsSupertonic = TTSAutoInitOptionsBase & {
   modelType: 'supertonic';
   modelOptions?: never;
 };
 
-/**
- * Configuration for TTS initialization. Discriminated by `modelType`:
- * with `'auto'` or omitted, `modelOptions` is not allowed; with a concrete synthesizer type, only the matching `modelOptions` block is allowed.
- */
-export type TTSInitializeOptions =
+export type TTSAutoInitializeOptions =
   | TTSInitializeOptionsAuto
   | TTSInitializeOptionsVits
   | TTSInitializeOptionsMatcha
@@ -235,6 +314,14 @@ export type TTSInitializeOptions =
   | TTSInitializeOptionsPocket
   | TTSInitializeOptionsZipvoice
   | TTSInitializeOptionsSupertonic;
+
+/**
+ * Configuration for TTS initialization. Discriminated by `initMode` and `modelType`:
+ * auto mode scans a model directory; custom mode supplies explicit {@link FileSource} paths.
+ */
+export type TTSInitializeOptions =
+  | TTSAutoInitializeOptions
+  | TTSCustomInitializeOptions;
 
 /** No runtime parameter change. */
 export type TtsUpdateOptionsEmpty = {
@@ -320,23 +407,90 @@ export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
  * Options for buffer-to-buffer TTS synthesis via `tts.synthesize()`.
  * No subtitle/alignment options — those are separate modules.
  *
- * Note: `silenceScale` and `numSteps` are only applied when `voiceClone` is
- * provided. They are ignored for non-cloning synthesis (native code only reads
- * them inside the voice-clone config).
+ * **Language:** `lang` is forwarded as `GenerationConfig.extra["lang"]` when the native batch path
+ * uses `generateWithConfig`. Upstream **honors** it only for `kokoro` and `supertonic`. For `vits`,
+ * `matcha`, and `kitten` it is ignored (eSpeak is init-only via `data_dir`, not per-synthesis `lang`).
+ * For `zipvoice` / `pocket`, use `voiceClone` and model-specific `extra` keys — not `lang`.
+ * Use {@link supportsSynthesisLang} from `./languagePolicy` before UI promises.
+ *
+ * `lang` does **not** switch the lexicon file loaded at init; use `lexiconLanguageId` + re-init.
+ *
+ * `silenceScale` and `numSteps` apply only with `voiceClone` (ignored otherwise).
  */
 export type TtsSynthesisOptions = {
   sid?: number;
   speed?: number;
   silenceScale?: number;
   numSteps?: number;
+  /**
+   * Runtime language hint. Prefer this over `extra.lang` (same native key; this wins on conflict).
+   *
+   * **Effective:** `kokoro` (overrides `modelOptions.kokoro.lang`), `supertonic` (upstream: `en`, `ko`, `es`, `pt`, `fr`).
+   * **Ignored (no-op):** `vits`, `matcha`, `kitten` — passing `lang` does not change output language.
+   * **Not applicable:** `zipvoice`, `pocket` (voice-clone models).
+   */
+  lang?: string;
+  /** Additional generation extras. For `lang`, prefer the `lang` property above. */
   extra?: Record<string, string>;
   voiceClone?: TtsVoiceClone;
+  segmentation?: {
+    mode?: 'off' | 'manual' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  errorRecovery?: ErrorRecoveryStrategy;
+  maxRetriesPerSegment?: number;
+  retryExhaustedFallback?: RetryExhaustedFallback;
+  abortSignal?: AbortSignal;
+  onProgress?: (progress: OrchestrationProgress) => void;
+  overlapChars?: number;
+  textSkipPlaceholder?: string;
+  linkMap?: SegmentLinkMapRef;
 };
+
+export interface TtsSynthesisResult {
+  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  totalSegments: number;
+  completedSegments: number;
+  skippedSegments: SkippedSegmentInfo[];
+  failedSegment?: FailedSegmentInfo;
+  processingTimeMs: number;
+  linkMap?: SegmentLinkMapRef;
+}
+
+/**
+ * Options for the live offline TTS pipeline overload.
+ * Extends `LiveOfflinePipelineBaseOptions` which requires `segmentation.policy`
+ * with a text-domain evaluator (e.g. `text_synthetic_auto`).
+ *
+ * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+ * See: docs/migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md
+ */
+export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
+  /** Speaker ID for the entire pipeline. Default 0. Overridable per-segment via `segment.meta.sid`. */
+  sid?: number;
+  /** Speed multiplier. Default 1.0. Overridable per-segment via `segment.meta.speed`. */
+  speed?: number;
+  /**
+   * Runtime language override (`extra["lang"]`). Effective for kokoro and supertonic only.
+   * Applied to every segment in the pipeline.
+   */
+  lang?: string;
+  /**
+   * Voice cloning configuration. Initialized once per pipeline.
+   * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).
+   */
+  voiceClone?: TtsVoiceClone;
+  /**
+   * Optional mirror of every committed audio segment that lands on the output `LiveAudioBuffer`.
+   * Same constraints as STT's `onSegment` (worker thread, no `onPartial`).
+   */
+  onSegment?: (segment: SpeechSegment) => void;
+}
 
 /**
  * Instance-based batch TTS engine returned by createTTS().
  * Use synthesize() for buffer-to-buffer offline synthesis.
- * For streaming, use createStreamingTTS() and StreamingTtsEngine instead.
+ * For live pipelines, use the LiveText/LiveAudio synthesize overload.
  * Call destroy() when done to free native resources.
  */
 export interface TtsEngine {
@@ -353,7 +507,24 @@ export interface TtsEngine {
     textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
     audioOut: OfflineAudioBufferRef | OfflineBufferHandle,
     options?: TtsSynthesisOptions
-  ): Promise<void>;
+  ): Promise<TtsSynthesisResult>;
+  /**
+   * Live offline TTS pipeline: reads committed text segments from a `LiveTextBuffer`,
+   * synthesizes each via the offline TTS engine, and writes audio chunks to a `LiveAudioBuffer`.
+   * Segmentation policy is mandatory (text domain).
+   *
+   * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
+   *
+   * @param textIn - Live text buffer (recording state, text domain segmentation applied)
+   * @param audioOut - Live audio buffer (recording state, sampleRate must equal model sampleRate)
+   * @param options - Pipeline options including mandatory segmentation policy
+   * @returns Handle to control and inspect the running pipeline
+   */
+  synthesize(
+    textIn: LiveTextBufferIdSource,
+    audioOut: LiveAudioBufferIdSource,
+    options: TtsLivePipelineOptions
+  ): Promise<TtsPipelineHandle>;
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: DetectedModelEntry[];

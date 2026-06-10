@@ -25,7 +25,8 @@ internal object TtsOfflineConfigBuilder {
     ruleFars: String?,
     maxNumSentences: Int?,
     silenceScale: Double?,
-    provider: String?
+    provider: String?,
+    kokoroLang: String? = null
   ): OfflineTtsConfig {
     val ns = noiseScale?.toFloat() ?: 0.667f
     val nsw = noiseScaleW?.toFloat() ?: 0.8f
@@ -67,6 +68,7 @@ internal object TtsOfflineConfigBuilder {
           tokens = path(paths, "tokens"),
           dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon"),
+          lang = kokoroLang.orEmpty(),
           lengthScale = ls
         ),
         numThreads = numThreads,
@@ -150,6 +152,7 @@ internal object TtsOfflineConfigBuilder {
               tokens = path(paths, "tokens"),
               dataDir = path(paths, "dataDir"),
               lexicon = path(paths, "lexicon"),
+              lang = kokoroLang.orEmpty(),
               lengthScale = ls
             ),
             numThreads = numThreads,

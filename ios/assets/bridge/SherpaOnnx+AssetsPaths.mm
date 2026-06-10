@@ -45,58 +45,7 @@
   if (error) {
     *error = [NSError errorWithDomain:@"SherpaOnnx"
                                  code:1
-                             userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Asset path not found: %@", assetPath]}];
-  }
-  return nil;
-}
-
-- (NSString *)resolveFilePath:(NSString *)filePath error:(NSError **)error {
-  NSFileManager *fileManager = [NSFileManager defaultManager];
-  BOOL isDirectory = NO;
-  BOOL exists = [fileManager fileExistsAtPath:filePath isDirectory:&isDirectory];
-
-  if (!exists) {
-    if (error) {
-      *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                   code:2
-                               userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"File path does not exist: %@", filePath]}];
-    }
-    return nil;
-  }
-
-  if (!isDirectory) {
-    if (error) {
-      *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                   code:3
-                               userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Path is not a directory: %@", filePath]}];
-    }
-    return nil;
-  }
-
-  return [filePath stringByStandardizingPath];
-}
-
-- (NSString *)resolveAutoPath:(NSString *)path error:(NSError **)error {
-  NSError *assetError = nil;
-  NSString *resolvedPath = [self resolveAssetPath:path error:&assetError];
-  if (resolvedPath) {
-    return resolvedPath;
-  }
-
-  NSError *fileError = nil;
-  resolvedPath = [self resolveFilePath:path error:&fileError];
-  if (resolvedPath) {
-    return resolvedPath;
-  }
-
-  if (error) {
-    NSString *errorMessage = [NSString stringWithFormat:@"Path not found as asset or file: %@. Asset error: %@, File error: %@",
-                               path,
-                               assetError.localizedDescription ?: @"Unknown",
-                               fileError.localizedDescription ?: @"Unknown"];
-    *error = [NSError errorWithDomain:@"SherpaOnnx"
-                                 code:4
-                             userInfo:@{NSLocalizedDescriptionKey: errorMessage}];
+                             userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Bundled asset path not found: %@", assetPath]}];
   }
   return nil;
 }

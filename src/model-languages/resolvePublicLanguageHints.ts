@@ -10,6 +10,8 @@ import { ModelCategory } from '../download/types';
 export type ResolvePublicLanguageHintsInput = {
   domain: ModelCategory;
   modelType?: string;
+  /** Catalog id, archive stem, or on-disk folder basename (e.g. Supertonic 3 disambiguation). */
+  modelKey?: string;
   rawFromNative?: readonly string[];
 };
 
@@ -43,12 +45,14 @@ function resolvePublicLanguageHintStrings(
   }
   switch (input.domain) {
     case ModelCategory.Tts:
-      return iso6391HintsForTtsModelType(input.modelType) ?? [];
+      return iso6391HintsForTtsModelType(input.modelType, input.modelKey) ?? [];
     case ModelCategory.Stt:
       return iso6391HintsForSttModelType(input.modelType) ?? [];
     case ModelCategory.Alignment:
       return iso6391HintsForAlignmentModelType(input.modelType) ?? [];
     case ModelCategory.Vad:
+      return [];
+    case ModelCategory.Punctuation:
       return [];
     default: {
       return [];

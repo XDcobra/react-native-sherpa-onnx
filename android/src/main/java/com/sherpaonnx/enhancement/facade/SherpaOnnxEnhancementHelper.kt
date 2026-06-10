@@ -4,6 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserConfig
@@ -14,6 +15,8 @@ import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.enhancement.config.EnhancementInitOptionsParser
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.enhancement.core.EnhancementErrorCodes
 import com.sherpaonnx.enhancement.core.EnhancementInstance
@@ -21,7 +24,13 @@ import com.sherpaonnx.enhancement.core.EnhancementModelConfigFactory
 import com.sherpaonnx.enhancement.core.EnhancementResultMapper
 import com.sherpaonnx.enhancement.core.OnlineEnhancementInstance
 import com.sherpaonnx.enhancement.pipeline.EnhancementPipelineWorker
+import com.sherpaonnx.enhancement.pipeline.EnhancementOfflineLivePipelineWorker
+import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.facebook.react.bridge.WritableNativeMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
 
 internal class SherpaOnnxEnhancementHelper(
   private val context: ReactApplicationContext,
@@ -66,46 +75,31 @@ internal class SherpaOnnxEnhancementHelper(
 
   fun initializeEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise,
   ) {
+    if (instanceId.isBlank()) {
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, "instanceId is required")
+      return
+    }
+    val parsed = EnhancementInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        }
+      )
+      return
+    }
     try {
-      val result = nativeDetectEnhancementModel(modelDir, null, modelType ?: "auto")
-      if (result == null || result["success"] as? Boolean != true) {
-        val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
-        promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, reason)
-        return
+      if (parsed.initMode == "custom") {
+        initializeEnhancementCustom(instanceId, parsed, promise)
+      } else {
+        initializeEnhancementAuto(instanceId, parsed, promise)
       }
-
-      val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
-      val paths = EnhancementModelConfigFactory.extractPaths(result)
-      val modelConfig = try {
-        EnhancementModelConfigFactory.build(modelTypeStr, paths, numThreads, provider, debug)
-      } catch (e: IllegalArgumentException) {
-        promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, e.message)
-        return
-      }
-
-      val inst = instances.getOrPut(instanceId) { EnhancementInstance() }
-      inst.release()
-      val denoiser = OfflineSpeechDenoiser(
-        config = OfflineSpeechDenoiserConfig(model = modelConfig),
-      )
-      inst.denoiser = denoiser
-
-      val out = Arguments.createMap()
-      out.putBoolean("success", true)
-      out.putArray(
-        "detectedModels",
-        EnhancementResultMapper.detectedModelsToWritableArray(result["detectedModels"] as? ArrayList<*>),
-      )
-      out.putString("modelType", modelTypeStr)
-      out.putInt("sampleRate", denoiser.sampleRate)
-      promise.resolve(out)
     } catch (e: Exception) {
       Log.e(EnhancementErrorCodes.TAG, "Failed to initialize enhancement", e)
       promise.reject(
@@ -114,6 +108,113 @@ internal class SherpaOnnxEnhancementHelper(
         e,
       )
     }
+  }
+
+  private fun initializeEnhancementCustom(
+    instanceId: String,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelTypeStr = parsed.modelType.trim()
+    if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR,
+        "custom init requires a concrete modelType",
+      )
+      return
+    }
+    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet") {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR,
+        "Unsupported enhancement model type: $modelTypeStr",
+      )
+      return
+    }
+
+    val pathStrings = parsed.modelPaths.orEmpty()
+    ModelPathValidationNative.validate("enhancement", modelTypeStr, pathStrings)?.let { errorMsg ->
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, errorMsg)
+      return
+    }
+
+    finishInitializeOfflineWithModelPath(
+      instanceId = instanceId,
+      modelTypeStr = modelTypeStr,
+      paths = pathStrings,
+      parsed = parsed,
+      promise = promise,
+    )
+  }
+
+  private fun initializeEnhancementAuto(
+    instanceId: String,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelDir = parsed.modelDir.orEmpty()
+    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType)
+    if (result == null || result["success"] as? Boolean != true) {
+      val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, reason)
+      return
+    }
+
+    val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
+    val paths = EnhancementModelConfigFactory.extractPaths(result)
+    finishInitializeOfflineWithModelPath(
+      instanceId = instanceId,
+      modelTypeStr = modelTypeStr,
+      paths = paths,
+      parsed = parsed,
+      promise = promise,
+      detectedModels = result["detectedModels"] as? ArrayList<*>,
+    )
+  }
+
+  private fun finishInitializeOfflineWithModelPath(
+    instanceId: String,
+    modelTypeStr: String,
+    paths: Map<String, String>,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+    detectedModels: ArrayList<*>? = null,
+  ) {
+    val modelConfig = try {
+      EnhancementModelConfigFactory.build(
+        modelTypeStr,
+        paths,
+        parsed.numThreads,
+        parsed.provider,
+        parsed.debug,
+      )
+    } catch (e: IllegalArgumentException) {
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, e.message)
+      return
+    }
+
+    val inst = instances.getOrPut(instanceId) { EnhancementInstance() }
+    inst.release()
+    val denoiser = OfflineSpeechDenoiser(
+      config = OfflineSpeechDenoiserConfig(model = modelConfig),
+    )
+    inst.denoiser = denoiser
+
+    val out = Arguments.createMap()
+    out.putBoolean("success", true)
+    out.putArray(
+      "detectedModels",
+      EnhancementResultMapper.detectedModelsToWritableArray(
+        detectedModels ?: arrayListOf(
+          hashMapOf(
+            "type" to modelTypeStr,
+            "modelDir" to (parsed.modelDir ?: "custom"),
+          )
+        )
+      ),
+    )
+    out.putString("modelType", modelTypeStr)
+    out.putInt("sampleRate", denoiser.sampleRate)
+    promise.resolve(out)
   }
 
   fun enhanceOfflineAudioBuffers(
@@ -131,7 +232,7 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
-    
+
     if (!audioInBufferId.startsWith("off_")) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_BUFFER_KIND_MISMATCH,
@@ -196,7 +297,6 @@ internal class SherpaOnnxEnhancementHelper(
         )
         return
       }
-      // Upgrade output to mmap if it exceeds the threshold
       PipelineAudioRegistry.upgradeToMmapIfNeeded(audioOutBufferId)
       promise.resolve(null)
     } catch (e: OutOfMemoryError) {
@@ -236,42 +336,31 @@ internal class SherpaOnnxEnhancementHelper(
 
   fun initializeOnlineEnhancement(
     instanceId: String,
-    modelDir: String,
-    modelType: String?,
-    numThreads: Double?,
-    provider: String?,
-    debug: Boolean?,
+    options: ReadableMap,
     promise: Promise,
   ) {
-    try {
-      val result = nativeDetectEnhancementModel(modelDir, null, modelType ?: "auto")
-      if (result == null || result["success"] as? Boolean != true) {
-        val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
-        promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, reason)
-        return
-      }
-
-      val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
-      val paths = EnhancementModelConfigFactory.extractPaths(result)
-      val modelConfig = try {
-        EnhancementModelConfigFactory.build(modelTypeStr, paths, numThreads, provider, debug)
-      } catch (e: IllegalArgumentException) {
-        promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, e.message)
-        return
-      }
-
-      val inst = onlineInstances.getOrPut(instanceId) { OnlineEnhancementInstance() }
-      inst.release()
-      val denoiser = OnlineSpeechDenoiser(
-        config = OnlineSpeechDenoiserConfig(model = modelConfig),
+    if (instanceId.isBlank()) {
+      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, "instanceId is required")
+      return
+    }
+    val parsed = EnhancementInitOptionsParser.parse(options)
+    if (parsed == null) {
+      promise.reject(
+        EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
+        if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+          "custom init requires initMode, modelType, and modelPaths"
+        } else {
+          "auto init requires modelDir"
+        }
       )
-      inst.denoiser = denoiser
-
-      val out = Arguments.createMap()
-      out.putBoolean("success", true)
-      out.putInt("sampleRate", denoiser.sampleRate)
-      out.putInt("frameShiftInSamples", denoiser.frameShiftInSamples)
-      promise.resolve(out)
+      return
+    }
+    try {
+      if (parsed.initMode == "custom") {
+        initializeOnlineEnhancementCustom(instanceId, parsed, promise)
+      } else {
+        initializeOnlineEnhancementAuto(instanceId, parsed, promise)
+      }
     } catch (e: Exception) {
       promise.reject(
         EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
@@ -279,6 +368,100 @@ internal class SherpaOnnxEnhancementHelper(
         e,
       )
     }
+  }
+
+  private fun initializeOnlineEnhancementCustom(
+    instanceId: String,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelTypeStr = parsed.modelType.trim()
+    if (modelTypeStr.isEmpty() || modelTypeStr == "auto") {
+      promise.reject(
+        EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
+        "custom init requires a concrete modelType",
+      )
+      return
+    }
+    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet") {
+      promise.reject(
+        EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
+        "Unsupported enhancement model type: $modelTypeStr",
+      )
+      return
+    }
+
+    val pathStrings = parsed.modelPaths.orEmpty()
+    ModelPathValidationNative.validate("enhancement", modelTypeStr, pathStrings)?.let { errorMsg ->
+      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, errorMsg)
+      return
+    }
+
+    finishInitializeOnlineWithModelPath(
+      instanceId = instanceId,
+      modelTypeStr = modelTypeStr,
+      paths = pathStrings,
+      parsed = parsed,
+      promise = promise,
+    )
+  }
+
+  private fun initializeOnlineEnhancementAuto(
+    instanceId: String,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelDir = parsed.modelDir.orEmpty()
+    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType)
+    if (result == null || result["success"] as? Boolean != true) {
+      val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
+      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, reason)
+      return
+    }
+
+    val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
+    val paths = EnhancementModelConfigFactory.extractPaths(result)
+    finishInitializeOnlineWithModelPath(
+      instanceId = instanceId,
+      modelTypeStr = modelTypeStr,
+      paths = paths,
+      parsed = parsed,
+      promise = promise,
+    )
+  }
+
+  private fun finishInitializeOnlineWithModelPath(
+    instanceId: String,
+    modelTypeStr: String,
+    paths: Map<String, String>,
+    parsed: EnhancementInitOptionsParser.Parsed,
+    promise: Promise,
+  ) {
+    val modelConfig = try {
+      EnhancementModelConfigFactory.build(
+        modelTypeStr,
+        paths,
+        parsed.numThreads,
+        parsed.provider,
+        parsed.debug,
+      )
+    } catch (e: IllegalArgumentException) {
+      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, e.message)
+      return
+    }
+
+    val inst = onlineInstances.getOrPut(instanceId) { OnlineEnhancementInstance() }
+    inst.release()
+    val denoiser = OnlineSpeechDenoiser(
+      config = OnlineSpeechDenoiserConfig(model = modelConfig),
+    )
+    inst.denoiser = denoiser
+
+    val out = Arguments.createMap()
+    out.putBoolean("success", true)
+    out.putInt("sampleRate", denoiser.sampleRate)
+    out.putInt("frameShiftInSamples", denoiser.frameShiftInSamples)
+    promise.resolve(out)
   }
 
   fun startEnhancementPipeline(
@@ -365,6 +548,73 @@ internal class SherpaOnnxEnhancementHelper(
   fun unloadOnline(instanceId: String, promise: Promise) {
     onlineInstances.remove(instanceId)?.release()
     promise.resolve(null)
+  }
+
+  fun startEnhancementOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val enhancer = instances[instanceId]?.denoiser
+      if (enhancer == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_ERROR, "Enhancement instance not found: $instanceId")
+        return
+      }
+      val liveAudioIn = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      if (liveAudioIn == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND, "Input live buffer not found: $audioInLiveBufferId")
+        return
+      }
+      val liveAudioOut = PipelineAudioRegistry.getLive(audioOutLiveBufferId)
+      if (liveAudioOut == null) {
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND, "Output live buffer not found: $audioOutLiveBufferId")
+        return
+      }
+
+      val attachedSegmentationEngineId = options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
+      if (attachedSegmentationEngineId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: attachedSegmentationEngineId missing on native bridge")
+      }
+
+      val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
+      if (segmentLiveBufferId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentLiveBufferId missing on native bridge")
+      }
+
+      val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+        ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
+
+      val pipelineId = "live_offline_enh_${UUID.randomUUID()}"
+      val worker = EnhancementOfflineLivePipelineWorker(
+        pipelineId = pipelineId,
+        attachedSegmentationEngineId = attachedSegmentationEngineId,
+        audioInputRef = OfflineLivePipelineWorker.AudioInput(
+          liveAudioEntry = liveAudioIn,
+          liveSegmentEntry = segmentEntry,
+        ),
+        enhancer = enhancer,
+        audioOutputEntry = liveAudioOut,
+      )
+      StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+      }
+      promise.resolve(WritableNativeMap().apply { putString("pipelineId", pipelineId) })
+    } catch (e: Exception) {
+      val msg = e.message ?: "live offline enhancement failed"
+      val code = if (msg.startsWith("LIVE_OFFLINE_SEGMENTATION_REQUIRED")) {
+        "LIVE_OFFLINE_SEGMENTATION_REQUIRED"
+      } else {
+        EnhancementErrorCodes.STREAMING_PIPELINE_ERROR
+      }
+      promise.reject(
+        code,
+        msg,
+        e,
+      )
+    }
   }
 
   private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {

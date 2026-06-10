@@ -1,7 +1,7 @@
-import type { ModelPathConfig } from '../types';
 import type {
   TTSInitializeOptions,
   TTSModelType,
+  TTSCustomInitializeOptions,
   TtsSynthesisOptions,
   TtsKittenModelOptions,
   TtsKokoroModelOptions,
@@ -10,8 +10,11 @@ import type {
   TtsUpdateOptions,
   TtsVitsModelOptions,
 } from './types';
+import type { TtsInitBridgeOptions } from '../nativeBridge/initBridgeTypes';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
+import { resolveTtsCustomConfigPaths } from './customConfig';
 
 export type FlattenedTtsModelNativeOptions = {
   noiseScale: number | undefined;
@@ -95,47 +98,102 @@ function modelOptionsBagFromInit(
     return undefined;
   }
   switch (mt) {
-    case 'vits':
-      return { vits: options.modelOptions.vits };
-    case 'matcha':
-      return { matcha: options.modelOptions.matcha };
-    case 'kokoro':
-      return { kokoro: options.modelOptions.kokoro };
-    case 'kitten':
-      return { kitten: options.modelOptions.kitten };
+    case 'vits': {
+      const mo = options.modelOptions as { vits: TtsVitsModelOptions };
+      return { vits: mo.vits };
+    }
+    case 'matcha': {
+      const mo = options.modelOptions as { matcha: TtsMatchaModelOptions };
+      return { matcha: mo.matcha };
+    }
+    case 'kokoro': {
+      const mo = options.modelOptions as { kokoro: TtsKokoroModelOptions };
+      return { kokoro: mo.kokoro };
+    }
+    case 'kitten': {
+      const mo = options.modelOptions as { kitten: TtsKittenModelOptions };
+      return { kitten: mo.kitten };
+    }
     default:
       return undefined;
   }
 }
 
-export type ExpandedTtsInitFields = {
-  modelPath: ModelPathConfig;
-  modelType: TTSModelType | undefined;
-  provider: string | undefined;
-  numThreads: number | undefined;
-  debug: boolean | undefined;
-  modelOptions: TtsModelOptions | undefined;
-  ruleFsts: string | undefined;
-  ruleFars: string | undefined;
-  maxNumSentences: number | undefined;
-  silenceScale: number | undefined;
-};
+function kokoroLangFromInit(options: TTSInitializeOptions): string | undefined {
+  const bag = modelOptionsBagFromInit(options);
+  const lang = bag?.kokoro?.lang;
+  return lang !== undefined && typeof lang === 'string' && lang.length > 0
+    ? lang
+    : undefined;
+}
 
-export function expandTtsInitializeOptions(
-  options: TTSInitializeOptions
-): ExpandedTtsInitFields {
+function appendTtsScalarBridgeFields(
+  options: TTSInitializeOptions,
+  flat: FlattenedTtsModelNativeOptions
+): Omit<
+  TtsInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
+> {
+  const kokoroLang = kokoroLangFromInit(options);
   return {
-    modelPath: options.modelPath,
-    modelType: options.modelType,
-    provider:
-      options.provider !== undefined ? String(options.provider) : undefined,
-    numThreads: options.numThreads,
-    debug: options.debug,
-    modelOptions: modelOptionsBagFromInit(options),
-    ruleFsts: options.ruleFsts,
-    ruleFars: options.ruleFars,
-    maxNumSentences: options.maxNumSentences,
-    silenceScale: options.silenceScale,
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
+      : {}),
+    ...(options.debug !== undefined ? { debug: options.debug } : {}),
+    ...(flat.noiseScale !== undefined ? { noiseScale: flat.noiseScale } : {}),
+    ...(flat.noiseScaleW !== undefined
+      ? { noiseScaleW: flat.noiseScaleW }
+      : {}),
+    ...(flat.lengthScale !== undefined
+      ? { lengthScale: flat.lengthScale }
+      : {}),
+    ...(options.ruleFsts !== undefined ? { ruleFsts: options.ruleFsts } : {}),
+    ...(options.ruleFars !== undefined ? { ruleFars: options.ruleFars } : {}),
+    ...(options.maxNumSentences !== undefined
+      ? { maxNumSentences: options.maxNumSentences }
+      : {}),
+    ...(options.silenceScale !== undefined
+      ? { silenceScale: options.silenceScale }
+      : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(kokoroLang !== undefined ? { kokoroLang } : {}),
+  };
+}
+
+export type { TtsInitBridgeOptions };
+
+export async function buildTtsInitBridgeOptions(
+  options: TTSInitializeOptions
+): Promise<TtsInitBridgeOptions> {
+  const flat = flattenTtsModelOptionsForNative(
+    options.modelType,
+    modelOptionsBagFromInit(options)
+  );
+  const scalarFields = appendTtsScalarBridgeFields(options, flat);
+
+  if (options.initMode === 'custom') {
+    const customOptions = options as TTSCustomInitializeOptions;
+    const modelPaths = await resolveTtsCustomConfigPaths(
+      customOptions.modelType,
+      customOptions.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType: customOptions.modelType,
+      modelPaths,
+      ...scalarFields,
+    };
+  }
+
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    modelType: options.modelType ?? 'auto',
+    ...(options.lexiconLanguageId !== undefined
+      ? { lexiconLanguageId: options.lexiconLanguageId }
+      : {}),
+    ...scalarFields,
   };
 }
 
@@ -194,6 +252,9 @@ export function toNativeSynthesisOptions(
     out.silenceScale = options.silenceScale;
   }
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.lang !== undefined && options.lang.length > 0) {
+    out.lang = options.lang;
+  }
   if (options.extra != null && Object.keys(options.extra).length > 0) {
     out.extra = options.extra;
   }

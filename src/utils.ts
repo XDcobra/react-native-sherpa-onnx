@@ -1,128 +1,33 @@
 import { Platform } from 'react-native';
-import type { ModelPathConfig } from './types';
 import SherpaOnnx from './NativeSherpaOnnx';
-import { resolveActualModelDir } from './download/validation';
-
+import type { FileSource, FileSourceAutoTryTarget } from './fileio/types';
 /**
- * Utility functions for model path handling
- */
-
-/**
- * Derive a bare asset name from a ModelPathConfig by stripping the path to its
- * last segment and removing common archive suffixes (.tar.bz2, .tar.gz, .tgz, .zip).
- * Returns null when no usable name can be derived.
+ * {@link FileSource} for a model folder shipped inside the app package.
  *
- * @param modelPath - Model path configuration
- * @returns Derived asset name string, or null
+ * - Android: `app:apkAsset` (APK `assets/<path>`, materialized to a readable dir)
+ * - iOS: `app:appBundle` (main bundle resources at `<path>`)
  */
-export function deriveAssetNameFromModelPath(
-  modelPath: ModelPathConfig
-): string | null {
-  const raw = modelPath.path?.trim();
-  if (!raw) return null;
-  const leaf = raw.split(/[\\/]/).filter(Boolean).pop();
-  if (!leaf) return null;
-  return leaf
-    .replace(/\.tar\.bz2$/i, '')
-    .replace(/\.tar\.gz$/i, '')
-    .replace(/\.tgz$/i, '')
-    .replace(/\.zip$/i, '');
-}
-
-/**
- * Get the default model directory path for the current platform.
- * This is a logical name (e.g. `'Documents/models'` on iOS), not an absolute path.
- * On iOS, when using file-based models without PAD, pass an absolute base path to
- * `getFileModelPath` instead (e.g. `DocumentDirectoryPath + '/models'` from react-native-fs).
- *
- * @returns Platform-specific default path
- */
-export function getDefaultModelPath(): string {
-  if (Platform.OS === 'ios') {
-    // iOS: Documents directory
-    return 'Documents/models';
-  } else {
-    // Android: Internal storage
-    return 'models';
+export function bundledModelFileSource(relativePath: string): FileSource {
+  const path = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (Platform.OS === 'android') {
+    return { kind: 'app', base: 'apkAsset', path };
   }
+  return { kind: 'app', base: 'appBundle', path };
 }
 
 /**
- * Create a model path configuration for asset models.
- * Use this when models are bundled in your app's assets.
- *
- * @param assetPath - Path relative to assets (e.g., "models/sherpa-onnx-model")
- * @returns Model path configuration
+ * {@link FileSource} that tries multiple location kinds in order until one resolves
+ * to an existing model directory. Requires an explicit {@link FileSourceAutoTryTarget} list.
  */
-export function assetModelPath(assetPath: string): ModelPathConfig {
+export function autoModelFileSource(
+  path: string,
+  tryOrder: FileSourceAutoTryTarget[]
+): FileSource {
   return {
-    type: 'asset',
-    path: assetPath,
+    kind: 'auto',
+    path: path.replace(/\\/g, '/').trim(),
+    tryOrder,
   };
-}
-
-/**
- * Create a model path configuration for file system models.
- * Use this when models are downloaded or stored in file system.
- *
- * @param filePath - Absolute path to model directory. On iOS, use an absolute path
- *   (e.g. from react-native-fs: `DocumentDirectoryPath + '/models/' + modelName` when
- *   using getFileModelPath without PAD).
- * @returns Model path configuration
- */
-export function fileModelPath(filePath: string): ModelPathConfig {
-  return {
-    type: 'file',
-    path: filePath,
-  };
-}
-
-/**
- * Create a model path configuration with auto-detection.
- * Tries asset first, then file system.
- *
- * @param path - Path to try (will be checked as both asset and file)
- * @returns Model path configuration
- */
-export function autoModelPath(path: string): ModelPathConfig {
-  return {
-    type: 'auto',
-    path: path,
-  };
-}
-
-/**
- * Resolve model path based on configuration.
- * This handles different path types (asset, file, auto) and returns
- * a platform-specific absolute path that can be used by native code.
- *
- * For type 'file', the path is normalized so that when the given path is an
- * install directory (e.g. with .ready and manifest.json and one model subdir),
- * the returned path is the subdirectory that actually contains the .onnx files.
- * This allows apps that build paths as baseDir/modelId to work without change.
- *
- * @param config - Model path configuration
- * @returns Promise resolving to absolute path usable by native code
- */
-export async function resolveModelPath(
-  config: ModelPathConfig
-): Promise<string> {
-  const path = await SherpaOnnx.resolveModelPath(config);
-  if (config.type === 'file') {
-    const resolved = await resolveActualModelDir(path);
-    // Diagnostic: log so we can tell if /usr/share/espeak-ng-data is due to our path or sherpa-onnx fallback.
-    if (__DEV__) {
-      console.log(
-        '[SherpaOnnx] resolveModelPath(file): native path=',
-        path,
-        resolved !== path
-          ? `resolvedActualModelDir=> ${resolved}`
-          : '(unchanged)'
-      );
-    }
-    return resolved;
-  }
-  return path;
 }
 
 /**
@@ -130,23 +35,20 @@ export async function resolveModelPath(
  * Scans the platform-specific model directory and returns folder names.
  *
  * This is useful for discovering models at runtime without hardcoding paths.
- * You can then use the returned folder names with resolveModelPath and initialize.
+ * You can then use the returned folder names to construct FileSource inputs for detect/init APIs.
  *
  * @returns Promise resolving to array of model info objects
  *
  * @example
  * ```typescript
- * import { listAssetModels, resolveModelPath } from 'react-native-sherpa-onnx';
+ * import { listAssetModels } from 'react-native-sherpa-onnx/utils';
+ * import { detectSttModel } from 'react-native-sherpa-onnx/stt';
  *
- * // Get all model folders
  * const models = await listAssetModels();
- * console.log('Found models:', models);
- * // Example output: [{ folder: 'sherpa-onnx-streaming-zipformer-en-2023-06-26', hint: 'stt' }, { folder: 'sherpa-onnx-matcha-icefall-en_US-ljspeech', hint: 'tts' }]
- *
- * // Initialize each model to detect types
  * for (const model of models) {
- *   const path = await resolveModelPath({ type: 'asset', path: `models/${model.folder}` });
- *   const result = await initializeStt(path);
+ *   const result = await detectSttModel(
+ *     bundledModelFileSource(`models/${model.folder}`)
+ *   );
  *   if (result.success) {
  *     console.log(`Found models in ${model.folder}:`, result.detectedModels);
  *   }
@@ -154,7 +56,10 @@ export async function resolveModelPath(
  * ```
  */
 export async function listAssetModels(): Promise<
-  Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>
+  Array<{
+    folder: string;
+    hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+  }>
 > {
   return SherpaOnnx.listAssetModels();
 }
@@ -166,15 +71,20 @@ export async function listAssetModels(): Promise<
 export async function listModelsAtPath(
   path: string,
   recursive = false
-): Promise<Array<{ folder: string; hint: 'stt' | 'tts' | 'unknown' }>> {
+): Promise<
+  Array<{
+    folder: string;
+    hint: 'stt' | 'tts' | 'alignment' | 'enhancement' | 'unknown';
+  }>
+> {
   return SherpaOnnx.listModelsAtPath(path, recursive);
 }
 
 /**
- * **Play Asset Delivery (PAD):** Returns the path to the models directory inside an
- * Android asset pack, or null if the pack is not available.
- * Use this to list and load models delivered via PAD (e.g. pack "sherpa_models").
- * On iOS returns null.
+ * **PAD / ODR:** Returns the canonical `…/models` directory when the pack is
+ * installed (Android) or ODR access is active (iOS), regardless of contents.
+ * For on-demand / ODR, call {@link ensureAssetPackReady} first; list archives via {@link listBundledArchives} from `react-native-sherpa-onnx/extraction`.
+ * @see docs/model-delivery-pad-odr.md
  */
 export async function getAssetPackPath(
   packName: string
@@ -186,3 +96,24 @@ export async function getAssetPackPath(
  * Alias for {@link getAssetPackPath}. Use for PAD (Play Asset Delivery) model discovery.
  */
 export const getPlayAssetDeliveryModelsPath = getAssetPackPath;
+
+export {
+  fetchAssetPack,
+  getAssetPackState,
+  removeAssetPack,
+  ensureAssetPackReady,
+  assetPackDownloadPercent,
+} from './pad/assetPack';
+export {
+  listOdrDeliverySnapshot,
+  logOdrDeliveryDiagnostics,
+} from './pad/odrDiagnostics';
+export type {
+  OdrDeliverySnapshot,
+  OdrDirectoryProbe,
+} from './pad/odrDiagnostics';
+export type {
+  AssetPackDeliveryStatus,
+  AssetPackStateSnapshot,
+  EnsureAssetPackReadyOptions,
+} from './pad/assetPack';

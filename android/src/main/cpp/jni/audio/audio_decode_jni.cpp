@@ -180,8 +180,10 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
+    jboolean allowDemuxerAutoProbe,
     jlong cancelFlagPtr,
-    jstring jOutputPath
+    jstring jOutputPath,
+    jobject jProgressCallback
 ) {
     const char* path = nullptr;
     if (jPath) {
@@ -216,14 +218,58 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
     config.targetSampleRate = (int)targetSampleRate;
     config.forceMono = (bool)forceMono;
     config.chunkSize = chunkSize > 0 ? (int)chunkSize : 8192;
+    config.allowDemuxerAutoProbe = (bool)allowDemuxerAutoProbe;
 
     auto& cancelFlag = *reinterpret_cast<std::atomic<bool>*>(cancelFlagPtr);
+
+    jmethodID onProgressMethod = nullptr;
+    jobject progressCbGlobal = nullptr;
+    if (jProgressCallback) {
+        jclass progressCbClass = env->GetObjectClass(jProgressCallback);
+        if (progressCbClass) {
+            onProgressMethod = env->GetMethodID(progressCbClass, "onProgress", "(JJIII)V");
+            env->DeleteLocalRef(progressCbClass);
+        }
+        if (!onProgressMethod) {
+            if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
+            env->ReleaseStringUTFChars(jOutputPath, outputPath);
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "DECODE_INTERNAL_ERROR: Progress callback missing onProgress(JJIII)V");
+            return nullptr;
+        }
+        progressCbGlobal = env->NewGlobalRef(jProgressCallback);
+    }
+
+    int srcSampleRateForProgress = 0;
+    int srcChannelsForProgress = 0;
+    sherpa::DecodeProgressCallback onProgressCb = nullptr;
+    sherpa::DecodeStreamInfoCallback onStreamInfoCb = nullptr;
+    if (progressCbGlobal && onProgressMethod) {
+        onStreamInfoCb = [&srcSampleRateForProgress, &srcChannelsForProgress](int sr, int ch) {
+            srcSampleRateForProgress = sr;
+            srcChannelsForProgress = ch;
+        };
+        onProgressCb = [env, progressCbGlobal, onProgressMethod, &srcSampleRateForProgress,
+                          &srcChannelsForProgress, &cancelFlag](int64_t framesDecoded,
+                                                                 int64_t totalEstimate, int percent) {
+            env->CallVoidMethod(progressCbGlobal, onProgressMethod, (jlong)framesDecoded,
+                                (jlong)totalEstimate, (jint)percent, (jint)srcSampleRateForProgress,
+                                (jint)srcChannelsForProgress);
+            if (env->ExceptionCheck()) {
+                cancelFlag.store(true);
+                env->ExceptionClear();
+            }
+        };
+    }
 
     // Open output file for streaming writes
     std::string outPathStr(outputPath);
     FILE* outFile = fopen(outPathStr.c_str(), "wb");
     if (!outFile) {
         int err = errno;
+        if (progressCbGlobal) {
+            env->DeleteGlobalRef(progressCbGlobal);
+        }
         if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
         env->ReleaseStringUTFChars(jOutputPath, outputPath);
         std::string msg = "DECODE_INTERNAL_ERROR: Cannot open output file: " + std::string(strerror(err));
@@ -245,9 +291,15 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
     };
 
     try {
-        auto result = sherpa::decodeFile(path, (int)inputFd, config, onChunk, nullptr, nullptr, cancelFlag);
+        auto result = sherpa::decodeFile(path, (int)inputFd, config, onChunk, onProgressCb,
+                                         onStreamInfoCb, cancelFlag);
         fclose(outFile);
         outFile = nullptr;
+
+        if (progressCbGlobal) {
+            env->DeleteGlobalRef(progressCbGlobal);
+            progressCbGlobal = nullptr;
+        }
 
         if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
         env->ReleaseStringUTFChars(jOutputPath, outputPath);
@@ -296,6 +348,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
 
         return map;
     } catch (const std::runtime_error& e) {
+        if (progressCbGlobal) {
+            env->DeleteGlobalRef(progressCbGlobal);
+        }
         if (outFile) fclose(outFile);
         remove(outPathStr.c_str());
         if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
@@ -303,6 +358,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
         return nullptr;
     } catch (...) {
+        if (progressCbGlobal) {
+            env->DeleteGlobalRef(progressCbGlobal);
+        }
         if (outFile) fclose(outFile);
         remove(outPathStr.c_str());
         if (path && jPath) env->ReleaseStringUTFChars(jPath, path);
@@ -333,6 +391,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jint targetSampleRate,
     jboolean forceMono,
     jint chunkSize,
+    jboolean allowDemuxerAutoProbe,
     jlong cancelFlagPtr,
     jobject jChunkCallback,
     jobject jProgressCallback
@@ -366,6 +425,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     config.targetSampleRate = (int)targetSampleRate;
     config.forceMono = (bool)forceMono;
     config.chunkSize = chunkSize > 0 ? (int)chunkSize : 8192;
+    config.allowDemuxerAutoProbe = (bool)allowDemuxerAutoProbe;
 
     auto& cancelFlag = *reinterpret_cast<std::atomic<bool>*>(cancelFlagPtr);
 
@@ -391,12 +451,19 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
     jobject chunkCbGlobal = env->NewGlobalRef(jChunkCallback);
     jobject progressCbGlobal = jProgressCallback ? env->NewGlobalRef(jProgressCallback) : nullptr;
 
-    auto onChunk = [env, chunkCbGlobal, onChunkMethod](const float* samples, int count) {
+    auto onChunk = [env, chunkCbGlobal, onChunkMethod, &cancelFlag](const float* samples, int count) {
         jfloatArray arr = env->NewFloatArray(count);
-        if (arr) {
-            env->SetFloatArrayRegion(arr, 0, count, samples);
-            env->CallVoidMethod(chunkCbGlobal, onChunkMethod, arr, (jint)count);
-            env->DeleteLocalRef(arr);
+        if (!arr) {
+            return;
+        }
+        env->SetFloatArrayRegion(arr, 0, count, samples);
+        env->CallVoidMethod(chunkCbGlobal, onChunkMethod, arr, (jint)count);
+        env->DeleteLocalRef(arr);
+        // If Java threw (e.g. live buffer finalized mid-ingest), clear pending exception
+        // before the next JNI call — otherwise CheckJNI aborts. Stop decode via cancelFlag.
+        if (env->ExceptionCheck()) {
+            cancelFlag.store(true);
+            env->ExceptionClear();
         }
     };
 
@@ -409,11 +476,15 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
             srcSampleRate = sr;
             srcChannels = ch;
         };
-        onProgress = [env, progressCbGlobal, onProgressMethod, &srcSampleRate, &srcChannels](
-            int64_t framesDecoded, int64_t totalEstimate, int percent) {
+        onProgress = [env, progressCbGlobal, onProgressMethod, &srcSampleRate, &srcChannels,
+                      &cancelFlag](int64_t framesDecoded, int64_t totalEstimate, int percent) {
             env->CallVoidMethod(progressCbGlobal, onProgressMethod,
                 (jlong)framesDecoded, (jlong)totalEstimate, (jint)percent,
                 (jint)srcSampleRate, (jint)srcChannels);
+            if (env->ExceptionCheck()) {
+                cancelFlag.store(true);
+                env->ExceptionClear();
+            }
         };
     }
 
@@ -494,6 +565,135 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileStreaming(
         if (progressCbGlobal) env->DeleteGlobalRef(progressCbGlobal);
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
                        "DECODE_INTERNAL_ERROR: Unknown error during streaming decode");
+        return nullptr;
+    }
+}
+
+/**
+ * Probe audio file duration from container metadata (no decode).
+ * Returns long[2]: { durationMs, isExact (1 or 0) }.
+ */
+JNIEXPORT jlongArray JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileDuration(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd
+) {
+    const char* path = nullptr;
+    if (jPath) {
+        path = env->GetStringUTFChars(jPath, nullptr);
+        if (!path) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to get path string");
+            return nullptr;
+        }
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_NOT_FOUND: Empty file path and invalid fd");
+        return nullptr;
+    }
+
+    try {
+        auto result = sherpa::probeFileDuration(path, (int)inputFd);
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+
+        jlongArray arr = env->NewLongArray(2);
+        if (!arr) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to allocate result array");
+            return nullptr;
+        }
+        jlong values[2] = {result.durationMs, result.isExact ? 1L : 0L};
+        env->SetLongArrayRegion(arr, 0, 2, values);
+        return arr;
+    } catch (const std::exception& e) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+        return nullptr;
+    } catch (...) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_INTERNAL_ERROR: Unknown error during duration probe");
+        return nullptr;
+    }
+}
+
+/**
+ * Probe container format and primary audio codec (no PCM decode).
+ * Returns HashMap{inputFormatName, codecName}.
+ */
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileContainer(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring jPath,
+    jint inputFd
+) {
+    const char* path = nullptr;
+    if (jPath) {
+        path = env->GetStringUTFChars(jPath, nullptr);
+        if (!path) {
+            env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                          "PROBE_INTERNAL_ERROR: Failed to get path string");
+            return nullptr;
+        }
+    }
+
+    if ((!path || path[0] == '\0') && inputFd < 0) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_NOT_FOUND: Empty file path and invalid fd");
+        return nullptr;
+    }
+
+    try {
+        auto result = sherpa::probeFileContainer(path, (int)inputFd);
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+
+        jclass hashMapClass = env->FindClass("java/util/HashMap");
+        jmethodID hashMapInit = env->GetMethodID(hashMapClass, "<init>", "()V");
+        jmethodID hashMapPut = env->GetMethodID(hashMapClass, "put",
+            "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+
+        jobject map = env->NewObject(hashMapClass, hashMapInit);
+        auto putString = [&](const char* key, const std::string& value) {
+            jstring jKey = env->NewStringUTF(key);
+            jstring jVal = env->NewStringUTF(value.c_str());
+            env->CallObjectMethod(map, hashMapPut, jKey, jVal);
+            env->DeleteLocalRef(jKey);
+            env->DeleteLocalRef(jVal);
+        };
+        putString("inputFormatName", result.inputFormatName);
+        putString("codecName", result.codecName);
+        return map;
+    } catch (const std::exception& e) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+        return nullptr;
+    } catch (...) {
+        if (path && jPath) {
+            env->ReleaseStringUTFChars(jPath, path);
+        }
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "PROBE_INTERNAL_ERROR: Unknown error during container probe");
         return nullptr;
     }
 }

@@ -38,6 +38,14 @@ public:
         bool debug = false
     );
 
+    EnhancementInitializeResult initializeCustom(
+        const std::string& modelType,
+        const EnhancementModelPaths& paths,
+        int32_t numThreads = 1,
+        const std::optional<std::string>& provider = std::nullopt,
+        bool debug = false
+    );
+
     EnhancedAudioResult runSamples(const std::vector<float>& samples, int32_t sampleRate);
 
     int32_t getSampleRate() const;
@@ -59,6 +67,14 @@ public:
     EnhancementInitializeResult initialize(
         const std::string& modelDir,
         const std::string& modelType = "auto",
+        int32_t numThreads = 1,
+        const std::optional<std::string>& provider = std::nullopt,
+        bool debug = false
+    );
+
+    EnhancementInitializeResult initializeCustom(
+        const std::string& modelType,
+        const EnhancementModelPaths& paths,
         int32_t numThreads = 1,
         const std::optional<std::string>& provider = std::nullopt,
         bool debug = false

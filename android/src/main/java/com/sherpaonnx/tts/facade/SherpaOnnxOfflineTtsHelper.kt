@@ -26,4 +26,18 @@ internal class SherpaOnnxOfflineTtsHelper(
     options: ReadableMap?,
     promise: Promise
   ) = core.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
+
+  fun startTtsOfflineLivePipeline(
+    instanceId: String,
+    textInLiveBufferId: String,
+    audioOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) = core.startTtsOfflineLivePipeline(
+    instanceId,
+    textInLiveBufferId,
+    audioOutLiveBufferId,
+    options,
+    promise
+  )
 }

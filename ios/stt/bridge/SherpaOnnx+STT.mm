@@ -7,13 +7,20 @@
 
 #import "../../SherpaOnnx.h"
 #import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>
 
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../pipeline/SttOfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
+#include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx/c-api/cxx-api.h"
 #include <atomic>
+#include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -35,7 +42,9 @@ static NSString *const kSttErrAlreadyPopulated = @"TEXT_ALREADY_POPULATED";
 static NSString *const kSttErrOfflineOom = @"OFFLINE_OOM";
 static NSString *const kSttErrInternalError = @"STT_INTERNAL_ERROR";
 static NSString *const kSttOfflineOomMessage =
-    @"Not enough memory for offline speech-to-text. Please use a streaming mode for large inputs.";
+    @"Not enough memory for offline speech-to-text. Please use a streaming mode for large inputs. "
+    @"Alternatively, use the segmentation engine to process smaller segments with offline models "
+    @"(see docs/segmentation-engine.md).";
 
 // ==================== Instance State ====================
 struct SttInstanceState {
@@ -71,23 +80,27 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
     }
 }
 
+static void FillSttModelPathsFromDict(
+    NSDictionary *dict,
+    sherpaonnx::SttModelPaths &paths
+) {
+    if (![dict isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    std::map<std::string, std::string> pathMap;
+    for (NSString *key in dict) {
+        id value = dict[key];
+        if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+            pathMap[std::string([key UTF8String])] = std::string([(NSString *)value UTF8String]);
+        }
+    }
+    sherpaonnx::FillSttModelPathsFromStringMap(pathMap, paths);
+}
+
 @implementation SherpaOnnx (STT)
 
 - (void)initializeStt:(NSString *)instanceId
-            modelDir:(NSString *)modelDir
-         preferInt8:(NSNumber *)preferInt8
-          modelType:(NSString *)modelType
-              debug:(NSNumber *)debug
-       hotwordsFile:(NSString *)hotwordsFile
-      hotwordsScore:(NSNumber *)hotwordsScore
-         numThreads:(NSNumber *)numThreads
-           provider:(NSString *)provider
-           ruleFsts:(NSString *)ruleFsts
-           ruleFars:(NSString *)ruleFars
-             dither:(NSNumber *)dither
-        modelOptions:(NSDictionary *)modelOptions
-        modelingUnit:(NSString *)modelingUnit
-             bpeVocab:(NSString *)bpeVocab
+              options:(JS::NativeSherpaOnnx::SttInitBridgeOptions &)options
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -95,8 +108,38 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         reject(kSttErrInitFailed, @"instanceId is required", nil);
         return;
     }
+
+    NSString *initMode = options.initMode();
+    if (initMode == nil || [initMode length] == 0) {
+        initMode = @"auto";
+    }
+
+    NSString *modelType = options.modelType();
+    auto debug = options.debug();
+    NSString *hotwordsFile = options.hotwordsFile();
+    auto hotwordsScore = options.hotwordsScore();
+    auto numThreads = options.numThreads();
+    NSString *provider = options.provider();
+    NSString *ruleFsts = options.ruleFsts();
+    NSString *ruleFars = options.ruleFars();
+    auto dither = options.dither();
+    id modelOptionsRaw = options.modelOptions();
+    NSDictionary *modelOptions =
+        [modelOptionsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)modelOptionsRaw : nil;
     std::string instanceIdStr = [instanceId UTF8String];
-    RCTLogInfo(@"Initializing STT instance %@ with modelDir: %@", instanceId, modelDir);
+
+    const bool isCustomInit = initMode.length > 0 && [initMode isEqualToString:@"custom"];
+    NSString *modelDir = options.modelDir();
+    if (!isCustomInit && (modelDir == nil || [modelDir length] == 0)) {
+        reject(kSttErrInitFailed, @"modelDir is required for initMode auto", nil);
+        return;
+    }
+    if (isCustomInit && (modelType == nil || [modelType length] == 0)) {
+        reject(kSttErrInitFailed, @"modelType is required for initMode custom", nil);
+        return;
+    }
+
+    RCTLogInfo(@"Initializing STT instance %@ initMode=%@ modelDir=%@", instanceId, initMode, modelDir);
 
     @try {
         std::lock_guard<std::mutex> lock(g_stt_mutex);
@@ -109,11 +152,14 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             inst->wrapper = std::make_unique<sherpaonnx::SttWrapper>();
         }
 
-        std::string modelDirStr = [modelDir UTF8String];
+        std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
 
         std::optional<bool> preferInt8Opt = std::nullopt;
-        if (preferInt8 != nil) {
-            preferInt8Opt = [preferInt8 boolValue];
+        if (!isCustomInit) {
+            auto preferInt8 = options.preferInt8();
+            if (preferInt8.has_value()) {
+                preferInt8Opt = preferInt8.value();
+            }
         }
 
         std::optional<std::string> modelTypeOpt = std::nullopt;
@@ -121,7 +167,7 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             modelTypeOpt = [modelType UTF8String];
         }
 
-        bool debugVal = (debug != nil && [debug boolValue]);
+        bool debugVal = debug.has_value() && debug.value();
 
         std::optional<std::string> hotwordsFileOpt = std::nullopt;
         if (hotwordsFile != nil && [hotwordsFile length] > 0) {
@@ -129,13 +175,13 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         }
 
         std::optional<float> hotwordsScoreOpt = std::nullopt;
-        if (hotwordsScore != nil) {
-            hotwordsScoreOpt = [hotwordsScore floatValue];
+        if (hotwordsScore.has_value()) {
+            hotwordsScoreOpt = (float)hotwordsScore.value();
         }
 
         std::optional<int32_t> numThreadsOpt = std::nullopt;
-        if (numThreads != nil) {
-            numThreadsOpt = [numThreads intValue];
+        if (numThreads.has_value()) {
+            numThreadsOpt = (int32_t)numThreads.value();
         }
 
         std::optional<std::string> providerOpt = std::nullopt;
@@ -154,8 +200,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         }
 
         std::optional<float> ditherOpt = std::nullopt;
-        if (dither != nil) {
-            ditherOpt = [dither floatValue];
+        if (dither.has_value()) {
+            ditherOpt = (float)dither.value();
         }
 
         // Parse model-specific options (only the block for the loaded model type is applied in C++).
@@ -230,11 +276,42 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
             }
         }
 
-        sherpaonnx::SttInitializeResult result = inst->wrapper->initialize(
-            modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
-            numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
-            whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
-            cohereTranscribeOptsPtr);
+        sherpaonnx::SttInitializeResult result;
+        if (isCustomInit) {
+            id pathsRaw = options.modelPaths();
+            NSDictionary *pathsDict =
+                [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
+            if (pathsDict == nil || pathsDict.count == 0) {
+                reject(kSttErrInitFailed, @"modelPaths is required for initMode custom", nil);
+                return;
+            }
+            sherpaonnx::SttModelPaths paths;
+            FillSttModelPathsFromDict(pathsDict, paths);
+            result = inst->wrapper->initializeCustom(
+                modelTypeOpt.value_or(""),
+                paths,
+                debugVal,
+                hotwordsFileOpt,
+                hotwordsScoreOpt,
+                numThreadsOpt,
+                providerOpt,
+                ruleFstsOpt,
+                ruleFarsOpt,
+                ditherOpt,
+                whisperOptsPtr,
+                senseVoiceOptsPtr,
+                canaryOptsPtr,
+                funasrNanoOptsPtr,
+                qwen3AsrOptsPtr,
+                cohereTranscribeOptsPtr
+            );
+        } else {
+            result = inst->wrapper->initialize(
+                modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
+                numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
+                whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
+                cohereTranscribeOptsPtr);
+        }
 
         if (result.success) {
             RCTLogInfo(@"Sherpa-onnx initialized successfully");
@@ -273,8 +350,8 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
 }
 
 - (void)detectSttModel:(NSString *)modelDir
-            assetName:(NSString *)assetName
-            modelType:(NSString *)modelType
+            assetName:(NSString * _Nullable)assetName
+            modelType:(NSString * _Nullable)modelType
            preferInt8:(NSNumber *)preferInt8
                 debug:(NSNumber *)debug
               resolve:(RCTPromiseResolveBlock)resolve
@@ -398,6 +475,127 @@ static NSString *sttModelKindToNSString(sherpaonnx::SttModelKind kind) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception in setSttConfig: %@", exception.reason ?: @""];
         RCTLogError(@"%@", errorMsg);
         reject(kSttErrConfigFailed, errorMsg, nil);
+    }
+}
+
+- (void)startSttOfflineLivePipeline:(NSString *)instanceId
+                  audioInLiveBufferId:(NSString *)audioInLiveBufferId
+                 textOutLiveBufferId:(NSString *)textOutLiveBufferId
+                             options:(JS::NativeSherpaOnnx::SpecStartSttOfflineLivePipelineOptions &)options
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
+{
+    if (instanceId == nil || [instanceId length] == 0) {
+        reject(kSttErrInstanceNotFound, @"instanceId is required", nil);
+        return;
+    }
+    if (audioInLiveBufferId == nil || [audioInLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"audioInLiveBufferId is required", nil);
+        return;
+    }
+    if (textOutLiveBufferId == nil || [textOutLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"textOutLiveBufferId is required", nil);
+        return;
+    }
+
+    NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+    if (attachedSegmentationEngineId == nil || [attachedSegmentationEngineId length] == 0) {
+        reject(kSttErrInvalidArgument, @"options.attachedSegmentationEngineId is required", nil);
+        return;
+    }
+
+    NSString *segmentLiveBufferId = options.segmentLiveBufferId();
+    if (segmentLiveBufferId == nil || [segmentLiveBufferId length] == 0) {
+        reject(kSttErrInvalidArgument, @"options.segmentLiveBufferId is required", nil);
+        return;
+    }
+
+    std::string instanceIdStr = [instanceId UTF8String];
+    std::string audioInIdStr = [audioInLiveBufferId UTF8String];
+    std::string textOutIdStr = [textOutLiveBufferId UTF8String];
+    std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
+    std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
+
+    sherpaonnx::SttWrapper *wrapper = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_stt_mutex);
+        auto it = g_stt_instances.find(instanceIdStr);
+        if (it == g_stt_instances.end() || it->second->wrapper == nullptr || !it->second->wrapper->isInitialized()) {
+            reject(kSttErrInstanceNotFound, @"STT not initialized. Call initializeStt first.", nil);
+            return;
+        }
+        wrapper = it->second->wrapper.get();
+    }
+
+    auto inputEntry = pa_get_live_entry(audioInIdStr);
+    if (!inputEntry) {
+        reject(kSttErrBufferNotFound,
+               [NSString stringWithFormat:@"Input live audio buffer not found: %@", audioInLiveBufferId],
+               nil);
+        return;
+    }
+
+    if (inputEntry->state != PaLiveEntry::RECORDING) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Input live audio buffer is not in recording state: %@", audioInLiveBufferId],
+               nil);
+        return;
+    }
+
+    auto textOutputEntry = txt_get_live_entry(textOutIdStr);
+    if (!textOutputEntry) {
+        reject(kSttErrTextBufferNotFound,
+               [NSString stringWithFormat:@"Output live text buffer not found: %@", textOutLiveBufferId],
+               nil);
+        return;
+    }
+
+    if (!txt_live_is_recording(textOutputEntry)) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Output live text buffer is not in recording state: %@", textOutLiveBufferId],
+               nil);
+        return;
+    }
+
+    auto segmentInputEntry = seg_get_live_entry(segmentBufferIdStr);
+    if (!segmentInputEntry) {
+        reject(kSttErrInvalidArgument,
+               [NSString stringWithFormat:@"Input live segment buffer not found: %@", segmentLiveBufferId],
+               nil);
+        return;
+    }
+
+    (void)segmentInputEntry;
+
+    try {
+        std::string pipelineId = std::string("stt_offline_live_") +
+          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+
+        auto worker = std::make_shared<SttOfflineLivePipelineWorker>(
+            pipelineId,
+            attachedEngineIdStr,
+            inputEntry,
+            segmentBufferIdStr,
+            textOutputEntry,
+            wrapper
+        );
+
+        {
+            std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+            g_streaming_pipelines[pipelineId] = worker;
+        }
+
+        worker->start();
+        so_start_streaming_pipeline_completion_watcher(self, pipelineId, worker);
+
+        resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pipelineId.c_str()] ?: @"" });
+    } catch (const std::bad_alloc&) {
+        reject(kSttErrOfflineOom, kSttOfflineOomMessage, nil);
+    } catch (const std::exception &e) {
+        NSString *msg = [NSString stringWithUTF8String:e.what()] ?: @"Failed to start live offline STT pipeline";
+        reject(kSttErrTranscribeFailed, msg, nil);
+    } catch (...) {
+        reject(kSttErrTranscribeFailed, @"Failed to start live offline STT pipeline", nil);
     }
 }
 

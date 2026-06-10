@@ -389,6 +389,24 @@ std::vector<LexiconCandidate> FindLexiconCandidates(
     return candidates;
 }
 
+std::string ResolveLexiconPath(
+    const std::vector<LexiconCandidate>& candidates,
+    const std::string& languageId
+) {
+    if (candidates.empty()) {
+        return "";
+    }
+    if (!languageId.empty()) {
+        for (const auto& c : candidates) {
+            if (c.languageId == languageId) {
+                return c.path;
+            }
+        }
+        return "";
+    }
+    return candidates[0].path;
+}
+
 bool Qwen3TokenizerDirHasVocabAndMerges(
     const std::vector<FileEntry>& files,
     const std::string& dirRaw

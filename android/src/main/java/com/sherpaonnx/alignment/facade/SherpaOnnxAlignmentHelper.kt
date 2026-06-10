@@ -8,7 +8,6 @@ import com.sherpaonnx.alignment.core.AlignmentOptionParsers
 import com.sherpaonnx.alignment.core.AlignmentPromiseUtils
 import com.sherpaonnx.alignment.core.AlignmentResultMapper
 import com.sherpaonnx.alignment.core.SttAlignmentSegment
-import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.segment.pipeline.SegmentErrorCodes
@@ -55,6 +54,15 @@ internal class SherpaOnnxAlignmentHelper {
     text: String,
     audioPath: String,
     granularity: String,
+  ): HashMap<String, Any>
+
+  private external fun nativeAlignAccurateForcedCtcFromFloatPcm(
+    modelPath: String,
+    windowText: String,
+    samples: FloatArray,
+    sampleRate: Int,
+    granularity: String,
+    language: String,
   ): HashMap<String, Any>
 
   private data class VadaAnchor(
@@ -532,13 +540,199 @@ internal class SherpaOnnxAlignmentHelper {
     }
   }
 
+  private fun parseKnownAlignmentCode(message: String?): String? {
+    val source = message?.trim().orEmpty()
+    if (source.isEmpty()) {
+      return null
+    }
+    val prefix = source.substringBefore(':').trim()
+    return when (prefix) {
+      AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+      AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+      AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+      AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE,
+      AlignmentErrorCodes.ERR_NATIVE_UNKNOWN,
+      AlignmentErrorCodes.OFFLINE_OOM,
+      AlignmentErrorCodes.ERR_ALIGNMENT,
+      AlignmentErrorCodes.ERR_CONSTRAINED_ACCURATE -> prefix
+      else -> null
+    }
+  }
+
+  private fun resolveOfflinePcmSlice(
+    pcm: ReadableMap,
+    sampleRate: Int,
+  ): FloatArray {
+    val descriptor = AlignmentOptionParsers.parsePcmSliceDescriptor(pcm)
+    val entry = PipelineAudioRegistry.getOffline(descriptor.audioBufferId)
+      ?: throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: offline audio buffer not found: ${descriptor.audioBufferId}",
+      )
+
+    if (entry.sampleRate != sampleRate) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: sampleRate mismatch for pcm slice.",
+      )
+    }
+
+    val endExclusive = descriptor.startSample + descriptor.sampleCount
+    if (descriptor.startSample < 0 || descriptor.sampleCount <= 0 || endExclusive > entry.numSamples) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice must be within offline buffer bounds.",
+      )
+    }
+
+    val slice = entry.readSlice(descriptor.startSample, descriptor.sampleCount)
+    if (slice.isEmpty()) {
+      throw IllegalArgumentException(
+        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice produced no samples.",
+      )
+    }
+    return slice
+  }
+
+  fun alignAccurateFromPcm(
+    modelPath: String,
+    text: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        val normalizedModelPath = modelPath.trim()
+        if (normalizedModelPath.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+            "${AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED}: modelPath is required.",
+          )
+          return@execute
+        }
+
+        val normalizedText = text.trim()
+        if (normalizedText.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+            "${AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED}: text must not be empty.",
+          )
+          return@execute
+        }
+
+        val normalizedSampleRate = sampleRate.toInt()
+        if (!sampleRate.isFinite() || normalizedSampleRate <= 0) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED,
+            "${AlignmentErrorCodes.ERR_NATIVE_ACCURATE_FAILED}: sampleRate must be positive.",
+          )
+          return@execute
+        }
+
+        val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
+        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
+        val raw = nativeAlignAccurateFromFloatPcm(
+          normalizedModelPath,
+          normalizedText,
+          slice,
+          normalizedSampleRate,
+          normalizedGranularity,
+        )
+
+        promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
+      } catch (e: OutOfMemoryError) {
+        Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
+        promise.reject(
+          AlignmentErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("alignment"),
+          e,
+        )
+      } catch (e: Exception) {
+        val code = parseKnownAlignmentCode(e.message) ?: AlignmentErrorCodes.ERR_NATIVE_UNKNOWN
+        val message = (e.message ?: "$code: Native accurate alignment failed").trim()
+        Log.e(AlignmentErrorCodes.TAG, message, e)
+        promise.reject(code, message, e)
+      }
+    }
+  }
+
+  fun alignAccurateForcedCtcFromPcm(
+    modelPath: String,
+    windowText: String,
+    pcm: ReadableMap,
+    sampleRate: Double,
+    granularity: String,
+    language: String?,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        val normalizedModelPath = modelPath.trim()
+        if (normalizedModelPath.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED,
+            "${AlignmentErrorCodes.ERR_MODEL_LOAD_FAILED}: modelPath is required.",
+          )
+          return@execute
+        }
+
+        val normalizedWindowText = windowText.trim()
+        if (normalizedWindowText.isEmpty()) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+            "${AlignmentErrorCodes.ERR_FORCED_CTC_FAILED}: windowText must not be empty.",
+          )
+          return@execute
+        }
+
+        val normalizedSampleRate = sampleRate.toInt()
+        if (!sampleRate.isFinite() || normalizedSampleRate <= 0) {
+          promise.reject(
+            AlignmentErrorCodes.ERR_FORCED_CTC_FAILED,
+            "${AlignmentErrorCodes.ERR_FORCED_CTC_FAILED}: sampleRate must be positive.",
+          )
+          return@execute
+        }
+
+        val normalizedGranularity = AlignmentOptionParsers
+          .normalizeGranularity(granularity)
+          .let { if (it == "character") "word" else it }
+
+        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
+
+        val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
+          normalizedModelPath,
+          normalizedWindowText,
+          slice,
+          normalizedSampleRate,
+          normalizedGranularity,
+          language?.trim().orEmpty(),
+        )
+
+        promise.resolve(AlignmentResultMapper.forcedCtcResultToWritable(raw))
+      } catch (e: OutOfMemoryError) {
+        Log.e(AlignmentErrorCodes.TAG, "OFFLINE_OOM: ${e.message}", e)
+        promise.reject(
+          AlignmentErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("alignment"),
+          e,
+        )
+      } catch (e: Exception) {
+        val code = parseKnownAlignmentCode(e.message) ?: AlignmentErrorCodes.ERR_NATIVE_UNKNOWN
+        val message = (e.message ?: "$code: forced CTC alignment failed").trim()
+        Log.e(AlignmentErrorCodes.TAG, message, e)
+        promise.reject(code, message, e)
+      }
+    }
+  }
+
   fun alignTextToPcmForStt(
     text: String,
     samples: FloatArray,
     sampleRate: Int,
     mode: String,
     granularity: String,
-    alignmentModelPath: String?,
+    modelPath: String?,
     onSuccess: (segments: List<SttAlignmentSegment>, timingMode: String) -> Unit,
     onError: (message: String, error: Throwable?) -> Unit,
   ) {
@@ -569,12 +763,12 @@ internal class SherpaOnnxAlignmentHelper {
           )
 
           "accurate" -> {
-            val modelPath = alignmentModelPath?.trim().orEmpty()
-            if (modelPath.isEmpty()) {
-              throw IllegalArgumentException("ALIGNMENT_MODEL_MISSING: alignmentModelPath is required for accurate mode")
+            val resolved = modelPath?.trim().orEmpty()
+            if (resolved.isEmpty()) {
+              throw IllegalArgumentException("ALIGNMENT_MODEL_MISSING: modelPath is required for accurate mode")
             }
             nativeAlignAccurateFromFloatPcm(
-              modelPath,
+              resolved,
               text,
               samples,
               sampleRate,

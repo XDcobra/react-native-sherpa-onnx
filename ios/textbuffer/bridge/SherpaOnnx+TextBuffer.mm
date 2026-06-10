@@ -20,6 +20,7 @@
 #include <deque>
 #include <algorithm>
 #include <stdexcept>
+#include <chrono>
 
 // ==================== Error Codes ====================
 static NSString *const kTxtErrBufferNotFound   = @"TEXT_BUFFER_NOT_FOUND";
@@ -142,6 +143,127 @@ struct TxtOfflineEntry {
 std::unordered_map<std::string, std::shared_ptr<TxtOfflineEntry>> g_txt_offline;
 std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> g_txt_live;
 std::mutex g_txt_mutex;
+static std::unordered_map<std::string, int64_t> g_txt_partial_last_emit_ms;
+static std::mutex g_txt_partial_emit_mutex;
+static __weak SherpaOnnx *g_txt_partial_event_module = nil;
+
+static int64_t txt_now_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+extern "C" void txt_set_partial_event_module(SherpaOnnx *module) {
+    g_txt_partial_event_module = module;
+}
+
+void txt_dispatch_pipeline_live_text_partial(
+    const std::string &bufferId,
+    const char *source,
+    const std::string &partialText,
+    int64_t revisionValue,
+    int64_t partialEventMinIntervalMs
+) {
+#ifdef __OBJC__
+    NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
+    const char *src = source && source[0] ? source : "replace";
+
+    bool shouldEmit = true;
+    int64_t nowMs = txt_now_ms();
+    {
+        std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+        int64_t last = 0;
+        auto found = g_txt_partial_last_emit_ms.find(bufferId);
+        if (found != g_txt_partial_last_emit_ms.end()) {
+            last = found->second;
+        }
+        int64_t minInterval = std::max<int64_t>(0, partialEventMinIntervalMs);
+        if (minInterval > 0 && last > 0 && (nowMs - last) < minInterval) {
+            shouldEmit = false;
+        } else {
+            g_txt_partial_last_emit_ms[bufferId] = nowMs;
+        }
+    }
+
+    if (!shouldEmit) {
+        return;
+    }
+
+    SherpaOnnx *bridge = g_txt_partial_event_module;
+    if (bridge == nil) {
+        return;
+    }
+
+    NSString *currentText = [NSString stringWithUTF8String:partialText.c_str()] ?: @"";
+    NSString *sourceNs = [NSString stringWithUTF8String:src] ?: @"replace";
+    NSDictionary *body = @{
+        @"liveBufferId": liveBufferId,
+        @"source": sourceNs,
+        @"partialText": currentText,
+        @"revision": @(revisionValue),
+    };
+
+    SherpaOnnx *strongBridge = bridge;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [strongBridge sendEventWithName:@"pipelineLiveTextPartial" body:body];
+    });
+#endif
+}
+
+static NSString *txt_truncate_event_text(NSString *text, BOOL *truncated) {
+    static const NSUInteger kTxtMaxEventTextChars = 4096;
+    if (truncated) *truncated = NO;
+    if (text == nil) return @"";
+    if (text.length <= kTxtMaxEventTextChars) return text;
+
+    if (truncated) *truncated = YES;
+    NSRange safeRange = [text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, kTxtMaxEventTextChars)];
+    return [text substringWithRange:safeRange];
+}
+
+static void txt_emit_live_text_segment_event(
+    SherpaOnnx *module,
+    NSString *liveBufferId,
+    const TextSegment &segment,
+    int totalSegments
+) {
+    if (module == nil) return;
+
+    NSMutableDictionary *body = [NSMutableDictionary dictionary];
+    body[@"liveBufferId"] = liveBufferId ?: @"";
+    body[@"totalSegments"] = @(totalSegments);
+    NSString *fullText = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
+    BOOL textTruncated = NO;
+    body[@"text"] = txt_truncate_event_text(fullText, &textTruncated);
+    if (textTruncated) {
+        body[@"textTruncated"] = @YES;
+    }
+    body[@"source"] = [NSString stringWithUTF8String:segment.source.c_str()] ?: @"unknown";
+    body[@"segmentIndex"] = @(segment.segmentIndex);
+
+    if (!segment.tokens.empty()) {
+        NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:segment.tokens.size()];
+        for (const auto &token : segment.tokens) {
+            [tokens addObject:[NSString stringWithUTF8String:token.c_str()] ?: @""];
+        }
+        body[@"tokens"] = tokens;
+    }
+
+    if (!segment.timestamps.empty()) {
+        NSMutableArray *timestamps = [NSMutableArray arrayWithCapacity:segment.timestamps.size()];
+        for (float ts : segment.timestamps) {
+            [timestamps addObject:@(ts)];
+        }
+        body[@"timestamps"] = timestamps;
+    }
+
+    if (segment.meta != nil) {
+        body[@"meta"] = segment.meta;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [module sendEventWithName:@"pipelineLiveTextSegmentAppended" body:body];
+    });
+}
 
 std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId) {
     std::lock_guard<std::mutex> lock(g_txt_mutex);
@@ -224,6 +346,31 @@ bool txt_read_offline_text(
     return true;
 }
 
+bool txt_read_offline_text_with_lang(
+    const std::string &bufferId,
+    std::string *text,
+    std::string *lang,
+    std::string *error
+) {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+        if (error) *error = "Offline text buffer not found";
+        return false;
+    }
+    if (!it->second->populated || it->second->text.empty()) {
+        if (error) *error = "Text buffer is empty or not populated";
+        return false;
+    }
+    if (text) {
+        *text = it->second->text;
+    }
+    if (lang) {
+        *lang = it->second->lang;
+    }
+    return true;
+}
+
 bool txt_populate_offline_if_empty(
     const std::string &bufferId,
     const std::string &text,
@@ -256,6 +403,10 @@ void txt_release_all_entries() {
         liveToRelease = std::move(g_txt_live);
         g_txt_live.clear();
         g_txt_offline.clear();
+    }
+    {
+        std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+        g_txt_partial_last_emit_ms.clear();
     }
     for (auto &pair : liveToRelease) {
         if (pair.second) {
@@ -381,13 +532,73 @@ static std::string txt_generateId(const char *prefix) {
     }
 }
 
-- (void)createLiveTextBuffer:(NSDictionary *)options
+- (void)populateOfflineTextBufferIfEmpty:(NSString *)bufferId
+                                    text:(NSString *)text
+                                 options:(NSDictionary *)options
+                                 resolve:(RCTPromiseResolveBlock)resolve
+                                  reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        if (bufferId == nil || [bufferId length] == 0) {
+            reject(kTxtErrInvalidArgument, @"bufferId is required", nil);
+            return;
+        }
+
+        const std::string bid = [bufferId UTF8String] ?: "";
+        const std::string t = text != nil ? ([text UTF8String] ?: "") : "";
+        std::string lang;
+        std::string emotion;
+        std::string event;
+        if (options != nil) {
+            if ([options[@"lang"] isKindOfClass:[NSString class]]) {
+                lang = [options[@"lang"] UTF8String] ?: "";
+            }
+            if ([options[@"emotion"] isKindOfClass:[NSString class]]) {
+                emotion = [options[@"emotion"] UTF8String] ?: "";
+            }
+            if ([options[@"event"] isKindOfClass:[NSString class]]) {
+                event = [options[@"event"] UTF8String] ?: "";
+            }
+        }
+
+        std::string error;
+        if (!txt_populate_offline_if_empty(
+              bid,
+              t,
+              {},
+              {},
+              {},
+              lang,
+              emotion,
+              event,
+              &error
+            )) {
+            NSString *message = [NSString stringWithUTF8String:error.c_str()] ?: @"Failed to populate offline text buffer";
+            if (error.find("not found") != std::string::npos) {
+                reject(kTxtErrBufferNotFound, message, nil);
+                return;
+            }
+            if (error.find("already populated") != std::string::npos) {
+                reject(kTxtErrAlreadyPopulated, message, nil);
+                return;
+            }
+            reject(kTxtErrInternalError, message, nil);
+            return;
+        }
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
+- (void)createLiveTextBuffer:(JS::NativeSherpaOnnx::SpecCreateLiveTextBufferOptions &)options
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
     try {
         int windowMaxChars = 65536;
-        int maxSegments = 1000;
+        int maxSegments = 4096;
         bool emitPartialEvents = false;
         int64_t partialEventMinIntervalMs = 0;
         TxtLiveEntry::SpoolingMode spoolingMode = TxtLiveEntry::SPOOL_ON;
@@ -395,20 +606,19 @@ static std::string txt_generateId(const char *prefix) {
         std::string spoolingPath;
         bool spoolingTemporary = true;
 
-        if (options[@"windowMaxChars"]) {
-            windowMaxChars = [options[@"windowMaxChars"] intValue];
+        if (auto windowMaxCharsOpt = options.windowMaxChars()) {
+            windowMaxChars = static_cast<int>(windowMaxCharsOpt.value());
         }
-        if (options[@"maxSegments"]) {
-            maxSegments = [options[@"maxSegments"] intValue];
+        if (auto maxSegmentsOpt = options.maxSegments()) {
+            maxSegments = static_cast<int>(maxSegmentsOpt.value());
         }
-        if (options[@"emitPartialEvents"]) {
-            emitPartialEvents = [options[@"emitPartialEvents"] boolValue];
+        if (auto emitPartialEventsOpt = options.emitPartialEvents()) {
+            emitPartialEvents = emitPartialEventsOpt.value();
         }
-        if (options[@"partialEventMinIntervalMs"]) {
-            partialEventMinIntervalMs = [options[@"partialEventMinIntervalMs"] longLongValue];
+        if (auto partialEventMinIntervalMsOpt = options.partialEventMinIntervalMs()) {
+            partialEventMinIntervalMs = static_cast<int64_t>(partialEventMinIntervalMsOpt.value());
         }
-        if ([options[@"spoolingMode"] isKindOfClass:[NSString class]]) {
-            NSString *rawMode = (NSString *)options[@"spoolingMode"];
+        if (NSString *rawMode = options.spoolingMode()) {
             if ([rawMode isEqualToString:@"off"]) {
                 spoolingMode = TxtLiveEntry::SPOOL_OFF;
             } else if ([rawMode isEqualToString:@"auto"]) {
@@ -422,17 +632,16 @@ static std::string txt_generateId(const char *prefix) {
                 return;
             }
         }
-        if (options[@"spoolingThresholdBytes"]) {
-            spoolingThresholdBytes = [options[@"spoolingThresholdBytes"] longLongValue];
+        if (auto spoolingThresholdBytesOpt = options.spoolingThresholdBytes()) {
+            spoolingThresholdBytes = static_cast<int64_t>(spoolingThresholdBytesOpt.value());
         }
-        if ([options[@"spoolingPath"] isKindOfClass:[NSString class]]) {
-            NSString *path = (NSString *)options[@"spoolingPath"];
+        if (NSString *path = options.spoolingPath()) {
             if (path.length > 0) {
                 spoolingPath = [path UTF8String] ?: "";
             }
         }
-        if (options[@"spoolingTemporary"]) {
-            spoolingTemporary = [options[@"spoolingTemporary"] boolValue];
+        if (auto spoolingTemporaryOpt = options.spoolingTemporary()) {
+            spoolingTemporary = spoolingTemporaryOpt.value();
         } else {
             spoolingTemporary = spoolingPath.empty();
         }
@@ -453,6 +662,18 @@ static std::string txt_generateId(const char *prefix) {
         entry->emitPartialEvents = emitPartialEvents;
         entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
         entry->configureSpooling(spoolingMode, spoolingPath, spoolingTemporary, spoolingThresholdBytes);
+        __weak SherpaOnnx *weakSelf = self;
+        std::weak_ptr<TxtLiveEntry> weakEntry = entry;
+        NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
+        entry->addCommitListener([weakSelf, weakEntry, liveBufferId](const TextSegment &segment) {
+            SherpaOnnx *strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            int totalSegments = segment.segmentIndex + 1;
+            if (auto strongEntry = weakEntry.lock()) {
+                totalSegments = strongEntry->segmentCount();
+            }
+            txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
+        });
         {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_live[bufferId] = entry;
@@ -493,6 +714,18 @@ static std::string txt_generateId(const char *prefix) {
         NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
         std::string spoolPath = [joined UTF8String] ?: "";
         entry->configureSpooling(TxtLiveEntry::SPOOL_ON, spoolPath, true, 0);
+        __weak SherpaOnnx *weakSelf = self;
+        std::weak_ptr<TxtLiveEntry> weakEntry = entry;
+        NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
+        entry->addCommitListener([weakSelf, weakEntry, liveBufferId](const TextSegment &segment) {
+            SherpaOnnx *strongSelf = weakSelf;
+            if (strongSelf == nil) return;
+            int totalSegments = segment.segmentIndex + 1;
+            if (auto strongEntry = weakEntry.lock()) {
+                totalSegments = strongEntry->segmentCount();
+            }
+            txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
+        });
         if (!seedText.empty()) {
             entry->writePartial(seedText);
         }
@@ -581,6 +814,10 @@ static std::string txt_generateId(const char *prefix) {
                 liveToRelease = liveIt->second;
                 g_txt_live.erase(liveIt);
             }
+        }
+        {
+            std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
+            g_txt_partial_last_emit_ms.erase(bid);
         }
         if (liveToRelease) {
             liveToRelease->release();
@@ -876,10 +1113,82 @@ static std::string txt_generateId(const char *prefix) {
     }
 }
 
+- (void)setLiveTextBufferPartial:(NSString *)liveBufferId
+                            text:(NSString *)text
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
+{
+    try {
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::string textStr = [text UTF8String] ?: "";
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        entry->writePartial(textStr);
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown setLiveTextBufferPartial error", nil);
+    }
+}
+
+- (void)appendLiveTextBufferPartial:(NSString *)liveBufferId
+                               text:(NSString *)text
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject
+{
+    try {
+    @try {
+        std::string lid = [liveBufferId UTF8String] ?: "";
+        std::string textStr = [text UTF8String] ?: "";
+
+        std::shared_ptr<TxtLiveEntry> entry;
+        {
+            std::lock_guard<std::mutex> lock(g_txt_mutex);
+            auto it = g_txt_live.find(lid);
+            if (it == g_txt_live.end()) {
+                reject(kTxtErrBufferNotFound,
+                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
+                return;
+            }
+            entry = it->second;
+        }
+
+        entry->appendText(textStr);
+
+        resolve(nil);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+        return;
+    }
+    } catch (const std::exception &e) {
+        txtRejectWithStdException(reject, e);
+    } catch (...) {
+        reject(kTxtErrInternalError, @"Unknown appendLiveTextBufferPartial error", nil);
+    }
+}
+
 - (void)appendLiveTextSegment:(NSString *)liveBufferId
                           text:(NSString *)text
-                        tokens:(NSArray<NSString *> *)tokens
-                    timestamps:(NSArray<NSNumber *> *)timestamps
+                        tokens:(NSArray *)tokens
+                    timestamps:(NSArray *)timestamps
                           meta:(NSDictionary *)meta
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
@@ -937,7 +1246,7 @@ static std::string txt_generateId(const char *prefix) {
 - (void)getLiveTextBufferSegments:(NSString *)liveBufferId
                         startIndex:(double)startIndex
                           maxCount:(double)maxCount
-                           options:(NSDictionary *)options
+                           options:(JS::NativeSherpaOnnx::SpecGetLiveTextBufferSegmentsOptions &)options
                            resolve:(RCTPromiseResolveBlock)resolve
                             reject:(RCTPromiseRejectBlock)reject
 {
@@ -969,15 +1278,12 @@ static std::string txt_generateId(const char *prefix) {
             entry = it->second;
         }
 
-        BOOL includeTokens = options != nil && options[@"includeTokens"] != nil
-            ? [options[@"includeTokens"] boolValue]
-            : NO;
-        BOOL includeTimestamps = options != nil && options[@"includeTimestamps"] != nil
-            ? [options[@"includeTimestamps"] boolValue]
-            : NO;
-        BOOL includeMeta = options != nil && options[@"includeMeta"] != nil
-            ? [options[@"includeMeta"] boolValue]
-            : NO;
+        auto includeTokensOpt = options.includeTokens();
+        BOOL includeTokens = includeTokensOpt.has_value() ? includeTokensOpt.value() : NO;
+        auto includeTimestampsOpt = options.includeTimestamps();
+        BOOL includeTimestamps = includeTimestampsOpt.has_value() ? includeTimestampsOpt.value() : NO;
+        auto includeMetaOpt = options.includeMeta();
+        BOOL includeMeta = includeMetaOpt.has_value() ? includeMetaOpt.value() : NO;
 
         auto segments = entry->getSegments(s, m);
         NSMutableArray *segmentArray = [NSMutableArray arrayWithCapacity:segments.size()];

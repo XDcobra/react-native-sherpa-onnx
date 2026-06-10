@@ -1,10 +1,16 @@
 # Pipeline text buffers — live / streaming (`textbuffer`)
 
-**Live native text buffers** for incremental pipelines with partial text, committed segments, and optional spool-backed full history.
+## Introduction
+
+**Live native text buffers** for incremental pipelines with partial text, committed segments, and optional spool-backed full history. Use **`onPartial`** for hypothesis streaming and **`onSegment`** for each **committed** text segment without polling (see [Committed text segments](#committed-text-segments-onsegment-no-polling)).
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
 
 For streaming STT pipelines that write into live text buffers, see [stt-streaming.md](stt-streaming.md).
+
+## Relation to streaming pipelines
+
+Live text buffers are **sinks** or **sources** for segment-oriented workers (STT transcript, streaming punctuation, TTS live overload, …). **Finalizing** a live text buffer (`finalizeLiveTextBuffer`) is a **buffer** operation; **flushing** a running feature is a **pipeline handle** operation on the STT/TTS/punctuation engine — both layers appear in end-to-end flows. See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
 
 ---
 
@@ -20,7 +26,9 @@ When you need full-history guarantees beyond the active window, enable spooling 
 
 ---
 
-## Quick start: Streaming STT -> LiveTextBuffer
+## Quick start
+
+### Streaming STT -> LiveTextBuffer
 
 ```ts
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
@@ -69,10 +77,14 @@ const liveText = await createLiveTextBuffer({
     }
     lastSegmentIndex = total;
   },
+  // Also fires on every commit — use alone or together with `onPartial` (see section below).
+  onSegment: (e) => {
+    console.log(`[onSegment ${e.segment.segmentIndex}]`, e.segment.text);
+  },
 });
 
 const stt = await createStreamingSTT({
-  modelPath: { type: 'asset', path: 'models/my-streaming-model' },
+  modelSource: { kind: 'app', base: 'apkAsset', path: 'models/my-streaming-model' },
   modelType: 'transducer',
 });
 const pipeline = await stt.transcribe(liveAudio, liveText, { chunkSize: 3200 });
@@ -96,13 +108,43 @@ await releasePipelineAudioBuffer(liveAudio);
 
 ---
 
+## Committed text segments: `onSegment` (no polling)
+
+Each time the native worker (or `appendLiveTextSegment`) **commits** a new transcript slice, the live text buffer can emit **`onSegment`** with a [`LiveTextBufferSegmentEvent`](../src/textbuffer/types.ts):
+
+- `bufferId` — live text buffer id  
+- `segment` — committed segment (`domain: 'text'`, `text`, `segmentIndex`, optional `tokens` / `timestamps` / `meta`)  
+- `totalSegments` — retained segment count **after** this commit (upper bound for pull APIs)
+
+This is the right hook when you want **“new subtitle line”** semantics instead of high-frequency **`onPartial`** updates. It complements (does not replace) **`onPartial`** for streaming STT.
+
+```ts
+import { createLiveTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const liveText = await createLiveTextBuffer({
+  windowMaxChars: 65536,
+  maxSegments: 2048,
+  onSegment: (e) => {
+    console.log(
+      `[segment ${e.segment.segmentIndex}]`,
+      e.segment.text,
+      `(total=${e.totalSegments})`
+    );
+  },
+});
+```
+
+For attach-after-creation, use **`subscribeLiveTextBufferEvents`** (same shape as `createLiveTextBuffer` callbacks). See also [Streaming STT](stt-streaming.md#observing-committed-segments).
+
+---
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/textbuffer`.
 
 Ref-first usage is recommended: pass `LiveTextBufferRef` directly.
 
-Partial events: optional `streamEvents.partial` (`enabled` + `minIntervalMs`); if omitted, registering `onPartial` opts in to events (see [`CreateLiveTextBufferOptions`](../src/textbuffer/types.ts)).
+Partial events: optional `streamEvents.partial` (`enabled` + `minIntervalMs`); if omitted, registering `onPartial` opts in to events (see [`CreateLiveTextBufferOptions`](../src/textbuffer/types.ts)). **Committed segments:** register **`onSegment`** for push notifications per commit (see [Committed text segments](#committed-text-segments-onsegment-no-polling)).
 
 ### General
 
@@ -153,6 +195,7 @@ const live = await createLiveTextBuffer({
   spooling: { mode: 'auto', thresholdBytes: 262144 },
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   onPartial: (e) => console.log(e.partialText),
+  onSegment: (e) => console.log('[commit]', e.segment.text),
   onError: (e) => console.warn(e.message),
 });
 ```
@@ -162,6 +205,32 @@ Spooling options:
 - `path`: explicit spool file path
 - `temporary`: delete spool on release (default true for auto temp paths)
 - `thresholdBytes`: activation threshold for `mode: 'auto'`
+
+**Listener cleanup:** `createLiveTextBuffer` returns a ref with an `unsubscribeEvents` function. Calling `live.unsubscribeEvents()` removes **only** the callbacks passed during this `createLiveTextBuffer` call.
+
+#### `subscribeLiveTextBufferEvents(liveBuffer, callbacks)`
+
+```ts
+function subscribeLiveTextBufferEvents(
+  liveBuffer: LiveTextBufferIdSource,
+  callbacks: LiveTextBufferCallbacks
+): () => void;
+```
+
+```ts
+const unsub = subscribeLiveTextBufferEvents(live, {
+  onPartial: (e) => console.log(e.partialText),
+  onSegment: (e) => console.log(e.segment.text),
+  onError: (e) => console.error(e.message),
+});
+
+// later:
+unsub();
+```
+
+Use this for the **advanced "two-level" event story** (shared with `audiobuffer`):
+1. **Default:** Pass callbacks to `createLiveTextBuffer` and use `live.unsubscribeEvents()`.
+2. **Advanced:** Attach additional listeners later (e.g. from a different UI component) using `subscribeLiveTextBufferEvents`. The returned function unregisters **only** the listeners from that specific call.
 
 #### `createLiveTextBufferFromOffline(offlineBuffer)`
 
@@ -204,23 +273,20 @@ function getLiveTextBufferPartialSlice(
 const partial = await getLiveTextBufferPartialSlice(live, 0, 256);
 ```
 
-#### `appendLiveTextSegment(liveBuffer, text, options?)`
+#### `appendLiveTextSegment(liveBuffer, text, tokens?, timestamps?, meta?)`
 
 ```ts
 function appendLiveTextSegment(
   liveBuffer: LiveTextBufferRecordingSource,
   text: string,
-  options?: {
-    source?: 'stt_stream' | 'append' | 'replace' | 'mixed' | 'unknown';
-    tokens?: string[];
-    timestamps?: number[];
-    meta?: Record<string, unknown>;
-  }
+  tokens?: string[],
+  timestamps?: number[],
+  meta?: Record<string, unknown>
 ): Promise<{ segmentIndex: number }>;
 ```
 
 ```ts
-await appendLiveTextSegment(live, 'hello world', { source: 'append' });
+await appendLiveTextSegment(live, 'hello world', ['h', 'e', 'l', 'l', 'o']);
 ```
 
 #### `getLiveTextBufferSegments(liveBuffer, startIndex, maxCount)`
@@ -229,7 +295,11 @@ await appendLiveTextSegment(live, 'hello world', { source: 'append' });
 function getLiveTextBufferSegments(
   liveBuffer: LiveTextBufferIdSource,
   startIndex: number,
-  maxCount: number
+  maxCount: number,
+  options?: {
+    includeTokens?: boolean;
+    includeTimestamps?: boolean;
+  }
 ): Promise<LiveTextSegment[]>;
 ```
 
@@ -268,9 +338,58 @@ Strict mode semantics:
 - `windowSnapshot`: current in-memory live window
 - `fullIfSpooled`: full text from spool only; rejects with `TEXT_SPOOL_*` errors when unavailable
 
+## Segmentation
+
+Live text buffers support built-in segmentation configuration through `CreateLiveTextBufferOptions.segmentation`.
+
+- `off`: no segmentation attachment.
+- `manual` (default): boundary management is external.
+- `auto`: segmentation engine auto-attaches with text policy (default evaluator: `text_synthetic_auto`).
+
+Use this when streaming text should be segmented at consistent boundaries before downstream consumers (for example streaming TTS) process segments.
+
+```ts
+const live = await createLiveTextBuffer({
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 },
+  },
+  onSegment: (e) =>
+    console.log('text segment', e.segment.segmentIndex, 'total=', e.totalSegments),
+});
+```
+
+See [segmentation-engine.md](segmentation-engine.md) for full segmentation semantics and [memory-and-models.md](memory-and-models.md) for memory/OOM context.
+
 ---
 
-## Error code quick table
+## Types and constants
+
+```ts
+import type {
+  LiveTextBufferRef, // live text buffer ref with info + recording handle
+  LiveTextBufferInfo, // live buffer metadata including spool status
+  LiveTextBufferIdSource, // ref/handle/id accepted by live text APIs
+  LiveTextBufferRecordingSource, // recording-only source for append/finalize
+  LiveTextSegment, // committed segment shape from live segment log
+  LiveTextBufferPartialEvent, // partial event payload for streaming updates
+  LiveTextBufferSegmentEvent, // committed-segment event payload (`onSegment`)
+  LiveTextBufferErrorEvent, // error event payload for live buffer
+  CreateLiveTextBufferOptions, // options for createLiveTextBuffer
+  OfflineTextBufferFromLiveMode, // conversion mode from live to offline
+  PipelineTextBufferInfo, // offline/live metadata union
+  PipelineTextErrorCodeValue, // string union of textbuffer error codes
+} from 'react-native-sherpa-onnx/textbuffer';
+
+import {
+  PipelineTextErrorCode, // runtime constants for code-based error handling
+  subscribeLiveTextBufferEvents, // attach additional listeners after buffer creation
+  TEXT_DEFAULT_SLICE_COUNT, // default safe slice count for reads
+  TEXT_MAX_SLICE_COUNT, // maximum safe slice count for reads
+} from 'react-native-sherpa-onnx/textbuffer';
+```
+
+## Error codes
 
 The following codes are the relevant runtime outcomes for live/streaming text-buffer operations in this document (`create`, `append`, `finalize`, `slice`, `createOfflineFromLive`, `release`).
 
@@ -296,3 +415,46 @@ The following codes are the relevant runtime outcomes for live/streaming text-bu
 - [Pipeline text buffers — offline](textbuffer-offline.md)
 - [Streaming STT](stt-streaming.md)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
+
+## Use case examples
+
+<details>
+<summary>Event-driven partial rendering with endpoint-triggered segment reads</summary>
+
+```ts
+let last = 0;
+const liveText = await createLiveTextBuffer({
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
+  onPartial: async (event) => {
+    console.log('[partial]', event.partialText);
+    if (!event.isEndpoint) return;
+
+    const total = await getLiveTextBufferSegmentCount(liveText);
+    if (total <= last) return;
+    const fresh = await getLiveTextBufferSegments(liveText, last, total - last);
+    fresh.forEach((s) => console.log('[segment]', s.text));
+    last = total;
+  },
+});
+```
+
+</details>
+
+<details>
+<summary>Convert finished live session to strict full-history offline snapshot</summary>
+
+```ts
+await finalizeLiveTextBuffer(liveText);
+const offline = await createOfflineTextBufferFromLive(liveText, 'fullIfSpooled');
+const info = await getPipelineTextBufferInfo(offline);
+const text = await getOfflineTextBufferTextSlice(offline, 0, info.utf16Length);
+console.log(text);
+await releasePipelineTextBuffer(offline);
+```
+
+</details>
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+

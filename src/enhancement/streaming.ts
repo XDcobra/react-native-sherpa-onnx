@@ -1,11 +1,15 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
-import { resolveModelPath } from '../utils';
+import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
+import { validateSegmentationConfig } from '../segment/validation';
+import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
 import type { EnhancementModelType } from './types';
 import type {
   EnhancementPipelineHandle,
   StreamingEnhancementEngine,
+  StreamingEnhancementEnhanceOptions,
   StreamingEnhancementInitializeOptions,
 } from './streamingTypes';
 
@@ -13,9 +17,26 @@ let streamingEnhancementInstanceCounter = 0;
 
 function createEnhancementPipelineHandle(
   instanceId: string,
-  pipelineId: string
+  pipelineId: string,
+  attachedSegmentationEngineId?: string
 ): EnhancementPipelineHandle {
-  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  let detached = false;
+  const detachIfNeeded = async () => {
+    if (!attachedSegmentationEngineId || detached) return;
+    detached = true;
+    try {
+      await detachSegmentationEngine(attachedSegmentationEngineId, {
+        flushFinal: true,
+      });
+    } catch {
+      // Best effort: segmentation detach must not mask pipeline shutdown.
+    }
+  };
+
+  const completed =
+    createStreamingPipelineCompletionPromise(pipelineId).finally(
+      detachIfNeeded
+    );
 
   return {
     instanceId,
@@ -24,7 +45,11 @@ function createEnhancementPipelineHandle(
     },
     completed,
     async stop(): Promise<void> {
-      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      try {
+        await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      } finally {
+        await detachIfNeeded();
+      }
     },
     async flush(): Promise<void> {
       await SherpaOnnx.flushStreamingPipeline(pipelineId);
@@ -42,14 +67,10 @@ export async function createStreamingEnhancement(
   options: StreamingEnhancementInitializeOptions
 ): Promise<StreamingEnhancementEngine> {
   const instanceId = `streaming_enhancement_${++streamingEnhancementInstanceCounter}`;
-  const resolvedPath = await resolveModelPath(options.modelPath);
+  const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const result = await SherpaOnnx.initializeOnlineEnhancement(
     instanceId,
-    resolvedPath,
-    options.modelType ?? 'auto',
-    options.numThreads,
-    options.provider,
-    options.debug
+    bridgeOptions
   );
 
   if (!result.success) {
@@ -94,15 +115,66 @@ export async function createStreamingEnhancement(
 
     async enhance(
       inputBufferId: string,
-      outputBufferId: string
+      outputBufferId: string,
+      enhanceOptions?: StreamingEnhancementEnhanceOptions
     ): Promise<EnhancementPipelineHandle> {
       guard();
-      const raw = await SherpaOnnx.startEnhancementPipeline(
-        instanceId,
-        inputBufferId,
-        outputBufferId
-      );
-      return createEnhancementPipelineHandle(instanceId, raw.pipelineId);
+
+      const normalizedInputId = resolvePipelineAudioBufferId(inputBufferId);
+      if (!normalizedInputId.startsWith('live_')) {
+        throw new Error(
+          'ENHANCEMENT_INVALID_ARGUMENT: streaming enhancement input buffer must be live_*'
+        );
+      }
+
+      const normalizedOutputId = resolvePipelineAudioBufferId(outputBufferId);
+      if (!normalizedOutputId.startsWith('live_')) {
+        throw new Error(
+          'ENHANCEMENT_INVALID_ARGUMENT: streaming enhancement output buffer must be live_*'
+        );
+      }
+
+      const segmentation = validateSegmentationConfig({
+        mode: enhanceOptions?.segmentation?.mode,
+        policy: enhanceOptions?.segmentation?.policy,
+        featureName: 'streaming enhancement',
+        domain: 'speech',
+        supportsManual: true,
+        defaultPolicy: {
+          evaluator: 'continuous_frames',
+          checkpointIntervalMs: 1000,
+        },
+        supportedEvaluators: ['continuous_frames'],
+        errorPrefix: 'ENHANCEMENT_INVALID_SEGMENTATION',
+      });
+
+      let attachedSegmentationEngineId: string | undefined;
+      if (segmentation.mode === 'auto') {
+        const attached = await attachSegmentationEngine(normalizedInputId, {
+          policy: segmentation.policy,
+        });
+        attachedSegmentationEngineId = attached.engineId;
+      }
+
+      try {
+        const raw = await SherpaOnnx.startEnhancementPipeline(
+          instanceId,
+          normalizedInputId,
+          normalizedOutputId
+        );
+        return createEnhancementPipelineHandle(
+          instanceId,
+          raw.pipelineId,
+          attachedSegmentationEngineId
+        );
+      } catch (err) {
+        if (attachedSegmentationEngineId) {
+          await detachSegmentationEngine(attachedSegmentationEngineId, {
+            flushFinal: true,
+          }).catch(() => undefined);
+        }
+        throw err;
+      }
     },
   };
 }

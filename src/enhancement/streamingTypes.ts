@@ -1,8 +1,15 @@
-import type { EnhancementInitializeOptions } from './types';
+import type {
+  EnhanceSegmentationConfig,
+  EnhancementInitializeOptions,
+} from './types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 
 export type StreamingEnhancementInitializeOptions =
   EnhancementInitializeOptions;
+
+export interface StreamingEnhancementEnhanceOptions {
+  segmentation?: EnhanceSegmentationConfig;
+}
 
 /**
  * Online denoiser from `createStreamingEnhancement`. Audio is produced only via
@@ -15,7 +22,8 @@ export interface StreamingEnhancementEngine {
   destroy(): Promise<void>;
   enhance(
     inputBufferId: string,
-    outputBufferId: string
+    outputBufferId: string,
+    options?: StreamingEnhancementEnhanceOptions
   ): Promise<EnhancementPipelineHandle>;
 }
 
