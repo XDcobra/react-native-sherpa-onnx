@@ -105,6 +105,12 @@ type Props = {
    * that the parent already caught) to show alongside the widget's own errors.
    */
   externalError?: string | null;
+  /**
+   * When set, decode/resample the file to this sample rate before creating the
+   * offline buffer. Use the separation (or other feature) model sample rate so
+   * segmented pipelines match orchestrator output buffers.
+   */
+  decodeTargetSampleRateHz?: number;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,6 +165,7 @@ export const OfflineAudioBufferWidget = forwardRef<
     disabled = false,
     visible = true,
     externalError = null,
+    decodeTargetSampleRateHz,
   },
   ref
 ) {
@@ -305,6 +312,9 @@ export const OfflineAudioBufferWidget = forwardRef<
 
       const decodeOptions = {
         forceMono: true,
+        ...(decodeTargetSampleRateHz != null && decodeTargetSampleRateHz > 0
+          ? { targetSampleRateHz: decodeTargetSampleRateHz }
+          : {}),
         onProgress: (event: {
           percent?: number;
           framesDecoded?: number;
@@ -355,7 +365,7 @@ export const OfflineAudioBufferWidget = forwardRef<
         }
       }
     },
-    [onBufferReady, stopPlayer]
+    [decodeTargetSampleRateHz, onBufferReady, stopPlayer]
   );
 
   // ─────────────────────────────────────────────────────────────────────────

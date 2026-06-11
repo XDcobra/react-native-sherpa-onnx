@@ -1183,6 +1183,7 @@ export default function SeparationScreen() {
               audioFiles={AUDIO_FILES}
               visible={engineReady}
               disabled={!engineReady || separating || liveBusy}
+              decodeTargetSampleRateHz={modelSampleRate ?? undefined}
               onBufferReady={setPreparedInputBuffer}
               onBufferReleased={() => {
                 setPreparedInputBuffer(null);
