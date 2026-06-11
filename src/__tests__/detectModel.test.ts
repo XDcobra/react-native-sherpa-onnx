@@ -74,6 +74,35 @@ describe('detectModel', () => {
     expect(result).toEqual({ matched: false });
   });
 
+  it('maps native separation category to ModelCategory.Separation', async () => {
+    mockSherpa.detectModel.mockResolvedValue({
+      matched: true,
+      success: true,
+      category: 'separation',
+      modelType: 'uvr',
+      detectedModels: [{ type: 'uvr', modelDir: '.' }],
+      detectionSources: ['nameOnly'],
+      paths: { model: '/models/UVR-MDX-NET-Inst_1.onnx' },
+      isStreaming: false,
+    });
+
+    const result = await detectModel({ assetName: 'UVR-MDX-NET-Inst_1.onnx' });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        matched: true,
+        category: ModelCategory.Separation,
+        modelType: 'uvr',
+        isStreaming: false,
+        paths: { model: '/models/UVR-MDX-NET-Inst_1.onnx' },
+      })
+    );
+    expect(mockSherpa.detectModel).toHaveBeenCalledWith(
+      '',
+      'UVR-MDX-NET-Inst_1.onnx'
+    );
+  });
+
   it('sets supportsQnn on STT hits with QNN naming', async () => {
     mockSherpa.detectModel.mockResolvedValue({
       matched: true,

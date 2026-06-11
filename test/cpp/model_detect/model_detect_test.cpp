@@ -1275,6 +1275,25 @@ TEST(UnifiedModelDetectTest, NameOnlySupertonicRepoMatchesTtsCategory) {
     EXPECT_EQ(result.modelType, "supertonic");
 }
 
+TEST(UnifiedModelDetectTest, NameOnlySpleeterAssetMatchesSeparationCategory) {
+    auto result = sherpaonnx::DetectModel(
+        std::nullopt,
+        std::optional<std::string>("sherpa-onnx-spleeter-2stems.tar.bz2"));
+    EXPECT_TRUE(result.matched);
+    EXPECT_EQ(result.category, "separation");
+    EXPECT_EQ(result.modelType, "spleeter");
+    EXPECT_FALSE(result.isStreaming);
+}
+
+TEST(UnifiedModelDetectTest, NameOnlyUvrAssetMatchesSeparationCategory) {
+    auto result = sherpaonnx::DetectModel(
+        std::nullopt, std::optional<std::string>("UVR-MDX-NET-Inst_1.onnx"));
+    EXPECT_TRUE(result.matched);
+    EXPECT_EQ(result.category, "separation");
+    EXPECT_EQ(result.modelType, "uvr");
+    EXPECT_FALSE(result.isStreaming);
+}
+
 TEST(UnifiedModelDetectTest, BatchPreservesOrderAndLength) {
     std::vector<sherpaonnx::UnifiedModelDetectInput> inputs = {
         {std::nullopt, std::optional<std::string>("vits-piper-en")},

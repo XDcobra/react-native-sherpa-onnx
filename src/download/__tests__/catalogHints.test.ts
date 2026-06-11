@@ -9,11 +9,11 @@ describe('categoryUsesCatalogDetect', () => {
     expect(categoryUsesCatalogDetect(ModelCategory.Vad)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Punctuation)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Enhancement)).toBe(true);
+    expect(categoryUsesCatalogDetect(ModelCategory.Separation)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Alignment)).toBe(true);
   });
 
-  it('excludes diarization and separation', () => {
+  it('excludes diarization', () => {
     expect(categoryUsesCatalogDetect(ModelCategory.Diarization)).toBe(false);
-    expect(categoryUsesCatalogDetect(ModelCategory.Separation)).toBe(false);
   });
 });
