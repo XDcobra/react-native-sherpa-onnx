@@ -3,16 +3,27 @@ package com.sherpaonnx.separation.facade
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import com.facebook.react.bridge.WritableNativeMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
+import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.separation.config.SeparationInitOptionsParser
 import com.sherpaonnx.separation.core.SeparationErrorCodes
+import com.sherpaonnx.separation.pipeline.SeparationOfflineLivePipelineWorker
+import java.util.UUID
 
 internal class SherpaOnnxSeparationHelper(
+  private val context: ReactApplicationContext,
   private val nativeDetectSeparationModel: (
     modelDir: String?,
     assetName: String?,
@@ -320,6 +331,146 @@ internal class SherpaOnnxSeparationHelper(
     }
     nativeReleaseSeparation(instanceId)
     promise.resolve(null)
+  }
+
+  fun startSeparationOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferIds: ReadableArray,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    try {
+      val expectedStems = nativeGetSeparationNumStems(instanceId)
+      if (expectedStems <= 0) {
+        promise.reject(
+          SeparationErrorCodes.SEPARATION_ERROR,
+          "Separation instance not found: $instanceId",
+        )
+        return
+      }
+
+      if (!audioInLiveBufferId.startsWith("live_")) {
+        promise.reject(
+          SeparationErrorCodes.SEPARATION_BUFFER_KIND_MISMATCH,
+          "Expected live audio buffer (live_*) for audioIn, got: $audioInLiveBufferId",
+        )
+        return
+      }
+      val liveAudioIn = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      if (liveAudioIn == null) {
+        promise.reject(
+          SeparationErrorCodes.SEPARATION_BUFFER_NOT_FOUND,
+          "Input live buffer not found: $audioInLiveBufferId",
+        )
+        return
+      }
+
+      if (audioOutLiveBufferIds.size() != expectedStems) {
+        promise.reject(
+          SeparationErrorCodes.SEPARATION_STEM_COUNT_MISMATCH,
+          "Expected $expectedStems output buffers, got ${audioOutLiveBufferIds.size()}",
+        )
+        return
+      }
+
+      val liveAudioOuts = ArrayList<LiveEntry>(expectedStems)
+      for (i in 0 until audioOutLiveBufferIds.size()) {
+        val outId = audioOutLiveBufferIds.getString(i)
+        if (outId.isNullOrBlank()) {
+          promise.reject(
+            SeparationErrorCodes.SEPARATION_BUFFER_NOT_FOUND,
+            "Output buffer id missing at index $i",
+          )
+          return
+        }
+        if (!outId.startsWith("live_")) {
+          promise.reject(
+            SeparationErrorCodes.SEPARATION_BUFFER_KIND_MISMATCH,
+            "Expected live audio buffer (live_*) for audioOut, got: $outId",
+          )
+          return
+        }
+        val liveAudioOut = PipelineAudioRegistry.getLive(outId)
+        if (liveAudioOut == null) {
+          promise.reject(
+            SeparationErrorCodes.SEPARATION_BUFFER_NOT_FOUND,
+            "Output live buffer not found: $outId",
+          )
+          return
+        }
+        liveAudioOuts.add(liveAudioOut)
+      }
+
+      val attachedSegmentationEngineId = options.getString("attachedSegmentationEngineId")?.trim().orEmpty()
+      if (attachedSegmentationEngineId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: attachedSegmentationEngineId missing on native bridge")
+      }
+
+      val segmentLiveBufferId = options.getString("segmentLiveBufferId")?.trim().orEmpty()
+      if (segmentLiveBufferId.isEmpty()) {
+        error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: segmentLiveBufferId missing on native bridge")
+      }
+
+      val segmentEntry = SegmentPipelineRegistry.getLive(segmentLiveBufferId)
+        ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
+
+      val pipelineId = "live_offline_sep_${UUID.randomUUID()}"
+      val worker = SeparationOfflineLivePipelineWorker(
+        pipelineId = pipelineId,
+        attachedSegmentationEngineId = attachedSegmentationEngineId,
+        audioInputRef = OfflineLivePipelineWorker.AudioInput(
+          liveAudioEntry = liveAudioIn,
+          liveSegmentEntry = segmentEntry,
+        ),
+        processSeparation = { samples, sampleRate ->
+          nativeProcessSeparation(instanceId, samples, sampleRate)
+        },
+        audioOutputEntries = liveAudioOuts,
+      )
+      StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+      }
+      promise.resolve(WritableNativeMap().apply { putString("pipelineId", pipelineId) })
+    } catch (e: OutOfMemoryError) {
+      Log.e(SeparationErrorCodes.TAG, "OOM Separation live overload failed", e)
+      promise.reject(
+        SeparationErrorCodes.OFFLINE_OOM,
+        OfflineOomError.message("separation"),
+        e,
+      )
+    } catch (e: Exception) {
+      val msg = e.message ?: "live offline separation failed"
+      val code = if (msg.startsWith("LIVE_OFFLINE_SEGMENTATION_REQUIRED")) {
+        "LIVE_OFFLINE_SEGMENTATION_REQUIRED"
+      } else {
+        SeparationErrorCodes.SEPARATION_ERROR
+      }
+      promise.reject(code, msg, e)
+    }
+  }
+
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
+    }
   }
 
   private fun pathsToHashMap(paths: Map<String, String>): HashMap<String, String> {

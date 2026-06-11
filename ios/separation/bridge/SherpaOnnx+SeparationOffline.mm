@@ -4,6 +4,10 @@
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../sherpa-onnx-separation-wrapper.h"
 #include "../core/SeparationBridgeState.h"
+#include "../SeparationOfflineLivePipelineWorker.h"
+#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "sherpa-onnx-model-path-fill.h"
 
 #include <map>
@@ -373,6 +377,117 @@ static NSString *const kOfflineSeparationOomMessage =
     return;
   }
   resolve(@(it->second->wrapper->getNumStems()));
+}
+
+- (void)startSeparationOfflineLivePipeline:(NSString *)instanceId
+                     audioInLiveBufferId:(NSString *)audioInLiveBufferId
+                  audioOutLiveBufferIds:(NSArray<NSString *> *)audioOutLiveBufferIds
+                                options:(JS::NativeSherpaOnnx::SpecStartSeparationOfflineLivePipelineOptions &)options
+                                resolve:(RCTPromiseResolveBlock)resolve
+                                 reject:(RCTPromiseRejectBlock)reject
+{
+  if (!instanceId || !audioInLiveBufferId || !audioOutLiveBufferIds) {
+    reject(@"SEPARATION_ERROR", @"Missing required buffer IDs", nil);
+    return;
+  }
+
+  std::string instanceIdStr = [instanceId UTF8String];
+  sherpaonnx::SeparationWrapper *separator = nullptr;
+  int expectedStems = 0;
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
+    auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
+    if (it == sherpaonnx::separation::bridge::g_separation_instances.end() ||
+        it->second->wrapper == nullptr) {
+      reject(@"SEPARATION_ERROR", @"Separation instance not found", nil);
+      return;
+    }
+    separator = it->second->wrapper.get();
+    expectedStems = separator->getNumStems();
+  }
+
+  if (static_cast<NSInteger>(expectedStems) != (NSInteger)audioOutLiveBufferIds.count) {
+    reject(@"SEPARATION_STEM_COUNT_MISMATCH",
+           [NSString stringWithFormat:@"Expected %d output buffers, got %lu",
+                                      expectedStems,
+                                      (unsigned long)audioOutLiveBufferIds.count],
+           nil);
+    return;
+  }
+
+  std::string audioInId = [audioInLiveBufferId UTF8String];
+  if (audioInId.find("live_") != 0) {
+    reject(@"SEPARATION_BUFFER_KIND_MISMATCH",
+           [NSString stringWithFormat:@"Expected live audio buffer (live_*) for audioIn, got: %@", audioInLiveBufferId],
+           nil);
+    return;
+  }
+
+  auto liveAudioIn = pa_get_live_entry(audioInId);
+  if (!liveAudioIn) {
+    reject(@"SEPARATION_BUFFER_NOT_FOUND", @"Input live buffer not found", nil);
+    return;
+  }
+
+  std::vector<std::shared_ptr<PaLiveEntry>> liveAudioOuts;
+  liveAudioOuts.reserve(audioOutLiveBufferIds.count);
+  for (NSString *outId in audioOutLiveBufferIds) {
+    if (outId == nil || [outId length] == 0) {
+      reject(@"SEPARATION_BUFFER_NOT_FOUND", @"Output buffer id is empty", nil);
+      return;
+    }
+    std::string outIdStr = [outId UTF8String];
+    if (outIdStr.find("live_") != 0) {
+      reject(@"SEPARATION_BUFFER_KIND_MISMATCH",
+             [NSString stringWithFormat:@"Expected live audio buffer (live_*) for audioOut, got: %@", outId],
+             nil);
+      return;
+    }
+    auto liveAudioOut = pa_get_live_entry(outIdStr);
+    if (!liveAudioOut) {
+      reject(@"SEPARATION_BUFFER_NOT_FOUND", @"Output live buffer not found", nil);
+      return;
+    }
+    liveAudioOuts.push_back(liveAudioOut);
+  }
+
+  NSString *attachedSegmentationEngineId = options.attachedSegmentationEngineId();
+  NSString *segmentLiveBufferId = options.segmentLiveBufferId();
+
+  if (!attachedSegmentationEngineId || !segmentLiveBufferId) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Missing attachedSegmentationEngineId or segmentLiveBufferId", nil);
+    return;
+  }
+
+  std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
+  std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
+
+  auto liveSegmentEntry = seg_get_live_entry(segmentBufferIdStr);
+  if (!liveSegmentEntry) {
+    reject(@"LIVE_OFFLINE_SEGMENTATION_REQUIRED", @"Segment buffer not found", nil);
+    return;
+  }
+
+  NSString *uuidString = [[NSUUID UUID] UUIDString];
+  std::string pipelineId = "live_offline_sep_" + std::string([uuidString UTF8String]);
+
+  auto worker = std::make_shared<SeparationOfflineLivePipelineWorker>(
+    pipelineId,
+    attachedEngineIdStr,
+    liveAudioIn,
+    segmentBufferIdStr,
+    liveAudioOuts,
+    separator
+  );
+
+  {
+    std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+    g_streaming_pipelines[pipelineId] = worker;
+  }
+  worker->start();
+  so_start_streaming_pipeline_completion_watcher(self, pipelineId, worker);
+
+  resolve(@{ @"pipelineId": [NSString stringWithUTF8String:pipelineId.c_str()] });
 }
 
 - (void)unloadSeparation:(NSString *)instanceId

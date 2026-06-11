@@ -204,6 +204,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val separationHelper = SherpaOnnxSeparationHelper(
+    reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
@@ -4680,6 +4681,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadSeparation(instanceId: String, promise: Promise) {
     separationHelper.unloadSeparation(instanceId, promise)
+  }
+
+  override fun startSeparationOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferIds: ReadableArray,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    separationHelper.startSeparationOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferIds,
+      options,
+      promise,
+    )
   }
 
   override fun detectAlignmentModel(
