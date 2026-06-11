@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
@@ -53,7 +54,10 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import {
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -102,14 +106,6 @@ function normalizeErrorMessage(error: unknown): string {
     if (maybe.message) return maybe.message;
   }
   return 'Unknown error';
-}
-
-function toFileSource(uri: string): FileSource {
-  const v = uri.trim();
-  if (v.startsWith('content://')) return { kind: 'contentUri', uri: v };
-  if (v.startsWith('file://'))
-    return { kind: 'fs', path: decodeURI(v.replace(/^file:\/\//, '')) };
-  return { kind: 'fs', path: v };
 }
 
 export default function LivePipelineShowcaseScreen() {
@@ -666,11 +662,15 @@ export default function LivePipelineShowcaseScreen() {
   const pickFile = useCallback(async () => {
     try {
       const [result] = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       if (result) {
         setPickedFileUri(result.uri);
-        setPickedFileName(result.name ?? result.uri);
+        setPickedFileName(
+          resolveAudioFileDisplayName(result.uri, result.name) ??
+            result.name ??
+            result.uri
+        );
       }
     } catch (pickErr) {
       const isPickCancel =
@@ -837,7 +837,10 @@ export default function LivePipelineShowcaseScreen() {
           'Microphone active. Speech → STT → TTS (no live playback; use TTS output below after stop).'
         );
       } else {
-        const source = toFileSource(pickedFileUri!);
+        const source = toFileSource(
+          pickedFileUri!,
+          pickedFileName ?? undefined
+        );
         setStatusText('Ingesting file into STT pipeline…');
         const ingest = await ingestFileToLiveAudioBuffer(
           sttInputAudio.bufferId,
@@ -889,6 +892,7 @@ export default function LivePipelineShowcaseScreen() {
     selectedTtsModel,
     sourceMode,
     pickedFileUri,
+    pickedFileName,
     pipelineState,
     textSegConfig,
     sttSegConfig,

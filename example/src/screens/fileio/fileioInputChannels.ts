@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import {
   pick,
-  types,
   isErrorWithCode,
   errorCodes,
 } from '@react-native-documents/picker';
@@ -18,8 +17,10 @@ import {
 } from '../../audioConfig';
 import {
   fileSourceFromBundledPath,
+  resolveAudioFileDisplayName,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 
 /** How the active sample is exposed as a {@link FileSource}. */
 export type FileioInputChannelId =
@@ -340,7 +341,7 @@ export async function pickFileioInputForChannel(
   try {
     const picked = await pick({
       mode: 'open',
-      type: [types.audio],
+      type: DECODABLE_AUDIO_PICKER_TYPES,
       requestLongTermAccess: channelId === 'securityScoped',
     });
     const file = picked[0];
@@ -349,15 +350,16 @@ export async function pickFileioInputForChannel(
       return null;
     }
 
+    const name =
+      resolveAudioFileDisplayName(uri, file.name) ??
+      file.name?.trim() ??
+      uri.split('/').pop()?.split('?')[0] ??
+      'Picked audio';
+
     const fileSource: FileSource =
       channelId === 'securityScoped'
-        ? { kind: 'securityScoped', uri }
-        : toFileSource(uri);
-
-    const name =
-      file.name?.trim() ||
-      uri.split('/').pop()?.split('?')[0] ||
-      'Picked audio';
+        ? { kind: 'securityScoped', uri, displayName: name }
+        : toFileSource(uri, name);
 
     return {
       fileSource,

@@ -30,10 +30,10 @@ import {
   createOfflineAudioBufferFromLive,
   finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
-  ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
   type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
@@ -77,7 +77,12 @@ import {
   toDetectSource,
 } from '../../modelConfig';
 import { AUDIO_FILES } from '../../audioConfig';
-import { fileSourceFromBundledPath } from '../../utils/fileSourceFromUri';
+import {
+  fileSourceFromBundledPath,
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { fillSeparationCustomConfigFromModelFolder } from '../../utils/separationCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
@@ -114,17 +119,6 @@ function normalizeErrorMessage(error: unknown): string {
     return error;
   }
   return String(error);
-}
-
-function toFileSource(pathOrUri: string): FileSource {
-  const trimmed = pathOrUri.trim();
-  if (trimmed.startsWith('content://')) {
-    return { kind: 'contentUri', uri: trimmed };
-  }
-  if (trimmed.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(trimmed.replace(/^file:\/\//, '')) };
-  }
-  return { kind: 'fs', path: trimmed };
 }
 
 function isSeparationHint(folder: string, hint: string): boolean {
@@ -727,14 +721,19 @@ export default function SeparationScreen() {
       if (!selectedFileUri) {
         throw new Error('Pick an audio file first.');
       }
-      return toFileSource(selectedFileUri);
+      return toFileSource(selectedFileUri, selectedFileName ?? undefined);
     }
     const example = AUDIO_FILES.find((f) => f.id === selectedExampleAudioId);
     if (!example) {
       throw new Error('Select example audio first.');
     }
     return fileSourceFromBundledPath(example.id);
-  }, [liveFileSourceType, selectedExampleAudioId, selectedFileUri]);
+  }, [
+    liveFileSourceType,
+    selectedExampleAudioId,
+    selectedFileName,
+    selectedFileUri,
+  ]);
 
   const handleSeparateLive = async () => {
     if (!engineRef.current) {
@@ -947,11 +946,15 @@ export default function SeparationScreen() {
   const pickFile = useCallback(async () => {
     try {
       const [result] = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       if (result) {
+        const resolvedName =
+          resolveAudioFileDisplayName(result.uri, result.name) ??
+          result.name ??
+          result.uri;
         setSelectedFileUri(result.uri);
-        setSelectedFileName(result.name ?? result.uri);
+        setSelectedFileName(resolvedName);
         setLiveFileSourceType('own');
       }
     } catch (pickErr) {

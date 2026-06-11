@@ -40,8 +40,9 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   createOfflineAudioBufferFromFile,
   releasePipelineAudioBuffer,
+  type OfflineAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../utils/decodableAudioPickerTypes';
 
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
@@ -52,7 +53,11 @@ import {
   keepValidDeviceSelection,
   type AudioRouteDevice,
 } from '../utils/audioDevices';
-import { fileSourceFromBundledPath } from '../utils/fileSourceFromUri';
+import {
+  fileSourceFromBundledPath,
+  resolveAudioFileDisplayName,
+  toFileSource as toFileSourceWithHint,
+} from '../utils/fileSourceFromUri';
 import { widgetStyles as s } from './OfflineAudioBufferWidget.styles';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,20 +111,17 @@ type Props = {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function toFileSource(pathOrUri: string) {
+function toFileSource(pathOrUri: string, displayName?: string) {
   const trimmed = pathOrUri.trim();
-  if (trimmed.startsWith('content://')) {
-    return { kind: 'contentUri' as const, uri: trimmed };
-  }
-  if (trimmed.startsWith('file://')) {
-    const p = decodeURI(trimmed.replace(/^file:\/\//, ''));
-    return { kind: 'fs' as const, path: p };
-  }
   // Relative paths are bundled example assets (test_wavs/test_codec).
-  if (!trimmed.startsWith('/')) {
+  if (
+    !trimmed.startsWith('content://') &&
+    !trimmed.startsWith('file://') &&
+    !trimmed.startsWith('/')
+  ) {
     return fileSourceFromBundledPath(trimmed);
   }
-  return { kind: 'fs' as const, path: trimmed };
+  return toFileSourceWithHint(trimmed, displayName);
 }
 
 function isEphemeralFd(pathOrUri: string): boolean {
@@ -284,11 +286,7 @@ export const OfflineAudioBufferWidget = forwardRef<
   // ─────────────────────────────────────────────────────────────────────────
 
   const decodeSource = useCallback(
-    async (
-      _uri: string,
-      label: string,
-      source: ReturnType<typeof toFileSource>
-    ) => {
+    async (label: string, source: ReturnType<typeof toFileSource>) => {
       const requestId = ++decodeRequestRef.current;
 
       // Release any existing buffer first
@@ -305,23 +303,32 @@ export const OfflineAudioBufferWidget = forwardRef<
       setDecodeStatus(`Decoding "${label}" into OfflineAudioBuffer…`);
       setDecodeError(null);
 
+      const decodeOptions = {
+        forceMono: true,
+        onProgress: (event: {
+          percent?: number;
+          framesDecoded?: number;
+          totalFramesEstimate?: number;
+        }) => {
+          if (requestId !== decodeRequestRef.current) return;
+          const pct = Math.max(0, Math.min(100, event.percent ?? 0));
+          setDecodeProgress(pct);
+          const total = event.totalFramesEstimate ?? 0;
+          setDecodeStatus(
+            total > 0
+              ? `Decoding "${label}"… ${Math.round(pct)}% (${
+                  event.framesDecoded
+                }/${total} frames)`
+              : `Decoding "${label}"… ${Math.round(pct)}%`
+          );
+        },
+      };
+
       try {
-        const audioRef = await createOfflineAudioBufferFromFile(source, {
-          forceMono: true,
-          onProgress: (event) => {
-            if (requestId !== decodeRequestRef.current) return;
-            const pct = Math.max(0, Math.min(100, event.percent ?? 0));
-            setDecodeProgress(pct);
-            const total = event.totalFramesEstimate ?? 0;
-            setDecodeStatus(
-              total > 0
-                ? `Decoding "${label}"… ${Math.round(pct)}% (${
-                    event.framesDecoded
-                  }/${total} frames)`
-                : `Decoding "${label}"… ${Math.round(pct)}%`
-            );
-          },
-        });
+        const audioRef = await createOfflineAudioBufferFromFile(
+          source,
+          decodeOptions
+        );
 
         if (requestId !== decodeRequestRef.current) {
           await releasePipelineAudioBuffer(audioRef.bufferId).catch(() => {});
@@ -358,11 +365,7 @@ export const OfflineAudioBufferWidget = forwardRef<
   const handleExamplePick = useCallback(
     async (audioFile: AudioFileInfo) => {
       try {
-        await decodeSource(
-          audioFile.id,
-          audioFile.name,
-          toFileSource(audioFile.id)
-        );
+        await decodeSource(audioFile.name, toFileSource(audioFile.id));
       } catch (err) {
         setDecodeError(err instanceof Error ? err.message : String(err));
       }
@@ -378,7 +381,7 @@ export const OfflineAudioBufferWidget = forwardRef<
     setDecodeError(null);
     try {
       const res = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       const file = Array.isArray(res) ? res[0] : res;
       const uri =
@@ -386,7 +389,11 @@ export const OfflineAudioBufferWidget = forwardRef<
         (file as any)?.fileCopyUri ??
         (file as any)?.localUri ??
         (file as any)?.nativeUri;
-      const name = file?.name || uri?.split('/')?.pop() || 'audio';
+      const name =
+        resolveAudioFileDisplayName(uri, file?.name) ??
+        file?.name?.trim() ??
+        uri?.split('/')?.pop() ??
+        'audio';
 
       if (!uri) {
         setDecodeError('Could not get file URI from picker result');
@@ -399,7 +406,8 @@ export const OfflineAudioBufferWidget = forwardRef<
         return;
       }
 
-      await decodeSource(uri, name, toFileSource(uri));
+      const source = toFileSource(uri, name);
+      await decodeSource(name, source);
     } catch (err) {
       if (isPickerCancel(err)) return;
       setDecodeError(err instanceof Error ? err.message : String(err));
