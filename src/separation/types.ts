@@ -1,5 +1,8 @@
 import type { FileSource } from '../fileio/types';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
 import type { SeparationDetectModelResult } from '../types/modelDetect';
 import type { SpleeterCustomConfig, UvrCustomConfig } from './customConfig';
 import type {
@@ -103,23 +106,20 @@ export interface SeparationEngine {
   ): Promise<SeparationResult>;
 
   /**
-   * Live overload — NOT implemented in MVP.
-   * Future: template (b), `continuous_frames` only (see live-overload doc §5.1).
+   * Live overload on the offline separation engine — mandatory `continuous_frames` segmentation.
    */
-  // separate(
-  //   audioIn: LiveAudioBufferIdSource,
-  //   audioOuts: readonly LiveAudioBufferIdSource[],
-  //   options: SeparationLivePipelineOptions
-  // ): Promise<SeparationPipelineHandle>;
+  separate(
+    audioIn: LiveAudioBufferIdSource,
+    audioOuts: readonly LiveAudioBufferIdSource[],
+    options: SeparationLivePipelineOptions
+  ): Promise<SeparationPipelineHandle>;
 
   getSampleRate(): Promise<number>;
   getNumStems(): Promise<number>;
   destroy(): Promise<void>;
 }
 
-/**
- * Live-pipeline options — type stub for future live overload (not exported from index until implemented).
- */
+/** Live-pipeline options for `separate(Live, Live[], …)`. */
 export interface SeparationLivePipelineOptions
   extends LiveOfflinePipelineBaseOptions {
   segmentation: {

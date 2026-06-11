@@ -20,16 +20,31 @@ import {
 import {
   resolvePipelineAudioBufferId,
   releasePipelineAudioBuffer,
+  subscribeLiveAudioBufferEvents,
 } from '../audiobuffer';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import type {
+  LiveAudioBufferIdSource,
+  LiveAudioBufferRef,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
+import { validateLiveOfflinePipelineOptions } from '../livePipeline/validation';
+import {
+  attachSegmentationEngine,
+  detachSegmentationEngine,
+  getSegmentationEngineInfo,
+} from '../segment';
+import type { SpeechSegment } from '../segment/segment';
 import type {
   SeparationDetectResult,
   SeparationEngine,
   SeparationInitializeOptions,
+  SeparationLivePipelineOptions,
   SeparationModelType,
   SeparateOptions,
   SeparationResult,
 } from './types';
+import type { SeparationPipelineHandle } from './streamingTypes';
 import { SeparationErrorCode } from './customConfig';
 import { buildSeparationInitBridgeOptions } from './separationNativeBridge';
 import {
@@ -38,6 +53,131 @@ import {
 } from './orchestrate';
 
 let separationInstanceCounter = 0;
+
+function isLiveAudioSource(buffer: unknown): buffer is LiveAudioBufferIdSource {
+  if (typeof buffer === 'string') return buffer.startsWith('live_');
+  if (
+    typeof buffer === 'object' &&
+    buffer !== null &&
+    'info' in buffer &&
+    typeof (buffer as LiveAudioBufferRef).info === 'object' &&
+    (buffer as LiveAudioBufferRef).info?.kind === 'livePcmBuffer'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function createSeparationPipelineHandle(
+  instanceId: string,
+  pipelineId: string,
+  attachedEngineId?: string
+): SeparationPipelineHandle {
+  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      if (attachedEngineId) {
+        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      }
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus() {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
+}
+
+async function separateLiveOverload(
+  instanceId: string,
+  audioIn: LiveAudioBufferIdSource,
+  audioOuts: readonly LiveAudioBufferIdSource[],
+  options: SeparationLivePipelineOptions
+): Promise<SeparationPipelineHandle> {
+  const { policy } = validateLiveOfflinePipelineOptions({
+    featureName: 'live offline source separation',
+    domain: 'speech',
+    supportedEvaluators: ['continuous_frames'],
+    segmentation: options.segmentation,
+  });
+
+  const numStems = await SherpaOnnx.getSeparationNumStems(instanceId);
+  if (audioOuts.length !== numStems) {
+    throw new Error(
+      `${SeparationErrorCode.INVALID_ARGUMENT}: separate() expects ${numStems} output buffers, got ${audioOuts.length}`
+    );
+  }
+
+  const inId = resolvePipelineAudioBufferId(audioIn);
+  const outIds = audioOuts.map(resolvePipelineAudioBufferId);
+
+  const attached = await attachSegmentationEngine(audioIn, { policy });
+  let engineInfo: Awaited<ReturnType<typeof getSegmentationEngineInfo>>;
+  try {
+    engineInfo = await getSegmentationEngineInfo(attached.engineId);
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw new Error(
+      'SEPARATION_ERROR: segmentation engine did not produce a segment buffer for speech domain'
+    );
+  }
+
+  let pipelineId: string;
+  try {
+    const result = await SherpaOnnx.startSeparationOfflineLivePipeline(
+      instanceId,
+      inId,
+      outIds,
+      {
+        attachedSegmentationEngineId: attached.engineId,
+        segmentLiveBufferId,
+      }
+    );
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
+
+  const handle = createSeparationPipelineHandle(
+    instanceId,
+    pipelineId,
+    attached.engineId
+  );
+
+  if (options.onSegment) {
+    const cb = options.onSegment;
+    const stem0OutId = outIds[0];
+    if (stem0OutId != null) {
+      const unsub = subscribeLiveAudioBufferEvents(stem0OutId, {
+        onSegment: (event) => cb(event.segment as SpeechSegment),
+      });
+      handle.completed.then(unsub, unsub);
+    }
+  }
+
+  return handle;
+}
 
 function readNonEmptyPath(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -152,14 +292,36 @@ export async function createSeparation(
     get instanceId() {
       return instanceId;
     },
-    async separate(
-      audioIn: OfflineAudioBufferIdSource,
-      audioOuts: readonly OfflineAudioBufferIdSource[],
-      separateOptions?: SeparateOptions
-    ): Promise<SeparationResult> {
+    separate: (async (
+      audioIn: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
+      audioOuts: readonly (
+        | OfflineAudioBufferIdSource
+        | LiveAudioBufferIdSource
+      )[],
+      separateOptions?: SeparateOptions | SeparationLivePipelineOptions
+    ): Promise<SeparationResult | SeparationPipelineHandle> => {
       guard();
 
-      const mode = separateOptions?.segmentation?.mode ?? 'off';
+      const inIsLive = isLiveAudioSource(audioIn);
+      const outsAreLive = audioOuts.every(isLiveAudioSource);
+
+      if (inIsLive || outsAreLive) {
+        if (!(inIsLive && outsAreLive)) {
+          throw new Error(
+            `${SeparationErrorCode.INVALID_ARGUMENT}: separate() overload mismatch. Use (OfflineAudio, OfflineAudio[], options?) or (LiveAudio, LiveAudio[], options).`
+          );
+        }
+        return separateLiveOverload(
+          instanceId,
+          audioIn as LiveAudioBufferIdSource,
+          audioOuts as readonly LiveAudioBufferIdSource[],
+          separateOptions as SeparationLivePipelineOptions
+        );
+      }
+
+      const mode =
+        (separateOptions as SeparateOptions | undefined)?.segmentation?.mode ??
+        'off';
 
       const numStems = await SherpaOnnx.getSeparationNumStems(instanceId);
       if (audioOuts.length !== numStems) {
@@ -175,7 +337,11 @@ export async function createSeparation(
 
       if (mode === 'off') {
         const startedAtMs = Date.now();
-        await runOfflineSeparationDirect(instanceId, audioIn, audioOuts);
+        await runOfflineSeparationDirect(
+          instanceId,
+          audioIn as OfflineAudioBufferIdSource,
+          audioOuts as readonly OfflineAudioBufferIdSource[]
+        );
         return {
           status: 'complete',
           totalSegments: 1,
@@ -186,10 +352,10 @@ export async function createSeparation(
       }
 
       const orchestrated = await runOfflineSeparationPipeline(
-        audioIn,
+        audioIn as OfflineAudioBufferIdSource,
         instanceId,
-        audioOuts,
-        separateOptions ?? {}
+        audioOuts as readonly OfflineAudioBufferIdSource[],
+        (separateOptions as SeparateOptions | undefined) ?? {}
       );
 
       const outputBuffers = orchestrated.outputBuffers;
@@ -223,7 +389,7 @@ export async function createSeparation(
           : {}),
         processingTimeMs: orchestrated.processingTimeMs,
       };
-    },
+    }) as SeparationEngine['separate'],
     async getSampleRate(): Promise<number> {
       guard();
       return SherpaOnnx.getSeparationSampleRate(instanceId);
@@ -253,9 +419,11 @@ export type {
   SeparationStemIndex,
   SeparationEngineInfo,
   SeparationEngine,
+  SeparationLivePipelineOptions,
   SeparationDetectResult,
   SeparationDetectModelResult,
 } from './types';
+export type { SeparationPipelineHandle } from './streamingTypes';
 export { SEPARATION_MODEL_TYPES, SEPARATION_STEM_LABELS } from './types';
 
 export {

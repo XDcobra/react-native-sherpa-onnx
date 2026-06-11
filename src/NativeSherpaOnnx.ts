@@ -1514,6 +1514,20 @@ export interface Spec extends TurboModule {
 
   unloadSeparation(instanceId: string): Promise<void>;
 
+  /**
+   * Start a live-offline Source Separation pipeline (1 live input → N live stem outputs).
+   * Restricts evaluator to `continuous_frames` at the JS layer.
+   */
+  startSeparationOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    audioOutLiveBufferIds: string[],
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   detectVadModel(
     modelDir: string,
     assetName: string | null,
