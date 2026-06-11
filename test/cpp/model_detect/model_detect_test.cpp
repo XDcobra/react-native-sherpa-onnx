@@ -12,6 +12,9 @@
  * Fixtures (speech enhancement):
  *   - speech-enhancement-models-structure.txt, speech-enhancement-models-expected.csv
  *     (see collect-speech-enhancement-model-structures workflow).
+ * Fixtures (source separation):
+ *   - source-separation-models-structure.txt, source-separation-models-expected.csv
+ *     (see collect-separation-model-structures workflow).
  * Fixtures (VAD):
  *   - asr-models-structure.txt + vad-models-expected.csv (VAD assets live in asr-models release).
  *
@@ -29,6 +32,7 @@
 #include "sherpa-onnx-validate-online-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
+#include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -67,6 +71,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream enhStruct(dir + "/speech-enhancement-models-structure.txt");
     std::ifstream enhCsv(dir + "/speech-enhancement-models-expected.csv");
     std::ifstream vadCsv(dir + "/vad-models-expected.csv");
+    std::ifstream sepStruct(dir + "/source-separation-models-structure.txt");
+    std::ifstream sepCsv(dir + "/source-separation-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -74,6 +80,9 @@ TEST(ModelDetectTest, FixturesExist) {
     ASSERT_TRUE(enhStruct.is_open()) << "Missing: " << dir << "/speech-enhancement-models-structure.txt";
     ASSERT_TRUE(enhCsv.is_open()) << "Missing: " << dir << "/speech-enhancement-models-expected.csv";
     ASSERT_TRUE(vadCsv.is_open()) << "Missing: " << dir << "/vad-models-expected.csv";
+    ASSERT_TRUE(sepStruct.is_open())
+        << "Missing: " << dir << "/source-separation-models-structure.txt";
+    ASSERT_TRUE(sepCsv.is_open()) << "Missing: " << dir << "/source-separation-models-expected.csv";
 }
 
 /**
@@ -247,6 +256,57 @@ TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
  * (k2-fsa/sherpa-onnx speech-enhancement-models release). Each asset is typically a single .onnx;
  * fixtures use model dir "." and path ./<basename>.onnx.
  */
+TEST(ModelDetectTest, DetectSeparationFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/source-separation-models-structure.txt";
+    std::string csvPath = dir + "/source-separation-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files = model_detect_test::BuildFileEntriesFromPathLines(
+                block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectSeparationModelFromFileList(
+                files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::SeparationModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::SeparationModelKind expectedKind =
+            model_detect_test::SeparationKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::SeparationModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(
+            block.modelDir, block.pathLines);
+        auto result = sherpaonnx::DetectSeparationModelFromFileList(
+            files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got " << model_detect_test::SeparationKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
 TEST(ModelDetectTest, DetectEnhancementFromFileListMatchesExpected) {
     std::string dir = GetFixturesDir();
     std::string structurePath = dir + "/speech-enhancement-models-structure.txt";
@@ -882,6 +942,42 @@ TEST(ModelDetectValidation, ValidateVadPathsUnknownKindPassesThrough) {
     auto v = sherpaonnx::ValidateVadPaths(
         sherpaonnx::VadModelKind::kUnknown, paths, "/m");
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, SeparationSpleeterLayoutOk) {
+    const std::string dir = "sherpa-onnx-spleeter-2stems-fp16";
+    std::vector<FE> files = {
+        MakeEntry(dir, "vocals.fp16.onnx"),
+        MakeEntry(dir, "accompaniment.fp16.onnx"),
+    };
+    auto result = sherpaonnx::DetectSeparationModelFromFileList(files, dir, "auto");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::SeparationModelKind::kSpleeter));
+    EXPECT_FALSE(result.paths.vocals.empty());
+    EXPECT_FALSE(result.paths.accompaniment.empty());
+}
+
+TEST(ModelDetectValidation, SeparationUvrSingleOnnxOk) {
+    const std::string dir = ".";
+    std::vector<FE> files = {
+        MakeEntry(dir, "UVR_MDXNET_9482.onnx"),
+    };
+    auto result = sherpaonnx::DetectSeparationModelFromFileList(files, dir, "auto");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::SeparationModelKind::kUvr));
+    EXPECT_FALSE(result.paths.model.empty());
+}
+
+TEST(ModelDetectValidation, SeparationNameOnlySpleeterIsHeuristic) {
+    const std::string syntheticDir = "m/sherpa-onnx-spleeter-2stems-fp16.tar.bz2";
+    auto result = sherpaonnx::DetectSeparationModelFromFileList({}, syntheticDir, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::SeparationModelKind::kSpleeter));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
 }
 
 TEST(ModelDetectValidation, EnhancementMissingOnnxRejected) {

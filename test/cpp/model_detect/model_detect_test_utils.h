@@ -19,6 +19,7 @@ namespace sherpaonnx {
 enum class SttModelKind;
 enum class TtsModelKind;
 enum class EnhancementModelKind;
+enum class SeparationModelKind;
 enum class PunctuationModelKind;
 enum class VadModelKind;
 }
@@ -57,8 +58,10 @@ std::string TtsKindToString(sherpaonnx::TtsModelKind kind);
 
 /** Map CSV model_type string to EnhancementModelKind. */
 sherpaonnx::EnhancementModelKind EnhancementKindFromString(const std::string& modelType);
+sherpaonnx::SeparationModelKind SeparationKindFromString(const std::string& modelType);
 
 std::string EnhancementKindToString(sherpaonnx::EnhancementModelKind kind);
+std::string SeparationKindToString(sherpaonnx::SeparationModelKind kind);
 
 sherpaonnx::VadModelKind VadKindFromString(const std::string& modelType);
 
