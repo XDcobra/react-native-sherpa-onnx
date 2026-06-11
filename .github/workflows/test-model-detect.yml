@@ -23,14 +23,14 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Check ASR/TTS/speech-enhancement assets vs expected CSVs
+      - name: Check ASR/TTS/speech-enhancement/source-separation assets vs expected CSVs
         run: bash scripts/ci/check-model-csvs.sh
         # Script always exits 0; outputs warning if new assets are on GitHub but not in CSVs
         # In case of new assets available on Github, follow this procedure:
         # 0. Decide if the new assets are for models already supported
         # If yes:
         # 1. Run the collect workflows to update the CSVs
-        # 2. Fill out the result column in the CSV with the expectedmodel type
+        # 2. Fill out the result column in the CSV with the expected model type
         # 3. Push and run this workflow again
         # If no:
         # 1. Open an issue on github to add support for this new model type

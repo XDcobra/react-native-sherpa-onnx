@@ -69,7 +69,11 @@ if [[ -n "$_GH_TOKEN" ]]; then
   API_AUTH=(-H "Authorization: Bearer ${_GH_TOKEN}" -H "Accept: application/vnd.github+json")
 fi
 
-RESP="$(curl -sSL "${API_AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}")"
+if [[ ${#API_AUTH[@]} -gt 0 ]]; then
+  RESP="$(curl -sSL "${API_AUTH[@]}" "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}")"
+else
+  RESP="$(curl -sSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${RELEASE_TAG}")"
+fi
 if echo "$RESP" | jq -e '.assets' >/dev/null 2>&1; then
   LIST="$(echo "$RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | "\(.name)|\(.browser_download_url)|\(.updated_at)"')"
   if [[ -z "$_ASSET_LIMIT" || "$_ASSET_LIMIT" == "0" ]]; then

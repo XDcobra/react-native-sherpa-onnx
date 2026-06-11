@@ -1,0 +1,13 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "source-separation-models",
+      "release_tag": "source-separation-models",
+      "tree_cache_dir": "tree-cache/source-separation-models",
+      "structure_file": "test/fixtures/source-separation-models-structure.txt",
+      "expected_csv": "test/fixtures/source-separation-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/source-separation-models-license-status.csv"
+    }
+  ]
+}
