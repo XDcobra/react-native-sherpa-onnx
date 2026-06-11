@@ -27,6 +27,18 @@ export type {
 } from './types';
 export { SEPARATION_MODEL_TYPES } from './types';
 
+export {
+  assertSeparationCustomConfig,
+  resolveSeparationCustomConfigPaths,
+  resolveSpleeterCustomConfigPaths,
+  resolveUvrCustomConfigPaths,
+  SeparationErrorCode,
+  type SpleeterCustomConfig,
+  type UvrCustomConfig,
+  type SpleeterCustomPathKey,
+  type UvrCustomPathKey,
+} from './customConfig';
+
 export interface SeparationInitializeOptions {
   modelSource: FileSource;
 }
