@@ -16,7 +16,7 @@ Import path: `react-native-sherpa-onnx/separation`
 
 **MVP output format:** Multi-channel stems from the native engine are **downmixed to mono** when written into each output buffer. Stereo/multi-channel output buffers are planned for a later release.
 
-**Segmentation / live overload:** Not part of the MVP. `SeparateOptions.segmentation.mode` accepts only `'off'` (default). Segment-wise orchestration and live overload will reuse the same `separate()` entry point later.
+**Segmentation:** `segmentation.mode: 'off'` (default) runs one batch pass; `'auto'` splits input via the [segmentation engine](segmentation-engine.md) and separates each chunk (recommended for long mixes to reduce OOM risk). `'manual'` is not supported offline.
 
 For **offline STT / enhancement** composition with pipeline buffers, see [stt-offline.md](stt-offline.md) and [enhancement-offline.md](enhancement-offline.md).
 
@@ -146,7 +146,7 @@ separate(
 ): Promise<SeparationResult>;
 ```
 
-**MVP constraints:** `audioOuts.length` must equal **`getNumStems()`** (typically `2`); all outputs must be empty `off_*` buffers; `segmentation.mode` must be `'off'` or omitted.
+**Constraints:** `audioOuts.length` must equal **`getNumStems()`** (typically `2`); all outputs must be empty `off_*` buffers.
 
 ```ts
 const mixed = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/mix.wav' });
@@ -155,13 +155,13 @@ const vocals = createEmptyOfflineAudioBuffer(sr);
 const accomp = createEmptyOfflineAudioBuffer(sr);
 
 const result = await sep.separate(mixed, [vocals, accomp]);
-// result.status === 'complete', result.totalSegments === 1
+// result.status === 'complete', result.totalSegments === 1 (mode 'off')
 // vocals / accomp: mono stems at sr
 ```
 
 - **`audioIn`:** populated **`OfflineAudioBuffer`** (`off_*`); mono mixed audio.
 - **`audioOuts`:** N **empty** offline buffers at the separation sample rate (`getSampleRate()`).
-- **Returns:** `SeparationResult` with orchestration counters. MVP always completes in one segment (`totalSegments: 1`). Read PCM via **`getPipelineAudioBufferInfo()`** and persist with `saveAudioAsFile(...)`.
+- **Returns:** `SeparationResult` with orchestration counters (`totalSegments`, `completedSegments`, `skippedSegments`, optional `failedSegment`, `processingTimeMs`). With `segmentation.mode: 'off'`, `totalSegments` is `1`. Read PCM via **`getPipelineAudioBufferInfo()`** and persist with `saveAudioAsFile(...)`.
 
 ---
 
@@ -292,11 +292,56 @@ const sep = await createSeparation({
 });
 ```
 
-## Segmentation (planned)
+## Segmentation
 
-Large offline buffers can exceed mobile memory limits (**OOM**). A future release will add segment-wise orchestration via `SeparateOptions.segmentation` (`mode: 'auto'`), mirroring [enhancement-offline.md — Segmentation](enhancement-offline.md#segmentation).
+Source separation is **offline-only** and can exceed mobile memory on long mixes (**OOM**). Segment-wise orchestration splits input audio into bounded chunks, runs **`separateOfflineAudioBuffers`** per chunk for **all N stems in sync**, then assembles each stem output in order — same pattern as [enhancement-offline.md — Segmentation](enhancement-offline.md#segmentation).
 
-**MVP:** only `segmentation.mode: 'off'` (default) is supported. Passing `'auto'` or `'manual'` throws `SEPARATION_INVALID_ARGUMENT`.
+Supported modes:
+
+- `'off'` (default): one full pass over the input buffer.
+- `'auto'`: split input by segmentation policy and process chunk by chunk.
+
+`'manual'` is not supported for offline separation.
+
+Default policy evaluator: `speech_energy_silence`. Mixed music may not have clear speech pauses — set **`maxSegmentMs`** in the policy as a hard cap on chunk length (primary OOM lever). Optional **`speech_vad_model`** if VAD-based cuts fit your content better.
+
+```ts
+import { createSeparation } from 'react-native-sherpa-onnx/separation';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const sep = await createSeparation({
+  modelSource: { kind: 'fs', path: '/path/to/uvr-model' },
+  modelType: 'auto',
+});
+
+const mixed = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/path/to/long-mix.wav',
+});
+const sr = await sep.getSampleRate();
+const vocalsOut = createEmptyOfflineAudioBuffer(sr);
+const accompOut = createEmptyOfflineAudioBuffer(sr);
+
+try {
+  const result = await sep.separate(mixed, [vocalsOut, accompOut], {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip',
+    maxRetriesPerSegment: 2,
+  });
+  console.log(result.status, result.completedSegments, result.totalSegments);
+} finally {
+  await releasePipelineAudioBuffer(mixed);
+  await releasePipelineAudioBuffer(vocalsOut);
+  await releasePipelineAudioBuffer(accompOut);
+  await sep.destroy();
+}
+```
+
+Segment boundaries can introduce audible artifacts at chunk edges (same tradeoff as offline enhancement). See [segmentation-engine.md](segmentation-engine.md) for policy fields and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
 ## Pipeline composition
 
@@ -363,7 +408,7 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `SEPARATION_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `SEPARATION_OUTPUT_NOT_EMPTY` | An output buffer must be empty before calling `separate(...)`. |
 | `SEPARATION_STEM_COUNT_MISMATCH` | `audioOuts.length !== getNumStems()`. |
-| `OFFLINE_OOM` | Not enough memory for offline separation. Use segmentation (when available) or process shorter inputs. |
+| `OFFLINE_OOM` | Not enough memory for offline separation. Use `segmentation.mode: 'auto'` for long inputs, or process shorter clips. See [segmentation-engine.md](./segmentation-engine.md). |
 | `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, unsupported segmentation mode). |
 
 ---

@@ -119,7 +119,7 @@ The SDK **segmentation engine** is introduced partly to **counter that OOM press
 
 **Tradeoff:** segment boundaries can **slightly reduce quality** versus a single full-buffer offline run (less global context, effects at cuts). For many products this is preferable to **crashes** or **refusing** long inputs.
 
-Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-specific integration (STT, TTS, enhancement, punctuation, …) is documented in each feature’s **`## Segmentation`** section.
+Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-specific integration (STT, TTS, enhancement, punctuation, separation, …) is documented in each feature’s **`## Segmentation`** section.
 
 ---
 
