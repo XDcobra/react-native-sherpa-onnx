@@ -22,7 +22,7 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
-#include "sherpa-onnx-separation-wrapper.h"
+#include "sherpa-onnx-separation-detect-wrapper.h"
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"

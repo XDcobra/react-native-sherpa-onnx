@@ -1,5 +1,5 @@
-#ifndef SHERPA_ONNX_SEPARATION_INFERENCE_WRAPPER_H
-#define SHERPA_ONNX_SEPARATION_INFERENCE_WRAPPER_H
+#ifndef SHERPA_ONNX_SEPARATION_WRAPPER_H
+#define SHERPA_ONNX_SEPARATION_WRAPPER_H
 
 #include "sherpa-onnx-common.h"
 #include "sherpa-onnx-model-detect.h"
@@ -69,4 +69,4 @@ private:
 
 }  // namespace sherpaonnx
 
-#endif  // SHERPA_ONNX_SEPARATION_INFERENCE_WRAPPER_H
+#endif  // SHERPA_ONNX_SEPARATION_WRAPPER_H

@@ -3,9 +3,10 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-separation.h"
 
+#include <cstring>
 #include <optional>
 
-#include "sherpa-onnx/c-api/cxx-api.h"
+#include "sherpa-onnx/c-api/c-api.h"
 
 namespace sherpaonnx {
 namespace {
@@ -27,81 +28,99 @@ SeparationModelKind ParseSeparationModelTypeFromString(const std::string& modelT
     return SeparationModelKind::kUnknown;
 }
 
-sherpa_onnx::cxx::OfflineSourceSeparationModelConfig BuildModelConfigFromPaths(
+struct SeparationEngineConfig {
+    SherpaOnnxOfflineSourceSeparationConfig config{};
+    std::string vocals;
+    std::string accompaniment;
+    std::string uvrModel;
+    std::string provider;
+};
+
+SeparationEngineConfig BuildEngineConfig(
     SeparationModelKind kind,
     const SeparationModelPaths& paths,
     int32_t numThreads,
     const std::optional<std::string>& provider,
     bool debug
 ) {
-    sherpa_onnx::cxx::OfflineSourceSeparationModelConfig cfg;
-    cfg.num_threads = numThreads;
-    cfg.debug = debug;
+    SeparationEngineConfig bundle;
+    std::memset(&bundle.config, 0, sizeof(bundle.config));
+
+    bundle.config.model.num_threads = numThreads;
+    bundle.config.model.debug = debug ? 1 : 0;
     if (provider.has_value() && !provider->empty()) {
-        cfg.provider = *provider;
+        bundle.provider = *provider;
+        bundle.config.model.provider = bundle.provider.c_str();
     }
+
     switch (kind) {
         case SeparationModelKind::kSpleeter:
-            cfg.spleeter.vocals = paths.vocals;
-            cfg.spleeter.accompaniment = paths.accompaniment;
+            bundle.vocals = paths.vocals;
+            bundle.accompaniment = paths.accompaniment;
+            bundle.config.model.spleeter.vocals = bundle.vocals.c_str();
+            bundle.config.model.spleeter.accompaniment = bundle.accompaniment.c_str();
             break;
         case SeparationModelKind::kUvr:
-            cfg.uvr.model = paths.model;
+            bundle.uvrModel = paths.model;
+            bundle.config.model.uvr.model = bundle.uvrModel.c_str();
             break;
         default:
             break;
     }
-    return cfg;
+    return bundle;
 }
 
-sherpa_onnx::cxx::OfflineSourceSeparationModelConfig BuildModelConfig(
+SeparationEngineConfig BuildEngineConfig(
     const SeparationDetectResult& detect,
     int32_t numThreads,
     const std::optional<std::string>& provider,
     bool debug
 ) {
-    return BuildModelConfigFromPaths(
+    return BuildEngineConfig(
         detect.selectedKind, detect.paths, numThreads, provider, debug
     );
 }
 
-std::vector<float> DownmixStemToMono(
-    const sherpa_onnx::cxx::SourceSeparationStem& stem
-) {
-    if (stem.samples.empty()) {
+std::vector<float> DownmixStemToMono(const SherpaOnnxSourceSeparationStem& stem) {
+    if (stem.num_channels <= 0 || stem.samples == nullptr || stem.n <= 0) {
         return {};
     }
-    if (stem.samples.size() == 1) {
-        return stem.samples[0];
+    if (stem.num_channels == 1) {
+        return {stem.samples[0], stem.samples[0] + stem.n};
     }
-    const size_t n = stem.samples[0].size();
-    for (size_t c = 1; c < stem.samples.size(); ++c) {
-        if (stem.samples[c].size() != n) {
+    const int32_t n = stem.n;
+    for (int32_t c = 1; c < stem.num_channels; ++c) {
+        if (stem.samples[c] == nullptr) {
             return {};
         }
     }
-    std::vector<float> mono(n);
-    const float invChannels = 1.0f / static_cast<float>(stem.samples.size());
-    for (size_t i = 0; i < n; ++i) {
+    std::vector<float> mono(static_cast<size_t>(n));
+    const float invChannels = 1.0f / static_cast<float>(stem.num_channels);
+    for (int32_t i = 0; i < n; ++i) {
         float sum = 0.0f;
-        for (const auto& channel : stem.samples) {
-            sum += channel[i];
+        for (int32_t c = 0; c < stem.num_channels; ++c) {
+            sum += stem.samples[c][i];
         }
-        mono[i] = sum * invChannels;
+        mono[static_cast<size_t>(i)] = sum * invChannels;
     }
     return mono;
 }
 
 SeparationProcessResult ToSeparationProcessResult(
-    const sherpa_onnx::cxx::SourceSeparationOutput& output
+    const SherpaOnnxSourceSeparationOutput* output
 ) {
     SeparationProcessResult result;
-    result.stems.reserve(output.stems.size());
-    for (const auto& stem : output.stems) {
+    if (output == nullptr || output->stems == nullptr || output->num_stems <= 0) {
+        result.error = "Source separation produced no stems";
+        return result;
+    }
+
+    result.stems.reserve(static_cast<size_t>(output->num_stems));
+    for (int32_t s = 0; s < output->num_stems; ++s) {
         SeparationStemAudio audio;
-        audio.sampleRate = output.sample_rate;
-        audio.samples = DownmixStemToMono(stem);
-        if (audio.samples.empty() && !stem.samples.empty()) {
+        audio.sampleRate = output->sample_rate;
+        audio.samples = DownmixStemToMono(output->stems[s]);
+        if (audio.samples.empty()) {
             result.success = false;
             result.error = "Stem channel length mismatch during mono downmix";
             result.stems.clear();
@@ -121,7 +140,7 @@ SeparationProcessResult ToSeparationProcessResult(
 class SeparationWrapper::Impl {
 public:
     bool initialized = false;
-    std::optional<sherpa_onnx::cxx::OfflineSourceSeparation> separation;
+    const SherpaOnnxOfflineSourceSeparation* separation = nullptr;
 };
 
 SeparationWrapper::SeparationWrapper() : pImpl(std::make_unique<Impl>()) {}
@@ -164,19 +183,17 @@ SeparationInitializeResult SeparationWrapper::initialize(
         return result;
     }
 
-    sherpa_onnx::cxx::OfflineSourceSeparationConfig config;
-    config.model = BuildModelConfig(detect, numThreads, provider, debug);
-    pImpl->separation = sherpa_onnx::cxx::OfflineSourceSeparation::Create(config);
-    if (!pImpl->separation.has_value() || !pImpl->separation->Get()) {
+    auto engineConfig = BuildEngineConfig(detect, numThreads, provider, debug);
+    pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    if (pImpl->separation == nullptr) {
         result.error = "Failed to create offline source separation engine";
-        pImpl->separation.reset();
         return result;
     }
 
     pImpl->initialized = true;
     result.success = true;
-    result.sampleRate = pImpl->separation->GetOutputSampleRate();
-    result.numStems = pImpl->separation->GetNumberOfStems();
+    result.sampleRate = SherpaOnnxOfflineSourceSeparationGetOutputSampleRate(pImpl->separation);
+    result.numStems = SherpaOnnxOfflineSourceSeparationGetNumberOfStems(pImpl->separation);
     return result;
 }
 
@@ -208,21 +225,19 @@ SeparationInitializeResult SeparationWrapper::initializeCustom(
     result.modelType = SeparationKindToString(selectedKind);
     result.detectedModels.push_back({result.modelType, "custom"});
 
-    sherpa_onnx::cxx::OfflineSourceSeparationConfig config;
-    config.model = BuildModelConfigFromPaths(
+    auto engineConfig = BuildEngineConfig(
         selectedKind, paths, numThreads, provider, debug
     );
-    pImpl->separation = sherpa_onnx::cxx::OfflineSourceSeparation::Create(config);
-    if (!pImpl->separation.has_value() || !pImpl->separation->Get()) {
+    pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    if (pImpl->separation == nullptr) {
         result.error = "Failed to create offline source separation engine";
-        pImpl->separation.reset();
         return result;
     }
 
     pImpl->initialized = true;
     result.success = true;
-    result.sampleRate = pImpl->separation->GetOutputSampleRate();
-    result.numStems = pImpl->separation->GetNumberOfStems();
+    result.sampleRate = SherpaOnnxOfflineSourceSeparationGetOutputSampleRate(pImpl->separation);
+    result.numStems = SherpaOnnxOfflineSourceSeparationGetNumberOfStems(pImpl->separation);
     return result;
 }
 
@@ -231,7 +246,7 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
     int32_t sampleRate
 ) {
     SeparationProcessResult result;
-    if (!pImpl->initialized || !pImpl->separation.has_value()) {
+    if (!pImpl->initialized || pImpl->separation == nullptr) {
         result.error = "Separation engine is not initialized";
         return result;
     }
@@ -246,25 +261,36 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
 
     const float* channels[] = {monoSamples.data()};
     const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
-    auto output = pImpl->separation->Process(channels, 1, numSamples, sampleRate);
-    return ToSeparationProcessResult(output);
+    const SherpaOnnxSourceSeparationOutput* output =
+        SherpaOnnxOfflineSourceSeparationProcess(
+            pImpl->separation, channels, 1, numSamples, sampleRate
+        );
+    if (output == nullptr) {
+        result.error = "Source separation processing failed";
+        return result;
+    }
+
+    result = ToSeparationProcessResult(output);
+    SherpaOnnxDestroySourceSeparationOutput(output);
+    return result;
 }
 
 int32_t SeparationWrapper::getSampleRate() const {
-    if (!pImpl->initialized || !pImpl->separation.has_value()) return 0;
-    return pImpl->separation->GetOutputSampleRate();
+    if (!pImpl->initialized || pImpl->separation == nullptr) return 0;
+    return SherpaOnnxOfflineSourceSeparationGetOutputSampleRate(pImpl->separation);
 }
 
 int32_t SeparationWrapper::getNumStems() const {
-    if (!pImpl->initialized || !pImpl->separation.has_value()) return 0;
-    return pImpl->separation->GetNumberOfStems();
+    if (!pImpl->initialized || pImpl->separation == nullptr) return 0;
+    return SherpaOnnxOfflineSourceSeparationGetNumberOfStems(pImpl->separation);
 }
 
 bool SeparationWrapper::isInitialized() const { return pImpl->initialized; }
 
 void SeparationWrapper::release() {
-    if (pImpl->separation.has_value()) {
-        pImpl->separation.reset();
+    if (pImpl->separation != nullptr) {
+        SherpaOnnxDestroyOfflineSourceSeparation(pImpl->separation);
+        pImpl->separation = nullptr;
     }
     pImpl->initialized = false;
 }

@@ -1,4 +1,4 @@
-#include "sherpa-onnx-separation-wrapper.h"
+#include "sherpa-onnx-separation-detect-wrapper.h"
 
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-detect.h"
