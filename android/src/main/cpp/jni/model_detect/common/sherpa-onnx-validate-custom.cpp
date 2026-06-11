@@ -4,6 +4,7 @@
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-alignment.h"
 #include "sherpa-onnx-validate-enhancement.h"
+#include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-online-stt.h"
@@ -70,6 +71,12 @@ PunctuationModelKind ParsePunctuationModelTypeLocal(const std::string& modelType
 AlignmentModelKind ParseAlignmentModelTypeLocal(const std::string& modelType) {
     if (modelType == "wav2vec2") return AlignmentModelKind::kWav2Vec2;
     return AlignmentModelKind::kUnknown;
+}
+
+SeparationModelKind ParseSeparationModelTypeLocal(const std::string& modelType) {
+    if (modelType == "spleeter") return SeparationModelKind::kSpleeter;
+    if (modelType == "uvr") return SeparationModelKind::kUvr;
+    return SeparationModelKind::kUnknown;
 }
 
 }  // namespace
@@ -157,6 +164,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "separation") {
+        const SeparationModelKind kind = ParseSeparationModelTypeLocal(modelType);
+        if (kind == SeparationModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom separation model type: " + modelType
+            );
+        }
+        SeparationModelPaths separationPaths;
+        FillSeparationModelPathsFromStringMap(paths, separationPaths);
+        const auto vr = ValidateSeparationPaths(kind, separationPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);
         if (kind == PunctuationModelKind::kUnknown) {
@@ -224,6 +246,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const EnhancementModelKind kind = ParseEnhancementModelTypeLocal(modelType);
         if (kind == EnhancementModelKind::kUnknown) return {};
         return FromSpecs(GetEnhancementPathRequirements(kind));
+    }
+    if (cat == "separation") {
+        const SeparationModelKind kind = ParseSeparationModelTypeLocal(modelType);
+        if (kind == SeparationModelKind::kUnknown) return {};
+        return FromSpecs(GetSeparationPathRequirements(kind));
     }
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);

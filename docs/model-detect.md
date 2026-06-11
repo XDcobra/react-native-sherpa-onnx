@@ -325,7 +325,8 @@ flowchart LR
   stt -->|no match| vad[VAD]
   vad -->|no match| punct[Punctuation]
   punct -->|no match| enh[Enhancement]
-  enh -->|no match| align[Alignment]
+  enh -->|no match| sep[Separation]
+  sep -->|no match| align[Alignment]
   align -->|no match| none["matched: false"]
 ```
 

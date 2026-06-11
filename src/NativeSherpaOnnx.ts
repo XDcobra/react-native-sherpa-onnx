@@ -1452,6 +1452,29 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Source separation model detection: Spleeter (vocals + accompaniment) or UVR (single ONNX).
+   * Offline only — no streaming layout.
+   */
+  detectSeparationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      vocals?: string;
+      accompaniment?: string;
+      model?: string;
+    };
+  }>;
+
   detectVadModel(
     modelDir: string,
     assetName: string | null,

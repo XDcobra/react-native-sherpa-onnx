@@ -7,6 +7,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.Vad,
   ModelCategory.Punctuation,
   ModelCategory.Enhancement,
+  ModelCategory.Separation,
   ModelCategory.Alignment,
 ]);
 
@@ -17,6 +18,7 @@ export type CatalogDetectCategory =
   | ModelCategory.Vad
   | ModelCategory.Punctuation
   | ModelCategory.Enhancement
+  | ModelCategory.Separation
   | ModelCategory.Alignment;
 
 export function categoryUsesCatalogDetect(

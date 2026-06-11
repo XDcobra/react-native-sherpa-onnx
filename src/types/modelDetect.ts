@@ -93,6 +93,17 @@ export interface EnhancementDetectModelResult extends ModelDetectResultBase {
   };
 }
 
+// ─── Source separation extension ───────────────────────────────────────
+
+export interface SeparationDetectModelResult extends ModelDetectResultBase {
+  /** Spleeter: vocals + accompaniment; UVR: single model ONNX. */
+  paths?: {
+    vocals?: string;
+    accompaniment?: string;
+    model?: string;
+  };
+}
+
 // ─── Alignment extension ────────────────────────────────────────────────
 
 export interface AlignmentDetectModelResult extends ModelDetectResultBase {

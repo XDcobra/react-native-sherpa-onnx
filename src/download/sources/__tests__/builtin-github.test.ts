@@ -1,7 +1,43 @@
-jest.mock('../../../detect', () => ({
-  detectModelsBatch: jest.fn(async () => []),
-  detectModelResultMatchesCategory: jest.fn(() => true),
+jest.mock('../../../NativeSherpaOnnx', () => ({
+  __esModule: true,
+  default: {},
 }));
+
+jest.mock('../../../detect', () => {
+  const { detectModelResultMatchesCategory } = jest.requireActual(
+    '../../../detect/detectModel'
+  );
+  return {
+    detectModelsBatch: jest.fn(async (inputs: { assetName: string }[]) =>
+      inputs.map((input) => {
+        if (input.assetName.includes('spleeter')) {
+          return {
+            matched: true,
+            category: 'separation',
+            modelType: 'spleeter',
+            languages: [],
+            quantization: 'fp16',
+            sizeTier: 'unknown',
+            isStreaming: false,
+          };
+        }
+        if (input.assetName.startsWith('UVR')) {
+          return {
+            matched: true,
+            category: 'separation',
+            modelType: 'uvr',
+            languages: [],
+            quantization: 'unknown',
+            sizeTier: 'unknown',
+            isStreaming: false,
+          };
+        }
+        return { matched: false };
+      })
+    ),
+    detectModelResultMatchesCategory,
+  };
+});
 
 import { ModelCategory } from '../../types';
 import { getCategoryTag } from '../../paths';
@@ -24,11 +60,16 @@ describe('builtin github providers', () => {
         json: async () => ({
           assets: [
             {
-              name: 'sherpa-onnx-test-model.tar.bz2',
+              name: 'sherpa-onnx-spleeter-2stems-fp16.tar.bz2',
               size: 123,
-              browser_download_url: 'https://example.invalid/model.tar.bz2',
+              browser_download_url: 'https://example.invalid/spleeter.tar.bz2',
               digest:
                 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            },
+            {
+              name: 'UVR-MDX-NET-Inst_1.onnx',
+              size: 456,
+              browser_download_url: 'https://example.invalid/uvr.onnx',
             },
           ],
         }),
@@ -36,7 +77,7 @@ describe('builtin github providers', () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () =>
-          'sherpa-onnx-test-model.tar.bz2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
+          'sherpa-onnx-spleeter-2stems-fp16.tar.bz2 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
       });
 
     global.fetch = fetchMock as typeof fetch;
@@ -60,12 +101,22 @@ describe('builtin github providers', () => {
       ctx
     );
 
-    expect(models).toHaveLength(1);
-    expect(models[0]?.layout.kind).toBe('archive');
-    expect(models[0]?.assets[0]?.relativePath).toBe(
-      'sherpa-onnx-test-model.tar.bz2'
+    expect(models).toHaveLength(2);
+
+    const spleeter = models.find(
+      (m) => m.id === 'sherpa-onnx-spleeter-2stems-fp16'
     );
-    expect(checksums?.get('sherpa-onnx-test-model.tar.bz2')).toBe(
+    expect(spleeter?.layout.kind).toBe('archive');
+    expect(spleeter?.modelType).toBe('spleeter');
+    expect(spleeter?.assets[0]?.relativePath).toBe(
+      'sherpa-onnx-spleeter-2stems-fp16.tar.bz2'
+    );
+
+    const uvr = models.find((m) => m.id === 'UVR-MDX-NET-Inst_1');
+    expect(uvr?.layout.kind).toBe('folder');
+    expect(uvr?.modelType).toBe('uvr');
+
+    expect(checksums?.get('sherpa-onnx-spleeter-2stems-fp16.tar.bz2')).toBe(
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     );
 

@@ -23,7 +23,8 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     'sherpa-onnx-speech-enhancement-1d-cn', // Default enhancement
   ],
   [ModelCategory.Separation]: [
-    'sherpa-onnx-source-separation-model', // Default separation
+    'sherpa-onnx-spleeter-2stems-fp16',
+    'UVR-MDX-NET-Inst_1',
   ],
   [ModelCategory.Punctuation]: [],
   [ModelCategory.Qnn]: [],
