@@ -25,6 +25,7 @@ import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -201,6 +202,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
+  )
+  private val separationHelper = SherpaOnnxSeparationHelper(
+    { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
@@ -4635,6 +4639,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
   }
 
+  override fun detectSeparationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+  }
+
   override fun detectAlignmentModel(
     modelDir: String,
     modelType: String?,
@@ -5297,6 +5310,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
     private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    /** Model detection for source separation: Spleeter or UVR layout (offline only). */
+    @JvmStatic
+    private external fun nativeDetectSeparationModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

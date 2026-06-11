@@ -53,6 +53,8 @@ std::map<std::string, std::string> TtsModelPathsToStringMap(const TtsModelPaths&
 std::map<std::string, std::string> VadModelPathsToStringMap(const VadModelPaths& paths);
 std::map<std::string, std::string> EnhancementModelPathsToStringMap(
     const EnhancementModelPaths& paths);
+std::map<std::string, std::string> SeparationModelPathsToStringMap(
+    const SeparationModelPaths& paths);
 std::map<std::string, std::string> PunctuationModelPathsToStringMap(
     const PunctuationModelPaths& paths);
 std::map<std::string, std::string> AlignmentModelPathsToStringMap(

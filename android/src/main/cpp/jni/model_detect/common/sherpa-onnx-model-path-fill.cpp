@@ -215,6 +215,15 @@ std::map<std::string, std::string> EnhancementModelPathsToStringMap(
     return out;
 }
 
+std::map<std::string, std::string> SeparationModelPathsToStringMap(
+    const SeparationModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "vocals", paths.vocals);
+    PutPathIfNonEmpty(out, "accompaniment", paths.accompaniment);
+    PutPathIfNonEmpty(out, "model", paths.model);
+    return out;
+}
+
 std::map<std::string, std::string> PunctuationModelPathsToStringMap(
     const PunctuationModelPaths& paths) {
     std::map<std::string, std::string> out;

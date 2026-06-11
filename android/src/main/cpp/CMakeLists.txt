@@ -114,6 +114,7 @@ set(SOURCES
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
     jni/model_detect/separation/sherpa-onnx-model-detect-separation.cpp
     jni/model_detect/separation/sherpa-onnx-validate-separation.cpp
+    jni/model_detect/separation/sherpa-onnx-separation-wrapper.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-online-guard.cpp
     jni/model_detect/punctuation/sherpa-onnx-model-detect-punctuation.cpp
