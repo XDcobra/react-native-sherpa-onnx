@@ -1,6 +1,7 @@
 # Collect source separation model assets from k2-fsa/sherpa-onnx source-separation-models release.
 # Fixtures (structure.txt, expected CSV, license CSV) are generated here only — do not run collect locally.
-# After the first run: fill model_type column in source-separation-models-expected.csv (spleeter | uvr) before separation model_detect tests.
+# After the first run: fill model_type in source-separation-models-expected.csv — engine family only:
+#   spleeter | uvr | unsupported (see test/cpp/model_detect and docs/separation.md when added).
 # Skip policy: stored "# updated_at:" in *-structure.txt must match the GitHub asset (see collect_one_sherpa_release_stream.sh).
 # Assets: sherpa-onnx-spleeter-*.tar.bz2 (directory layout) and UVR-*.onnx / UVR_*.onnx (standalone ONNX).
 # Streams are defined in scripts/ci/sherpa_separation_model_release_streams.json
