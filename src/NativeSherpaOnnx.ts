@@ -112,6 +112,28 @@ export type EnhancementInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeSeparation(instanceId, options)`. */
+export type SeparationInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (spleeter: vocals/accompaniment; uvr: model). */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `initializeSeparation`. */
+export type SeparationInitializeNativeResult = {
+  success: boolean;
+  error?: string;
+  modelType?: string;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  sampleRate?: number;
+  numStems?: number;
+};
+
 /** `initializeOfflinePunctuation` / `initializeOnlinePunctuation(instanceId, options)`. */
 export type PunctuationInitBridgeOptions = {
   initMode?: string;
@@ -1474,6 +1496,37 @@ export interface Spec extends TurboModule {
       model?: string;
     };
   }>;
+
+  initializeSeparation(
+    instanceId: string,
+    options: SeparationInitBridgeOptions
+  ): Promise<SeparationInitializeNativeResult>;
+
+  separateOfflineAudioBuffers(
+    instanceId: string,
+    audioInBufferId: string,
+    audioOutBufferIds: string[]
+  ): Promise<void>;
+
+  getSeparationSampleRate(instanceId: string): Promise<number>;
+
+  getSeparationNumStems(instanceId: string): Promise<number>;
+
+  unloadSeparation(instanceId: string): Promise<void>;
+
+  /**
+   * Start a live-offline Source Separation pipeline (1 live input → N live stem outputs).
+   * Restricts evaluator to `continuous_frames` at the JS layer.
+   */
+  startSeparationOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    audioOutLiveBufferIds: string[],
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+    }
+  ): Promise<{ pipelineId: string }>;
 
   detectVadModel(
     modelDir: string,

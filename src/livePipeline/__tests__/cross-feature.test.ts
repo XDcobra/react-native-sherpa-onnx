@@ -2,6 +2,7 @@ import { createSTT } from '../../stt';
 import { createOfflinePunctuation } from '../../punctuation';
 import { createTTS } from '../../tts';
 import { createEnhancement } from '../../enhancement';
+import { createSeparation } from '../../separation';
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { LiveOfflinePipelineError } from '../validation';
 import { NativeEventEmitter } from 'react-native';
@@ -41,6 +42,11 @@ jest.mock('react-native', () => {
     detectEnhancementModel: jest.fn(),
     initializeEnhancement: jest.fn(),
     startEnhancementOfflineLivePipeline: jest.fn(),
+    detectSeparationModel: jest.fn(),
+    initializeSeparation: jest.fn(),
+    getSeparationNumStems: jest.fn().mockResolvedValue(2),
+    startSeparationOfflineLivePipeline: jest.fn(),
+    unloadSeparation: jest.fn(),
     stopStreamingPipeline: jest.fn(),
     flushStreamingPipeline: jest.fn(),
     resetStreamingPipeline: jest.fn(),
@@ -67,6 +73,7 @@ jest.mock('react-native', () => {
   };
   return {
     NativeEventEmitter: jest.fn().mockImplementation(() => mockEmitter),
+    NativeModules: { SherpaOnnx: {} },
     TurboModuleRegistry: {
       getEnforcing: jest.fn().mockReturnValue(mockNative),
     },
@@ -149,6 +156,20 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
       pipelineId: 'enh_p1',
     });
 
+    native.detectSeparationModel.mockResolvedValue({
+      success: true,
+      detectedModels: [{ type: 'auto', modelDir: 'm' }],
+    });
+    native.initializeSeparation.mockResolvedValue({
+      success: true,
+      detectedModels: [{ type: 'auto', modelDir: 'm' }],
+      sampleRate: 44100,
+      numStems: 2,
+    });
+    native.startSeparationOfflineLivePipeline.mockResolvedValue({
+      pipelineId: 'sep_p1',
+    });
+
     native.getStreamingPipelineStatus.mockResolvedValue({
       pipelineId: 'p_any',
       isRunning: true,
@@ -178,37 +199,69 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
       create: () =>
         createEnhancement({ modelSource: { kind: 'fs', path: 'm' } }),
     },
+    {
+      name: 'Separation',
+      create: () =>
+        createSeparation({ modelSource: { kind: 'fs', path: 'm' } }),
+    },
   ];
+
+  const liveAudioOut2 = 'live_11111111-2222-3333-4444-555555555555';
+
+  function liveOverloadArgs(name: string): {
+    method: string;
+    arg1: string;
+    arg2: string | string[];
+    policy: Record<string, unknown>;
+  } {
+    const liveAudio = 'live_12345678-1234-1234-1234-123456789012';
+    const liveText = 'txt_live_87654321-4321-4321-4321-210987654321';
+    const liveAudioOut = 'live_87654321-4321-4321-4321-210987654321';
+
+    if (name === 'STT') {
+      return {
+        method: 'transcribe',
+        arg1: liveAudio,
+        arg2: liveText,
+        policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 1000 },
+      };
+    }
+    if (name === 'Punctuation') {
+      return {
+        method: 'punctuate',
+        arg1: liveText,
+        arg2: liveText,
+        policy: { evaluator: 'text_synthetic_auto' },
+      };
+    }
+    if (name === 'TTS') {
+      return {
+        method: 'synthesize',
+        arg1: liveText,
+        arg2: liveAudio,
+        policy: { evaluator: 'text_synthetic_auto' },
+      };
+    }
+    if (name === 'Enhancement') {
+      return {
+        method: 'enhance',
+        arg1: liveAudio,
+        arg2: liveAudioOut,
+        policy: { evaluator: 'continuous_frames' },
+      };
+    }
+    return {
+      method: 'separate',
+      arg1: liveAudio,
+      arg2: [liveAudioOut, liveAudioOut2],
+      policy: { evaluator: 'continuous_frames' },
+    };
+  }
 
   it('X-1: Error code parity — should throw LIVE_OFFLINE_SEGMENTATION_REQUIRED for all features', async () => {
     for (const { name, create } of factories) {
       const engine: any = await create();
-      const method =
-        name === 'STT'
-          ? 'transcribe'
-          : name === 'Punctuation'
-          ? 'punctuate'
-          : name === 'TTS'
-          ? 'synthesize'
-          : 'enhance';
-
-      const liveAudio = 'live_12345678-1234-1234-1234-123456789012';
-      const liveText = 'txt_live_87654321-4321-4321-4321-210987654321';
-
-      let arg1 = liveAudio;
-      let arg2 = liveText;
-      if (name === 'Punctuation') {
-        arg1 = liveText;
-        arg2 = liveText;
-      }
-      if (name === 'TTS') {
-        arg1 = liveText;
-        arg2 = liveAudio;
-      }
-      if (name === 'Enhancement') {
-        arg1 = liveAudio;
-        arg2 = liveAudio;
-      }
+      const { method, arg1, arg2 } = liveOverloadArgs(name);
 
       await expect(engine[method](arg1, arg2, {})).rejects.toThrow(
         LiveOfflinePipelineError
@@ -225,36 +278,7 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
   it('X-2: Handle type parity — should return consistent handle shape for all features', async () => {
     for (const { name, create } of factories) {
       const engine: any = await create();
-      const method =
-        name === 'STT'
-          ? 'transcribe'
-          : name === 'Punctuation'
-          ? 'punctuate'
-          : name === 'TTS'
-          ? 'synthesize'
-          : 'enhance';
-
-      const liveAudio = 'live_12345678-1234-1234-1234-123456789012';
-      const liveText = 'txt_live_87654321-4321-4321-4321-210987654321';
-
-      let arg1 = liveAudio;
-      let arg2 = liveText;
-      let policy = { evaluator: 'speech_energy_silence', maxSegmentMs: 1000 };
-      if (name === 'Punctuation') {
-        arg1 = liveText;
-        arg2 = liveText;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'TTS') {
-        arg1 = liveText;
-        arg2 = liveAudio;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'Enhancement') {
-        arg1 = liveAudio;
-        arg2 = liveAudio;
-        policy = { evaluator: 'continuous_frames' } as any;
-      }
+      const { method, arg1, arg2, policy } = liveOverloadArgs(name);
 
       const handle = await engine[method](arg1, arg2, {
         segmentation: { mode: 'auto', policy },
@@ -277,36 +301,7 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
   it('X-3: completed event parity — should resolve when native event fires', async () => {
     for (const { name, create } of factories) {
       const engine: any = await create();
-      const method =
-        name === 'STT'
-          ? 'transcribe'
-          : name === 'Punctuation'
-          ? 'punctuate'
-          : name === 'TTS'
-          ? 'synthesize'
-          : 'enhance';
-
-      const liveAudio = 'live_12345678-1234-1234-1234-123456789012';
-      const liveText = 'txt_live_87654321-4321-4321-4321-210987654321';
-
-      let arg1 = liveAudio;
-      let arg2 = liveText;
-      let policy = { evaluator: 'speech_energy_silence', maxSegmentMs: 1000 };
-      if (name === 'Punctuation') {
-        arg1 = liveText;
-        arg2 = liveText;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'TTS') {
-        arg1 = liveText;
-        arg2 = liveAudio;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'Enhancement') {
-        arg1 = liveAudio;
-        arg2 = liveAudio;
-        policy = { evaluator: 'continuous_frames' } as any;
-      }
+      const { method, arg1, arg2, policy } = liveOverloadArgs(name);
 
       const handle = await engine[method](arg1, arg2, {
         segmentation: { mode: 'auto', policy },
@@ -332,36 +327,7 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
   it('X-4: Detach-on-stop parity — should invoke detachSegmentationEngine on handle.stop()', async () => {
     for (const { name, create } of factories) {
       const engine: any = await create();
-      const method =
-        name === 'STT'
-          ? 'transcribe'
-          : name === 'Punctuation'
-          ? 'punctuate'
-          : name === 'TTS'
-          ? 'synthesize'
-          : 'enhance';
-
-      const liveAudio = 'live_12345678-1234-1234-1234-123456789012';
-      const liveText = 'txt_live_87654321-4321-4321-4321-210987654321';
-
-      let arg1 = liveAudio;
-      let arg2 = liveText;
-      let policy = { evaluator: 'speech_energy_silence', maxSegmentMs: 1000 };
-      if (name === 'Punctuation') {
-        arg1 = liveText;
-        arg2 = liveText;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'TTS') {
-        arg1 = liveText;
-        arg2 = liveAudio;
-        policy = { evaluator: 'text_synthetic_auto' } as any;
-      }
-      if (name === 'Enhancement') {
-        arg1 = liveAudio;
-        arg2 = liveAudio;
-        policy = { evaluator: 'continuous_frames' } as any;
-      }
+      const { method, arg1, arg2, policy } = liveOverloadArgs(name);
 
       // Mock attachSegmentationEngine to return a fake engineId
       native.attachSegmentationEngine.mockResolvedValueOnce({

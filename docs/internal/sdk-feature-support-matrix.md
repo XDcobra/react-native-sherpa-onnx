@@ -10,6 +10,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Speech enhancement / denoiser | Yes (`OfflineSpeechDenoiserConfig`) | Yes (`OnlineSpeechDenoiserConfig`) | Yes (`createEnhancement`) | Yes, **real streaming** (`createStreamingEnhancement`) |
 | Alignment (audio/text alignment) | No (no dedicated sherpa alignment config in Kotlin/C API) | No | Yes (`AlignmentEngine`) | Not as a dedicated live engine; **fake streaming possible manually** (chunk/segment-wise orchestration) |
 | Punctuation | Yes (`OfflinePunctuationConfig`) | Yes (`OnlinePunctuationConfig`) | Yes (`createOfflinePunctuation`) | Yes (`createStreamingPunctuation`) |
+| Source separation | Yes (`OfflineSourceSeparationConfig`) | No | Yes (`createSeparation`) | Yes, live overload on offline engine (`createSeparation().separate(Live, Live[], …)`) |
 
 ## Short notes
 
@@ -17,3 +18,4 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 - **VAD** is implemented in the SDK as a single engine entry point (`createStreamingVAD`) that can cover both the live pipeline and offline processing.
 - **Alignment** exists in the SDK but not as a true streaming engine; ongoing/segmented processing is only orchestrated as fake streaming.
 - **Punctuation** is its own module (`src/punctuation/`) in the SDK and supports both offline and streaming models.
+- **Source separation** uses `createSeparation` for offline batch (`separate` into N offline buffers, optional offline segmentation) and live overload (`separate` into N live buffers with mandatory `continuous_frames` segmentation). There is no separate streaming separation factory.

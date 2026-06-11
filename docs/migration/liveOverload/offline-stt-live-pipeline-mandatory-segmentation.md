@@ -358,7 +358,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
 | **VAD** | n/a (no separate batch engine) | `createStreamingVAD` — single engine; `process()` already accepts **both** `LiveAudioBuffer` **and** `OfflineAudioBuffer` via a discriminated union | **(c) No live overload** | — |
 | **Alignment** | `createAlignment` — offline forced alignment / ASR-mediated / VAD-anchored | n/a | **(c) No live overload** | — |
 | **Diarization** | placeholder (`initializeDiarization` throws) | n/a | **(d) Defer** | revisit at implementation time |
-| **Source separation** | placeholder (`initializeSeparation` throws) | n/a | **(d) Defer** | likely (b) when implemented (block-based) |
+| **Source separation** | `createSeparation` + `separate(Offline, Offline[])` | n/a | **(b) STT template with restrictions** | `engine.separate(LiveAudio, LiveAudio[], { segmentation: continuous_frames })` — N live stem outputs |
 
 ### 5.2 Rationale per feature
 
@@ -371,7 +371,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
 - **VAD (c).** VAD is the **segmentation primitive** other features ride on; the segmentation engine itself uses VAD models (`speech_vad_model` evaluator). `createStreamingVAD.process()` already accepts both `LiveAudioBuffer` and `OfflineAudioBuffer` via a discriminated union, so the gap this document addresses **does not exist** for VAD. Adding a live overload here would also create a circular dependency (segmentation engine ↔ VAD engine).
 - **Alignment (c).** Alignment maps a **known, fixed** text to a **known, fixed** audio (forced alignment via DP / Viterbi-style or ASR-mediated). It is structurally a **closed** problem and meaningless on an open-ended stream where neither end is bounded. No live overload.
 - **Diarization (d).** Currently a placeholder. When implemented, decision will likely lean (a)/(b) but speaker change-point detection is itself segmentation-like; revisit then.
-- **Source separation (d).** Currently a placeholder. When implemented, expect template **(b)** with `continuous_frames`-style chunking similar to enhancement, since separators have the same boundary-artifact concerns.
+- **Source separation (b).** Offline weights only; live overload uses `continuous_frames` segmentation and writes **N live stem buffers** synchronously per committed segment — same boundary-artifact caveats as enhancement live overload.
 
 ### 5.3 Consequences for §3 / §4 / §6
 

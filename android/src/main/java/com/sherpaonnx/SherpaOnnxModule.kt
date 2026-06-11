@@ -204,6 +204,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
   private val separationHelper = SherpaOnnxSeparationHelper(
+    reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
@@ -4646,6 +4647,56 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeSeparation(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    separationHelper.initializeSeparation(instanceId, options, promise)
+  }
+
+  override fun separateOfflineAudioBuffers(
+    instanceId: String,
+    audioInBufferId: String,
+    audioOutBufferIds: ReadableArray,
+    promise: Promise
+  ) {
+    separationHelper.separateOfflineAudioBuffers(
+      instanceId,
+      audioInBufferId,
+      audioOutBufferIds,
+      promise,
+    )
+  }
+
+  override fun getSeparationSampleRate(instanceId: String, promise: Promise) {
+    separationHelper.getSampleRate(instanceId, promise)
+  }
+
+  override fun getSeparationNumStems(instanceId: String, promise: Promise) {
+    separationHelper.getNumStems(instanceId, promise)
+  }
+
+  override fun unloadSeparation(instanceId: String, promise: Promise) {
+    separationHelper.unloadSeparation(instanceId, promise)
+  }
+
+  override fun startSeparationOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferIds: ReadableArray,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    separationHelper.startSeparationOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferIds,
+      options,
+      promise,
+    )
   }
 
   override fun detectAlignmentModel(
