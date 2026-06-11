@@ -147,6 +147,26 @@ describe('Separation Engine - Live Offline Overload', () => {
     ).rejects.toThrow('supports only continuous_frames policy');
   });
 
+  it('SL-4a: rejects mixed live/offline outputs', async () => {
+    await expect(
+      separator.separate(
+        dummyLiveIn,
+        [
+          'live_87654321-4321-4321-4321-210987654321',
+          'off_11111111-2222-3333-4444-555555555555',
+        ],
+        {
+          segmentation: {
+            mode: 'auto',
+            policy: { evaluator: 'continuous_frames' },
+          },
+        }
+      )
+    ).rejects.toThrow(
+      'SEPARATION_INVALID_ARGUMENT: separate() overload mismatch'
+    );
+  });
+
   it('SL-4: throws SEPARATION_INVALID_ARGUMENT on mixed buffer kinds', async () => {
     await expect(
       separator.separate(

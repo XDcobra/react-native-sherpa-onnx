@@ -244,6 +244,42 @@ describe('createSeparation', () => {
     expect(runOfflineSeparationPipeline).not.toHaveBeenCalled();
   });
 
+  it('treats empty offline outputs as offline path (not live overload)', async () => {
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+
+    await expect(sep.separate('off_input', [])).rejects.toThrow(
+      `${SeparationErrorCode.INVALID_ARGUMENT}: separate() expects 2 output buffers, got 0`
+    );
+    expect(native.startSeparationOfflineLivePipeline).not.toHaveBeenCalled();
+    expect(runOfflineSeparationDirect).not.toHaveBeenCalled();
+  });
+
+  it('rejects mixed live/offline output arrays before native', async () => {
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+
+    await expect(
+      sep.separate(
+        'off_input',
+        ['off_vocals', 'live_87654321-4321-4321-4321-210987654321'],
+        {
+          segmentation: {
+            mode: 'auto',
+            policy: { evaluator: 'continuous_frames' },
+          },
+        } as any
+      )
+    ).rejects.toThrow(
+      'SEPARATION_INVALID_ARGUMENT: separate() overload mismatch'
+    );
+
+    expect(native.startSeparationOfflineLivePipeline).not.toHaveBeenCalled();
+    expect(runOfflineSeparationDirect).not.toHaveBeenCalled();
+  });
+
   it('routes live separate() to startSeparationOfflineLivePipeline', async () => {
     native.startSeparationOfflineLivePipeline.mockResolvedValue({
       pipelineId: 'live_offline_sep_1',

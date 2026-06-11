@@ -303,10 +303,17 @@ export async function createSeparation(
       guard();
 
       const inIsLive = isLiveAudioSource(audioIn);
-      const outsAreLive = audioOuts.every(isLiveAudioSource);
+      const outsAreAllLive =
+        audioOuts.length > 0 && audioOuts.every(isLiveAudioSource);
 
-      if (inIsLive || outsAreLive) {
-        if (!(inIsLive && outsAreLive)) {
+      if (audioOuts.some(isLiveAudioSource) && !outsAreAllLive) {
+        throw new Error(
+          `${SeparationErrorCode.INVALID_ARGUMENT}: separate() overload mismatch. Use (OfflineAudio, OfflineAudio[], options?) or (LiveAudio, LiveAudio[], options).`
+        );
+      }
+
+      if (inIsLive || outsAreAllLive) {
+        if (!(inIsLive && outsAreAllLive)) {
           throw new Error(
             `${SeparationErrorCode.INVALID_ARGUMENT}: separate() overload mismatch. Use (OfflineAudio, OfflineAudio[], options?) or (LiveAudio, LiveAudio[], options).`
           );

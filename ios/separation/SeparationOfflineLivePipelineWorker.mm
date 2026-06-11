@@ -47,7 +47,7 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
     throw std::runtime_error("SEPARATION_ERROR: native separation stem count mismatch");
   }
 
-  int64_t unitsWritten = 0;
+  int64_t stem0SamplesWritten = 0;
   for (size_t i = 0; i < processResult.stems.size(); ++i) {
     const auto &stem = processResult.stems[i];
     if (stem.samples.empty()) continue;
@@ -55,8 +55,9 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
     auto &audioOutput = audioOutputs_[i];
     if (audioOutput->sampleRate != speech.sampleRate) {
       throw std::runtime_error(
-        "SEPARATION_SAMPLE_RATE_MISMATCH: live audio out is " + std::to_string(audioOutput->sampleRate) +
-        " Hz; chunk is " + std::to_string(speech.sampleRate) + " Hz"
+        "SEPARATION_SAMPLE_RATE_MISMATCH: live audio out[" + std::to_string(i) + "] is " +
+        std::to_string(audioOutput->sampleRate) + " Hz; chunk is " +
+        std::to_string(speech.sampleRate) + " Hz"
       );
     }
 
@@ -70,12 +71,12 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
       stop();
       return;
     }
-    if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
-      unitsWritten += static_cast<int64_t>(stem.samples.size());
+    if (appendResult == PaLiveEntry::AppendResult::APPENDED && i == 0) {
+      stem0SamplesWritten = static_cast<int64_t>(stem.samples.size());
     }
   }
 
-  if (unitsWritten > 0) {
-    addUnitsWritten(unitsWritten);
+  if (stem0SamplesWritten > 0) {
+    addUnitsWritten(stem0SamplesWritten);
   }
 }

@@ -38,7 +38,7 @@ internal class SeparationOfflineLivePipelineWorker(
       )
     }
 
-    var unitsWritten = 0L
+    var stem0SamplesWritten = 0L
     for (i in audioOutputEntries.indices) {
       val stemSamples = stems[i]
       if (stemSamples.isEmpty()) continue
@@ -59,13 +59,13 @@ internal class SeparationOfflineLivePipelineWorker(
         stop()
         return
       }
-      if (result == LiveEntry.AppendResult.APPENDED) {
-        unitsWritten += stemSamples.size.toLong()
+      if (result == LiveEntry.AppendResult.APPENDED && i == 0) {
+        stem0SamplesWritten = stemSamples.size.toLong()
       }
     }
 
-    if (unitsWritten > 0) {
-      addUnitsWritten(unitsWritten)
+    if (stem0SamplesWritten > 0) {
+      addUnitsWritten(stem0SamplesWritten)
     }
   }
 }
