@@ -301,16 +301,21 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
         return result;
     }
 
-    const float* channels[] = {monoSamples.data()};
+    // Spleeter's native path always reads channel 0 and 1; mono input alone
+    // triggers SHERPA_ONNX_EXIT inside sherpa-onnx. UVR tolerates missing ch1.
     const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
+    std::vector<float> stereoRight = monoSamples;
+    const float* channels[] = {monoSamples.data(), stereoRight.data()};
+    constexpr int32_t kNumChannels = 2;
     LOGI(
-        "processMonoSamples: numSamples=%d sampleRate=%d",
+        "processMonoSamples: numSamples=%d sampleRate=%d channels=%d (mono upmixed to stereo)",
         numSamples,
-        sampleRate
+        sampleRate,
+        kNumChannels
     );
     const SherpaOnnxSourceSeparationOutput* output =
         SherpaOnnxOfflineSourceSeparationProcess(
-            pImpl->separation, channels, 1, numSamples, sampleRate
+            pImpl->separation, channels, kNumChannels, numSamples, sampleRate
         );
     if (output == nullptr) {
         result.error = "Source separation processing failed";
