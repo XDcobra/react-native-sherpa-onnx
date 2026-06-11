@@ -51,14 +51,13 @@ export type SeparationInitializeOptions =
   | SeparationCustomInitializeOptions;
 
 export interface SeparateSegmentationConfig {
-  /** MVP: only `'off'` (default). `'auto'`/`'manual'` added with orchestrator. */
+  /** `'off'` (default) = single batch call; `'auto'` = segment-wise orchestration. `'manual'` not supported offline. */
   mode?: 'off' | 'manual' | 'auto';
   policy?: SegmentationPolicy;
 }
 
 export interface SeparateOptions {
   segmentation?: SeparateSegmentationConfig;
-  /** Reserved — wired when orchestrator ships. */
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: 'abort' | 'skip';
@@ -95,7 +94,7 @@ export interface SeparationEngine {
 
   /**
    * Offline batch separation (Enhancement-shaped API).
-   * MVP: `segmentation.mode` defaults to `'off'` → single native batch call.
+   * Default `segmentation.mode: 'off'` → single native batch call; `'auto'` → segment orchestration.
    */
   separate(
     audioIn: OfflineAudioBufferIdSource,

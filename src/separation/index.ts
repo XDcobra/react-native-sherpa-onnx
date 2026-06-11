@@ -17,7 +17,10 @@ import {
   type DetectedModelEntry,
   type DetectionSource,
 } from '../types/modelDetect';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  resolvePipelineAudioBufferId,
+  releasePipelineAudioBuffer,
+} from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type {
   SeparationDetectResult,
@@ -29,7 +32,10 @@ import type {
 } from './types';
 import { SeparationErrorCode } from './customConfig';
 import { buildSeparationInitBridgeOptions } from './separationNativeBridge';
-import { runOfflineSeparationDirect } from './orchestrate';
+import {
+  runOfflineSeparationDirect,
+  runOfflineSeparationPipeline,
+} from './orchestrate';
 
 let separationInstanceCounter = 0;
 
@@ -154,13 +160,7 @@ export async function createSeparation(
       guard();
 
       const mode = separateOptions?.segmentation?.mode ?? 'off';
-      if (mode !== 'off') {
-        throw new Error(
-          `${SeparationErrorCode.INVALID_ARGUMENT}: segmentation mode '${mode}' is not supported yet; use mode 'off' or omit options`
-        );
-      }
 
-      const startedAtMs = Date.now();
       const numStems = await SherpaOnnx.getSeparationNumStems(instanceId);
       if (audioOuts.length !== numStems) {
         throw new Error(
@@ -168,20 +168,60 @@ export async function createSeparation(
         );
       }
 
-      // Resolve ids early so invalid buffer refs fail before native call.
       resolvePipelineAudioBufferId(audioIn);
       for (const out of audioOuts) {
         resolvePipelineAudioBufferId(out);
       }
 
-      await runOfflineSeparationDirect(instanceId, audioIn, audioOuts);
+      if (mode === 'off') {
+        const startedAtMs = Date.now();
+        await runOfflineSeparationDirect(instanceId, audioIn, audioOuts);
+        return {
+          status: 'complete',
+          totalSegments: 1,
+          completedSegments: 1,
+          skippedSegments: [],
+          processingTimeMs: Date.now() - startedAtMs,
+        };
+      }
+
+      const orchestrated = await runOfflineSeparationPipeline(
+        audioIn,
+        instanceId,
+        audioOuts,
+        separateOptions ?? {}
+      );
+
+      const outputBuffers = orchestrated.outputBuffers;
+      if (outputBuffers) {
+        for (let i = 0; i < outputBuffers.length; i++) {
+          const callerOut = audioOuts[i];
+          const orchestratedOut = outputBuffers[i];
+          if (callerOut == null || orchestratedOut == null) continue;
+          const callerOutId = resolvePipelineAudioBufferId(callerOut);
+          try {
+            await SherpaOnnx.populateOfflineAudioBufferIfEmpty(
+              callerOutId,
+              orchestratedOut.bufferId,
+              undefined
+            );
+          } finally {
+            await releasePipelineAudioBuffer(orchestratedOut.bufferId).catch(
+              () => undefined
+            );
+          }
+        }
+      }
 
       return {
-        status: 'complete',
-        totalSegments: 1,
-        completedSegments: 1,
-        skippedSegments: [],
-        processingTimeMs: Date.now() - startedAtMs,
+        status: orchestrated.status,
+        totalSegments: orchestrated.totalSegments,
+        completedSegments: orchestrated.completedSegments,
+        skippedSegments: orchestrated.skippedSegments,
+        ...(orchestrated.failedSegment
+          ? { failedSegment: orchestrated.failedSegment }
+          : {}),
+        processingTimeMs: orchestrated.processingTimeMs,
       };
     },
     async getSampleRate(): Promise<number> {
