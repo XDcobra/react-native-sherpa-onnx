@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -41,12 +42,21 @@
 #define LOGE(...) ((void)0)
 #endif
 
+#ifndef NDEBUG
+#define AUDIO_DECODE_DBG(...) LOGI(__VA_ARGS__)
+#define AUDIO_DECODE_DBGW(...) LOGW(__VA_ARGS__)
+#else
+#define AUDIO_DECODE_DBG(...) ((void)0)
+#define AUDIO_DECODE_DBGW(...) ((void)0)
+#endif
+
 #ifdef HAVE_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
 #include <libavutil/error.h>
+#include <libavutil/intreadwrite.h>
 #include <libswresample/swresample.h>
 }
 #endif
@@ -365,6 +375,514 @@ int64_t avioSeekFd(void* opaque, int64_t offset, int whence) {
   return static_cast<int64_t>(result);
 }
 
+static const int kMpeg4AacSampleRates[] = {
+    96000, 88200, 64000, 48000, 44100, 32000,
+    24000, 22050, 16000, 12000, 11025, 8000, 7350,
+};
+
+static const int kAdtsChannelCount[] = {0, 1, 2, 3, 4, 5, 6, 8};
+static constexpr int kMinValidAdtsFrameBytes = 100;
+
+static void logDirectFdBytes(int fd, int64_t offset, size_t count, const char* label) {
+#ifndef NDEBUG
+  if (fd < 0 || !label || count == 0) {
+    return;
+  }
+
+  std::vector<uint8_t> buf(count);
+  const ssize_t got = pread(fd, buf.data(), count, static_cast<off_t>(offset));
+  if (got <= 0) {
+    AUDIO_DECODE_DBGW(
+        "fd_direct label=%s offset=%lld read_fail got=%zd",
+        label,
+        static_cast<long long>(offset),
+        got);
+    return;
+  }
+
+  char hex[128] = {0};
+  const int hexLen = std::min(static_cast<int>(got), 32);
+  for (int i = 0; i < hexLen; ++i) {
+    std::snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", buf[i]);
+  }
+  AUDIO_DECODE_DBG(
+      "fd_direct label=%s offset=%lld got=%zd hex=%s",
+      label,
+      static_cast<long long>(offset),
+      got,
+      hex);
+#else
+  (void)fd;
+  (void)offset;
+  (void)count;
+  (void)label;
+#endif
+}
+
+static int parseAdtsFrameLength(const uint8_t* hdr, int available) {
+  if (available < 7) {
+    return 0;
+  }
+  if ((AV_RB16(hdr) & 0xFFF6) != 0xFFF0) {
+    return 0;
+  }
+  return (AV_RB32(hdr + 3) >> 13) & 0x1FFF;
+}
+
+static int64_t resyncRawAdtsToValidFrame(AVFormatContext* fmtCtx, int minFrameBytes) {
+  if (!fmtCtx || !fmtCtx->pb || minFrameBytes <= 0) {
+    return -1;
+  }
+
+  const int64_t fileSize = avio_size(fmtCtx->pb);
+  const int64_t scanLimit = fileSize > 0 ? fileSize : (1024 * 1024);
+
+  if (avio_seek(fmtCtx->pb, 0, SEEK_SET) < 0) {
+    AUDIO_DECODE_DBGW("adts_resync seek_to_0_failed");
+    return -1;
+  }
+
+  int64_t scanPos = 0;
+  int candidates = 0;
+  while (scanPos + 7 <= scanLimit) {
+    if (avio_seek(fmtCtx->pb, scanPos, SEEK_SET) < 0) {
+      break;
+    }
+
+    uint8_t hdr[7];
+    const int got = avio_read(fmtCtx->pb, hdr, 7);
+    if (got != 7) {
+      break;
+    }
+
+    const int fsize = parseAdtsFrameLength(hdr, 7);
+    if (fsize <= 0) {
+      scanPos++;
+      continue;
+    }
+
+    candidates++;
+    char hex[32] = {0};
+    for (int i = 0; i < 7; ++i) {
+      std::snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", hdr[i]);
+    }
+    AUDIO_DECODE_DBG(
+        "adts_candidate #%d syncPos=%lld fsize=%d min=%d hex=%s",
+        candidates,
+        static_cast<long long>(scanPos),
+        fsize,
+        minFrameBytes,
+        hex);
+
+    if (fsize >= minFrameBytes && (fileSize <= 0 || scanPos + fsize <= fileSize)) {
+      avio_seek(fmtCtx->pb, scanPos, SEEK_SET);
+      AUDIO_DECODE_DBG(
+          "adts_resync_ok syncPos=%lld fsize=%d scanned=%lld",
+          static_cast<long long>(scanPos),
+          fsize,
+          static_cast<long long>(scanPos));
+      return scanPos;
+    }
+
+    scanPos++;
+  }
+
+  AUDIO_DECODE_DBGW(
+      "adts_resync_fail candidates=%d scanLimit=%lld fileSize=%lld",
+      candidates,
+      static_cast<long long>(scanLimit),
+      static_cast<long long>(fileSize));
+  return -1;
+}
+
+struct AdtsFrameHeader {
+  bool ok = false;
+  int frameLength = 0;
+  int sampleRateHz = 0;
+  int channelCount = 0;
+  int sfIndex = -1;
+  int chConfig = 0;
+  uint8_t bytes[7] = {};
+};
+
+static AdtsFrameHeader peekAdtsHeaderAtAvio(AVFormatContext* fmtCtx) {
+  AdtsFrameHeader hdr;
+  if (!fmtCtx || !fmtCtx->pb) {
+    return hdr;
+  }
+
+  const int64_t syncPos = avio_tell(fmtCtx->pb);
+  const int got = avio_read(fmtCtx->pb, hdr.bytes, 7);
+  if (got != 7) {
+    AUDIO_DECODE_DBGW("adts_peek read_fail syncPos=%lld got=%d", static_cast<long long>(syncPos), got);
+    avio_seek(fmtCtx->pb, syncPos, SEEK_SET);
+    return hdr;
+  }
+
+  if ((AV_RB16(hdr.bytes) & 0xFFF6) != 0xFFF0) {
+    char hex[32] = {0};
+    for (int i = 0; i < 7; ++i) {
+      std::snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", hdr.bytes[i]);
+    }
+    AUDIO_DECODE_DBGW(
+        "adts_peek sync_miss syncPos=%lld hex=%s",
+        static_cast<long long>(syncPos),
+        hex);
+    avio_seek(fmtCtx->pb, syncPos, SEEK_SET);
+    return hdr;
+  }
+
+  hdr.sfIndex = (hdr.bytes[2] & 0x3C) >> 2;
+  hdr.chConfig = ((hdr.bytes[2] & 0x01) << 2) | ((hdr.bytes[3] & 0xC0) >> 6);
+  hdr.frameLength = (AV_RB32(hdr.bytes + 3) >> 13) & 0x1FFF;
+  if (hdr.sfIndex >= 0 && hdr.sfIndex < static_cast<int>(sizeof(kMpeg4AacSampleRates) / sizeof(kMpeg4AacSampleRates[0]))) {
+    hdr.sampleRateHz = kMpeg4AacSampleRates[hdr.sfIndex];
+  }
+  if (hdr.chConfig >= 0 && hdr.chConfig < static_cast<int>(sizeof(kAdtsChannelCount) / sizeof(kAdtsChannelCount[0]))) {
+    hdr.channelCount = kAdtsChannelCount[hdr.chConfig];
+  }
+  hdr.ok = hdr.sampleRateHz > 0 && hdr.frameLength >= kMinValidAdtsFrameBytes;
+
+  const int64_t restoredPos = avio_seek(fmtCtx->pb, syncPos, SEEK_SET);
+  if (restoredPos < 0) {
+    AUDIO_DECODE_DBGW(
+        "adts_peek restore_fail syncPos=%lld restored=%lld",
+        static_cast<long long>(syncPos),
+        static_cast<long long>(restoredPos));
+    hdr.ok = false;
+    return hdr;
+  }
+
+  char hex[32] = {0};
+  for (int i = 0; i < 7; ++i) {
+    std::snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", hdr.bytes[i]);
+  }
+  AUDIO_DECODE_DBG(
+      "adts_peek syncPos=%lld frameLen=%d sfIdx=%d sr=%d chCfg=%d ch=%d hex=%s",
+      static_cast<long long>(syncPos),
+      hdr.frameLength,
+      hdr.sfIndex,
+      hdr.sampleRateHz,
+      hdr.chConfig,
+      hdr.channelCount,
+      hex);
+  return hdr;
+}
+
+static void logInputIoState(
+    AVFormatContext* fmtCtx,
+    int ownedFd,
+    int inputFd,
+    const char* phase) {
+#ifndef NDEBUG
+  int64_t avioPos = -1;
+  int64_t avioSize = -1;
+  int seekable = 0;
+  int eofReached = -1;
+  int avioError = 0;
+  int64_t bytesRead = -1;
+  if (fmtCtx && fmtCtx->pb) {
+    avioPos = avio_tell(fmtCtx->pb);
+    avioSize = avio_size(fmtCtx->pb);
+    seekable = fmtCtx->pb->seekable;
+    eofReached = fmtCtx->pb->eof_reached;
+    avioError = fmtCtx->pb->error;
+    bytesRead = fmtCtx->pb->bytes_read;
+    const int bufLeft = static_cast<int>(fmtCtx->pb->buf_end - fmtCtx->pb->buf_ptr);
+    const int bufTotal = static_cast<int>(fmtCtx->pb->buf_end - fmtCtx->pb->buffer);
+    const int64_t bufBasePos =
+        fmtCtx->pb->pos - (fmtCtx->pb->write_flag ? 0 : bufTotal);
+    AUDIO_DECODE_DBG(
+        "avio_detail phase=%s bufBasePos=%lld bufLeft=%d bufTotal=%d pos=%lld eof=%d avioErr=%d bytesRead=%lld",
+        phase ? phase : "?",
+        static_cast<long long>(bufBasePos),
+        bufLeft,
+        bufTotal,
+        static_cast<long long>(fmtCtx->pb->pos),
+        eofReached,
+        avioError,
+        static_cast<long long>(bytesRead));
+  }
+
+  off_t fdPos = -1;
+  off_t fdSize = -1;
+  if (ownedFd >= 0) {
+    fdPos = lseek(ownedFd, 0, SEEK_CUR);
+    fdSize = lseek(ownedFd, 0, SEEK_END);
+    if (fdSize >= 0) {
+      lseek(ownedFd, fdPos, SEEK_SET);
+    }
+  }
+
+  AUDIO_DECODE_DBG(
+      "io_state phase=%s inputFd=%d ownedFd=%d avioPos=%lld avioSize=%lld seekable=0x%x fdPos=%lld fdSize=%lld",
+      phase ? phase : "?",
+      inputFd,
+      ownedFd,
+      static_cast<long long>(avioPos),
+      static_cast<long long>(avioSize),
+      seekable,
+      static_cast<long long>(fdPos),
+      static_cast<long long>(fdSize));
+#else
+  (void)fmtCtx;
+  (void)ownedFd;
+  (void)inputFd;
+  (void)phase;
+#endif
+}
+
+static const char* mediaTypeName(int mediaType) {
+  switch (mediaType) {
+    case AVMEDIA_TYPE_AUDIO:
+      return "audio";
+    case AVMEDIA_TYPE_VIDEO:
+      return "video";
+    case AVMEDIA_TYPE_SUBTITLE:
+      return "subtitle";
+    case AVMEDIA_TYPE_DATA:
+      return "data";
+    default:
+      return "other";
+  }
+}
+
+static const char* identifyContainerMagic(const uint8_t* buf, size_t len) {
+  if (!buf || len < 2) {
+    return "too_short";
+  }
+  if (len >= 12 && buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F' &&
+      buf[8] == 'W' && buf[9] == 'A' && buf[10] == 'V' && buf[11] == 'E') {
+    return "RIFF/WAVE";
+  }
+  if (len >= 8 && buf[4] == 'f' && buf[5] == 't' && buf[6] == 'y' && buf[7] == 'p') {
+    return "ISO/ftyp";
+  }
+  if (len >= 3 && buf[0] == 'I' && buf[1] == 'D' && buf[2] == '3') {
+    return "ID3v2";
+  }
+  if (len >= 4 && buf[0] == 'O' && buf[1] == 'g' && buf[2] == 'g' && buf[3] == 'S') {
+    return "OggS";
+  }
+  if (len >= 4 && buf[0] == 'f' && buf[1] == 'L' && buf[2] == 'a' && buf[3] == 'C') {
+    return "fLaC";
+  }
+  if (len >= 4 && buf[0] == 'F' && buf[1] == 'L' && buf[2] == 'A' && buf[3] == 'C') {
+    return "FLAC";
+  }
+  if (len >= 2 && (buf[0] & 0xFF) == 0xFF && ((buf[1] & 0xF6) == 0xF0)) {
+    return "ADTS";
+  }
+  if (len >= 4 && buf[0] == 0x1A && buf[1] == 'E' && buf[2] == 'B' && buf[3] == 'P') {
+    return "EBML/matroska";
+  }
+  if (len >= 2 && (buf[0] & 0xFF) == 0xFF && ((buf[1] & 0xE0) == 0xE0)) {
+    return "MP3_frame_sync";
+  }
+  if (len >= 4 && buf[0] == 'X' && buf[1] == 'i' && buf[2] == 'n' && buf[3] == 'g') {
+    return "Xing/MP3";
+  }
+  if (len >= 4 && buf[0] == 'I' && buf[1] == 'n' && buf[2] == 'f' && buf[3] == 'o') {
+    return "Info/MP3";
+  }
+  return "unknown";
+}
+
+static void logContainerMagicFromFd(int fd, const char* label) {
+#ifndef NDEBUG
+  if (fd < 0 || !label) {
+    return;
+  }
+
+  uint8_t buf[16] = {};
+  const ssize_t got = pread(fd, buf, sizeof(buf), 0);
+  if (got <= 0) {
+    AUDIO_DECODE_DBGW(
+        "container_magic label=%s read_fail got=%zd",
+        label,
+        got);
+    return;
+  }
+
+  char hex[64] = {0};
+  const int hexLen = std::min(static_cast<int>(got), 16);
+  for (int i = 0; i < hexLen; ++i) {
+    std::snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02x ", buf[i]);
+  }
+  AUDIO_DECODE_DBG(
+      "container_magic label=%s magic=%s got=%zd hex=%s",
+      label,
+      identifyContainerMagic(buf, static_cast<size_t>(got)),
+      got,
+      hex);
+#else
+  (void)fd;
+  (void)label;
+#endif
+}
+
+static void logFormatContextSummary(
+    AVFormatContext* fmtCtx,
+    int selectedAudioIdx,
+    const char* phase) {
+#ifndef NDEBUG
+  if (!fmtCtx) {
+    return;
+  }
+
+  const char* iformat =
+      (fmtCtx->iformat && fmtCtx->iformat->name) ? fmtCtx->iformat->name : "?";
+  AUDIO_DECODE_DBG(
+      "format_summary phase=%s iformat=%s nb_streams=%u duration=%lld bit_rate=%lld",
+      phase ? phase : "?",
+      iformat,
+      fmtCtx->nb_streams,
+      static_cast<long long>(fmtCtx->duration),
+      static_cast<long long>(fmtCtx->bit_rate));
+
+  for (unsigned i = 0; i < fmtCtx->nb_streams; ++i) {
+    AVStream* st = fmtCtx->streams[i];
+    if (!st || !st->codecpar) {
+      continue;
+    }
+    AVCodecParameters* par = st->codecpar;
+    const char* codecName = avcodec_get_name(par->codec_id);
+    AUDIO_DECODE_DBG(
+        "format_stream phase=%s idx=%u type=%s codec=%s sr=%d ch=%d extradata=%d "
+        "selected_audio=%d",
+        phase ? phase : "?",
+        i,
+        mediaTypeName(par->codec_type),
+        codecName ? codecName : "?",
+        par->sample_rate,
+        par->ch_layout.nb_channels,
+        par->extradata_size,
+        static_cast<int>(i) == selectedAudioIdx ? 1 : 0);
+  }
+#else
+  (void)fmtCtx;
+  (void)selectedAudioIdx;
+  (void)phase;
+#endif
+}
+
+static void logStreamTimingState(AVStream* st, const char* phase) {
+#ifndef NDEBUG
+  if (!st) {
+    return;
+  }
+  AUDIO_DECODE_DBG(
+      "stream_timing phase=%s idx=%d start_time=%lld duration=%lld nb_frames=%lld "
+      "time_base=%d/%d",
+      phase ? phase : "?",
+      st->index,
+      static_cast<long long>(st->start_time),
+      static_cast<long long>(st->duration),
+      static_cast<long long>(st->nb_frames),
+      st->time_base.num,
+      st->time_base.den);
+#else
+  (void)st;
+  (void)phase;
+#endif
+}
+
+static const char* ffmpegErrLabel(int err, char* buf, size_t bufSize) {
+  if (err == 0) {
+    return "ok";
+  }
+  av_strerror(err, buf, bufSize);
+  return buf;
+}
+
+static bool isIsoMediaDemuxer(const AVFormatContext* fmtCtx) {
+  if (!fmtCtx || !fmtCtx->iformat || !fmtCtx->iformat->name) {
+    return false;
+  }
+  // FFmpeg short name list, e.g. "mov,mp4,m4a,3gp,3g2,mj2"
+  const char* name = fmtCtx->iformat->name;
+  return std::strstr(name, "mov") != nullptr || std::strstr(name, "mp4") != nullptr;
+}
+
+static bool initDecodeResampler(
+    SwrContext** swr,
+    AVCodecContext* decCtx,
+    int outSampleRate,
+    int outChannels,
+    int srcSampleRate,
+    const char* reason) {
+  if (!swr || !decCtx || srcSampleRate <= 0) {
+    LOGE(
+        "swr_init_skip reason=%s srcSr=%d decSr=%d decCh=%d",
+        reason ? reason : "?",
+        srcSampleRate,
+        decCtx ? decCtx->sample_rate : 0,
+        decCtx ? decCtx->ch_layout.nb_channels : 0);
+    return false;
+  }
+
+  if (*swr) {
+    swr_free(swr);
+  }
+
+  AVChannelLayout outLayout;
+  av_channel_layout_default(&outLayout, outChannels);
+
+  int swrRet = swr_alloc_set_opts2(
+      swr,
+      &outLayout,
+      AV_SAMPLE_FMT_FLT,
+      outSampleRate,
+      &decCtx->ch_layout,
+      decCtx->sample_fmt,
+      srcSampleRate,
+      0,
+      nullptr);
+  if (swrRet < 0 || !*swr) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+    av_strerror(swrRet, errbuf, sizeof(errbuf));
+    LOGE(
+        "swr_alloc_fail reason=%s ret=%d (%s) outSr=%d outCh=%d inSr=%d inCh=%d inFmt=%d",
+        reason ? reason : "?",
+        swrRet,
+        errbuf,
+        outSampleRate,
+        outChannels,
+        srcSampleRate,
+        decCtx->ch_layout.nb_channels,
+        static_cast<int>(decCtx->sample_fmt));
+    return false;
+  }
+
+  const int initRet = swr_init(*swr);
+  if (initRet < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+    av_strerror(initRet, errbuf, sizeof(errbuf));
+    LOGE(
+        "swr_init_fail reason=%s ret=%d (%s) outSr=%d outCh=%d inSr=%d inCh=%d inFmt=%d",
+        reason ? reason : "?",
+        initRet,
+        errbuf,
+        outSampleRate,
+        outChannels,
+        srcSampleRate,
+        decCtx->ch_layout.nb_channels,
+        static_cast<int>(decCtx->sample_fmt));
+    swr_free(swr);
+    return false;
+  }
+
+  AUDIO_DECODE_DBG(
+      "swr_init_ok reason=%s outSr=%d outCh=%d inSr=%d inCh=%d inFmt=%d",
+      reason ? reason : "?",
+      outSampleRate,
+      outChannels,
+      srcSampleRate,
+      decCtx->ch_layout.nb_channels,
+      static_cast<int>(decCtx->sample_fmt));
+  return true;
+}
+
 AudioDecodeResult decodeFileFFmpeg(
     const char* path,
     int inputFd,
@@ -381,6 +899,11 @@ AudioDecodeResult decodeFileFFmpeg(
       "allowAutoProbe=%d",
       config.allowDemuxerAutoProbe ? 1 : 0);
   SHERPA_DIAG_D("audio.decode", "ffmpeg_start", diagDetail);
+  AUDIO_DECODE_DBG(
+      "ffmpeg_start pathHint=%s fd=%d allowAutoProbe=%d",
+      path ? path : "(null)",
+      inputFd,
+      config.allowDemuxerAutoProbe ? 1 : 0);
 
   AVFormatContext* fmtCtx = nullptr;
   AVIOContext* avioCtx = nullptr;
@@ -470,11 +993,62 @@ AudioDecodeResult decodeFileFFmpeg(
     }
   }
 
-  if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
-    throw std::runtime_error("DECODE_OPEN_FAILED: Failed to find stream info");
+  const bool isRawAdtsDemuxer =
+      fmtCtx->iformat && fmtCtx->iformat->name &&
+      std::strcmp(fmtCtx->iformat->name, "aac") == 0;
+  const char* inputKind = inputFd >= 0 ? "content_fd" : "path";
+  const char* iformatName =
+      (fmtCtx->iformat && fmtCtx->iformat->name) ? fmtCtx->iformat->name : "?";
+
+  AUDIO_DECODE_DBG(
+      "decode_open inputKind=%s iformat=%s rawAdts=%d pathHint=%s fd=%d",
+      inputKind,
+      iformatName,
+      isRawAdtsDemuxer ? 1 : 0,
+      path ? path : "(null)",
+      inputFd);
+  if (ownedFd >= 0) {
+    logContainerMagicFromFd(ownedFd, "decode_open");
+    logDirectFdBytes(ownedFd, 0, 32, "decode_file_start");
+  }
+  logInputIoState(fmtCtx, ownedFd, inputFd, "after_open");
+  logFormatContextSummary(fmtCtx, -1, "after_read_header");
+
+  // Raw ADTS: read_header already resynced to the first frame. find_stream_info
+  // reads ahead and leaves the demuxer mid-stream; rewinding to byte 0 does not
+  // re-run resync, so the first av_read_frame can yield a bogus 9-byte ADTS header.
+  if (!isRawAdtsDemuxer) {
+    logInputIoState(fmtCtx, ownedFd, inputFd, "before_find_stream_info");
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+      throw std::runtime_error("DECODE_OPEN_FAILED: Failed to find stream info");
+    }
+    logInputIoState(fmtCtx, ownedFd, inputFd, "after_find_stream_info");
+    logFormatContextSummary(fmtCtx, -1, "after_find_stream_info");
+  } else {
+    AUDIO_DECODE_DBG("skip find_stream_info for raw ADTS demuxer (read_header resync active)");
+    logInputIoState(fmtCtx, ownedFd, inputFd, "after_read_header");
+    logDirectFdBytes(ownedFd, 0, 32, "adts_file_start");
+    const int64_t resyncPos =
+        resyncRawAdtsToValidFrame(fmtCtx, kMinValidAdtsFrameBytes);
+    if (resyncPos < 0) {
+      AUDIO_DECODE_DBGW("adts_resync using read_header position (no valid frame found while scanning)");
+    }
+    logInputIoState(fmtCtx, ownedFd, inputFd, "after_adts_resync");
   }
 
-  // Find audio stream
+  AdtsFrameHeader adtsPeek;
+  if (isRawAdtsDemuxer) {
+    adtsPeek = peekAdtsHeaderAtAvio(fmtCtx);
+    if (!adtsPeek.ok) {
+      AUDIO_DECODE_DBGW(
+          "adts_peek invalid after resync frameLen=%d sr=%d — decode may still recover from parser",
+          adtsPeek.frameLength,
+          adtsPeek.sampleRateHz);
+    }
+    logInputIoState(fmtCtx, ownedFd, inputFd, "after_adts_peek");
+  }
+
+  // Find audio stream before rewinding custom inputs (seek may target this stream).
   int audioIdx = -1;
   for (unsigned i = 0; i < fmtCtx->nb_streams; ++i) {
     if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -484,6 +1058,101 @@ AudioDecodeResult decodeFileFFmpeg(
   }
   if (audioIdx < 0) {
     throw std::runtime_error("DECODE_NO_AUDIO_STREAM: No audio stream found");
+  }
+  logFormatContextSummary(fmtCtx, audioIdx, "stream_selected");
+
+  // Custom AVIO (e.g. Android content:// fd): reset read position after probe.
+  // ISO-BMFF (mov/mp4/m4a): NEVER avio_seek(0). FFmpeg mov_read_packet() at pb->pos==0
+  // discards all index entries and re-parses from scratch — yields EOF on custom AVIO.
+  // Keep post-find_stream_info IO position; only stream-index seek to sample 0.
+  if (!isRawAdtsDemuxer && inputFd >= 0 && fmtCtx->pb != nullptr) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+    const bool isoMedia = isIsoMediaDemuxer(fmtCtx);
+
+    if (isoMedia) {
+      const int64_t avioPosBeforeSeek = avio_tell(fmtCtx->pb);
+      int streamSeekRet = -1;
+      if (audioIdx >= 0) {
+        streamSeekRet = av_seek_frame(fmtCtx, audioIdx, 0, AVSEEK_FLAG_BACKWARD);
+        if (streamSeekRet < 0) {
+          streamSeekRet = avformat_seek_file(
+              fmtCtx,
+              audioIdx,
+              INT64_MIN,
+              0,
+              INT64_MAX,
+              AVSEEK_FLAG_BACKWARD);
+        }
+      }
+      AUDIO_DECODE_DBG(
+          "iso_custom_fd_seek streamSeekRet=%d (%s) avioPosBefore=%lld avioPosAfter=%lld "
+          "(must stay !=0)",
+          streamSeekRet,
+          ffmpegErrLabel(streamSeekRet, errbuf, sizeof(errbuf)),
+          static_cast<long long>(avioPosBeforeSeek),
+          fmtCtx->pb ? static_cast<long long>(avio_tell(fmtCtx->pb)) : -1LL);
+      if (streamSeekRet < 0) {
+        throw std::runtime_error(
+            "DECODE_OPEN_FAILED: Failed to seek ISO media stream to start on custom input");
+      }
+      logInputIoState(fmtCtx, ownedFd, inputFd, "after_iso_stream_seek");
+      if (audioIdx >= 0 && fmtCtx->streams[audioIdx]) {
+        logStreamTimingState(fmtCtx->streams[audioIdx], "after_iso_stream_seek");
+      }
+    } else {
+      const int64_t avioSeekRet = avio_seek(fmtCtx->pb, 0, SEEK_SET);
+      AUDIO_DECODE_DBG(
+          "rewind_step avio_seek ret=%lld eof_before=%d",
+          static_cast<long long>(avioSeekRet),
+          fmtCtx->pb->eof_reached);
+      logInputIoState(fmtCtx, ownedFd, inputFd, "after_avio_seek_0");
+
+      const int byteSeekRet =
+          avformat_seek_file(fmtCtx, -1, 0, 0, 0, AVSEEK_FLAG_BYTE);
+      AUDIO_DECODE_DBG(
+          "rewind_step byte_seek ret=%d (%s)",
+          byteSeekRet,
+          ffmpegErrLabel(byteSeekRet, errbuf, sizeof(errbuf)));
+      logInputIoState(fmtCtx, ownedFd, inputFd, "after_byte_seek");
+
+      int streamSeekRet = -1;
+      if (byteSeekRet < 0 && audioIdx >= 0) {
+        streamSeekRet = avformat_seek_file(fmtCtx, audioIdx, 0, 0, 0, 0);
+        AUDIO_DECODE_DBG(
+            "rewind_step stream_seek_fallback ret=%d (%s) audioIdx=%d",
+            streamSeekRet,
+            ffmpegErrLabel(streamSeekRet, errbuf, sizeof(errbuf)),
+            audioIdx);
+        logInputIoState(fmtCtx, ownedFd, inputFd, "after_stream_seek_fallback");
+      }
+
+      AUDIO_DECODE_DBG(
+          "rewind_after_probe fd=%d avioSeekRet=%lld byteSeekRet=%d streamSeekRet=%d audioIdx=%d",
+          inputFd,
+          static_cast<long long>(avioSeekRet),
+          byteSeekRet,
+          streamSeekRet,
+          audioIdx);
+      if (avioSeekRet < 0) {
+        throw std::runtime_error(
+            "DECODE_OPEN_FAILED: Failed to rewind custom input after stream probe");
+      }
+      if (byteSeekRet < 0 && streamSeekRet < 0) {
+        throw std::runtime_error(
+            "DECODE_OPEN_FAILED: Failed to seek custom input after stream probe");
+      }
+      if (audioIdx >= 0 && fmtCtx->streams[audioIdx]) {
+        logStreamTimingState(fmtCtx->streams[audioIdx], "after_rewind_after_probe");
+      }
+      if (ownedFd >= 0) {
+        logDirectFdBytes(ownedFd, 0, 32, "after_rewind_file_start");
+        logDirectFdBytes(ownedFd, avio_tell(fmtCtx->pb), 32, "after_rewind_avio_pos");
+      }
+      logInputIoState(fmtCtx, ownedFd, inputFd, "after_rewind_after_probe");
+    }
+    logFormatContextSummary(fmtCtx, audioIdx, "after_rewind_after_probe");
+  } else if (!isRawAdtsDemuxer && inputFd < 0) {
+    AUDIO_DECODE_DBG("rewind_after_probe skipped inputKind=path iformat=%s", iformatName);
   }
 
   AVStream* stream = fmtCtx->streams[audioIdx];
@@ -503,46 +1172,123 @@ AudioDecodeResult decodeFileFFmpeg(
     throw std::runtime_error("DECODE_CODEC_UNSUPPORTED: Failed to open decoder");
   }
 
-  // Source info
+  // Source info — raw ADTS leaves codecpar empty until packets are parsed.
   int srcSampleRate = decCtx->sample_rate;
   int srcChannels = decCtx->ch_layout.nb_channels;
+  if (isRawAdtsDemuxer && adtsPeek.ok) {
+    if (srcSampleRate <= 0) {
+      srcSampleRate = adtsPeek.sampleRateHz;
+    }
+    if (srcChannels <= 0 && adtsPeek.channelCount > 0) {
+      srcChannels = adtsPeek.channelCount;
+      av_channel_layout_uninit(&decCtx->ch_layout);
+      av_channel_layout_default(&decCtx->ch_layout, srcChannels);
+    }
+    if (stream->codecpar->bit_rate <= 0 && adtsPeek.frameLength > 0 && srcSampleRate > 0) {
+      stream->codecpar->bit_rate =
+          static_cast<int64_t>(adtsPeek.frameLength) * 8LL * srcSampleRate / 1024LL;
+    }
+  }
   if (srcChannels <= 0) srcChannels = 1;
 
   if (onStreamInfo) {
     onStreamInfo(srcSampleRate, srcChannels);
   }
 
+  AUDIO_DECODE_DBG(
+      "decode_stream_open inputKind=%s iformat=%s codec=%s profile=%d sample_fmt=%d sr=%d ch=%d "
+      "extradata=%d bit_rate=%lld adtsPeek=%d pathHint=%s fd=%d",
+      inputKind,
+      iformatName,
+      decoder->name ? decoder->name : "?",
+      stream->codecpar->profile,
+      static_cast<int>(decCtx->sample_fmt),
+      srcSampleRate,
+      srcChannels,
+      stream->codecpar->extradata_size,
+      static_cast<long long>(stream->codecpar->bit_rate),
+      adtsPeek.ok ? 1 : 0,
+      path ? path : "(null)",
+      inputFd);
+
   // Target config
   int outSampleRate = config.targetSampleRate > 0 ? config.targetSampleRate : srcSampleRate;
   int outChannels = config.forceMono ? 1 : srcChannels;
 
-  // Configure SwrContext for resampling + downmix → float32 mono output
-  AVChannelLayout outLayout;
-  av_channel_layout_default(&outLayout, outChannels);
-
-  int swrRet = swr_alloc_set_opts2(
-      &swr,
-      &outLayout, AV_SAMPLE_FMT_FLT, outSampleRate,
-      &decCtx->ch_layout, decCtx->sample_fmt, srcSampleRate,
-      0, nullptr
-  );
-  if (swrRet < 0 || !swr || swr_init(swr) < 0) {
-    throw std::runtime_error("DECODE_RESAMPLE_ERROR: Failed to initialize resampler");
+  bool swrReady = false;
+  if (srcSampleRate > 0) {
+    swrReady = initDecodeResampler(
+        &swr,
+        decCtx,
+        outSampleRate,
+        outChannels,
+        srcSampleRate,
+        isRawAdtsDemuxer ? "adts_peek" : "codecpar");
+    if (!swrReady) {
+      throw std::runtime_error("DECODE_RESAMPLE_ERROR: Failed to initialize resampler");
+    }
+  } else {
+    AUDIO_DECODE_DBG(
+        "swr_init_deferred iformat=%s waiting_for_first_decoded_frame",
+        iformatName);
   }
+
+  auto ensureSwrFromFrame = [&](AVFrame* decodedFrame, const char* reason) {
+    if (swrReady) {
+      return;
+    }
+    int frameSampleRate = decodedFrame->sample_rate > 0 ? decodedFrame->sample_rate : decCtx->sample_rate;
+    if (frameSampleRate <= 0) {
+      throw std::runtime_error("DECODE_RESAMPLE_ERROR: Unknown source sample rate after first frame");
+    }
+    if (decodedFrame->ch_layout.nb_channels > 0) {
+      srcChannels = decodedFrame->ch_layout.nb_channels;
+      av_channel_layout_uninit(&decCtx->ch_layout);
+      av_channel_layout_copy(&decCtx->ch_layout, &decodedFrame->ch_layout);
+    }
+    srcSampleRate = frameSampleRate;
+    if (config.targetSampleRate <= 0) {
+      outSampleRate = srcSampleRate;
+    }
+    outChannels = config.forceMono ? 1 : srcChannels;
+    if (onStreamInfo) {
+      onStreamInfo(srcSampleRate, srcChannels);
+    }
+    AUDIO_DECODE_DBG(
+        "swr_params_from_frame reason=%s sr=%d ch=%d sample_fmt=%d",
+        reason ? reason : "?",
+        srcSampleRate,
+        srcChannels,
+        static_cast<int>(decodedFrame->format));
+    if (!initDecodeResampler(
+            &swr,
+            decCtx,
+            outSampleRate,
+            outChannels,
+            srcSampleRate,
+            reason)) {
+      throw std::runtime_error("DECODE_RESAMPLE_ERROR: Failed to initialize resampler");
+    }
+    swrReady = true;
+  };
 
   // Progress estimation
   int64_t totalFramesEstimate = 0;
   if (fmtCtx->duration > 0) {
     double durationSec = (double)fmtCtx->duration / AV_TIME_BASE;
     totalFramesEstimate = (int64_t)(durationSec * outSampleRate);
-  } else if (fmtCtx->bit_rate > 0) {
-    struct stat st;
-    const bool hasSize =
-        (ownedFd >= 0 && fstat(ownedFd, &st) == 0 && st.st_size > 0) ||
-        (ownedFd < 0 && path && stat(path, &st) == 0 && st.st_size > 0);
-    if (hasSize) {
-      double durationSec = (double)(st.st_size * 8) / (double)fmtCtx->bit_rate;
-      totalFramesEstimate = (int64_t)(durationSec * outSampleRate);
+  } else {
+    const int64_t bitRate =
+        stream->codecpar->bit_rate > 0 ? stream->codecpar->bit_rate : fmtCtx->bit_rate;
+    if (bitRate > 0) {
+      struct stat st;
+      const bool hasSize =
+          (ownedFd >= 0 && fstat(ownedFd, &st) == 0 && st.st_size > 0) ||
+          (ownedFd < 0 && path && stat(path, &st) == 0 && st.st_size > 0);
+      if (hasSize) {
+        double durationSec = (double)(st.st_size * 8) / (double)bitRate;
+        totalFramesEstimate = (int64_t)(durationSec * outSampleRate);
+      }
     }
   }
 
@@ -557,29 +1303,132 @@ AudioDecodeResult decodeFileFFmpeg(
   chunkBuf.reserve(chunkSize * 2);
 
   int64_t totalFramesDecoded = 0;
+  int audioPacketsSeen = 0;
+  int audioFramesSeen = 0;
+  int readAttempts = 0;
+  int nonAudioPackets = 0;
+  int firstReadRet = 0;
+
+  logInputIoState(fmtCtx, ownedFd, inputFd, "before_read_loop");
+  if (audioIdx >= 0 && fmtCtx->streams[audioIdx]) {
+    logStreamTimingState(fmtCtx->streams[audioIdx], "before_read_loop");
+  }
 
   // Decode loop
-  while (av_read_frame(fmtCtx, pkt) >= 0) {
+  while (true) {
+    const int readRet = av_read_frame(fmtCtx, pkt);
+    readAttempts++;
+    if (readRet < 0) {
+      firstReadRet = readRet;
+      char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+      AUDIO_DECODE_DBG(
+          "read_frame_end attempt=%d ret=%d (%s) audioPackets=%d nonAudio=%d avioPos=%lld eof=%d",
+          readAttempts,
+          readRet,
+          ffmpegErrLabel(readRet, errbuf, sizeof(errbuf)),
+          audioPacketsSeen,
+          nonAudioPackets,
+          fmtCtx->pb ? static_cast<long long>(avio_tell(fmtCtx->pb)) : -1LL,
+          fmtCtx->pb ? fmtCtx->pb->eof_reached : -1);
+      if (readAttempts == 1) {
+        logInputIoState(fmtCtx, ownedFd, inputFd, "first_read_fail");
+        if (audioIdx >= 0 && fmtCtx->streams[audioIdx]) {
+          logStreamTimingState(fmtCtx->streams[audioIdx], "first_read_fail");
+        }
+      }
+      break;
+    }
+
     if (cancelFlag.load(std::memory_order_relaxed)) {
+      av_packet_unref(pkt);
       throw std::runtime_error("DECODE_CANCELLED: Operation cancelled");
     }
 
     if (pkt->stream_index != audioIdx) {
+      nonAudioPackets++;
+      if (nonAudioPackets == 1) {
+        AUDIO_DECODE_DBG(
+            "first_non_audio_packet stream_index=%d expected=%d size=%d pts=%lld",
+            pkt->stream_index,
+            audioIdx,
+            pkt->size,
+            static_cast<long long>(pkt->pts));
+      }
       av_packet_unref(pkt);
       continue;
     }
 
+    audioPacketsSeen++;
+    const int pktSize = pkt->size;
+    if (audioPacketsSeen == 1) {
+      char hexPrefix[64] = {0};
+      const int hexLen = pktSize > 0 && pkt->data != nullptr ? std::min(pktSize, 16) : 0;
+      for (int i = 0; i < hexLen; ++i) {
+        std::snprintf(hexPrefix + i * 3, sizeof(hexPrefix) - i * 3, "%02x ", pkt->data[i]);
+      }
+      AUDIO_DECODE_DBG(
+          "first_audio_packet iformat=%s pktSize=%d hex=%s avioPos=%lld fd=%d",
+          iformatName,
+          pktSize,
+          hexLen > 0 ? hexPrefix : "(empty)",
+          fmtCtx->pb ? static_cast<long long>(avio_tell(fmtCtx->pb)) : -1LL,
+          inputFd);
+    }
     int sendRet = avcodec_send_packet(decCtx, pkt);
-    av_packet_unref(pkt);
     if (sendRet < 0 && sendRet != AVERROR(EAGAIN) && sendRet != AVERROR_EOF) {
+#ifdef HAVE_FFMPEG
+      char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+      av_strerror(sendRet, errbuf, sizeof(errbuf));
+      char hexPrefix[64] = {0};
+      const int hexLen = pktSize > 0 && pkt->data != nullptr ? std::min(pktSize, 16) : 0;
+      for (int i = 0; i < hexLen; ++i) {
+        std::snprintf(hexPrefix + i * 3, sizeof(hexPrefix) - i * 3, "%02x ", pkt->data[i]);
+      }
+      LOGE(
+          "send_packet_fail pkt#=%d ret=%d (%s) pktSize=%d hex=%s codec=%s iformat=%s pathHint=%s fd=%d",
+          audioPacketsSeen,
+          sendRet,
+          errbuf,
+          pktSize,
+          hexLen > 0 ? hexPrefix : "(empty)",
+          decoder->name ? decoder->name : "?",
+          (fmtCtx->iformat && fmtCtx->iformat->name) ? fmtCtx->iformat->name : "?",
+          path ? path : "(null)",
+          inputFd);
+#else
+      LOGE(
+          "send_packet_fail pkt#=%d ret=%d pktSize=%d pathHint=%s fd=%d",
+          audioPacketsSeen,
+          sendRet,
+          pktSize,
+          path ? path : "(null)",
+          inputFd);
+#endif
+      av_packet_unref(pkt);
       throw std::runtime_error("DECODE_DECODE_ERROR: Error sending packet to decoder");
     }
+    av_packet_unref(pkt);
 
     while (true) {
       int recvRet = avcodec_receive_frame(decCtx, frame);
       if (recvRet == AVERROR(EAGAIN) || recvRet == AVERROR_EOF) break;
       if (recvRet < 0) {
         throw std::runtime_error("DECODE_DECODE_ERROR: Error receiving frame from decoder");
+      }
+
+      ensureSwrFromFrame(frame, "decode_loop");
+
+      audioFramesSeen++;
+      if (audioFramesSeen == 1) {
+        AUDIO_DECODE_DBG(
+            "first_audio_frame iformat=%s pkt#=%d nb_samples=%d sr=%d ch=%d fmt=%d pts=%lld",
+            iformatName,
+            audioPacketsSeen,
+            frame->nb_samples,
+            frame->sample_rate,
+            frame->ch_layout.nb_channels,
+            static_cast<int>(frame->format),
+            static_cast<long long>(frame->pts));
       }
 
       // Resample frame → float32
@@ -624,6 +1473,11 @@ AudioDecodeResult decodeFileFFmpeg(
     if (recvRet == AVERROR(EAGAIN) || recvRet == AVERROR_EOF) break;
     if (recvRet < 0) break;
 
+    ensureSwrFromFrame(frame, "decoder_flush");
+    if (!swrReady) {
+      break;
+    }
+
     int maxOutSamples = swr_get_out_samples(swr, frame->nb_samples);
     if (maxOutSamples <= 0) maxOutSamples = frame->nb_samples * 4;
 
@@ -640,13 +1494,15 @@ AudioDecodeResult decodeFileFFmpeg(
   }
 
   // Flush resampler
-  while (true) {
-    float flushBuf[1024];
-    uint8_t* outBuf[1] = { reinterpret_cast<uint8_t*>(flushBuf) };
-    int flushed = swr_convert(swr, outBuf, 1024, nullptr, 0);
-    if (flushed <= 0) break;
-    int samplesOut = flushed * outChannels;
-    chunkBuf.insert(chunkBuf.end(), flushBuf, flushBuf + samplesOut);
+  if (swrReady) {
+    while (true) {
+      float flushBuf[1024];
+      uint8_t* outBuf[1] = { reinterpret_cast<uint8_t*>(flushBuf) };
+      int flushed = swr_convert(swr, outBuf, 1024, nullptr, 0);
+      if (flushed <= 0) break;
+      int samplesOut = flushed * outChannels;
+      chunkBuf.insert(chunkBuf.end(), flushBuf, flushBuf + samplesOut);
+    }
   }
 
   // Deliver remaining samples
@@ -663,11 +1519,45 @@ AudioDecodeResult decodeFileFFmpeg(
   result.totalFramesDecoded = totalFramesDecoded;
   result.sourceSampleRate = srcSampleRate;
   result.sourceChannels = srcChannels;
+  AUDIO_DECODE_DBG(
+      "decode_done inputKind=%s iformat=%s totalFrames=%lld audioPackets=%d audioFrames=%d "
+      "readAttempts=%d firstReadRet=%d nonAudio=%d outSr=%d srcSr=%d srcCh=%d pathHint=%s fd=%d",
+      inputKind,
+      iformatName,
+      static_cast<long long>(totalFramesDecoded),
+      audioPacketsSeen,
+      audioFramesSeen,
+      readAttempts,
+      firstReadRet,
+      nonAudioPackets,
+      outSampleRate,
+      srcSampleRate,
+      srcChannels,
+      path ? path : "(null)",
+      inputFd);
+#ifdef NDEBUG
+  if (totalFramesDecoded <= 0) {
+    LOGW(
+        "decode_empty iformat=%s inputKind=%s pathHint=%s fd=%d packets=%d firstReadRet=%d",
+        iformatName,
+        inputKind,
+        path ? path : "(null)",
+        inputFd,
+        audioPacketsSeen,
+        firstReadRet);
+  }
+#endif
   SHERPA_DIAG("audio.decode", "ffmpeg_end");
   return result;
 }
 
 AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
+  AUDIO_DECODE_DBG(
+      "probe_duration_start pathHint=%s fd=%d inputKind=%s",
+      path ? path : "(null)",
+      inputFd,
+      inputFd >= 0 ? "content_fd" : "path");
+
   AVFormatContext* fmtCtx = nullptr;
   AVIOContext* avioCtx = nullptr;
   int ownedFd = -1;
@@ -725,6 +1615,19 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
     }
   }
 
+  const char* iformatName =
+      (fmtCtx->iformat && fmtCtx->iformat->name) ? fmtCtx->iformat->name : "?";
+  AUDIO_DECODE_DBG(
+      "probe_duration_open iformat=%s pathHint=%s fd=%d",
+      iformatName,
+      path ? path : "(null)",
+      inputFd);
+  if (ownedFd >= 0) {
+    logContainerMagicFromFd(ownedFd, "probe_duration_open");
+    logDirectFdBytes(ownedFd, 0, 32, "probe_duration_file_start");
+  }
+  logInputIoState(fmtCtx, ownedFd, inputFd, "probe_duration_after_open");
+
   AVDictionary* opts = nullptr;
   av_dict_set(&opts, "analyzeduration", "2000000", 0);
   av_dict_set(&opts, "probesize", "32768", 0);
@@ -733,6 +1636,8 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
     throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
   }
   av_dict_free(&opts);
+  logInputIoState(fmtCtx, ownedFd, inputFd, "probe_duration_after_find_stream_info");
+  logFormatContextSummary(fmtCtx, -1, "probe_duration_after_find_stream_info");
 
   int audioStreamIdx = -1;
   for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
@@ -744,6 +1649,7 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
   if (audioStreamIdx < 0) {
     throw std::runtime_error("PROBE_NO_AUDIO_STREAM: No audio stream found");
   }
+  logFormatContextSummary(fmtCtx, audioStreamIdx, "probe_duration_stream_selected");
 
   AudioFileProbeResult result;
   AVStream* stream = fmtCtx->streams[audioStreamIdx];
@@ -753,6 +1659,12 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
     if (sec > 0) {
       result.durationMs = static_cast<int64_t>(sec * 1000.0);
       result.isExact = true;
+      AUDIO_DECODE_DBG(
+          "probe_duration_ok source=stream durationMs=%lld exact=%d iformat=%s fd=%d",
+          static_cast<long long>(result.durationMs),
+          result.isExact ? 1 : 0,
+          iformatName,
+          inputFd);
       return result;
     }
   }
@@ -762,6 +1674,12 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
     if (sec > 0) {
       result.durationMs = static_cast<int64_t>(sec * 1000.0);
       result.isExact = true;
+      AUDIO_DECODE_DBG(
+          "probe_duration_ok source=format durationMs=%lld exact=%d iformat=%s fd=%d",
+          static_cast<long long>(result.durationMs),
+          result.isExact ? 1 : 0,
+          iformatName,
+          inputFd);
       return result;
     }
   }
@@ -777,6 +1695,12 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
       if (sec > 0) {
         result.durationMs = static_cast<int64_t>(sec * 1000.0);
         result.isExact = false;
+        AUDIO_DECODE_DBG(
+            "probe_duration_ok source=bitrate durationMs=%lld exact=%d iformat=%s fd=%d",
+            static_cast<long long>(result.durationMs),
+            result.isExact ? 1 : 0,
+            iformatName,
+            inputFd);
         return result;
       }
     }
@@ -786,6 +1710,12 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
 }
 
 AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd) {
+  AUDIO_DECODE_DBG(
+      "probe_container_start pathHint=%s fd=%d inputKind=%s",
+      path ? path : "(null)",
+      inputFd,
+      inputFd >= 0 ? "content_fd" : "path");
+
   AVFormatContext* fmtCtx = nullptr;
   AVIOContext* avioCtx = nullptr;
   int ownedFd = -1;
@@ -850,6 +1780,20 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
     }
   }
 
+  const char* iformatName =
+      (fmtCtx->iformat && fmtCtx->iformat->name) ? fmtCtx->iformat->name : "?";
+  AUDIO_DECODE_DBG(
+      "probe_container_open iformat=%s pathHint=%s fd=%d autoProbeOnly=%d",
+      iformatName,
+      path ? path : "(null)",
+      inputFd,
+      1);
+  if (ownedFd >= 0) {
+    logContainerMagicFromFd(ownedFd, "probe_container_open");
+    logDirectFdBytes(ownedFd, 0, 32, "probe_container_file_start");
+  }
+  logInputIoState(fmtCtx, ownedFd, inputFd, "probe_container_after_open");
+
   AVDictionary* opts = nullptr;
   av_dict_set(&opts, "analyzeduration", "2000000", 0);
   av_dict_set(&opts, "probesize", "32768", 0);
@@ -858,6 +1802,8 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
     throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
   }
   av_dict_free(&opts);
+  logInputIoState(fmtCtx, ownedFd, inputFd, "probe_container_after_find_stream_info");
+  logFormatContextSummary(fmtCtx, -1, "probe_container_after_find_stream_info");
 
   int audioStreamIdx = -1;
   for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
@@ -869,6 +1815,7 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
   if (audioStreamIdx < 0) {
     throw std::runtime_error("PROBE_NO_AUDIO_STREAM: No audio stream found");
   }
+  logFormatContextSummary(fmtCtx, audioStreamIdx, "probe_container_stream_selected");
 
   AudioContainerProbeResult result;
   if (fmtCtx->iformat && fmtCtx->iformat->name && fmtCtx->iformat->name[0] != '\0') {
@@ -889,6 +1836,14 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
   } else {
     result.codecName = "unknown";
   }
+
+  AUDIO_DECODE_DBG(
+      "probe_container_ok inputFormat=%s codec=%s iformat=%s fd=%d pathHint=%s",
+      result.inputFormatName.c_str(),
+      result.codecName.c_str(),
+      iformatName,
+      inputFd,
+      path ? path : "(null)");
 
   return result;
 }
@@ -933,7 +1888,7 @@ AudioDecodeResult decodeFile(
 
   WavInfo wavInfo = parseWavHeaderForFastPath(f);
   if (canUseWavFastPath(wavInfo, config)) {
-    LOGI("Using WAV fast path: rate=%d ch=%d bits=%d", wavInfo.sampleRate, wavInfo.channels, wavInfo.bitsPerSample);
+    AUDIO_DECODE_DBG("Using WAV fast path: rate=%d ch=%d bits=%d", wavInfo.sampleRate, wavInfo.channels, wavInfo.bitsPerSample);
     auto result = decodeWavFastPath(f, wavInfo, config, onChunk, onProgress, onStreamInfo, cancelFlag);
     fclose(f);
     return result;
@@ -946,7 +1901,7 @@ AudioDecodeResult decodeFile(
 
   // FFmpeg path
 #ifdef HAVE_FFMPEG
-  LOGI("Using FFmpeg decode path: %s targetRate=%d forceMono=%d", pathOrFd ? pathOrFd : "<fd>", config.targetSampleRate, config.forceMono);
+  AUDIO_DECODE_DBG("Using FFmpeg decode path: %s targetRate=%d forceMono=%d", pathOrFd ? pathOrFd : "<fd>", config.targetSampleRate, config.forceMono);
   return decodeFileFFmpeg(pathOrFd, inputFd, config, onChunk, onProgress, onStreamInfo, cancelFlag);
 #else
   throw std::runtime_error("DECODE_INTERNAL_ERROR: FFmpeg not available in this build");
