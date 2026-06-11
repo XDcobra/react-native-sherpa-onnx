@@ -1,8 +1,7 @@
 /**
  * Source Separation feature module.
  *
- * `detectSeparationModel` is implemented; runtime (`initializeSeparation`, `separateSources`)
- * follows in a later milestone.
+ * Offline batch separation via `createSeparation` + `engine.separate(audioIn, audioOuts)`.
  */
 
 import SherpaOnnx from '../NativeSherpaOnnx';
@@ -18,35 +17,21 @@ import {
   type DetectedModelEntry,
   type DetectionSource,
 } from '../types/modelDetect';
-import type { SeparationDetectResult, SeparationModelType } from './types';
-
-export type {
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
   SeparationDetectResult,
+  SeparationEngine,
+  SeparationInitializeOptions,
   SeparationModelType,
-  SeparationDetectModelResult,
+  SeparateOptions,
+  SeparationResult,
 } from './types';
-export { SEPARATION_MODEL_TYPES } from './types';
+import { SeparationErrorCode } from './customConfig';
+import { buildSeparationInitBridgeOptions } from './separationNativeBridge';
+import { runOfflineSeparationDirect } from './orchestrate';
 
-export {
-  assertSeparationCustomConfig,
-  resolveSeparationCustomConfigPaths,
-  resolveSpleeterCustomConfigPaths,
-  resolveUvrCustomConfigPaths,
-  SeparationErrorCode,
-  type SpleeterCustomConfig,
-  type UvrCustomConfig,
-  type SpleeterCustomPathKey,
-  type UvrCustomPathKey,
-} from './customConfig';
-
-export interface SeparationInitializeOptions {
-  modelSource: FileSource;
-}
-
-export interface SeparatedSource {
-  sourceId: string;
-  outputPath: string;
-}
+let separationInstanceCounter = 0;
 
 function readNonEmptyPath(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -127,23 +112,120 @@ export async function detectSeparationModel(
   };
 }
 
-/** @throws Not yet implemented */
-export async function initializeSeparation(
-  _options: SeparationInitializeOptions
-): Promise<void> {
-  throw new Error(
-    'Source Separation runtime is not yet implemented. Use detectSeparationModel to validate model layout.'
-  );
+/**
+ * Create an offline source-separation engine.
+ *
+ * @throws Error if native init fails (`Separation initialization failed: …`)
+ */
+export async function createSeparation(
+  options: SeparationInitializeOptions
+): Promise<SeparationEngine> {
+  const instanceId = `separation_${++separationInstanceCounter}`;
+  const bridgeOptions = await buildSeparationInitBridgeOptions(options);
+  const init = await SherpaOnnx.initializeSeparation(instanceId, bridgeOptions);
+
+  if (!init.success) {
+    const nativeError = typeof init.error === 'string' ? init.error.trim() : '';
+    throw new Error(
+      nativeError.length > 0
+        ? `Separation initialization failed: ${nativeError}`
+        : `Separation initialization failed for ${instanceId}`
+    );
+  }
+
+  let destroyed = false;
+  const guard = () => {
+    if (destroyed) {
+      throw new Error(
+        `Separation instance ${instanceId} has been destroyed; cannot call methods on it.`
+      );
+    }
+  };
+
+  return {
+    get instanceId() {
+      return instanceId;
+    },
+    async separate(
+      audioIn: OfflineAudioBufferIdSource,
+      audioOuts: readonly OfflineAudioBufferIdSource[],
+      separateOptions?: SeparateOptions
+    ): Promise<SeparationResult> {
+      guard();
+
+      const mode = separateOptions?.segmentation?.mode ?? 'off';
+      if (mode !== 'off') {
+        throw new Error(
+          `${SeparationErrorCode.INVALID_ARGUMENT}: segmentation mode '${mode}' is not supported yet; use mode 'off' or omit options`
+        );
+      }
+
+      const startedAtMs = Date.now();
+      const numStems = await SherpaOnnx.getSeparationNumStems(instanceId);
+      if (audioOuts.length !== numStems) {
+        throw new Error(
+          `${SeparationErrorCode.INVALID_ARGUMENT}: separate() expects ${numStems} output buffers, got ${audioOuts.length}`
+        );
+      }
+
+      // Resolve ids early so invalid buffer refs fail before native call.
+      resolvePipelineAudioBufferId(audioIn);
+      for (const out of audioOuts) {
+        resolvePipelineAudioBufferId(out);
+      }
+
+      await runOfflineSeparationDirect(instanceId, audioIn, audioOuts);
+
+      return {
+        status: 'complete',
+        totalSegments: 1,
+        completedSegments: 1,
+        skippedSegments: [],
+        processingTimeMs: Date.now() - startedAtMs,
+      };
+    },
+    async getSampleRate(): Promise<number> {
+      guard();
+      return SherpaOnnx.getSeparationSampleRate(instanceId);
+    },
+    async getNumStems(): Promise<number> {
+      guard();
+      return SherpaOnnx.getSeparationNumStems(instanceId);
+    },
+    async destroy(): Promise<void> {
+      if (destroyed) return;
+      destroyed = true;
+      await SherpaOnnx.unloadSeparation(instanceId);
+    },
+  };
 }
 
-/** @throws Not yet implemented */
-export function separateSources(_filePath: string): Promise<SeparatedSource[]> {
-  throw new Error(
-    'Source Separation runtime is not yet implemented. Use detectSeparationModel to validate model layout.'
-  );
-}
+export type {
+  SeparationModelType,
+  SeparationConcreteModelType,
+  SeparationInitOptionsShared,
+  SeparationAutoInitializeOptions,
+  SeparationCustomInitializeOptions,
+  SeparationInitializeOptions,
+  SeparateSegmentationConfig,
+  SeparateOptions,
+  SeparationResult,
+  SeparationStemIndex,
+  SeparationEngineInfo,
+  SeparationEngine,
+  SeparationDetectResult,
+  SeparationDetectModelResult,
+} from './types';
+export { SEPARATION_MODEL_TYPES, SEPARATION_STEM_LABELS } from './types';
 
-/** @throws Not yet implemented */
-export function unloadSeparation(): Promise<void> {
-  throw new Error('Source Separation runtime is not yet implemented.');
-}
+export {
+  assertSeparationCustomConfig,
+  resolveSeparationCustomConfigPaths,
+  resolveSpleeterCustomConfigPaths,
+  resolveUvrCustomConfigPaths,
+  SeparationErrorCode,
+  type SpleeterCustomConfig,
+  type UvrCustomConfig,
+  type SpleeterCustomPathKey,
+  type UvrCustomPathKey,
+} from './customConfig';
