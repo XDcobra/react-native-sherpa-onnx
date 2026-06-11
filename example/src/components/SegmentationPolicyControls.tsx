@@ -82,6 +82,10 @@ type Props = {
   disableOff?: boolean;
   /** Alert message shown when the user presses the disabled 'Off' tab. */
   offDisabledMessage?: string;
+  /** When set, only these evaluator keys are shown (e.g. live separation: continuous_frames). */
+  allowedEvaluators?: readonly string[];
+  /** When true, the manual mode tab is hidden (live overload flows). */
+  disableManual?: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -727,9 +731,15 @@ export function SegmentationPolicyControls({
   disabled = false,
   disableOff = false,
   offDisabledMessage,
+  allowedEvaluators,
+  disableManual = false,
 }: Props) {
-  const modes = getAvailableModes(variant);
-  const evaluators = getEvaluators(variant);
+  const modes = getAvailableModes(variant).filter(
+    (mode) => !(disableManual && mode === 'manual')
+  );
+  const evaluators = getEvaluators(variant).filter(
+    ({ key }) => !allowedEvaluators || allowedEvaluators.includes(key)
+  );
 
   const handleModeChange = useCallback(
     (mode: SegmentationMode) => {
