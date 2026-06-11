@@ -700,6 +700,12 @@ export function createOfflineAudioBufferFromSamples(
 export function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
   inputSampleRateHz: number,
+  channelCount: number,
+  options: OfflineFromSamplesOptions
+): OfflineAudioBufferRef;
+export function createOfflineAudioBufferFromSamples(
+  samples: Float32Array,
+  inputSampleRateHz: number,
   channelCountOrOptions?: number | OfflineFromSamplesOptions,
   options?: OfflineFromSamplesOptions
 ): OfflineAudioBufferRef {
