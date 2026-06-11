@@ -8,6 +8,23 @@
 
 #include "sherpa-onnx/c-api/c-api.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define SEPARATION_LOG_TAG "SherpaOnnxSeparation"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, SEPARATION_LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, SEPARATION_LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, SEPARATION_LOG_TAG, __VA_ARGS__)
+#elif defined(__APPLE__)
+#include <os/log.h>
+#define LOGI(fmt, ...) os_log_info(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
+#define LOGW(fmt, ...) os_log(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
+#define LOGE(fmt, ...) os_log_error(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
+#else
+#define LOGI(...) ((void)0)
+#define LOGW(...) ((void)0)
+#define LOGE(...) ((void)0)
+#endif
+
 namespace sherpaonnx {
 namespace {
 
@@ -184,9 +201,17 @@ SeparationInitializeResult SeparationWrapper::initialize(
     }
 
     auto engineConfig = BuildEngineConfig(detect, numThreads, provider, debug);
+    LOGI(
+        "initialize: modelDir=%s modelType=%s threads=%d debug=%d",
+        modelDir.c_str(),
+        result.modelType.c_str(),
+        numThreads,
+        debug ? 1 : 0
+    );
     pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
     if (pImpl->separation == nullptr) {
         result.error = "Failed to create offline source separation engine";
+        LOGE("initialize failed: %s", result.error.c_str());
         return result;
     }
 
@@ -194,6 +219,11 @@ SeparationInitializeResult SeparationWrapper::initialize(
     result.success = true;
     result.sampleRate = SherpaOnnxOfflineSourceSeparationGetOutputSampleRate(pImpl->separation);
     result.numStems = SherpaOnnxOfflineSourceSeparationGetNumberOfStems(pImpl->separation);
+    LOGI(
+        "initialize ok: sampleRate=%d numStems=%d",
+        result.sampleRate,
+        result.numStems
+    );
     return result;
 }
 
@@ -228,9 +258,16 @@ SeparationInitializeResult SeparationWrapper::initializeCustom(
     auto engineConfig = BuildEngineConfig(
         selectedKind, paths, numThreads, provider, debug
     );
+    LOGI(
+        "initializeCustom: modelType=%s threads=%d debug=%d",
+        result.modelType.c_str(),
+        numThreads,
+        debug ? 1 : 0
+    );
     pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
     if (pImpl->separation == nullptr) {
         result.error = "Failed to create offline source separation engine";
+        LOGE("initializeCustom failed: %s", result.error.c_str());
         return result;
     }
 
@@ -238,6 +275,11 @@ SeparationInitializeResult SeparationWrapper::initializeCustom(
     result.success = true;
     result.sampleRate = SherpaOnnxOfflineSourceSeparationGetOutputSampleRate(pImpl->separation);
     result.numStems = SherpaOnnxOfflineSourceSeparationGetNumberOfStems(pImpl->separation);
+    LOGI(
+        "initializeCustom ok: sampleRate=%d numStems=%d",
+        result.sampleRate,
+        result.numStems
+    );
     return result;
 }
 
@@ -261,17 +303,31 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
 
     const float* channels[] = {monoSamples.data()};
     const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
+    LOGI(
+        "processMonoSamples: numSamples=%d sampleRate=%d",
+        numSamples,
+        sampleRate
+    );
     const SherpaOnnxSourceSeparationOutput* output =
         SherpaOnnxOfflineSourceSeparationProcess(
             pImpl->separation, channels, 1, numSamples, sampleRate
         );
     if (output == nullptr) {
         result.error = "Source separation processing failed";
+        LOGE("processMonoSamples failed: native Process returned null");
         return result;
     }
 
     result = ToSeparationProcessResult(output);
     SherpaOnnxDestroySourceSeparationOutput(output);
+    if (result.success) {
+        LOGI(
+            "processMonoSamples ok: stems=%zu",
+            result.stems.size()
+        );
+    } else {
+        LOGE("processMonoSamples failed: %s", result.error.c_str());
+    }
     return result;
 }
 
@@ -289,6 +345,7 @@ bool SeparationWrapper::isInitialized() const { return pImpl->initialized; }
 
 void SeparationWrapper::release() {
     if (pImpl->separation != nullptr) {
+        LOGI("release: destroying separation engine");
         SherpaOnnxDestroyOfflineSourceSeparation(pImpl->separation);
         pImpl->separation = nullptr;
     }

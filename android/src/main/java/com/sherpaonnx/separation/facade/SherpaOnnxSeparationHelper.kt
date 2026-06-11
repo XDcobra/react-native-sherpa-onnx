@@ -139,12 +139,22 @@ internal class SherpaOnnxSeparationHelper(
       val success = result["success"] as? Boolean ?: false
       if (!success) {
         val error = result["error"] as? String
+        Log.e(
+          SeparationErrorCodes.TAG,
+          "initializeSeparation failed: instanceId=$instanceId error=$error",
+        )
         promise.reject(
           SeparationErrorCodes.SEPARATION_INIT_ERROR,
           error?.takeIf { it.isNotBlank() } ?: "Failed to initialize separation",
         )
         return
       }
+      val sampleRate = result["sampleRate"] as? Int ?: 0
+      val numStems = result["numStems"] as? Int ?: 0
+      Log.i(
+        SeparationErrorCodes.TAG,
+        "initializeSeparation ok: instanceId=$instanceId sampleRate=$sampleRate numStems=$numStems",
+      )
       promise.resolve(initResultToWritable(result))
     } catch (e: Exception) {
       Log.e(SeparationErrorCodes.TAG, "Failed to initialize separation", e)
@@ -249,19 +259,38 @@ internal class SherpaOnnxSeparationHelper(
     }
 
     try {
+      Log.i(
+        SeparationErrorCodes.TAG,
+        "separateOfflineAudioBuffers: instanceId=$instanceId audioIn=$audioInBufferId " +
+          "numSamples=${audioInEntry.numSamples} sampleRate=${audioInEntry.sampleRate} " +
+          "expectedStems=$expectedStems",
+      )
       val inputSamples = audioInEntry.readAllSamples()
+      Log.i(
+        SeparationErrorCodes.TAG,
+        "separateOfflineAudioBuffers: readAllSamples size=${inputSamples.size}",
+      )
       val stems = nativeProcessSeparation(
         instanceId,
         inputSamples,
         audioInEntry.sampleRate,
       )
       if (stems == null || stems.size != expectedStems) {
+        Log.e(
+          SeparationErrorCodes.TAG,
+          "separateOfflineAudioBuffers: native process invalid stems " +
+            "expected=$expectedStems got=${stems?.size ?: -1}",
+        )
         promise.reject(
           SeparationErrorCodes.SEPARATION_ERROR,
           "Failed to separate audio: native process returned invalid stems",
         )
         return
       }
+      Log.i(
+        SeparationErrorCodes.TAG,
+        "separateOfflineAudioBuffers: native ok stemSizes=${stems.map { it.size }}",
+      )
       for (i in 0 until expectedStems) {
         val stemSamples = stems[i]
         val outId = audioOutBufferIds.getString(i) ?: continue
@@ -275,6 +304,10 @@ internal class SherpaOnnxSeparationHelper(
         }
         PipelineAudioRegistry.upgradeToMmapIfNeeded(outId)
       }
+      Log.i(
+        SeparationErrorCodes.TAG,
+        "separateOfflineAudioBuffers ok: instanceId=$instanceId",
+      )
       promise.resolve(null)
     } catch (e: OutOfMemoryError) {
       Log.e(SeparationErrorCodes.TAG, "OOM Separation offline failed", e)
@@ -284,6 +317,7 @@ internal class SherpaOnnxSeparationHelper(
         e,
       )
     } catch (e: Exception) {
+      Log.e(SeparationErrorCodes.TAG, "separateOfflineAudioBuffers failed", e)
       promise.reject(
         SeparationErrorCodes.SEPARATION_ERROR,
         "Failed to separate audio: ${e.message}",

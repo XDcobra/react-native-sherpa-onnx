@@ -1,9 +1,11 @@
 package com.sherpaonnx.separation.pipeline
 
+import android.util.Log
 import com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_SEPARATION
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.separation.core.SeparationErrorCodes
 
 internal class SeparationOfflineLivePipelineWorker(
   pipelineId: String,
@@ -30,6 +32,11 @@ internal class SeparationOfflineLivePipelineWorker(
     )
     if (pcm.isEmpty()) return
 
+    Log.i(
+      SeparationErrorCodes.TAG,
+      "liveSeparation segment: pipelineId=$pipelineId frames=$frameCount " +
+        "sampleRate=${speech.sampleRate} start=${speech.startSample} end=${speech.endSample}",
+    )
     val stems = processSeparation(pcm, speech.sampleRate)
       ?: error("SEPARATION_ERROR: native separation returned null")
     if (stems.size != audioOutputEntries.size) {
