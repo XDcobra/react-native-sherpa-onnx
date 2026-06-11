@@ -15,6 +15,10 @@ struct PublicLanguageRow {
     std::string id;
 };
 
+inline bool operator==(const PublicLanguageRow& a, const PublicLanguageRow& b) {
+    return a.iso6391Hint == b.iso6391Hint && a.id == b.id;
+}
+
 enum class SttModelKind {
     kUnknown,
     kTransducer,
@@ -105,6 +109,13 @@ enum class VadModelKind {
 enum class AlignmentModelKind {
     kUnknown,
     kWav2Vec2
+};
+
+/** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
+enum class SeparationModelKind {
+    kUnknown,
+    kSpleeter,
+    kUvr
 };
 
 struct SttModelPaths {
@@ -251,6 +262,15 @@ struct EnhancementModelPaths {
     std::string model;
 };
 
+struct SeparationModelPaths {
+    /** Spleeter: vocals stem ONNX. */
+    std::string vocals;
+    /** Spleeter: accompaniment stem ONNX. */
+    std::string accompaniment;
+    /** UVR: single MDX-Net ONNX. */
+    std::string model;
+};
+
 struct PunctuationModelPaths {
     /** OfflinePunctuationModelConfig.ct_transformer */
     std::string ct_transformer;
@@ -318,6 +338,17 @@ struct EnhancementDetectResult {
     /** Heuristic languages from asset/folder name; currently usually empty for enhancement. */
     std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from asset/folder name heuristics. */
+    std::string quantization;
+};
+
+struct SeparationDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    SeparationModelKind selectedKind = SeparationModelKind::kUnknown;
+    SeparationModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
 };
 
@@ -431,6 +462,16 @@ EnhancementDetectResult DetectEnhancementModel(
     const std::string& modelType = "auto"
 );
 
+/**
+ * Source separation model detection. Pass at least one of `model_dir` or `asset_name`.
+ * Offline-only (Spleeter directory layout or single UVR ONNX).
+ */
+SeparationDetectResult DetectSeparationModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto"
+);
+
 VadDetectResult DetectVadModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
@@ -456,6 +497,13 @@ AlignmentDetectResult DetectAlignmentModel(
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectSeparationModel but takes a pre-built file list; no filesystem access. */
+SeparationDetectResult DetectSeparationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"

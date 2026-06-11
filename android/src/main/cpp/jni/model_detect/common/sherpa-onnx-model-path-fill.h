@@ -28,6 +28,11 @@ void FillEnhancementModelPathsFromStringMap(
     EnhancementModelPaths& out
 );
 
+void FillSeparationModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    SeparationModelPaths& out
+);
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out

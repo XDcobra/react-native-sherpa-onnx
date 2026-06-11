@@ -94,6 +94,15 @@ void FillEnhancementModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillSeparationModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    SeparationModelPaths& out
+) {
+    SetPathFromMap(paths, "vocals", out.vocals);
+    SetPathFromMap(paths, "accompaniment", out.accompaniment);
+    SetPathFromMap(paths, "model", out.model);
+}
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out
