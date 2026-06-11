@@ -13,6 +13,9 @@
 #include <unordered_map>
 
 #define SEPARATION_JNI_TAG "SherpaOnnxSeparationJNI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, SEPARATION_JNI_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, SEPARATION_JNI_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, SEPARATION_JNI_TAG, __VA_ARGS__)
 
 namespace {
 
@@ -123,6 +126,14 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeInitializ
   const std::string modelTypeStr = CopyRequiredJstring(env, modelType);
   const auto providerOpt = CopyOptionalJstring(env, provider);
 
+  LOGI(
+      "nativeInitializeSeparationAuto: instanceId=%s modelDir=%s modelType=%s threads=%d",
+      instanceIdStr.c_str(),
+      modelDirStr.c_str(),
+      modelTypeStr.c_str(),
+      numThreads
+  );
+
   sherpaonnx::SeparationInitializeResult result;
   {
     std::lock_guard<std::mutex> lock(g_separation_mutex);
@@ -140,7 +151,19 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeInitializ
         debug == JNI_TRUE
     );
     if (!result.success) {
+      LOGE(
+          "nativeInitializeSeparationAuto failed: instanceId=%s error=%s",
+          instanceIdStr.c_str(),
+          result.error.c_str()
+      );
       g_separation_instances.erase(instanceIdStr);
+    } else {
+      LOGI(
+          "nativeInitializeSeparationAuto ok: instanceId=%s sampleRate=%d numStems=%d",
+          instanceIdStr.c_str(),
+          result.sampleRate,
+          result.numStems
+      );
     }
   }
   return SeparationInitializeResultToJava(env, result);
@@ -167,6 +190,13 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeInitializ
       paths
   );
 
+  LOGI(
+      "nativeInitializeSeparationCustom: instanceId=%s modelType=%s threads=%d",
+      instanceIdStr.c_str(),
+      modelTypeStr.c_str(),
+      numThreads
+  );
+
   sherpaonnx::SeparationInitializeResult result;
   {
     std::lock_guard<std::mutex> lock(g_separation_mutex);
@@ -184,7 +214,19 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeInitializ
         debug == JNI_TRUE
     );
     if (!result.success) {
+      LOGE(
+          "nativeInitializeSeparationCustom failed: instanceId=%s error=%s",
+          instanceIdStr.c_str(),
+          result.error.c_str()
+      );
       g_separation_instances.erase(instanceIdStr);
+    } else {
+      LOGI(
+          "nativeInitializeSeparationCustom ok: instanceId=%s sampleRate=%d numStems=%d",
+          instanceIdStr.c_str(),
+          result.sampleRate,
+          result.numStems
+      );
     }
   }
   return SeparationInitializeResultToJava(env, result);
@@ -201,25 +243,40 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   sherpaonnx::SeparationWrapper* wrapper = GetSeparationWrapperOrNull(instanceIdStr);
   if (wrapper == nullptr) {
-    __android_log_print(ANDROID_LOG_ERROR, SEPARATION_JNI_TAG,
-                        "Process: instance not found: %s", instanceIdStr.c_str());
+    LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
     return nullptr;
   }
 
   jsize n = env->GetArrayLength(samples);
   if (n <= 0 || sampleRate <= 0) {
+    LOGE(
+        "nativeProcessSeparation: invalid input instanceId=%s n=%d sampleRate=%d",
+        instanceIdStr.c_str(),
+        static_cast<int>(n),
+        sampleRate
+    );
     return nullptr;
   }
+  LOGI(
+      "nativeProcessSeparation: instanceId=%s n=%d sampleRate=%d",
+      instanceIdStr.c_str(),
+      static_cast<int>(n),
+      sampleRate
+  );
   std::vector<float> input(static_cast<size_t>(n));
   env->GetFloatArrayRegion(samples, 0, n, input.data());
 
   sherpaonnx::SeparationProcessResult result =
       wrapper->processMonoSamples(input, sampleRate);
   if (!result.success) {
-    __android_log_print(ANDROID_LOG_ERROR, SEPARATION_JNI_TAG,
-                        "Process failed: %s", result.error.c_str());
+    LOGE("nativeProcessSeparation failed: %s", result.error.c_str());
     return nullptr;
   }
+  LOGI(
+      "nativeProcessSeparation ok: instanceId=%s stems=%zu",
+      instanceIdStr.c_str(),
+      result.stems.size()
+  );
 
   jclass floatArrayClass = env->FindClass("[F");
   if (!floatArrayClass) return nullptr;
@@ -274,6 +331,7 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeReleaseSe
     jstring instanceId
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  LOGI("nativeReleaseSeparation: instanceId=%s", instanceIdStr.c_str());
   std::lock_guard<std::mutex> lock(g_separation_mutex);
   auto it = g_separation_instances.find(instanceIdStr);
   if (it != g_separation_instances.end()) {

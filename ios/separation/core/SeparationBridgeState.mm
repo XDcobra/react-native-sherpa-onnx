@@ -1,5 +1,5 @@
 #include "SeparationBridgeState.h"
-#include "../sherpa-onnx-separation-wrapper.h"
+#include "sherpa-onnx-separation-wrapper.h"
 
 namespace sherpaonnx {
 namespace separation {

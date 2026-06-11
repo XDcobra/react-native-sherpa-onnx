@@ -698,7 +698,8 @@ async function runOfflineAudioSegmentLoop(
           tempIn = createOfflineAudioBufferFromSamples(
             segSamples,
             inputInfo.sampleRate,
-            inputInfo.channelCount
+            inputInfo.channelCount,
+            { targetSampleRateHz: 0 }
           );
           tempOuts = [];
           for (let o = 0; o < outputCount; o++) {
@@ -1601,7 +1602,8 @@ export async function runOfflineAudioToTextPipeline(
           tempIn = createOfflineAudioBufferFromSamples(
             segSamples,
             info.sampleRate,
-            info.channelCount
+            info.channelCount,
+            { targetSampleRateHz: 0 }
           );
           tempOut = await createEmptyOfflineTextBuffer();
 

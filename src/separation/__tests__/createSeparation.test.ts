@@ -43,6 +43,7 @@ jest.mock('../../model-languages', () => ({
 }));
 
 jest.mock('../../audiobuffer', () => ({
+  getPipelineAudioBufferInfo: jest.fn(),
   releasePipelineAudioBuffer: jest.fn(),
   resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
 }));
@@ -53,7 +54,10 @@ jest.mock('../orchestrate', () => ({
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
-import { releasePipelineAudioBuffer } from '../../audiobuffer';
+import {
+  getPipelineAudioBufferInfo,
+  releasePipelineAudioBuffer,
+} from '../../audiobuffer';
 import { createSeparation } from '../index';
 import {
   runOfflineSeparationDirect,
@@ -86,6 +90,15 @@ describe('createSeparation', () => {
     native.populateOfflineAudioBufferIfEmpty.mockResolvedValue(null);
     native.getSeparationSampleRate.mockResolvedValue(44100);
     native.getSeparationNumStems.mockResolvedValue(2);
+    (getPipelineAudioBufferInfo as jest.Mock).mockResolvedValue({
+      bufferId: 'off_input',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 44100,
+      channelCount: 1,
+      numSamples: 44100,
+      durationMs: 1000,
+    });
     (runOfflineSeparationDirect as jest.Mock).mockResolvedValue(undefined);
     (releasePipelineAudioBuffer as jest.Mock).mockResolvedValue(undefined);
   });
@@ -230,6 +243,31 @@ describe('createSeparation', () => {
 
     expect(result.status).toBe('partial');
     expect(result.failedSegment?.segmentId).toBe('speech_1');
+  });
+
+  it('rejects segmented separation when input sample rate differs from model', async () => {
+    (getPipelineAudioBufferInfo as jest.Mock).mockResolvedValue({
+      bufferId: 'off_input',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 16000,
+      durationMs: 1000,
+    });
+
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+
+    await expect(
+      sep.separate('off_input', ['off_vocals', 'off_accomp'], {
+        segmentation: { mode: 'auto' },
+      })
+    ).rejects.toThrow(
+      `${SeparationErrorCode.INVALID_ARGUMENT}: Input sample rate (16000 Hz) must match separation model sample rate (44100 Hz) when using segmentation.`
+    );
+    expect(runOfflineSeparationPipeline).not.toHaveBeenCalled();
   });
 
   it('validates output buffer count against numStems', async () => {

@@ -114,8 +114,8 @@ set(SOURCES
     jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
     jni/model_detect/separation/sherpa-onnx-model-detect-separation.cpp
     jni/model_detect/separation/sherpa-onnx-validate-separation.cpp
-    jni/model_detect/separation/sherpa-onnx-separation-wrapper.cpp
-    ../../../ios/separation/sherpa-onnx-separation-wrapper.cpp
+    jni/model_detect/separation/sherpa-onnx-separation-detect-wrapper.cpp
+    separation/sherpa-onnx-separation-wrapper.cpp
     jni/separation/sherpa-onnx-separation-jni.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-online-guard.cpp
@@ -240,6 +240,7 @@ endif()
 target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/alignment
+    ${CMAKE_CURRENT_SOURCE_DIR}/separation
     ${ORT_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
@@ -249,7 +250,6 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/separation
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../ios/separation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment

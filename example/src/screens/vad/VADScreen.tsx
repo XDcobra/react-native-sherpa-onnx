@@ -10,7 +10,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import {
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
@@ -129,17 +134,6 @@ function normalizeErrorMessage(error: unknown): string {
     }
   }
   return 'Unknown error';
-}
-
-function toFileSource(pathOrUri: string): FileSource {
-  const trimmed = pathOrUri.trim();
-  if (trimmed.startsWith('content://')) {
-    return { kind: 'contentUri', uri: trimmed };
-  }
-  if (trimmed.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(trimmed.replace(/^file:\/\//, '')) };
-  }
-  return { kind: 'fs', path: trimmed };
 }
 
 export default function VADScreen() {
@@ -548,7 +542,7 @@ export default function VADScreen() {
   const pickLiveFile = useCallback(async () => {
     try {
       const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       const file = Array.isArray(picked) ? picked[0] : picked;
       const uri =
@@ -557,10 +551,13 @@ export default function VADScreen() {
         (file as any).localUri ??
         (file as any).nativeUri;
       if (!uri) throw new Error('Could not resolve a file URI from picker.');
+      const resolvedName =
+        resolveAudioFileDisplayName(uri, file.name) ??
+        file.name?.trim() ??
+        uri.split('/').pop() ??
+        'audio-file';
       setSelectedLiveFileUri(uri);
-      setSelectedLiveFileName(
-        file.name || uri.split('/').pop() || 'audio-file'
-      );
+      setSelectedLiveFileName(resolvedName);
       setStatus('Live input file selected.');
     } catch (pickErr: any) {
       const isCancel =
@@ -741,7 +738,7 @@ export default function VADScreen() {
         );
         const ingest = await ingestFileToLiveAudioBuffer(
           liveAudio,
-          toFileSource(selectedLiveFileUri),
+          toFileSource(selectedLiveFileUri, selectedLiveFileName ?? undefined),
           {
             // Deterministic template flow: user explicitly finishes the pipeline.
             autoFinalize: false,

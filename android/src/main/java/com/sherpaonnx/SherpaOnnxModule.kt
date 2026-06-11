@@ -1,10 +1,12 @@
 package com.sherpaonnx
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
@@ -1136,11 +1138,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val pathHint: String? = null,
   )
 
-  private fun sourcePathHint(source: ReadableMap): String? {
-    if (!source.hasKey("displayName")) {
+  private fun logDecodeDiag(message: String) {
+    if ((reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+      return
+    }
+    android.util.Log.i("SherpaOnnxDecode", message)
+  }
+
+  private fun sourcePathHint(source: ReadableMap?): String? {
+    if (source == null) {
       return null
     }
-    return source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
+    source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    return when (source.getString("kind")) {
+      "contentUri", "securityScoped" -> {
+        val uriStr = source.getString("uri")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        displayNameFromContentUri(Uri.parse(uriStr))
+      }
+      else -> null
+    }
+  }
+
+  private fun displayNameFromContentUri(uri: Uri): String? {
+    return try {
+      reactApplicationContext.contentResolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+          if (!cursor.moveToFirst()) {
+            return@use null
+          }
+          val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+          if (idx < 0) {
+            return@use null
+          }
+          cursor.getString(idx)?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    } catch (_: Exception) {
+      null
+    }
   }
 
   private fun extensionFromFileName(fileName: String): String? {
@@ -1162,12 +1197,54 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle,
     source: ReadableMap? = null,
   ): DecodableSource {
+    val jsDisplayName = source?.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
     val displayName = source?.let { sourcePathHint(it) }
-    return when (handle) {
-      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
-        DecodableSource(path = handle.file.absolutePath, fd = -1, pathHint = displayName)
-      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
+    logDecodeDiag(
+      "resolveDecodableSource: kind=${source?.getString("kind")} " +
+        "uri=${source?.getString("uri")} jsDisplayName=$jsDisplayName pathHint=$displayName " +
+        "handle=${handle.javaClass.simpleName}",
+    )
+    val resolved = when (handle) {
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
+        val file = handle.file
+        val fileExt = extensionFromFileName(file.name)
+        val hintExt = displayName?.let { extensionFromFileName(it) }
+        if (fileExt == null && hintExt != null) {
+          val tmpFile = File(
+            reactApplicationContext.cacheDir,
+            decodeTempFileName(displayName),
+          )
+          try {
+            file.inputStream().use { input ->
+              tmpFile.outputStream().use { output ->
+                input.copyTo(output, 65536)
+              }
+            }
+          } catch (e: Exception) {
+            try { tmpFile.delete() } catch (_: Exception) {}
+            throw FileIOException(
+              FileIOErrorCodes.READ_ERROR,
+              "Failed to materialize extensionless path for decode",
+              e,
+            )
+          }
+          DecodableSource(
+            path = tmpFile.absolutePath,
+            fd = -1,
+            tempFile = tmpFile,
+            pathHint = displayName,
+          )
+        } else {
+          DecodableSource(path = file.absolutePath, fd = -1, pathHint = displayName)
+        }
+      }
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
+        val statSize = handle.pfd.statSize
+        logDecodeDiag(
+          "resolveDecodableSource.fileDescriptor statSize=$statSize fd=${handle.pfd.fd}",
+        )
         DecodableSource(path = null, fd = handle.pfd.fd, pathHint = displayName)
+      }
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
         val tmpFile = File(
           reactApplicationContext.cacheDir,
@@ -1193,6 +1270,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         )
       }
     }
+    logDecodeDiag(
+      "resolveDecodableSource.result path=${resolved.path} fd=${resolved.fd} " +
+        "pathHint=${resolved.pathHint} temp=${resolved.tempFile?.absolutePath}",
+    )
+    return resolved
   }
 
   /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
@@ -1777,6 +1859,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
         val nativePath = nativePathArg(decodableSource)
+        logDecodeDiag(
+          "decodeFileToOfflineBuffer: nativePath=$nativePath sourcePath=$sourcePath " +
+            "fd=$sourceFd temp=${tempSourceFile?.absolutePath} forceMono=$forceMono " +
+            "allowDemuxerAutoProbe=$allowDemuxerAutoProbe targetRate=$targetSampleRateHz",
+        )
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 

@@ -18,6 +18,7 @@ import {
   type DetectionSource,
 } from '../types/modelDetect';
 import {
+  getPipelineAudioBufferInfo,
   resolvePipelineAudioBufferId,
   releasePipelineAudioBuffer,
   subscribeLiveAudioBufferEvents,
@@ -337,9 +338,24 @@ export async function createSeparation(
         );
       }
 
-      resolvePipelineAudioBufferId(audioIn);
+      const inId = resolvePipelineAudioBufferId(audioIn);
       for (const out of audioOuts) {
         resolvePipelineAudioBufferId(out);
+      }
+
+      if (mode !== 'off') {
+        const inInfo = await getPipelineAudioBufferInfo(inId);
+        const modelSampleRateHz = await SherpaOnnx.getSeparationSampleRate(
+          instanceId
+        );
+        if (
+          inInfo.kind === 'offlinePcmBuffer' &&
+          inInfo.sampleRate !== modelSampleRateHz
+        ) {
+          throw new Error(
+            `${SeparationErrorCode.INVALID_ARGUMENT}: Input sample rate (${inInfo.sampleRate} Hz) must match separation model sample rate (${modelSampleRateHz} Hz) when using segmentation. Decode or resample the input before separate().`
+          );
+        }
       }
 
       if (mode === 'off') {

@@ -1,5 +1,5 @@
-#ifndef SHERPA_ONNX_SEPARATION_WRAPPER_H
-#define SHERPA_ONNX_SEPARATION_WRAPPER_H
+#ifndef SHERPA_ONNX_SEPARATION_DETECT_WRAPPER_H
+#define SHERPA_ONNX_SEPARATION_DETECT_WRAPPER_H
 
 #include <jni.h>
 
@@ -14,4 +14,4 @@ jobject SeparationDetectResultToJava(
 
 } // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_SEPARATION_WRAPPER_H
+#endif // SHERPA_ONNX_SEPARATION_DETECT_WRAPPER_H

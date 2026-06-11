@@ -2,7 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../sherpa-onnx-separation-wrapper.h"
+#include "sherpa-onnx-separation-wrapper.h"
 #include "../core/SeparationBridgeState.h"
 #include "../SeparationOfflineLivePipelineWorker.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
