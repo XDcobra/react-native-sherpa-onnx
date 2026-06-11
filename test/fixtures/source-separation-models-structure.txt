@@ -1,0 +1,87 @@
+# Asset: sherpa-onnx-spleeter-2stems-fp16.tar.bz2
+# updated_at: 2025-05-23T07:28:23Z
+sherpa-onnx-spleeter-2stems-fp16/
+sherpa-onnx-spleeter-2stems-fp16/accompaniment.fp16.onnx
+sherpa-onnx-spleeter-2stems-fp16/vocals.fp16.onnx
+# Asset: sherpa-onnx-spleeter-2stems-int8.tar.bz2
+# updated_at: 2025-05-23T07:28:21Z
+sherpa-onnx-spleeter-2stems-int8/
+sherpa-onnx-spleeter-2stems-int8/vocals.int8.onnx
+sherpa-onnx-spleeter-2stems-int8/accompaniment.int8.onnx
+# Asset: sherpa-onnx-spleeter-2stems.tar.bz2
+# updated_at: 2025-05-23T07:28:18Z
+sherpa-onnx-spleeter-2stems/
+sherpa-onnx-spleeter-2stems/accompaniment.onnx
+sherpa-onnx-spleeter-2stems/vocals.onnx
+# Asset: UVR-MDX-NET-Inst_1.onnx
+# updated_at: 2025-05-31T05:34:19Z
+./
+./UVR-MDX-NET-Inst_1.onnx
+# Asset: UVR-MDX-NET-Inst_2.onnx
+# updated_at: 2025-05-31T05:34:15Z
+./
+./UVR-MDX-NET-Inst_2.onnx
+# Asset: UVR-MDX-NET-Inst_3.onnx
+# updated_at: 2025-05-31T05:34:12Z
+./
+./UVR-MDX-NET-Inst_3.onnx
+# Asset: UVR-MDX-NET-Inst_HQ_1.onnx
+# updated_at: 2025-05-31T05:34:08Z
+./
+./UVR-MDX-NET-Inst_HQ_1.onnx
+# Asset: UVR-MDX-NET-Inst_HQ_2.onnx
+# updated_at: 2025-05-31T05:34:05Z
+./
+./UVR-MDX-NET-Inst_HQ_2.onnx
+# Asset: UVR-MDX-NET-Inst_HQ_3.onnx
+# updated_at: 2025-05-31T05:34:01Z
+./
+./UVR-MDX-NET-Inst_HQ_3.onnx
+# Asset: UVR-MDX-NET-Inst_HQ_4.onnx
+# updated_at: 2025-05-31T05:33:57Z
+./
+./UVR-MDX-NET-Inst_HQ_4.onnx
+# Asset: UVR-MDX-NET-Inst_HQ_5.onnx
+# updated_at: 2025-05-31T05:33:54Z
+./
+./UVR-MDX-NET-Inst_HQ_5.onnx
+# Asset: UVR-MDX-NET-Inst_Main.onnx
+# updated_at: 2025-05-31T05:33:51Z
+./
+./UVR-MDX-NET-Inst_Main.onnx
+# Asset: UVR-MDX-NET-Voc_FT.onnx
+# updated_at: 2025-05-31T05:33:48Z
+./
+./UVR-MDX-NET-Voc_FT.onnx
+# Asset: UVR-MDX-NET_Crowd_HQ_1.onnx
+# updated_at: 2025-05-31T05:33:44Z
+./
+./UVR-MDX-NET_Crowd_HQ_1.onnx
+# Asset: UVR_MDXNET_1_9703.onnx
+# updated_at: 2025-05-31T05:33:41Z
+./
+./UVR_MDXNET_1_9703.onnx
+# Asset: UVR_MDXNET_2_9682.onnx
+# updated_at: 2025-05-31T05:33:39Z
+./
+./UVR_MDXNET_2_9682.onnx
+# Asset: UVR_MDXNET_3_9662.onnx
+# updated_at: 2025-05-31T05:33:36Z
+./
+./UVR_MDXNET_3_9662.onnx
+# Asset: UVR_MDXNET_9482.onnx
+# updated_at: 2025-05-31T05:33:34Z
+./
+./UVR_MDXNET_9482.onnx
+# Asset: UVR_MDXNET_KARA.onnx
+# updated_at: 2025-05-31T05:33:32Z
+./
+./UVR_MDXNET_KARA.onnx
+# Asset: UVR_MDXNET_KARA_2.onnx
+# updated_at: 2025-05-31T05:33:30Z
+./
+./UVR_MDXNET_KARA_2.onnx
+# Asset: UVR_MDXNET_Main.onnx
+# updated_at: 2025-05-31T05:33:27Z
+./
+./UVR_MDXNET_Main.onnx
