@@ -358,7 +358,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
 | **VAD** | n/a (no separate batch engine) | `createStreamingVAD` — single engine; `process()` already accepts **both** `LiveAudioBuffer` **and** `OfflineAudioBuffer` via a discriminated union | **(c) No live overload** | — |
 | **Alignment** | `createAlignment` — offline forced alignment / ASR-mediated / VAD-anchored | n/a | **(c) No live overload** | — |
 | **Diarization** | placeholder (`initializeDiarization` throws) | n/a | **(d) Defer** | revisit at implementation time |
-| **Source separation** | placeholder (`initializeSeparation` throws) | n/a | **(d) Defer** | likely (b) when implemented (block-based) |
+| **Source separation** | `createSeparation` + `separate(Offline, Offline[])` (offline MVP) | n/a | **(d) Defer** | likely (b) when live overload ships (block-based) |
 
 ### 5.2 Rationale per feature
 
