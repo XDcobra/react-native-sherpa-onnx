@@ -1,3 +1,17 @@
+jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
+  createStreamingPipelineCompletionPromise: jest.fn(() =>
+    Promise.resolve({ pipelineId: 'pipe_1', reason: 'completed' })
+  ),
+}));
+
+jest.mock('../../segment', () => ({
+  attachSegmentationEngine: jest.fn().mockResolvedValue({ engineId: 'seg_1' }),
+  getSegmentationEngineInfo: jest
+    .fn()
+    .mockResolvedValue({ engineId: 'seg_1', segmentBufferId: 'seg_live_1' }),
+  detachSegmentationEngine: jest.fn(),
+}));
+
 jest.mock('../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
@@ -7,6 +21,11 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     populateOfflineAudioBufferIfEmpty: jest.fn(),
     getSeparationSampleRate: jest.fn(),
     getSeparationNumStems: jest.fn(),
+    startSeparationOfflineLivePipeline: jest.fn(),
+    stopStreamingPipeline: jest.fn(),
+    flushStreamingPipeline: jest.fn(),
+    resetStreamingPipeline: jest.fn(),
+    getStreamingPipelineStatus: jest.fn(),
   },
 }));
 
@@ -50,6 +69,7 @@ describe('createSeparation', () => {
     populateOfflineAudioBufferIfEmpty: jest.Mock;
     getSeparationSampleRate: jest.Mock;
     getSeparationNumStems: jest.Mock;
+    startSeparationOfflineLivePipeline: jest.Mock;
   };
 
   beforeEach(() => {
@@ -220,6 +240,39 @@ describe('createSeparation', () => {
     await expect(sep.separate('off_input', ['off_vocals'])).rejects.toThrow(
       `${SeparationErrorCode.INVALID_ARGUMENT}: separate() expects 2 output buffers, got 1`
     );
+    expect(runOfflineSeparationDirect).not.toHaveBeenCalled();
+    expect(runOfflineSeparationPipeline).not.toHaveBeenCalled();
+  });
+
+  it('routes live separate() to startSeparationOfflineLivePipeline', async () => {
+    native.startSeparationOfflineLivePipeline.mockResolvedValue({
+      pipelineId: 'live_offline_sep_1',
+    });
+
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+
+    const handle = await sep.separate(
+      'live_12345678-1234-1234-1234-123456789012',
+      [
+        'live_87654321-4321-4321-4321-210987654321',
+        'live_11111111-2222-3333-4444-555555555555',
+      ],
+      {
+        segmentation: {
+          mode: 'auto',
+          policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+        },
+      }
+    );
+
+    expect(
+      (
+        handle as unknown as import('../streamingTypes').SeparationPipelineHandle
+      ).pipelineId
+    ).toBe('live_offline_sep_1');
+    expect(native.startSeparationOfflineLivePipeline).toHaveBeenCalled();
     expect(runOfflineSeparationDirect).not.toHaveBeenCalled();
     expect(runOfflineSeparationPipeline).not.toHaveBeenCalled();
   });
