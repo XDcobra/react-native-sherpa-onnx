@@ -3,10 +3,6 @@
 React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 <div align="center">
-  <img src="./docs/images/banner.png" alt="Banner" width="560" />
-</div>
-
-<div align="center">
 
 [![npm version](https://img.shields.io/npm/v/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
 [![npm downloads](https://img.shields.io/npm/dm/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
@@ -22,6 +18,29 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 > Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
 
 A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
+
+## VoiceLab
+
+**VoiceLab** is a production Android & iOS app built with this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship on top of `react-native-sherpa-onnx`.
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" valign="middle">
+        <a href="YOUR_PLAY_STORE_URL"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="60" /></a>
+      </td>
+      <td align="center" valign="middle">
+        <a href="YOUR_APP_STORE_URL"><img src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83" alt="Download on the App Store" height="41" /></a>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div align="center">
+  <img src="./docs/images/voicelab-01-home.png" alt="VoiceLab home — eight offline voice features" width="30%" />
+  <img src="./docs/images/voicelab-02-download.png" alt="VoiceLab library — download and manage on-device models" width="30%" />
+  <img src="./docs/images/voicelab-03-provider.png" alt="VoiceLab settings — NPU / execution provider" width="30%" />
+</div>
 
 ## Installation
 
@@ -82,6 +101,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Table of contents
 
+- [VoiceLab](#voicelab)
 - [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
 - [Installation](#installation)
   - [Android](#android)
