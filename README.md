@@ -17,9 +17,9 @@ A React Native TurboModule that provides offline and streaming speech processing
 > **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
 > Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
 
-## VoiceLab
+## Built with this SDK: VoiceLab
 
-**VoiceLab** is a production Android & iOS app built with this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship on top of `react-native-sherpa-onnx`.
+**VoiceLab** is a separate production Android & iOS app built on top of this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship with `react-native-sherpa-onnx`.
 
 <p align="center">
   <a href="https://play.google.com/store/apps/details?id=com.xdcobra.voicelab"><img src="./docs/images/badge-google-play.png" alt="Get it on Google Play" height="61" /></a>
@@ -92,7 +92,7 @@ Full step-by-step: [Download manager – Setup (iOS & Android)](docs/download-ma
 
 ## Table of contents
 
-- [VoiceLab](#voicelab)
+- [Built with this SDK: VoiceLab](#built-with-this-sdk-voicelab)
 - [Bundled sherpa-onnx version](#bundled-sherpa-onnx-version)
 - [Installation](#installation)
   - [Android](#android)
