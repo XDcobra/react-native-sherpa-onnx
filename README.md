@@ -21,18 +21,10 @@ A React Native TurboModule that provides offline and streaming speech processing
 
 **VoiceLab** is a production Android & iOS app built with this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship on top of `react-native-sherpa-onnx`.
 
-<div align="center">
-  <table>
-    <tr>
-      <td align="center" valign="middle">
-        <a href="YOUR_PLAY_STORE_URL"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="60" /></a>
-      </td>
-      <td align="center" valign="middle">
-        <a href="YOUR_APP_STORE_URL"><img src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83" alt="Download on the App Store" height="41" /></a>
-      </td>
-    </tr>
-  </table>
-</div>
+<p align="center">
+  <a href="YOUR_PLAY_STORE_URL"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="90" style="vertical-align: middle;" /></a>
+  <a href="YOUR_APP_STORE_URL"><img src="https://tools.applemediaservices.com/api/badges/download-on-the-app-store/black/en-us?size=250x83" alt="Download on the App Store" height="61" style="vertical-align: middle;" /></a>
+</p>
 
 <div align="center">
   <img src="./docs/images/voicelab-01-home.png" alt="VoiceLab home — eight offline voice features" width="30%" />
