@@ -1,7 +1,5 @@
 # react-native-sherpa-onnx
 
-React Native SDK for sherpa-onnx – offline and streaming speech processing
-
 <div align="center">
 
 [![npm version](https://img.shields.io/npm/v/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
@@ -14,10 +12,10 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 </div>
 
+A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
+
 > **⚠️ SDK 0.3.0 – Breaking changes from 0.2.0**  
 > Since the last release I have restructured and improved the SDK significantly: full iOS support, smoother behaviour, fewer failure points, and a much smaller footprint (~95% size reduction). As a result, **logic and the public API have changed**. If you are upgrading from 0.2.x, please follow the [Breaking changes (upgrading to 0.3.0)](docs/migration.md#breaking-changes-upgrading-to-030) section and the updated API documentation 
-
-A React Native TurboModule that provides offline and streaming speech processing capabilities using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). The SDK aims to support all functionalities that sherpa-onnx offers, including offline and **online (streaming)** speech-to-text, text-to-speech (batch and streaming), speaker diarization, speech enhancement, source separation, and VAD (Voice Activity Detection).
 
 ## VoiceLab
 
