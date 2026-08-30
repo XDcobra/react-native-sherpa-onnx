@@ -24,7 +24,7 @@ A React Native TurboModule that provides offline and streaming speech processing
 <p align="center">
   <a href="https://play.google.com/store/apps/details?id=com.xdcobra.voicelab"><img src="./docs/images/badge-google-play.png" alt="Get it on Google Play" height="61" /></a>
   &nbsp;
-  <a href="YOUR_APP_STORE_URL"><img src="./docs/images/badge-app-store.png" alt="Download on the App Store" height="61" /></a>
+  <a href="https://apps.apple.com/app/id6761100598"><img src="./docs/images/badge-app-store.png" alt="Download on the App Store" height="61" /></a>
 </p>
 
 <div align="center">
