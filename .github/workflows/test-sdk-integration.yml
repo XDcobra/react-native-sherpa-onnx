@@ -18,10 +18,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-integration
   cancel-in-progress: true
 
-# Pin the fresh-app RN template to the SDK's declared baseline (see package.json /
-# example). Avoids floating on @latest and keeps AGP/Gradle aligned with that template.
+# Pin the fresh-app RN template to the SDK's 0.83 line (see package.json / example).
+# Use the latest 0.83.x patch: 0.83.0–0.83.4 ship fmt 11.0.2, which fails to compile
+# under Xcode 26.4+; 0.83.5+ bumps fmt to 12.1.0.
 env:
-  RN_VERSION: '0.83.0'
+  RN_VERSION: '0.83.10'
   RN_CLI_VERSION: '20.0.0'
 
 jobs:
@@ -170,7 +171,8 @@ jobs:
     timeout-minutes: 60
 
     env:
-      XCODE_VERSION: 15.4
+      # Align with sdk-ios.yml; must be selected via setup-xcode (env alone is a no-op).
+      XCODE_VERSION: '26.2'
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -184,6 +186,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version-file: react-native-sherpa-onnx/.nvmrc
+
+      - name: Use appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       - name: Set up Ruby and Bundler
         uses: ruby/setup-ruby@v1
