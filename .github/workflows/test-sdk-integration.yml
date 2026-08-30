@@ -18,6 +18,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-integration
   cancel-in-progress: true
 
+# Pin the fresh-app RN template to the SDK's declared baseline (see package.json /
+# example). Avoids floating on @latest and keeps AGP/Gradle aligned with that template.
+env:
+  RN_VERSION: '0.83.0'
+  RN_CLI_VERSION: '20.0.0'
+
 jobs:
   test-integration-android:
     runs-on: ubuntu-latest
@@ -116,7 +122,9 @@ jobs:
 
       - name: Initialize Fresh React Native App
         run: |
-          echo "y" | npx @react-native-community/cli@latest init TestProject --skip-install
+          echo "y" | npx "@react-native-community/cli@${RN_CLI_VERSION}" init TestProject \
+            --version "${RN_VERSION}" \
+            --skip-install
 
       - name: Install Dependencies & SDK in TestProject
         working-directory: TestProject
@@ -132,8 +140,9 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
+          # Use the RN template Gradle wrapper (0.83.x → Gradle 9.0). Do not
+          # force an older wrapper — that breaks AGP from the template.
           chmod +x gradlew
-          ./gradlew wrapper --gradle-version 8.13
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testproject-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
           if [ "$GRADLE_EXIT" -ne 0 ]; then
@@ -244,7 +253,9 @@ jobs:
 
       - name: Initialize Fresh React Native App
         run: |
-          echo "y" | npx @react-native-community/cli@latest init TestProject --skip-install
+          echo "y" | npx "@react-native-community/cli@${RN_CLI_VERSION}" init TestProject \
+            --version "${RN_VERSION}" \
+            --skip-install
 
       - name: Install Dependencies & SDK in TestProject
         working-directory: TestProject
