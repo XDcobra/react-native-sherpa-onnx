@@ -12,6 +12,7 @@
 
 #include <map>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <string>
 #include <vector>
@@ -285,26 +286,35 @@ static NSString *const kOfflineSeparationOomMessage =
   @try {
     std::vector<float> inputSamples;
     int inputSr = 0;
-    if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
-      reject(@"SEPARATION_BUFFER_EMPTY",
-             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
-             nil);
+    sherpaonnx::SeparationProcessResult processResult;
+    try {
+      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+        reject(@"SEPARATION_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
+               nil);
+        return;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
+        auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
+        if (it == sherpaonnx::separation::bridge::g_separation_instances.end() ||
+            it->second->wrapper == nullptr) {
+          reject(@"SEPARATION_ERROR", @"Separation instance not found", nil);
+          return;
+        }
+        processResult = it->second->wrapper->processMonoSamples(inputSamples, inputSr);
+      }
+    } catch (const std::bad_alloc &) {
+      reject(kOfflineOomCode, kOfflineSeparationOomMessage, nil);
       return;
     }
 
-    sherpaonnx::SeparationProcessResult processResult;
-    {
-      std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
-      auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
-      if (it == sherpaonnx::separation::bridge::g_separation_instances.end() ||
-          it->second->wrapper == nullptr) {
-        reject(@"SEPARATION_ERROR", @"Separation instance not found", nil);
+    if (!processResult.success) {
+      if (processResult.error.rfind("OFFLINE_OOM", 0) == 0) {
+        reject(kOfflineOomCode, kOfflineSeparationOomMessage, nil);
         return;
       }
-      processResult = it->second->wrapper->processMonoSamples(inputSamples, inputSr);
-    }
-
-    if (!processResult.success) {
       NSString *errorMsg = processResult.error.empty()
           ? @"Failed to separate audio"
           : [NSString stringWithUTF8String:processResult.error.c_str()];

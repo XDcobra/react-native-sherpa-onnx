@@ -317,6 +317,16 @@ internal class SherpaOnnxSeparationHelper(
         e,
       )
     } catch (e: Exception) {
+      val msg = e.message.orEmpty()
+      if (msg.startsWith("OFFLINE_OOM")) {
+        Log.e(SeparationErrorCodes.TAG, "OOM Separation offline failed", e)
+        promise.reject(
+          SeparationErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("separation"),
+          e,
+        )
+        return
+      }
       Log.e(SeparationErrorCodes.TAG, "separateOfflineAudioBuffers failed", e)
       promise.reject(
         SeparationErrorCodes.SEPARATION_ERROR,
@@ -475,12 +485,19 @@ internal class SherpaOnnxSeparationHelper(
       )
     } catch (e: Exception) {
       val msg = e.message ?: "live offline separation failed"
-      val code = if (msg.startsWith("LIVE_OFFLINE_SEGMENTATION_REQUIRED")) {
-        "LIVE_OFFLINE_SEGMENTATION_REQUIRED"
-      } else {
-        SeparationErrorCodes.SEPARATION_ERROR
+      val code = when {
+        msg.startsWith("OFFLINE_OOM") -> SeparationErrorCodes.OFFLINE_OOM
+        msg.startsWith("LIVE_OFFLINE_SEGMENTATION_REQUIRED") ->
+          "LIVE_OFFLINE_SEGMENTATION_REQUIRED"
+        else -> SeparationErrorCodes.SEPARATION_ERROR
       }
-      promise.reject(code, msg, e)
+      val rejectMsg =
+        if (code == SeparationErrorCodes.OFFLINE_OOM) {
+          OfflineOomError.message("separation")
+        } else {
+          msg
+        }
+      promise.reject(code, rejectMsg, e)
     }
   }
 

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -31,6 +32,18 @@ std::optional<std::string> CopyOptionalJstring(JNIEnv* env, jstring value) {
   env->ReleaseStringUTFChars(value, chars);
   if (out.empty()) return std::nullopt;
   return out;
+}
+
+void ThrowRuntimeException(JNIEnv* env, const char* message) {
+  jclass cls = env->FindClass("java/lang/RuntimeException");
+  if (cls != nullptr) {
+    env->ThrowNew(cls, message != nullptr ? message : "Separation native failure");
+    env->DeleteLocalRef(cls);
+  }
+}
+
+bool ErrorLooksLikeOfflineOom(const std::string& error) {
+  return error.rfind("OFFLINE_OOM", 0) == 0;
 }
 
 std::string CopyRequiredJstring(JNIEnv* env, jstring value) {
@@ -240,64 +253,84 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
     jfloatArray samples,
     jint sampleRate
 ) {
-  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
-  sherpaonnx::SeparationWrapper* wrapper = GetSeparationWrapperOrNull(instanceIdStr);
-  if (wrapper == nullptr) {
-    LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
-    return nullptr;
-  }
+  try {
+    const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+    sherpaonnx::SeparationWrapper* wrapper = GetSeparationWrapperOrNull(instanceIdStr);
+    if (wrapper == nullptr) {
+      LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
+      return nullptr;
+    }
 
-  jsize n = env->GetArrayLength(samples);
-  if (n <= 0 || sampleRate <= 0) {
-    LOGE(
-        "nativeProcessSeparation: invalid input instanceId=%s n=%d sampleRate=%d",
+    jsize n = env->GetArrayLength(samples);
+    if (n <= 0 || sampleRate <= 0) {
+      LOGE(
+          "nativeProcessSeparation: invalid input instanceId=%s n=%d sampleRate=%d",
+          instanceIdStr.c_str(),
+          static_cast<int>(n),
+          sampleRate
+      );
+      return nullptr;
+    }
+    LOGI(
+        "nativeProcessSeparation: instanceId=%s n=%d sampleRate=%d",
         instanceIdStr.c_str(),
         static_cast<int>(n),
         sampleRate
     );
-    return nullptr;
-  }
-  LOGI(
-      "nativeProcessSeparation: instanceId=%s n=%d sampleRate=%d",
-      instanceIdStr.c_str(),
-      static_cast<int>(n),
-      sampleRate
-  );
-  std::vector<float> input(static_cast<size_t>(n));
-  env->GetFloatArrayRegion(samples, 0, n, input.data());
+    std::vector<float> input(static_cast<size_t>(n));
+    env->GetFloatArrayRegion(samples, 0, n, input.data());
 
-  sherpaonnx::SeparationProcessResult result =
-      wrapper->processMonoSamples(input, sampleRate);
-  if (!result.success) {
-    LOGE("nativeProcessSeparation failed: %s", result.error.c_str());
-    return nullptr;
-  }
-  LOGI(
-      "nativeProcessSeparation ok: instanceId=%s stems=%zu",
-      instanceIdStr.c_str(),
-      result.stems.size()
-  );
-
-  jclass floatArrayClass = env->FindClass("[F");
-  if (!floatArrayClass) return nullptr;
-  jobjectArray out =
-      env->NewObjectArray(static_cast<jsize>(result.stems.size()), floatArrayClass, nullptr);
-  env->DeleteLocalRef(floatArrayClass);
-  if (!out) return nullptr;
-
-  for (jsize i = 0; i < static_cast<jsize>(result.stems.size()); ++i) {
-    const auto& stem = result.stems[static_cast<size_t>(i)];
-    jfloatArray stemArray = env->NewFloatArray(static_cast<jsize>(stem.samples.size()));
-    if (!stemArray) return nullptr;
-    if (!stem.samples.empty()) {
-      env->SetFloatArrayRegion(
-          stemArray, 0, static_cast<jsize>(stem.samples.size()), stem.samples.data()
-      );
+    sherpaonnx::SeparationProcessResult result =
+        wrapper->processMonoSamples(input, sampleRate);
+    if (!result.success) {
+      LOGE("nativeProcessSeparation failed: %s", result.error.c_str());
+      if (ErrorLooksLikeOfflineOom(result.error)) {
+        ThrowRuntimeException(env, result.error.c_str());
+      }
+      return nullptr;
     }
-    env->SetObjectArrayElement(out, i, stemArray);
-    env->DeleteLocalRef(stemArray);
+    LOGI(
+        "nativeProcessSeparation ok: instanceId=%s stems=%zu",
+        instanceIdStr.c_str(),
+        result.stems.size()
+    );
+
+    jclass floatArrayClass = env->FindClass("[F");
+    if (!floatArrayClass) return nullptr;
+    jobjectArray out =
+        env->NewObjectArray(static_cast<jsize>(result.stems.size()), floatArrayClass, nullptr);
+    env->DeleteLocalRef(floatArrayClass);
+    if (!out) {
+      ThrowRuntimeException(
+          env, "OFFLINE_OOM: Not enough memory for offline source separation"
+      );
+      return nullptr;
+    }
+
+    for (jsize i = 0; i < static_cast<jsize>(result.stems.size()); ++i) {
+      const auto& stem = result.stems[static_cast<size_t>(i)];
+      jfloatArray stemArray = env->NewFloatArray(static_cast<jsize>(stem.samples.size()));
+      if (!stemArray) {
+        ThrowRuntimeException(
+            env, "OFFLINE_OOM: Not enough memory for offline source separation"
+        );
+        return nullptr;
+      }
+      if (!stem.samples.empty()) {
+        env->SetFloatArrayRegion(
+            stemArray, 0, static_cast<jsize>(stem.samples.size()), stem.samples.data()
+        );
+      }
+      env->SetObjectArrayElement(out, i, stemArray);
+      env->DeleteLocalRef(stemArray);
+    }
+    return out;
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(
+        env, "OFFLINE_OOM: Not enough memory for offline source separation"
+    );
+    return nullptr;
   }
-  return out;
 }
 
 JNIEXPORT jint JNICALL

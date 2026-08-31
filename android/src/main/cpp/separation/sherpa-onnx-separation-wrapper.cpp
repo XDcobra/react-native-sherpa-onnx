@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <new>
 #include <optional>
 #include <string>
 
@@ -363,39 +364,50 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
         return result;
     }
 
-    // Spleeter's native path always reads channel 0 and 1; mono input alone
-    // triggers SHERPA_ONNX_EXIT inside sherpa-onnx. UVR tolerates missing ch1.
-    const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
-    std::vector<float> stereoRight = monoSamples;
-    const float* channels[] = {monoSamples.data(), stereoRight.data()};
-    constexpr int32_t kNumChannels = 2;
-    LOGI(
-        "processMonoSamples: numSamples=%d sampleRate=%d channels=%d (mono upmixed to stereo)",
-        numSamples,
-        sampleRate,
-        kNumChannels
-    );
-    const SherpaOnnxSourceSeparationOutput* output =
-        SherpaOnnxOfflineSourceSeparationProcess(
-            pImpl->separation, channels, kNumChannels, numSamples, sampleRate
+    try {
+        // Spleeter's native path always reads channel 0 and 1; mono input alone
+        // triggers SHERPA_ONNX_EXIT inside sherpa-onnx. UVR tolerates missing ch1.
+        const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
+        std::vector<float> stereoRight = monoSamples;
+        const float* channels[] = {monoSamples.data(), stereoRight.data()};
+        constexpr int32_t kNumChannels = 2;
+        LOGI(
+            "processMonoSamples: numSamples=%d sampleRate=%d channels=%d (mono upmixed to stereo)",
+            numSamples,
+            sampleRate,
+            kNumChannels
         );
-    if (output == nullptr) {
-        result.error = "Source separation processing failed";
-        LOGE("processMonoSamples failed: native Process returned null");
+        const SherpaOnnxSourceSeparationOutput* output =
+            SherpaOnnxOfflineSourceSeparationProcess(
+                pImpl->separation, channels, kNumChannels, numSamples, sampleRate
+            );
+        if (output == nullptr) {
+            result.error = "Source separation processing failed";
+            LOGE("processMonoSamples failed: native Process returned null");
+            return result;
+        }
+
+        result = ToSeparationProcessResult(output);
+        SherpaOnnxDestroySourceSeparationOutput(output);
+        if (result.success) {
+            LOGI(
+                "processMonoSamples ok: stems=%zu",
+                result.stems.size()
+            );
+        } else {
+            LOGE("processMonoSamples failed: %s", result.error.c_str());
+        }
+        return result;
+    } catch (const std::bad_alloc&) {
+        // Parity with STT/alignment: surface catchable C++ OOM as OFFLINE_OOM.
+        // Does not cover OS low-memory kills or hard native aborts.
+        result.success = false;
+        result.stems.clear();
+        result.error =
+            "OFFLINE_OOM: Not enough memory for offline source separation";
+        LOGE("processMonoSamples failed: %s", result.error.c_str());
         return result;
     }
-
-    result = ToSeparationProcessResult(output);
-    SherpaOnnxDestroySourceSeparationOutput(output);
-    if (result.success) {
-        LOGI(
-            "processMonoSamples ok: stems=%zu",
-            result.stems.size()
-        );
-    } else {
-        LOGE("processMonoSamples failed: %s", result.error.c_str());
-    }
-    return result;
 }
 
 int32_t SeparationWrapper::getSampleRate() const {

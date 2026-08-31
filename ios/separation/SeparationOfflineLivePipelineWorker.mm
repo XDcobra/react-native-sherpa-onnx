@@ -1,6 +1,7 @@
 #include "SeparationOfflineLivePipelineWorker.h"
 
 #include <algorithm>
+#include <new>
 #include <stdexcept>
 
 SeparationOfflineLivePipelineWorker::SeparationOfflineLivePipelineWorker(
@@ -32,10 +33,18 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
   const int frameCount = std::max(0, speech.endSample - speech.startSample);
   if (frameCount <= 0) return;
 
-  auto samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
-  if (samples.empty()) return;
+  std::vector<float> samples;
+  sherpaonnx::SeparationProcessResult processResult;
+  try {
+    samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
+    if (samples.empty()) return;
 
-  auto processResult = wrapper_->processMonoSamples(samples, static_cast<int32_t>(speech.sampleRate));
+    processResult = wrapper_->processMonoSamples(samples, static_cast<int32_t>(speech.sampleRate));
+  } catch (const std::bad_alloc &) {
+    throw std::runtime_error(
+        "OFFLINE_OOM: Not enough memory for offline source separation");
+  }
+
   if (!processResult.success) {
     const std::string msg = processResult.error.empty()
       ? "Failed to separate audio chunk"

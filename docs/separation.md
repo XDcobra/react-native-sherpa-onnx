@@ -471,7 +471,7 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `SEPARATION_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `SEPARATION_OUTPUT_NOT_EMPTY` | An output buffer must be empty before calling `separate(...)`. |
 | `SEPARATION_STEM_COUNT_MISMATCH` | `audioOuts.length !== getNumStems()`. |
-| `OFFLINE_OOM` | Not enough memory for offline separation. Use `segmentation.mode: 'auto'` for long inputs, or process shorter clips. See [segmentation-engine.md](./segmentation-engine.md). |
+| `OFFLINE_OOM` | Not enough memory for offline separation (JVM `OutOfMemoryError`, catchable C++ `std::bad_alloc` during process, or related native alloc failure). Prefer `segmentation.mode: 'auto'` for long inputs, or process shorter clips. See [segmentation-engine.md](./segmentation-engine.md). OS low-memory kills / hard native aborts may still terminate the process without this code — see [memory-and-models.md](./memory-and-models.md). |
 | `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, offline/live overload mismatch, unsupported offline segmentation mode). |
 | `LIVE_OFFLINE_SEGMENTATION_REQUIRED` | Live overload called without a valid `segmentation.policy` or with a disallowed evaluator (not `continuous_frames`). |
 
