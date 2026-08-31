@@ -1,6 +1,6 @@
 package com.sherpaonnx.separation.core
 
-internal object SeparationErrorCodes {
+object SeparationErrorCodes {
   const val TAG = "SherpaOnnxSeparation"
 
   const val DETECT_ERROR = "SEPARATION_DETECT_ERROR"

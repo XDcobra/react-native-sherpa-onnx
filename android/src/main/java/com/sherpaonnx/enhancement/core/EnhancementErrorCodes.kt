@@ -1,6 +1,6 @@
 package com.sherpaonnx.enhancement.core
 
-internal object EnhancementErrorCodes {
+object EnhancementErrorCodes {
   const val TAG = "SherpaOnnxEnhancement"
 
   const val DETECT_ERROR = "DETECT_ERROR"
