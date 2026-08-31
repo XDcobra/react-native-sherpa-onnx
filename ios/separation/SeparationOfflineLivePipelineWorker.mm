@@ -1,6 +1,7 @@
 #include "SeparationOfflineLivePipelineWorker.h"
 
 #include "../separation/core/SeparationBridgeState.h"
+#include "sherpa-onnx-separation-wrapper.h"
 
 #include <algorithm>
 #include <new>

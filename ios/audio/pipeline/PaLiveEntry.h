@@ -61,13 +61,14 @@ inline const char *pa_live_append_kind_wire(PaLiveAppendKind k) {
 
 struct PaLiveAppendOrigin {
   enum class Tag { Ingress, Pipeline } tag;
-  PaLiveIngressSource ingress = PaLiveIngressSource::Mic;
+  // Named `source` (not `ingress`) to avoid clashing with static factory ingress().
+  PaLiveIngressSource source = PaLiveIngressSource::Mic;
   PaLivePipelineWriter writer = PaLivePipelineWriter::Enhancement;
 
   static PaLiveAppendOrigin ingress(PaLiveIngressSource s) {
     PaLiveAppendOrigin o;
     o.tag = Tag::Ingress;
-    o.ingress = s;
+    o.source = s;
     return o;
   }
 
@@ -80,7 +81,7 @@ struct PaLiveAppendOrigin {
 
   bool operator==(const PaLiveAppendOrigin &other) const {
     if (tag != other.tag) return false;
-    if (tag == Tag::Ingress) return ingress == other.ingress;
+    if (tag == Tag::Ingress) return source == other.source;
     return writer == other.writer;
   }
 
@@ -104,7 +105,7 @@ struct PaLiveFramesAppendedPayload {
     payload.totalSamplesWritten = totalSamplesWritten;
     if (origin.tag == PaLiveAppendOrigin::Tag::Ingress) {
       payload.appendKind = PaLiveAppendKind::Ingress;
-      payload.ingressSource = origin.ingress;
+      payload.ingressSource = origin.source;
     } else {
       payload.appendKind = PaLiveAppendKind::Pipeline;
       payload.pipelineWriter = origin.writer;

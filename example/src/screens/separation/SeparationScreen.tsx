@@ -95,6 +95,8 @@ type ProcessingMode = 'batch' | 'liveOverload';
 type LiveSourceMode = 'file' | 'mic';
 type LiveFileSourceType = 'example' | 'own';
 
+type BatchPipelinePhase = 'idle' | 'separating' | 'separation_complete';
+
 type StemResult = {
   bufferId: string;
   label: string;
@@ -191,6 +193,11 @@ export default function SeparationScreen() {
   const [preparedInputBuffer, setPreparedInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
   const [separating, setSeparating] = useState(false);
+  const [batchPhase, setBatchPhase] =
+    useState<BatchPipelinePhase>('idle');
+  const [batchSeparationProgress, setBatchSeparationProgress] = useState<
+    number | null
+  >(null);
   const [separateResult, setSeparateResult] = useState<string | null>(null);
   const [stemResults, setStemResults] = useState<StemResult[]>([]);
 
@@ -235,6 +242,7 @@ export default function SeparationScreen() {
   const liveSeparationSamplesWrittenRef = useRef(0);
   const liveDecodeCompleteRef = useRef(false);
   const liveStopRequestedRef = useRef(false);
+  const liveRunEpochRef = useRef(0);
   const batchAbortRef = useRef<AbortController | null>(null);
   const liveOutputEventsUnsubRef = useRef<(() => void) | null>(null);
 
@@ -648,6 +656,8 @@ export default function SeparationScreen() {
     setModelSampleRate(null);
     setNumStems(2);
     setSeparateResult(null);
+    setBatchPhase('idle');
+    setBatchSeparationProgress(null);
     setLiveStatus(null);
     setLiveFilePhase('idle');
     setLiveMicPhase('idle');
@@ -682,6 +692,9 @@ export default function SeparationScreen() {
     setError(null);
     setErrorSource(null);
     setSeparateResult(null);
+    const batchUsesSegmentation = segBatchConfig.mode !== 'off';
+    setBatchPhase(batchUsesSegmentation ? 'separating' : 'idle');
+    setBatchSeparationProgress(null);
     await clearStemResults();
 
     const abortController = new AbortController();
@@ -702,10 +715,15 @@ export default function SeparationScreen() {
         {
           segmentation: segOption,
           abortSignal: abortController.signal,
-          ...(segBatchConfig.mode !== 'off'
+          ...(batchUsesSegmentation
             ? {
                 errorRecovery: 'partial_result' as const,
                 overlapSamples: Math.round(sr * 0.02),
+                onProgress: (progress) => {
+                  setBatchSeparationProgress(
+                    Math.min(100, (progress.fraction ?? 0) * 100)
+                  );
+                },
               }
             : {}),
         }
@@ -715,6 +733,8 @@ export default function SeparationScreen() {
         for (const out of outs) {
           await releasePipelineAudioBuffer(out.bufferId).catch(() => {});
         }
+        setBatchPhase('idle');
+        setBatchSeparationProgress(null);
         setSeparateResult('Mode: offline batch\nStatus: cancelled');
         return;
       }
@@ -741,11 +761,19 @@ export default function SeparationScreen() {
       setSeparateResult(
         `Mode: offline batch\nSegmentation: ${segBatchConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nInput duration: ~${durationSec} s\nProcessing: ${result.processingTimeMs} ms`
       );
+      if (batchUsesSegmentation) {
+        setBatchSeparationProgress(100);
+        setBatchPhase('separation_complete');
+      }
     } catch (batchErr) {
       if (abortController.signal.aborted) {
+        setBatchPhase('idle');
+        setBatchSeparationProgress(null);
         setSeparateResult('Mode: offline batch\nStatus: cancelled');
         return;
       }
+      setBatchPhase('idle');
+      setBatchSeparationProgress(null);
       setErrorSource('separate');
       setError(normalizeErrorMessage(batchErr));
     } finally {
@@ -857,6 +885,7 @@ export default function SeparationScreen() {
 
     setLiveRunState('running');
     liveStopRequestedRef.current = false;
+    const runEpoch = ++liveRunEpochRef.current;
     setError(null);
     setErrorSource(null);
     setSeparateResult(null);
@@ -873,6 +902,9 @@ export default function SeparationScreen() {
     setLiveSegmentLog([]);
     await clearStemResults();
     await cleanupLiveRuntime();
+    if (runEpoch !== liveRunEpochRef.current) {
+      return;
+    }
 
     try {
       const engine = engineRef.current;
@@ -943,6 +975,9 @@ export default function SeparationScreen() {
         }
       );
       pipelineRef.current = pipeline;
+      if (runEpoch !== liveRunEpochRef.current) {
+        return;
+      }
 
       if (liveSourceMode === 'file') {
         const source = resolveLiveFileSource();
@@ -965,12 +1000,12 @@ export default function SeparationScreen() {
         try {
           ingestResult = await ingest.done;
         } catch (ingestErr) {
-          if (liveStopRequestedRef.current) {
+          if (runEpoch !== liveRunEpochRef.current) {
             return;
           }
           throw ingestErr;
         }
-        if (liveStopRequestedRef.current) {
+        if (runEpoch !== liveRunEpochRef.current) {
           return;
         }
         ingestHandleRef.current = null;
@@ -982,7 +1017,7 @@ export default function SeparationScreen() {
         handleSeparationOutputFrames(liveSeparationSamplesWrittenRef.current);
 
         const completion = await waitForPipelineCompletion(pipeline);
-        if (liveStopRequestedRef.current) {
+        if (runEpoch !== liveRunEpochRef.current) {
           return;
         }
         stopLiveOutputEvents();
@@ -1001,14 +1036,19 @@ export default function SeparationScreen() {
           `Mode: live overload (file)\nSegmentation: ${segLiveConfig.mode} / continuous_frames\nPipeline: ${completion.reason}\nSegment events: ${segmentEventCount}\nOutput samples (all stems): ${totalSamples}\nSample rate: ${sr} Hz`
         );
         await releaseLiveBuffers();
-        setLiveRunState('idle');
+        if (runEpoch === liveRunEpochRef.current) {
+          setLiveRunState('idle');
+        }
       } else {
+        if (runEpoch !== liveRunEpochRef.current) {
+          return;
+        }
         ingestHandleRef.current = null;
         await startMicToLiveAudioBuffer(liveIn, { emitToJs: false });
         liveUsingMicRef.current = true;
       }
     } catch (liveErr) {
-      if (liveStopRequestedRef.current) {
+      if (runEpoch !== liveRunEpochRef.current) {
         return;
       }
       setErrorSource('live');
@@ -1018,14 +1058,26 @@ export default function SeparationScreen() {
       setLiveDecodePercent(null);
       setLiveSeparationProgress(null);
       await cleanupLiveRuntime();
-      setLiveRunState('idle');
+      if (runEpoch === liveRunEpochRef.current) {
+        setLiveRunState('idle');
+      }
     }
   };
 
   const stopLiveSeparation = useCallback(async () => {
-    if (liveRunState !== 'running') {
+    if (liveRunState === 'stopping') {
       return;
     }
+    const canStop =
+      liveRunState === 'running' ||
+      liveFilePhase === 'decoding' ||
+      liveFilePhase === 'separating' ||
+      liveMicPhase === 'recording' ||
+      liveMicPhase === 'separating';
+    if (!canStop) {
+      return;
+    }
+    liveRunEpochRef.current += 1;
     liveStopRequestedRef.current = true;
     setLiveRunState('stopping');
 
@@ -1115,6 +1167,8 @@ export default function SeparationScreen() {
     finalizeLiveStemResults,
     handleSeparationOutputFrames,
     liveRunState,
+    liveFilePhase,
+    liveMicPhase,
     releaseLiveBuffers,
     segLiveConfig.mode,
     stopLiveOutputEvents,
@@ -1158,7 +1212,14 @@ export default function SeparationScreen() {
     !separating;
 
   const engineReady = !!engineRef.current && !!initializedSummary;
-  const liveBusy = liveRunState !== 'idle';
+  const livePipelineBusy =
+    liveRunState === 'running' ||
+    liveRunState === 'stopping' ||
+    liveFilePhase === 'decoding' ||
+    liveFilePhase === 'separating' ||
+    liveMicPhase === 'recording' ||
+    liveMicPhase === 'separating';
+  const liveBusy = livePipelineBusy;
 
   const canRunBatch =
     processingMode === 'batch' &&
@@ -1170,7 +1231,7 @@ export default function SeparationScreen() {
   const canRunLive =
     processingMode === 'liveOverload' &&
     engineReady &&
-    liveRunState === 'idle' &&
+    !livePipelineBusy &&
     (liveSourceMode === 'mic' ||
       (liveFileSourceType === 'example' && !!selectedExampleAudioId) ||
       (liveFileSourceType === 'own' && !!selectedFileUri));
@@ -1366,9 +1427,25 @@ export default function SeparationScreen() {
               onBufferReleased={() => {
                 setPreparedInputBuffer(null);
                 setSeparateResult(null);
+                setBatchPhase('idle');
+                setBatchSeparationProgress(null);
                 clearStemResults().catch(() => {});
               }}
             />
+            {segBatchConfig.mode !== 'off' && batchPhase !== 'idle' ? (
+              <View style={screenStyles.liveProgressList}>
+                <Text style={screenStyles.liveProgressStep}>
+                  ✓ Input ready
+                </Text>
+                <Text style={screenStyles.liveProgressStep}>
+                  {batchPhase === 'separation_complete'
+                    ? '✓ Separation complete'
+                    : batchSeparationProgress != null
+                      ? `Separation progress: ${batchSeparationProgress.toFixed(0)}%`
+                      : 'Separation pending…'}
+                </Text>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={[
                 screenStyles.primaryButton,
@@ -1558,7 +1635,7 @@ export default function SeparationScreen() {
               </Text>
             ) : null}
 
-            {liveRunState === 'running' || liveRunState === 'stopping' ? (
+            {livePipelineBusy ? (
               <TouchableOpacity
                 style={[lpStyles.runButton, lpStyles.runButtonStop]}
                 onPress={() => {
