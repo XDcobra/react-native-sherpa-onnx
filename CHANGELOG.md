@@ -34,6 +34,10 @@
 * **alignment:** unified shared C++ alignment engine for proportional, estimated, and accurate modes (single segmentation/timing implementation across Android and iOS).
 * **alignment:** optional offline `onProgress` on `AlignTextToAudioOptions` with `OrchestrationProgress` payload. Progress fires at the start of each alignment step and uses mode-specific `totalSegments` semantics documented in alignment offline docs.
 * **vad:** offline segmented mode (`segmentation.mode: 'auto'`) now includes orchestrator-style progress plus phase-3 edge-case hardening: deterministic zero-result behavior for no-speech segmentation, documented fail-fast/no-retry policy, and explicit callback error propagation semantics.
+* **separation:** `createSeparation`, `detectSeparationModel`, and `assertSeparationCustomConfig` for Spleeter and UVR model families (Android & iOS).
+* **separation:** Offline batch `separate(OfflineAudioBuffer, OfflineAudioBuffer[], options?)` with optional offline segmentation (`mode: 'auto'`, progress, error recovery).
+* **separation:** Live overload `separate(LiveAudioBuffer, LiveAudioBuffer[], options)` returning `SeparationPipelineHandle` — mandatory `continuous_frames` segmentation policy; no separate `createStreamingSeparation` factory.
+* **separation:** Example app `SeparationScreen` — batch + file/mic live overload, phased progress, stop/restart. Known MVP limits: mono-downmixed stem outputs (stereo stems planned); boundary artifacts possible on segmented live runs (see future-work overlap/crossfade doc).
 
 ### Migration Guide
 

@@ -1,22 +1,22 @@
 ---
 name: Separation Runtime MVP
-overview: "Offline Source-Separation nach Enhancement-Muster: `createSeparation` + `separate(audioIn, audioOuts[], options?)` → `SeparationResult`. Extension Points für Segmentation/Live-Overload vorbereitet, nicht implementiert. Native `SeparationWrapper` (cxx-api). Example-Screen deferred."
+overview: "Offline Source-Separation nach Enhancement-Muster: `createSeparation` + `separate(audioIn, audioOuts[], options?)` → `SeparationResult`. Offline segmentation (`mode: 'auto'`), live overload (`SeparationPipelineHandle`), Example-Screen, Android & iOS native bridges — shipped. Offen: stereo/multi-channel stems, live overlap/crossfade."
 todos:
   - id: cpp-wrapper
     content: SeparationWrapper in sherpa-onnx-separation-wrapper (init/process/release) + cxx::OfflineSourceSeparation
-    status: pending
+    status: completed
   - id: android-bridge
     content: JNI + SherpaOnnxSeparationHelper + SeparationInitOptionsParser (jni/separation/, bestehendes c-api linking)
-    status: pending
+    status: completed
   - id: ios-bridge
     content: SherpaOnnx+SeparationOffline.mm + SeparationBridgeState + podspec ios/separation
-    status: pending
+    status: completed
   - id: ts-api
     content: TurboModule, separationNativeBridge, createSeparation, SeparateOptions/SeparationResult, orchestrate.ts stub, Placeholder entfernen
-    status: pending
+    status: completed
   - id: tests-docs
     content: createSeparation/separationNativeBridge tests + docs/separation.md update
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -680,19 +680,25 @@ Detect bleibt in [`SherpaOnnx+SeparationDetect.mm`](ios/separation/bridge/Sherpa
 
 **Deferred (eigene Milestones):**
 
+- **Stereo-/Multi-Channel-Output-Buffer** — Downmix entfällt (MVP schreibt mono-downmixed stems)
+- **Live-overlap/crossfade** — `overlapSamples` für live overload; siehe [future-work/live-overload-audio-overlap-crossfade-future-work.md](../../future-work/live-overload-audio-overlap-crossfade-future-work.md)
+
+**Shipped (nicht mehr deferred):**
+
 - Example [`SeparationScreen`](example/src/screens/separation/SeparationScreen.tsx)
-- **Segmentation Engine** — `runOfflineSeparationPipeline`, `segmentation.mode: 'auto'|'manual'`
+- **Segmentation Engine** — `runOfflineSeparationPipeline`, `segmentation.mode: 'auto'`
 - **Live Overload** — `separate(Live, Live[], …)`, `startSeparationOfflineLivePipeline`, `SeparationPipelineHandle`
-- **Stereo-/Multi-Channel-Output-Buffer** — Downmix entfällt
 
-**Follow-up-Checkliste (wenn Segmentation/Live kommt):**
+**Follow-up-Checkliste:**
 
-- [ ] `runOfflineSeparationPipeline` implementieren (N Outputs pro Segment synchron)
-- [ ] `SeparateOptions` Felder aktivieren (`onProgress`, `errorRecovery`, `overlapSamples`)
-- [ ] Live-Overload auf `SeparationEngine` (Overload + `SeparationLivePipelineOptions` exportieren)
-- [ ] Native: `startSeparationOfflineLivePipeline` + Worker (Enhancement-Worker als Vorlage)
-- [ ] Policy-Guard: nur `continuous_frames` (wie Enhancement §5.1.b)
-- [ ] Kein `createStreamingSeparation` — Offline-Engine bleibt einziger Entry Point
+- [x] `runOfflineSeparationPipeline` implementieren (N Outputs pro Segment synchron)
+- [x] `SeparateOptions` Felder aktivieren (`onProgress`, `errorRecovery`; `overlapSamples` offline)
+- [x] Live-Overload auf `SeparationEngine` (Overload + `SeparationLivePipelineOptions` exportieren)
+- [x] Native: `startSeparationOfflineLivePipeline` + Worker (Enhancement-Worker als Vorlage)
+- [x] Policy-Guard: nur `continuous_frames` (wie Enhancement §5.1.b)
+- [x] Kein `createStreamingSeparation` — Offline-Engine bleibt einziger Entry Point
+- [ ] Stereo/multi-channel output buffers (kein Downmix)
+- [ ] Live-overlap/crossfade für boundary artifacts (`overlapSamples` auf live overload)
 
 ---
 

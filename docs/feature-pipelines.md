@@ -6,7 +6,7 @@ This guide is a pipeline composition cookbook for real, reusable end-to-end flow
 
 It focuses on public buffer contracts (`OfflineAudioBuffer`, `LiveAudioBuffer`, `OfflineTextBuffer`, `LiveTextBuffer`, `OfflineSegmentBuffer`, `LiveSegmentBuffer`) and public feature APIs, rather than internal implementation details.
 
-Use this file to pick a proven chain quickly. For full per-feature API details, follow the linked feature docs. For **shared streaming pipeline handle** semantics (`stop` / `flush` / `reset` / `getStatus` / `completed`) across STT, enhancement, VAD, TTS live overload, and punctuation, see **[streaming-pipelines-overview.md](streaming-pipelines-overview.md)**.
+Use this file to pick a proven chain quickly. For full per-feature API details, follow the linked feature docs. For **shared streaming pipeline handle** semantics (`stop` / `flush` / `reset` / `getStatus` / `completed`) across STT, enhancement, separation live overload, VAD, TTS live overload, and punctuation, see **[streaming-pipelines-overview.md](streaming-pipelines-overview.md)**.
 
 ## Table of contents
 
@@ -17,6 +17,8 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 - [TTS streaming patterns](#tts-streaming-patterns)
 - [Enhancement offline patterns](#enhancement-offline-patterns)
 - [Enhancement streaming patterns](#enhancement-streaming-patterns)
+- [Separation offline patterns](#separation-offline-patterns)
+- [Separation live overload patterns](#separation-live-overload-patterns)
 - [Punctuation offline patterns](#punctuation-offline-patterns)
 - [Punctuation streaming patterns](#punctuation-streaming-patterns)
 - [VAD streaming patterns](#vad-streaming-patterns)
@@ -27,13 +29,13 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 
 | Public concept | Typical producers | Typical consumers | Notes |
 | --- | --- | --- | --- |
-| `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
-| `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, VAD `process`, PCM player | Continuous stream; supports running pipelines |
+| `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createSeparation().separate`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
+| `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, PCM player | Continuous stream; supports running pipelines |
 | `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff |
 | `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
 | `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
 | `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments | gating, timeline UI, downstream orchestration | Event-driven segment stream |
-| Segmentation engine (`react-native-sherpa-onnx/segment`) | attached to text/audio streams or offline orchestrators | STT/TTS/enhancement/punctuation/alignment chunk orchestration | Use to bound peak memory on offline-heavy workloads |
+| Segmentation engine (`react-native-sherpa-onnx/segment`) | attached to text/audio streams or offline orchestrators | STT/TTS/enhancement/separation/punctuation/alignment chunk orchestration | Use to bound peak memory on offline-heavy workloads |
 
 ## STT offline patterns
 
@@ -144,6 +146,48 @@ When to use:
 Related docs:
 - [enhancement-streaming.md](enhancement-streaming.md)
 - [stt-streaming.md](stt-streaming.md)
+
+## Separation offline patterns
+
+```mermaid
+flowchart LR
+  A[Mixed file] --> B[OfflineAudioBuffer input]
+  B --> C["createSeparation().separate(input, stemOuts[])"]
+  C --> D1[OfflineAudioBuffer vocals]
+  C --> D2[OfflineAudioBuffer accompaniment]
+  D1 --> E[Playback or export per stem]
+  D2 --> E
+```
+
+When to use:
+- Batch stem extraction from a complete mix (vocals vs accompaniment).
+- Long mixes where `segmentation.mode: 'auto'` bounds peak RAM per chunk.
+
+Related docs:
+- [separation.md](separation.md)
+- [segmentation-engine.md](segmentation-engine.md)
+- [memory-and-models.md](memory-and-models.md)
+
+## Separation live overload patterns
+
+```mermaid
+flowchart LR
+  A[Mic or file ingest] --> B[LiveAudioBuffer mixed]
+  B --> C["createSeparation().separate(liveIn, liveStemOuts[], { segmentation })"]
+  C --> D1[LiveAudioBuffer vocals]
+  C --> D2[LiveAudioBuffer accompaniment]
+  D1 --> E[Live playback or finalize to offline]
+  D2 --> E
+```
+
+When to use:
+- Long or live streams where monolithic offline separation would OOM.
+- Mandatory `continuous_frames` segmentation on the live overload path.
+
+Related docs:
+- [separation.md](separation.md)
+- [streaming-pipelines-overview.md](streaming-pipelines-overview.md)
+- [audiobuffer-streaming.md](audiobuffer-streaming.md)
 
 ## Punctuation offline patterns
 

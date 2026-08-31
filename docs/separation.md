@@ -1,8 +1,12 @@
-# Source separation (offline)
+# Source separation
+
+**Status:** Android ✅ · iOS ✅ · Example app ✅
 
 ## Introduction
 
-On-device batch source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**.
+On-device source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**. Offline batch and **live overload** (offline weights on live buffers) are supported on both platforms; there is no separate `createStreamingSeparation` factory.
+
+For shared **`SeparationPipelineHandle`** lifecycle (`stop` / `flush` / `reset` / `getStatus` / `completed`), see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 | Role | Type | Notes |
 | --- | --- | --- |
@@ -360,7 +364,7 @@ Segment boundaries can introduce audible artifacts at chunk edges (same tradeoff
 The offline separation engine can drive a **live pipeline**: mixed audio flows into a `LiveAudioBuffer`, committed segments are separated with the offline model, and **N live stem buffers** grow in lockstep.
 
 > [!WARNING]
-> Offline separators are designed for whole-utterance batch inference. Chunking via segmentation can introduce **audible artifacts at segment boundaries**. There is no true online separation model in sherpa-onnx — tune `checkpointIntervalMs` for RAM vs. boundary quality.
+> Offline separators are designed for whole-utterance batch inference. Chunking via segmentation can introduce **audible artifacts at segment boundaries**. There is no true online separation model in sherpa-onnx — tune `checkpointIntervalMs` for RAM vs. boundary quality. Future overlap/crossfade options are tracked in [future-work/live-overload-audio-overlap-crossfade-future-work.md](future-work/live-overload-audio-overlap-crossfade-future-work.md).
 
 `'off'` and `'manual'` segmentation modes are **not** supported on the live overload path.
 

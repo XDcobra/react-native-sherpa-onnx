@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, punctuation, VAD, timestamp/alignment generation, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, timestamp/alignment generation, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -207,7 +207,18 @@ This screen demonstrates segmentation policies for audio and text pipelines to k
 
 The Settings screen (gear button on Home) provides runtime diagnostics for acceleration backends and provider availability. It exposes checks for QNN, NNAPI, XNNPACK, Core ML, and available providers, plus app/SDK version display. This is used for environment verification before running model-heavy screens. See [docs/execution-providers.md](../docs/execution-providers.md).
 
+## Source separation (offline)
+
+| ![Separation offline 1](../docs/images/example/separation_offline_1.png) | ![Separation offline 2](../docs/images/example/separation_offline_2.png) | ![Separation offline 3](../docs/images/example/separation_offline_3.png) |
+| --- | --- | --- |
+
+This screen initializes offline separation engines (Spleeter or UVR) with auto or custom init, ingests a mixed audio file into an offline input buffer, and runs batch separation into N empty stem output buffers (vocals + accompaniment by default). It supports optional offline segmentation (`mode: 'auto'`) for long mixes, per-stem playback and save, and progress display during segmented runs. Models can come from bundled assets, the download manager (`ModelCategory.Separation`), or local folders — see [docs/separation.md](../docs/separation.md), [docs/model-detect.md](../docs/model-detect.md), and [ios/sherpa_models/README.md](./ios/sherpa_models/README.md) for iOS bundle layout.
+
+## Source separation (live overload)
+
+| ![Separation streaming 1](../docs/images/example/separation_streaming_1.png) | ![Separation streaming 2](../docs/images/example/separation_streaming_2.png) | ![Separation streaming 3](../docs/images/example/separation_streaming_3.png) |
+| --- | --- | --- |
+
+This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation.md](../docs/separation.md) (live overload section), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
+
 ## Speaker diarization (coming soon)
-
-
-## Source separation (coming soon)
