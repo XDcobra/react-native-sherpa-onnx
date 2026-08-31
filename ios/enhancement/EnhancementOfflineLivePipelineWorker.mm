@@ -1,6 +1,7 @@
 #include "EnhancementOfflineLivePipelineWorker.h"
 
 #include "../enhancement/core/EnhancementBridgeState.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 
 #include <algorithm>
 #include <stdexcept>
