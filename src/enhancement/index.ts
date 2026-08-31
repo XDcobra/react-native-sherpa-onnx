@@ -60,15 +60,31 @@ function createEnhancementPipelineHandle(
   pipelineId: string,
   attachedEngineId?: string
 ): EnhancementPipelineHandle {
-  const completed = createStreamingPipelineCompletionPromise(pipelineId);
+  let detached = false;
+  const detachIfNeeded = async () => {
+    if (!attachedEngineId || detached) return;
+    detached = true;
+    try {
+      await detachSegmentationEngine(attachedEngineId, {
+        flushFinal: true,
+      });
+    } catch {
+      // Best effort: segmentation detach must not mask pipeline shutdown.
+    }
+  };
+
+  const completed =
+    createStreamingPipelineCompletionPromise(pipelineId).finally(detachIfNeeded);
+
   return {
     instanceId,
     pipelineId,
     completed,
     async stop(): Promise<void> {
-      await SherpaOnnx.stopStreamingPipeline(pipelineId);
-      if (attachedEngineId) {
-        await detachSegmentationEngine(attachedEngineId).catch(() => undefined);
+      try {
+        await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      } finally {
+        await detachIfNeeded();
       }
     },
     async flush(): Promise<void> {

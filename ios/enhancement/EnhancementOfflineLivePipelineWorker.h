@@ -2,7 +2,6 @@
 
 #include "../livePipeline/OfflineLivePipelineWorker.h"
 #include "../audio/pipeline/PaLiveEntry.h"
-#include "sherpa-onnx-enhancement-wrapper.h"
 
 #include <memory>
 #include <string>
@@ -15,14 +14,15 @@ public:
     std::shared_ptr<PaLiveEntry> audioInput,
     std::string audioSegmentInputBufferId,
     std::shared_ptr<PaLiveEntry> audioOutput,
-    sherpaonnx::EnhancementWrapper *wrapper
+    std::string enhancementInstanceId
   );
 
 protected:
   void onSegmentCommitted(const CommittedSegmentRef &segment) override;
+  void onRelease() override;
 
 private:
   std::shared_ptr<PaLiveEntry> audioInput_;
   std::shared_ptr<PaLiveEntry> audioOutput_;
-  sherpaonnx::EnhancementWrapper *wrapper_;
+  std::string enhancementInstanceId_;
 };

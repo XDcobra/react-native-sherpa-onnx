@@ -9,10 +9,55 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
+
+namespace {
+
+void StopActiveEnhancementLivePipeline(const std::string &instanceIdStr) {
+  std::string pipelineId;
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+    auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
+    if (it == sherpaonnx::enhancement::bridge::g_enhancement_instances.end()) {
+      return;
+    }
+    pipelineId = it->second->activeLivePipelineId;
+    it->second->activeLivePipelineId.clear();
+  }
+  if (pipelineId.empty()) {
+    return;
+  }
+
+  std::shared_ptr<StreamingPipelineWorker> worker;
+  {
+    std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+    auto it = g_streaming_pipelines.find(pipelineId);
+    if (it != g_streaming_pipelines.end()) {
+      worker = it->second;
+      g_streaming_pipelines.erase(it);
+    }
+  }
+  if (!worker) {
+    return;
+  }
+
+  so_mark_streaming_pipeline_stop_requested(pipelineId);
+  worker->stop();
+
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 120s;
+  while (worker->isRunning() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(20ms);
+  }
+  worker->release();
+}
+
+}  // namespace
 
 @implementation SherpaOnnx (Enhancement)
 
@@ -213,7 +258,8 @@ static NSString *const kOfflineEnhancementOomMessage =
     resolve(nil);
     return;
   }
-  std::string instanceIdStr = [instanceId UTF8String];
+  const std::string instanceIdStr = [instanceId UTF8String];
+  StopActiveEnhancementLivePipeline(instanceIdStr);
   std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
   auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
   if (it != sherpaonnx::enhancement::bridge::g_enhancement_instances.end() && it->second->wrapper != nullptr) {
@@ -236,7 +282,6 @@ static NSString *const kOfflineEnhancementOomMessage =
   }
 
   std::string instanceIdStr = [instanceId UTF8String];
-  sherpaonnx::EnhancementWrapper *enhancer = nullptr;
   {
     std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
     auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
@@ -244,7 +289,6 @@ static NSString *const kOfflineEnhancementOomMessage =
       reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
       return;
     }
-    enhancer = it->second->wrapper.get();
   }
 
   std::string audioInId = [audioInLiveBufferId UTF8String];
@@ -281,14 +325,24 @@ static NSString *const kOfflineEnhancementOomMessage =
   NSString *uuidString = [[NSUUID UUID] UUIDString];
   std::string pipelineId = "live_offline_enh_" + std::string([uuidString UTF8String]);
 
+  StopActiveEnhancementLivePipeline(instanceIdStr);
+
   auto worker = std::make_shared<EnhancementOfflineLivePipelineWorker>(
     pipelineId,
     attachedEngineIdStr,
     liveAudioIn,
     segmentBufferIdStr,
     liveAudioOut,
-    enhancer
+    instanceIdStr
   );
+
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+    auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
+    if (it != sherpaonnx::enhancement::bridge::g_enhancement_instances.end()) {
+      it->second->activeLivePipelineId = pipelineId;
+    }
+  }
 
   {
     std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);

@@ -1,6 +1,9 @@
 #include "EnhancementOfflineLivePipelineWorker.h"
-#include <stdexcept>
+
+#include "../enhancement/core/EnhancementBridgeState.h"
+
 #include <algorithm>
+#include <stdexcept>
 
 EnhancementOfflineLivePipelineWorker::EnhancementOfflineLivePipelineWorker(
   std::string pipelineId,
@@ -8,7 +11,7 @@ EnhancementOfflineLivePipelineWorker::EnhancementOfflineLivePipelineWorker(
   std::shared_ptr<PaLiveEntry> audioInput,
   std::string audioSegmentInputBufferId,
   std::shared_ptr<PaLiveEntry> audioOutput,
-  sherpaonnx::EnhancementWrapper *wrapper
+  std::string enhancementInstanceId
 ) : OfflineLivePipelineWorker(
       std::move(pipelineId),
       std::move(attachedSegmentationEngineId),
@@ -18,7 +21,7 @@ EnhancementOfflineLivePipelineWorker::EnhancementOfflineLivePipelineWorker(
     ),
     audioInput_(std::move(audioInput)),
     audioOutput_(std::move(audioOutput)),
-    wrapper_(wrapper)
+    enhancementInstanceId_(std::move(enhancementInstanceId))
 {}
 
 void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegmentRef &segment) {
@@ -41,7 +44,20 @@ void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSeg
   auto samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
   if (samples.empty()) return;
 
-  auto result = wrapper_->runSamples(samples, static_cast<int32_t>(speech.sampleRate));
+  sherpaonnx::EnhancedAudioResult result;
+  {
+    std::lock_guard<std::mutex> lock(
+        sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+    auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(
+        enhancementInstanceId_);
+    if (it == sherpaonnx::enhancement::bridge::g_enhancement_instances.end() ||
+        it->second->wrapper == nullptr) {
+      throw std::runtime_error("ENHANCEMENT_ERROR: Enhancement instance not found");
+    }
+    result = it->second->wrapper->runSamples(
+        samples,
+        static_cast<int32_t>(speech.sampleRate));
+  }
 
   if (result.samples.empty()) return;
 
@@ -53,4 +69,15 @@ void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSeg
   );
 
   addUnitsWritten(static_cast<int64_t>(result.samples.size()));
+}
+
+void EnhancementOfflineLivePipelineWorker::onRelease() {
+  std::lock_guard<std::mutex> lock(
+      sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+  auto it = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(
+      enhancementInstanceId_);
+  if (it != sherpaonnx::enhancement::bridge::g_enhancement_instances.end() &&
+      it->second->activeLivePipelineId == pipelineId) {
+    it->second->activeLivePipelineId.clear();
+  }
 }

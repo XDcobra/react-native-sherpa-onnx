@@ -18,6 +18,7 @@ namespace bridge {
 
 struct EnhancementInstanceState {
   std::unique_ptr<sherpaonnx::EnhancementWrapper> wrapper;
+  std::string activeLivePipelineId;
 };
 
 struct OnlineEnhancementInstanceState {
