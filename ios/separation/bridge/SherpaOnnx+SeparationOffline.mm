@@ -10,11 +10,13 @@
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "sherpa-onnx-model-path-fill.h"
 
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -41,6 +43,45 @@ void FillSeparationModelPathsFromDict(
     }
   }
   sherpaonnx::FillSeparationModelPathsFromStringMap(pathMap, paths);
+}
+
+void StopActiveSeparationLivePipeline(const std::string &instanceIdStr) {
+  std::string pipelineId;
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
+    auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
+    if (it == sherpaonnx::separation::bridge::g_separation_instances.end()) {
+      return;
+    }
+    pipelineId = it->second->activeLivePipelineId;
+    it->second->activeLivePipelineId.clear();
+  }
+  if (pipelineId.empty()) {
+    return;
+  }
+
+  std::shared_ptr<StreamingPipelineWorker> worker;
+  {
+    std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+    auto it = g_streaming_pipelines.find(pipelineId);
+    if (it != g_streaming_pipelines.end()) {
+      worker = it->second;
+      g_streaming_pipelines.erase(it);
+    }
+  }
+  if (!worker) {
+    return;
+  }
+
+  so_mark_streaming_pipeline_stop_requested(pipelineId);
+  worker->stop();
+
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 120s;
+  while (worker->isRunning() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(20ms);
+  }
+  worker->release();
 }
 
 struct SeparationInitScalars {
@@ -407,7 +448,6 @@ static NSString *const kOfflineSeparationOomMessage =
   }
 
   std::string instanceIdStr = [instanceId UTF8String];
-  sherpaonnx::SeparationWrapper *separator = nullptr;
   int expectedStems = 0;
   {
     std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
@@ -417,8 +457,7 @@ static NSString *const kOfflineSeparationOomMessage =
       reject(@"SEPARATION_ERROR", @"Separation instance not found", nil);
       return;
     }
-    separator = it->second->wrapper.get();
-    expectedStems = separator->getNumStems();
+    expectedStems = it->second->wrapper->getNumStems();
   }
 
   if (static_cast<NSInteger>(expectedStems) != (NSInteger)audioOutLiveBufferIds.count) {
@@ -486,14 +525,24 @@ static NSString *const kOfflineSeparationOomMessage =
   NSString *uuidString = [[NSUUID UUID] UUIDString];
   std::string pipelineId = "live_offline_sep_" + std::string([uuidString UTF8String]);
 
+  StopActiveSeparationLivePipeline(instanceIdStr);
+
   auto worker = std::make_shared<SeparationOfflineLivePipelineWorker>(
     pipelineId,
     attachedEngineIdStr,
     liveAudioIn,
     segmentBufferIdStr,
     liveAudioOuts,
-    separator
+    instanceIdStr
   );
+
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
+    auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
+    if (it != sherpaonnx::separation::bridge::g_separation_instances.end()) {
+      it->second->activeLivePipelineId = pipelineId;
+    }
+  }
 
   {
     std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
@@ -513,7 +562,8 @@ static NSString *const kOfflineSeparationOomMessage =
     reject(@"SEPARATION_ERROR", @"instanceId is required", nil);
     return;
   }
-  std::string instanceIdStr = [instanceId UTF8String];
+  const std::string instanceIdStr = [instanceId UTF8String];
+  StopActiveSeparationLivePipeline(instanceIdStr);
   std::lock_guard<std::mutex> lock(sherpaonnx::separation::bridge::g_separation_mutex);
   auto it = sherpaonnx::separation::bridge::g_separation_instances.find(instanceIdStr);
   if (it != sherpaonnx::separation::bridge::g_separation_instances.end()) {

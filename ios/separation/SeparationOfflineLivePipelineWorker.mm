@@ -1,5 +1,7 @@
 #include "SeparationOfflineLivePipelineWorker.h"
 
+#include "../separation/core/SeparationBridgeState.h"
+
 #include <algorithm>
 #include <new>
 #include <stdexcept>
@@ -10,7 +12,7 @@ SeparationOfflineLivePipelineWorker::SeparationOfflineLivePipelineWorker(
   std::shared_ptr<PaLiveEntry> audioInput,
   std::string audioSegmentInputBufferId,
   std::vector<std::shared_ptr<PaLiveEntry>> audioOutputs,
-  sherpaonnx::SeparationWrapper *wrapper
+  std::string separationInstanceId
 ) : OfflineLivePipelineWorker(
       std::move(pipelineId),
       std::move(attachedSegmentationEngineId),
@@ -20,7 +22,7 @@ SeparationOfflineLivePipelineWorker::SeparationOfflineLivePipelineWorker(
     ),
     audioInput_(std::move(audioInput)),
     audioOutputs_(std::move(audioOutputs)),
-    wrapper_(wrapper)
+    separationInstanceId_(std::move(separationInstanceId))
 {}
 
 void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegmentRef &segment) {
@@ -39,7 +41,19 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
     samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
     if (samples.empty()) return;
 
-    processResult = wrapper_->processMonoSamples(samples, static_cast<int32_t>(speech.sampleRate));
+    {
+      std::lock_guard<std::mutex> lock(
+          sherpaonnx::separation::bridge::g_separation_mutex);
+      auto it = sherpaonnx::separation::bridge::g_separation_instances.find(
+          separationInstanceId_);
+      if (it == sherpaonnx::separation::bridge::g_separation_instances.end() ||
+          it->second->wrapper == nullptr) {
+        throw std::runtime_error("SEPARATION_ERROR: Separation instance not found");
+      }
+      processResult = it->second->wrapper->processMonoSamples(
+          samples,
+          static_cast<int32_t>(speech.sampleRate));
+    }
   } catch (const std::bad_alloc &) {
     throw std::runtime_error(
         "OFFLINE_OOM: Not enough memory for offline source separation");
@@ -87,5 +101,16 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
 
   if (stem0SamplesWritten > 0) {
     addUnitsWritten(stem0SamplesWritten);
+  }
+}
+
+void SeparationOfflineLivePipelineWorker::onRelease() {
+  std::lock_guard<std::mutex> lock(
+      sherpaonnx::separation::bridge::g_separation_mutex);
+  auto it = sherpaonnx::separation::bridge::g_separation_instances.find(
+      separationInstanceId_);
+  if (it != sherpaonnx::separation::bridge::g_separation_instances.end() &&
+      it->second->activeLivePipelineId == pipelineId) {
+    it->second->activeLivePipelineId.clear();
   }
 }

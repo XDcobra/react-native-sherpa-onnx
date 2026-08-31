@@ -1979,6 +1979,28 @@ bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string
   }
   return true;
 }
+
+bool seg_engine_flush(const std::string &engineId, std::string *error) {
+  std::shared_ptr<SegEngine> engine;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_engine_mutex);
+    auto it = g_seg_engine_by_id.find(engineId);
+    if (it == g_seg_engine_by_id.end()) {
+      return true;
+    }
+    engine = it->second;
+    if (engine->state != SegEngineState::ACTIVE) {
+      return true;
+    }
+  }
+
+  if (engine->domain == SegEngineDomain::TEXT) {
+    seg_engine_flush_text(engine);
+  } else {
+    seg_engine_flush_audio(engine);
+  }
+  return true;
+}
 #endif
 
 @implementation SherpaOnnx (SegmentBuffer)

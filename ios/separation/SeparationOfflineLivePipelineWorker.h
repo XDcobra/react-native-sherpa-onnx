@@ -2,7 +2,6 @@
 
 #include "../livePipeline/OfflineLivePipelineWorker.h"
 #include "../audio/pipeline/PaLiveEntry.h"
-#include "sherpa-onnx-separation-wrapper.h"
 
 #include <memory>
 #include <string>
@@ -16,14 +15,15 @@ public:
     std::shared_ptr<PaLiveEntry> audioInput,
     std::string audioSegmentInputBufferId,
     std::vector<std::shared_ptr<PaLiveEntry>> audioOutputs,
-    sherpaonnx::SeparationWrapper *wrapper
+    std::string separationInstanceId
   );
 
 protected:
   void onSegmentCommitted(const CommittedSegmentRef &segment) override;
+  void onRelease() override;
 
 private:
   std::shared_ptr<PaLiveEntry> audioInput_;
   std::vector<std::shared_ptr<PaLiveEntry>> audioOutputs_;
-  sherpaonnx::SeparationWrapper *wrapper_;
+  std::string separationInstanceId_;
 };

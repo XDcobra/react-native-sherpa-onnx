@@ -1157,6 +1157,12 @@ object SegmentationEngineRegistry {
     engineIdByBufferId.remove(engine.attachedBufferId)
   }
 
+  fun flushEngine(engineId: String) {
+    val engine = engineById[engineId] ?: return
+    if (engine.state() != EngineState.ACTIVE) return
+    engine.flush()
+  }
+
   fun getEngineInfo(engineId: String): SegmentationEngineInfoSnapshot {
     val engine = engineById[engineId]
       ?: throw SegmentationEngineException(

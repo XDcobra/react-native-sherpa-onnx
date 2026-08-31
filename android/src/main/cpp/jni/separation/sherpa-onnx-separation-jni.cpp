@@ -255,11 +255,6 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
 ) {
   try {
     const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
-    sherpaonnx::SeparationWrapper* wrapper = GetSeparationWrapperOrNull(instanceIdStr);
-    if (wrapper == nullptr) {
-      LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
-      return nullptr;
-    }
 
     jsize n = env->GetArrayLength(samples);
     if (n <= 0 || sampleRate <= 0) {
@@ -280,8 +275,16 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
     std::vector<float> input(static_cast<size_t>(n));
     env->GetFloatArrayRegion(samples, 0, n, input.data());
 
-    sherpaonnx::SeparationProcessResult result =
-        wrapper->processMonoSamples(input, sampleRate);
+    sherpaonnx::SeparationProcessResult result;
+    {
+      std::lock_guard<std::mutex> lock(g_separation_mutex);
+      auto it = g_separation_instances.find(instanceIdStr);
+      if (it == g_separation_instances.end() || it->second == nullptr) {
+        LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
+        return nullptr;
+      }
+      result = it->second->processMonoSamples(input, sampleRate);
+    }
     if (!result.success) {
       LOGE("nativeProcessSeparation failed: %s", result.error.c_str());
       if (ErrorLooksLikeOfflineOom(result.error)) {

@@ -17,6 +17,7 @@ namespace bridge {
 
 struct SeparationInstanceState {
   std::unique_ptr<sherpaonnx::SeparationWrapper> wrapper;
+  std::string activeLivePipelineId;
 };
 
 extern std::unordered_map<std::string, std::unique_ptr<SeparationInstanceState>>
