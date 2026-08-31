@@ -39,7 +39,9 @@ internal class EnhancementOfflineLivePipelineWorker(
       val result = audioOutputEntry.tryAppendSamples(
         samples = denoised.samples,
         inputSampleRate = speech.sampleRate,
-        source = com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_ENHANCEMENT
+        origin = com.sherpaonnx.audio.pipeline.LiveAppendOrigin.Pipeline(
+          com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter.ENHANCEMENT,
+        ),
       )
       if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED) {
         stop()

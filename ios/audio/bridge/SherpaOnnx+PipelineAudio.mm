@@ -1272,7 +1272,7 @@ bool pa_append_samples_to_live(
   }
 
   try {
-    live->appendSamples(samples, count, sampleRate, kPaAppendSourceAppend, false);
+    live->appendSamples(samples, count, sampleRate, PaLiveAppendOrigin::ingress(PaLiveIngressSource::Append), false);
     return true;
   } catch (const std::runtime_error &e) {
     if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
@@ -2360,19 +2360,22 @@ static bool pa_populate_offline_from_source_if_empty(
     __weak SherpaOnnx *weakSelf = self;
 
     auto onFramesAppended = [weakSelf, liveBufferId, sr](
-      const std::string &source,
-      int frameCount,
-      int64_t totalSamplesWritten
+      const PaLiveFramesAppendedPayload &event
     ) {
       SherpaOnnx *module = weakSelf;
       if (!module) return;
 
       NSMutableDictionary *payload = [NSMutableDictionary dictionary];
       payload[@"liveBufferId"] = liveBufferId ?: @"";
-      payload[@"source"] = [NSString stringWithUTF8String:source.c_str()];
+      payload[@"appendKind"] = [NSString stringWithUTF8String:pa_live_append_kind_wire(event.appendKind)];
+      if (event.appendKind == PaLiveAppendKind::Ingress) {
+        payload[@"ingressSource"] = [NSString stringWithUTF8String:pa_live_ingress_wire(event.ingressSource)];
+      } else if (event.appendKind == PaLiveAppendKind::Pipeline) {
+        payload[@"pipelineWriter"] = [NSString stringWithUTF8String:pa_live_pipeline_writer_wire(event.pipelineWriter)];
+      }
       payload[@"sampleRate"] = @(sr);
-      payload[@"frameCount"] = @(frameCount);
-      payload[@"totalSamplesWritten"] = @((double)totalSamplesWritten);
+      payload[@"frameCount"] = @(event.frameCount);
+      payload[@"totalSamplesWritten"] = @((double)event.totalSamplesWritten);
 
       dispatch_async(dispatch_get_main_queue(), ^{
         [module sendEventWithName:@"pipelineLiveAudioChunk" body:payload];
@@ -2434,7 +2437,12 @@ static bool pa_populate_offline_from_source_if_empty(
       return;
     }
     auto allSamples = offline->readAllSamples();
-    live->appendSamples(allSamples.data(), allSamples.size(), offline->sampleRate, kPaAppendSourceAppendOffline);
+    live->appendSamples(
+      allSamples.data(),
+      allSamples.size(),
+      offline->sampleRate,
+      PaLiveAppendOrigin::ingress(PaLiveIngressSource::AppendOffline)
+    );
     resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);
@@ -2963,7 +2971,7 @@ static std::string pa_encodeViaDecodeFile(
           samples,
           count,
           liveEntry->sampleRate,
-          kPaAppendSourceFileIngest,
+          PaLiveAppendOrigin::ingress(PaLiveIngressSource::FileIngest),
           useBackpressure
         );
         if (appendResult == PaLiveEntry::AppendResult::APPENDED) {

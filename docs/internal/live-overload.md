@@ -155,6 +155,10 @@ startEnhancementOfflineLivePipeline(
 ): Promise<{ pipelineId: string }>;
 ```
 
+### Output live buffer append events
+
+When audio→audio live overload workers (Enhancement, TTS, Separation) append decoded PCM to their output `LiveAudioBuffer`, `onFramesAppended` / `pipelineLiveAudioChunk` carry **`appendKind: 'pipeline'`** and the matching **`pipelineWriter`** (`enhancement` | `tts` | `separation`). Input-side ingress (mic, file ingest, JS append) uses **`appendKind: 'ingress'`** with **`ingressSource`**. See [liveaudiobuffer-internal.md](liveaudiobuffer-internal.md#4-producers-data-sources).
+
 ---
 
 ## 4. Worker Drain

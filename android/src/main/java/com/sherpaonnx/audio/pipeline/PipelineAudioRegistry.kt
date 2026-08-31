@@ -531,13 +531,13 @@ object PipelineAudioRegistry {
     liveBufferId: String,
     samples: FloatArray,
     sampleRate: Int,
-    source: String = LIVE_APPEND_SOURCE_APPEND,
+    origin: LiveAppendOrigin = LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND),
   ) {
     val entry = requireLiveEntry(liveBufferId)
     if (entry.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
-    entry.appendSamples(samples, sampleRate, source)
+    entry.appendSamples(samples, sampleRate, origin)
   }
 
   /**
@@ -558,7 +558,11 @@ object PipelineAudioRegistry {
         val read = reader.readSamples(chunk, 0, chunk.size)
         if (read <= 0) break
         val toAppend = if (read == chunk.size) chunk else chunk.copyOf(read)
-        live.appendSamples(toAppend, offline.sampleRate, LIVE_APPEND_SOURCE_APPEND_OFFLINE)
+        live.appendSamples(
+          toAppend,
+          offline.sampleRate,
+          LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND_OFFLINE),
+        )
       }
     }
   }
@@ -701,7 +705,11 @@ object PipelineAudioRegistry {
     if (entry.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("[BUFFER_NOT_RECORDING] $bufferId")
     }
-    entry.appendSamples(samples, sampleRate, LIVE_APPEND_SOURCE_APPEND)
+    entry.appendSamples(
+      samples,
+      sampleRate,
+      LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND),
+    )
   }
 
   private fun requireLiveEntry(liveBufferId: String): LiveEntry {

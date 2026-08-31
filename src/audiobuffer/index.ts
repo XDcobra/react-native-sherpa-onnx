@@ -53,6 +53,8 @@ import type {
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferSegmentEvent,
   LiveAudioBufferErrorEvent,
+  LiveAudioIngressSource,
+  LiveAudioPipelineWriter,
   OfflineFromSamplesOptions,
 } from './types';
 
@@ -73,6 +75,74 @@ const DEFAULT_SPEECH_SEGMENTATION_POLICY = {
   maxSegmentMs: 30000,
   hangoverMs: 300,
 };
+
+const INGRESS_SOURCES = new Set<LiveAudioIngressSource>([
+  'mic',
+  'append',
+  'append_offline',
+  'file_ingest',
+]);
+
+const PIPELINE_WRITERS = new Set<LiveAudioPipelineWriter>([
+  'enhancement',
+  'tts',
+  'separation',
+]);
+
+function parseLiveFramesAppendedEvent(
+  liveBufferId: string,
+  rawEvent: {
+    appendKind?: string;
+    ingressSource?: string;
+    pipelineWriter?: string;
+    sampleRate?: number;
+    frameCount?: number;
+    totalSamplesWritten?: number;
+  }
+): LiveAudioBufferFramesAppendedEvent | null {
+  const base = {
+    liveBufferId,
+    sampleRate: rawEvent.sampleRate ?? 0,
+    frameCount: rawEvent.frameCount ?? 0,
+    totalSamplesWritten: rawEvent.totalSamplesWritten ?? 0,
+  };
+
+  if (rawEvent.appendKind === 'ingress') {
+    const ingressSource = rawEvent.ingressSource;
+    if (
+      typeof ingressSource !== 'string' ||
+      !INGRESS_SOURCES.has(ingressSource as LiveAudioIngressSource)
+    ) {
+      return null;
+    }
+    return {
+      ...base,
+      appendKind: 'ingress',
+      ingressSource: ingressSource as LiveAudioIngressSource,
+    };
+  }
+
+  if (rawEvent.appendKind === 'pipeline') {
+    const pipelineWriter = rawEvent.pipelineWriter;
+    if (
+      typeof pipelineWriter !== 'string' ||
+      !PIPELINE_WRITERS.has(pipelineWriter as LiveAudioPipelineWriter)
+    ) {
+      return null;
+    }
+    return {
+      ...base,
+      appendKind: 'pipeline',
+      pipelineWriter: pipelineWriter as LiveAudioPipelineWriter,
+    };
+  }
+
+  if (rawEvent.appendKind === 'mixed') {
+    return { ...base, appendKind: 'mixed' };
+  }
+
+  return null;
+}
 
 function createInvalidAudioBufferIdError(
   sourceName: string,
@@ -271,7 +341,9 @@ function ensureLiveEventSubscriptions(): void {
       'pipelineLiveAudioChunk',
       (rawEvent: {
         liveBufferId?: string;
-        source?: string;
+        appendKind?: string;
+        ingressSource?: string;
+        pipelineWriter?: string;
         sampleRate?: number;
         frameCount?: number;
         totalSamplesWritten?: number;
@@ -282,23 +354,8 @@ function ensureLiveEventSubscriptions(): void {
         const callbacks = framesCallbacks.get(liveBufferId);
         if (!callbacks || callbacks.size === 0) return;
 
-        const source =
-          rawEvent.source === 'mic' ||
-          rawEvent.source === 'append' ||
-          rawEvent.source === 'append_offline' ||
-          rawEvent.source === 'file_ingest' ||
-          rawEvent.source === 'mixed' ||
-          rawEvent.source === 'unknown'
-            ? rawEvent.source
-            : 'unknown';
-
-        const event: LiveAudioBufferFramesAppendedEvent = {
-          liveBufferId,
-          source,
-          sampleRate: rawEvent.sampleRate ?? 0,
-          frameCount: rawEvent.frameCount ?? 0,
-          totalSamplesWritten: rawEvent.totalSamplesWritten ?? 0,
-        };
+        const event = parseLiveFramesAppendedEvent(liveBufferId, rawEvent);
+        if (!event) return;
 
         for (const cb of callbacks) {
           cb(event);
@@ -1111,7 +1168,8 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
  * Spool is automatically enabled for the duration of file ingest to prevent
  * data loss (ring overwrite during fast decode).
  *
- * `onFramesAppended` fires per decoded chunk with `source: 'file_ingest'`.
+ * `onFramesAppended` fires per decoded chunk with
+ * `appendKind: 'ingress'` and `ingressSource: 'file_ingest'`.
  *
  * @param liveBuffer - Live buffer in recording state.
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
@@ -1262,7 +1320,9 @@ export type {
   StartMicToLiveOptions,
   OfflineFromLiveMode,
   OfflineTransferFromLiveMode,
-  LiveBufferAppendSource,
+  LiveAudioIngressSource,
+  LiveAudioPipelineWriter,
+  LiveAudioAppendKind,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
   LiveAudioBufferSegmentEvent,

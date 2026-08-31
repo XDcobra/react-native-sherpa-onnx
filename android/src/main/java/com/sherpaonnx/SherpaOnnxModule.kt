@@ -374,7 +374,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
     payload.putString("liveBufferId", event.liveBufferId)
-    payload.putString("source", event.source)
+    payload.putString("appendKind", event.appendKind.wireValue)
+    event.ingressSource?.let { payload.putString("ingressSource", it.wireValue) }
+    event.pipelineWriter?.let { payload.putString("pipelineWriter", it.wireValue) }
     payload.putInt("sampleRate", event.sampleRate)
     payload.putInt("frameCount", event.frameCount)
     payload.putDouble("totalSamplesWritten", event.totalSamplesWritten.toDouble())
@@ -2189,7 +2191,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
                 liveEntry.tryAppendSamples(
                   samples,
                   liveEntry.sampleRate,
-                  com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                  com.sherpaonnx.audio.pipeline.LiveAppendOrigin.Ingress(
+                    com.sherpaonnx.audio.pipeline.LiveAudioIngressSource.FILE_INGEST,
+                  ),
                   backpressure = useBackpressure
                 )
               ) {

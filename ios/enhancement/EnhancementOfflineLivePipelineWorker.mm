@@ -65,7 +65,7 @@ void EnhancementOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSeg
     result.samples.data(),
     result.samples.size(),
     result.sampleRate,
-    kPaAppendSourceEnhancement
+    PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Enhancement)
   );
 
   addUnitsWritten(static_cast<int64_t>(result.samples.size()));

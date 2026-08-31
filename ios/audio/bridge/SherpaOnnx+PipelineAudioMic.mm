@@ -131,7 +131,7 @@ static void paMicAQInputCallback(
     floatSamples.data(),
     floatSamples.size(),
     targetRate,
-    kPaAppendSourceMic
+    PaLiveAppendOrigin::ingress(PaLiveIngressSource::Mic)
   );
   if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
     g_pa_mic_aq_running = false;

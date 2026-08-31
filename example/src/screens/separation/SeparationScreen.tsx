@@ -34,6 +34,7 @@ import {
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
+  subscribeLiveAudioBufferEvents,
   type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
@@ -186,6 +187,13 @@ export default function SeparationScreen() {
   const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [liveProgress, setLiveProgress] = useState<number | null>(null);
+  const [liveSeparationProgress, setLiveSeparationProgress] = useState<
+    number | null
+  >(null);
+  const [liveSeparationSamplesWritten, setLiveSeparationSamplesWritten] =
+    useState(0);
+  const [liveTotalInputFrames, setLiveTotalInputFrames] = useState(0);
+  const [liveSegmentsProcessed, setLiveSegmentsProcessed] = useState(0);
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [liveRunState, setLiveRunState] = useState<
     'idle' | 'running' | 'stopping'
@@ -201,6 +209,28 @@ export default function SeparationScreen() {
   const cleanupLockRef = useRef(false);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const stemResultsRef = useRef<StemResult[]>([]);
+  const totalInputFramesRef = useRef(0);
+  const liveSeparationSamplesWrittenRef = useRef(0);
+  const liveOutputEventsUnsubRef = useRef<(() => void) | null>(null);
+
+  const stopLiveOutputEvents = useCallback(() => {
+    liveOutputEventsUnsubRef.current?.();
+    liveOutputEventsUnsubRef.current = null;
+  }, []);
+
+  const handleSeparationOutputFrames = useCallback(
+    (totalSamplesWritten: number) => {
+      liveSeparationSamplesWrittenRef.current = totalSamplesWritten;
+      setLiveSeparationSamplesWritten(totalSamplesWritten);
+      const total = totalInputFramesRef.current;
+      if (total > 0) {
+        setLiveSeparationProgress(
+          Math.min(100, (totalSamplesWritten / total) * 100)
+        );
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     stemResultsRef.current = stemResults;
@@ -335,6 +365,9 @@ export default function SeparationScreen() {
     }
     cleanupLockRef.current = true;
     try {
+      stopLiveOutputEvents();
+      totalInputFramesRef.current = 0;
+      setLiveTotalInputFrames(0);
       try {
         ingestHandleRef.current?.cancel();
       } catch {
@@ -370,7 +403,7 @@ export default function SeparationScreen() {
     } finally {
       cleanupLockRef.current = false;
     }
-  }, []);
+  }, [stopLiveOutputEvents]);
 
   useEffect(() => {
     return () => {
@@ -766,6 +799,11 @@ export default function SeparationScreen() {
     setErrorSource(null);
     setSeparateResult(null);
     setLiveProgress(null);
+    setLiveSeparationProgress(null);
+    setLiveSeparationSamplesWritten(0);
+    liveSeparationSamplesWrittenRef.current = 0;
+    setLiveTotalInputFrames(0);
+    setLiveSegmentsProcessed(0);
     setLiveSegmentLog([]);
     await clearStemResults();
     await cleanupLiveRuntime();
@@ -790,13 +828,32 @@ export default function SeparationScreen() {
             ringSeconds: 240,
             retention: 'auto',
             streamEvents: {
-              framesAppended: { enabled: false, minIntervalMs: 0 },
+              framesAppended: { enabled: true, minIntervalMs: 0 },
             },
           })
         )
       );
       liveInRef.current = liveIn;
       liveOutRefs.current = liveOuts;
+
+      const stem0 = liveOuts[0];
+      if (stem0) {
+        stopLiveOutputEvents();
+        liveOutputEventsUnsubRef.current = subscribeLiveAudioBufferEvents(
+          stem0.bufferId,
+          {
+            onFramesAppended: (event) => {
+              if (
+                event.appendKind !== 'pipeline' ||
+                event.pipelineWriter !== 'separation'
+              ) {
+                return;
+              }
+              handleSeparationOutputFrames(event.totalSamplesWritten);
+            },
+          }
+        );
+      }
 
       let segmentEventCount = 0;
       const pipeline = await engine.separate(
@@ -811,6 +868,7 @@ export default function SeparationScreen() {
           },
           onSegment: (segment: SpeechSegment) => {
             segmentEventCount += 1;
+            setLiveSegmentsProcessed(segmentEventCount);
             setLiveSegmentLog((prev) => {
               const line = `seg #${segment.segmentIndex} (${segment.reason})`;
               return [...prev.slice(-4), line];
@@ -842,10 +900,17 @@ export default function SeparationScreen() {
           }
         );
         ingestHandleRef.current = ingest;
-        await ingest.done;
+        const ingestResult = await ingest.done;
         ingestHandleRef.current = null;
+        totalInputFramesRef.current = ingestResult.totalFramesIngested;
+        setLiveTotalInputFrames(ingestResult.totalFramesIngested);
+        setLiveProgress(100);
+        setLiveStatus(
+          `Decode complete • ${ingestResult.totalFramesIngested.toLocaleString()} frames ingested. Separating stems…`
+        );
 
         const completion = await waitForPipelineCompletion(pipeline);
+        stopLiveOutputEvents();
         pipelineRef.current = null;
         await pipeline.stop().catch(() => {});
 
@@ -861,6 +926,10 @@ export default function SeparationScreen() {
         await releaseLiveBuffers();
         setLiveRunState('idle');
         setLiveProgress(null);
+        setLiveSeparationProgress(null);
+        setLiveSeparationSamplesWritten(0);
+        setLiveTotalInputFrames(0);
+        setLiveSegmentsProcessed(0);
       } else {
         ingestHandleRef.current = null;
         await startMicToLiveAudioBuffer(liveIn, { emitToJs: false });
@@ -911,9 +980,17 @@ export default function SeparationScreen() {
       const liveIn = liveInRef.current;
       if (liveIn) {
         await finalizeLiveAudioBuffer(liveIn.bufferId);
+        const inInfo = await getPipelineAudioBufferInfo(liveIn.bufferId);
+        if (inInfo.kind === 'livePcmBuffer') {
+          totalInputFramesRef.current = inInfo.numSamples;
+          setLiveTotalInputFrames(inInfo.numSamples);
+          handleSeparationOutputFrames(liveSeparationSamplesWrittenRef.current);
+        }
+        setLiveStatus('Input finalized. Separating remaining segments…');
       }
 
       const completion = await waitForPipelineCompletion(pipeline);
+      stopLiveOutputEvents();
       pipelineRef.current = null;
       await pipeline.stop().catch(() => {});
 
@@ -930,16 +1007,23 @@ export default function SeparationScreen() {
       setError(normalizeErrorMessage(stopErr));
       setLiveStatus('Live separation stop failed.');
     } finally {
+      stopLiveOutputEvents();
       await releaseLiveBuffers();
       setLiveRunState('idle');
       setLiveProgress(null);
+      setLiveSeparationProgress(null);
+      setLiveSeparationSamplesWritten(0);
+      setLiveTotalInputFrames(0);
+      setLiveSegmentsProcessed(0);
     }
   }, [
     finalizeLiveStemResults,
+    handleSeparationOutputFrames,
     liveRunState,
     liveSourceMode,
     releaseLiveBuffers,
     segLiveConfig.mode,
+    stopLiveOutputEvents,
     waitForPipelineCompletion,
   ]);
 
@@ -1321,6 +1405,24 @@ export default function SeparationScreen() {
             {liveProgress != null ? (
               <Text style={screenStyles.bodyText}>
                 Decode progress: {liveProgress.toFixed(0)}%
+              </Text>
+            ) : null}
+            {liveSeparationProgress != null ? (
+              <Text style={screenStyles.bodyText}>
+                Separation progress: {liveSeparationProgress.toFixed(0)}%
+              </Text>
+            ) : liveSeparationSamplesWritten > 0 ? (
+              <Text style={screenStyles.bodyText}>
+                Separation output:{' '}
+                {liveSeparationSamplesWritten.toLocaleString()} samples
+              </Text>
+            ) : null}
+            {liveSegmentsProcessed > 0 ? (
+              <Text style={screenStyles.monoResultText}>
+                Segments processed: {liveSegmentsProcessed}
+                {liveTotalInputFrames > 0
+                  ? ` • stem0=${liveSeparationSamplesWritten.toLocaleString()} / ${liveTotalInputFrames.toLocaleString()} samples`
+                  : ''}
               </Text>
             ) : null}
             {liveStatus ? (

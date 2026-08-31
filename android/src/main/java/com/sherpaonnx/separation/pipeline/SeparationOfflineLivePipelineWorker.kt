@@ -1,7 +1,8 @@
 package com.sherpaonnx.separation.pipeline
 
 import android.util.Log
-import com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_SEPARATION
+import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
+import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
@@ -60,7 +61,7 @@ internal class SeparationOfflineLivePipelineWorker(
       val result = output.tryAppendSamples(
         samples = stemSamples,
         inputSampleRate = speech.sampleRate,
-        source = LIVE_APPEND_SOURCE_SEPARATION,
+        origin = LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.SEPARATION),
       )
       if (result == LiveEntry.AppendResult.BUFFER_FINALIZED) {
         stop()

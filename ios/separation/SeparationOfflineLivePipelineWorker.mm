@@ -88,7 +88,7 @@ void SeparationOfflineLivePipelineWorker::onSegmentCommitted(const CommittedSegm
       stem.samples.data(),
       stem.samples.size(),
       stem.sampleRate,
-      std::string(kPaAppendSourceSeparation)
+      PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Separation)
     );
     if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
       stop();

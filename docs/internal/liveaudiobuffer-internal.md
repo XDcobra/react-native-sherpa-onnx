@@ -141,18 +141,28 @@ For file ingest, the `backpressure` option controls how the producer interacts w
 
 ## 4. Producers (Data Sources)
 
-All producers append Float32 PCM into the same ring+spool pipeline. The `source` tag in `onFramesAppended` events identifies who wrote:
+All producers append Float32 PCM into the same ring+spool pipeline. `onFramesAppended` events distinguish **ingress** (who feeds PCM into a buffer) from **pipeline writers** (native offline→live workers writing to an output live buffer):
 
-| Source Tag | Producer | How it appends |
+### Ingress sources (`appendKind: 'ingress'`)
+
+| `ingressSource` | Producer | How it appends |
 |---|---|---|
 | `'mic'` | Platform mic capture (AudioRecord / AVAudioEngine) | Native thread writes directly into ring; no JS roundtrip |
 | `'append'` | JS `appendSamplesToLiveAudioBuffer` | JSI synchronous call; copies Float32Array → ring |
 | `'append_offline'` | `appendOfflineToLiveAudioBuffer` | Reads from offline buffer → ring (native, no JS) |
 | `'file_ingest'` | `ingestFileToLiveAudioBuffer` | FFmpeg decode on background thread → ring |
-| `'enhancement'` | Streaming enhancement pipeline output | Native worker appends enhanced chunks |
-| `'tts'` | Streaming TTS pipeline output | Native worker appends synthesized chunks |
 
-**JSI fast-path:** `appendSamplesToLiveAudioBuffer` and `getLiveAudioBufferSamplesSlice` use JSI (C++ → JS runtime) to transfer `ArrayBuffer` data without bridge serialization. This is critical for the `'append'` source to avoid copying Float32 samples through the React Native async bridge.
+### Pipeline writers (`appendKind: 'pipeline'`)
+
+| `pipelineWriter` | Producer | How it appends |
+|---|---|---|
+| `'enhancement'` | Enhancement live overload / streaming enhancement output | Native worker appends enhanced chunks to output `LiveAudioBuffer` |
+| `'tts'` | TTS live overload output | Native worker appends synthesized chunks |
+| `'separation'` | Source separation live overload output | Native worker appends separated stem chunks |
+
+When `streamEvents.framesAppended.minIntervalMs` coalesces appends from different producers within one throttle window, events carry `appendKind: 'mixed'` with no detail field.
+
+**JSI fast-path:** `appendSamplesToLiveAudioBuffer` and `getLiveAudioBufferSamplesSlice` use JSI (C++ → JS runtime) to transfer `ArrayBuffer` data without bridge serialization. This is critical for `ingressSource: 'append'` to avoid copying Float32 samples through the React Native async bridge.
 
 ---
 
@@ -210,7 +220,7 @@ All steady-state audio data stays in native memory:
 - Mic → ring (native thread, no JS).
 - File ingest → ring (native decode thread, no JS).
 - Ring → consumer cursor → native pipeline worker → output buffer (entirely native).
-- JS receives only **metadata events** (`onFramesAppended` with frame count, source tag — no PCM data).
+- JS receives only **metadata events** (`onFramesAppended` with frame count, `appendKind`, optional `ingressSource` / `pipelineWriter` — no PCM data).
 
 ### Event Throttling
 `streamEvents.framesAppended.minIntervalMs` controls how often JS receives append notifications. Setting to 0 = every append; higher values coalesce events. This prevents JS bridge flooding during high-frequency mic capture.
@@ -228,7 +238,7 @@ All steady-state audio data stays in native memory:
 
 ### Offline → Live (`appendOfflineToLiveAudioBuffer`)
 
-Reads all samples from the offline buffer (via `readAllSamples()` or `floatPtr()`) and appends them into the live ring + spool. Source tag: `'append_offline'`.
+Reads all samples from the offline buffer (via `readAllSamples()` or `floatPtr()`) and appends them into the live ring + spool. Event: `appendKind: 'ingress'`, `ingressSource: 'append_offline'`.
 
 ---
 
@@ -251,7 +261,7 @@ Reads all samples from the offline buffer (via `readAllSamples()` or `floatPtr()
 | Spool is write-once, not random-access | Simplicity. The only consumer of raw spool data is `createOfflineFromLive`, which does a sequential copy. |
 | Mandatory spool for file ingest | File decode can outrun consumers 100×. Without spool, the ring silently overwrites data. |
 | JSI for sample transport | TurboModule async bridge would serialize Float32Array to JSON. JSI provides zero-copy ArrayBuffer sharing. |
-| Events are metadata-only | Sending actual PCM to JS would defeat the purpose of native-side processing. Events carry frame counts and source tags. |
+| Events are metadata-only | Sending actual PCM to JS would defeat the purpose of native-side processing. Events carry frame counts and typed append metadata (`appendKind`, `ingressSource`, `pipelineWriter`). |
 
 ---
 
