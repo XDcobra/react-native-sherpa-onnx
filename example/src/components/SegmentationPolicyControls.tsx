@@ -121,6 +121,60 @@ function getAvailableModes(variant: SegmentationVariant): SegmentationMode[] {
   return ['off', 'manual', 'auto'];
 }
 
+/** Example-app default for continuous_frames (native uses 1000 ms when omitted entirely). */
+export const CONTINUOUS_FRAMES_CHECKPOINT_MS_DEFAULT = 5000;
+
+function isSpeechVariant(variant: SegmentationVariant): boolean {
+  return variant === 'speech-offline' || variant === 'speech-streaming';
+}
+
+function isStreamingVariant(variant: SegmentationVariant): boolean {
+  return variant === 'speech-streaming' || variant === 'text-streaming';
+}
+
+function getModeHint(
+  mode: SegmentationMode,
+  variant: SegmentationVariant
+): string {
+  const speech = isSpeechVariant(variant);
+  const streaming = isStreamingVariant(variant);
+
+  if (mode === 'off') {
+    if (speech) {
+      return 'Processes the full audio buffer in one pass. No automatic chunking — best for short clips; long recordings keep more audio in memory at once.';
+    }
+    return 'Processes the full text buffer in one pass. No automatic chunking — suitable when the input already fits comfortably in memory.';
+  }
+
+  if (mode === 'manual') {
+    return streaming
+      ? 'You decide when a segment ends by calling commitSegment on the live buffer. The pipeline runs only on committed chunks — typical for streaming demos and precise utterance control. No automatic evaluator runs in this mode.'
+      : 'Manual commit is only available on live streaming buffers in the SDK.';
+  }
+
+  if (speech) {
+    return 'The engine splits audio automatically using the evaluator below. Each committed segment is processed separately — lower peak memory on long inputs, with possible quality or boundary effects at chunk edges.';
+  }
+  return 'The engine splits text automatically using the evaluator below. Each committed segment is processed separately — useful for long documents and live text pipelines.';
+}
+
+const EVALUATOR_HINTS: Record<SegmentationPolicy['evaluator'], string> = {
+  continuous_frames:
+    'Fixed time blocks (not silence-aware). Each checkpoint commits a segment for the live pipeline. Shorter intervals reduce latency but increase boundary artifacts (clicks/pops). Longer intervals (e.g. 5000 ms) usually sound cleaner. Live speech only — not valid for offline batch.',
+  speech_energy_silence:
+    'Splits at silence using RMS energy — no VAD model required. Commits after enough quiet time (silence threshold + hangover) once min segment length is met, or when max segment length is reached. Boundaries follow natural pauses; works offline and on live audio.',
+  speech_vad_model:
+    'Uses a VAD ONNX model for speech boundaries — usually more robust than energy/silence in noisy audio. Requires a VAD model bundle. Tune threshold and min speech/silence durations below. Works offline and on live audio.',
+  text_synthetic_auto:
+    'Rule-based split on sentence delimiters and/or max character length — no external model. Offline: scans the full buffer. Live: commits at the last delimiter or length cap as partial text grows.',
+  text_punctuation_assisted:
+    'Inserts punctuation with an offline CT-Transformer first, then splits like Synthetic auto. Needs a loaded punctuation engine (punctuationInstanceId). Better sentence boundaries on raw ASR text without punctuation.',
+};
+
+function SegmentationHintText({ text }: { text: string }) {
+  return <Text style={s.evaluatorHint}>{text}</Text>;
+}
+
 function defaultPolicy(variant: SegmentationVariant): SegmentationPolicy {
   if (variant === 'text-offline' || variant === 'text-streaming') {
     return {
@@ -130,7 +184,10 @@ function defaultPolicy(variant: SegmentationVariant): SegmentationPolicy {
     };
   }
   if (variant === 'speech-streaming') {
-    return { evaluator: 'continuous_frames' };
+    return {
+      evaluator: 'continuous_frames',
+      checkpointIntervalMs: CONTINUOUS_FRAMES_CHECKPOINT_MS_DEFAULT,
+    };
   }
   return { evaluator: 'speech_energy_silence' };
 }
@@ -149,7 +206,7 @@ const SEG_NUM_DEFAULTS = {
   vadThreshold: 0.5,
   vadMinSpeechMs: 250,
   vadMinSilenceMs: 250,
-  checkpointIntervalMs: 0,
+  checkpointIntervalMs: CONTINUOUS_FRAMES_CHECKPOINT_MS_DEFAULT,
 } as const;
 
 const TEXT_MAX_LENGTH_DEFAULT_CHARS = 320;
@@ -622,7 +679,11 @@ function VadPolicyFields({
   );
 }
 
-function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
+function PolicyFields({
+  policy,
+  disabled,
+  onPolicyChange,
+}: PolicyFieldsProps) {
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
       onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
@@ -633,6 +694,8 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
 
   return (
     <View style={s.fieldGroup}>
+      <SegmentationHintText text={EVALUATOR_HINTS[evaluator]} />
+
       {/* ── speech_energy_silence ── */}
       {evaluator === 'speech_energy_silence' && (
         <>
@@ -678,13 +741,15 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
 
       {/* ── continuous_frames ── */}
       {evaluator === 'continuous_frames' && (
-        <NumericField
-          label="Checkpoint interval (ms)"
-          value={policy.checkpointIntervalMs}
-          placeholder={ph(SEG_NUM_DEFAULTS.checkpointIntervalMs)}
-          disabled={disabled}
-          onChange={(v) => update({ checkpointIntervalMs: v })}
-        />
+        <>
+          <NumericField
+            label="Checkpoint interval (ms)"
+            value={policy.checkpointIntervalMs}
+            placeholder={ph(SEG_NUM_DEFAULTS.checkpointIntervalMs)}
+            disabled={disabled}
+            onChange={(v) => update({ checkpointIntervalMs: v })}
+          />
+        </>
       )}
 
       {/* ── text_synthetic_auto ── */}
@@ -849,9 +914,22 @@ export function SegmentationPolicyControls({
         </View>
       </View>
 
-      {/* ── Body: evaluator + fields (only when mode === 'auto' or 'manual') ── */}
-      {(value.mode === 'auto' || value.mode === 'manual') && (
+      {value.mode === 'off' ? (
+        <View style={s.modeHintBody}>
+          <SegmentationHintText text={getModeHint('off', variant)} />
+        </View>
+      ) : null}
+
+      {value.mode === 'manual' ? (
         <View style={s.body}>
+          <SegmentationHintText text={getModeHint('manual', variant)} />
+        </View>
+      ) : null}
+
+      {/* ── Body: evaluator + fields (only when mode === 'auto') ── */}
+      {value.mode === 'auto' && (
+        <View style={s.body}>
+          <SegmentationHintText text={getModeHint('auto', variant)} />
           <View style={s.sectionDivider} />
 
           {/* Evaluator chips: label above row so it is not squeezed by multiple chips (e.g. streaming speech). */}

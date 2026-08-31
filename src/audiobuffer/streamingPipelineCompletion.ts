@@ -12,7 +12,7 @@ function logStreamingPipelineCompletion(
   if (typeof __DEV__ === 'undefined' || !__DEV__) {
     return;
   }
-  console.warn('[SherpaOnnx:StreamingPipeline] completed', {
+  console.log('[SherpaOnnx:StreamingPipeline] completed', {
     pipelineId: completion.pipelineId,
     reason: completion.reason,
     chunksProcessed: completion.chunksProcessed,
