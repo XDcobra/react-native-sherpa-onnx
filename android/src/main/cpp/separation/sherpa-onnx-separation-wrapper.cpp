@@ -3,8 +3,11 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-separation.h"
 
+#include <cstdio>
 #include <cstring>
+#include <exception>
 #include <optional>
+#include <string>
 
 #include "sherpa-onnx/c-api/c-api.h"
 
@@ -15,10 +18,16 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, SEPARATION_LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, SEPARATION_LOG_TAG, __VA_ARGS__)
 #elif defined(__APPLE__)
-#include <os/log.h>
-#define LOGI(fmt, ...) os_log_info(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
-#define LOGW(fmt, ...) os_log(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
-#define LOGE(fmt, ...) os_log_error(OS_LOG_DEFAULT, fmt, ##__VA_ARGS__)
+// Prefer fprintf over os_log with printf "%s" — os_log does not accept printf
+// style %s and can crash during initializeSeparation on iOS.
+#define LOGI(...)                                                          \
+  do {                                                                     \
+    std::fprintf(stderr, "[SherpaOnnxSeparation] ");                       \
+    std::fprintf(stderr, __VA_ARGS__);                                     \
+    std::fprintf(stderr, "\n");                                            \
+  } while (0)
+#define LOGW(...) LOGI(__VA_ARGS__)
+#define LOGE(...) LOGI(__VA_ARGS__)
 #else
 #define LOGI(...) ((void)0)
 #define LOGW(...) ((void)0)
@@ -65,10 +74,11 @@ SeparationEngineConfig BuildEngineConfig(
 
     bundle.config.model.num_threads = numThreads;
     bundle.config.model.debug = debug ? 1 : 0;
-    if (provider.has_value() && !provider->empty()) {
-        bundle.provider = *provider;
-        bundle.config.model.provider = bundle.provider.c_str();
-    }
+    // Always set an explicit provider. Leaving nullptr relies on C-API defaults
+    // but makes debugging harder across Android/iOS.
+    bundle.provider =
+        (provider.has_value() && !provider->empty()) ? *provider : "cpu";
+    bundle.config.model.provider = bundle.provider.c_str();
 
     switch (kind) {
         case SeparationModelKind::kSpleeter:
@@ -202,16 +212,45 @@ SeparationInitializeResult SeparationWrapper::initialize(
 
     auto engineConfig = BuildEngineConfig(detect, numThreads, provider, debug);
     LOGI(
-        "initialize: modelDir=%s modelType=%s threads=%d debug=%d",
+        "initialize: modelDir=%s modelType=%s threads=%d debug=%d provider=%s "
+        "vocals=%s accompaniment=%s uvr=%s",
         modelDir.c_str(),
         result.modelType.c_str(),
         numThreads,
-        debug ? 1 : 0
+        debug ? 1 : 0,
+        engineConfig.provider.c_str(),
+        engineConfig.vocals.c_str(),
+        engineConfig.accompaniment.c_str(),
+        engineConfig.uvrModel.c_str()
     );
-    pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    try {
+        pImpl->separation =
+            SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    } catch (const std::exception& e) {
+        result.error = std::string(
+                           "Failed to create offline source separation engine: "
+                       ) +
+                       e.what();
+        LOGE("initialize threw: %s", result.error.c_str());
+        return result;
+    } catch (...) {
+        result.error =
+            "Failed to create offline source separation engine (unknown "
+            "exception)";
+        LOGE("initialize threw unknown exception");
+        return result;
+    }
     if (pImpl->separation == nullptr) {
-        result.error = "Failed to create offline source separation engine";
-        LOGE("initialize failed: %s", result.error.c_str());
+        result.error =
+            "Failed to create offline source separation engine (Create "
+            "returned null — check model paths exist and are readable)";
+        LOGE(
+            "initialize failed: %s vocals=%s accompaniment=%s uvr=%s",
+            result.error.c_str(),
+            engineConfig.vocals.c_str(),
+            engineConfig.accompaniment.c_str(),
+            engineConfig.uvrModel.c_str()
+        );
         return result;
     }
 
@@ -259,14 +298,37 @@ SeparationInitializeResult SeparationWrapper::initializeCustom(
         selectedKind, paths, numThreads, provider, debug
     );
     LOGI(
-        "initializeCustom: modelType=%s threads=%d debug=%d",
+        "initializeCustom: modelType=%s threads=%d debug=%d provider=%s "
+        "vocals=%s accompaniment=%s uvr=%s",
         result.modelType.c_str(),
         numThreads,
-        debug ? 1 : 0
+        debug ? 1 : 0,
+        engineConfig.provider.c_str(),
+        engineConfig.vocals.c_str(),
+        engineConfig.accompaniment.c_str(),
+        engineConfig.uvrModel.c_str()
     );
-    pImpl->separation = SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    try {
+        pImpl->separation =
+            SherpaOnnxCreateOfflineSourceSeparation(&engineConfig.config);
+    } catch (const std::exception& e) {
+        result.error = std::string(
+                           "Failed to create offline source separation engine: "
+                       ) +
+                       e.what();
+        LOGE("initializeCustom threw: %s", result.error.c_str());
+        return result;
+    } catch (...) {
+        result.error =
+            "Failed to create offline source separation engine (unknown "
+            "exception)";
+        LOGE("initializeCustom threw unknown exception");
+        return result;
+    }
     if (pImpl->separation == nullptr) {
-        result.error = "Failed to create offline source separation engine";
+        result.error =
+            "Failed to create offline source separation engine (Create "
+            "returned null — check model paths exist and are readable)";
         LOGE("initializeCustom failed: %s", result.error.c_str());
         return result;
     }
