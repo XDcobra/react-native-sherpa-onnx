@@ -6,7 +6,7 @@
 
 **Related (today):**
 
-- [separation.md](../separation.md) — live overload warning on boundary artifacts  
+- [separation-offline.md](../separation-offline.md) — live overload warning on boundary artifacts  
 - [offlineOrchestrator.ts](../../src/pipeline/offlineOrchestrator.ts) — offline `overlapSamples` append path  
 - [SeparationOfflineLivePipelineWorker.kt](../../android/src/main/java/com/sherpaonnx/separation/pipeline/SeparationOfflineLivePipelineWorker.kt) — naive stem append  
 - [sub-06-enhancement-live-overload.md](../migration/liveOverload/sub-06-enhancement-live-overload.md) — OQ-6.2 (deferred overlap option)
@@ -23,7 +23,7 @@ Live overload drives an **offline** separator/enhancer on a **live** input buffe
 
 When `checkpointIntervalMs` is 500, listeners often hear a **loud click or tonal burst roughly every 500 ms**; at 5000 ms, the same artifact appears roughly every 5 s. The timing tracks the checkpoint interval, not model branding (reproduced on Spleeter and UVR).
 
-This is **expected** given the current architecture (documented in [separation.md](../separation.md)), but it is ** worse on the live path** than necessary because live workers do not apply any boundary stitching that offline orchestration partially addresses.
+This is **expected** given the current architecture (documented in [separation-offline.md](../separation-offline.md)), but it is ** worse on the live path** than necessary because live workers do not apply any boundary stitching that offline orchestration partially addresses.
 
 ---
 
@@ -121,7 +121,7 @@ STT/TTS/punctuation live overload are **out of scope** (text domain; different d
 - [ ] Wire **enhancement** live overload (same helper).  
 - [ ] Unit/integration tests: synthetic sine/discontinuity — measure max delta at boundary with/without crossfade.  
 - [ ] Example app note in Separation live overload UI (overlap optional field).  
-- [ ] Update [separation.md](../separation.md) — link here; clarify that overlap reduces but does not eliminate chunking artifacts vs true streaming models.
+- [ ] Update [separation-offline.md](../separation-offline.md) — link here; clarify that overlap reduces but does not eliminate chunking artifacts vs true streaming models.
 
 ---
 

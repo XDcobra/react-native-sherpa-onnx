@@ -37,7 +37,7 @@ npm install react-native-sherpa-onnx
 - ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
 - ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- ✅ Source separation: [Separation](./docs/separation.md) — offline batch + live overload (Spleeter/UVR)
+- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Streaming](./docs/separation-streaming.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
@@ -475,10 +475,6 @@ Real-world apps help others see what the SDK can do beyond the monorepo integrat
 **What to include:** app name, one-line description, link (App Store / Play Store / website / public repo if applicable), and which SDK features you use (e.g. offline STT, streaming TTS, PAD, separation).
 
 **How to get listed:** open a pull request that adds your app to this section, or [open an issue](https://github.com/XDcobra/react-native-sherpa-onnx/issues/new) if you prefer maintainers to add it for you.
-
-<!-- Add community apps below (newest at top). Format:
-- **[App Name](https://example.com)** — Short description. Features: STT, TTS, …
--->
 
 *No community entries yet — yours could be the first.*
 

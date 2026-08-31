@@ -20,7 +20,7 @@ Related docs:
 
 - Memory planning and OOM: [memory-and-models.md](./memory-and-models.md)
 - Buffer contracts: [audiobuffer-offline.md](./audiobuffer-offline.md), [textbuffer-offline.md](./textbuffer-offline.md), [segmentbuffer-offline.md](./segmentbuffer-offline.md)
-- Feature integration points: [stt-offline.md](./stt-offline.md), [tts-offline.md](./tts-offline.md), [enhancement-offline.md](./enhancement-offline.md), [punctuation-offline.md](./punctuation-offline.md), [separation.md](./separation.md)
+- Feature integration points: [stt-offline.md](./stt-offline.md), [tts-offline.md](./tts-offline.md), [enhancement-offline.md](./enhancement-offline.md), [punctuation-offline.md](./punctuation-offline.md), [separation-offline.md](./separation-offline.md)
 
 ### Segmentation modes used by feature APIs
 

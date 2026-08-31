@@ -1,12 +1,14 @@
-# Source separation
+# Source separation (offline)
 
 **Status:** Android ✅ · iOS ✅ · Example app ✅
 
 ## Introduction
 
-On-device source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**. Offline batch and **live overload** (offline weights on live buffers) are supported on both platforms; there is no separate `createStreamingSeparation` factory.
+On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**. There is no separate `createStreamingSeparation` factory.
 
-For shared **`SeparationPipelineHandle`** lifecycle (`stop` / `flush` / `reset` / `getStatus` / `completed`), see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+For **streaming** separation (live overload on live buffers), see [Source separation (streaming)](separation-streaming.md).
+
+For live separation with pipeline handles, see [Live overload](#live-overload-on-offline-separation-offline-weights-live-consumption) below. Shared **`SeparationPipelineHandle`** lifecycle (`stop` / `flush` / `reset` / `getStatus` / `completed`) is also documented in [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 | Role | Type | Notes |
 | --- | --- | --- |

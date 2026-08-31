@@ -63,7 +63,8 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 | Guide | Description |
 |-------|-------------|
-| [separation.md](./separation.md) | Offline batch + live overload (Spleeter/UVR), Android & iOS |
+| [separation-offline.md](./separation-offline.md) | Offline (batch) separation — Spleeter/UVR, Android & iOS |
+| [separation-streaming.md](./separation-streaming.md) | Live separation entry point — links live overload (`SeparationPipelineHandle`) |
 
 ---
 

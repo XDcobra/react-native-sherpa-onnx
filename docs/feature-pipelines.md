@@ -164,7 +164,7 @@ When to use:
 - Long mixes where `segmentation.mode: 'auto'` bounds peak RAM per chunk.
 
 Related docs:
-- [separation.md](separation.md)
+- [separation-offline.md](separation-offline.md)
 - [segmentation-engine.md](segmentation-engine.md)
 - [memory-and-models.md](memory-and-models.md)
 
@@ -185,7 +185,7 @@ When to use:
 - Mandatory `continuous_frames` segmentation on the live overload path.
 
 Related docs:
-- [separation.md](separation.md)
+- [separation-offline.md](separation-offline.md)
 - [streaming-pipelines-overview.md](streaming-pipelines-overview.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
 

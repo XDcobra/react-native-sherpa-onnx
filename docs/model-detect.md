@@ -305,7 +305,7 @@ Each feature doc has the full per-`modelType` table. Summary of where to look:
 | TTS | [tts-offline.md](tts-offline.md#validation-required-files) | `detectTtsModel` | `tts` |
 | VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
 | Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
-| Separation | [separation.md](separation.md#validation-required-files) | `detectSeparationModel` | `separation` |
+| Separation | [separation-offline.md](separation-offline.md#validation-required-files) | `detectSeparationModel` | `separation` |
 | Punctuation offline | [punctuation-offline.md](punctuation-offline.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Punctuation streaming | [punctuation-streaming.md](punctuation-streaming.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Alignment | [alignment-offline.md](alignment-offline.md#validation-required-files) | `detectAlignmentModel` | `alignment` |
