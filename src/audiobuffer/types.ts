@@ -158,25 +158,41 @@ export type PipelineBufferHandle = OfflineBufferHandle | LiveBufferHandle;
 
 // ========== Live Append Events ==========
 
-/** Source that produced newly appended frames in a live buffer. */
-export type LiveBufferAppendSource =
+/** Ingress path that appended PCM into a live buffer (mic, JS append, file decode, …). */
+export type LiveAudioIngressSource =
   | 'mic'
   | 'append'
   | 'append_offline'
-  | 'file_ingest'
+  | 'file_ingest';
+
+/** Native pipeline worker that appended PCM into a live output buffer. */
+export type LiveAudioPipelineWriter =
   | 'enhancement'
   | 'tts'
-  | 'unknown'
-  | 'mixed';
+  | 'separation';
 
-/** Producer-agnostic event: new frames were appended to a live buffer. */
-export interface LiveAudioBufferFramesAppendedEvent {
+export type LiveAudioAppendKind = 'ingress' | 'pipeline' | 'mixed';
+
+interface LiveAudioBufferFramesAppendedBase {
   liveBufferId: string;
-  source: LiveBufferAppendSource;
   sampleRate: number;
   frameCount: number;
   totalSamplesWritten: number;
 }
+
+/** New frames were appended to a live buffer (discriminated by append kind). */
+export type LiveAudioBufferFramesAppendedEvent =
+  | (LiveAudioBufferFramesAppendedBase & {
+      appendKind: 'ingress';
+      ingressSource: LiveAudioIngressSource;
+    })
+  | (LiveAudioBufferFramesAppendedBase & {
+      appendKind: 'pipeline';
+      pipelineWriter: LiveAudioPipelineWriter;
+    })
+  | (LiveAudioBufferFramesAppendedBase & {
+      appendKind: 'mixed';
+    });
 
 /** Live-buffer related error event (for example mic capture failures). */
 export interface LiveAudioBufferErrorEvent {

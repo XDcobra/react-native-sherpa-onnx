@@ -155,6 +155,10 @@ startEnhancementOfflineLivePipeline(
 ): Promise<{ pipelineId: string }>;
 ```
 
+### Output live buffer append events
+
+When audio→audio live overload workers (Enhancement, TTS, Separation) append decoded PCM to their output `LiveAudioBuffer`, `onFramesAppended` / `pipelineLiveAudioChunk` carry **`appendKind: 'pipeline'`** and the matching **`pipelineWriter`** (`enhancement` | `tts` | `separation`). Input-side ingress (mic, file ingest, JS append) uses **`appendKind: 'ingress'`** with **`ingressSource`**. See [liveaudiobuffer-internal.md](liveaudiobuffer-internal.md#4-producers-data-sources).
+
 ---
 
 ## 4. Worker Drain
@@ -312,10 +316,10 @@ Both buffers must be live **or** both offline. Mixed calls throw `*_INVALID_ARGU
 | **TTS** | ✅ `synthesize(LiveText, LiveAudio, { segmentation })` | Implemented |
 | **Punctuation** | ✅ `punctuate(LiveText, LiveText, { segmentation })` | Implemented |
 | **Enhancement** | ✅ `enhance(LiveAudio, LiveAudio, { segmentation: continuous_frames })` | Implemented (restricted) |
+| **Separation** | ✅ `separate(LiveAudio, LiveAudio[], { segmentation: continuous_frames })` | Implemented (restricted; N stem outputs) |
 | VAD | ❌ | N/A — VAD **is** the segmentation primitive; `createStreamingVAD.process()` already accepts both buffer families |
 | Alignment | ❌ | Structurally incompatible (closed, bounded problem) |
 | Diarization | ❌ | Placeholder — revisit at implementation time |
-| Source Separation | ❌ | Placeholder — revisit at implementation time |
 
 ---
 

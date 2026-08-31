@@ -196,10 +196,10 @@ const FEATURES: HomeFeature[] = [
     id: 'separation',
     sectionTitle: 'Speakers & Separation',
     title: 'Source Separation',
-    description: 'Separate voice from background music',
+    description: 'Offline batch + live overload (vocals / accompaniment)',
     icon: 'musical-notes',
     screen: 'Separation',
-    implemented: false,
+    implemented: true,
   },
 ];
 

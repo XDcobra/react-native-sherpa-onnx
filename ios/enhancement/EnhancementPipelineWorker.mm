@@ -51,7 +51,7 @@ void EnhancementPipelineWorker::runLoop() {
               flushed.samples.data(),
               flushed.samples.size(),
               sr,
-              kPaAppendSourceEnhancement
+              PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Enhancement)
             );
             if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
               std::lock_guard<std::mutex> sLock(statusMtx_);
@@ -74,7 +74,7 @@ void EnhancementPipelineWorker::runLoop() {
         denoised.samples.data(),
         denoised.samples.size(),
         sr,
-        kPaAppendSourceEnhancement
+        PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Enhancement)
       );
       if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
         running.store(false);
@@ -122,7 +122,7 @@ void EnhancementPipelineWorker::processCommands() {
               flushed.samples.data(),
               flushed.samples.size(),
               wrapper_->getSampleRate(),
-              kPaAppendSourceEnhancement
+              PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Enhancement)
             );
             if (appendResult == PaLiveEntry::AppendResult::APPENDED) {
               std::lock_guard<std::mutex> sLock(statusMtx_);

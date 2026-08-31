@@ -119,7 +119,7 @@ The SDK **segmentation engine** is introduced partly to **counter that OOM press
 
 **Tradeoff:** segment boundaries can **slightly reduce quality** versus a single full-buffer offline run (less global context, effects at cuts). For many products this is preferable to **crashes** or **refusing** long inputs.
 
-Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-specific integration (STT, TTS, enhancement, punctuation, …) is documented in each feature’s **`## Segmentation`** section.
+Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-specific integration (STT, TTS, enhancement, punctuation, separation, …) is documented in each feature’s **`## Segmentation`** section.
 
 ---
 
@@ -134,13 +134,13 @@ Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-
 ### iOS
 
 - The OS sends memory-pressure notifications; the app is killed if it exceeds a per-device threshold (no fixed number, varies from ~1 GB on older devices to > 2 GB on newer ones).
-- The SDK does not catch native OOM — the process terminates without a JS error. Watch for silent crashes in logs.
+- Catchable C++ allocation failures (`std::bad_alloc`) on some offline paths (e.g. STT, alignment, separation) reject with **`OFFLINE_OOM`**. OS process kills and hard native aborts still terminate without a JS error — watch for silent crashes in logs.
 - Recommendation: test on the lowest-tier device you intend to support.
 
 ### Android
 
 - The JVM + native heap share a per-process limit. Large models loaded via JNI count against native heap.
-- `OutOfMemoryError` from the JVM is catchable but does not reliably catch native allocations.
+- JVM `OutOfMemoryError` and catchable native `std::bad_alloc` on some offline paths (e.g. STT, alignment, separation) surface as **`OFFLINE_OOM`**. That does not cover the OS low-memory killer or hard aborts inside ONNX Runtime / sherpa-onnx.
 - Use `adb shell dumpsys meminfo <package>` during testing to monitor native heap usage.
 - Devices with ≤ 2 GB RAM should use only small/int8 models and a single engine at a time.
 
@@ -148,7 +148,8 @@ Full API and modes: [segmentation-engine.md](./segmentation-engine.md). Feature-
 
 | Signal | Likely cause |
 |--------|-------------|
-| Silent app crash on model load | Model too large for available native heap |
+| Silent app crash on model load / long offline job | Model or activation tensors too large for available native heap (OS kill; not always `OFFLINE_OOM`) |
+| Promise reject `OFFLINE_OOM` | Catchable JVM/native allocation failure on a guarded offline path |
 | `Error: cannot allocate buffer` from native | Audio buffer size exceeds OS limit |
 | JS bridge timeout during inference | Long ONNX inference blocking native thread (consider streaming) |
 | Partial results missing | LiveBuffer eviction racing with consumer |

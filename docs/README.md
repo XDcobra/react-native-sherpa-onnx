@@ -59,6 +59,15 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Source Separation
+
+| Guide | Description |
+|-------|-------------|
+| [separation-offline.md](./separation-offline.md) | Offline (batch) separation — Spleeter/UVR, Android & iOS |
+| [separation-streaming.md](./separation-streaming.md) | Live separation entry point — links live overload (`SeparationPipelineHandle`) |
+
+---
+
 ## Punctuation
 
 | Guide | Description |
@@ -135,5 +144,4 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [diarization.md](./diarization.md) | Speaker diarization (planned, not yet available) |
-| [separation.md](./separation.md) | Source separation (planned, not yet available) |
 | [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) | SDK-facing known issues (e.g. Pocket TTS, platform drift) |

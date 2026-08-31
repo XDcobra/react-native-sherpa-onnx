@@ -224,6 +224,24 @@ std::string EnhancementKindToString(EnhancementModelKind kind) {
     }
 }
 
+SeparationModelKind SeparationKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "spleeter") return SeparationModelKind::kSpleeter;
+    if (t == "uvr") return SeparationModelKind::kUvr;
+    return SeparationModelKind::kUnknown;
+}
+
+std::string SeparationKindToString(SeparationModelKind kind) {
+    switch (kind) {
+        case SeparationModelKind::kSpleeter:
+            return "spleeter";
+        case SeparationModelKind::kUvr:
+            return "uvr";
+        default:
+            return "unknown";
+    }
+}
+
 VadModelKind VadKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "silero_vad") return VadModelKind::kSileroVad;

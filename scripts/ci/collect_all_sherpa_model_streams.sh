@@ -8,6 +8,7 @@
 # Default config: scripts/ci/sherpa_asr_model_release_streams.json (ASR + QNN).
 # TTS: --config sherpa_tts_model_release_streams.json
 # Speech enhancement: --config sherpa_speech_enhancement_model_release_streams.json
+# Source separation: --config sherpa_separation_model_release_streams.json
 # (paths relative to this dir or repo root, or absolute).
 #
 # --print-git-paths prints newline-separated paths to git-add (deduped), then exits.

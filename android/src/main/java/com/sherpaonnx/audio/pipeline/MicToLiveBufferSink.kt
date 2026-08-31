@@ -105,7 +105,7 @@ class MicToLiveBufferSink(
             liveEntry.tryAppendSamples(
               rawSamples,
               targetRate,
-              LIVE_APPEND_SOURCE_MIC,
+              LiveAppendOrigin.Ingress(LiveAudioIngressSource.MIC),
             )
           ) {
             LiveEntry.AppendResult.APPENDED -> Unit

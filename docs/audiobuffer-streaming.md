@@ -25,7 +25,7 @@ Live audio buffers are the usual **operand** for native workers (STT, enhancemen
 
 **Offline and live work together:** both use **stable buffer ids** and the same TurboModule surface. Use **`appendOfflineToLiveAudioBuffer`** to play an offline clip into a live stream, **`ingestFileToLiveAudioBuffer`** to decode a file directly into a recording buffer, and **`createOfflineAudioBufferFromLive`** (on the [offline](audiobuffer-offline.md) page) to snapshot live audio for batch work. Native pipelines chain **live → live** so PCM **stays in native memory** between stages.
 
-**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended` for PCM, **`onSegment`** when live speech segmentation commits a slice, …) with metadata, independent of producer (`mic`, `append`, `append_offline`, `file_ingest`, or native pipeline **`source`**).
+**Why this is fast:** orchestration uses **ids and small control calls**; steady-state streaming does not push PCM through the JS bridge. JS receives **events** (e.g. `pipelineLiveAudioChunk` / `onFramesAppended` for PCM, **`onSegment`** when live speech segmentation commits a slice, …) with metadata: **`appendKind`** (`ingress` | `pipeline` | `mixed`) plus **`ingressSource`** or **`pipelineWriter`** when applicable.
 
 `pipelineLiveAudioChunk` means: **new frames were appended to the live buffer** — one contract for waveform UI, logging, and streaming STT without tying those concerns to a specific producer.
 
@@ -52,7 +52,7 @@ Both are **optional**, **push-based** callbacks on `createEmptyLiveAudioBuffer` 
 
 | Callback | Fires when | Typical use |
 | --- | --- | --- |
-| **`onFramesAppended`** | New **PCM samples** were appended to the ring (any producer: mic, JS `append*`, offline append, `file_ingest`, native pipeline `source`, …). | Waveform / levels, ingress throughput, “audio is moving”. |
+| **`onFramesAppended`** | New **PCM samples** were appended to the ring (ingress: mic, JS `append*`, offline append, `file_ingest`; or pipeline output: enhancement, TTS, separation). | Waveform / levels, ingress throughput, pipeline output progress. |
 | **`onSegment`** | A **speech segment** was **committed** on this live audio buffer (segmentation log updated). | “A new speech slice exists” without polling; drive UI that cares about **segment boundaries**, not raw frame rate. |
 
 **`onSegment` payload (`LiveAudioBufferSegmentEvent`):**
@@ -158,16 +158,17 @@ const textOut = await createLiveTextBuffer({
   },
 });
 
-// Live audio: mic and/or append paths all show up as `onFramesAppended` with a `source` tag.
+// Live audio: mic and/or append paths show up as `onFramesAppended` with appendKind + ingressSource.
 const live = await createEmptyLiveAudioBuffer({
   sampleRate: SAMPLE_RATE,
   channelCount: 1,
   windowSeconds: 120,
   streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
   onFramesAppended: (e) => {
-    // Producer-agnostic: mic, JS append, offline append, or native pipeline `source`.
-    console.log(`[${e.source}] +${e.frameCount} frames`);
-    // Example output: [mic] +320 frames
+    if (e.appendKind === 'ingress') {
+      console.log(`[${e.ingressSource}] +${e.frameCount} frames`);
+      // Example output: [mic] +320 frames
+    }
   },
   onError: (e) => {
     console.error('Live buffer error:', e.message, e.liveBufferId);
@@ -214,15 +215,15 @@ await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(live);
 ```
 
-`onFramesAppended` receives producer metadata only: `source`, `frameCount`, `sampleRate`, `totalSamplesWritten`. On the text sink, opt in to **`streamEvents.partial`** (or pass **`onPartial`** alone — it opts in) and **`onSegment`** for push-driven UI; see [Pipeline text buffers — live](textbuffer-streaming.md).
+`onFramesAppended` receives producer metadata only: `appendKind`, optional `ingressSource` / `pipelineWriter`, `frameCount`, `sampleRate`, `totalSamplesWritten`. When `appendKind === 'mixed'`, event throttling coalesced different producers in one window. On the text sink, opt in to **`streamEvents.partial`** (or pass **`onPartial`** alone — it opts in) and **`onSegment`** for push-driven UI; see [Pipeline text buffers — live](textbuffer-streaming.md).
 
 ---
 
-## Example: producer-agnostic callback with mixed sources
+## Example: producer-agnostic callback with mixed ingress sources
 
 ```typescript
 // No microphone: push a tiny float chunk, then splice a whole offline WAV into the same live buffer.
-// Same `onFramesAppended` callback sees different `source` values (`append` vs `append_offline`).
+// Same `onFramesAppended` callback sees different ingressSource values (`append` vs `append_offline`).
 
 import {
   createEmptyLiveAudioBuffer,
@@ -241,14 +242,18 @@ const live = await createEmptyLiveAudioBuffer({
   sampleRate: 16000,
   streamEvents: { framesAppended: { enabled: true, minIntervalMs: 50 } },
   onFramesAppended: (e) => {
-    console.log(`[${e.source}] +${e.frameCount} frames, total=${e.totalSamplesWritten}`);
-    // Example output: [append] +3 frames, total=3
-    // Example output: [append_offline] +48000 frames, total=48003
+    if (e.appendKind === 'ingress') {
+      console.log(
+        `[${e.ingressSource}] +${e.frameCount} frames, total=${e.totalSamplesWritten}`
+      );
+      // Example output: [append] +3 frames, total=3
+      // Example output: [append_offline] +48000 frames, total=48003
+    }
   },
 });
 
-appendSamplesToLiveAudioBuffer(live, new Float32Array([0.1, 0.2, 0.3]), 16000); // source=append
-await appendOfflineToLiveAudioBuffer(live, offline); // source=append_offline
+appendSamplesToLiveAudioBuffer(live, new Float32Array([0.1, 0.2, 0.3]), 16000); // ingressSource=append
+await appendOfflineToLiveAudioBuffer(live, offline); // ingressSource=append_offline
 
 live.unsubscribeEvents();
 await releasePipelineAudioBuffer(offline);
@@ -395,7 +400,7 @@ Use this when the source audio is still a file and you want downstream native co
 - Buffer state: live buffer must still be `recording`
 - Progress: `options.onProgress` receives `DecodeProgressEvent`
 - Cancellation: `ingest.cancel()` or `options.signal`
-- Append source: `onFramesAppended` receives `source: 'file_ingest'`
+- Append event: `onFramesAppended` receives `appendKind: 'ingress'`, `ingressSource: 'file_ingest'`
 - Completion: `ingest.done` resolves with `FileIngestResult`
 
 Robust stop ordering for active ingest:

@@ -17,9 +17,9 @@ type PcmFilePlaybackOptions = {
 export async function startPcmFilePlayback(
   pathOrUri: string,
   onPlaybackEnded?: () => void,
-  options?: PcmFilePlaybackOptions
+  options?: PcmFilePlaybackOptions & { displayName?: string }
 ): Promise<ActivePcmFilePlayback> {
-  const source = toFileSource(pathOrUri);
+  const source = toFileSource(pathOrUri, options?.displayName);
   const audioBuffer = await createOfflineAudioBufferFromFile(source, {
     forceMono: true,
   });

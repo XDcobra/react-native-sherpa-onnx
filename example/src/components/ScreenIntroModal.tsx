@@ -98,8 +98,8 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen mirrors the offline enhancement flow but runs through live input/output buffers and a streaming pipeline. Use it for long files that can trigger offline OOM when full decode buffers are too large.',
   },
   Separation: {
-    title: 'Source separation preview',
-    body: 'This placeholder screen shows where source separation will appear in the example app. It is useful for understanding how the SDK may split mixed audio into cleaner components.',
+    title: 'Source separation demo',
+    body: 'Split mixed audio into stems (typically vocals and accompaniment) using Spleeter or UVR models. Try offline batch with optional segmentation, or live overload with file ingest or microphone input. Download models from the Download screen if needed.',
   },
   Settings: {
     title: 'Runtime capability dashboard',

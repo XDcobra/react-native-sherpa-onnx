@@ -161,15 +161,26 @@ internal abstract class OfflineLivePipelineWorker(
     }
   }
 
+  private fun flushSegmentationEngineIfActive() {
+    if (segmentationDetached.get()) return
+    try {
+      SegmentationEngineRegistry.flushEngine(attachedSegmentationEngineId)
+    } catch (_: Exception) {
+    }
+  }
+
   private fun runLoop() {
     while (!stopRequested.get()) {
       processCommands()
 
-      val drained = drainNextSegment()
-      if (drained == null) {
-        if (isInputFinalized()) {
+      var drained = drainNextSegment()
+      if (drained == null && isInputFinalized()) {
+        flushSegmentationEngineIfActive()
+        drained = drainNextSegment()
+        if (drained == null) {
           break
         }
+      } else if (drained == null) {
         workerThreadLock.withLock {
           dataAvailable.await(100, TimeUnit.MILLISECONDS)
         }

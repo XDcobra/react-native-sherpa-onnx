@@ -37,6 +37,7 @@ npm install react-native-sherpa-onnx
 - ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
 - ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Streaming](./docs/separation-streaming.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
@@ -60,7 +61,6 @@ npm install react-native-sherpa-onnx
 ### Planned / not yet
 
 - ⏳ Speaker diarization: [Diarization](./docs/diarization.md)
-- ⏳ Source separation: [Separation](./docs/separation.md)
 
 ## How to start
 
@@ -404,7 +404,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - [Execution providers](./docs/execution-providers.md) – CPU, NNAPI, XNNPACK, Core ML, QNN
 - [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cross-platform drift)
-- **Planned:** [Speaker diarization](./docs/diarization.md) · [Source separation](./docs/separation.md)
+- **Planned:** [Speaker diarization](./docs/diarization.md)
 
 ## Requirements
 
@@ -465,6 +465,18 @@ yarn android  # or yarn ios
 </tr>
 </table>
 </div>
+
+### Community Example Apps
+
+Built something with `react-native-sherpa-onnx`? We'd love to showcase it here.
+
+Real-world apps help others see what the SDK can do beyond the monorepo integration demo — production UX, model delivery choices, and feature combinations we don't cover in `example/`. If you ship (or are building) a React Native app that uses this SDK, consider adding a short entry below.
+
+**What to include:** app name, one-line description, link (App Store / Play Store / website / public repo if applicable), and which SDK features you use (e.g. offline STT, streaming TTS, PAD, separation).
+
+**How to get listed:** open a pull request that adds your app to this section, or [open an issue](https://github.com/XDcobra/react-native-sherpa-onnx/issues/new) if you prefer maintainers to add it for you.
+
+*No community entries yet — yours could be the first.*
 
 ## Contributing
 

@@ -358,7 +358,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
 | **VAD** | n/a (no separate batch engine) | `createStreamingVAD` — single engine; `process()` already accepts **both** `LiveAudioBuffer` **and** `OfflineAudioBuffer` via a discriminated union | **(c) No live overload** | — |
 | **Alignment** | `createAlignment` — offline forced alignment / ASR-mediated / VAD-anchored | n/a | **(c) No live overload** | — |
 | **Diarization** | placeholder (`initializeDiarization` throws) | n/a | **(d) Defer** | revisit at implementation time |
-| **Source separation** | placeholder (`initializeSeparation` throws) | n/a | **(d) Defer** | likely (b) when implemented (block-based) |
+| **Source separation** | `createSeparation` + `separate(Offline, Offline[])` | n/a | **(b) STT template with restrictions** | `engine.separate(LiveAudio, LiveAudio[], { segmentation: continuous_frames })` — N live stem outputs |
 
 ### 5.2 Rationale per feature
 
@@ -371,7 +371,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
 - **VAD (c).** VAD is the **segmentation primitive** other features ride on; the segmentation engine itself uses VAD models (`speech_vad_model` evaluator). `createStreamingVAD.process()` already accepts both `LiveAudioBuffer` and `OfflineAudioBuffer` via a discriminated union, so the gap this document addresses **does not exist** for VAD. Adding a live overload here would also create a circular dependency (segmentation engine ↔ VAD engine).
 - **Alignment (c).** Alignment maps a **known, fixed** text to a **known, fixed** audio (forced alignment via DP / Viterbi-style or ASR-mediated). It is structurally a **closed** problem and meaningless on an open-ended stream where neither end is bounded. No live overload.
 - **Diarization (d).** Currently a placeholder. When implemented, decision will likely lean (a)/(b) but speaker change-point detection is itself segmentation-like; revisit then.
-- **Source separation (d).** Currently a placeholder. When implemented, expect template **(b)** with `continuous_frames`-style chunking similar to enhancement, since separators have the same boundary-artifact concerns.
+- **Source separation (b).** Offline weights only; live overload uses `continuous_frames` segmentation and writes **N live stem buffers** synchronously per committed segment — same boundary-artifact caveats as enhancement live overload.
 
 ### 5.3 Consequences for §3 / §4 / §6
 
@@ -382,7 +382,7 @@ This section answers §7.6.2 (per-feature review) up front so the rollout is con
   - TTS: `text_synthetic_auto`.
   - Enhancement: `continuous_frames` only (enforced; reject other evaluators with `INVALID_SEGMENTATION` at the JS layer, mirroring `createStreamingEnhancement`).
 - **§4.5 shared worker base** — STT, TTS, Punctuation, Enhancement **all** reuse the same `OfflineLivePipelineWorker` skeleton; per-feature differences live exclusively in `onSegmentCommitted`. This keeps Enhancement's restricted-policy variant from forking the worker.
-- **§6 minimal-touch table** — VAD and Alignment add **zero** surface in this rollout (decision (c)); Diarization and Separation are explicitly out of scope until they ship at all.
+- **§6 minimal-touch table** — VAD and Alignment add **zero** surface in this rollout (decision (c)); Diarization remains out of scope. **Separation** live overload shipped separately (decision (b), like Enhancement).
 
 ---
 
@@ -470,7 +470,8 @@ Concrete defaults — see §5.3.
 | STT / Punctuation: live audio/text + offline weights | Not supported (streaming engine rejects offline weights) | Supported via offline engine's **live-pipeline overload** with **mandatory** `segmentation.policy`; **no partials** (§7.1) — use true streaming for that |
 | TTS: live text in → live audio out | Today via `createStreamingTTS` (offline weights inside the streaming engine) | `createTTS` gains the same live overload (§5.1 / §7.5); streaming-TTS factory dedup **deferred** |
 | Enhancement: live audio in → live audio out | Today only via `createStreamingEnhancement` | Live overload on `createEnhancement` (§5.1) **restricted** to `continuous_frames` policy |
+| Separation: live audio in → N live stem buffers out | n/a (batch only at design time) | Live overload on `createSeparation` (§5.1.b) **restricted** to `continuous_frames` policy — **shipped** |
 | VAD | `createStreamingVAD.process()` already covers both buffer families | **No change** (decision §5.1.c) |
-| Alignment, Diarization, Separation | Offline / placeholder | **No live overload** (decision §5.1.c / §5.1.d) |
+| Alignment, Diarization | Offline / placeholder | **No live overload** (decision §5.1.c / §5.1.d) |
 | Batch file + offline weights | Supported; segmentation optional | **Unchanged** for every feature |
 | Mental model for users | Two engines per feature, distinct domains | **Same two engines**; offline engine simply gains a "consume me live" overload — feature-by-feature per §5 |

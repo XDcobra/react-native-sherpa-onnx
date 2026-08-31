@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
@@ -50,7 +51,6 @@ import {
   ModelCategory,
   onModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   InitModeSelector,
@@ -70,6 +70,10 @@ import {
   toDetectSource,
 } from '../../modelConfig';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
+import {
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
@@ -90,17 +94,6 @@ function normalizeErrorMessage(error: unknown): string {
     if (maybe.message) return maybe.message;
   }
   return 'Unknown error';
-}
-
-function toFileSource(input: string): FileSource {
-  const value = input.trim();
-  if (value.startsWith('content://')) {
-    return { kind: 'contentUri', uri: value };
-  }
-  if (value.startsWith('file://')) {
-    return { kind: 'fs', path: decodeURI(value.replace(/^file:\/\//, '')) };
-  }
-  return { kind: 'fs', path: value };
 }
 
 type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
@@ -528,7 +521,10 @@ export default function STTStreamingScreen() {
       let fileIngestDone: Promise<unknown> = Promise.resolve();
 
       if (sourceMode === 'file') {
-        const source = toFileSource(selectedFileUri!);
+        const source = toFileSource(
+          selectedFileUri!,
+          selectedFileName ?? undefined
+        );
         const ingest = await ingestFileToLiveAudioBuffer(
           liveAudio.bufferId,
           source,
@@ -602,6 +598,7 @@ export default function STTStreamingScreen() {
     resolveModelPath,
     segConfig,
     selectedFileUri,
+    selectedFileName,
     sourceMode,
     selectedModelFolder,
     stopPolling,
@@ -633,11 +630,15 @@ export default function STTStreamingScreen() {
   const pickFile = useCallback(async () => {
     try {
       const [result] = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       if (result) {
+        const resolvedName =
+          resolveAudioFileDisplayName(result.uri, result.name) ??
+          result.name ??
+          result.uri;
         setSelectedFileUri(result.uri);
-        setSelectedFileName(result.name ?? result.uri);
+        setSelectedFileName(resolvedName);
       }
     } catch (pickErr) {
       const isPickCancel =

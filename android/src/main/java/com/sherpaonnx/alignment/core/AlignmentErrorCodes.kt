@@ -1,6 +1,6 @@
 package com.sherpaonnx.alignment.core
 
-internal object AlignmentErrorCodes {
+object AlignmentErrorCodes {
   const val TAG = "SherpaOnnxAlignment"
 
   const val ERR_ALIGNMENT = "ALIGNMENT_ERROR"

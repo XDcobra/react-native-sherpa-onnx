@@ -126,11 +126,14 @@ void OfflineLivePipelineWorker::runLoop() {
     processCommands();
 
     DrainedSegment drained;
-    if (!drainNextSegment(&drained)) {
-      if (isInputFinalized()) {
+    bool hasSegment = drainNextSegment(&drained);
+    if (!hasSegment && isInputFinalized()) {
+      flushSegmentationEngineIfActive();
+      hasSegment = drainNextSegment(&drained);
+      if (!hasSegment) {
         break;
       }
-
+    } else if (!hasSegment) {
       std::unique_lock<std::mutex> lock(waitMtx_);
       waitCv_.wait_for(lock, std::chrono::milliseconds(100));
       continue;
@@ -336,4 +339,12 @@ void OfflineLivePipelineWorker::detachSegmentationEngineSafe(bool flushFinal) {
   }
   std::string err;
   seg_engine_detach(attachedSegmentationEngineId_, flushFinal, &err);
+}
+
+void OfflineLivePipelineWorker::flushSegmentationEngineIfActive() {
+  if (segmentationDetached_.load()) {
+    return;
+  }
+  std::string err;
+  seg_engine_flush(attachedSegmentationEngineId_, &err);
 }

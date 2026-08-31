@@ -1,7 +1,8 @@
 package com.sherpaonnx.enhancement.pipeline
 
 import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
-import com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_ENHANCEMENT
+import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
+import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
@@ -79,7 +80,7 @@ class EnhancementPipelineWorker(
                 outputEntry.tryAppendSamples(
                   flushed.samples,
                   sampleRate,
-                  LIVE_APPEND_SOURCE_ENHANCEMENT
+                  LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
                 )
               ) {
                 LiveEntry.AppendResult.APPENDED -> {
@@ -104,7 +105,7 @@ class EnhancementPipelineWorker(
           outputEntry.tryAppendSamples(
             denoised.samples,
             sampleRate,
-            LIVE_APPEND_SOURCE_ENHANCEMENT
+            LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
           )
         ) {
           LiveEntry.AppendResult.APPENDED -> {
@@ -143,7 +144,7 @@ class EnhancementPipelineWorker(
                 outputEntry.tryAppendSamples(
                   flushed.samples,
                   denoiser.sampleRate,
-                  LIVE_APPEND_SOURCE_ENHANCEMENT
+                  LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
                 )
               ) {
                 LiveEntry.AppendResult.APPENDED -> {

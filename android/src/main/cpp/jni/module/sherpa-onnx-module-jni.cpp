@@ -22,6 +22,7 @@
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-separation-detect-wrapper.h"
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
@@ -30,6 +31,86 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "../diagnostic/NativeDiagnostic.h"
+
+namespace {
+
+std::optional<std::string> OptionalJstring(JNIEnv* env, jstring value) {
+  if (!value) return std::nullopt;
+  const char* c = env->GetStringUTFChars(value, nullptr);
+  if (!c) {
+    return std::nullopt;
+  }
+  if (c[0] == '\0') {
+    env->ReleaseStringUTFChars(value, c);
+    return std::nullopt;
+  }
+  std::string out(c);
+  env->ReleaseStringUTFChars(value, c);
+  return out;
+}
+
+bool CopyOptionalJstring(
+    JNIEnv* env,
+    jstring value,
+    std::optional<std::string>& out) {
+  if (!value) {
+    return true;
+  }
+  const char* c = env->GetStringUTFChars(value, nullptr);
+  if (!c) {
+    return false;
+  }
+  if (c[0] != '\0') {
+    out = std::string(c);
+  }
+  env->ReleaseStringUTFChars(value, c);
+  return true;
+}
+
+bool CopyModelTypeJstring(JNIEnv* env, jstring value, std::string& out) {
+  if (!value) {
+    out = "auto";
+    return true;
+  }
+  const char* c = env->GetStringUTFChars(value, nullptr);
+  if (!c) {
+    return false;
+  }
+  out = c;
+  env->ReleaseStringUTFChars(value, c);
+  return true;
+}
+
+bool CopyRequiredJstring(JNIEnv* env, jstring value, std::string& out) {
+  if (!value) {
+    out.clear();
+    return true;
+  }
+  const char* c = env->GetStringUTFChars(value, nullptr);
+  if (!c) {
+    return false;
+  }
+  out = c;
+  env->ReleaseStringUTFChars(value, c);
+  return true;
+}
+
+std::optional<std::string> HashMapGetString(
+    JNIEnv* env,
+    jobject map,
+    jmethodID get,
+    const char* key) {
+  jstring jkey = env->NewStringUTF(key);
+  if (!jkey) return std::nullopt;
+  jobject jval = env->CallObjectMethod(map, get, jkey);
+  env->DeleteLocalRef(jkey);
+  if (!jval) return std::nullopt;
+  auto str = OptionalJstring(env, static_cast<jstring>(jval));
+  env->DeleteLocalRef(jval);
+  return str;
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -168,21 +249,14 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
     jboolean j_debug) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
-  if (j_model_dir) {
-    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
-    if (c && c[0] != '\0') model_dir = std::string(c);
-    env->ReleaseStringUTFChars(j_model_dir, c);
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
   }
-  if (j_asset_name) {
-    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
-    if (c && c[0] != '\0') asset_name = std::string(c);
-    env->ReleaseStringUTFChars(j_asset_name, c);
-  }
-  const char* model_type_c = j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_type(model_type_c ? model_type_c : "auto");
   std::optional<bool> prefer_int8;
   if (j_has_prefer_int8) prefer_int8 = (j_prefer_int8 == JNI_TRUE);
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   SHERPA_DIAG("stt.detect", "start");
   sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(
@@ -205,19 +279,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
     jstring j_model_type) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
-  if (j_model_dir) {
-    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
-    if (c && c[0] != '\0') model_dir = std::string(c);
-    env->ReleaseStringUTFChars(j_model_dir, c);
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
   }
-  if (j_asset_name) {
-    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
-    if (c && c[0] != '\0') asset_name = std::string(c);
-    env->ReleaseStringUTFChars(j_asset_name, c);
-  }
-  const char* model_type_c = j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_type(model_type_c ? model_type_c : "auto");
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, asset_name, model_type);
   return sherpaonnx::TtsDetectResultToJava(env, result);
@@ -233,24 +300,38 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
     jstring j_model_type) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
-  if (j_model_dir) {
-    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
-    if (c && c[0] != '\0') model_dir = std::string(c);
-    env->ReleaseStringUTFChars(j_model_dir, c);
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
   }
-  if (j_asset_name) {
-    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
-    if (c && c[0] != '\0') asset_name = std::string(c);
-    env->ReleaseStringUTFChars(j_asset_name, c);
-  }
-  const char* model_type_c =
-      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_type(model_type_c ? model_type_c : "auto");
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::EnhancementDetectResult result =
       sherpaonnx::DetectEnhancementModel(model_dir, asset_name, model_type);
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
+}
+
+// Source separation: Spleeter (vocals+accompaniment) or UVR (single ONNX). Offline only.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSeparationModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
+
+  sherpaonnx::SeparationDetectResult result =
+      sherpaonnx::DetectSeparationModel(model_dir, asset_name, model_type);
+  return sherpaonnx::SeparationDetectResultToJava(env, result);
 }
 
 // Punctuation: CT-transformer (offline) or CNN-BiLSTM (online) layout. Returns HashMap with detect fields.
@@ -263,20 +344,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectPunctuationModel(
     jstring j_model_type) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
-  if (j_model_dir) {
-    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
-    if (c && c[0] != '\0') model_dir = std::string(c);
-    env->ReleaseStringUTFChars(j_model_dir, c);
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
   }
-  if (j_asset_name) {
-    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
-    if (c && c[0] != '\0') asset_name = std::string(c);
-    env->ReleaseStringUTFChars(j_asset_name, c);
-  }
-  const char* model_type_c =
-      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_type(model_type_c ? model_type_c : "auto");
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::PunctuationDetectResult result =
       sherpaonnx::DetectPunctuationModel(model_dir, asset_name, model_type);
@@ -293,20 +366,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectVadModel(
     jstring j_model_type) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
-  if (j_model_dir) {
-    const char* c = env->GetStringUTFChars(j_model_dir, nullptr);
-    if (c && c[0] != '\0') model_dir = std::string(c);
-    env->ReleaseStringUTFChars(j_model_dir, c);
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
   }
-  if (j_asset_name) {
-    const char* c = env->GetStringUTFChars(j_asset_name, nullptr);
-    if (c && c[0] != '\0') asset_name = std::string(c);
-    env->ReleaseStringUTFChars(j_asset_name, c);
-  }
-  const char* model_type_c =
-      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_type(model_type_c ? model_type_c : "auto");
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
 
   sherpaonnx::VadDetectResult result =
       sherpaonnx::DetectVadModel(model_dir, asset_name, model_type);
@@ -320,13 +385,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_model_type) {
-  const char* model_dir_c = env->GetStringUTFChars(j_model_dir, nullptr);
-  const char* model_type_c =
-      j_model_type ? env->GetStringUTFChars(j_model_type, nullptr) : nullptr;
-  std::string model_dir(model_dir_c ? model_dir_c : "");
-  std::string model_type(model_type_c ? model_type_c : "auto");
-  env->ReleaseStringUTFChars(j_model_dir, model_dir_c);
-  if (model_type_c) env->ReleaseStringUTFChars(j_model_type, model_type_c);
+  std::string model_dir;
+  std::string model_type;
+  if (!CopyRequiredJstring(env, j_model_dir, model_dir) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
 
   sherpaonnx::AlignmentDetectResult result =
       sherpaonnx::DetectAlignmentModel(model_dir, model_type);
@@ -335,40 +399,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
 
 }  // extern "C"
 
-namespace {
-
-std::optional<std::string> OptionalJstring(JNIEnv* env, jstring value) {
-  if (!value) return std::nullopt;
-  const char* c = env->GetStringUTFChars(value, nullptr);
-  if (!c || c[0] == '\0') {
-    if (c) env->ReleaseStringUTFChars(value, c);
-    return std::nullopt;
-  }
-  std::string out(c);
-  env->ReleaseStringUTFChars(value, c);
-  return out;
-}
-
-std::optional<std::string> HashMapGetString(
-    JNIEnv* env,
-    jobject map,
-    jmethodID get,
-    const char* key) {
-  jstring jkey = env->NewStringUTF(key);
-  if (!jkey) return std::nullopt;
-  jobject jval = env->CallObjectMethod(map, get, jkey);
-  env->DeleteLocalRef(jkey);
-  if (!jval) return std::nullopt;
-  auto str = OptionalJstring(env, static_cast<jstring>(jval));
-  env->DeleteLocalRef(jval);
-  return str;
-}
-
-}  // namespace
-
 extern "C" {
 
-// Unified model detection (TTS→STT→VAD→Punctuation→Enhancement→Alignment). Returns HashMap.
+// Unified model detection (TTS→STT→VAD→Punctuation→Enhancement→Separation→Alignment). Returns HashMap.
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModel(
     JNIEnv* env,

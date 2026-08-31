@@ -1,6 +1,7 @@
 package com.sherpaonnx.tts.pipeline
 
-import com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_TTS
+import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
+import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
@@ -72,7 +73,11 @@ internal class TtsOfflineLivePipelineWorker(
     }
 
     if (audio.samples.isNotEmpty()) {
-      val result = audioOutputEntry.tryAppendSamples(audio.samples, audio.sampleRate, LIVE_APPEND_SOURCE_TTS)
+      val result = audioOutputEntry.tryAppendSamples(
+        audio.samples,
+        audio.sampleRate,
+        LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.TTS),
+      )
       if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED) {
         stop()
         return

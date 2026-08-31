@@ -3,7 +3,7 @@ package com.sherpaonnx.fileio
 /**
  * Error codes for file I/O operations, matching the JS-side FileIOErrorCode.
  */
-internal object FileIOErrorCodes {
+object FileIOErrorCodes {
   const val INVALID_ARGUMENT = "FILEIO_INVALID_ARGUMENT"
   const val UNSUPPORTED_LOCATION_KIND = "FILEIO_UNSUPPORTED_LOCATION_KIND"
   const val UNSUPPORTED_ON_PLATFORM = "FILEIO_UNSUPPORTED_ON_PLATFORM"

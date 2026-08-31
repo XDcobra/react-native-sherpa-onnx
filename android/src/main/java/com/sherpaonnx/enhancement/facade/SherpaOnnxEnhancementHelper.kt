@@ -42,6 +42,27 @@ internal class SherpaOnnxEnhancementHelper(
 ) {
   private val instances = ConcurrentHashMap<String, EnhancementInstance>()
   private val onlineInstances = ConcurrentHashMap<String, OnlineEnhancementInstance>()
+  private val activeLivePipelineByInstance = ConcurrentHashMap<String, String>()
+
+  private fun awaitPipelineStopped(pipelineId: String, timeoutMs: Long = 120_000L) {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+      if (StreamingPipelineRegistry.get(pipelineId) == null) {
+        return
+      }
+      try {
+        Thread.sleep(50)
+      } catch (_: InterruptedException) {
+        return
+      }
+    }
+  }
+
+  private fun stopActiveLivePipeline(instanceId: String) {
+    val pipelineId = activeLivePipelineByInstance.remove(instanceId) ?: return
+    StreamingPipelineRegistry.stop(pipelineId)
+    awaitPipelineStopped(pipelineId)
+  }
 
   fun shutdown() {
     instances.values.forEach { it.release() }
@@ -330,6 +351,7 @@ internal class SherpaOnnxEnhancementHelper(
   }
 
   fun unloadEnhancement(instanceId: String, promise: Promise) {
+    stopActiveLivePipeline(instanceId)
     instances.remove(instanceId)?.release()
     promise.resolve(null)
   }
@@ -588,6 +610,7 @@ internal class SherpaOnnxEnhancementHelper(
         ?: error("LIVE_OFFLINE_SEGMENTATION_REQUIRED: Segment buffer not found: $segmentLiveBufferId")
 
       val pipelineId = "live_offline_enh_${UUID.randomUUID()}"
+      stopActiveLivePipeline(instanceId)
       val worker = EnhancementOfflineLivePipelineWorker(
         pipelineId = pipelineId,
         attachedSegmentationEngineId = attachedSegmentationEngineId,
@@ -598,7 +621,9 @@ internal class SherpaOnnxEnhancementHelper(
         enhancer = enhancer,
         audioOutputEntry = liveAudioOut,
       )
+      activeLivePipelineByInstance[instanceId] = pipelineId
       StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        activeLivePipelineByInstance.remove(instanceId, pipelineId)
         emitPipelineCompletedEvent(completion)
       }
       promise.resolve(WritableNativeMap().apply { putString("pipelineId", pipelineId) })

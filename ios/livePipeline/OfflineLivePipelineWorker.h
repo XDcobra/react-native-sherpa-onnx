@@ -85,6 +85,7 @@ private:
   void releaseCursors();
   void drainRemainingCommands();
   void detachSegmentationEngineSafe(bool flushFinal);
+  void flushSegmentationEngineIfActive();
 
   std::string attachedSegmentationEngineId_;
 

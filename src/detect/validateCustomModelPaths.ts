@@ -22,6 +22,7 @@ export type CustomModelPathCategory =
   | ModelCategory.Tts
   | ModelCategory.Vad
   | ModelCategory.Enhancement
+  | ModelCategory.Separation
   | ModelCategory.Punctuation
   | ModelCategory.Alignment;
 

@@ -7,8 +7,13 @@ Content placed here is copied into the app at build time by the “Copy Sherpa m
 - **`models/` folder**  
   Add one subfolder per model under `sherpa_models/models/` (e.g. `models/my-stt-model/` with all ONNX and token files inside). They are copied to `App.app/models/` and available as asset paths like `models/my-whisper`.
 
-- **For models not loaded by the script**  
-  The script `example/scripts/download-models.js` only fetches models listed in `model-download-config.json`. Any other models (custom or not in the config) can be placed here so they are bundled with the app.
+  For **source separation**, mirror the Android example assets when shipping demos offline:
+  - `sherpa-onnx-spleeter-2stems-fp16/` (vocals + accompaniment fp16 ONNX)
+  - `UVR-MDX-NET-Inst_HQ_5/` (single UVR MDX-Net ONNX)
+
+  The Xcode “Download SherpaOnnx Models” phase only fetches models listed in
+  `example/scripts/model-download-config.json` (currently includes Spleeter, not UVR).
+  Place UVR (and any other unlisted packs) here so the Copy build phase bundles them.
 
 In the app, use e.g. `resolveModelPath({ type: 'asset', path: 'models/my-whisper' })` or discover the model via `listAssetModels()`.
 

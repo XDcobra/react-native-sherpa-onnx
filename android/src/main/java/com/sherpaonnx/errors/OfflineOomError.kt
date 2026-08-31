@@ -1,6 +1,6 @@
 package com.sherpaonnx.errors
 
-internal object OfflineOomError {
+object OfflineOomError {
   const val CODE = "OFFLINE_OOM"
 
   fun message(feature: String): String =

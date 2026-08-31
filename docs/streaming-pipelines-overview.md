@@ -1,6 +1,6 @@
 # Streaming pipelines — shared lifecycle
 
-This page describes what is **common** to native **streaming pipeline** workers (STT, enhancement, VAD, TTS live overload, punctuation, …). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming doc.
+This page describes what is **common** to native **streaming pipeline** workers (STT, enhancement, separation live overload, VAD, TTS live overload, punctuation, …). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming doc.
 
 ## Mental model
 
@@ -36,6 +36,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | STT streaming + `SttPipelineHandle` | [stt-streaming.md](stt-streaming.md) |
 | TTS live overload + `TtsPipelineHandle` | [tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption](tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption) and [tts-streaming.md](tts-streaming.md) |
 | Enhancement streaming + `EnhancementPipelineHandle` | [enhancement-streaming.md](enhancement-streaming.md) |
+| Separation live overload + `SeparationPipelineHandle` | [separation-streaming.md](separation-streaming.md) · [separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption](separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption) |
 | VAD streaming + `VADPipelineHandle` | [vad-streaming.md](vad-streaming.md) |
 | Punctuation streaming + `PunctuationPipelineHandle` | [punctuation-streaming.md](punctuation-streaming.md) |
 | Live audio as pipeline operand | [audiobuffer-streaming.md](audiobuffer-streaming.md) |

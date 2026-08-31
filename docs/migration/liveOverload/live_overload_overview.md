@@ -17,7 +17,8 @@ Per the design note (§5), this rollout covers four features:
 | **Punctuation** | (a) STT template | `engine.punctuate(LiveText, LiveText, { segmentation })` |
 | **TTS** | (a) STT template + post-impl dedup | `engine.synthesize(LiveText, LiveAudio, { segmentation })` |
 | **Enhancement** | (b) STT template **with restrictions** | `engine.enhance(LiveAudio, LiveAudio, { segmentation: { policy: continuous_frames } })` |
-| VAD / Alignment / Diarization / Separation | (c) / (d) — no live overload | — |
+| **Separation** | (b) STT template **with restrictions** | `engine.separate(LiveAudio, LiveAudio[], { segmentation: { policy: continuous_frames } })` |
+| VAD / Alignment / Diarization | (c) / (d) — no live overload | — |
 
 ---
 
@@ -135,7 +136,7 @@ Each phase ships independently and is verified in isolation before moving to the
 
 ## What is **not** in scope
 
-- **VAD / Alignment / Diarization / Separation** — see design §5.1 (decisions c / d). No live overload, no native changes here.
+- **VAD / Alignment / Diarization** — see design §5.1 (decisions c / d). No live overload, no native changes here. (**Separation** live overload is shipped — decision b, like Enhancement.)
 - **Online decoder enhancements** — `createStreamingX` factories stay byte-for-byte unchanged.
 - **Public API for `OfflineLivePipelineWorker`** — the worker base is internal native infrastructure. JS users only see the per-feature overload.
 - **Streaming TTS dedup** — phase 7 / sub-08 only. Not part of the first shipping slice.

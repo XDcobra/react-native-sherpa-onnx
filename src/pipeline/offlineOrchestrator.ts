@@ -337,10 +337,12 @@ function joinPath(base: string, name: string): string {
 }
 
 async function resolveOrchestrationAccumulatorPath(
-  sessionId: string
+  sessionId: string,
+  outputIndex?: number
 ): Promise<string> {
   const tmpDir = await SherpaOnnx.resolveAppBaseDir('tmp');
-  return joinPath(tmpDir, `orch_${sessionId}_acc.wav`);
+  const suffix = outputIndex != null ? `_out${outputIndex}` : '';
+  return joinPath(tmpDir, `orch_${sessionId}_acc${suffix}.wav`);
 }
 
 function asSpeechSegment(seg: Segment): SpeechSegment {
@@ -464,34 +466,128 @@ async function cleanupAudioTemporaries(
   tempIn?: OfflineAudioBufferRef,
   tempOut?: OfflineAudioBufferRef
 ): Promise<void> {
+  await cleanupAudioTemporariesMulti(
+    tempIn,
+    tempOut != null ? [tempOut] : undefined
+  );
+}
+
+async function cleanupAudioTemporariesMulti(
+  tempIn?: OfflineAudioBufferRef,
+  tempOuts?: readonly OfflineAudioBufferRef[]
+): Promise<void> {
   if (tempIn) {
     await releasePipelineAudioBuffer(tempIn.bufferId);
   }
-  if (tempOut) {
-    await releasePipelineAudioBuffer(tempOut.bufferId);
+  if (tempOuts) {
+    for (const tempOut of tempOuts) {
+      await releasePipelineAudioBuffer(tempOut.bufferId);
+    }
   }
 }
 
-async function cleanupTextTemporaries(
-  tempIn?: OfflineTextBufferRef,
-  tempOut?: OfflineTextBufferRef
+async function finalizeAudioAccumulators(
+  accumulators: readonly LiveAudioBufferRef[],
+  sampleRate: number,
+  totalSamplesAppended: readonly number[]
+): Promise<OfflineAudioBufferRef[]> {
+  const outputBuffers: OfflineAudioBufferRef[] = [];
+  for (let i = 0; i < accumulators.length; i++) {
+    const accumulator = accumulators[i]!;
+    outputBuffers.push(
+      await finalizeAudioAccumulator(
+        accumulator,
+        sampleRate,
+        totalSamplesAppended[i] ?? 0
+      )
+    );
+  }
+  return outputBuffers;
+}
+
+async function releaseLiveAudioAccumulators(
+  accumulators: readonly LiveAudioBufferRef[]
 ): Promise<void> {
-  if (tempIn) {
-    await releasePipelineTextBuffer(tempIn.bufferId);
-  }
-  if (tempOut) {
-    await releasePipelineTextBuffer(tempOut.bufferId);
+  for (const accumulator of accumulators) {
+    try {
+      await releasePipelineAudioBuffer(accumulator.bufferId);
+    } catch {
+      // Ignore cleanup errors in terminal path.
+    }
   }
 }
 
-export async function runOfflineAudioPipeline(
+async function appendAudioSegmentOutputToAccumulator(args: {
+  segmentIndex: number;
+  overlapSamples: number;
+  inputInfo: OfflineAudioBufferInfo;
+  tempOut: OfflineAudioBufferRef;
+  accumulator: LiveAudioBufferRef;
+}): Promise<number> {
+  const outInfo = await getPipelineAudioBufferInfo(args.tempOut.bufferId);
+  if (outInfo.kind !== 'offlinePcmBuffer') {
+    throw new Error(
+      'ORCHESTRATION_CONSUMER_ERROR: offline audio consumer must write to an offline audio output buffer'
+    );
+  }
+
+  let appendedSamples = outInfo.numSamples;
+  if (outInfo.numSamples > 0) {
+    if (args.overlapSamples > 0 && args.segmentIndex > 0) {
+      const trim = Math.min(args.overlapSamples, outInfo.numSamples);
+      const kept = outInfo.numSamples - trim;
+      appendedSamples = Math.max(0, kept);
+      if (kept > 0) {
+        const trimmed = getOfflineAudioBufferSamplesSlice(
+          args.tempOut.bufferId,
+          trim,
+          kept
+        );
+        appendSamplesToLiveAudioBuffer(
+          args.accumulator.bufferId,
+          trimmed,
+          args.inputInfo.sampleRate
+        );
+      }
+    } else {
+      await appendOfflineToLiveAudioBuffer(
+        args.accumulator.bufferId,
+        args.tempOut.bufferId
+      );
+    }
+  }
+  return appendedSamples;
+}
+
+function appendSilenceToAccumulators(
+  accumulators: readonly LiveAudioBufferRef[],
+  silenceSamples: number,
+  sampleRate: number,
+  totalSamplesAppended: number[]
+): void {
+  if (silenceSamples <= 0) {
+    return;
+  }
+  const silence = new Float32Array(silenceSamples);
+  for (let i = 0; i < accumulators.length; i++) {
+    const accumulator = accumulators[i]!;
+    appendSamplesToLiveAudioBuffer(accumulator.bufferId, silence, sampleRate);
+    totalSamplesAppended[i]! += silenceSamples;
+  }
+}
+
+type OfflineAudioSegmentConsumer = (
+  segIn: OfflineAudioBufferRef,
+  segOuts: readonly OfflineAudioBufferRef[]
+) => Promise<void>;
+
+async function runOfflineAudioSegmentLoop(
   input: OfflineAudioBufferIdSource,
-  consumer: (
-    segIn: OfflineAudioBufferRef,
-    segOut: OfflineAudioBufferRef
-  ) => Promise<void>,
-  config: OrchestrationConfig = {}
-): Promise<OrchestrationResult<OfflineAudioBufferRef>> {
+  outputCount: number,
+  consumer: OfflineAudioSegmentConsumer,
+  config: OrchestrationConfig,
+  callerLabel: string
+): Promise<OrchestrationResult<readonly OfflineAudioBufferRef[]>> {
   const strategy = normalizeRecovery(config.errorRecovery);
   const maxRetries = normalizeRetryCount(config.maxRetriesPerSegment);
   const retryFallback = normalizeRetryFallback(config.retryExhaustedFallback);
@@ -499,8 +595,25 @@ export async function runOfflineAudioPipeline(
 
   const session = new OrchestrationSession(nextSessionId('audio'));
 
-  let accumulator: LiveAudioBufferRef | undefined;
-  let totalSamplesAppended = 0;
+  let accumulators: LiveAudioBufferRef[] = [];
+  const totalSamplesAppended: number[] = [];
+
+  if (outputCount <= 0) {
+    return {
+      status: 'failed',
+      totalSegments: 0,
+      completedSegments: 0,
+      skippedSegments: [],
+      failedSegment: {
+        segmentIndex: -1,
+        segmentId: 'audio_output_count_invalid',
+        error: `ORCHESTRATION_INVALID_ARGUMENT: ${callerLabel} requires outputCount >= 1`,
+        retryCount: 0,
+      },
+      processingTimeMs: Date.now() - session.startedAtMs,
+      linkMap: config.linkMap,
+    };
+  }
 
   try {
     const inputInfo = await getPipelineAudioBufferInfo(input);
@@ -513,8 +626,7 @@ export async function runOfflineAudioPipeline(
         failedSegment: {
           segmentIndex: -1,
           segmentId: 'audio_input_kind_mismatch',
-          error:
-            'ORCHESTRATION_INVALID_ARGUMENT: runOfflineAudioPipeline expects an offline audio buffer',
+          error: `ORCHESTRATION_INVALID_ARGUMENT: ${callerLabel} expects an offline audio buffer`,
           retryCount: 0,
         },
         processingTimeMs: Date.now() - session.startedAtMs,
@@ -529,20 +641,28 @@ export async function runOfflineAudioPipeline(
       session.sessionId
     );
     const totalSegments = segments.length;
-    const accumulatorSpoolPath = await resolveOrchestrationAccumulatorPath(
-      session.sessionId
-    );
 
-    accumulator = await createEmptyLiveAudioBuffer({
-      sampleRate: inputInfo.sampleRate,
-      channelCount: 1,
-      retention: {
-        mode: 'path',
-        path: accumulatorSpoolPath,
-        trim: 'session',
-      },
-      segmentation: { mode: 'off' },
-    });
+    accumulators = [];
+    totalSamplesAppended.length = 0;
+    for (let o = 0; o < outputCount; o++) {
+      const accumulatorSpoolPath = await resolveOrchestrationAccumulatorPath(
+        session.sessionId,
+        outputCount > 1 ? o : undefined
+      );
+      accumulators.push(
+        await createEmptyLiveAudioBuffer({
+          sampleRate: inputInfo.sampleRate,
+          channelCount: 1,
+          retention: {
+            mode: 'path',
+            path: accumulatorSpoolPath,
+            trim: 'session',
+          },
+          segmentation: { mode: 'off' },
+        })
+      );
+      totalSamplesAppended.push(0);
+    }
 
     session.start();
 
@@ -563,7 +683,7 @@ export async function runOfflineAudioPipeline(
         }
 
         let tempIn: OfflineAudioBufferRef | undefined;
-        let tempOut: OfflineAudioBufferRef | undefined;
+        let tempOuts: OfflineAudioBufferRef[] | undefined;
         try {
           const segLength = Math.max(0, seg.endOffset - seg.startOffset);
           const segSamples =
@@ -578,46 +698,27 @@ export async function runOfflineAudioPipeline(
           tempIn = createOfflineAudioBufferFromSamples(
             segSamples,
             inputInfo.sampleRate,
-            inputInfo.channelCount
+            inputInfo.channelCount,
+            { targetSampleRateHz: 0 }
           );
-          tempOut = await createEmptyOfflineAudioBuffer(
-            inputInfo.sampleRate,
-            1
-          );
-
-          await consumer(tempIn, tempOut);
-          const outInfo = await getPipelineAudioBufferInfo(tempOut.bufferId);
-          if (outInfo.kind !== 'offlinePcmBuffer') {
-            throw new Error(
-              'ORCHESTRATION_CONSUMER_ERROR: offline audio consumer must write to an offline audio output buffer'
+          tempOuts = [];
+          for (let o = 0; o < outputCount; o++) {
+            tempOuts.push(
+              await createEmptyOfflineAudioBuffer(inputInfo.sampleRate, 1)
             );
           }
 
-          let appendedSamples = outInfo.numSamples;
-          if (outInfo.numSamples > 0) {
-            if (overlapSamples > 0 && i > 0) {
-              const trim = Math.min(overlapSamples, outInfo.numSamples);
-              const kept = outInfo.numSamples - trim;
-              appendedSamples = Math.max(0, kept);
-              if (kept > 0) {
-                const trimmed = getOfflineAudioBufferSamplesSlice(
-                  tempOut.bufferId,
-                  trim,
-                  kept
-                );
-                appendSamplesToLiveAudioBuffer(
-                  accumulator.bufferId,
-                  trimmed,
-                  inputInfo.sampleRate
-                );
-              }
-            } else {
-              await appendOfflineToLiveAudioBuffer(
-                accumulator.bufferId,
-                tempOut.bufferId
-              );
-            }
-            totalSamplesAppended += appendedSamples;
+          await consumer(tempIn, tempOuts);
+
+          for (let o = 0; o < outputCount; o++) {
+            totalSamplesAppended[o]! +=
+              await appendAudioSegmentOutputToAccumulator({
+                segmentIndex: i,
+                overlapSamples,
+                inputInfo,
+                tempOut: tempOuts[o]!,
+                accumulator: accumulators[o]!,
+              });
           }
 
           session.addCompletedSegment();
@@ -643,14 +744,12 @@ export async function runOfflineAudioPipeline(
 
           if (exhaustedFallback === 'skip') {
             const silenceSamples = Math.max(0, seg.endOffset - seg.startOffset);
-            if (silenceSamples > 0) {
-              appendSamplesToLiveAudioBuffer(
-                accumulator.bufferId,
-                new Float32Array(silenceSamples),
-                inputInfo.sampleRate
-              );
-              totalSamplesAppended += silenceSamples;
-            }
+            appendSilenceToAccumulators(
+              accumulators,
+              silenceSamples,
+              inputInfo.sampleRate,
+              totalSamplesAppended
+            );
             session.addSkippedSegment({
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
@@ -677,7 +776,7 @@ export async function runOfflineAudioPipeline(
             completed = true;
           }
         } finally {
-          await cleanupAudioTemporaries(tempIn, tempOut);
+          await cleanupAudioTemporariesMulti(tempIn, tempOuts);
         }
       }
 
@@ -692,12 +791,12 @@ export async function runOfflineAudioPipeline(
       }
     }
 
-    if (!accumulator) {
-      throw new Error('ORCHESTRATION_INTERNAL_ERROR: accumulator missing');
+    if (accumulators.length === 0) {
+      throw new Error('ORCHESTRATION_INTERNAL_ERROR: accumulators missing');
     }
 
     if (session.state === 'failed') {
-      await releasePipelineAudioBuffer(accumulator.bufferId);
+      await releaseLiveAudioAccumulators(accumulators);
       return {
         status: 'failed',
         totalSegments: segments.length,
@@ -713,7 +812,7 @@ export async function runOfflineAudioPipeline(
 
     if (session.state === 'cancelled') {
       if (!shouldReturnPartialOnCancel(strategy)) {
-        await releasePipelineAudioBuffer(accumulator.bufferId);
+        await releaseLiveAudioAccumulators(accumulators);
         return {
           status: 'cancelled',
           totalSegments: segments.length,
@@ -725,8 +824,8 @@ export async function runOfflineAudioPipeline(
       }
 
       session.markCompleting();
-      const outputBuffer = await finalizeAudioAccumulator(
-        accumulator,
+      const outputBuffer = await finalizeAudioAccumulators(
+        accumulators,
         inputInfo.sampleRate,
         totalSamplesAppended
       );
@@ -746,8 +845,8 @@ export async function runOfflineAudioPipeline(
     }
 
     session.markCompleting();
-    const outputBuffer = await finalizeAudioAccumulator(
-      accumulator,
+    const outputBuffer = await finalizeAudioAccumulators(
+      accumulators,
       inputInfo.sampleRate,
       totalSamplesAppended
     );
@@ -769,12 +868,8 @@ export async function runOfflineAudioPipeline(
       linkMap: config.linkMap,
     };
   } catch (err) {
-    if (accumulator) {
-      try {
-        await releasePipelineAudioBuffer(accumulator.bufferId);
-      } catch {
-        // Ignore cleanup errors in terminal path.
-      }
+    if (accumulators.length > 0) {
+      await releaseLiveAudioAccumulators(accumulators);
     }
 
     return {
@@ -792,6 +887,58 @@ export async function runOfflineAudioPipeline(
       linkMap: config.linkMap,
     };
   }
+}
+
+async function cleanupTextTemporaries(
+  tempIn?: OfflineTextBufferRef,
+  tempOut?: OfflineTextBufferRef
+): Promise<void> {
+  if (tempIn) {
+    await releasePipelineTextBuffer(tempIn.bufferId);
+  }
+  if (tempOut) {
+    await releasePipelineTextBuffer(tempOut.bufferId);
+  }
+}
+
+export async function runOfflineAudioPipeline(
+  input: OfflineAudioBufferIdSource,
+  consumer: (
+    segIn: OfflineAudioBufferRef,
+    segOut: OfflineAudioBufferRef
+  ) => Promise<void>,
+  config: OrchestrationConfig = {}
+): Promise<OrchestrationResult<OfflineAudioBufferRef>> {
+  const result = await runOfflineAudioSegmentLoop(
+    input,
+    1,
+    async (segIn, segOuts) => {
+      await consumer(segIn, segOuts[0]!);
+    },
+    config,
+    'runOfflineAudioPipeline'
+  );
+  const { outputBuffer: outputBuffers, ...rest } = result;
+  const [outputBuffer] = outputBuffers ?? [];
+  return {
+    ...rest,
+    ...(outputBuffer != null ? { outputBuffer } : {}),
+  };
+}
+
+export async function runOfflineAudioMultiOutputPipeline(
+  input: OfflineAudioBufferIdSource,
+  outputCount: number,
+  consumer: OfflineAudioSegmentConsumer,
+  config: OrchestrationConfig = {}
+): Promise<OrchestrationResult<readonly OfflineAudioBufferRef[]>> {
+  return runOfflineAudioSegmentLoop(
+    input,
+    outputCount,
+    consumer,
+    config,
+    'runOfflineAudioMultiOutputPipeline'
+  );
 }
 
 export async function runOfflineTextPipeline(
@@ -1455,7 +1602,8 @@ export async function runOfflineAudioToTextPipeline(
           tempIn = createOfflineAudioBufferFromSamples(
             segSamples,
             info.sampleRate,
-            info.channelCount
+            info.channelCount,
+            { targetSampleRateHz: 0 }
           );
           tempOut = await createEmptyOfflineTextBuffer();
 

@@ -1,10 +1,12 @@
 package com.sherpaonnx
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.util.Base64
 import com.facebook.react.bridge.ReadableArray
@@ -25,6 +27,7 @@ import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
+import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -202,6 +205,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
   )
+  private val separationHelper = SherpaOnnxSeparationHelper(
+    reactApplicationContext,
+    { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
+  )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -367,7 +374,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
     val payload = Arguments.createMap()
     payload.putString("liveBufferId", event.liveBufferId)
-    payload.putString("source", event.source)
+    payload.putString("appendKind", event.appendKind.wireValue)
+    event.ingressSource?.let { payload.putString("ingressSource", it.wireValue) }
+    event.pipelineWriter?.let { payload.putString("pipelineWriter", it.wireValue) }
     payload.putInt("sampleRate", event.sampleRate)
     payload.putInt("frameCount", event.frameCount)
     payload.putDouble("totalSamplesWritten", event.totalSamplesWritten.toDouble())
@@ -1131,11 +1140,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     val pathHint: String? = null,
   )
 
-  private fun sourcePathHint(source: ReadableMap): String? {
-    if (!source.hasKey("displayName")) {
+  private fun logDecodeDiag(message: String) {
+    if ((reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+      return
+    }
+    android.util.Log.i("SherpaOnnxDecode", message)
+  }
+
+  private fun sourcePathHint(source: ReadableMap?): String? {
+    if (source == null) {
       return null
     }
-    return source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
+    source.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    return when (source.getString("kind")) {
+      "contentUri", "securityScoped" -> {
+        val uriStr = source.getString("uri")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        displayNameFromContentUri(Uri.parse(uriStr))
+      }
+      else -> null
+    }
+  }
+
+  private fun displayNameFromContentUri(uri: Uri): String? {
+    return try {
+      reactApplicationContext.contentResolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+          if (!cursor.moveToFirst()) {
+            return@use null
+          }
+          val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+          if (idx < 0) {
+            return@use null
+          }
+          cursor.getString(idx)?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    } catch (_: Exception) {
+      null
+    }
   }
 
   private fun extensionFromFileName(fileName: String): String? {
@@ -1157,12 +1199,54 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle,
     source: ReadableMap? = null,
   ): DecodableSource {
+    val jsDisplayName = source?.getString("displayName")?.trim()?.takeIf { it.isNotEmpty() }
     val displayName = source?.let { sourcePathHint(it) }
-    return when (handle) {
-      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
-        DecodableSource(path = handle.file.absolutePath, fd = -1, pathHint = displayName)
-      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
+    logDecodeDiag(
+      "resolveDecodableSource: kind=${source?.getString("kind")} " +
+        "uri=${source?.getString("uri")} jsDisplayName=$jsDisplayName pathHint=$displayName " +
+        "handle=${handle.javaClass.simpleName}",
+    )
+    val resolved = when (handle) {
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath -> {
+        val file = handle.file
+        val fileExt = extensionFromFileName(file.name)
+        val hintExt = displayName?.let { extensionFromFileName(it) }
+        if (fileExt == null && hintExt != null) {
+          val tmpFile = File(
+            reactApplicationContext.cacheDir,
+            decodeTempFileName(displayName),
+          )
+          try {
+            file.inputStream().use { input ->
+              tmpFile.outputStream().use { output ->
+                input.copyTo(output, 65536)
+              }
+            }
+          } catch (e: Exception) {
+            try { tmpFile.delete() } catch (_: Exception) {}
+            throw FileIOException(
+              FileIOErrorCodes.READ_ERROR,
+              "Failed to materialize extensionless path for decode",
+              e,
+            )
+          }
+          DecodableSource(
+            path = tmpFile.absolutePath,
+            fd = -1,
+            tempFile = tmpFile,
+            pathHint = displayName,
+          )
+        } else {
+          DecodableSource(path = file.absolutePath, fd = -1, pathHint = displayName)
+        }
+      }
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor -> {
+        val statSize = handle.pfd.statSize
+        logDecodeDiag(
+          "resolveDecodableSource.fileDescriptor statSize=$statSize fd=${handle.pfd.fd}",
+        )
         DecodableSource(path = null, fd = handle.pfd.fd, pathHint = displayName)
+      }
       is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream -> {
         val tmpFile = File(
           reactApplicationContext.cacheDir,
@@ -1188,6 +1272,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         )
       }
     }
+    logDecodeDiag(
+      "resolveDecodableSource.result path=${resolved.path} fd=${resolved.fd} " +
+        "pathHint=${resolved.pathHint} temp=${resolved.tempFile?.absolutePath}",
+    )
+    return resolved
   }
 
   /** Path string passed to native decode/probe (filesystem path or demuxer hint for fd-only). */
@@ -1772,6 +1861,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val sourceFd = decodableSource.fd
         tempSourceFile = decodableSource.tempFile
         val nativePath = nativePathArg(decodableSource)
+        logDecodeDiag(
+          "decodeFileToOfflineBuffer: nativePath=$nativePath sourcePath=$sourcePath " +
+            "fd=$sourceFd temp=${tempSourceFile?.absolutePath} forceMono=$forceMono " +
+            "allowDemuxerAutoProbe=$allowDemuxerAutoProbe targetRate=$targetSampleRateHz",
+        )
 
         val targetRate = if (targetSampleRateHz > 0) targetSampleRateHz.toInt() else 0
 
@@ -2097,7 +2191,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
                 liveEntry.tryAppendSamples(
                   samples,
                   liveEntry.sampleRate,
-                  com.sherpaonnx.audio.pipeline.LIVE_APPEND_SOURCE_FILE_INGEST,
+                  com.sherpaonnx.audio.pipeline.LiveAppendOrigin.Ingress(
+                    com.sherpaonnx.audio.pipeline.LiveAudioIngressSource.FILE_INGEST,
+                  ),
                   backpressure = useBackpressure
                 )
               ) {
@@ -4635,6 +4731,65 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
   }
 
+  override fun detectSeparationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeSeparation(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    separationHelper.initializeSeparation(instanceId, options, promise)
+  }
+
+  override fun separateOfflineAudioBuffers(
+    instanceId: String,
+    audioInBufferId: String,
+    audioOutBufferIds: ReadableArray,
+    promise: Promise
+  ) {
+    separationHelper.separateOfflineAudioBuffers(
+      instanceId,
+      audioInBufferId,
+      audioOutBufferIds,
+      promise,
+    )
+  }
+
+  override fun getSeparationSampleRate(instanceId: String, promise: Promise) {
+    separationHelper.getSampleRate(instanceId, promise)
+  }
+
+  override fun getSeparationNumStems(instanceId: String, promise: Promise) {
+    separationHelper.getNumStems(instanceId, promise)
+  }
+
+  override fun unloadSeparation(instanceId: String, promise: Promise) {
+    separationHelper.unloadSeparation(instanceId, promise)
+  }
+
+  override fun startSeparationOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    audioOutLiveBufferIds: ReadableArray,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    separationHelper.startSeparationOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      audioOutLiveBufferIds,
+      options,
+      promise,
+    )
+  }
+
   override fun detectAlignmentModel(
     modelDir: String,
     modelType: String?,
@@ -5297,6 +5452,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speech enhancement: optional directory and/or asset name. */
     @JvmStatic
     private external fun nativeDetectEnhancementModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    /** Model detection for source separation: Spleeter or UVR layout (offline only). */
+    @JvmStatic
+    private external fun nativeDetectSeparationModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

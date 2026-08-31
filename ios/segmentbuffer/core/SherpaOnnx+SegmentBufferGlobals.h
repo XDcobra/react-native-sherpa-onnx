@@ -81,6 +81,7 @@ void seg_engine_on_audio_append(
 void seg_engine_on_buffer_finalized(const std::string &bufferId);
 void seg_engine_on_buffer_released(const std::string &bufferId);
 bool seg_engine_detach(const std::string &engineId, bool flushFinal, std::string *error);
+bool seg_engine_flush(const std::string &engineId, std::string *error);
 
 // Segment annotation metadata (reason/source/timestamps) emitted by native engines.
 bool seg_engine_peek_annotation(

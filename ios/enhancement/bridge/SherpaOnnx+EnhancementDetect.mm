@@ -44,15 +44,19 @@ struct EnhancementInitScalars {
   std::optional<std::string> provider;
 };
 
-EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
+EnhancementInitScalars ParseEnhancementInitScalars(
+    const JS::NativeSherpaOnnx::EnhancementInitBridgeOptions &options
+) {
   EnhancementInitScalars scalars;
-  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
-    scalars.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  auto numThreads = options.numThreads();
+  if (numThreads.has_value()) {
+    scalars.numThreads = MAX(1, (int32_t)numThreads.value());
   }
-  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
-    scalars.debug = [options[@"debug"] boolValue];
+  auto debug = options.debug();
+  if (debug.has_value()) {
+    scalars.debug = debug.value();
   }
-  scalars.provider = OptionalUtf8String(options[@"provider"]);
+  scalars.provider = OptionalUtf8String(options.provider());
   return scalars;
 }
 
@@ -81,16 +85,16 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
 }
 
 - (void)initializeEnhancement:(NSString *)instanceId
-                    options:(NSDictionary *)options
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
+                      options:(JS::NativeSherpaOnnx::EnhancementInitBridgeOptions &)options
+                      resolve:(RCTPromiseResolveBlock)resolve
+                       reject:(RCTPromiseRejectBlock)reject
 {
   if (instanceId == nil || [instanceId length] == 0) {
     reject(@"ENHANCEMENT_INIT_ERROR", @"instanceId is required", nil);
     return;
   }
 
-  NSString *initMode = options[@"initMode"];
+  NSString *initMode = options.initMode();
   if (initMode == nil || [initMode length] == 0) {
     initMode = @"auto";
   }
@@ -113,12 +117,12 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
 
     sherpaonnx::EnhancementInitializeResult result;
     if (isCustomInit) {
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
         reject(@"ENHANCEMENT_INIT_ERROR", @"modelType is required for initMode custom", nil);
         return;
       }
-      id pathsRaw = options[@"modelPaths"];
+      id pathsRaw = options.modelPaths();
       NSDictionary *pathsDict =
           [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
       if (pathsDict == nil || pathsDict.count == 0) {
@@ -135,12 +139,12 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
           scalars.provider,
           scalars.debug);
     } else {
-      NSString *modelDir = options[@"modelDir"];
+      NSString *modelDir = options.modelDir();
       if (modelDir == nil || [modelDir length] == 0) {
         reject(@"ENHANCEMENT_INIT_ERROR", @"modelDir is required for initMode auto", nil);
         return;
       }
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
       result = inst->wrapper->initialize(
           std::string([modelDir UTF8String]),
@@ -180,7 +184,7 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
 }
 
 - (void)initializeOnlineEnhancement:(NSString *)instanceId
-                            options:(NSDictionary *)options
+                            options:(JS::NativeSherpaOnnx::EnhancementInitBridgeOptions &)options
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject
 {
@@ -189,7 +193,7 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
     return;
   }
 
-  NSString *initMode = options[@"initMode"];
+  NSString *initMode = options.initMode();
   if (initMode == nil || [initMode length] == 0) {
     initMode = @"auto";
   }
@@ -212,12 +216,12 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
 
     sherpaonnx::EnhancementInitializeResult result;
     if (isCustomInit) {
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
         reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelType is required for initMode custom", nil);
         return;
       }
-      id pathsRaw = options[@"modelPaths"];
+      id pathsRaw = options.modelPaths();
       NSDictionary *pathsDict =
           [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
       if (pathsDict == nil || pathsDict.count == 0) {
@@ -234,12 +238,12 @@ EnhancementInitScalars ParseEnhancementInitScalars(NSDictionary *options) {
           scalars.provider,
           scalars.debug);
     } else {
-      NSString *modelDir = options[@"modelDir"];
+      NSString *modelDir = options.modelDir();
       if (modelDir == nil || [modelDir length] == 0) {
         reject(@"ONLINE_ENHANCEMENT_INIT_ERROR", @"modelDir is required for initMode auto", nil);
         return;
       }
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
       result = inst->wrapper->initialize(
           std::string([modelDir UTF8String]),

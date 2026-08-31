@@ -69,6 +69,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   vad: ModelCategory.Vad,
   punctuation: ModelCategory.Punctuation,
   enhancement: ModelCategory.Enhancement,
+  separation: ModelCategory.Separation,
   alignment: ModelCategory.Alignment,
 };
 

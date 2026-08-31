@@ -7,6 +7,7 @@ export type {
   EnhancementInitBridgeOptions,
   OnlineSttInitBridgeOptions,
   PunctuationInitBridgeOptions,
+  SeparationInitBridgeOptions,
   SttInitBridgeOptions,
   TtsInitBridgeOptions,
   VadInitBridgeOptions,

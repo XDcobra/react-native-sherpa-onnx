@@ -86,6 +86,14 @@ const char* EnhancementModelKindToString(EnhancementModelKind k) {
     }
 }
 
+const char* SeparationModelKindToString(SeparationModelKind k) {
+    switch (k) {
+        case SeparationModelKind::kSpleeter: return "spleeter";
+        case SeparationModelKind::kUvr: return "uvr";
+        default: return "unknown";
+    }
+}
+
 const char* AlignmentModelKindToString(AlignmentModelKind k) {
     switch (k) {
         case AlignmentModelKind::kWav2Vec2: return "wav2vec2";
@@ -255,6 +263,26 @@ UnifiedModelDetectResult DetectModelInternal(
             enhancement.detectionSources,
             EnhancementModelPathsToStringMap(enhancement.paths),
             enhancement.error);
+    }
+
+    SeparationDetectResult separation =
+        DetectSeparationModel(model_dir, asset_name, modelType);
+    const std::string separationType =
+        SeparationModelKindToString(separation.selectedKind);
+    if (IsCatalogDetectHit(
+            separation.ok, separationType, separation.detectionSources)) {
+        return MakeHit(
+            "separation",
+            separationType,
+            separation.derivedLanguages,
+            separation.quantization,
+            "",
+            false,
+            false,
+            separation.detectedModels,
+            separation.detectionSources,
+            SeparationModelPathsToStringMap(separation.paths),
+            separation.error);
     }
 
     std::string alignmentKey;

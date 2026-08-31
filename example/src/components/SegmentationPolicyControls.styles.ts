@@ -144,6 +144,15 @@ export const segStyles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
   },
+  evaluatorHint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6B7280',
+  },
+  modeHintBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
   vadWarningBox: {
     padding: 10,
     borderRadius: 8,

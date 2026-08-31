@@ -29,7 +29,8 @@ This note captures the **product / API consistency** goal discussed for **`Orche
 ### Out of scope for this folder
 
 - Streaming STT / Enhancement / TTS progress (buffer callbacks + `getStatus`).
-- **Diarization / Separation** (stubs / thin surfaces).
+- **Separation** — shipped (`createSeparation`, offline batch + live overload with orchestration progress). See [separation-offline.md](../../separation-offline.md) and [separation-streaming.md](../../separation-streaming.md).
+- **Diarization** (stub / thin surface — not yet implemented).
 
 ---
 

@@ -71,7 +71,7 @@ void TtsOfflineLivePipelineWorker::onSegmentCommitted(
     audio.samples.data(),
     audio.samples.size(),
     audio.sampleRate,
-    kPaAppendSourceTts
+    PaLiveAppendOrigin::pipeline(PaLivePipelineWriter::Tts)
   );
   if (appendResult != PaLiveEntry::AppendResult::APPENDED) return;
   addUnitsWritten(static_cast<int64_t>(audio.samples.size()));

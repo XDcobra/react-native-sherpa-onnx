@@ -283,7 +283,7 @@ if (!result.ok) {
 | `getCustomModelPathRequirements(category, modelType)` | Read-only schema — ordered `fields[]` with `required` and `kind` (`file` \| `dir`) |
 | `validateCustomModelPaths(category, modelType, paths)` | Enforces non-empty paths + family-specific rules |
 
-Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `punctuation`, `alignment`.
+Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `separation`, `punctuation`, `alignment`.
 
 > [!NOTE]
 > **`stt_streaming`** keys differ from offline `stt` (e.g. streaming transducer uses `encoder`/`decoder`/`joiner`/`tokens`; offline CTC uses `ctcModel`/`tokens`). Always query the schema for the exact category.
@@ -305,6 +305,7 @@ Each feature doc has the full per-`modelType` table. Summary of where to look:
 | TTS | [tts-offline.md](tts-offline.md#validation-required-files) | `detectTtsModel` | `tts` |
 | VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
 | Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
+| Separation | [separation-offline.md](separation-offline.md#validation-required-files) | `detectSeparationModel` | `separation` |
 | Punctuation offline | [punctuation-offline.md](punctuation-offline.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Punctuation streaming | [punctuation-streaming.md](punctuation-streaming.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Alignment | [alignment-offline.md](alignment-offline.md#validation-required-files) | `detectAlignmentModel` | `alignment` |
@@ -325,7 +326,8 @@ flowchart LR
   stt -->|no match| vad[VAD]
   vad -->|no match| punct[Punctuation]
   punct -->|no match| enh[Enhancement]
-  enh -->|no match| align[Alignment]
+  enh -->|no match| sep[Separation]
+  sep -->|no match| align[Alignment]
   align -->|no match| none["matched: false"]
 ```
 

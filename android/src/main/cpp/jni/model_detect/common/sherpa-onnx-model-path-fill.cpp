@@ -94,6 +94,15 @@ void FillEnhancementModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillSeparationModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    SeparationModelPaths& out
+) {
+    SetPathFromMap(paths, "vocals", out.vocals);
+    SetPathFromMap(paths, "accompaniment", out.accompaniment);
+    SetPathFromMap(paths, "model", out.model);
+}
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out
@@ -202,6 +211,15 @@ std::map<std::string, std::string> VadModelPathsToStringMap(const VadModelPaths&
 std::map<std::string, std::string> EnhancementModelPathsToStringMap(
     const EnhancementModelPaths& paths) {
     std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "model", paths.model);
+    return out;
+}
+
+std::map<std::string, std::string> SeparationModelPathsToStringMap(
+    const SeparationModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "vocals", paths.vocals);
+    PutPathIfNonEmpty(out, "accompaniment", paths.accompaniment);
     PutPathIfNonEmpty(out, "model", paths.model);
     return out;
 }

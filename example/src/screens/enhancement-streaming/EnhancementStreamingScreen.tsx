@@ -11,12 +11,17 @@ import {
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
   getAssetPackPath,
   listAssetModels,
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import {
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   listDownloadedModels,
@@ -306,7 +311,7 @@ export default function EnhancementStreamingScreen() {
       const trimmed = effectiveCustomAudioPath.trim();
       if (trimmed.startsWith('content://')) {
         return {
-          source: { kind: 'contentUri', uri: trimmed },
+          source: toFileSource(trimmed, effectiveCustomAudioName ?? undefined),
           sourceType: 'own',
           sourceLabel: effectiveCustomAudioName ?? 'Local audio',
           sourcePathForPlayback: trimmed,
@@ -846,7 +851,7 @@ export default function EnhancementStreamingScreen() {
     setErrorSource(null);
     try {
       const res = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       const file = Array.isArray(res) ? res[0] : res;
       const uri =
@@ -854,7 +859,11 @@ export default function EnhancementStreamingScreen() {
         (file as any).fileCopyUri ??
         (file as any).localUri ??
         (file as any).nativeUri;
-      const name = file.name || uri?.split('/')?.pop() || 'local.wav';
+      const name =
+        resolveAudioFileDisplayName(uri, file.name) ??
+        file.name?.trim() ??
+        uri?.split('/')?.pop() ??
+        'local.wav';
       if (!uri) {
         setErrorSource('enhance');
         setError('Could not get file URI from picker result');
@@ -895,7 +904,7 @@ export default function EnhancementStreamingScreen() {
 
   const playPath = async (
     path: string | null,
-    options?: { bindResultOriginalUi?: boolean }
+    options?: { bindResultOriginalUi?: boolean; displayName?: string | null }
   ) => {
     if (!path) return;
     const bindResult = options?.bindResultOriginalUi === true;
@@ -914,6 +923,7 @@ export default function EnhancementStreamingScreen() {
         },
         {
           outputDeviceId: selectedOutputDeviceId ?? undefined,
+          displayName: options?.displayName ?? undefined,
         }
       );
       pcmPlaybackRef.current = nextPlayback;
@@ -1602,7 +1612,11 @@ export default function EnhancementStreamingScreen() {
                         styles.playButton,
                         preparingInputBuffer && styles.buttonDisabled,
                       ]}
-                      onPress={() => playPath(customAudioPath)}
+                      onPress={() =>
+                        playPath(customAudioPath, {
+                          displayName: customAudioName,
+                        })
+                      }
                       disabled={preparingInputBuffer}
                     >
                       <View style={styles.rowAlignCenter}>

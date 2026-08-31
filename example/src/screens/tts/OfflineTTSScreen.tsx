@@ -20,7 +20,7 @@ import {
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
-import { copyFile, shareFile } from 'react-native-sherpa-onnx/fileio';
+import { shareFile } from 'react-native-sherpa-onnx/fileio';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import {
@@ -51,12 +51,13 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import {
-  DocumentDirectoryPath,
-  unlink,
-  exists,
-} from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath, exists } from '@dr.pogodin/react-native-fs';
 import * as DocumentPicker from '@react-native-documents/picker';
+import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
+import {
+  resolveAudioFileDisplayName,
+  toFileSource,
+} from '../../utils/fileSourceFromUri';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './OfflineTTSScreen.styles';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
@@ -105,7 +106,6 @@ type ReferenceAudioState = {
   buffer: OfflineAudioBufferRef;
   sampleRate: number;
   numSamples: number;
-  ownedTempPath: string | null;
 };
 
 export default function OfflineTTSScreen() {
@@ -416,9 +416,6 @@ export default function OfflineTTSScreen() {
       await releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(
         () => {}
       );
-      if (refAudio.ownedTempPath) {
-        await unlink(refAudio.ownedTempPath).catch(() => {});
-      }
     },
     []
   );
@@ -448,9 +445,6 @@ export default function OfflineTTSScreen() {
       referenceAudioRef.current = null;
       if (refAudio) {
         releasePipelineAudioBuffer(refAudio.buffer.bufferId).catch(() => {});
-        if (refAudio.ownedTempPath) {
-          unlink(refAudio.ownedTempPath).catch(() => {});
-        }
       }
       const buffersToRelease = offlineAudioBuffersRef.current;
       offlineAudioBuffersRef.current = [];
@@ -464,38 +458,26 @@ export default function OfflineTTSScreen() {
     setError(null);
     try {
       const picked = await DocumentPicker.pick({
-        type: [DocumentPicker.types.audio],
+        type: DECODABLE_AUDIO_PICKER_TYPES,
       });
       const file = Array.isArray(picked) ? picked[0] : picked;
       const uri = file?.uri ?? (file as { fileUri?: string })?.fileUri ?? '';
-      const name = file?.name ?? uri?.split('/')?.pop() ?? 'reference.wav';
+      const name =
+        resolveAudioFileDisplayName(uri, file?.name) ??
+        file?.name?.trim() ??
+        uri?.split('/')?.pop() ??
+        'reference.wav';
       if (!uri) {
         setError('Could not get file URI from picker');
         return;
       }
-      let path = uri.replace(/^file:\/\//, '');
-      let ownedTempPath: string | null = null;
-      if (uri.startsWith('content://')) {
-        const result = await copyFile(
-          { kind: 'contentUri', uri },
-          { kind: 'app', base: 'cache', path: `tts_ref_${Date.now()}.wav` }
-        );
-        path =
-          result.output.kind === 'fs' ? result.output.path : result.output.uri;
-        ownedTempPath = path;
-      }
 
-      const refBuffer = await createOfflineAudioBufferFromFile({
-        kind: 'fs',
-        path,
-      });
+      const source = toFileSource(uri, name);
+      const refBuffer = await createOfflineAudioBufferFromFile(source);
       const info = await getPipelineAudioBufferInfo(refBuffer.bufferId);
       const numSamples = info.numSamples ?? 0;
       if (numSamples <= 0 || info.sampleRate <= 0) {
         await releasePipelineAudioBuffer(refBuffer.bufferId).catch(() => {});
-        if (ownedTempPath) {
-          await unlink(ownedTempPath).catch(() => {});
-        }
         setError('Reference audio is empty or invalid');
         return;
       }
@@ -504,7 +486,6 @@ export default function OfflineTTSScreen() {
         buffer: refBuffer,
         sampleRate: info.sampleRate,
         numSamples,
-        ownedTempPath,
       };
       const previousRef = referenceAudioRef.current;
       referenceAudioRef.current = nextRef;

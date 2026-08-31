@@ -3,6 +3,7 @@ import * as DocumentPicker from '@react-native-documents/picker';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
   describeFileSource,
+  resolveAudioFileDisplayName,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 
@@ -44,7 +45,8 @@ export function FileSourceSlotPicker({
       if (!uri) {
         return;
       }
-      onChange(toFileSource(uri));
+      const displayName = resolveAudioFileDisplayName(uri, picked?.name);
+      onChange(toFileSource(uri, displayName));
     } catch (err) {
       if (isPickerCancelled(err)) {
         return;

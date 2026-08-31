@@ -34,6 +34,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
 import {
   runOfflineAudioToTextPipeline,
   runOfflineAudioPipeline,
+  runOfflineAudioMultiOutputPipeline,
   runOfflineTextToAudioPipeline,
   runOfflineTextPipeline,
 } from '../offlineOrchestrator';
@@ -1062,5 +1063,158 @@ describe('offline orchestrator', () => {
     expect(result.skippedSegments).toHaveLength(1);
     expect(result.segmentMappings).toHaveLength(0);
     expect(audio.appendSamplesToLiveAudioBuffer).toHaveBeenCalled();
+  });
+
+  describe('runOfflineAudioMultiOutputPipeline', () => {
+    function setupDualOutputMocks() {
+      audio.getPipelineAudioBufferInfo.mockImplementation((id: string) => {
+        if (id === 'off_input') {
+          return Promise.resolve({
+            bufferId: 'off_input',
+            kind: 'offlinePcmBuffer',
+            state: 'immutable',
+            sampleRate: 16000,
+            channelCount: 1,
+            numSamples: 4,
+            durationMs: 0.25,
+          });
+        }
+        return Promise.resolve({
+          bufferId: id,
+          kind: 'offlinePcmBuffer',
+          state: 'immutable',
+          sampleRate: 16000,
+          channelCount: 1,
+          numSamples: 4,
+          durationMs: 0.25,
+        });
+      });
+
+      segment.getSegments.mockResolvedValue([
+        {
+          segmentId: 'seg_1',
+          domain: 'speech',
+          startOffset: 0,
+          endOffset: 4,
+          reason: 'manual_commit',
+          source: 'external',
+          createdAtMs: Date.now(),
+          segmentIndex: 0,
+          sourceAudioBufferId: 'off_input',
+          sampleRate: 16000,
+          durationMs: 0.25,
+        },
+      ]);
+
+      let liveAccIndex = 0;
+      audio.createEmptyLiveAudioBuffer.mockImplementation(async () => {
+        const bufferId = `live_acc_${liveAccIndex++}`;
+        return {
+          bufferId,
+          info: {
+            bufferId,
+            kind: 'livePcmBuffer',
+            state: 'recording',
+            sampleRate: 16000,
+            channelCount: 1,
+            numSamples: 0,
+            durationMs: 0,
+            totalSamplesWritten: 0,
+            ringEvictedSamples: 0,
+            hasActiveSpool: true,
+          },
+          unsubscribeEvents: jest.fn(),
+        };
+      });
+
+      let tempOutIndex = 0;
+      audio.createEmptyOfflineAudioBuffer.mockImplementation(async () => {
+        const bufferId = `off_tmp_out_${tempOutIndex++}`;
+        return {
+          bufferId,
+          info: {
+            bufferId,
+            kind: 'offlinePcmBuffer',
+            state: 'immutable',
+            sampleRate: 16000,
+            channelCount: 1,
+            numSamples: 0,
+            durationMs: 0,
+          },
+        };
+      });
+
+      let finalIndex = 0;
+      audio.transferOfflineAudioBufferFromLive.mockImplementation(async () => {
+        const bufferId = `off_final_${finalIndex++}`;
+        return {
+          bufferId,
+          info: {
+            bufferId,
+            kind: 'offlinePcmBuffer',
+            state: 'immutable',
+            sampleRate: 16000,
+            channelCount: 1,
+            numSamples: 8,
+            durationMs: 0.5,
+          },
+        };
+      });
+    }
+
+    it('produces N output buffers and invokes consumer with N temp outs per segment', async () => {
+      setupDualOutputMocks();
+
+      const consumer = jest.fn().mockResolvedValue(undefined);
+      const result = await runOfflineAudioMultiOutputPipeline(
+        'off_input',
+        2,
+        consumer,
+        { segmentation: { mode: 'auto' } }
+      );
+
+      expect(result.status).toBe('complete');
+      expect(result.outputBuffer).toHaveLength(2);
+      expect(consumer).toHaveBeenCalledTimes(1);
+      const segOuts = consumer.mock.calls[0]?.[1] as { bufferId: string }[];
+      expect(segOuts).toHaveLength(2);
+      expect(audio.createEmptyLiveAudioBuffer).toHaveBeenCalledTimes(2);
+      expect(
+        audio.createEmptyLiveAudioBuffer.mock.calls[0]?.[0]?.retention?.path
+      ).toMatch(/\/tmp\/orch_audio_\d+_\d+_acc_out0\.wav$/);
+      expect(
+        audio.createEmptyLiveAudioBuffer.mock.calls[1]?.[0]?.retention?.path
+      ).toMatch(/\/tmp\/orch_audio_\d+_\d+_acc_out1\.wav$/);
+    });
+
+    it('rejects outputCount <= 0', async () => {
+      const result = await runOfflineAudioMultiOutputPipeline(
+        'off_input',
+        0,
+        jest.fn(),
+        { segmentation: { mode: 'auto' } }
+      );
+
+      expect(result.status).toBe('failed');
+      expect(result.failedSegment?.error).toContain('outputCount >= 1');
+    });
+
+    it('skip recovery appends silence to all accumulators', async () => {
+      setupDualOutputMocks();
+
+      const result = await runOfflineAudioMultiOutputPipeline(
+        'off_input',
+        2,
+        jest.fn().mockRejectedValue(new Error('sep_fail')),
+        {
+          segmentation: { mode: 'auto' },
+          errorRecovery: 'skip',
+        }
+      );
+
+      expect(result.status).toBe('complete');
+      expect(result.skippedSegments).toHaveLength(1);
+      expect(audio.appendSamplesToLiveAudioBuffer).toHaveBeenCalledTimes(2);
+    });
   });
 });

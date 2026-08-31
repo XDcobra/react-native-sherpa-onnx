@@ -25,15 +25,102 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
-// ==================== Source constants ====================
-static const char *kPaAppendSourceMic = "mic";
-static const char *kPaAppendSourceAppend = "append";
-static const char *kPaAppendSourceAppendOffline = "append_offline";
-static const char *kPaAppendSourceEnhancement = "enhancement";
-static const char *kPaAppendSourceTts = "tts";
-static const char *kPaAppendSourceFileIngest = "file_ingest";
-static const char *kPaAppendSourceUnknown = "unknown";
-static const char *kPaAppendSourceMixed = "mixed";
+// ==================== Append origin types ====================
+
+enum class PaLiveIngressSource { Mic, Append, AppendOffline, FileIngest };
+enum class PaLivePipelineWriter { Enhancement, Tts, Separation };
+enum class PaLiveAppendKind { Ingress, Pipeline, Mixed };
+
+inline const char *pa_live_ingress_wire(PaLiveIngressSource s) {
+  switch (s) {
+    case PaLiveIngressSource::Mic: return "mic";
+    case PaLiveIngressSource::Append: return "append";
+    case PaLiveIngressSource::AppendOffline: return "append_offline";
+    case PaLiveIngressSource::FileIngest: return "file_ingest";
+  }
+  return "mic";
+}
+
+inline const char *pa_live_pipeline_writer_wire(PaLivePipelineWriter w) {
+  switch (w) {
+    case PaLivePipelineWriter::Enhancement: return "enhancement";
+    case PaLivePipelineWriter::Tts: return "tts";
+    case PaLivePipelineWriter::Separation: return "separation";
+  }
+  return "enhancement";
+}
+
+inline const char *pa_live_append_kind_wire(PaLiveAppendKind k) {
+  switch (k) {
+    case PaLiveAppendKind::Ingress: return "ingress";
+    case PaLiveAppendKind::Pipeline: return "pipeline";
+    case PaLiveAppendKind::Mixed: return "mixed";
+  }
+  return "mixed";
+}
+
+struct PaLiveAppendOrigin {
+  enum class Tag { Ingress, Pipeline } tag;
+  // Named `source` (not `ingress`) to avoid clashing with static factory ingress().
+  PaLiveIngressSource source = PaLiveIngressSource::Mic;
+  PaLivePipelineWriter writer = PaLivePipelineWriter::Enhancement;
+
+  static PaLiveAppendOrigin ingress(PaLiveIngressSource s) {
+    PaLiveAppendOrigin o;
+    o.tag = Tag::Ingress;
+    o.source = s;
+    return o;
+  }
+
+  static PaLiveAppendOrigin pipeline(PaLivePipelineWriter w) {
+    PaLiveAppendOrigin o;
+    o.tag = Tag::Pipeline;
+    o.writer = w;
+    return o;
+  }
+
+  bool operator==(const PaLiveAppendOrigin &other) const {
+    if (tag != other.tag) return false;
+    if (tag == Tag::Ingress) return source == other.source;
+    return writer == other.writer;
+  }
+
+  bool operator!=(const PaLiveAppendOrigin &other) const { return !(*this == other); }
+};
+
+struct PaLiveFramesAppendedPayload {
+  PaLiveAppendKind appendKind = PaLiveAppendKind::Mixed;
+  PaLiveIngressSource ingressSource = PaLiveIngressSource::Mic;
+  PaLivePipelineWriter pipelineWriter = PaLivePipelineWriter::Enhancement;
+  int frameCount = 0;
+  int64_t totalSamplesWritten = 0;
+
+  static PaLiveFramesAppendedPayload fromOrigin(
+    const PaLiveAppendOrigin &origin,
+    int frameCount,
+    int64_t totalSamplesWritten
+  ) {
+    PaLiveFramesAppendedPayload payload;
+    payload.frameCount = frameCount;
+    payload.totalSamplesWritten = totalSamplesWritten;
+    if (origin.tag == PaLiveAppendOrigin::Tag::Ingress) {
+      payload.appendKind = PaLiveAppendKind::Ingress;
+      payload.ingressSource = origin.source;
+    } else {
+      payload.appendKind = PaLiveAppendKind::Pipeline;
+      payload.pipelineWriter = origin.writer;
+    }
+    return payload;
+  }
+
+  static PaLiveFramesAppendedPayload mixed(int frameCount, int64_t totalSamplesWritten) {
+    PaLiveFramesAppendedPayload payload;
+    payload.appendKind = PaLiveAppendKind::Mixed;
+    payload.frameCount = frameCount;
+    payload.totalSamplesWritten = totalSamplesWritten;
+    return payload;
+  }
+};
 
 // Segmentation engine hooks are implemented in segmentbuffer bridge.
 void seg_engine_on_audio_append(
@@ -132,11 +219,13 @@ struct PaLiveEntry {
   // Append events (JS callback)
   bool appendEventsEnabled = false;
   int appendEventMinIntervalMs = 0;
-  std::function<void(const std::string &, int, int64_t)> onFramesAppended;
+  std::function<void(const PaLiveFramesAppendedPayload &)> onFramesAppended;
   std::mutex appendEventMutex;
   uint64_t lastAppendEventAtMs = 0;
   int pendingFrames = 0;
-  std::string pendingSource;
+  bool pendingHasOrigin = false;
+  PaLiveAppendOrigin pendingOrigin{};
+  bool pendingIsMixed = false;
 
   // Token-based native append listener system for pipeline workers.
   struct NativeAppendListener {
@@ -182,7 +271,7 @@ struct PaLiveEntry {
               const std::string &spoolPathArg,
               bool emitAppendedEvents,
               int appendEventMinIntervalMsArg,
-              std::function<void(const std::string &, int, int64_t)> onFramesAppendedArg)
+              std::function<void(const PaLiveFramesAppendedPayload &)> onFramesAppendedArg)
     : bufferId(bid), sampleRate(sr), channelCount(ch) {
     appendEventsEnabled = emitAppendedEvents;
     appendEventMinIntervalMs = std::max(0, appendEventMinIntervalMsArg);
@@ -317,7 +406,7 @@ struct PaLiveEntry {
 #endif
 
   AppendResult tryAppendSamples(const float *data, size_t count, int inputRate,
-                                const std::string &source = kPaAppendSourceUnknown,
+                                PaLiveAppendOrigin origin,
                                 bool backpressure = false) {
     if (state != RECORDING) return AppendResult::BUFFER_FINALIZED;
     std::vector<float> resampled;
@@ -372,7 +461,7 @@ struct PaLiveEntry {
       spoolSamplesWritten += appendCount;
     }
 
-    dispatchFramesAppended(appendCount, source);
+    dispatchFramesAppended(appendCount, origin);
 
     // Notify native pipeline listeners (immediate, no throttling)
     notifyAppendListeners();
@@ -381,9 +470,9 @@ struct PaLiveEntry {
   }
 
   void appendSamples(const float *data, size_t count, int inputRate,
-                     const std::string &source = kPaAppendSourceUnknown,
+                     PaLiveAppendOrigin origin,
                      bool backpressure = false) {
-    auto result = tryAppendSamples(data, count, inputRate, source, backpressure);
+    auto result = tryAppendSamples(data, count, inputRate, origin, backpressure);
     if (result != AppendResult::APPENDED) {
       throw std::runtime_error("Cannot append to finalized LiveBuffer");
     }
@@ -400,75 +489,101 @@ struct PaLiveEntry {
     appendEventMinIntervalMs = std::max(0, minIntervalMs);
     if (!appendEventsEnabled) {
       pendingFrames = 0;
-      pendingSource.clear();
+      pendingHasOrigin = false;
+      pendingIsMixed = false;
     }
   }
 
-  void dispatchFramesAppended(size_t appendedCount, const std::string &source) {
+  void mergePendingOrigin(const PaLiveAppendOrigin &origin) {
+    if (pendingIsMixed) {
+      return;
+    }
+    if (!pendingHasOrigin) {
+      pendingOrigin = origin;
+      pendingHasOrigin = true;
+      return;
+    }
+    if (pendingOrigin == origin) {
+      return;
+    }
+    pendingIsMixed = true;
+    pendingHasOrigin = false;
+  }
+
+  PaLiveFramesAppendedPayload buildPendingPayloadLocked() {
+    if (pendingIsMixed) {
+      return PaLiveFramesAppendedPayload::mixed(pendingFrames, totalSamplesWritten);
+    }
+    if (!pendingHasOrigin) {
+      return PaLiveFramesAppendedPayload::mixed(pendingFrames, totalSamplesWritten);
+    }
+    return PaLiveFramesAppendedPayload::fromOrigin(
+      pendingOrigin,
+      pendingFrames,
+      totalSamplesWritten
+    );
+  }
+
+  void resetPendingAppendStateLocked() {
+    pendingFrames = 0;
+    pendingHasOrigin = false;
+    pendingIsMixed = false;
+  }
+
+  void dispatchFramesAppended(size_t appendedCount, PaLiveAppendOrigin origin) {
     if (!appendEventsEnabled || !onFramesAppended) return;
 
-    std::string sourceToEmit;
-    int frameCountToEmit = 0;
-    int64_t totalWrittenToEmit = 0;
+    PaLiveFramesAppendedPayload payload;
     bool shouldEmit = false;
 
     {
       std::lock_guard<std::mutex> lock(appendEventMutex);
       pendingFrames += (int)appendedCount;
-      if (pendingSource.empty()) {
-        pendingSource = source;
-      } else if (pendingSource != source) {
-        pendingSource = kPaAppendSourceMixed;
-      }
+      mergePendingOrigin(origin);
 
 #ifdef __OBJC__
       uint64_t nowMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
 #else
-      uint64_t nowMs = 0; // Fallback, not used in non-ObjC context
+      uint64_t nowMs = 0;
 #endif
       bool intervalReached = appendEventMinIntervalMs <= 0 ||
                              lastAppendEventAtMs == 0 ||
                              (nowMs - lastAppendEventAtMs) >= (uint64_t)appendEventMinIntervalMs;
 
       if (intervalReached && pendingFrames > 0) {
-        frameCountToEmit = pendingFrames;
-        sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
-        totalWrittenToEmit = totalSamplesWritten;
-        pendingFrames = 0;
-        pendingSource.clear();
+        payload = buildPendingPayloadLocked();
+        resetPendingAppendStateLocked();
         lastAppendEventAtMs = nowMs;
         shouldEmit = true;
       }
     }
 
     if (shouldEmit && onFramesAppended) {
-      onFramesAppended(sourceToEmit, frameCountToEmit, totalWrittenToEmit);
+      onFramesAppended(payload);
     }
   }
 
   void flushPendingFramesAppended() {
     if (!appendEventsEnabled || !onFramesAppended) return;
 
-    std::string sourceToEmit;
-    int frameCountToEmit = 0;
-    int64_t totalWrittenToEmit = 0;
+    PaLiveFramesAppendedPayload payload;
+    bool shouldEmit = false;
 
     {
       std::lock_guard<std::mutex> lock(appendEventMutex);
       if (pendingFrames <= 0) return;
 
-      frameCountToEmit = pendingFrames;
-      sourceToEmit = pendingSource.empty() ? kPaAppendSourceUnknown : pendingSource;
-      totalWrittenToEmit = totalSamplesWritten;
-
-      pendingFrames = 0;
-      pendingSource.clear();
+      payload = buildPendingPayloadLocked();
+      resetPendingAppendStateLocked();
 #ifdef __OBJC__
       lastAppendEventAtMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
 #endif
+      shouldEmit = true;
     }
 
-    onFramesAppended(sourceToEmit, frameCountToEmit, totalWrittenToEmit);
+    if (shouldEmit) {
+      onFramesAppended(payload);
+    }
   }
 
   void finalize_() {
