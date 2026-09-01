@@ -760,6 +760,9 @@ def sherpaLocalJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-
 def sherpaExtractedJar = file("${project.buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
 
 project.tasks.register("extractSherpaOnnxClasses") {
+  // Pin change (ANDROID_RELEASE_TAG / SHERPA_ONNX_VERSION) must re-extract classes.jar,
+  // not only a different AAR file identity in the Gradle cache.
+  inputs.property("sherpaOnnxVersion", project.ext.sherpaOnnxVersion)
   outputs.dir sherpaOnnxClassesDir
   inputs.files(project.configurations.sherpaOnnxAar)
   if (sherpaLocalJar.exists()) inputs.file(sherpaLocalJar)
@@ -795,6 +798,8 @@ project.tasks.register("extractSherpaOnnxClasses") {
 // Extract classes.jar from the onnxruntime AAR so ai.onnxruntime.* Java classes
 // are bundled directly in the SDK. No compileOnly needed; users get it for free.
 project.tasks.register("extractOnnxruntimeClasses") {
+  // Pin change (ANDROID_RELEASE_TAG / ORT_VERSION) must re-extract classes.jar.
+  inputs.property("ortVersion", project.ext.ortVersion)
   outputs.dir onnxruntimeClassesDir
   inputs.files(project.configurations.onnxruntimeAar)
   doLast {
