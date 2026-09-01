@@ -1,0 +1,78 @@
+# Reusable collect + commit job. All collect workflows share one concurrency group per ref so
+# parallel workflow_dispatch runs queue instead of racing on git push.
+#
+# Call with a single --config or --manifest (collect-all) via the config input.
+
+name: Reusable - Collect model structures
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: 'Stream config JSON basename under scripts/ci/, or "manifest" for all streams'
+        required: true
+        type: string
+      commit_message:
+        description: 'Git commit message when files change'
+        required: true
+        type: string
+      asset_limit:
+        description: 'Max assets per stream (0 = no limit)'
+        required: false
+        default: 0
+        type: number
+
+concurrency:
+  group: collect-model-structures-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Collect release streams
+        env:
+          ASSET_LIMIT: ${{ inputs.asset_limit }}
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ci/collect_all_sherpa_model_streams.sh \
+            scripts/ci/collect_one_sherpa_release_stream.sh \
+            scripts/ci/git_commit_collect_changes.sh
+
+          if [[ "${{ inputs.config }}" == "manifest" ]]; then
+            mapfile -t configs < <(jq -r '.configs[]' scripts/ci/sherpa_model_collect_manifest.json)
+            for cfg in "${configs[@]}"; do
+              echo "=== Collecting $cfg ==="
+              bash scripts/ci/collect_all_sherpa_model_streams.sh --config "$cfg"
+            done
+          else
+            bash scripts/ci/collect_all_sherpa_model_streams.sh --config "${{ inputs.config }}"
+          fi
+
+      - name: Commit and push if changed
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          args=(--message "${{ inputs.commit_message }}")
+          if [[ "${{ inputs.config }}" == "manifest" ]]; then
+            args+=(--manifest scripts/ci/sherpa_model_collect_manifest.json)
+          else
+            args+=(--config "${{ inputs.config }}")
+          fi
+          bash scripts/ci/git_commit_collect_changes.sh "${args[@]}"

@@ -1,8 +1,6 @@
 # Collect ASR-related model archive structures from k2-fsa/sherpa-onnx GitHub releases.
 # Streams are defined in scripts/ci/sherpa_asr_model_release_streams.json (tag, tree-cache, fixtures, license CSV).
-# For each stream: list .tar.bz2 / .onnx assets, tar -tjf (no full extract), aggregate structure + expected CSV.
-# Skip policy: stored "# updated_at:" in *-structure.txt must match the GitHub asset (see collect_one_sherpa_release_stream.sh).
-# then optional scripts/ci/update_model_license_csv.sh (see script header for skip rules).
+# For bulk refresh prefer: Testdata - Collect all model structures (single commit, no push races).
 #
 # To add another release: append an object to "streams" in scripts/ci/sherpa_asr_model_release_streams.json.
 
@@ -17,49 +15,11 @@ on:
         default: 0
         type: number
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   collect:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Collect all configured release streams
-        env:
-          ASSET_LIMIT: ${{ inputs.asset_limit }}
-          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
-        run: |
-          set -euo pipefail
-          chmod +x scripts/ci/collect_all_sherpa_model_streams.sh scripts/ci/collect_one_sherpa_release_stream.sh
-          bash scripts/ci/collect_all_sherpa_model_streams.sh --config sherpa_asr_model_release_streams.json
-
-      - name: Commit and push if changed
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          while IFS= read -r f; do
-            [[ -z "$f" ]] && continue
-            git add "$f"
-          done < <(bash scripts/ci/collect_all_sherpa_model_streams.sh --config sherpa_asr_model_release_streams.json --print-git-paths)
-          git status --short
-          if ! git diff --staged --quiet; then
-            git commit -m "chore(stt_testdata): update ASR/QNN model structures, expected CSVs, and license status from sherpa-onnx releases"
-            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref_name }}
-          else
-            echo "No changes to commit."
-          fi
+    uses: ./.github/workflows/collect-model-structures-reusable.yml
+    secrets: inherit
+    with:
+      config: sherpa_asr_model_release_streams.json
+      asset_limit: ${{ inputs.asset_limit }}
+      commit_message: 'chore(stt_testdata): update ASR/QNN model structures, expected CSVs, and license status from sherpa-onnx releases'

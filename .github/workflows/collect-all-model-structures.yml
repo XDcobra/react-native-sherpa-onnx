@@ -1,0 +1,23 @@
+# Collect all configured sherpa-onnx model streams in one run (recommended for bulk refresh).
+# Runs configs from scripts/ci/sherpa_model_collect_manifest.json sequentially and creates
+# a single commit. Shares concurrency with per-stream workflows — only one collect runs per ref.
+
+name: Testdata - Collect all model structures
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_limit:
+        description: 'Max number of assets to process per stream (0 or empty = no limit)'
+        required: false
+        default: 0
+        type: number
+
+jobs:
+  collect-all:
+    uses: ./.github/workflows/collect-model-structures-reusable.yml
+    secrets: inherit
+    with:
+      config: manifest
+      asset_limit: ${{ inputs.asset_limit }}
+      commit_message: 'chore(testdata): update all model structures, expected CSVs, and license status from sherpa-onnx releases'
