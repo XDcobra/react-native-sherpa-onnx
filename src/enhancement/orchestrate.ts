@@ -46,7 +46,6 @@ export async function runOfflineEnhancementPipeline(
       errorRecovery: options.errorRecovery,
       maxRetriesPerSegment: options.maxRetriesPerSegment,
       retryExhaustedFallback: options.retryExhaustedFallback,
-      abortSignal: options.abortSignal,
       onProgress: options.onProgress,
       overlapSamples: options.overlapSamples,
     }

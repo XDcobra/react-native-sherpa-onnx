@@ -273,14 +273,13 @@ export interface SttTranscribeOptions {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: 'abort' | 'skip';
-  abortSignal?: AbortSignal;
   onProgress?: (progress: OrchestrationProgress) => void;
   linkMap?: SegmentLinkMapRef;
   textSkipPlaceholder?: string;
 }
 
 export interface SttTranscribeResult {
-  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  status: 'complete' | 'partial' | 'failed';
   totalSegments: number;
   completedSegments: number;
   skippedSegments: SkippedSegmentInfo[];

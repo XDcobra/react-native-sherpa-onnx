@@ -72,7 +72,6 @@ export interface OrchestrationConfig {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: RetryExhaustedFallback;
-  abortSignal?: AbortSignal;
   onProgress?: (progress: OrchestrationProgress) => void;
   overlapSamples?: number;
   overlapChars?: number;
@@ -82,7 +81,7 @@ export interface OrchestrationConfig {
 
 export interface OrchestrationResult<TOutput> {
   outputBuffer?: TOutput;
-  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  status: 'complete' | 'partial' | 'failed';
   totalSegments: number;
   completedSegments: number;
   skippedSegments: SkippedSegmentInfo[];
@@ -121,8 +120,7 @@ type SessionState =
   | 'recovering'
   | 'completing'
   | 'done'
-  | 'failed'
-  | 'cancelled';
+  | 'failed';
 
 let sessionCounter = 0;
 
@@ -187,22 +185,13 @@ class OrchestrationSession {
   }
 
   markCompleting(): void {
-    if (
-      this._state === 'running' ||
-      this._state === 'recovering' ||
-      this._state === 'cancelled'
-    ) {
+    if (this._state === 'running' || this._state === 'recovering') {
       this._state = 'completing';
     }
   }
 
   markDone(): void {
     this._state = 'done';
-  }
-
-  cancel(): void {
-    if (this.isTerminal()) return;
-    this._state = 'cancelled';
   }
 
   fail(failed: FailedSegmentInfo): void {
@@ -223,11 +212,7 @@ class OrchestrationSession {
   }
 
   isTerminal(): boolean {
-    return (
-      this._state === 'done' ||
-      this._state === 'failed' ||
-      this._state === 'cancelled'
-    );
+    return this._state === 'done' || this._state === 'failed';
   }
 
   private assertState(expected: SessionState): void {
@@ -254,14 +239,6 @@ function normalizeRetryFallback(
   value: RetryExhaustedFallback | undefined
 ): RetryExhaustedFallback {
   return value === 'skip' ? 'skip' : 'abort';
-}
-
-function isAbortRequested(signal?: AbortSignal): boolean {
-  return signal?.aborted === true;
-}
-
-function shouldReturnPartialOnCancel(strategy: ErrorRecoveryStrategy): boolean {
-  return strategy === 'skip' || strategy === 'partial_result';
 }
 
 function formatError(err: unknown): string {
@@ -667,21 +644,11 @@ async function runOfflineAudioSegmentLoop(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      if (isAbortRequested(config.abortSignal)) {
-        session.cancel();
-        break;
-      }
-
       reportProgress(session, config, i, totalSegments, seg.durationMs ?? 0);
 
       let attempts = 0;
       let completed = false;
       while (!completed) {
-        if (isAbortRequested(config.abortSignal)) {
-          session.cancel();
-          break;
-        }
-
         let tempIn: OfflineAudioBufferRef | undefined;
         let tempOuts: OfflineAudioBufferRef[] | undefined;
         try {
@@ -783,9 +750,6 @@ async function runOfflineAudioSegmentLoop(
       if (session.state === 'failed') {
         break;
       }
-      if (session.state === 'cancelled') {
-        break;
-      }
       if (session.state === 'completing') {
         break;
       }
@@ -799,40 +763,6 @@ async function runOfflineAudioSegmentLoop(
       await releaseLiveAudioAccumulators(accumulators);
       return {
         status: 'failed',
-        totalSegments: segments.length,
-        completedSegments: session.completedSegments,
-        skippedSegments: session.skippedSegments,
-        ...(session.failedSegment
-          ? { failedSegment: session.failedSegment }
-          : {}),
-        processingTimeMs: Date.now() - session.startedAtMs,
-        linkMap: config.linkMap,
-      };
-    }
-
-    if (session.state === 'cancelled') {
-      if (!shouldReturnPartialOnCancel(strategy)) {
-        await releaseLiveAudioAccumulators(accumulators);
-        return {
-          status: 'cancelled',
-          totalSegments: segments.length,
-          completedSegments: session.completedSegments,
-          skippedSegments: session.skippedSegments,
-          processingTimeMs: Date.now() - session.startedAtMs,
-          linkMap: config.linkMap,
-        };
-      }
-
-      session.markCompleting();
-      const outputBuffer = await finalizeAudioAccumulators(
-        accumulators,
-        inputInfo.sampleRate,
-        totalSamplesAppended
-      );
-      session.markDone();
-      return {
-        outputBuffer,
-        status: 'cancelled',
         totalSegments: segments.length,
         completedSegments: session.completedSegments,
         skippedSegments: session.skippedSegments,
@@ -989,11 +919,6 @@ export async function runOfflineTextPipeline(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      if (isAbortRequested(config.abortSignal)) {
-        session.cancel();
-        break;
-      }
-
       const segLength = Math.max(0, seg.endOffset - seg.startOffset);
       const segDurationMs = segLength;
       reportProgress(session, config, i, totalSegments, segDurationMs);
@@ -1001,11 +926,6 @@ export async function runOfflineTextPipeline(
       let attempts = 0;
       let completed = false;
       while (!completed) {
-        if (isAbortRequested(config.abortSignal)) {
-          session.cancel();
-          break;
-        }
-
         let tempIn: OfflineTextBufferRef | undefined;
         let tempOut: OfflineTextBufferRef | undefined;
         try {
@@ -1089,9 +1009,6 @@ export async function runOfflineTextPipeline(
       if (session.state === 'failed') {
         break;
       }
-      if (session.state === 'cancelled') {
-        break;
-      }
       if (session.state === 'completing') {
         break;
       }
@@ -1111,32 +1028,14 @@ export async function runOfflineTextPipeline(
       };
     }
 
-    if (
-      session.state === 'cancelled' &&
-      !shouldReturnPartialOnCancel(strategy)
-    ) {
-      return {
-        status: 'cancelled',
-        totalSegments: segments.length,
-        completedSegments: session.completedSegments,
-        skippedSegments: session.skippedSegments,
-        processingTimeMs: Date.now() - session.startedAtMs,
-        linkMap: config.linkMap,
-      };
-    }
-
-    const wasCancelled = session.state === 'cancelled';
     session.markCompleting();
     const finalText = chunks.join('');
     const outputBuffer =
       finalText.length > 0
         ? await createOfflineTextBufferFromText(finalText)
         : await createEmptyOfflineTextBuffer();
-    const status: 'complete' | 'partial' | 'cancelled' = wasCancelled
-      ? 'cancelled'
-      : session.failedSegment != null
-      ? 'partial'
-      : 'complete';
+    const status: 'complete' | 'partial' =
+      session.failedSegment != null ? 'partial' : 'complete';
 
     session.markDone();
     return {
@@ -1283,22 +1182,12 @@ export async function runOfflineTextToAudioPipeline(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      if (isAbortRequested(config.abortSignal)) {
-        session.cancel();
-        break;
-      }
-
       const segLength = Math.max(0, seg.endOffset - seg.startOffset);
       reportProgress(session, config, i, totalSegments, segLength);
 
       let attempts = 0;
       let completed = false;
       while (!completed) {
-        if (isAbortRequested(config.abortSignal)) {
-          session.cancel();
-          break;
-        }
-
         let tempIn: OfflineTextBufferRef | undefined;
         let tempOut: OfflineAudioBufferRef | undefined;
         try {
@@ -1408,9 +1297,6 @@ export async function runOfflineTextToAudioPipeline(
       if (session.state === 'failed') {
         break;
       }
-      if (session.state === 'cancelled') {
-        break;
-      }
       if (session.state === 'completing') {
         break;
       }
@@ -1424,42 +1310,6 @@ export async function runOfflineTextToAudioPipeline(
       await releasePipelineAudioBuffer(accumulator.bufferId);
       return {
         status: 'failed',
-        totalSegments: segments.length,
-        completedSegments: session.completedSegments,
-        skippedSegments: session.skippedSegments,
-        ...(session.failedSegment
-          ? { failedSegment: session.failedSegment }
-          : {}),
-        processingTimeMs: Date.now() - session.startedAtMs,
-        linkMap: config.linkMap,
-        segmentMappings,
-      };
-    }
-
-    if (session.state === 'cancelled') {
-      if (!shouldReturnPartialOnCancel(strategy)) {
-        await releasePipelineAudioBuffer(accumulator.bufferId);
-        return {
-          status: 'cancelled',
-          totalSegments: segments.length,
-          completedSegments: session.completedSegments,
-          skippedSegments: session.skippedSegments,
-          processingTimeMs: Date.now() - session.startedAtMs,
-          linkMap: config.linkMap,
-          segmentMappings,
-        };
-      }
-
-      session.markCompleting();
-      const outputBuffer = await finalizeAudioAccumulator(
-        accumulator,
-        sampleRate,
-        totalSamplesAppended
-      );
-      session.markDone();
-      return {
-        outputBuffer,
-        status: 'cancelled',
         totalSegments: segments.length,
         completedSegments: session.completedSegments,
         skippedSegments: session.skippedSegments,
@@ -1571,21 +1421,11 @@ export async function runOfflineAudioToTextPipeline(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      if (isAbortRequested(config.abortSignal)) {
-        session.cancel();
-        break;
-      }
-
       reportProgress(session, config, i, totalSegments, seg.durationMs ?? 0);
 
       let attempts = 0;
       let completed = false;
       while (!completed) {
-        if (isAbortRequested(config.abortSignal)) {
-          session.cancel();
-          break;
-        }
-
         let tempIn: OfflineAudioBufferRef | undefined;
         let tempOut: OfflineTextBufferRef | undefined;
         try {
@@ -1689,9 +1529,6 @@ export async function runOfflineAudioToTextPipeline(
       if (session.state === 'failed') {
         break;
       }
-      if (session.state === 'cancelled') {
-        break;
-      }
       if (session.state === 'completing') {
         break;
       }
@@ -1712,33 +1549,14 @@ export async function runOfflineAudioToTextPipeline(
       };
     }
 
-    if (
-      session.state === 'cancelled' &&
-      !shouldReturnPartialOnCancel(strategy)
-    ) {
-      return {
-        status: 'cancelled',
-        totalSegments: segments.length,
-        completedSegments: session.completedSegments,
-        skippedSegments: session.skippedSegments,
-        processingTimeMs: Date.now() - session.startedAtMs,
-        linkMap: config.linkMap,
-        segmentMappings,
-      };
-    }
-
-    const wasCancelled = session.state === 'cancelled';
     session.markCompleting();
     const finalText = chunks.join('');
     const outputBuffer =
       finalText.length > 0
         ? await createOfflineTextBufferFromText(finalText)
         : await createEmptyOfflineTextBuffer();
-    const status: 'complete' | 'partial' | 'cancelled' = wasCancelled
-      ? 'cancelled'
-      : session.failedSegment != null
-      ? 'partial'
-      : 'complete';
+    const status: 'complete' | 'partial' =
+      session.failedSegment != null ? 'partial' : 'complete';
 
     session.markDone();
     return {

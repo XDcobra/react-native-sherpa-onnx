@@ -49,7 +49,6 @@ export async function runOfflinePunctuationPipeline(
       errorRecovery: options.errorRecovery,
       maxRetriesPerSegment: options.maxRetriesPerSegment,
       retryExhaustedFallback: options.retryExhaustedFallback,
-      abortSignal: options.abortSignal,
       onProgress: options.onProgress,
       overlapChars: options.overlapChars,
       textSkipPlaceholder: options.textSkipPlaceholder,
