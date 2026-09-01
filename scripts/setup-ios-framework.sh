@@ -103,9 +103,9 @@ get_framework_config() {
       XCFRAMEWORK_NAME="sherpa_onnx.xcframework"
       ZIP_ASSET_NAME="sherpa_onnx.xcframework.zip"
       VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-sherpa-onnx"
-      LIB_DEVICE="libsherpa-onnx.a"
-      LIB_SIMULATOR="libsherpa-onnx.a"
-      HEADER_CHECK="Headers/sherpa-onnx/c-api/cxx-api.h"
+      LIB_DEVICE="SherpaOnnxC.framework/SherpaOnnxC"
+      LIB_SIMULATOR="SherpaOnnxC.framework/SherpaOnnxC"
+      HEADER_CHECK="SherpaOnnxC.framework/Headers/sherpa-onnx/c-api/cxx-api.h"
       DISPLAY_NAME="SherpaOnnx"
       ;;
     ffmpeg)
