@@ -1,7 +1,7 @@
 # Native offline inference cancellation (future work)
 
 **Status:** Clean cut completed (2026-08) — orchestrator-level “fake” cancel removed. **Blocked on sherpa-onnx upstream** for mid-inference native cancel before a central SDK layer can ship.  
-**Related (done):** [Cancel clean cut plan](../../.cursor/plans/cancel_clean_cut_bc779d12.plan.md) (SDK + example app + VoiceLab).  
+**Related (done):** [Cancel clean cut (internal)](../internal/cancel-clean-cut.md) — SDK, example app, and VoiceLab.  
 **Archival context:** Pre-removal API design lives in `docs/migration/**` (orchestrator ADRs, segmentation transfer plans). Those records are **historical**; current user-facing docs no longer mention offline `abortSignal` or `'cancelled'` result status.
 
 ---
@@ -206,7 +206,7 @@ When native offline cancel ships:
 
 ## 9. Related documents
 
-- [Cancel clean cut plan (completed)](../../.cursor/plans/cancel_clean_cut_bc779d12.plan.md)
+- [Cancel clean cut (completed, internal)](../internal/cancel-clean-cut.md)
 - [Streaming pipelines overview](../streaming-pipelines-overview.md) — live `stop()` semantics (unchanged)
 - [Audiobuffer streaming](../audiobuffer-streaming.md) — decode cancel (`DECODE_CANCELLED`)
 - Migration (historical): `docs/migration/segmentationEngine/sub-04-transfer-offline-orchestration.md`, `docs/migration/OrchestrationProgressVADAli/ADR-002-vad-offline-segmentation-progress-strategy.md`
