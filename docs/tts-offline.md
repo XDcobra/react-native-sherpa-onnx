@@ -482,7 +482,7 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone?, segmentation?, errorRecovery?, maxRetriesPerSegment?, retryExhaustedFallback?, abortSignal?, onProgress?, overlapChars?, textSkipPlaceholder?, linkMap? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set; `segmentation` fields: `mode?` and `policy?` |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone?, segmentation?, errorRecovery?, maxRetriesPerSegment?, retryExhaustedFallback?, onProgress?, overlapChars?, textSkipPlaceholder?, linkMap? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set; `segmentation` fields: `mode?` and `policy?` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
 | `TtsVoiceCloneZipvoice` | `{ kind: 'zipvoice'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText: string }` |
 | `TtsVoiceClonePocket` | `{ kind: 'pocket'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText?: string }` |
