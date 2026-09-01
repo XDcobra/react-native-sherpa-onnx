@@ -57,9 +57,15 @@ if [[ -n "$MANIFEST" ]]; then
     echo "jq is required when using --manifest" >&2
     exit 1
   fi
-  while IFS= read -r cfg; do
-    [[ -n "$cfg" ]] && CONFIGS+=("$cfg")
-  done < <(jq -r '.configs[]' "$MANIFEST")
+  if jq -e '.streams' "$MANIFEST" >/dev/null 2>&1; then
+    while IFS= read -r cfg; do
+      [[ -n "$cfg" ]] && CONFIGS+=("$cfg")
+    done < <(jq -r '.streams[].config' "$MANIFEST")
+  else
+    while IFS= read -r cfg; do
+      [[ -n "$cfg" ]] && CONFIGS+=("$cfg")
+    done < <(jq -r '.configs[]' "$MANIFEST")
+  fi
 fi
 
 if [[ ${#CONFIGS[@]} -eq 0 ]]; then

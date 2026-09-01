@@ -6,7 +6,7 @@
  * (e.g. from k2-fsa/sherpa-onnx asr-models and tts-models releases).
  *
  * Fixtures (ASR):
- *   - asr-models-structure.txt, asr-models-expected.csv (see collect-asr-model-structures workflow).
+ *   - asr-models-structure.txt, asr-models-expected.csv (see collect-model-structures workflow).
  * Fixtures (TTS):
  *   - tts-models-structure.txt, tts-models-expected.csv (see collect-tts-model-structures workflow).
  * Fixtures (speech enhancement):
