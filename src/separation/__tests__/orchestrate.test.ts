@@ -77,8 +77,6 @@ describe('runOfflineSeparationPipeline', () => {
   });
 
   it('passes recovery and overlap options through to orchestration', async () => {
-    const abortController = new AbortController();
-
     await runOfflineSeparationPipeline(
       'off_input',
       'sep_1',
@@ -94,7 +92,6 @@ describe('runOfflineSeparationPipeline', () => {
         errorRecovery: 'retry',
         maxRetriesPerSegment: 2,
         retryExhaustedFallback: 'skip',
-        abortSignal: abortController.signal,
         onProgress: jest.fn(),
         overlapSamples: 441,
       }
@@ -108,7 +105,6 @@ describe('runOfflineSeparationPipeline', () => {
         errorRecovery: 'retry',
         maxRetriesPerSegment: 2,
         retryExhaustedFallback: 'skip',
-        abortSignal: abortController.signal,
         onProgress: expect.any(Function),
         overlapSamples: 441,
       })
