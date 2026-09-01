@@ -135,6 +135,29 @@ resolve_onnx_static_lib() {
   fi
 }
 
+# Upstream build-ios.sh lipos most simulator archives into build/simulator/lib/ but
+# excludes libsherpa-onnx-cxx-api.a (only built per simulator slice). Create it here.
+resolve_cxx_api_lib() {
+  local build_dir="$1"
+  local lib="${build_dir}/lib/libsherpa-onnx-cxx-api.a"
+  if [ -f "$lib" ]; then
+    echo "$lib"
+    return 0
+  fi
+  if [ "$build_dir" = "build/simulator" ]; then
+    local arm64="build/simulator_arm64/lib/libsherpa-onnx-cxx-api.a"
+    local x86="build/simulator_x86_64/lib/libsherpa-onnx-cxx-api.a"
+    if [ -f "$arm64" ] && [ -f "$x86" ]; then
+      mkdir -p build/simulator/lib
+      lipo -create "$arm64" "$x86" -output "$lib"
+      echo "$lib"
+      return 0
+    fi
+  fi
+  echo ""
+  return 1
+}
+
 echo "===== Merging cxx-api + ONNX Runtime into SherpaOnnxC.framework ====="
 cd "$BUILD_IOS_DIR"
 
@@ -142,18 +165,19 @@ merge_slice() {
   local slice="$1"
   local build_dir="$2"
   local sherpa_bin="$FRAMEWORK_NAME/$slice/SherpaOnnxC.framework/SherpaOnnxC"
-  local cxx_api_lib="$build_dir/lib/libsherpa-onnx-cxx-api.a"
+  local cxx_api_lib
   local onnx_lib
   local hdr_dir="$FRAMEWORK_NAME/$slice/SherpaOnnxC.framework/Headers/sherpa-onnx/c-api"
 
+  cxx_api_lib="$(resolve_cxx_api_lib "$build_dir")"
   onnx_lib="$(resolve_onnx_static_lib "$ONNXRUNTIME_DIR" "$slice")"
 
   if [ ! -f "$sherpa_bin" ]; then
     echo "Error: SherpaOnnxC binary not found: $sherpa_bin" >&2
     exit 1
   fi
-  if [ ! -f "$cxx_api_lib" ]; then
-    echo "Error: cxx-api archive not found: $cxx_api_lib" >&2
+  if [ -z "$cxx_api_lib" ] || [ ! -f "$cxx_api_lib" ]; then
+    echo "Error: cxx-api archive not found for $build_dir (expected under ${build_dir}/lib/ or simulator_arm64+x86_64 slices)" >&2
     exit 1
   fi
   if [ -z "$onnx_lib" ] || [ ! -f "$onnx_lib" ]; then
