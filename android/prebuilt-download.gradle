@@ -431,7 +431,17 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // C API headers (onnxruntime_c_api.h) for native CTC alignment: copy from AAR
     // headers/onnxruntime or include/onnxruntime (and per-ABI <abi>/headers/...) into
     // src/main/cpp/include/onnxruntime so CMake can use them without third_party/onnxruntime.
+    //
+    // LOCAL_SDK skip requires stamp + matched .so pair + headers. Skipping on files
+    // alone would keep a stale ORT (e.g. 1.27 vs 1.28) and break sherpa-onnx-jni
+    // (OrtGetApiBase versioned symbols).
     // =====================================================================
+    def currentOrtVersion = project.ext.ortVersion
+    def ortVersionFile = new File(downloadDir, "onnxruntime-version.txt")
+    def storedOrtVersion = (ortVersionFile.exists() ? ortVersionFile.text.trim() : null)
+    def ortNeedsUpdate = !hasAllOnnxruntimeBundleLibs() || !hasOnnxruntimeHeaders() ||
+        storedOrtVersion == null || storedOrtVersion != currentOrtVersion
+
     def ortOnnxHeadersDest = file("${project.projectDir}/src/main/cpp/include/onnxruntime")
     def copyOrtHeadersFromOnnxruntimeSubdir = { File onnxruntimeDir, String source, String detail ->
       if (onnxruntimeDir == null || !onnxruntimeDir.isDirectory()) return false
@@ -458,7 +468,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     def ortMatchedPairCopied = false
-    if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
+    if (!ortNeedsUpdate) {
+      logPrebuilt("onnxruntime", "native", "LOCAL_SDK", currentOrtVersion)
+    } else if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
       requiredAbis.each { abi ->
         copy {
           from new File(thirdPartyOrtDir, "jni/${abi}")
@@ -467,10 +479,12 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         }
       }
       ortMatchedPairCopied = true
-      logPrebuilt("onnxruntime", "native", "THIRD_PARTY", project.ext.ortVersion)
+      logPrebuilt("onnxruntime", "native", "THIRD_PARTY", currentOrtVersion)
       copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY")
+      downloadDir.mkdirs()
+      ortVersionFile.text = currentOrtVersion
     }
-    if (!ortMatchedPairCopied) {
+    if (ortNeedsUpdate && !ortMatchedPairCopied) {
       try {
         def aarFiles = project.configurations.onnxruntimeAar.files
         if (!aarFiles.isEmpty()) {
@@ -493,12 +507,13 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           ortMatchedPairCopied = true
           logPrebuilt("onnxruntime", "native", "MAVEN_AAR", aar.name)
           copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR")
+          ortVersionFile.text = currentOrtVersion
         }
       } catch (Exception e) {
         println "[onnxruntime] MAVEN_AAR matched-pair copy failed: ${e.message}"
       }
     }
-    if (!ortMatchedPairCopied && !hasAllOnnxruntimeBundleLibs()) {
+    if (ortNeedsUpdate && !ortMatchedPairCopied && !hasAllOnnxruntimeBundleLibs()) {
       // Legacy: third_party with JNI only (incomplete bundle)
       def tpJniOnly = hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeJniSoFiles)
       if (tpJniOnly) {
