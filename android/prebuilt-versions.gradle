@@ -14,6 +14,15 @@ def readVersionFromTagFile(File tagFile, String prefix) {
 // Module root: parent of android/ (so tag files resolve when SDK is used as dependency, e.g. node_modules/react-native-sherpa-onnx).
 def moduleRoot = project.projectDir.parentFile
 
+def sdkVersion = 'unknown'
+def packageJson = new File(moduleRoot, 'package.json')
+if (packageJson.exists()) {
+  def parsed = new groovy.json.JsonSlurper().parse(packageJson)
+  if (parsed.version) sdkVersion = parsed.version.toString()
+}
+project.ext.sdkVersion = sdkVersion
+println "[react-native-sherpa-onnx] SDK version: ${sdkVersion}"
+
 // sherpa-onnx: 1. SHERPA_ONNX_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def sherpaOnnxVersion = System.getenv('SHERPA_ONNX_VERSION')
 if (!sherpaOnnxVersion) {
