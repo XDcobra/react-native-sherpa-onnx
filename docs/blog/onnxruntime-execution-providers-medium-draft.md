@@ -275,7 +275,7 @@ Der wichtigste technische Punkt ist aber ueberall derselbe: Der EP entscheidet n
 
 Die hier beschriebenen Execution Providers lassen sich in der Praxis in unserer VoiceLab-App nutzen. Je nach Device und Plattform kann die App den passenden Provider waehlen und so je nach Hardware unterschiedliche Beschleuniger nutzen.
 
-[Play Store Link](https://example.com/play-store) | [App Store Link](https://example.com/app-store)
+[Google Play](https://play.google.com/store/apps/details?id=com.xdcobra.voicelab) · [App Store](https://apps.apple.com/app/id6761100598) · [Landing page](https://xdcobra.github.io/voice-lab-offline-tools/)
 
 ## Quellen
 

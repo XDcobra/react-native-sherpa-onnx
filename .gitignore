@@ -58,6 +58,7 @@ android-codegen-out/
 .sora/
 .agents/
 .x/
+skills-lock.json
 
 # CMake build artifacts
 CMakeCache.txt
@@ -282,3 +283,6 @@ plugins/
 
 # Model structure collection (scripts/ci/collect_*; CI uses ephemeral dirs)
 tree-cache/
+
+# Blog posts
+docs/blog/
