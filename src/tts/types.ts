@@ -440,7 +440,6 @@ export type TtsSynthesisOptions = {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: RetryExhaustedFallback;
-  abortSignal?: AbortSignal;
   onProgress?: (progress: OrchestrationProgress) => void;
   overlapChars?: number;
   textSkipPlaceholder?: string;
@@ -448,7 +447,7 @@ export type TtsSynthesisOptions = {
 };
 
 export interface TtsSynthesisResult {
-  status: 'complete' | 'partial' | 'failed' | 'cancelled';
+  status: 'complete' | 'partial' | 'failed';
   totalSegments: number;
   completedSegments: number;
   skippedSegments: SkippedSegmentInfo[];

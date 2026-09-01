@@ -63,10 +63,6 @@ interface VadProgressSession {
   ): void;
 }
 
-function isAbortRequested(signal?: AbortSignal): boolean {
-  return signal?.aborted === true;
-}
-
 function createVadProgressSession(
   onProgress: ((progress: OrchestrationProgress) => void) | undefined,
   startedAtMs: number = Date.now()
@@ -454,14 +450,6 @@ export async function createStreamingVAD(
             { code: 'SEGMENTATION_POLICY_INVALID' }
           );
         }
-        if (isAbortRequested(offlineOptions.abortSignal)) {
-          throw Object.assign(
-            new Error(
-              'VAD_ABORTED: offline VAD segmentation run was aborted before processing'
-            ),
-            { code: 'VAD_ABORTED' }
-          );
-        }
         const speechSegments = await collectSpeechSegmentsForOfflineAudio(
           audioInBufferId,
           segmentationPolicy
@@ -502,14 +490,6 @@ export async function createStreamingVAD(
             segmentIndex,
             speechSegment,
           ] of speechSegments.entries()) {
-            if (isAbortRequested(offlineOptions.abortSignal)) {
-              throw Object.assign(
-                new Error(
-                  `VAD_ABORTED: offline VAD segmentation run aborted before segment ${segmentIndex}`
-                ),
-                { code: 'VAD_ABORTED' }
-              );
-            }
             const startSample = Math.max(
               0,
               Math.trunc(speechSegment.startOffset)

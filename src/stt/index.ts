@@ -458,7 +458,6 @@ export async function createSTT(
           errorRecovery: batchOptions?.errorRecovery,
           maxRetriesPerSegment: batchOptions?.maxRetriesPerSegment,
           retryExhaustedFallback: batchOptions?.retryExhaustedFallback,
-          abortSignal: batchOptions?.abortSignal,
           onProgress: batchOptions?.onProgress,
           textSkipPlaceholder: batchOptions?.textSkipPlaceholder,
           linkMap: batchOptions?.linkMap,

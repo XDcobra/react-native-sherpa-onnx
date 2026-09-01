@@ -123,7 +123,6 @@ export default function OfflinePipelineShowcaseScreen() {
   const ttsEngineRef = useRef<TtsEngine | null>(null);
   const outputAudioRef = useRef<OfflineAudioBufferRef | null>(null);
   const playerRef = useRef<PcmPlayer | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   // ── load model lists ──────────────────────────────────────────────────────────
   const loadModels = useCallback(async () => {
@@ -366,10 +365,6 @@ export default function OfflinePipelineShowcaseScreen() {
     if (!audioInfo || !selectedSttModel || !selectedTtsModel) return;
     if (runState === 'running') return;
 
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
-
     setRunState('running');
     setError(null);
     setTranscript(null);
@@ -408,8 +403,6 @@ export default function OfflinePipelineShowcaseScreen() {
       ttsEngineRef.current = ttsEngine;
       const ttsSampleRate = await ttsEngine.getSampleRate();
 
-      if (abort.signal.aborted) return;
-
       // ─── STT phase ──────────────────────────────────────────────────────────
       setStatusText('Running STT…');
       textBufferRef = await createEmptyOfflineTextBuffer();
@@ -419,7 +412,6 @@ export default function OfflinePipelineShowcaseScreen() {
 
       await sttEngine.transcribe(audioInfo.bufferId, textBufferRef.bufferId, {
         ...(sttSeg ? { segmentation: sttSeg } : {}),
-        abortSignal: abort.signal,
         onProgress: (p) => {
           const frac = p.fraction ?? 0;
           setSttProgress(Math.round(frac * 100));
@@ -439,8 +431,6 @@ export default function OfflinePipelineShowcaseScreen() {
         },
       });
       setSttProgress(100);
-
-      if (abort.signal.aborted) return;
 
       // Read committed speech/text segments (when available) to show detailed
       // segment contents: speech window, text payload, and commit reason.
@@ -511,7 +501,6 @@ export default function OfflinePipelineShowcaseScreen() {
 
       await ttsEngine.synthesize(textBufferRef.bufferId, outputBuf.bufferId, {
         ...(ttsSeg ? { segmentation: ttsSeg } : {}),
-        abortSignal: abort.signal,
         onProgress: (p) => {
           const frac = p.fraction ?? 0;
           setTtsProgress(Math.round(frac * 100));
@@ -534,8 +523,6 @@ export default function OfflinePipelineShowcaseScreen() {
         },
       });
       setTtsProgress(100);
-
-      if (abort.signal.aborted) return;
 
       // Replace progress-only TTS items with detailed segment contents when
       // segment buffers are available (audio window, text payload, reason).
@@ -596,15 +583,10 @@ export default function OfflinePipelineShowcaseScreen() {
       setStatusText('Done. Tap Play to listen to synthesized audio.');
       setRunState('done');
     } catch (err) {
-      if (abort.signal.aborted) {
-        setStatusText('Cancelled.');
-        setRunState('idle');
-      } else {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        setStatusText('Pipeline failed.');
-        setRunState('failed');
-      }
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setStatusText('Pipeline failed.');
+      setRunState('failed');
     } finally {
       if (textBufferRef) {
         await releasePipelineTextBuffer(textBufferRef.bufferId).catch(() => {});
@@ -625,14 +607,7 @@ export default function OfflinePipelineShowcaseScreen() {
     destroyEngines,
   ]);
 
-  const handleCancel = useCallback(() => {
-    abortRef.current?.abort();
-    setRunState('idle');
-    setStatusText('Cancelling…');
-  }, []);
-
   const handleReset = useCallback(async () => {
-    abortRef.current?.abort();
     await releasePlayer();
     await releaseOutputAudio();
     await destroyEngines();
@@ -828,13 +803,6 @@ export default function OfflinePipelineShowcaseScreen() {
                   </View>
                 </>
               )}
-              <TouchableOpacity
-                style={[styles.runButton, { backgroundColor: '#D32F2F' }]}
-                onPress={handleCancel}
-              >
-                <Ionicons name="stop" size={18} color="#FFF" />
-                <Text style={styles.runButtonText}>Cancel</Text>
-              </TouchableOpacity>
             </>
           ) : (
             <>

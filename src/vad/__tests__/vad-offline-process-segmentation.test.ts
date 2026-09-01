@@ -298,7 +298,6 @@ describe('VAD offline process: segmentation modes, native passes, and onProgress
   it('passes only native-safe sourceTag for segmentation.mode=off', async () => {
     const engine = await createEngine();
     const onProgress = jest.fn();
-    const abortController = new AbortController();
 
     await engine.process({
       audioIn: 'off_audio',
@@ -307,7 +306,6 @@ describe('VAD offline process: segmentation modes, native passes, and onProgress
         sourceTag: 'job-123',
         segmentation: { mode: 'off' },
         onProgress,
-        abortSignal: abortController.signal,
       },
     });
 
@@ -696,35 +694,6 @@ describe('VAD offline process: segmentation modes, native passes, and onProgress
     });
     expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
     expect(mockRunVadOffline.mock.calls[0]?.[1]).toBe('off_slice_0');
-  });
-
-  it('checks abort before emitting progress for the next segment', async () => {
-    const engine = await createEngine();
-    const abortController = new AbortController();
-    const onProgress = jest.fn((progress: OrchestrationProgress) => {
-      if (progress.currentSegment === 0) {
-        abortController.abort();
-      }
-    });
-
-    await expect(
-      engine.process({
-        audioIn: 'off_audio',
-        segmentOut: 'seg_off_output',
-        options: {
-          segmentation: { mode: 'auto' },
-          onProgress,
-          abortSignal: abortController.signal,
-        },
-      })
-    ).rejects.toMatchObject({ code: 'VAD_ABORTED' });
-
-    expect(onProgress).toHaveBeenCalledTimes(1);
-    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({
-      currentSegment: 0,
-      totalSegments: 2,
-    });
-    expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
   });
 
   it('segmented mode writes directly into live target without offline staging', async () => {

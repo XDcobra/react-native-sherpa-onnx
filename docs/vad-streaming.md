@@ -222,7 +222,7 @@ const run = await engine.process({
 });
 ```
 
-Offline batch: `segmentation`, `onProgress`, and `abortSignal` on `options` are documented under **[Segmentation](#segmentation)** (offline `off_*` audio only).
+Offline batch: `segmentation` and `onProgress` on `options` are documented under **[Segmentation](#segmentation)** (offline `off_*` audio only).
 
 #### `engine.isSpeechDetected()`
 
@@ -364,14 +364,14 @@ More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-
 
 ## Segmentation
 
-**Scope:** `options.segmentation`, `onProgress`, and `abortSignal` exist only on **`VADOfflineRunOptions`**. The live `process` overload uses **`VADLiveProcessInput`** / **`VADLiveRunOptions`** — no batch segmentation step; use segment-buffer events instead.
+**Scope:** `options.segmentation` and `onProgress` exist only on **`VADOfflineRunOptions`**. The live `process` overload uses **`VADLiveProcessInput`** / **`VADLiveRunOptions`** — no batch segmentation step; use segment-buffer events instead.
 
 | | Offline batch (`off_*` → `seg_off_*` or `live_*` out) | Streaming pipeline (`live_*` → `live_*`) |
 | --- | --- | --- |
 | **Input audio** | `OfflineAudioBuffer` — full file (or finalized chunk) in one buffer | `LiveAudioBuffer` — samples appended over time |
 | **Segmentation engine** | Optional: `segmentation.mode: 'auto'` splits **offline** PCM into **speech** slices before VAD | **Not used** — the native VAD worker consumes the live stream directly |
 | **Progress** | `onProgress` with `OrchestrationProgress` **only** when `mode: 'auto'` and at least one speech slice exists; **`mode: 'off'`** → single native pass, **no** `onProgress` (STT single-pass parity) | **No** `OrchestrationProgress`. Use **`onSegmentAppended`** / `streamEvents.segmentAppended` on the **live** segment buffer for incremental segments |
-| **Cancellation** | `abortSignal` checked between slices (`segmentation.mode: 'auto'`) | Use **`pipeline.stop()`** / teardown; no `abortSignal` on live `options` |
+| **Stop / teardown** | Run to completion (no mid-batch cancel on offline options) | Use **`pipeline.stop()`** / teardown |
 
 > `'manual'` segmentation mode is **not** supported for offline VAD (`supportsManual: false` in validation).
 
@@ -443,7 +443,6 @@ const { summary } = await vad.process({
     },
     onProgress: (p) =>
       console.log(`vad slice ${p.currentSegment + 1}/${p.totalSegments}`, p.fraction),
-    abortSignal: controller.signal,
   },
 });
 ```

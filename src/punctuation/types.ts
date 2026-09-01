@@ -19,7 +19,7 @@ import type { TextInputNormalization } from './textInputNormalization';
 /** v1: only `processingTimeMs` (native punctuate duration in milliseconds). */
 export type OfflinePunctuateResult = {
   processingTimeMs: number;
-  status?: 'complete' | 'partial' | 'failed' | 'cancelled';
+  status?: 'complete' | 'partial' | 'failed';
   totalSegments?: number;
   completedSegments?: number;
   skippedSegments?: Array<{
@@ -48,7 +48,6 @@ export type OfflinePunctuateOptions = {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: RetryExhaustedFallback;
-  abortSignal?: AbortSignal;
   onProgress?: (progress: OrchestrationProgress) => void;
   overlapChars?: number;
   textSkipPlaceholder?: string;

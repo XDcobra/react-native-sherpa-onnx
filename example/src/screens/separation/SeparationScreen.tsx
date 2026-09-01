@@ -193,8 +193,7 @@ export default function SeparationScreen() {
   const [preparedInputBuffer, setPreparedInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
   const [separating, setSeparating] = useState(false);
-  const [batchPhase, setBatchPhase] =
-    useState<BatchPipelinePhase>('idle');
+  const [batchPhase, setBatchPhase] = useState<BatchPipelinePhase>('idle');
   const [batchSeparationProgress, setBatchSeparationProgress] = useState<
     number | null
   >(null);
@@ -243,7 +242,6 @@ export default function SeparationScreen() {
   const liveDecodeCompleteRef = useRef(false);
   const liveStopRequestedRef = useRef(false);
   const liveRunEpochRef = useRef(0);
-  const batchAbortRef = useRef<AbortController | null>(null);
   const liveOutputEventsUnsubRef = useRef<(() => void) | null>(null);
 
   const stopLiveOutputEvents = useCallback(() => {
@@ -671,10 +669,6 @@ export default function SeparationScreen() {
     setPreparedInputBuffer(null);
   };
 
-  const stopBatchSeparation = useCallback(() => {
-    batchAbortRef.current?.abort();
-  }, []);
-
   const handleSeparateBatch = async () => {
     if (!engineRef.current) {
       setErrorSource('separate');
@@ -697,9 +691,6 @@ export default function SeparationScreen() {
     setBatchSeparationProgress(null);
     await clearStemResults();
 
-    const abortController = new AbortController();
-    batchAbortRef.current = abortController;
-
     try {
       const engine = engineRef.current;
       const stems = await engine.getNumStems();
@@ -714,7 +705,6 @@ export default function SeparationScreen() {
         outs.map((out) => out.bufferId),
         {
           segmentation: segOption,
-          abortSignal: abortController.signal,
           ...(batchUsesSegmentation
             ? {
                 errorRecovery: 'partial_result' as const,
@@ -728,16 +718,6 @@ export default function SeparationScreen() {
             : {}),
         }
       );
-
-      if (abortController.signal.aborted) {
-        for (const out of outs) {
-          await releasePipelineAudioBuffer(out.bufferId).catch(() => {});
-        }
-        setBatchPhase('idle');
-        setBatchSeparationProgress(null);
-        setSeparateResult('Mode: offline batch\nStatus: cancelled');
-        return;
-      }
 
       const nextStems: StemResult[] = [];
       for (let i = 0; i < stems; i++) {
@@ -766,18 +746,11 @@ export default function SeparationScreen() {
         setBatchPhase('separation_complete');
       }
     } catch (batchErr) {
-      if (abortController.signal.aborted) {
-        setBatchPhase('idle');
-        setBatchSeparationProgress(null);
-        setSeparateResult('Mode: offline batch\nStatus: cancelled');
-        return;
-      }
       setBatchPhase('idle');
       setBatchSeparationProgress(null);
       setErrorSource('separate');
       setError(normalizeErrorMessage(batchErr));
     } finally {
-      batchAbortRef.current = null;
       setSeparating(false);
     }
   };
@@ -1101,7 +1074,9 @@ export default function SeparationScreen() {
             setLiveTotalInputFrames(inInfo.numSamples);
             liveDecodeCompleteRef.current = true;
             setLiveMicPhase('separating');
-            handleSeparationOutputFrames(liveSeparationSamplesWrittenRef.current);
+            handleSeparationOutputFrames(
+              liveSeparationSamplesWrittenRef.current
+            );
           }
         }
 
@@ -1434,36 +1409,35 @@ export default function SeparationScreen() {
             />
             {segBatchConfig.mode !== 'off' && batchPhase !== 'idle' ? (
               <View style={screenStyles.liveProgressList}>
-                <Text style={screenStyles.liveProgressStep}>
-                  ✓ Input ready
-                </Text>
+                <Text style={screenStyles.liveProgressStep}>✓ Input ready</Text>
                 <Text style={screenStyles.liveProgressStep}>
                   {batchPhase === 'separation_complete'
                     ? '✓ Separation complete'
                     : batchSeparationProgress != null
-                      ? `Separation progress: ${batchSeparationProgress.toFixed(0)}%`
-                      : 'Separation pending…'}
+                    ? `Separation progress: ${batchSeparationProgress.toFixed(
+                        0
+                      )}%`
+                    : 'Separation pending…'}
                 </Text>
               </View>
             ) : null}
             <TouchableOpacity
               style={[
                 screenStyles.primaryButton,
-                separating && screenStyles.stopButton,
                 !separating && !canRunBatch && screenStyles.buttonDisabled,
               ]}
               onPress={() => {
-                if (separating) {
-                  stopBatchSeparation();
-                } else {
-                  handleSeparateBatch().catch(() => {});
-                }
+                handleSeparateBatch().catch(() => {});
               }}
-              disabled={!separating && !canRunBatch}
+              disabled={separating || !canRunBatch}
             >
-              <Text style={screenStyles.primaryButtonText}>
-                {separating ? 'Stop' : 'Run separation'}
-              </Text>
+              {separating ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={screenStyles.primaryButtonText}>
+                  Run separation
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         ) : (
@@ -1589,8 +1563,10 @@ export default function SeparationScreen() {
                     {liveFilePhase === 'separation_complete'
                       ? '✓ Separation complete'
                       : liveSeparationProgress != null
-                        ? `Separation progress: ${liveSeparationProgress.toFixed(0)}%`
-                        : 'Separation pending…'}
+                      ? `Separation progress: ${liveSeparationProgress.toFixed(
+                          0
+                        )}%`
+                      : 'Separation pending…'}
                   </Text>
                 ) : null}
               </View>
@@ -1608,8 +1584,10 @@ export default function SeparationScreen() {
                     {liveMicPhase === 'separation_complete'
                       ? '✓ Separation complete'
                       : liveSeparationProgress != null
-                        ? `Separation progress: ${liveSeparationProgress.toFixed(0)}%`
-                        : 'Separation pending…'}
+                      ? `Separation progress: ${liveSeparationProgress.toFixed(
+                          0
+                        )}%`
+                      : 'Separation pending…'}
                   </Text>
                 ) : null}
               </View>
@@ -1623,9 +1601,7 @@ export default function SeparationScreen() {
               </Text>
             ) : null}
             {liveStatus &&
-            !(
-              liveSourceMode === 'file' && liveFilePhase !== 'idle'
-            ) &&
+            !(liveSourceMode === 'file' && liveFilePhase !== 'idle') &&
             !(liveSourceMode === 'mic' && liveMicPhase !== 'idle') ? (
               <Text style={screenStyles.bodyText}>{liveStatus}</Text>
             ) : null}

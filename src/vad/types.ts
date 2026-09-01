@@ -132,11 +132,6 @@ export type VADOfflineRunOptions = {
    * single-pass behaviour. Payload matches `OrchestrationProgress` in `pipeline/offlineOrchestrator.ts`.
    */
   onProgress?: (progress: OrchestrationProgress) => void;
-  /**
-   * When set, checked before the segmented loop and before each segment's native VAD call;
-   * aborted runs throw with code `VAD_ABORTED`.
-   */
-  abortSignal?: AbortSignal;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
