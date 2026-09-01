@@ -1,0 +1,10 @@
+{
+  "description": "Ordered sherpa-onnx model collect configs. ASR before QNN is enforced inside sherpa_asr_model_release_streams.json.",
+  "configs": [
+    "sherpa_asr_model_release_streams.json",
+    "sherpa_tts_model_release_streams.json",
+    "sherpa_punctuation_model_release_streams.json",
+    "sherpa_speech_enhancement_model_release_streams.json",
+    "sherpa_separation_model_release_streams.json"
+  ]
+}
