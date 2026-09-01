@@ -10,9 +10,9 @@ on:
         required: false
         default: ''
       onnxruntime_version:
-        description: 'ONNX Runtime version for csukuangfj/onnxruntime-libs static iOS xcframework (zip). Passed as ONNXRUNTIME_VERSION to build-ios.sh.'
+        description: 'ONNX Runtime version for csukuangfj/onnxruntime-libs static iOS xcframework. Passed as SHERPA_ONNX_ONNXRUNTIME_VERSION to build-ios.sh.'
         required: false
-        default: '1.24.2'
+        default: '1.28.1'
 
 jobs:
   build-framework:
@@ -69,53 +69,14 @@ jobs:
         run: |
           brew install cmake
 
-      - name: Patch onnxruntime version (build-ios.sh)
-        run: |
-          set -euo pipefail
-          REPO_ROOT="${GITHUB_WORKSPACE}"
-          EXPECTED_FILE="${REPO_ROOT}/third_party/sherpa-onnx-prebuilt/BUILD_IOS_SH_EXPECTED_SHA256"
-          TARGET="${REPO_ROOT}/third_party/sherpa-onnx/build-ios.sh"
-          PATCH="${REPO_ROOT}/third_party/sherpa-onnx-prebuilt/build-ios-patched.sh"
-          if [ ! -f "$EXPECTED_FILE" ]; then
-            echo "::error::Missing ${EXPECTED_FILE}"
-            exit 1
-          fi
-          if [ ! -f "$TARGET" ]; then
-            echo "::error::Missing submodule build-ios.sh at ${TARGET}"
-            exit 1
-          fi
-          if [ ! -f "$PATCH" ]; then
-            echo "::error::Missing ${PATCH}"
-            exit 1
-          fi
-          EXPECTED="$(grep -v '^#' "$EXPECTED_FILE" | grep -v '^[[:space:]]*$' | head -n1 | tr -d '\r\n ')"
-          ACTUAL="$(shasum -a 256 "$TARGET" | awk '{print $1}')"
-          if [ -z "$EXPECTED" ]; then
-            echo "::error::No SHA256 found in ${EXPECTED_FILE}"
-            exit 1
-          fi
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "::error::third_party/sherpa-onnx/build-ios.sh SHA256 does not match the pinned baseline."
-            echo "Expected (BUILD_IOS_SH_EXPECTED_SHA256): ${EXPECTED}"
-            echo "Actual:   ${ACTUAL}"
-            echo "The sherpa-onnx submodule may have updated upstream build-ios.sh. Compare with the previous baseline,"
-            echo "merge any upstream changes into third_party/sherpa-onnx-prebuilt/build-ios-patched.sh, then update"
-            echo "BUILD_IOS_SH_EXPECTED_SHA256 with the new upstream file hash after verification."
-            exit 1
-          fi
-          rm -f "$TARGET"
-          cp "$PATCH" "$TARGET"
-          chmod +x "$TARGET"
-          echo "Applied build-ios-patched.sh over submodule build-ios.sh (ORT zip / onnxruntime.framework layout)."
-
       - name: Build sherpa-onnx XCFramework
         env:
-          ONNXRUNTIME_VERSION: ${{ github.event.inputs.onnxruntime_version }}
+          SHERPA_ONNX_ONNXRUNTIME_VERSION: ${{ github.event.inputs.onnxruntime_version }}
         run: |
-          if [ -z "${ONNXRUNTIME_VERSION:-}" ]; then
-            export ONNXRUNTIME_VERSION="1.24.2"
+          if [ -z "${SHERPA_ONNX_ONNXRUNTIME_VERSION:-}" ]; then
+            export SHERPA_ONNX_ONNXRUNTIME_VERSION="1.28.1"
           fi
-          echo "ONNXRUNTIME_VERSION=${ONNXRUNTIME_VERSION}"
+          echo "SHERPA_ONNX_ONNXRUNTIME_VERSION=${SHERPA_ONNX_ONNXRUNTIME_VERSION}"
           cd third_party/sherpa-onnx-prebuilt
           chmod +x build_sherpa_onnx_ios.sh
           ./build_sherpa_onnx_ios.sh ${{ steps.version.outputs.tag }}
@@ -139,14 +100,14 @@ jobs:
           echo "Verifying library sizes contain ONNX Runtime..."
           MIN_SIZE=52428800  # 50MB in bytes - libraries with ONNX Runtime should be >50MB
 
-          DEVICE_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64/libsherpa-onnx.a"
-          SIM_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/libsherpa-onnx.a"
+          DEVICE_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64/SherpaOnnxC.framework/SherpaOnnxC"
+          SIM_LIB="ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/SherpaOnnxC.framework/SherpaOnnxC"
 
           for lib in "$DEVICE_LIB" "$SIM_LIB"; do
             if [ ! -f "$lib" ]; then
               echo "ERROR: Library not found: $lib"
               echo "Contents of ios/Frameworks/sherpa_onnx.xcframework:"
-              find ios/Frameworks/sherpa_onnx.xcframework -type f -name "*.a" 2>/dev/null || echo "No .a files found!"
+              find ios/Frameworks/sherpa_onnx.xcframework -type f \( -name "SherpaOnnxC" -o -name "*.a" \) 2>/dev/null || echo "No binaries found!"
               exit 1
             fi
             
@@ -172,7 +133,7 @@ jobs:
       - name: Create version info file
         run: |
           ORT_VER='${{ github.event.inputs.onnxruntime_version }}'
-          [ -z "$ORT_VER" ] && ORT_VER='1.24.2'
+          [ -z "$ORT_VER" ] && ORT_VER='1.28.1'
           cat > ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt << EOF
           sherpa-onnx version: ${{ steps.version.outputs.release_tag }}
           ONNX Runtime version (build-ios): ${ORT_VER}

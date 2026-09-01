@@ -92,7 +92,7 @@ jobs:
           echo ""
           echo "=== Verifying SherpaOnnx framework and required headers ==="
           REPO_ROOT="$SHERPA_ONNX_PROJECT_ROOT"
-          HEADER_PATH="$REPO_ROOT/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/Headers/sherpa-onnx/c-api/cxx-api.h"
+          HEADER_PATH="$REPO_ROOT/ios/Frameworks/sherpa_onnx.xcframework/ios-arm64_x86_64-simulator/SherpaOnnxC.framework/Headers/sherpa-onnx/c-api/cxx-api.h"
           if [ -f "$HEADER_PATH" ]; then
             echo "[OK] Required header found: $HEADER_PATH"
           else
