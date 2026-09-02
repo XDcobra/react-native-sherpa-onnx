@@ -1,0 +1,35 @@
+# Speaker embedding model detection tests: C++ tests vs speaker-recongition-models-expected.csv.
+# Triggered on PR (via test-model-detect) or manually.
+
+name: Test – Speaker embedding model detection
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-speaker-embedding-detect
+  cancel-in-progress: true
+
+jobs:
+  speaker-embedding-model-detect:
+    name: Speaker embedding model detection (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run speaker embedding model detection tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ./test/cpp/build/model_detect_test \
+            --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectSpeakerEmbeddingFromFileListMatchesExpected
