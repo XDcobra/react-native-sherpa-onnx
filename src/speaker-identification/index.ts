@@ -1,8 +1,23 @@
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  appendLiveSegment,
+  createLiveSegmentBuffer,
+  finalizeLiveSegmentBuffer,
+  getOfflineSegmentBufferSegments,
+  populateOfflineSegmentBufferIfEmpty,
+  releasePipelineSegmentBuffer,
+  resolveOfflineSegmentBufferId,
+} from '../segmentbuffer';
+import type {
+  OfflineSegmentBufferIdSource,
+  SegmentMeta,
+} from '../segmentbuffer/types';
 import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
 import type {
   IdentifyResult,
+  LabelOfflineSegmentsResult,
   SpeakerIdentificationEngine,
   SpeakerIdentificationOptions,
   SpeakerIdentificationThresholdOptions,
@@ -10,6 +25,7 @@ import type {
 
 export type {
   IdentifyResult,
+  LabelOfflineSegmentsResult,
   SpeakerIdentificationEngine,
   SpeakerIdentificationOptions,
   SpeakerIdentificationThresholdOptions,
@@ -22,6 +38,17 @@ function resolveThreshold(
 ): number {
   const t = options?.threshold;
   return typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_THRESHOLD;
+}
+
+/** Non-empty speech spans from an offline segment buffer (skips alignment / empty ranges). */
+function collectSpeechSpans(segments: SegmentMeta[]): SegmentMeta[] {
+  return segments.filter(
+    (seg) =>
+      seg.kind === 'speech' &&
+      Number.isFinite(seg.startSample) &&
+      Number.isFinite(seg.endSample) &&
+      seg.endSample > seg.startSample
+  );
 }
 
 /**
@@ -78,6 +105,44 @@ export async function createSpeakerIdentification(
         );
       }
     },
+    async enrollOfflineSegments(
+      name: string,
+      audioIn: OfflineAudioBufferIdSource,
+      segmentsIn: OfflineSegmentBufferIdSource
+    ): Promise<void> {
+      guard();
+      const trimmed = name.trim();
+      if (trimmed.length === 0) {
+        throw new Error(
+          'enrollOfflineSegments() requires a non-empty speaker name'
+        );
+      }
+      resolvePipelineAudioBufferId(audioIn);
+      resolveOfflineSegmentBufferId(segmentsIn);
+      const spans = collectSpeechSpans(
+        await getOfflineSegmentBufferSegments(segmentsIn)
+      );
+      if (spans.length === 0) {
+        throw new Error(
+          'enrollOfflineSegments() requires at least one non-empty speech span'
+        );
+      }
+      const embeddings: Float32Array[] = [];
+      for (const span of spans) {
+        embeddings.push(
+          await engine.extractFromOfflineAudio(audioIn, {
+            startSample: span.startSample,
+            endSample: span.endSample,
+          })
+        );
+      }
+      const ok = await manager.add(trimmed, embeddings);
+      if (!ok) {
+        throw new Error(
+          `Failed to enroll speaker '${trimmed}' (name may already exist)`
+        );
+      }
+    },
     async identify(
       audio: OfflineAudioBufferIdSource,
       thresholdOptions?: SpeakerIdentificationThresholdOptions
@@ -90,6 +155,87 @@ export async function createSpeakerIdentification(
       );
       const trimmed = name.trim();
       return { name: trimmed.length > 0 ? trimmed : null };
+    },
+    async labelOfflineSegments(
+      audioIn: OfflineAudioBufferIdSource,
+      segmentsIn: OfflineSegmentBufferIdSource,
+      segmentsOut: OfflineSegmentBufferIdSource,
+      thresholdOptions?: SpeakerIdentificationThresholdOptions
+    ): Promise<LabelOfflineSegmentsResult> {
+      guard();
+      const audioBufferId = resolvePipelineAudioBufferId(audioIn);
+      resolveOfflineSegmentBufferId(segmentsIn);
+      resolveOfflineSegmentBufferId(segmentsOut);
+      const threshold = resolveThreshold(thresholdOptions);
+      const spans = collectSpeechSpans(
+        await getOfflineSegmentBufferSegments(segmentsIn)
+      );
+
+      let labeledCount = 0;
+      let unknownCount = 0;
+      let stagingLiveBufferId: string | null = null;
+
+      try {
+        const staging = await createLiveSegmentBuffer({
+          sourceAudioBufferId: audioBufferId,
+          spooling: { mode: 'on' },
+        });
+        stagingLiveBufferId = staging.bufferId;
+
+        for (const span of spans) {
+          const embedding = await engine.extractFromOfflineAudio(audioIn, {
+            startSample: span.startSample,
+            endSample: span.endSample,
+          });
+          const rawName = await manager.search(embedding, threshold);
+          const trimmed = rawName.trim();
+          const speakerName = trimmed.length > 0 ? trimmed : null;
+          if (speakerName == null) {
+            unknownCount += 1;
+          } else {
+            labeledCount += 1;
+          }
+
+          const sampleRate = span.sampleRate;
+          const durationMs =
+            typeof span.durationMs === 'number' &&
+            Number.isFinite(span.durationMs) &&
+            span.durationMs > 0
+              ? span.durationMs
+              : sampleRate > 0
+              ? Math.round(
+                  ((span.endSample - span.startSample) * 1000) / sampleRate
+                )
+              : 0;
+
+          await appendLiveSegment(stagingLiveBufferId, {
+            kind: 'speech',
+            sourceAudioBufferId: audioBufferId,
+            startSample: span.startSample,
+            endSample: span.endSample,
+            sampleRate,
+            durationMs,
+            ...(span.confidence != null ? { confidence: span.confidence } : {}),
+            payload: { source: 'sid', speakerName },
+          });
+        }
+
+        await finalizeLiveSegmentBuffer(stagingLiveBufferId);
+        await populateOfflineSegmentBufferIfEmpty(
+          segmentsOut,
+          stagingLiveBufferId
+        );
+      } finally {
+        if (stagingLiveBufferId != null) {
+          try {
+            await releasePipelineSegmentBuffer(stagingLiveBufferId);
+          } catch {
+            // Best-effort cleanup of staging live buffer.
+          }
+        }
+      }
+
+      return { labeledCount, unknownCount };
     },
     async verify(
       name: string,
