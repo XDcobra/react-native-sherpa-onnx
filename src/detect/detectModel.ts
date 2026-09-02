@@ -70,6 +70,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   punctuation: ModelCategory.Punctuation,
   enhancement: ModelCategory.Enhancement,
   separation: ModelCategory.Separation,
+  speakerEmbedding: ModelCategory.SpeakerEmbedding,
   alignment: ModelCategory.Alignment,
 };
 

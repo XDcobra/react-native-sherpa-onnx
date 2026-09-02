@@ -43,6 +43,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Diarization]: 'Diarization',
   [ModelCategory.Enhancement]: 'Enhancement',
   [ModelCategory.Separation]: 'Separation',
+  [ModelCategory.SpeakerEmbedding]: 'Speaker embedding',
   [ModelCategory.Qnn]: 'QNN',
   [ModelCategory.Alignment]: 'Alignment',
 };

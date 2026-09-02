@@ -8,6 +8,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.Punctuation,
   ModelCategory.Enhancement,
   ModelCategory.Separation,
+  ModelCategory.SpeakerEmbedding,
   ModelCategory.Alignment,
 ]);
 
@@ -19,6 +20,7 @@ export type CatalogDetectCategory =
   | ModelCategory.Punctuation
   | ModelCategory.Enhancement
   | ModelCategory.Separation
+  | ModelCategory.SpeakerEmbedding
   | ModelCategory.Alignment;
 
 export function categoryUsesCatalogDetect(

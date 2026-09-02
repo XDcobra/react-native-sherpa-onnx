@@ -20,6 +20,7 @@ const DEFAULTS: Partial<Record<ModelCategory, HuggingFaceRepoSpec[]>> = {
   [ModelCategory.Diarization]: [],
   [ModelCategory.Enhancement]: [],
   [ModelCategory.Separation]: [],
+  [ModelCategory.SpeakerEmbedding]: [],
   [ModelCategory.Qnn]: [],
   [ModelCategory.Alignment]: [],
 };
