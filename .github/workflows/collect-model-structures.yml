@@ -7,6 +7,7 @@
 #   punctuation  — Punctuation models
 #   enhancement  — Speech enhancement models
 #   separation   — Source separation models
+#   speaker-embedding — Speaker embedding / recognition models
 #
 # Invalid stream IDs fail in the plan job before any downloads.
 # Asset download+tar-list inside a stream is parallel (COLLECT_JOBS, default 4).
@@ -29,6 +30,7 @@ on:
           - punctuation
           - enhancement
           - separation
+          - speaker-embedding
       asset_limit:
         description: 'Max assets per stream (0 = no limit)'
         required: false

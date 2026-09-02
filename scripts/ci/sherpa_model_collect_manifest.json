@@ -31,6 +31,12 @@
       "label": "Source separation",
       "config": "sherpa_separation_model_release_streams.json",
       "commit_message": "chore(testdata): update source separation model structures, expected CSV, and license status from source-separation-models release"
+    },
+    {
+      "id": "speaker-embedding",
+      "label": "Speaker embedding",
+      "config": "sherpa_speaker_embedding_model_release_streams.json",
+      "commit_message": "chore(testdata): update speaker embedding model structures, expected CSV, and license status from speaker-recongition-models release"
     }
   ]
 }
