@@ -103,6 +103,13 @@ void FillSeparationModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillSpeakerEmbeddingModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    SpeakerEmbeddingModelPaths& out
+) {
+    SetPathFromMap(paths, "model", out.model);
+}
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out

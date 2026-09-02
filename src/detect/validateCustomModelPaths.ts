@@ -23,6 +23,7 @@ export type CustomModelPathCategory =
   | ModelCategory.Vad
   | ModelCategory.Enhancement
   | ModelCategory.Separation
+  | ModelCategory.SpeakerEmbedding
   | ModelCategory.Punctuation
   | ModelCategory.Alignment;
 

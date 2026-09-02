@@ -33,6 +33,11 @@ void FillSeparationModelPathsFromStringMap(
     SeparationModelPaths& out
 );
 
+void FillSpeakerEmbeddingModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    SpeakerEmbeddingModelPaths& out
+);
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out

@@ -124,6 +124,18 @@ export type SeparationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeSpeakerEmbeddingExtractor(instanceId, options)`. */
+export type SpeakerEmbeddingInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`). */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native result from `initializeSeparation`. */
 export type SeparationInitializeNativeResult = {
   success: boolean;
@@ -1518,6 +1530,66 @@ export interface Spec extends TurboModule {
       model?: string;
     };
   }>;
+
+  initializeSpeakerEmbeddingExtractor(
+    instanceId: string,
+    options: SpeakerEmbeddingInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    dim: number;
+    modelType?: string;
+  }>;
+
+  computeSpeakerEmbeddingOffline(
+    instanceId: string,
+    audioBufferId: string
+  ): Promise<{ embedding: number[] }>;
+
+  unloadSpeakerEmbeddingExtractor(instanceId: string): Promise<void>;
+
+  createSpeakerEmbeddingManager(
+    managerId: string,
+    dim: number
+  ): Promise<{ success: boolean; error?: string }>;
+
+  speakerEmbeddingManagerAdd(
+    managerId: string,
+    name: string,
+    embeddings: number[],
+    count: number
+  ): Promise<{ ok: boolean }>;
+
+  speakerEmbeddingManagerRemove(
+    managerId: string,
+    name: string
+  ): Promise<{ ok: boolean }>;
+
+  speakerEmbeddingManagerSearch(
+    managerId: string,
+    embedding: number[],
+    threshold: number
+  ): Promise<{ name: string }>;
+
+  speakerEmbeddingManagerVerify(
+    managerId: string,
+    name: string,
+    embedding: number[],
+    threshold: number
+  ): Promise<{ ok: boolean }>;
+
+  speakerEmbeddingManagerContains(
+    managerId: string,
+    name: string
+  ): Promise<{ ok: boolean }>;
+
+  speakerEmbeddingManagerNumSpeakers(managerId: string): Promise<number>;
+
+  speakerEmbeddingManagerAllSpeakerNames(
+    managerId: string
+  ): Promise<{ names: string[] }>;
+
+  destroySpeakerEmbeddingManager(managerId: string): Promise<void>;
 
   initializeSeparation(
     instanceId: string,

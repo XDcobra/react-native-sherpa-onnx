@@ -8,6 +8,7 @@ export type {
   OnlineSttInitBridgeOptions,
   PunctuationInitBridgeOptions,
   SeparationInitBridgeOptions,
+  SpeakerEmbeddingInitBridgeOptions,
   SttInitBridgeOptions,
   TtsInitBridgeOptions,
   VadInitBridgeOptions,
