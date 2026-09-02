@@ -118,6 +118,14 @@ enum class SeparationModelKind {
     kUvr
 };
 
+/** Speaker embedding extractors (WeSpeaker / 3D-Speaker / NeMo); release tag speaker-recongition-models. */
+enum class SpeakerEmbeddingModelKind {
+    kUnknown,
+    kWespeaker,
+    k3dSpeaker,
+    kNemo
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -271,6 +279,11 @@ struct SeparationModelPaths {
     std::string model;
 };
 
+struct SpeakerEmbeddingModelPaths {
+    /** Single embedding extractor ONNX (bare .onnx release assets). */
+    std::string model;
+};
+
 struct PunctuationModelPaths {
     /** OfflinePunctuationModelConfig.ct_transformer */
     std::string ct_transformer;
@@ -347,6 +360,19 @@ struct SeparationDetectResult {
     std::vector<DetectedModel> detectedModels;
     SeparationModelKind selectedKind = SeparationModelKind::kUnknown;
     SeparationModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+};
+
+struct SpeakerEmbeddingDetectResult {
+    bool ok = false;
+    /** Always false: upstream has no streaming speaker-embedding extractor. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    SpeakerEmbeddingModelKind selectedKind = SpeakerEmbeddingModelKind::kUnknown;
+    SpeakerEmbeddingModelPaths paths;
     std::vector<DetectionSource> detectionSources;
     std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
@@ -472,6 +498,16 @@ SeparationDetectResult DetectSeparationModel(
     const std::string& modelType = "auto"
 );
 
+/**
+ * Speaker embedding model detection. Pass at least one of `model_dir` or `asset_name`.
+ * Offline-only (single ONNX; kinds wespeaker / 3d-speaker / nemo).
+ */
+SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto"
+);
+
 VadDetectResult DetectVadModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
@@ -504,6 +540,13 @@ EnhancementDetectResult DetectEnhancementModelFromFileList(
 
 /** Test-only: Like DetectSeparationModel but takes a pre-built file list; no filesystem access. */
 SeparationDetectResult DetectSeparationModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectSpeakerEmbeddingModel but takes a pre-built file list; no filesystem access. */
+SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"

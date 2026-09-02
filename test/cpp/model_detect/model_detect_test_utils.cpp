@@ -242,6 +242,27 @@ std::string SeparationKindToString(SeparationModelKind kind) {
     }
 }
 
+SpeakerEmbeddingModelKind SpeakerEmbeddingKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "wespeaker") return SpeakerEmbeddingModelKind::kWespeaker;
+    if (t == "3d-speaker" || t == "3dspeaker") return SpeakerEmbeddingModelKind::k3dSpeaker;
+    if (t == "nemo") return SpeakerEmbeddingModelKind::kNemo;
+    return SpeakerEmbeddingModelKind::kUnknown;
+}
+
+std::string SpeakerEmbeddingKindToString(SpeakerEmbeddingModelKind kind) {
+    switch (kind) {
+        case SpeakerEmbeddingModelKind::kWespeaker:
+            return "wespeaker";
+        case SpeakerEmbeddingModelKind::k3dSpeaker:
+            return "3d-speaker";
+        case SpeakerEmbeddingModelKind::kNemo:
+            return "nemo";
+        default:
+            return "unknown";
+    }
+}
+
 VadModelKind VadKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "silero_vad") return VadModelKind::kSileroVad;

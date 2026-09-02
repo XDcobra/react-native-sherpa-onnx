@@ -15,6 +15,9 @@
  * Fixtures (source separation):
  *   - source-separation-models-structure.txt, source-separation-models-expected.csv
  *     (see collect-separation-model-structures workflow).
+ * Fixtures (speaker embedding):
+ *   - speaker-recongition-models-structure.txt, speaker-recongition-models-expected.csv
+ *     (see collect-model-structures workflow, stream=speaker-embedding).
  * Fixtures (VAD):
  *   - asr-models-structure.txt + vad-models-expected.csv (VAD assets live in asr-models release).
  *
@@ -33,6 +36,7 @@
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
+#include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -73,6 +77,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream vadCsv(dir + "/vad-models-expected.csv");
     std::ifstream sepStruct(dir + "/source-separation-models-structure.txt");
     std::ifstream sepCsv(dir + "/source-separation-models-expected.csv");
+    std::ifstream speakerStruct(dir + "/speaker-recongition-models-structure.txt");
+    std::ifstream speakerCsv(dir + "/speaker-recongition-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -83,6 +89,10 @@ TEST(ModelDetectTest, FixturesExist) {
     ASSERT_TRUE(sepStruct.is_open())
         << "Missing: " << dir << "/source-separation-models-structure.txt";
     ASSERT_TRUE(sepCsv.is_open()) << "Missing: " << dir << "/source-separation-models-expected.csv";
+    ASSERT_TRUE(speakerStruct.is_open())
+        << "Missing: " << dir << "/speaker-recongition-models-structure.txt";
+    ASSERT_TRUE(speakerCsv.is_open())
+        << "Missing: " << dir << "/speaker-recongition-models-expected.csv";
 }
 
 /**
@@ -350,6 +360,59 @@ TEST(ModelDetectTest, DetectEnhancementFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
             << ") but got " << model_detect_test::EnhancementKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
+TEST(ModelDetectTest, DetectSpeakerEmbeddingFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/speaker-recongition-models-structure.txt";
+    std::string csvPath = dir + "/speaker-recongition-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files =
+                model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectSpeakerEmbeddingModelFromFileList(
+                files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::SpeakerEmbeddingModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::SpeakerEmbeddingModelKind expectedKind =
+            model_detect_test::SpeakerEmbeddingKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::SpeakerEmbeddingModelKind::kUnknown)
+            continue;
+
+        auto files =
+            model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result =
+            sherpaonnx::DetectSpeakerEmbeddingModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_FALSE(result.isStreaming) << "Asset " << block.assetName;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got "
+            << model_detect_test::SpeakerEmbeddingKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
 }
@@ -963,6 +1026,64 @@ TEST(ModelDetectValidation, ValidateEnhancementPathsUnknownKindPassesThrough) {
     auto v = sherpaonnx::ValidateEnhancementPaths(
         sherpaonnx::EnhancementModelKind::kUnknown, paths, "/m");
     EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, ValidateSpeakerEmbeddingPathsDirectOk) {
+    sherpaonnx::SpeakerEmbeddingModelPaths paths;
+    paths.model = "/m/wespeaker_en_voxceleb_resnet34.onnx";
+    auto v = sherpaonnx::ValidateSpeakerEmbeddingPaths(
+        sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSpeakerEmbeddingPathsDirectMissingModel) {
+    sherpaonnx::SpeakerEmbeddingModelPaths paths;
+    auto v = sherpaonnx::ValidateSpeakerEmbeddingPaths(
+        sherpaonnx::SpeakerEmbeddingModelKind::kNemo, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSpeakerEmbeddingPathsUnknownKindPassesThrough) {
+    sherpaonnx::SpeakerEmbeddingModelPaths paths;
+    auto v = sherpaonnx::ValidateSpeakerEmbeddingPaths(
+        sherpaonnx::SpeakerEmbeddingModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, SpeakerEmbeddingMissingOnnxRejected) {
+    const std::string dir = "test-models/speaker-embedding-empty";
+    std::vector<FE> files = {
+        MakeEntry(dir, "readme.txt"),
+    };
+    auto result = sherpaonnx::DetectSpeakerEmbeddingModelFromFileList(files, dir, "auto");
+    EXPECT_FALSE(result.ok) << "Should fail when no speaker-embedding onnx is present";
+    EXPECT_FALSE(result.isStreaming);
+}
+
+TEST(ModelDetectValidation, SpeakerEmbeddingNameOnlyWespeakerIsHeuristic) {
+    const std::string syntheticDir = "m/wespeaker_en_voxceleb_resnet34.onnx";
+    auto result =
+        sherpaonnx::DetectSpeakerEmbeddingModelFromFileList({}, syntheticDir, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
+}
+
+TEST(ModelDetectValidation, SpeakerEmbeddingFileListWespeakerOk) {
+    const std::string dir = "test-models/speaker-embedding-wespeaker";
+    std::vector<FE> files = {
+        MakeEntry(dir, "wespeaker_en_voxceleb_resnet34.onnx"),
+    };
+    auto result = sherpaonnx::DetectSpeakerEmbeddingModelFromFileList(files, dir, "auto");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker));
 }
 
 TEST(ModelDetectValidation, ValidateVadPathsDirectOk) {
