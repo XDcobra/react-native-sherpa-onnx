@@ -106,10 +106,12 @@ Pod::Spec.new do |s|
   s.vendored_frameworks = vendored
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
   xcframework_root = File.join(pod_root, "ios", "Frameworks", "sherpa_onnx.xcframework")
-  simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
-  device_headers = File.join(xcframework_root, "ios-arm64", "Headers")
+  simulator_headers = File.join(xcframework_root, "ios-arm64_x86_64-simulator", "SherpaOnnxC.framework", "Headers")
+  device_headers = File.join(xcframework_root, "ios-arm64", "SherpaOnnxC.framework", "Headers")
   simulator_slice = File.join(xcframework_root, "ios-arm64_x86_64-simulator")
   device_slice = File.join(xcframework_root, "ios-arm64")
+  device_sherpa_binary = File.join(device_slice, "SherpaOnnxC.framework", "SherpaOnnxC")
+  simulator_sherpa_binary = File.join(simulator_slice, "SherpaOnnxC.framework", "SherpaOnnxC")
 
   libarchive_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
   libarchive_simulator_headers = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
@@ -126,13 +128,15 @@ Pod::Spec.new do |s|
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
 
-  ld_flags = '$(inherited) -lsherpa-onnx'
+  ld_flags_base = '$(inherited)'
   if has_ffmpeg
-    ld_flags += ' -lffmpeg -liconv -lbz2'
+    ld_flags_base += ' -lffmpeg -liconv -lbz2'
   end
   if has_libarchive
-    ld_flags += ' -larchive'
+    ld_flags_base += ' -larchive'
   end
+  ld_flags_ios = "#{ld_flags_base} -force_load \"#{device_sherpa_binary}\""
+  ld_flags_sim = "#{ld_flags_base} -force_load \"#{simulator_sherpa_binary}\""
 
   header_search_paths = [
     "$(inherited)",
@@ -187,7 +191,8 @@ Pod::Spec.new do |s|
     "OTHER_CPLUSPLUSFLAGS" => "$(inherited)",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
-    "OTHER_LDFLAGS" => ld_flags
+    "OTHER_LDFLAGS[sdk=iphoneos*]" => ld_flags_ios,
+    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => ld_flags_sim
   }
 
   s.user_target_xcconfig = {
@@ -195,7 +200,8 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LIBRARY" => "libc++",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
-    "OTHER_LDFLAGS" => ld_flags
+    "OTHER_LDFLAGS[sdk=iphoneos*]" => ld_flags_ios,
+    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => ld_flags_sim
   }
 
   s.libraries = "c++", "z", "iconv", "bz2"

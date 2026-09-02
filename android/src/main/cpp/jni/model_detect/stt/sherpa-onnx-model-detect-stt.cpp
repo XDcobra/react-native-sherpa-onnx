@@ -487,7 +487,7 @@ static void CollectDetectedModels(
         else if (hints.isLikelyWenetCtc) out.push_back({"wenet_ctc", modelDir});
         else if (hints.isLikelySenseVoice) out.push_back({"sense_voice", modelDir});
         else out.push_back({"zipformer_ctc", modelDir});
-    } else if (!paths.paraformerModel.empty()) {
+    } else if (cap.hasParaformer) {
         out.push_back({"paraformer", modelDir});
     }
     if (cap.hasWhisper) out.push_back({"whisper", modelDir});
@@ -644,7 +644,7 @@ static SttModelKind ResolveSttKind(
     }
     if (cap.hasFunAsrNano && hints.isLikelyFunAsrNano) return returnFallback(SttModelKind::kFunAsrNano);
     if (cap.hasFireRedCtc) return returnFallback(SttModelKind::kZipformerCtc);
-    if (!paths.paraformerModel.empty()) return returnFallback(SttModelKind::kParaformer);
+    if (cap.hasParaformer) return returnFallback(SttModelKind::kParaformer);
     if (cap.hasCanary) return returnFallback(SttModelKind::kCanary);
     if (cap.hasFireRedAsr) return returnFallback(SttModelKind::kFireRedAsr);
     if (cap.hasQwen3Asr && hints.isLikelyQwen3Asr) return returnFallback(SttModelKind::kQwen3Asr);
@@ -886,7 +886,8 @@ static SttDetectResult DetectSttModelFromFiles(
     result.paths.tokens = candidate.tokens;
     result.paths.bpeVocab = candidate.bpeVocab;
 
-    auto validation = ValidateSttPaths(result.selectedKind, result.paths, modelDir);
+    auto validation = ValidateSttPaths(
+        result.selectedKind, result.paths, modelDir, /*acceptStreamingParaformerLayout=*/true);
     if (!validation.ok) {
         result.ok = false;
         result.error = validation.error;
@@ -902,7 +903,10 @@ static SttDetectResult DetectSttModelFromFiles(
                  EmptyOrPath(result.paths.encoder), EmptyOrPath(result.paths.decoder), EmptyOrPath(result.paths.joiner));
             break;
         case SttModelKind::kParaformer:
-            LOGI("DetectSttModel: paths set paraformerModel=%s", EmptyOrPath(result.paths.paraformerModel));
+            LOGI("DetectSttModel: paths set paraformerModel=%s encoder=%s decoder=%s",
+                 EmptyOrPath(result.paths.paraformerModel),
+                 EmptyOrPath(result.paths.encoder),
+                 EmptyOrPath(result.paths.decoder));
             break;
         case SttModelKind::kWhisper:
             LOGI("DetectSttModel: paths set whisperEncoder=%s whisperDecoder=%s",

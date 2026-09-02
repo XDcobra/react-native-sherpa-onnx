@@ -1,0 +1,36 @@
+{
+  "description": "Ordered sherpa-onnx model collect streams. ASR before QNN is enforced inside sherpa_asr_model_release_streams.json.",
+  "all_commit_message": "chore(testdata): update all model structures, expected CSVs, and license status from sherpa-onnx releases",
+  "streams": [
+    {
+      "id": "asr",
+      "label": "ASR + QNN",
+      "config": "sherpa_asr_model_release_streams.json",
+      "commit_message": "chore(stt_testdata): update ASR/QNN model structures, expected CSVs, and license status from sherpa-onnx releases"
+    },
+    {
+      "id": "tts",
+      "label": "TTS",
+      "config": "sherpa_tts_model_release_streams.json",
+      "commit_message": "chore(testdata): update TTS model structures, expected CSV, and license status from tts-models release"
+    },
+    {
+      "id": "punctuation",
+      "label": "Punctuation",
+      "config": "sherpa_punctuation_model_release_streams.json",
+      "commit_message": "chore(testdata): update punctuation model structures, expected CSV, and license status from punctuation-models release"
+    },
+    {
+      "id": "enhancement",
+      "label": "Speech enhancement",
+      "config": "sherpa_speech_enhancement_model_release_streams.json",
+      "commit_message": "chore(testdata): update speech enhancement model structures, expected CSV, and license status from speech-enhancement-models release"
+    },
+    {
+      "id": "separation",
+      "label": "Source separation",
+      "config": "sherpa_separation_model_release_streams.json",
+      "commit_message": "chore(testdata): update source separation model structures, expected CSV, and license status from source-separation-models release"
+    }
+  ]
+}

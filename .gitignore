@@ -58,6 +58,7 @@ android-codegen-out/
 .sora/
 .agents/
 .x/
+skills-lock.json
 
 # CMake build artifacts
 CMakeCache.txt
@@ -154,9 +155,7 @@ third_party/sherpa-onnx-prebuilt/*
 !third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG
 !third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh
 !third_party/sherpa-onnx-prebuilt/build_sherpa_onnx_ios.sh
-!third_party/sherpa-onnx-prebuilt/build-ios-patched.sh
 !third_party/sherpa-onnx-prebuilt/IOS_RELEASE_TAG
-!third_party/sherpa-onnx-prebuilt/BUILD_IOS_SH_EXPECTED_SHA256
 !third_party/sherpa-onnx-prebuilt/create_sherpa_onnx_aar.sh
 !third_party/sherpa-onnx-prebuilt/copy_prebuilts_to_sdk.js
 !third_party/sherpa-onnx-prebuilt/issue-tts-espeak-ng-path-length.md
@@ -284,3 +283,6 @@ plugins/
 
 # Model structure collection (scripts/ci/collect_*; CI uses ephemeral dirs)
 tree-cache/
+
+# Blog posts
+docs/blog/

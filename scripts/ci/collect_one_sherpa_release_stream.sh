@@ -7,6 +7,9 @@
 # updated_at matches the GitHub release asset (from test/fixtures *-structure.txt "# updated_at:"
 # lines, persisted across CI runs). Re-uploads change updated_at and trigger a refresh. Assets
 # without a stored updated_at are always re-downloaded (one-time migration after this format).
+#
+# Env: ASSET_LIMIT (0 = no limit), GITHUB_TOKEN / GH_TOKEN,
+#      COLLECT_JOBS — concurrent download+tar-list workers (default 4).
 set -euo pipefail
 
 GITHUB_REPO="k2-fsa/sherpa-onnx"
@@ -112,11 +115,20 @@ else
 fi
 
 mkdir -p "$WORK/dl"
-while IFS='|' read -r name url asset_updated_at; do
-  [[ -z "$name" ]] && continue
-  name="${name%$'\r'}"
-  url="${url%$'\r'}"
-  asset_updated_at="${asset_updated_at%$'\r'}"
+
+_COLLECT_JOBS="${COLLECT_JOBS:-4}"
+if ! [[ "$_COLLECT_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "::warning::COLLECT_JOBS='${_COLLECT_JOBS}' is not a positive integer; using 4" >&2
+  _COLLECT_JOBS=4
+fi
+echo "  Parallel asset workers: ${_COLLECT_JOBS}"
+
+# Download + tar -tjf (list only) one asset. Unique cache files per name; safe to run concurrently.
+collect_one_asset() {
+  local name="$1" url="$2" asset_updated_at="$3"
+  local safe cache_file meta_file stored dl
+  local -a DL_ARGS
+
   safe="${name//\//-}"
   safe="${safe//\\/-}"
   cache_file="${_abs_tree}/${safe}.txt"
@@ -127,7 +139,7 @@ while IFS='|' read -r name url asset_updated_at; do
   fi
   if [[ -f "$cache_file" && -n "$asset_updated_at" && -n "$stored" && "$stored" == "$asset_updated_at" ]]; then
     echo "  Skip (unchanged): $name"
-    continue
+    return 0
   fi
   if [[ -f "$cache_file" ]]; then
     if [[ -n "$stored" && -n "$asset_updated_at" ]]; then
@@ -146,28 +158,59 @@ while IFS='|' read -r name url asset_updated_at; do
   if ! curl "${DL_ARGS[@]}" -o "$dl" "$url"; then
     echo "::warning::Download failed for $name" >&2
     rm -f "$dl"
-    continue
+    return 0
   fi
   if [[ "$name" == *.tar.bz2 ]]; then
     if ! tar -tjf "$dl" > "$cache_file" 2>/dev/null; then
       echo "::warning::tar -tjf failed for $name" >&2
       rm -f "$cache_file" "$dl"
-      continue
+      return 0
     fi
   elif [[ "$name" == *.onnx ]]; then
     # Two lines so structure fixtures match tarball layout: model dir "." and the file (see model_detect_test).
-    base="${name##*/}"
+    local base="${name##*/}"
     printf '%s\n' "./" "./${base}" > "$cache_file"
   else
     echo "::warning::Unexpected asset $name" >&2
     rm -f "$dl"
-    continue
+    return 0
   fi
   if [[ -n "$asset_updated_at" ]]; then
     printf '%s' "$asset_updated_at" > "$meta_file"
   fi
   rm -f "$dl"
+}
+
+_collect_pids=()
+
+_reap_collect_pids() {
+  local pid
+  local -a alive=()
+  for pid in "${_collect_pids[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      alive+=("$pid")
+    fi
+  done
+  _collect_pids=()
+  for pid in "${alive[@]}"; do
+    _collect_pids+=("$pid")
+  done
+}
+
+while IFS='|' read -r name url asset_updated_at; do
+  [[ -z "$name" ]] && continue
+  name="${name%$'\r'}"
+  url="${url%$'\r'}"
+  asset_updated_at="${asset_updated_at%$'\r'}"
+  _reap_collect_pids
+  while (( ${#_collect_pids[@]} >= _COLLECT_JOBS )); do
+    wait -n || true
+    _reap_collect_pids
+  done
+  collect_one_asset "$name" "$url" "$asset_updated_at" &
+  _collect_pids+=("$!")
 done < "$ASSET_LIST"
+wait || true
 
 mkdir -p "$(dirname "$_abs_structure")"
 : > "$_abs_structure"

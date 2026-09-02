@@ -5,9 +5,10 @@
 # Usage:
 #   ./scripts/setup-ios-framework.sh                    # Downloads/updates both frameworks (auto mode, no interactive)
 #   ./scripts/setup-ios-framework.sh 1.12.24             # Downloads specific sherpa-onnx version (ffmpeg from its TAG)
-#   ./scripts/setup-ios-framework.sh --force            # Remove local caches and re-download both
+#   ./scripts/setup-ios-framework.sh --force            # Re-download (atomic replace; keeps the old copy if download fails)
 #   ./scripts/setup-ios-framework.sh --interactive       # Interactive mode with prompts
 # To force re-download during pod install: SHERPA_ONNX_IOS_FORCE_DOWNLOAD=1 pod install
+# CocoaPods evaluates the podspec several times per install; FORCE downloads once per parent process.
 
 set -e
 
@@ -50,16 +51,31 @@ INTERACTIVE=false
 
 # Check for explicit flags
 FORCE_DOWNLOAD=false
+FORCE_FROM_CLI=false
+FORCE_FROM_ENV=false
 if [ "$1" = "--interactive" ]; then
   INTERACTIVE=true
   shift
 fi
 if [ "$1" = "--force" ]; then
+  FORCE_FROM_CLI=true
   FORCE_DOWNLOAD=true
   shift
 fi
 if [ -n "$SHERPA_ONNX_IOS_FORCE_DOWNLOAD" ] && [ "$SHERPA_ONNX_IOS_FORCE_DOWNLOAD" != "0" ]; then
+  FORCE_FROM_ENV=true
   FORCE_DOWNLOAD=true
+fi
+
+# pod install re-execs this script on every podspec load with FORCE still set.
+# After a successful force in this parent process, later loads must not wipe/re-fetch.
+FORCE_SESSION_FILE="${TMPDIR:-/tmp}/sherpa-onnx-ios-force-${PPID}"
+if [ "$FORCE_FROM_ENV" = true ] && [ "$FORCE_FROM_CLI" != true ] && [ -f "$FORCE_SESSION_FILE" ]; then
+  saved_root=$(head -1 "$FORCE_SESSION_FILE" 2>/dev/null || true)
+  if [ "$saved_root" = "$PROJECT_ROOT" ]; then
+    echo "[SherpaOnnx] Force download already completed in this pod install; skipping re-download." >&2
+    FORCE_DOWNLOAD=false
+  fi
 fi
 
 # Only print header if interactive
@@ -103,9 +119,9 @@ get_framework_config() {
       XCFRAMEWORK_NAME="sherpa_onnx.xcframework"
       ZIP_ASSET_NAME="sherpa_onnx.xcframework.zip"
       VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-sherpa-onnx"
-      LIB_DEVICE="libsherpa-onnx.a"
-      LIB_SIMULATOR="libsherpa-onnx.a"
-      HEADER_CHECK="Headers/sherpa-onnx/c-api/cxx-api.h"
+      LIB_DEVICE="SherpaOnnxC.framework/SherpaOnnxC"
+      LIB_SIMULATOR="SherpaOnnxC.framework/SherpaOnnxC"
+      HEADER_CHECK="SherpaOnnxC.framework/Headers/sherpa-onnx/c-api/cxx-api.h"
       DISPLAY_NAME="SherpaOnnx"
       ;;
     ffmpeg)
@@ -366,64 +382,65 @@ download_and_extract_framework() {
 
   echo "Downloading from: $download_url" >&2
 
-  local zip_path="$FRAMEWORKS_DIR/$ZIP_ASSET_NAME"
+  local work_dir zip_path dest backup
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/sherpa-onnx-fw.XXXXXX") || return 1
+  zip_path="$work_dir/$ZIP_ASSET_NAME"
+  dest="$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
 
   if ! curl -L -f "${AUTH_ARGS[@]}" -o "$zip_path" "$download_url" 2>/dev/null; then
     echo -e "${RED}Error: Failed to download framework from $download_url${NC}" >&2
-    rm -f "$zip_path"
+    rm -rf "$work_dir"
     return 1
   fi
 
   if ! file "$zip_path" 2>/dev/null | grep -q "Zip archive"; then
     echo -e "${RED}Error: Downloaded file is not a valid zip archive${NC}" >&2
-    rm -f "$zip_path"
+    rm -rf "$work_dir"
     return 1
-  fi
-
-  if [ -d "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" ]; then
-    echo -e "${YELLOW}[$DISPLAY_NAME] Removing old framework...${NC}" >&2
-    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
   fi
 
   echo -e "${YELLOW}[$DISPLAY_NAME] Extracting framework...${NC}" >&2
-  unzip -q -o "$zip_path" -d "$FRAMEWORKS_DIR"
+  unzip -q -o "$zip_path" -d "$work_dir"
+  rm -f "$zip_path"
 
   # Normalize name: sherpa zip may contain sherpa-onnx.xcframework
-  if [ "$slug" = "sherpa-onnx" ] && [ -d "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" ] && [ ! -d "$FRAMEWORKS_DIR/sherpa_onnx.xcframework" ]; then
-    mv "$FRAMEWORKS_DIR/sherpa-onnx.xcframework" "$FRAMEWORKS_DIR/sherpa_onnx.xcframework"
+  if [ "$slug" = "sherpa-onnx" ] && [ -d "$work_dir/sherpa-onnx.xcframework" ] && [ ! -d "$work_dir/sherpa_onnx.xcframework" ]; then
+    mv "$work_dir/sherpa-onnx.xcframework" "$work_dir/sherpa_onnx.xcframework"
   fi
 
-  if [ ! -d "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME" ]; then
+  if [ ! -d "$work_dir/$XCFRAMEWORK_NAME" ]; then
     echo -e "${RED}Error: Framework extraction failed ($XCFRAMEWORK_NAME)${NC}" >&2
-    ls -la "$FRAMEWORKS_DIR" 2>/dev/null | head -20 >&2 || true
-    rm -f "$zip_path"
+    ls -la "$work_dir" 2>/dev/null | head -20 >&2 || true
+    rm -rf "$work_dir"
     return 1
   fi
 
-  if ! framework_valid "$slug" "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"; then
+  if ! framework_valid "$slug" "$work_dir/$XCFRAMEWORK_NAME"; then
     echo -e "${RED}Error: Downloaded $DISPLAY_NAME framework is missing required libraries or headers.${NC}" >&2
-    echo "Expected e.g. $FRAMEWORKS_DIR/$XCFRAMEWORK_NAME/ios-arm64_x86_64-simulator/$HEADER_CHECK" >&2
-    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
-    rm -f "$zip_path"
+    echo "Expected e.g. $work_dir/$XCFRAMEWORK_NAME/ios-arm64_x86_64-simulator/$HEADER_CHECK" >&2
+    rm -rf "$work_dir"
     return 1
   fi
 
-  rm -f "$zip_path"
+  # Swap only after the new copy is valid so a failed fetch never empties ios/Frameworks.
+  backup=""
+  if [ -d "$dest" ]; then
+    backup="${dest}.old.$$"
+    mv "$dest" "$backup"
+  fi
+  if ! mv "$work_dir/$XCFRAMEWORK_NAME" "$dest"; then
+    echo -e "${RED}Error: Failed to install $DISPLAY_NAME into $dest${NC}" >&2
+    if [ -n "$backup" ] && [ -d "$backup" ]; then
+      mv "$backup" "$dest"
+    fi
+    rm -rf "$work_dir"
+    return 1
+  fi
+  rm -rf "$backup" "$work_dir"
   echo "$version" > "$VERSION_FILE"
   echo -e "${GREEN}[$DISPLAY_NAME] Framework v$version downloaded and extracted successfully${NC}" >&2
   return 0
 }
-
-# Force: remove existing frameworks and version files so we always re-download
-if [ "$FORCE_DOWNLOAD" = true ]; then
-  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}Force download: removing local frameworks and version files${NC}" >&2
-  for slug in "${FRAMEWORK_SLUGS[@]}"; do
-    get_framework_config "$slug" || exit 1
-    rm -rf "$FRAMEWORKS_DIR/$XCFRAMEWORK_NAME"
-    rm -f "$VERSION_FILE"
-  done
-  rm -f "$FRAMEWORKS_DIR/.framework-version"
-fi
 
 # Main: download each framework that needs updating
 for slug in "${FRAMEWORK_SLUGS[@]}"; do
@@ -442,6 +459,10 @@ for slug in "${FRAMEWORK_SLUGS[@]}"; do
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}[$DISPLAY_NAME] Downloading v$desired...${NC}" >&2
   download_and_extract_framework "$slug" "$desired" || exit 1
 done
+
+if [ "$FORCE_FROM_ENV" = true ] && [ "$FORCE_DOWNLOAD" = true ]; then
+  printf '%s\n' "$PROJECT_ROOT" > "$FORCE_SESSION_FILE"
+fi
 
 if [ "$INTERACTIVE" = true ]; then
   echo "" >&2

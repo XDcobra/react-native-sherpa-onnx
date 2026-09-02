@@ -1,0 +1,110 @@
+# Collect sherpa-onnx model archive structures + license CSVs from k2-fsa/sherpa-onnx releases.
+#
+# Allowed `stream` input values (must match scripts/ci/sherpa_model_collect_manifest.json):
+#   all          — every stream as a parallel job, one commit per stream (default)
+#   asr          — ASR + QNN (sherpa_asr_model_release_streams.json; ASR before QNN)
+#   tts          — TTS models
+#   punctuation  — Punctuation models
+#   enhancement  — Speech enhancement models
+#   separation   — Source separation models
+#
+# Invalid stream IDs fail in the plan job before any downloads.
+# Asset download+tar-list inside a stream is parallel (COLLECT_JOBS, default 4).
+# Only one collect workflow per branch at a time (shared concurrency group).
+
+name: Testdata - Collect model structures
+
+on:
+  workflow_dispatch:
+    inputs:
+      stream:
+        description: 'Stream to collect (all = every stream in parallel jobs)'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - asr
+          - tts
+          - punctuation
+          - enhancement
+          - separation
+      asset_limit:
+        description: 'Max assets per stream (0 = no limit)'
+        required: false
+        default: 0
+        type: number
+
+concurrency:
+  group: collect-model-structures-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      streams: ${{ steps.plan.outputs.streams }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Plan stream matrix
+        id: plan
+        env:
+          STREAM: ${{ inputs.stream }}
+        run: |
+          set -euo pipefail
+          stream="$(echo -n "${STREAM:-all}" | xargs | tr '[:upper:]' '[:lower:]')"
+          [[ -z "$stream" ]] && stream="all"
+          manifest="scripts/ci/sherpa_model_collect_manifest.json"
+          if [[ "$stream" == "all" ]]; then
+            json="$(jq -c '[.streams[].id]' "$manifest")"
+          else
+            json="$(jq -c --arg id "$stream" '[.streams[] | select(.id == $id) | .id]' "$manifest")"
+            if [[ "$json" == "[]" ]]; then
+              echo "Invalid stream: '$stream'" >&2
+              echo "Allowed: all $(jq -r '.streams[].id' "$manifest" | tr '\n' ' ')" >&2
+              exit 1
+            fi
+          fi
+          echo "streams=$json" >> "$GITHUB_OUTPUT"
+          echo "Collect jobs: $json"
+
+  collect:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stream: ${{ fromJSON(needs.plan.outputs.streams) }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      COLLECT_JOBS: "4"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Collect and commit (${{ matrix.stream }})
+        env:
+          ASSET_LIMIT: ${{ inputs.asset_limit }}
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ci/run_model_collect.sh
+          bash scripts/ci/run_model_collect.sh --stream "${{ matrix.stream }}"

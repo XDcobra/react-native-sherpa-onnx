@@ -16,4 +16,4 @@ LIBRARY_SEARCH_PATHS = $(inherited) "$(SHERPA_ONNX_LIB_DIR)"
 
 // Force load the static library to ensure all symbols are included
 // This is necessary because the library symbols are called from Objective-C++
-OTHER_LDFLAGS = $(inherited) -force_load "$(SHERPA_ONNX_LIB_DIR)/libsherpa-onnx.a"
+OTHER_LDFLAGS = $(inherited) -force_load "$(SHERPA_ONNX_LIB_DIR)/SherpaOnnxC.framework/SherpaOnnxC"

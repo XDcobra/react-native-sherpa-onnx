@@ -134,7 +134,7 @@ if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] ||
   [ -n "$VAD_MISSING" ] && echo -e "ASR release assets missing from VAD expected CSV ($VAD_CSV):\n$VAD_MISSING"
   [ -n "$SEPARATION_MISSING" ] && echo -e "Source separation (source-separation-models) assets missing from $SEPARATION_CSV:\n$SEPARATION_MISSING"
   echo "Please run the collect workflows to update fixtures:"
-  echo "  - Testdata - Collect ASR model structures (workflow_dispatch)"
+  echo "  - Testdata - Collect model structures (workflow_dispatch; stream=all or asr)"
   echo "  - Testdata - Collect TTS model structures (workflow_dispatch)"
   echo "  - Testdata - Collect speech enhancement model structures (workflow_dispatch)"
   echo "  - Testdata - Collect source separation model structures (workflow_dispatch)"

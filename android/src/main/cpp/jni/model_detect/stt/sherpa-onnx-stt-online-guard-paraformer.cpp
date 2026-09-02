@@ -5,6 +5,9 @@
  * Validates that the encoder carries all required metadata to avoid
  * SHERPA_ONNX_EXIT(-1) in online-paraformer-model.cc.
  *
+ * Streaming paraformer uses encoder.onnx + decoder.onnx (not offline
+ * paraformerModel / single model.onnx). Metadata is read from the encoder.
+ *
  * Required encoder metadata:
  *   vocab_size, lfr_window_size, lfr_window_shift, encoder_output_size,
  *   decoder_num_blocks, decoder_kernel_size, neg_mean (float vec),
@@ -34,20 +37,34 @@ OnlineGuardResult GuardParaformerOnlineCompatibility(
     OnlineGuardResult out;
     out.passed = false;
 
-    const std::string& modelPath = paths.paraformerModel;
-    if (modelPath.empty()) {
-        out.error = "paraformer: model path is empty";
+    // Online paraformer requires encoder + decoder. Offline-only archives that
+    // only set paraformerModel are not streaming-compatible.
+    if (paths.encoder.empty()) {
+        if (!paths.paraformerModel.empty()) {
+            out.error = "paraformer: offline-only layout (paraformerModel); "
+                        "streaming requires encoder+decoder";
+        } else {
+            out.error = "paraformer: encoder path is empty";
+        }
         return out;
     }
-    if (!FileExists(modelPath)) {
-        out.error = "paraformer: model file not found: " + modelPath;
+    if (paths.decoder.empty()) {
+        out.error = "paraformer: decoder path is empty";
+        return out;
+    }
+    if (!FileExists(paths.encoder)) {
+        out.error = "paraformer: encoder file not found: " + paths.encoder;
+        return out;
+    }
+    if (!FileExists(paths.decoder)) {
+        out.error = "paraformer: decoder file not found: " + paths.decoder;
         return out;
     }
 
     try {
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "stt_paraformer_guard");
         Ort::SessionOptions opts;
-        Ort::Session session = CreateOrtSession(env, modelPath, opts);
+        Ort::Session session = CreateOrtSession(env, paths.encoder, opts);
         Ort::ModelMetadata meta = session.GetModelMetadata();
         Ort::AllocatorWithDefaultOptions alloc;
 

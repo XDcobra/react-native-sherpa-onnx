@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Build sherpa-onnx XCFramework for iOS (device + simulator).
 # Uses the sherpa-onnx submodule at third_party/sherpa-onnx if present; otherwise clones
-# from k2-fsa/sherpa-onnx. Applies C++ API and espeak-ng path-length patches, builds,
-# merges ONNX Runtime, adds nlohmann headers, and outputs sherpa_onnx.xcframework.
+# from k2-fsa/sherpa-onnx. Applies espeak-ng path-length patch, runs upstream build-ios.sh
+# (SherpaOnnxC.framework per slice), merges cxx-api + ONNX Runtime into the framework binary,
+# and outputs sherpa_onnx.xcframework.
 #
 # Usage: build_sherpa_onnx_ios.sh <GIT_REF>
-#   GIT_REF: branch or tag to use (e.g. v1.12.28, main). Required.
+#   GIT_REF: branch or tag to use (e.g. v1.13.7, main). Required.
+#
+# Environment:
+#   SHERPA_ONNX_ONNXRUNTIME_VERSION or ONNXRUNTIME_VERSION — ORT version (default 1.28.1)
 #
 # Output: third_party/sherpa-onnx-prebuilt/sherpa_onnx.xcframework
 # Requires: macOS, Xcode, CMake. Run from repo root or from third_party/sherpa-onnx-prebuilt.
@@ -14,7 +18,7 @@ set -e
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <GIT_REF>" >&2
-  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v1.12.28, main)" >&2
+  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v1.13.7, main)" >&2
   exit 1
 fi
 GIT_REF="$1"
@@ -24,6 +28,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_TOP="$SCRIPT_DIR/build_ios_work"
 SHERPA_SRC="$BUILD_TOP/sherpa-onnx-source"
 OUTPUT_XCFRAMEWORK="$SCRIPT_DIR/sherpa_onnx.xcframework"
+
+ORT_VERSION="${SHERPA_ONNX_ONNXRUNTIME_VERSION:-${ONNXRUNTIME_VERSION:-1.28.1}}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "iOS builds require macOS" >&2
@@ -45,17 +51,6 @@ else
   git checkout "$GIT_REF" || git checkout main
   git log -1 --oneline
   SHERPA_SRC="$BUILD_TOP/sherpa-onnx-source"
-fi
-
-cd "$SHERPA_SRC"
-echo "===== Patching build-ios.sh (C++ API) ====="
-if grep -q 'libsherpa-onnx-cxx-api\.a' build-ios.sh 2>/dev/null; then
-  echo "build-ios.sh already includes C++ API (e.g. build-ios-patched.sh); skipping sed."
-else
-  sed -i.bak 's/libsherpa-onnx-c-api.a libsherpa-onnx-core.a/libsherpa-onnx-c-api.a libsherpa-onnx-cxx-api.a libsherpa-onnx-core.a/g' build-ios.sh
-  sed -i.bak 's|build/simulator/lib/libsherpa-onnx-c-api.a|build/simulator/lib/libsherpa-onnx-c-api.a build/simulator/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
-  sed -i.bak 's|build/os64/lib/libsherpa-onnx-c-api.a|build/os64/lib/libsherpa-onnx-c-api.a build/os64/lib/libsherpa-onnx-cxx-api.a|' build-ios.sh
-  rm -f build-ios.sh.bak
 fi
 
 # espeak-ng (Piper/Vits TTS) uses a fixed path buffer (N_PATH_HOME_DEF 255 on Posix). Long iOS paths get
@@ -81,7 +76,6 @@ else
         ;;
     esac
     echo "Patched $CMAKE_FILE: added target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)"
-    # Verify the patch was applied successfully
     if ! grep -q "N_PATH_HOME=512" "$CMAKE_FILE" 2>/dev/null; then
       echo "Error: Failed to apply N_PATH_HOME=512 patch to $CMAKE_FILE." >&2
       echo "The upstream CMake file may have changed. Without this patch, espeak-ng may fail to" >&2
@@ -91,30 +85,33 @@ else
   fi
 fi
 
-# Upstream build-ios.sh configures and builds three slices, then creates the xcframework.
-# The CMake patch above ensures espeak-ng is compiled with N_PATH_HOME=512 for long data_dir paths.
-echo "===== Building sherpa-onnx XCFramework ====="
+echo "===== Building sherpa-onnx XCFramework (upstream build-ios.sh) ====="
+echo "ONNX Runtime version: $ORT_VERSION"
 cd "$SHERPA_SRC"
 chmod +x build-ios.sh
-# Ensure Xcode license is accepted once (run manually if needed: sudo xcodebuild -license accept)
-# Run without filtering so build failures show the real error.
+export SHERPA_ONNX_ONNXRUNTIME_VERSION="$ORT_VERSION"
 ./build-ios.sh
 
+BUILD_IOS_DIR="$SHERPA_SRC/build-ios"
 FRAMEWORK_NAME=""
-if [ -d "$SHERPA_SRC/build-ios/sherpa-onnx.xcframework" ]; then
+if [ -d "$BUILD_IOS_DIR/sherpa-onnx.xcframework" ]; then
   FRAMEWORK_NAME="sherpa-onnx.xcframework"
-elif [ -d "$SHERPA_SRC/build-ios/sherpa_onnx.xcframework" ]; then
+elif [ -d "$BUILD_IOS_DIR/sherpa_onnx.xcframework" ]; then
   FRAMEWORK_NAME="sherpa_onnx.xcframework"
 else
   echo "Error: XCFramework not found after build" >&2
-  ls -la "$SHERPA_SRC/build-ios/" 2>/dev/null || true
+  ls -la "$BUILD_IOS_DIR/" 2>/dev/null || true
   exit 1
 fi
 echo "XCFramework built: $FRAMEWORK_NAME"
 
-echo "===== Adding ONNX Runtime to XCFramework ====="
-cd "$SHERPA_SRC/build-ios"
-ONNXRUNTIME_DIR="ios-onnxruntime/onnxruntime.xcframework"
+CXX_API_HEADER="$BUILD_IOS_DIR/install/include/sherpa-onnx/c-api/cxx-api.h"
+if [ ! -f "$CXX_API_HEADER" ]; then
+  echo "Error: cxx-api.h not found at $CXX_API_HEADER (cmake install step may have failed)" >&2
+  exit 1
+fi
+
+ONNXRUNTIME_DIR="$BUILD_IOS_DIR/ios-onnxruntime/onnxruntime.xcframework"
 if [ ! -d "$ONNXRUNTIME_DIR" ]; then
   echo "Error: ONNX Runtime XCFramework not found at $ONNXRUNTIME_DIR" >&2
   exit 1
@@ -138,56 +135,71 @@ resolve_onnx_static_lib() {
   fi
 }
 
-for SLICE in ios-arm64 ios-arm64_x86_64-simulator; do
-  SHERPA_LIB="$FRAMEWORK_NAME/$SLICE/libsherpa-onnx.a"
-  ONNX_LIB="$(resolve_onnx_static_lib "$ONNXRUNTIME_DIR" "$SLICE")"
-  if [ -f "$SHERPA_LIB" ] && [ -n "$ONNX_LIB" ] && [ -f "$ONNX_LIB" ]; then
-    mv "$SHERPA_LIB" "${SHERPA_LIB}.original"
-    libtool -static -o "$SHERPA_LIB" "${SHERPA_LIB}.original" "$ONNX_LIB"
-    rm "${SHERPA_LIB}.original"
-  else
-    echo "Error: Missing libs for $SLICE" >&2
-    echo "  expected sherpa: $SHERPA_LIB" >&2
-    echo "  expected onnx under: $ONNXRUNTIME_DIR/$SLICE/ (onnxruntime.framework/onnxruntime or onnxruntime.a)" >&2
+# Upstream build-ios.sh lipos most simulator archives into build/simulator/lib/ but
+# excludes libsherpa-onnx-cxx-api.a (only built per simulator slice). Create it here.
+resolve_cxx_api_lib() {
+  local build_dir="$1"
+  local lib="${build_dir}/lib/libsherpa-onnx-cxx-api.a"
+  if [ -f "$lib" ]; then
+    echo "$lib"
+    return 0
+  fi
+  if [ "$build_dir" = "build/simulator" ]; then
+    local arm64="build/simulator_arm64/lib/libsherpa-onnx-cxx-api.a"
+    local x86="build/simulator_x86_64/lib/libsherpa-onnx-cxx-api.a"
+    if [ -f "$arm64" ] && [ -f "$x86" ]; then
+      mkdir -p build/simulator/lib
+      lipo -create "$arm64" "$x86" -output "$lib"
+      echo "$lib"
+      return 0
+    fi
+  fi
+  echo ""
+  return 1
+}
+
+echo "===== Merging cxx-api + ONNX Runtime into SherpaOnnxC.framework ====="
+cd "$BUILD_IOS_DIR"
+
+merge_slice() {
+  local slice="$1"
+  local build_dir="$2"
+  local sherpa_bin="$FRAMEWORK_NAME/$slice/SherpaOnnxC.framework/SherpaOnnxC"
+  local cxx_api_lib
+  local onnx_lib
+  local hdr_dir="$FRAMEWORK_NAME/$slice/SherpaOnnxC.framework/Headers/sherpa-onnx/c-api"
+
+  cxx_api_lib="$(resolve_cxx_api_lib "$build_dir")"
+  onnx_lib="$(resolve_onnx_static_lib "$ONNXRUNTIME_DIR" "$slice")"
+
+  if [ ! -f "$sherpa_bin" ]; then
+    echo "Error: SherpaOnnxC binary not found: $sherpa_bin" >&2
     exit 1
   fi
-done
-echo "ONNX Runtime merged into XCFramework"
+  if [ -z "$cxx_api_lib" ] || [ ! -f "$cxx_api_lib" ]; then
+    echo "Error: cxx-api archive not found for $build_dir (expected under ${build_dir}/lib/ or simulator_arm64+x86_64 slices)" >&2
+    exit 1
+  fi
+  if [ -z "$onnx_lib" ] || [ ! -f "$onnx_lib" ]; then
+    echo "Error: ONNX Runtime static lib not found for $slice under $ONNXRUNTIME_DIR" >&2
+    exit 1
+  fi
 
-echo "===== Including nlohmann headers ====="
-NLOHMANN_DIR=""
-for d in $(cd "$SHERPA_SRC" && find . -type d -name 'nlohmann' -print 2>/dev/null); do
-  case "$d" in
-    */include/*|*/single_include/*|./include/*|./single_include/*)
-      NLOHMANN_DIR="$SHERPA_SRC/${d#./}"
-      break
-      ;;
-  esac
-done
-if [ -z "$NLOHMANN_DIR" ]; then
-  D=$(cd "$SHERPA_SRC" && find . -type d \( -path './**/include/nlohmann' -o -path './**/single_include/nlohmann' \) 2>/dev/null | head -n1 || true)
-  [ -n "$D" ] && NLOHMANN_DIR="$SHERPA_SRC/${D#./}"
-fi
-if [ -n "$NLOHMANN_DIR" ]; then
-  FRAMEWORK_DIR="$SHERPA_SRC/build-ios/$FRAMEWORK_NAME"
-  for HDR_DIR in "$FRAMEWORK_DIR"/*/Headers; do
-    [ -d "$HDR_DIR" ] || continue
-    mkdir -p "$HDR_DIR/nlohmann"
-    if command -v rsync >/dev/null 2>&1; then
-      rsync -a --include='*/' --include='*.hpp' --include='*.h' --exclude='*' "$NLOHMANN_DIR/" "$HDR_DIR/nlohmann/"
-    else
-      (cd "$NLOHMANN_DIR" && find . -type f \( -name '*.hpp' -o -name '*.h' \) -print0) | while IFS= read -r -d '' f; do
-        mkdir -p "$HDR_DIR/nlohmann/$(dirname "$f")"
-        cp "$NLOHMANN_DIR/$f" "$HDR_DIR/nlohmann/$f" 2>/dev/null || true
-      done
-    fi
-  done
-  echo "nlohmann headers installed"
-fi
+  mv "$sherpa_bin" "${sherpa_bin}.original"
+  libtool -static -o "$sherpa_bin" "${sherpa_bin}.original" "$cxx_api_lib" "$onnx_lib"
+  rm "${sherpa_bin}.original"
 
-echo "===== Copying XCFramework to output ====="
+  mkdir -p "$hdr_dir"
+  cp "$CXX_API_HEADER" "$hdr_dir/cxx-api.h"
+  echo "  $slice: merged cxx-api + ORT into SherpaOnnxC, installed cxx-api.h"
+}
+
+merge_slice ios-arm64 build/os64
+merge_slice ios-arm64_x86_64-simulator build/simulator
+
+echo "===== Copying XCFramework to output (sherpa_onnx.xcframework) ====="
 rm -rf "$OUTPUT_XCFRAMEWORK"
-cp -R "$SHERPA_SRC/build-ios/$FRAMEWORK_NAME" "$OUTPUT_XCFRAMEWORK"
+cp -R "$BUILD_IOS_DIR/$FRAMEWORK_NAME" "$OUTPUT_XCFRAMEWORK"
 
 echo "Build complete: $OUTPUT_XCFRAMEWORK"
 du -sh "$OUTPUT_XCFRAMEWORK" 2>/dev/null || true

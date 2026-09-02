@@ -189,10 +189,14 @@ def firstAbiWithMissingLibs = { List<String> required ->
   return null
 }
 
+/** `[package]  part  SOURCE  detail` — fixed columns, no dot-padding. */
+def logPrebuilt = { String pkg, String part, String source, String detail = "" ->
+  println String.format("%-14s %-8s %-14s%s", "[${pkg}]", part, source, detail ? " ${detail}" : "")
+}
+
 project.tasks.register("downloadNativeLibsIfNeeded") {
   doLast {
     def downloadDir = file("${project.buildDir}/prebuilt-downloads")
-    def jniLibsHuman = "${project.projectDir}/src/main/jniLibs"
 
     def currentSherpaVersion = project.ext.sherpaOnnxVersion
     def sherpaVersionFile = new File(downloadDir, "sherpa-onnx-version.txt")
@@ -215,7 +219,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def libarchiveHdrsOk = hasLibarchiveHeaders()
     def libarchiveNeedsUpdate = !libarchiveLibsOk || !libarchiveHdrsOk || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
 
-    println "[prebuilt] Resolution order: (1) THIRD_PARTY  (2) LOCAL_SDK  (3) MAVEN_AAR  (4) GITHUB_RELEASE — see docs/PREBUILT_RESOLUTION.md"
+    println "[prebuilt] THIRD_PARTY → LOCAL_SDK → MAVEN_AAR → GITHUB_RELEASE"
 
     def sherpaResolved = false
     def ffmpegResolved = false
@@ -238,8 +242,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         downloadDir.mkdirs()
         sherpaVersionFile.text = currentSherpaVersion
         sherpaResolved = true
-        println "[sherpa-onnx] jniLibs + C headers ................. THIRD_PARTY  ${thirdPartySherpaDir}"
-        println "[sherpa-onnx] version stamp ...................... written  ${sherpaVersionFile.name}=${currentSherpaVersion}"
+        logPrebuilt("sherpa-onnx", "native", "THIRD_PARTY", currentSherpaVersion)
       }
 
       // Stage 3: MAVEN_AAR
@@ -270,10 +273,10 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             downloadDir.mkdirs()
             sherpaVersionFile.text = currentSherpaVersion
             sherpaResolved = true
-            println "[sherpa-onnx] jniLibs (*.so per ABI) .............. MAVEN_AAR  ${aar.name}"
-            println "[sherpa-onnx]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
-            println "[sherpa-onnx] C headers (sherpa-onnx) ............. ${copiedHeaders ? 'MAVEN_AAR  c-api/** --> ' + includeSherpaDir : 'unchanged (no c-api/ in AAR; existing tree kept)'}"
-            println "[sherpa-onnx] version stamp ...................... written  ${sherpaVersionFile.name}=${currentSherpaVersion}"
+            logPrebuilt("sherpa-onnx", "native", "MAVEN_AAR", aar.name)
+            if (!copiedHeaders) {
+              logPrebuilt("sherpa-onnx", "headers", "unchanged", "no c-api/ in AAR")
+            }
           } else {
             println "[sherpa-onnx] MAVEN_AAR: sherpaOnnxAar empty --> trying GITHUB_RELEASE"
           }
@@ -283,7 +286,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     } else {
       sherpaResolved = true
-      println "[sherpa-onnx] jniLibs + C headers ................. LOCAL_SDK  version=${currentSherpaVersion}"
+      logPrebuilt("sherpa-onnx", "native", "LOCAL_SDK", currentSherpaVersion)
     }
 
     // =====================================================================
@@ -291,7 +294,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // =====================================================================
     if (sherpaOnnxDisableFfmpeg) {
       ffmpegResolved = true
-      println "[FFmpeg] .................................... skipped (sherpaOnnxDisableFfmpeg=true)"
+      logPrebuilt("FFmpeg", "skipped", "disabled", "sherpaOnnxDisableFfmpeg=true")
     } else if (ffmpegNeedsUpdate) {
       // Stage 1: THIRD_PARTY (jni/<abi>/ or build_ffmpeg.sh <abi>/lib/; libshine from shine_prebuilt if needed)
       def tpJni = hasFfmpegThirdPartyLibs()
@@ -304,8 +307,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         downloadDir.mkdirs()
         ffmpegVersionFile.text = currentFfmpegVersion
         ffmpegResolved = true
-        println "[FFmpeg] jniLibs + C headers ...................... THIRD_PARTY  ${thirdPartyFfmpegDir}"
-        println "[FFmpeg] version stamp .......................... written  ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
+        logPrebuilt("FFmpeg", "native", "THIRD_PARTY", currentFfmpegVersion)
       }
 
       // Stage 3: MAVEN_AAR
@@ -336,10 +338,10 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             downloadDir.mkdirs()
             ffmpegVersionFile.text = currentFfmpegVersion
             ffmpegResolved = true
-            println "[FFmpeg] jniLibs .................................. MAVEN_AAR  ${aar.name}"
-            println "[FFmpeg]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
-            println "[FFmpeg] C headers ................................ ${copiedHdr ? 'MAVEN_AAR  include/** --> ' + ffmpegIncludeDir : 'unchanged (no include/ in AAR)'}"
-            println "[FFmpeg] version stamp ............................ written  ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
+            logPrebuilt("FFmpeg", "native", "MAVEN_AAR", aar.name)
+            if (!copiedHdr) {
+              logPrebuilt("FFmpeg", "headers", "unchanged", "no include/ in AAR")
+            }
           } else {
             println "[FFmpeg] MAVEN_AAR: ffmpegAar empty --> trying GITHUB_RELEASE"
           }
@@ -349,7 +351,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     } else {
       ffmpegResolved = true
-      println "[FFmpeg] jniLibs + C headers ........................ LOCAL_SDK  version=${currentFfmpegVersion}"
+      logPrebuilt("FFmpeg", "native", "LOCAL_SDK", currentFfmpegVersion)
     }
 
     // =====================================================================
@@ -357,7 +359,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // =====================================================================
     if (sherpaOnnxDisableLibarchive) {
       libarchiveResolved = true
-      println "[libarchive] .............................. skipped (sherpaOnnxDisableLibarchive=true)"
+      logPrebuilt("libarchive", "skipped", "disabled", "sherpaOnnxDisableLibarchive=true")
     } else if (libarchiveNeedsUpdate) {
       // Stage 1: THIRD_PARTY
       def tpJni = hasAllLibsUnder(thirdPartyLibarchiveDir, requiredLibarchiveSoFiles)
@@ -372,8 +374,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         downloadDir.mkdirs()
         libarchiveVersionFile.text = currentLibarchiveVersion
         libarchiveResolved = true
-        println "[libarchive] jniLibs + C headers ..................... THIRD_PARTY  ${thirdPartyLibarchiveDir}"
-        println "[libarchive] version stamp .......................... written  ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
+        logPrebuilt("libarchive", "native", "THIRD_PARTY", currentLibarchiveVersion)
       }
 
       // Stage 3: MAVEN_AAR
@@ -404,10 +405,10 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             downloadDir.mkdirs()
             libarchiveVersionFile.text = currentLibarchiveVersion
             libarchiveResolved = true
-            println "[libarchive] jniLibs .............................. MAVEN_AAR  ${aar.name}"
-            println "[libarchive]   install: jni/<abi>/*.so --> ${jniLibsHuman}/<abi>/"
-            println "[libarchive] C headers ............................ ${copiedHdr ? 'MAVEN_AAR  include/** --> ' + libarchiveIncludeDir : 'unchanged (no include/ in AAR)'}"
-            println "[libarchive] version stamp ........................ written  ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
+            logPrebuilt("libarchive", "native", "MAVEN_AAR", aar.name)
+            if (!copiedHdr) {
+              logPrebuilt("libarchive", "headers", "unchanged", "no include/ in AAR")
+            }
           } else {
             println "[libarchive] MAVEN_AAR: libarchiveAar empty --> trying GITHUB_RELEASE"
           }
@@ -417,7 +418,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     } else {
       libarchiveResolved = true
-      println "[libarchive] jniLibs + C headers ....................... LOCAL_SDK  version=${currentLibarchiveVersion}"
+      logPrebuilt("libarchive", "native", "LOCAL_SDK", currentLibarchiveVersion)
     }
 
     // =====================================================================
@@ -430,34 +431,46 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // C API headers (onnxruntime_c_api.h) for native CTC alignment: copy from AAR
     // headers/onnxruntime or include/onnxruntime (and per-ABI <abi>/headers/...) into
     // src/main/cpp/include/onnxruntime so CMake can use them without third_party/onnxruntime.
+    //
+    // LOCAL_SDK skip requires stamp + matched .so pair + headers. Skipping on files
+    // alone would keep a stale ORT (e.g. 1.27 vs 1.28) and break sherpa-onnx-jni
+    // (OrtGetApiBase versioned symbols).
     // =====================================================================
+    def currentOrtVersion = project.ext.ortVersion
+    def ortVersionFile = new File(downloadDir, "onnxruntime-version.txt")
+    def storedOrtVersion = (ortVersionFile.exists() ? ortVersionFile.text.trim() : null)
+    def ortNeedsUpdate = !hasAllOnnxruntimeBundleLibs() || !hasOnnxruntimeHeaders() ||
+        storedOrtVersion == null || storedOrtVersion != currentOrtVersion
+
     def ortOnnxHeadersDest = file("${project.projectDir}/src/main/cpp/include/onnxruntime")
-    def copyOrtHeadersFromOnnxruntimeSubdir = { File onnxruntimeDir, String label ->
+    def copyOrtHeadersFromOnnxruntimeSubdir = { File onnxruntimeDir, String source, String detail ->
       if (onnxruntimeDir == null || !onnxruntimeDir.isDirectory()) return false
       def marker = new File(onnxruntimeDir, "core/session/onnxruntime_c_api.h")
       if (!marker.exists()) return false
       project.delete(ortOnnxHeadersDest)
       ortOnnxHeadersDest.mkdirs()
       copy { from onnxruntimeDir; into ortOnnxHeadersDest }
-      println "[onnxruntime] C API headers ...................... ${label} --> ${ortOnnxHeadersDest}"
+      logPrebuilt("onnxruntime", "headers", source, detail)
       return true
     }
-    def tryOrtHeadersFromRoot = { File root, String label ->
+    def tryOrtHeadersFromRoot = { File root, String source ->
       if (root == null || !root.exists()) return false
-      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "headers/onnxruntime"), "${label} headers/onnxruntime")) return true
-      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "include/onnxruntime"), "${label} include/onnxruntime")) return true
+      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "headers/onnxruntime"), source, "headers/onnxruntime")) return true
+      if (copyOrtHeadersFromOnnxruntimeSubdir(new File(root, "include/onnxruntime"), source, "include/onnxruntime")) return true
       return false
     }
-    def copyOrtHeadersBestEffort = { File root, String label ->
-      if (tryOrtHeadersFromRoot(root, label)) return true
+    def copyOrtHeadersBestEffort = { File root, String source ->
+      if (tryOrtHeadersFromRoot(root, source)) return true
       for (abi in requiredAbis) {
-        if (tryOrtHeadersFromRoot(new File(root, abi), "${label} <${abi}>/")) return true
+        if (tryOrtHeadersFromRoot(new File(root, abi), source)) return true
       }
       return false
     }
 
     def ortMatchedPairCopied = false
-    if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
+    if (!ortNeedsUpdate) {
+      logPrebuilt("onnxruntime", "native", "LOCAL_SDK", currentOrtVersion)
+    } else if (hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeBundleSoFiles)) {
       requiredAbis.each { abi ->
         copy {
           from new File(thirdPartyOrtDir, "jni/${abi}")
@@ -466,10 +479,12 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         }
       }
       ortMatchedPairCopied = true
-      println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... THIRD_PARTY  ${thirdPartyOrtDir}"
+      logPrebuilt("onnxruntime", "native", "THIRD_PARTY", currentOrtVersion)
       copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY")
+      downloadDir.mkdirs()
+      ortVersionFile.text = currentOrtVersion
     }
-    if (!ortMatchedPairCopied) {
+    if (ortNeedsUpdate && !ortMatchedPairCopied) {
       try {
         def aarFiles = project.configurations.onnxruntimeAar.files
         if (!aarFiles.isEmpty()) {
@@ -490,14 +505,15 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             }
           }
           ortMatchedPairCopied = true
-          println "[onnxruntime] libonnxruntime.so + libonnxruntime4j_jni.so (matched pair) .... MAVEN_AAR  ${aar.name}"
+          logPrebuilt("onnxruntime", "native", "MAVEN_AAR", aar.name)
           copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR")
+          ortVersionFile.text = currentOrtVersion
         }
       } catch (Exception e) {
         println "[onnxruntime] MAVEN_AAR matched-pair copy failed: ${e.message}"
       }
     }
-    if (!ortMatchedPairCopied && !hasAllOnnxruntimeBundleLibs()) {
+    if (ortNeedsUpdate && !ortMatchedPairCopied && !hasAllOnnxruntimeBundleLibs()) {
       // Legacy: third_party with JNI only (incomplete bundle)
       def tpJniOnly = hasAllLibsUnder(thirdPartyOrtDir, requiredOnnxruntimeJniSoFiles)
       if (tpJniOnly) {
@@ -508,9 +524,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
             into new File(jniLibsDir, abi)
           }
         }
-        println "[onnxruntime] libonnxruntime4j_jni.so only .... THIRD_PARTY  ${thirdPartyOrtDir}"
-        println "[onnxruntime]   WARN: no libonnxruntime.so in ort third_party — add full bundle or resolve onnxruntime AAR."
-        copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY (jni-only)")
+        logPrebuilt("onnxruntime", "jni-only", "THIRD_PARTY")
+        println "[onnxruntime] WARN: no libonnxruntime.so in ort third_party — add full bundle or resolve onnxruntime AAR."
+        copyOrtHeadersBestEffort(thirdPartyOrtDir, "THIRD_PARTY")
       }
       if (!hasAllOnnxruntimeBundleLibs()) {
         try {
@@ -532,9 +548,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
                 }
               }
             }
-            println "[onnxruntime] libonnxruntime4j_jni.so only .... MAVEN_AAR  ${aar.name}"
-            println "[onnxruntime]   WARN: AAR jni/<abi> missing libonnxruntime.so — use a complete onnxruntime AAR."
-            copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR (jni-only)")
+            logPrebuilt("onnxruntime", "jni-only", "MAVEN_AAR", aar.name)
+            println "[onnxruntime] WARN: AAR jni/<abi> missing libonnxruntime.so — use a complete onnxruntime AAR."
+            copyOrtHeadersBestEffort(aarExtractDir, "MAVEN_AAR")
           } else {
             println "[onnxruntime] MAVEN_AAR: onnxruntimeAar empty — ORT native libs still missing"
           }
@@ -586,7 +602,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
         (!sherpaOnnxDisableLibarchive && !libarchiveResolved)
     if (willUseGithub) {
-      println "[prebuilt] GITHUB_RELEASE: repo=${repo} (ZIPs under releases/download/<tag>/ from third_party/*/ANDROID_RELEASE_TAG)"
+      println "[prebuilt] GITHUB_RELEASE repo=${repo}"
     }
     def baseUrl = "https://github.com/${repo}/releases/download"
     downloadDir.mkdirs()
@@ -624,10 +640,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       ffmpegVersionFile.text = currentFfmpegVersion
-      println "[FFmpeg] jniLibs + C headers ...................... GITHUB_RELEASE  tag=${tag}"
-      println "[FFmpeg]   url: ${url}"
-      println "[FFmpeg]   install: <abi>/*.so --> ${jniLibsHuman}/"
-      println "[FFmpeg] version stamp .......................... written  ${ffmpegVersionFile.name}=${currentFfmpegVersion}"
+      logPrebuilt("FFmpeg", "native", "GITHUB_RELEASE", tag)
     }
 
     if (!sherpaOnnxDisableLibarchive && !libarchiveResolved) {
@@ -654,10 +667,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       libarchiveVersionFile.text = currentLibarchiveVersion
-      println "[libarchive] jniLibs + C headers .................. GITHUB_RELEASE  tag=${tag}"
-      println "[libarchive]   url: ${url}"
-      println "[libarchive]   install: <abi>/*.so --> ${jniLibsHuman}/"
-      println "[libarchive] version stamp ........................ written  ${libarchiveVersionFile.name}=${currentLibarchiveVersion}"
+      logPrebuilt("libarchive", "native", "GITHUB_RELEASE", tag)
     }
 
     if (!sherpaResolved) {
@@ -692,11 +702,10 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       downloadDir.mkdirs()
       sherpaVersionFile.text = currentSherpaVersion
-      println "[sherpa-onnx] jniLibs + C headers ................. GITHUB_RELEASE  tag=${tag}"
-      println "[sherpa-onnx]   url: ${url}"
-      println "[sherpa-onnx]   install: <abi>/*.so --> ${jniLibsHuman}/"
-      println "[sherpa-onnx] classes.jar ......................... ${sherpaJavaJar.exists() ? 'GITHUB_RELEASE  --> ' + sherpaOnnxClassesDir : 'not in zip (use extractSherpaOnnxClasses)'}"
-      println "[sherpa-onnx] version stamp ...................... written  ${sherpaVersionFile.name}=${currentSherpaVersion}"
+      logPrebuilt("sherpa-onnx", "native", "GITHUB_RELEASE", tag)
+      if (sherpaJavaJar.exists()) {
+        logPrebuilt("sherpa-onnx", "classes", "GITHUB_RELEASE", "classes.jar")
+      }
     }
     println ""
   }
@@ -751,6 +760,9 @@ def sherpaLocalJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-
 def sherpaExtractedJar = file("${project.buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
 
 project.tasks.register("extractSherpaOnnxClasses") {
+  // Pin change (ANDROID_RELEASE_TAG / SHERPA_ONNX_VERSION) must re-extract classes.jar,
+  // not only a different AAR file identity in the Gradle cache.
+  inputs.property("sherpaOnnxVersion", project.ext.sherpaOnnxVersion)
   outputs.dir sherpaOnnxClassesDir
   inputs.files(project.configurations.sherpaOnnxAar)
   if (sherpaLocalJar.exists()) inputs.file(sherpaLocalJar)
@@ -759,9 +771,7 @@ project.tasks.register("extractSherpaOnnxClasses") {
     file(sherpaOnnxClassesDir).listFiles()?.findAll { it.name.endsWith('.jar') }?.each { it.delete() }
     if (sherpaLocalJar.exists()) {
       copy { from sherpaLocalJar; into sherpaOnnxClassesDir }
-      println "[prebuilt] extractSherpaOnnxClasses"
-      println "[sherpa-onnx] classes.jar (Kotlin API) .......... THIRD_PARTY"
-      println "[sherpa-onnx]   ${sherpaLocalJar.absolutePath} --> ${sherpaOnnxClassesDir}"
+      logPrebuilt("sherpa-onnx", "classes", "THIRD_PARTY")
       return
     }
     def aarFiles = project.configurations.sherpaOnnxAar.files
@@ -772,16 +782,12 @@ project.tasks.register("extractSherpaOnnxClasses") {
         include 'classes.jar'
         into sherpaOnnxClassesDir
       }
-      println "[prebuilt] extractSherpaOnnxClasses"
-      println "[sherpa-onnx] classes.jar (Kotlin API) .......... MAVEN_AAR  ${aar.name}"
-      println "[sherpa-onnx]   classes.jar --> ${sherpaOnnxClassesDir}"
+      logPrebuilt("sherpa-onnx", "classes", "MAVEN_AAR", aar.name)
       return
     }
     if (sherpaExtractedJar.exists()) {
       copy { from sherpaExtractedJar; into sherpaOnnxClassesDir }
-      println "[prebuilt] extractSherpaOnnxClasses"
-      println "[sherpa-onnx] classes.jar (Kotlin API) .......... GITHUB_EXTRACT"
-      println "[sherpa-onnx]   ${sherpaExtractedJar.absolutePath} --> ${sherpaOnnxClassesDir}"
+      logPrebuilt("sherpa-onnx", "classes", "GITHUB_EXTRACT")
       return
     }
     throw new RuntimeException(
@@ -792,6 +798,8 @@ project.tasks.register("extractSherpaOnnxClasses") {
 // Extract classes.jar from the onnxruntime AAR so ai.onnxruntime.* Java classes
 // are bundled directly in the SDK. No compileOnly needed; users get it for free.
 project.tasks.register("extractOnnxruntimeClasses") {
+  // Pin change (ANDROID_RELEASE_TAG / ORT_VERSION) must re-extract classes.jar.
+  inputs.property("ortVersion", project.ext.ortVersion)
   outputs.dir onnxruntimeClassesDir
   inputs.files(project.configurations.onnxruntimeAar)
   doLast {
@@ -810,9 +818,7 @@ project.tasks.register("extractOnnxruntimeClasses") {
         def renamed = new File(onnxruntimeClassesDir, "onnxruntime-classes.jar")
         extractedJar.renameTo(renamed)
       }
-      println "[prebuilt] extractOnnxruntimeClasses"
-      println "[onnxruntime] classes.jar (Java API) ........... MAVEN_AAR  ${aar.name}"
-      println "[onnxruntime]   renamed to onnxruntime-classes.jar --> ${onnxruntimeClassesDir}"
+      logPrebuilt("onnxruntime", "classes", "MAVEN_AAR", aar.name)
       return
     }
     throw new RuntimeException(

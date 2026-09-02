@@ -31,7 +31,8 @@ struct SttValidationResult {
 SttValidationResult ValidateSttPaths(
     SttModelKind kind,
     const SttModelPaths& paths,
-    const std::string& modelDir
+    const std::string& modelDir,
+    bool acceptStreamingParaformerLayout = false
 );
 
 std::vector<CustomPathFieldSpec> GetSttPathRequirements(SttModelKind kind);
