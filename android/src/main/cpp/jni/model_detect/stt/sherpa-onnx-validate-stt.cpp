@@ -25,8 +25,9 @@ static const SttFieldRequirement kTransducerReqs[] = {
     {"bpeVocab", &SttModelPaths::bpeVocab, false},
 };
 
-// Offline paraformer: single model.onnx via paraformerModel (+ tokens).
-// Streaming encoder+decoder layout lives under stt_streaming (GetOnlineSttPathRequirements).
+// Offline paraformer catalog: single model.onnx via paraformerModel (+ tokens).
+// Detect may also accept streaming encoder+decoder via acceptStreamingParaformerLayout.
+// Streaming custom-init catalog: GetOnlineSttPathRequirements.
 static const SttFieldRequirement kParaformerReqs[] = {
     {"paraformerModel", &SttModelPaths::paraformerModel, true},
     {"tokens",          &SttModelPaths::tokens,          true},
@@ -203,12 +204,60 @@ static const char* GetFieldHint(const char* fieldName) {
 
 } // namespace
 
+static void AppendMissingError(
+    SttValidationResult& result,
+    SttModelKind kind,
+    const std::string& modelDir
+) {
+    if (result.missingRequired.empty()) return;
+    result.ok = false;
+    result.error = std::string("STT ") + SttKindToName(kind)
+                 + ": missing required files in " + modelDir + ": ";
+    for (size_t i = 0; i < result.missingRequired.size(); ++i) {
+        if (i > 0) result.error += ", ";
+        result.error += result.missingRequired[i];
+        const char* hint = GetFieldHint(result.missingRequired[i].c_str());
+        if (hint) {
+            result.error += " (";
+            result.error += hint;
+            result.error += ")";
+        }
+    }
+}
+
 SttValidationResult ValidateSttPaths(
     SttModelKind kind,
     const SttModelPaths& paths,
-    const std::string& modelDir
+    const std::string& modelDir,
+    bool acceptStreamingParaformerLayout
 ) {
     SttValidationResult result;
+
+    // Detect-only: streaming paraformer uses encoder+decoder (no single model.onnx).
+    // Offline custom init / GetSttPathRequirements stay paraformerModel-only.
+    if (kind == SttModelKind::kParaformer && acceptStreamingParaformerLayout) {
+        const bool offlineOk = !paths.paraformerModel.empty() && !paths.tokens.empty();
+        const bool streamingOk =
+            !paths.encoder.empty() && !paths.decoder.empty() && !paths.tokens.empty();
+        if (offlineOk || streamingOk) {
+            return result;
+        }
+        if (paths.tokens.empty()) {
+            result.missingRequired.push_back("tokens");
+        }
+        if (paths.paraformerModel.empty() &&
+            (paths.encoder.empty() || paths.decoder.empty())) {
+            result.missingRequired.push_back("paraformerModel");
+            if (paths.encoder.empty()) result.missingRequired.push_back("encoder");
+            if (paths.decoder.empty()) result.missingRequired.push_back("decoder");
+        } else if (paths.paraformerModel.empty()) {
+            if (paths.encoder.empty()) result.missingRequired.push_back("encoder");
+            if (paths.decoder.empty()) result.missingRequired.push_back("decoder");
+        }
+        AppendMissingError(result, kind, modelDir);
+        return result;
+    }
+
     size_t count = 0;
     const auto* reqs = GetRequirements(kind, count);
     if (!reqs) return result;
@@ -219,21 +268,7 @@ SttValidationResult ValidateSttPaths(
         }
     }
 
-    if (!result.missingRequired.empty()) {
-        result.ok = false;
-        result.error = std::string("STT ") + SttKindToName(kind)
-                     + ": missing required files in " + modelDir + ": ";
-        for (size_t i = 0; i < result.missingRequired.size(); ++i) {
-            if (i > 0) result.error += ", ";
-            result.error += result.missingRequired[i];
-            const char* hint = GetFieldHint(result.missingRequired[i].c_str());
-            if (hint) {
-                result.error += " (";
-                result.error += hint;
-                result.error += ")";
-            }
-        }
-    }
+    AppendMissingError(result, kind, modelDir);
     return result;
 }
 

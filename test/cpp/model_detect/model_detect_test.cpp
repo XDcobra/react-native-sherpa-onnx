@@ -153,7 +153,8 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
         auto result = sherpaonnx::DetectSttModelFromFileList(
             files, block.modelDir, "auto", std::nullopt);
 
-        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        if (!result.ok) continue;
         EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
             << "Asset " << block.assetName
             << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
@@ -816,6 +817,50 @@ TEST(ModelDetectValidation, ValidateSttPathsDirectOk) {
     auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kTransducer, paths, "/m");
     EXPECT_TRUE(v.ok);
     EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsParaformerOfflineOk) {
+    sherpaonnx::SttModelPaths paths;
+    paths.paraformerModel = "/m/model.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kParaformer, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsParaformerStreamingOk) {
+    sherpaonnx::SttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateSttPaths(
+        sherpaonnx::SttModelKind::kParaformer, paths, "/m",
+        /*acceptStreamingParaformerLayout=*/true);
+    EXPECT_TRUE(v.ok) << v.error;
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsParaformerStreamingRejectedWithoutFlag) {
+    sherpaonnx::SttModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateSttPaths(sherpaonnx::SttModelKind::kParaformer, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "paraformerModel"),
+              v.missingRequired.end());
+}
+
+TEST(ModelDetectValidation, ValidateSttPathsParaformerMissingBothLayouts) {
+    sherpaonnx::SttModelPaths paths;
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateSttPaths(
+        sherpaonnx::SttModelKind::kParaformer, paths, "/m",
+        /*acceptStreamingParaformerLayout=*/true);
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "paraformerModel"),
+              v.missingRequired.end());
 }
 
 TEST(ModelDetectValidation, ValidateSttPathsDirectMissing) {

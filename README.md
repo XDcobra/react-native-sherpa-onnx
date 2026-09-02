@@ -416,8 +416,8 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 
 | Platform | Version |
 |----------|---------|
-| Android | 1.12.35 |
-| iOS | 1.12.35 |
+| Android | 1.13.7 |
+| iOS | 1.13.7 |
 
 ## Known issues
 
