@@ -41,6 +41,7 @@ npm install react-native-sherpa-onnx
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
+- ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md)
 
 ### Pipeline & buffers
 
@@ -381,6 +382,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
+- **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) – enroll / identify / verify; segment-buffer label Out
 
 ### Segmentation
 

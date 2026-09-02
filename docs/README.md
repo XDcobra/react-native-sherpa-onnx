@@ -87,6 +87,16 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Speaker Identification
+
+| Guide | Description |
+|-------|-------------|
+| [speaker-identification-offline.md](./speaker-identification-offline.md) | Named-speaker enroll / identify / verify; segment-buffer label Out |
+
+> Live/streaming SID is not available yet. Diarization (anonymous clusters) remains planned — see [diarization.md](./diarization.md).
+
+---
+
 ## Segmentation (cross-feature)
 
 | Guide | Description |
@@ -143,5 +153,5 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 | Guide | Description |
 |-------|-------------|
-| [diarization.md](./diarization.md) | Speaker diarization (planned, not yet available) |
+| [diarization.md](./diarization.md) | Speaker diarization (planned; shares embedding foundation with SID) |
 | [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) | SDK-facing known issues (e.g. Pocket TTS, platform drift) |

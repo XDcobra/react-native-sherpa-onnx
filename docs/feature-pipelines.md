@@ -22,6 +22,7 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 - [Punctuation offline patterns](#punctuation-offline-patterns)
 - [Punctuation streaming patterns](#punctuation-streaming-patterns)
 - [VAD streaming patterns](#vad-streaming-patterns)
+- [Speaker identification offline patterns](#speaker-identification-offline-patterns)
 - [Alignment offline patterns](#alignment-offline-patterns)
 - [Segmentation for offline memory control](#segmentation-for-offline-memory-control)
 
@@ -242,6 +243,29 @@ Related docs:
 - [vad-streaming.md](vad-streaming.md)
 - [stt-streaming.md](stt-streaming.md)
 - [segmentbuffer-streaming.md](segmentbuffer-streaming.md)
+
+## Speaker identification offline patterns
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer] --> C[createSpeakerIdentification]
+  B[OfflineSegmentBuffer speech spans] --> C
+  C --> D[enroll / enrollOfflineSegments]
+  C --> E[identify]
+  C --> F[labelOfflineSegments]
+  F --> G[OfflineSegmentBuffer source sid]
+```
+
+When to use:
+- Named-speaker enroll and identify against offline PCM clips.
+- Label VAD (or manual) speech spans with enrolled names into a new segment Out buffer.
+- App-filtered enroll spans (e.g. every other interview turn) via `enrollOfflineSegments`.
+
+Related docs:
+- [speaker-identification-offline.md](speaker-identification-offline.md)
+- [segmentbuffer-offline.md](segmentbuffer-offline.md)
+- [audiobuffer-offline.md](audiobuffer-offline.md)
+- [diarization.md](diarization.md)
 
 ## Alignment offline patterns
 
