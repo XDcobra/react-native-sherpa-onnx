@@ -17,7 +17,12 @@ import type {
 export type {
   DetectedModelEntry,
   DetectionSource,
+  SpeakerEmbeddingConcreteModelType,
   SpeakerEmbeddingDetectResult,
+  SpeakerEmbeddingEngine,
+  SpeakerEmbeddingExtractRange,
+  SpeakerEmbeddingInitializeOptions,
+  SpeakerEmbeddingManager,
   SpeakerEmbeddingModelType,
 } from './types';
 export {
@@ -25,6 +30,12 @@ export {
   isDetectionSource,
   SPEAKER_EMBEDDING_MODEL_TYPES,
 } from './types';
+
+export type {
+  SpeakerEmbeddingCustomConfig,
+  SpeakerEmbeddingCustomPathKey,
+} from './customConfig';
+export { SpeakerEmbeddingErrorCode } from './customConfig';
 
 export async function detectSpeakerEmbeddingModel(
   source: FileSource,
