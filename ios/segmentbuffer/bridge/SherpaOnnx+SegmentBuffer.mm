@@ -218,7 +218,7 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
   }
   NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
   if (source.length == 0) {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid";
     return false;
   }
   NSSet<NSString *> *allowed = nil;
@@ -228,10 +228,12 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
     allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"tts"]) {
     allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
+  } else if ([source isEqualToString:@"sid"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"speakerName", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"manual"]) {
     allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, manual";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, manual";
     return false;
   }
 
@@ -253,6 +255,17 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
     NSString *decision = [payload[@"decision"] isKindOfClass:[NSString class]] ? payload[@"decision"] : nil;
     if (!(decision && [decision isEqualToString:@"model"])) {
       if (errorMessage) *errorMessage = @"speech payload.decision must be model";
+      return false;
+    }
+  }
+  if ([source isEqualToString:@"sid"]) {
+    if (![[payload allKeys] containsObject:@"speakerName"]) {
+      if (errorMessage) *errorMessage = @"speech payload.speakerName is required for source=sid (string or null)";
+      return false;
+    }
+    id speakerName = payload[@"speakerName"];
+    if (!(speakerName == [NSNull null] || [speakerName isKindOfClass:[NSString class]])) {
+      if (errorMessage) *errorMessage = @"speech payload.speakerName must be a string or null";
       return false;
     }
   }

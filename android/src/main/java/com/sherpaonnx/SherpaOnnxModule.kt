@@ -4072,7 +4072,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts"
+        "speech payload.source must be one of vad, stt, tts, sid"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4080,10 +4080,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "vad" -> setOf("source", "engine", "decision", "score", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, manual"
       )
     }
 
@@ -4115,6 +4116,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
               com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
               "speech payload.decision must be model"
+            )
+          }
+        }
+      }
+      "sid" -> {
+        if (!payload.hasKey("speakerName")) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.speakerName is required for source=sid (string or null)"
+          )
+        }
+        if (!payload.isNull("speakerName")) {
+          try {
+            payload.getString("speakerName")
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.speakerName must be a string or null"
             )
           }
         }
