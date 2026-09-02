@@ -631,5 +631,5 @@ vits-piper-cy_GB-gwryw_gogleddol-medium-fp16.tar.bz2,no-license,no,high,manual,h
 vits-piper-cy_GB-bu_tts-medium.tar.bz2,cc-by,yes,high,manual,https://huggingface.co/rhasspy/piper-voices/tree/main
 vits-piper-cy_GB-bu_tts-medium-int8.tar.bz2,cc-by,yes,high,manual,https://huggingface.co/rhasspy/piper-voices/tree/main
 vits-piper-cy_GB-bu_tts-medium-fp16.tar.bz2,cc-by,yes,high,manual,https://huggingface.co/rhasspy/piper-voices/tree/main
-vits-inflect-en-nano-v2.tar.bz2,exhausted,unknown,high,scan_exhausted,
-vits-inflect-en-micro-v2.tar.bz2,exhausted,unknown,high,scan_exhausted,
+vits-inflect-en-nano-v2.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/owensong/Inflect-Nano-v2
+vits-inflect-en-micro-v2.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/owensong/Inflect-Micro-v2
