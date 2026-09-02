@@ -316,6 +316,52 @@ For mode behavior, setup, and constraints, see [Alignment (offline)](./docs/alig
 
 </details>
 
+<details>
+<summary>Voice Activity Detection (VAD) models</summary>
+
+VAD detects speech boundaries on live or offline audio. Detection resolves **Silero** vs **Ten VAD** from the model pack layout.
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` | Picks Silero or Ten VAD from files in the model folder. | n/a |
+| **Silero VAD** | `'silero_vad'` | Widely used speech activity detector (`silero_vad.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vad-models) |
+| **Ten VAD** | `'ten_vad'` | Alternative VAD pack (`ten_vad.onnx`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vad-models) |
+
+APIs and initialization: [VAD (streaming)](./docs/vad-streaming.md).
+
+</details>
+
+<details>
+<summary>Source Separation models</summary>
+
+Source separation splits mixed audio into stems (e.g. vocals / accompaniment).
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` | Detects Spleeter vs UVR layout from files in the model folder. | n/a |
+| **Spleeter** | `'spleeter'` | Two-stem pack (`vocals` + `accompaniment` ONNX). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
+| **UVR** | `'uvr'` | Single-model UVR-style separator. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
+
+APIs and initialization: [offline batch](./docs/separation-offline.md), [streaming / live overload](./docs/separation-streaming.md).
+
+</details>
+
+<details>
+<summary>Speaker Embedding / Identification models</summary>
+
+Speaker identification uses **speaker-embedding** ONNX packs (WeSpeaker, 3D-Speaker, NeMo). Detect via `detectSpeakerEmbeddingModel`; public enroll/identify API is `createSpeakerIdentification`.
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` | Detects embedding family from files in the model folder. | n/a |
+| **WeSpeaker** | `'wespeaker'` | WeSpeaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
+| **3D-Speaker** | `'3d-speaker'` | 3D-Speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
+| **NeMo** | `'nemo'` | NeMo speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
+
+APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md). Speaker **diarization** (anonymous clusters) is still planned — see [Diarization](./docs/diarization.md).
+
+</details>
+
 ## Memory and models
 
 Every active engine keeps its model weights resident in native memory for its entire lifetime. Plan ahead to avoid OOM crashes:
@@ -437,7 +483,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), punctuation (offline/streaming), VAD, and alignment/timestamps
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/streaming), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
