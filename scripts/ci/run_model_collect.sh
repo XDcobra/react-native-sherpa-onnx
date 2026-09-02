@@ -5,14 +5,14 @@
 #   run_model_collect.sh [--stream ID] [--manifest PATH] [--skip-commit]
 #
 # Stream IDs (also listed in .github/workflows/collect-model-structures.yml):
-#   all          — every stream in manifest order (default)
+#   all          — every stream in the manifest (in CI, each stream is its own job)
 #   asr          — ASR + QNN
 #   tts          — TTS
 #   punctuation  — Punctuation
 #   enhancement  — Speech enhancement
 #   separation   — Source separation
 #
-# Env: ASSET_LIMIT (0 = no limit), GITHUB_TOKEN, GITHUB_REPOSITORY, GITHUB_REF_NAME (for commit step)
+# Env: ASSET_LIMIT (0 = no limit), COLLECT_JOBS (parallel download+tar-list workers, default 4),
 set -euo pipefail
 
 if (( BASH_VERSINFO[0] < 4 )); then
