@@ -50,6 +50,7 @@ The following table explains the `license_type` and `commercial_use` values used
 | **ngc-terms-of-use** | `restricted` | NVIDIA NGC Terms; often restricts redistribution or specific commercial weight use. | [Terms](https://ngc.nvidia.com/legal/terms) |
 | **no-license** | `no` | No explicit permission granted; all rights reserved by the author. | N/A |
 | **nvidia-open-model-license** | `yes` | Allows commercial use under specific conditions (e.g. no benchmarking). | [License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) |
+| **openmdw-1.1** | `conditional` | Linux Foundation Open Model Distribution license; permissive use/modification/redistribution of model weights and artifacts, with notice retention and patent/litigation clauses. Used by newer NVIDIA Nemotron releases. | [OpenMDW 1.1](https://openmdw.ai/) |
 | **proprietary-restricted** | `no` | Closed or custom license with significant restrictions. | N/A |
 | **public-domain** | `yes` | Free for any use; no copyright protection. | N/A |
 | **research-only** | `no` | Limited strictly to non-commercial research and evaluation. | N/A |
