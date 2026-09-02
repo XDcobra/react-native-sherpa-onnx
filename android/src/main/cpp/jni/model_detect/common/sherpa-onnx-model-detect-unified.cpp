@@ -94,6 +94,15 @@ const char* SeparationModelKindToString(SeparationModelKind k) {
     }
 }
 
+const char* SpeakerEmbeddingModelKindToString(SpeakerEmbeddingModelKind k) {
+    switch (k) {
+        case SpeakerEmbeddingModelKind::kWespeaker: return "wespeaker";
+        case SpeakerEmbeddingModelKind::k3dSpeaker: return "3d-speaker";
+        case SpeakerEmbeddingModelKind::kNemo: return "nemo";
+        default: return "unknown";
+    }
+}
+
 const char* AlignmentModelKindToString(AlignmentModelKind k) {
     switch (k) {
         case AlignmentModelKind::kWav2Vec2: return "wav2vec2";
@@ -283,6 +292,28 @@ UnifiedModelDetectResult DetectModelInternal(
             separation.detectionSources,
             SeparationModelPathsToStringMap(separation.paths),
             separation.error);
+    }
+
+    SpeakerEmbeddingDetectResult speakerEmbedding =
+        DetectSpeakerEmbeddingModel(model_dir, asset_name, modelType);
+    const std::string speakerEmbeddingType =
+        SpeakerEmbeddingModelKindToString(speakerEmbedding.selectedKind);
+    if (IsCatalogDetectHit(
+            speakerEmbedding.ok,
+            speakerEmbeddingType,
+            speakerEmbedding.detectionSources)) {
+        return MakeHit(
+            "speakerEmbedding",
+            speakerEmbeddingType,
+            speakerEmbedding.derivedLanguages,
+            speakerEmbedding.quantization,
+            "",
+            speakerEmbedding.isStreaming,
+            false,
+            speakerEmbedding.detectedModels,
+            speakerEmbedding.detectionSources,
+            SpeakerEmbeddingModelPathsToStringMap(speakerEmbedding.paths),
+            speakerEmbedding.error);
     }
 
     std::string alignmentKey;

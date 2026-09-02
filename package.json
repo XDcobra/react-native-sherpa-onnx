@@ -60,6 +60,11 @@
       "types": "./lib/typescript/src/enhancement/index.d.ts",
       "default": "./lib/module/enhancement/index.js"
     },
+    "./speaker-embedding": {
+      "source": "./src/speaker-embedding/index.ts",
+      "types": "./lib/typescript/src/speaker-embedding/index.d.ts",
+      "default": "./lib/module/speaker-embedding/index.js"
+    },
     "./punctuation": {
       "source": "./src/punctuation/index.ts",
       "types": "./lib/typescript/src/punctuation/index.d.ts",

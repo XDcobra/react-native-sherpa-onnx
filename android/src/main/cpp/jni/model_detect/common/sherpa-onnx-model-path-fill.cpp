@@ -224,6 +224,13 @@ std::map<std::string, std::string> SeparationModelPathsToStringMap(
     return out;
 }
 
+std::map<std::string, std::string> SpeakerEmbeddingModelPathsToStringMap(
+    const SpeakerEmbeddingModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "model", paths.model);
+    return out;
+}
+
 std::map<std::string, std::string> PunctuationModelPathsToStringMap(
     const PunctuationModelPaths& paths) {
     std::map<std::string, std::string> out;

@@ -93,6 +93,16 @@ export interface EnhancementDetectModelResult extends ModelDetectResultBase {
   };
 }
 
+// ─── Speaker embedding extension ───────────────────────────────────────
+
+export interface SpeakerEmbeddingDetectModelResult
+  extends ModelDetectResultBase {
+  /** Resolved embedding extractor ONNX path from detection. */
+  paths?: {
+    model?: string;
+  };
+}
+
 // ─── Source separation extension ───────────────────────────────────────
 
 export interface SeparationDetectModelResult extends ModelDetectResultBase {

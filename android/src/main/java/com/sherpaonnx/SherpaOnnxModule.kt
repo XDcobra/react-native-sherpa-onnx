@@ -28,6 +28,7 @@ import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
+import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -208,6 +209,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val separationHelper = SherpaOnnxSeparationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
+  )
+  private val speakerEmbeddingHelper = SherpaOnnxSpeakerEmbeddingHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
+    }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
@@ -4740,6 +4746,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
   }
 
+  override fun detectSpeakerEmbeddingModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
+  }
+
   override fun initializeSeparation(
     instanceId: String,
     options: ReadableMap,
@@ -5460,6 +5475,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for source separation: Spleeter or UVR layout (offline only). */
     @JvmStatic
     private external fun nativeDetectSeparationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    /** Model detection for speaker embedding: wespeaker / 3d-speaker / nemo (offline only). */
+    @JvmStatic
+    private external fun nativeDetectSpeakerEmbeddingModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

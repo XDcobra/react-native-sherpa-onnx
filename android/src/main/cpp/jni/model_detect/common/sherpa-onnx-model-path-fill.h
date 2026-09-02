@@ -55,6 +55,8 @@ std::map<std::string, std::string> EnhancementModelPathsToStringMap(
     const EnhancementModelPaths& paths);
 std::map<std::string, std::string> SeparationModelPathsToStringMap(
     const SeparationModelPaths& paths);
+std::map<std::string, std::string> SpeakerEmbeddingModelPathsToStringMap(
+    const SpeakerEmbeddingModelPaths& paths);
 std::map<std::string, std::string> PunctuationModelPathsToStringMap(
     const PunctuationModelPaths& paths);
 std::map<std::string, std::string> AlignmentModelPathsToStringMap(

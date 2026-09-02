@@ -23,6 +23,7 @@
 #include "sherpa-onnx-tts-wrapper.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include "sherpa-onnx-separation-detect-wrapper.h"
+#include "sherpa-onnx-speaker-embedding-detect-wrapper.h"
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
@@ -332,6 +333,28 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSeparationModel(
   sherpaonnx::SeparationDetectResult result =
       sherpaonnx::DetectSeparationModel(model_dir, asset_name, model_type);
   return sherpaonnx::SeparationDetectResultToJava(env, result);
+}
+
+// Speaker embedding: wespeaker / 3d-speaker / nemo (offline only).
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSpeakerEmbeddingModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
+
+  sherpaonnx::SpeakerEmbeddingDetectResult result =
+      sherpaonnx::DetectSpeakerEmbeddingModel(model_dir, asset_name, model_type);
+  return sherpaonnx::SpeakerEmbeddingDetectResultToJava(env, result);
 }
 
 // Punctuation: CT-transformer (offline) or CNN-BiLSTM (online) layout. Returns HashMap with detect fields.

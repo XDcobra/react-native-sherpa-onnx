@@ -118,6 +118,7 @@ set(SOURCES
     jni/model_detect/speaker/sherpa-onnx-model-detect-speaker-embedding.cpp
     jni/model_detect/speaker/sherpa-onnx-validate-speaker-embedding.cpp
     jni/model_detect/speaker/sherpa-onnx-speaker-embedding-online-guard.cpp
+    jni/model_detect/speaker/sherpa-onnx-speaker-embedding-detect-wrapper.cpp
     separation/sherpa-onnx-separation-wrapper.cpp
     jni/separation/sherpa-onnx-separation-jni.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp

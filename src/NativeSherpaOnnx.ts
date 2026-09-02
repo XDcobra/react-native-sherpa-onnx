@@ -1497,6 +1497,28 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Speaker embedding model detection: wespeaker / 3d-speaker / nemo.
+   * Offline only — no streaming layout.
+   */
+  detectSpeakerEmbeddingModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
+  }>;
+
   initializeSeparation(
     instanceId: string,
     options: SeparationInitBridgeOptions
