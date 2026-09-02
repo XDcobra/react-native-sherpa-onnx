@@ -56,15 +56,18 @@ struct PunctuationInitScalars {
   std::string provider = "cpu";
 };
 
-static PunctuationInitScalars ParsePunctuationInitScalars(NSDictionary *options) {
+static PunctuationInitScalars ParsePunctuationInitScalars(
+    const JS::NativeSherpaOnnx::PunctuationInitBridgeOptions &options) {
   PunctuationInitScalars scalars;
-  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
-    scalars.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  auto numThreads = options.numThreads();
+  if (numThreads.has_value()) {
+    scalars.numThreads = MAX(1, (int32_t)numThreads.value());
   }
-  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
-    scalars.debug = [options[@"debug"] boolValue];
+  auto debug = options.debug();
+  if (debug.has_value()) {
+    scalars.debug = debug.value();
   }
-  NSString *provider = options[@"provider"];
+  NSString *provider = options.provider();
   if (provider != nil && provider.length > 0) {
     scalars.provider = std::string([provider UTF8String]);
   }
@@ -108,20 +111,16 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
 @implementation SherpaOnnx (OfflinePunctuation)
 
 - (void)initializeOfflinePunctuation:(NSString *)instanceId
-                            options:(NSDictionary *)options
-                            resolve:(RCTPromiseResolveBlock)resolve
-                             reject:(RCTPromiseRejectBlock)reject
+                             options:(JS::NativeSherpaOnnx::PunctuationInitBridgeOptions &)options
+                             resolve:(RCTPromiseResolveBlock)resolve
+                              reject:(RCTPromiseRejectBlock)reject
 {
   if (instanceId == nil || [instanceId length] == 0) {
     reject(kInitErr, @"instanceId is required", nil);
     return;
   }
-  if (options == nil) {
-    reject(kInitErr, @"options is required", nil);
-    return;
-  }
 
-  NSString *initMode = options[@"initMode"];
+  NSString *initMode = options.initMode();
   if (initMode == nil || [initMode length] == 0) {
     initMode = @"auto";
   }
@@ -134,7 +133,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     NSMutableArray *models = [NSMutableArray array];
 
     if (isCustomInit) {
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
         reject(kInitErr, @"modelType is required for initMode custom", nil);
         return;
@@ -147,7 +146,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
                nil);
         return;
       }
-      id pathsRaw = options[@"modelPaths"];
+      id pathsRaw = options.modelPaths();
       NSDictionary *pathsDict =
           [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
       if (pathsDict == nil || pathsDict.count == 0) {
@@ -171,12 +170,12 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
       ctPath = paths.ct_transformer;
       [models addObject:@{@"type": @"ct_transformer", @"modelDir": @"custom"}];
     } else {
-      NSString *modelDir = options[@"modelDir"];
+      NSString *modelDir = options.modelDir();
       if (modelDir == nil || [modelDir length] == 0) {
         reject(kInitErr, @"modelDir is required for initMode auto", nil);
         return;
       }
-      NSString *modelType = options[@"modelType"];
+      NSString *modelType = options.modelType();
       if (modelType != nil) {
         NSString *trimmed =
             [modelType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
