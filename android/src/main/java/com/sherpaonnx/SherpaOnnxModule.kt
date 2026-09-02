@@ -407,6 +407,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    speakerEmbeddingHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -4753,6 +4754,108 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeSpeakerEmbeddingExtractor(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.initializeSpeakerEmbeddingExtractor(instanceId, options, promise)
+  }
+
+  override fun computeSpeakerEmbeddingOffline(
+    instanceId: String,
+    audioBufferId: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.computeSpeakerEmbeddingOffline(instanceId, audioBufferId, promise)
+  }
+
+  override fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
+    speakerEmbeddingHelper.unloadSpeakerEmbeddingExtractor(instanceId, promise)
+  }
+
+  override fun createSpeakerEmbeddingManager(
+    managerId: String,
+    dim: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.createSpeakerEmbeddingManager(managerId, dim, promise)
+  }
+
+  override fun speakerEmbeddingManagerAdd(
+    managerId: String,
+    name: String,
+    embeddings: ReadableArray,
+    count: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerAdd(
+      managerId,
+      name,
+      embeddings,
+      count,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerRemove(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerRemove(managerId, name, promise)
+  }
+
+  override fun speakerEmbeddingManagerSearch(
+    managerId: String,
+    embedding: ReadableArray,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerSearch(
+      managerId,
+      embedding,
+      threshold,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerVerify(
+    managerId: String,
+    name: String,
+    embedding: ReadableArray,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerVerify(
+      managerId,
+      name,
+      embedding,
+      threshold,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerContains(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerContains(managerId, name, promise)
+  }
+
+  override fun speakerEmbeddingManagerNumSpeakers(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerNumSpeakers(managerId, promise)
+  }
+
+  override fun speakerEmbeddingManagerAllSpeakerNames(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerAllSpeakerNames(managerId, promise)
+  }
+
+  override fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.destroySpeakerEmbeddingManager(managerId, promise)
   }
 
   override fun initializeSeparation(
