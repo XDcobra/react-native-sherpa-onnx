@@ -1,5 +1,11 @@
 # Speaker Identification (live overload)
 
+> **Live overload** — not a streaming SID model.
+>
+> This guide uses the **same offline** speaker-embedding weights as [speaker-identification-offline.md](speaker-identification-offline.md). Live audio is sliced by a mandatory **segmentation policy**; each committed utterance is labeled with offline extract + search. There is **no** separate online/streaming speaker-ID model family in sherpa-onnx.
+>
+> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*`), which use streaming-capable models and native online workers.
+
 ## Introduction
 
 On-device **named-speaker labeling** over a live audio stream. SID owns speech segmentation, extracts an embedding per committed utterance, searches the enrolled manager, and appends labeled speech segments (`payload.source: 'sid'`) to a live segment Out buffer.
@@ -12,8 +18,6 @@ On-device **named-speaker labeling** over a live audio stream. SID owns speech s
 | **Pipeline handle** | `SpeakerIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
-
-This is a **live overload** of the offline embedding model (same weights / manager as [speaker-identification-offline.md](speaker-identification-offline.md)). There is no separate streaming SID model.
 
 Enrollment stays offline (`enroll` / `enrollOfflineSegments`). Live SID only **labels**.
 

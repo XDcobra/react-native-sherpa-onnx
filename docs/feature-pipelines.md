@@ -187,6 +187,7 @@ When to use:
 - Mandatory `continuous_frames` segmentation on the live overload path.
 
 Related docs:
+- [separation-streaming.md](separation-streaming.md) — live overload guide
 - [separation-offline.md](separation-offline.md)
 - [streaming-pipelines-overview.md](streaming-pipelines-overview.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)

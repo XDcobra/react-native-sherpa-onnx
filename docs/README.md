@@ -18,7 +18,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [model-detect.md](./model-detect.md) | Detection (cheap preflight), init modes (auto vs custom), validation, unified vs feature detect |
 | [model-languages.md](./model-languages.md) | Language tables and hints for picker UI / `modelOptions` |
 | [execution-providers.md](./execution-providers.md) | CPU, NNAPI, XNNPACK, Core ML, QNN |
-| [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …), registry, buffer finalization |
+| [streaming-pipelines-overview.md](./streaming-pipelines-overview.md) | Shared streaming pipeline lifecycle — handles (`stop` / `flush` / …); **live overload vs true streaming** |
 | [native-diagnostics.md](./native-diagnostics.md) | Native crash ring buffer, signal-handler dumps (`SherpaNativeDiag`), snapshot API |
 
 ---
@@ -64,7 +64,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [separation-offline.md](./separation-offline.md) | Offline (batch) separation — Spleeter/UVR, Android & iOS |
-| [separation-streaming.md](./separation-streaming.md) | Live separation entry point — links live overload (`SeparationPipelineHandle`) |
+| [separation-streaming.md](./separation-streaming.md) | **Live overload** (offline Spleeter/UVR on live buffers; not a streaming model) |
 
 ---
 
