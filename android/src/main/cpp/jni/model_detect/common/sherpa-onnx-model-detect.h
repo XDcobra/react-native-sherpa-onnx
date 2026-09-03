@@ -126,6 +126,13 @@ enum class SpeakerEmbeddingModelKind {
     kNemo
 };
 
+/** Speaker diarization segmentation packs (pyannote / ReVerb); release tag speaker-segmentation-models. */
+enum class DiarizationModelKind {
+    kUnknown,
+    kPyannote,
+    kReverb
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -284,6 +291,11 @@ struct SpeakerEmbeddingModelPaths {
     std::string model;
 };
 
+struct DiarizationModelPaths {
+    /** Segmentation ONNX (prefer model.onnx over model.int8.onnx). */
+    std::string model;
+};
+
 struct PunctuationModelPaths {
     /** OfflinePunctuationModelConfig.ct_transformer */
     std::string ct_transformer;
@@ -373,6 +385,19 @@ struct SpeakerEmbeddingDetectResult {
     std::vector<DetectedModel> detectedModels;
     SpeakerEmbeddingModelKind selectedKind = SpeakerEmbeddingModelKind::kUnknown;
     SpeakerEmbeddingModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+};
+
+struct DiarizationDetectResult {
+    bool ok = false;
+    /** Always false: upstream OfflineSpeakerDiarization is offline-only. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    DiarizationModelKind selectedKind = DiarizationModelKind::kUnknown;
+    DiarizationModelPaths paths;
     std::vector<DetectionSource> detectionSources;
     std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
@@ -508,6 +533,16 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     const std::string& modelType = "auto"
 );
 
+/**
+ * Speaker diarization segmentation model detection. Pass at least one of `model_dir` or `asset_name`.
+ * Offline-only (model.onnx / model.int8.onnx; kinds pyannote / reverb from pack name).
+ */
+DiarizationDetectResult DetectDiarizationModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto"
+);
+
 VadDetectResult DetectVadModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
@@ -547,6 +582,13 @@ SeparationDetectResult DetectSeparationModelFromFileList(
 
 /** Test-only: Like DetectSpeakerEmbeddingModel but takes a pre-built file list; no filesystem access. */
 SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto"
+);
+
+/** Test-only: Like DetectDiarizationModel but takes a pre-built file list; no filesystem access. */
+DiarizationDetectResult DetectDiarizationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto"

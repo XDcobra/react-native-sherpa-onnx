@@ -103,6 +103,14 @@ const char* SpeakerEmbeddingModelKindToString(SpeakerEmbeddingModelKind k) {
     }
 }
 
+const char* DiarizationModelKindToString(DiarizationModelKind k) {
+    switch (k) {
+        case DiarizationModelKind::kPyannote: return "pyannote";
+        case DiarizationModelKind::kReverb: return "reverb";
+        default: return "unknown";
+    }
+}
+
 const char* AlignmentModelKindToString(AlignmentModelKind k) {
     switch (k) {
         case AlignmentModelKind::kWav2Vec2: return "wav2vec2";
@@ -314,6 +322,26 @@ UnifiedModelDetectResult DetectModelInternal(
             speakerEmbedding.detectionSources,
             SpeakerEmbeddingModelPathsToStringMap(speakerEmbedding.paths),
             speakerEmbedding.error);
+    }
+
+    DiarizationDetectResult diarization =
+        DetectDiarizationModel(model_dir, asset_name, modelType);
+    const std::string diarizationType =
+        DiarizationModelKindToString(diarization.selectedKind);
+    if (IsCatalogDetectHit(
+            diarization.ok, diarizationType, diarization.detectionSources)) {
+        return MakeHit(
+            "diarization",
+            diarizationType,
+            diarization.derivedLanguages,
+            diarization.quantization,
+            "",
+            diarization.isStreaming,
+            false,
+            diarization.detectedModels,
+            diarization.detectionSources,
+            DiarizationModelPathsToStringMap(diarization.paths),
+            diarization.error);
     }
 
     std::string alignmentKey;

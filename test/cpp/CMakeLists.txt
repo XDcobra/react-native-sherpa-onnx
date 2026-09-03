@@ -48,6 +48,8 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/speaker/sherpa-onnx-model-detect-speaker-embedding.cpp"
   "${MODEL_DETECT_DIR}/speaker/sherpa-onnx-validate-speaker-embedding.cpp"
   "${MODEL_DETECT_DIR}/speaker/sherpa-onnx-speaker-embedding-online-guard.cpp"
+  "${MODEL_DETECT_DIR}/diarization/sherpa-onnx-model-detect-diarization.cpp"
+  "${MODEL_DETECT_DIR}/diarization/sherpa-onnx-validate-diarization.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"
 )
 
@@ -68,6 +70,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/enhancement"
   "${MODEL_DETECT_DIR}/separation"
   "${MODEL_DETECT_DIR}/speaker"
+  "${MODEL_DETECT_DIR}/diarization"
   "${MODEL_DETECT_DIR}/punctuation"
   "${MODEL_DETECT_DIR}/vad"
   "${MODEL_DETECT_DIR}/alignment"

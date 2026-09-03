@@ -6,6 +6,7 @@
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
+#include "sherpa-onnx-validate-diarization.h"
 #include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-online-stt.h"
@@ -87,6 +88,12 @@ SpeakerEmbeddingModelKind ParseSpeakerEmbeddingModelTypeLocal(
     if (modelType == "3d-speaker") return SpeakerEmbeddingModelKind::k3dSpeaker;
     if (modelType == "nemo") return SpeakerEmbeddingModelKind::kNemo;
     return SpeakerEmbeddingModelKind::kUnknown;
+}
+
+DiarizationModelKind ParseDiarizationModelTypeLocal(const std::string& modelType) {
+    if (modelType == "pyannote") return DiarizationModelKind::kPyannote;
+    if (modelType == "reverb") return DiarizationModelKind::kReverb;
+    return DiarizationModelKind::kUnknown;
 }
 
 }  // namespace
@@ -209,6 +216,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "diarization") {
+        const DiarizationModelKind kind = ParseDiarizationModelTypeLocal(modelType);
+        if (kind == DiarizationModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom diarization model type: " + modelType
+            );
+        }
+        DiarizationModelPaths diarizationPaths;
+        FillDiarizationModelPathsFromStringMap(paths, diarizationPaths);
+        const auto vr = ValidateDiarizationPaths(kind, diarizationPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);
         if (kind == PunctuationModelKind::kUnknown) {
@@ -287,6 +309,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
             ParseSpeakerEmbeddingModelTypeLocal(modelType);
         if (kind == SpeakerEmbeddingModelKind::kUnknown) return {};
         return FromSpecs(GetSpeakerEmbeddingPathRequirements(kind));
+    }
+    if (cat == "diarization") {
+        const DiarizationModelKind kind = ParseDiarizationModelTypeLocal(modelType);
+        if (kind == DiarizationModelKind::kUnknown) return {};
+        return FromSpecs(GetDiarizationPathRequirements(kind));
     }
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);

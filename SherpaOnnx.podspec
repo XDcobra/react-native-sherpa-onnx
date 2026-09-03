@@ -147,6 +147,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/separation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/speaker\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/diarization\"",
     "\"#{pod_root}/android/src/main/cpp/separation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
@@ -162,6 +163,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/separation\"",
     "\"#{pod_root}/ios/speaker-embedding\"",
     "\"#{pod_root}/ios/speaker-embedding/native\"",
+    "\"#{pod_root}/ios/diarization\"",
     "\"#{pod_root}/ios/punctuation\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""

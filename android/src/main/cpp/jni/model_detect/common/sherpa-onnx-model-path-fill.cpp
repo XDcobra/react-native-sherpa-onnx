@@ -110,6 +110,13 @@ void FillSpeakerEmbeddingModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillDiarizationModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    DiarizationModelPaths& out
+) {
+    SetPathFromMap(paths, "model", out.model);
+}
+
 void FillPunctuationModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     PunctuationModelPaths& out
@@ -233,6 +240,13 @@ std::map<std::string, std::string> SeparationModelPathsToStringMap(
 
 std::map<std::string, std::string> SpeakerEmbeddingModelPathsToStringMap(
     const SpeakerEmbeddingModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "model", paths.model);
+    return out;
+}
+
+std::map<std::string, std::string> DiarizationModelPathsToStringMap(
+    const DiarizationModelPaths& paths) {
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
     return out;
