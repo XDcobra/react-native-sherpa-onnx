@@ -254,8 +254,8 @@ export default function SpeakerIdentificationScreen() {
       source === 'init'
         ? 'Initialization failed'
         : source === 'live'
-          ? 'Live pipeline error'
-          : 'Action failed';
+        ? 'Live pipeline error'
+        : 'Action failed';
     Alert.alert(title, message);
   };
 
@@ -629,10 +629,7 @@ export default function SpeakerIdentificationScreen() {
     }
   };
 
-  const beginBusy = (
-    action: NonNullable<typeof busyAction>,
-    label: string
-  ) => {
+  const beginBusy = (action: NonNullable<typeof busyAction>, label: string) => {
     setBusy(true);
     setBusyAction(action);
     setActionProgress({ label, percent: null });
@@ -745,8 +742,54 @@ export default function SpeakerIdentificationScreen() {
     }
   };
 
+  const handleVerifyOffline = async () => {
+    beginBusy('verify', 'Verifying speech spans…');
+    try {
+      const engine = requireEngine();
+      const audio = requirePreparedAudio();
+      const name = speakerName.trim();
+      if (!name) {
+        throw new Error('Enter a speaker name to verify.');
+      }
+      if (segBatchConfig.mode === 'off') {
+        throw new Error('Verify speech spans requires segmentation mode Auto.');
+      }
+
+      const lines: string[] = [];
+      setActionProgress({ label: 'Segmenting speech…', percent: null });
+      await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
+        const result = await engine.verifyOfflineSegments(
+          name,
+          audio.bufferId,
+          segmentsIn,
+          {
+            threshold: resolveThreshold(),
+            onProgress: (p) => {
+              updateBusyProgress(`Verifying '${name}'`, p);
+            },
+            onVerified: (e) => {
+              const line = `#${e.segmentIndex} ${
+                e.matched ? 'match' : 'no match'
+              } (${e.durationMs}ms)`;
+              lines.push(line);
+              setLabeledLog([...lines]);
+            },
+          }
+        );
+        showActionSuccess(
+          `Verify '${name}' → ${result.matchCount} match, ${result.mismatchCount} no match`,
+          { keepLabeledLog: true }
+        );
+      });
+    } catch (err) {
+      showActionError('action', normalizeErrorMessage(err));
+    } finally {
+      endBusy();
+    }
+  };
+
   const handleLabelOffline = async () => {
-    beginBusy('label', 'Labeling segments…');
+    beginBusy('label', 'Labeling speech spans…');
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
@@ -1034,7 +1077,9 @@ export default function SpeakerIdentificationScreen() {
       await mkdir(stagingDir).catch(() => {});
       await writeFile(stagingPath, json, 'utf8');
       const sourceUri = encodeURI(
-        stagingPath.startsWith('file://') ? stagingPath : `file://${stagingPath}`
+        stagingPath.startsWith('file://')
+          ? stagingPath
+          : `file://${stagingPath}`
       );
       const responses = await DocumentPicker.saveDocuments({
         sourceUris: [sourceUri],
@@ -1573,14 +1618,15 @@ export default function SpeakerIdentificationScreen() {
               <>
                 <Text style={screenStyles.sectionHint}>
                   Segmentation on — enroll averages speech spans; label
-                  identifies each span. There is no per-span verify API (use
-                  whole-buffer Verify with segmentation off).
+                  identifies who spoke each span; verify checks one name per
+                  span.
                 </Text>
                 <View style={screenStyles.buttonRow}>
                   <TouchableOpacity
                     style={[
                       screenStyles.primaryButton,
                       screenStyles.flexButton,
+                      screenStyles.twoLineButton,
                       !canRunBatch && screenStyles.buttonDisabled,
                     ]}
                     onPress={() => {
@@ -1591,15 +1637,21 @@ export default function SpeakerIdentificationScreen() {
                     {busyAction === 'enroll' ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                      <Text style={screenStyles.primaryButtonText}>
-                        Enroll segs
-                      </Text>
+                      <>
+                        <Text style={screenStyles.primaryButtonText}>
+                          Enroll
+                        </Text>
+                        <Text style={screenStyles.primaryButtonSubText}>
+                          speech spans
+                        </Text>
+                      </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
                       screenStyles.primaryButton,
                       screenStyles.flexButton,
+                      screenStyles.twoLineButton,
                       !canRunBatch && screenStyles.buttonDisabled,
                     ]}
                     onPress={() => {
@@ -1610,9 +1662,41 @@ export default function SpeakerIdentificationScreen() {
                     {busyAction === 'label' ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                      <Text style={screenStyles.primaryButtonText}>
-                        Label segs
-                      </Text>
+                      <>
+                        <Text style={screenStyles.primaryButtonText}>
+                          Label
+                        </Text>
+                        <Text style={screenStyles.primaryButtonSubText}>
+                          each span
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      screenStyles.twoLineButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleVerifyOffline().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'verify' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Text style={screenStyles.primaryButtonText}>
+                          Verify
+                        </Text>
+                        <Text style={screenStyles.primaryButtonSubText}>
+                          each span
+                        </Text>
+                      </>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -2138,6 +2222,15 @@ const screenStyles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  primaryButtonSubText: {
+    color: '#E8F1FF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  twoLineButton: {
+    paddingVertical: 10,
   },
   stopButton: {
     backgroundColor: '#B42318',
