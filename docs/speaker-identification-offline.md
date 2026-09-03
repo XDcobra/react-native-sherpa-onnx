@@ -16,7 +16,7 @@ Model detect lives on **`react-native-sherpa-onnx/speaker-embedding`** (`detectS
 
 SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (planned). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
 
-There is **no live/streaming SID API** yet. “Live” usage is app orchestration: finalize live audio/segments → offline SID APIs (same idea as other offline engines before live overload).
+Live labeling is available via **`labelLiveSegments`** — see [speaker-identification-live.md](speaker-identification-live.md). Enrollment remains offline (`enroll` / `enrollOfflineSegments`).
 
 ## Quick start
 
@@ -418,6 +418,7 @@ JS-side SID guards (message match, not always a native `code`): empty speaker na
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [Pipeline segment buffers — offline](segmentbuffer-offline.md) — speech payload `sid`
 - [VAD streaming](vad-streaming.md) — speech boundaries (when)
+- [Speaker Identification (live overload)](speaker-identification-live.md) — `labelLiveSegments`
 - [Speaker diarization](diarization.md) — anonymous clustering (planned; shared embedding foundation)
 - [Feature pipelines](feature-pipelines.md)
 - [Model detect](model-detect.md)

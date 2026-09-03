@@ -92,8 +92,9 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [speaker-identification-offline.md](./speaker-identification-offline.md) | Named-speaker enroll / identify / verify; segment-buffer label Out |
+| [speaker-identification-live.md](./speaker-identification-live.md) | Live overload — `labelLiveSegments` on `LiveAudioBuffer` → labeled `LiveSegmentBuffer` |
 
-> Live/streaming SID is not available yet. Diarization (anonymous clusters) remains planned — see [diarization.md](./diarization.md).
+> Diarization (anonymous clusters) remains planned — see [diarization.md](./diarization.md).
 
 ---
 
