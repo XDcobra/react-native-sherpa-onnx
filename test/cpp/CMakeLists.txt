@@ -125,6 +125,30 @@ set_tests_properties(model_detect_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# --- Diarization core unit tests (powerset / clustering / timeline; no ORT) ---
+set(DIARIZATION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/diarization")
+set(DIARIZATION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/diarization")
+if(GTest_FOUND)
+  set(DIARIZATION_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(DIARIZATION_GTEST_LIBS gtest gtest_main)
+endif()
+
+add_executable(diarization_core_test
+  "${DIARIZATION_TEST_DIR}/diarization_core_test.cpp"
+  "${DIARIZATION_CORE_DIR}/powerset.cpp"
+  "${DIARIZATION_CORE_DIR}/agglomerative-clustering.cpp"
+  "${DIARIZATION_CORE_DIR}/speaker-timeline.cpp"
+)
+target_include_directories(diarization_core_test PRIVATE
+  "${DIARIZATION_CORE_DIR}"
+)
+target_link_libraries(diarization_core_test PRIVATE ${DIARIZATION_GTEST_LIBS})
+add_test(NAME diarization_core_test COMMAND $<TARGET_FILE:diarization_core_test>)
+set_tests_properties(diarization_core_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 if(TARGET audio_f32le_to_format_host_test)
   add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
   set_tests_properties(audio_f32le_to_format_host_test PROPERTIES

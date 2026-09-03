@@ -75,6 +75,12 @@ jobs:
     uses: ./.github/workflows/test-diarization-model-detect.yml
     secrets: inherit
 
+  diarization-core:
+    name: Diarization core
+    needs: [check-csvs]
+    uses: ./.github/workflows/test-diarization-core.yml
+    secrets: inherit
+
   asr-validate:
     name: ASR validation
     needs: [check-csvs]
