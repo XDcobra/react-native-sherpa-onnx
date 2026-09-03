@@ -1,6 +1,9 @@
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import type { SpeakerEmbeddingInitializeOptions } from '../speaker-embedding/types';
+
+export type { OrchestrationProgress };
 
 export type SpeakerIdentificationOptions = SpeakerEmbeddingInitializeOptions;
 
@@ -18,6 +21,31 @@ export type SpeakerIdentificationThresholdOptions = {
   /** Cosine similarity threshold in `[0, 1]`. Default `0.5`. */
   threshold?: number;
 };
+
+/** Shared by enrollOfflineSegments + label (progress only). */
+export type SpeakerIdentificationSegmentOptions =
+  SpeakerIdentificationThresholdOptions & {
+    /** Coarse start-of-step progress for multi-span enroll/label loops. */
+    onProgress?: (progress: OrchestrationProgress) => void;
+  };
+
+/** Fired after a speech span is searched and staged during `labelOfflineSegments`. */
+export type SidLabeledSegmentEvent = {
+  segmentIndex: number;
+  totalSegments: number;
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  durationMs: number;
+  /** Matched enrolled name, or null when below threshold / unknown. */
+  speakerName: string | null;
+};
+
+/** Options for `labelOfflineSegments` only. */
+export type SpeakerIdentificationLabelOptions =
+  SpeakerIdentificationSegmentOptions & {
+    onLabeled?: (event: SidLabeledSegmentEvent) => void;
+  };
 
 export interface SpeakerIdentificationEngine {
   readonly instanceId: string;
@@ -40,7 +68,8 @@ export interface SpeakerIdentificationEngine {
   enrollOfflineSegments(
     name: string,
     audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource
+    segmentsIn: OfflineSegmentBufferIdSource,
+    options?: SpeakerIdentificationSegmentOptions
   ): Promise<void>;
 
   identify(
@@ -56,7 +85,7 @@ export interface SpeakerIdentificationEngine {
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
     segmentsOut: OfflineSegmentBufferIdSource,
-    options?: SpeakerIdentificationThresholdOptions
+    options?: SpeakerIdentificationLabelOptions
   ): Promise<LabelOfflineSegmentsResult>;
 
   verify(

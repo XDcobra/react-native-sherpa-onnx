@@ -15,19 +15,26 @@ import type {
 } from '../segmentbuffer/types';
 import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
+import { createSpeakerIdentificationProgressSession } from './progress';
 import type {
   IdentifyResult,
   LabelOfflineSegmentsResult,
   SpeakerIdentificationEngine,
+  SpeakerIdentificationLabelOptions,
   SpeakerIdentificationOptions,
+  SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
 } from './types';
 
 export type {
   IdentifyResult,
   LabelOfflineSegmentsResult,
+  OrchestrationProgress,
+  SidLabeledSegmentEvent,
   SpeakerIdentificationEngine,
+  SpeakerIdentificationLabelOptions,
   SpeakerIdentificationOptions,
+  SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
 } from './types';
 
@@ -38,6 +45,42 @@ function resolveThreshold(
 ): number {
   const t = options?.threshold;
   return typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_THRESHOLD;
+}
+
+function assertSegmentOptions(
+  options?: SpeakerIdentificationSegmentOptions
+): void {
+  if (options?.onProgress != null && typeof options.onProgress !== 'function') {
+    throw new Error(
+      'SID_INVALID_OPTIONS: options.onProgress must be a function'
+    );
+  }
+}
+
+function assertLabelOptions(options?: SpeakerIdentificationLabelOptions): void {
+  assertSegmentOptions(options);
+  if (options?.onLabeled != null && typeof options.onLabeled !== 'function') {
+    throw new Error(
+      'SID_INVALID_OPTIONS: options.onLabeled must be a function'
+    );
+  }
+}
+
+function spanDurationMs(span: SegmentMeta): number {
+  if (
+    typeof span.durationMs === 'number' &&
+    Number.isFinite(span.durationMs) &&
+    span.durationMs > 0
+  ) {
+    return span.durationMs;
+  }
+  const sampleRate = span.sampleRate;
+  if (sampleRate > 0) {
+    return Math.round(
+      ((span.endSample - span.startSample) * 1000) / sampleRate
+    );
+  }
+  return 0;
 }
 
 /** Non-empty speech spans from an offline segment buffer (skips alignment / empty ranges). */
@@ -108,9 +151,11 @@ export async function createSpeakerIdentification(
     async enrollOfflineSegments(
       name: string,
       audioIn: OfflineAudioBufferIdSource,
-      segmentsIn: OfflineSegmentBufferIdSource
+      segmentsIn: OfflineSegmentBufferIdSource,
+      segmentOptions?: SpeakerIdentificationSegmentOptions
     ): Promise<void> {
       guard();
+      assertSegmentOptions(segmentOptions);
       const trimmed = name.trim();
       if (trimmed.length === 0) {
         throw new Error(
@@ -127,8 +172,13 @@ export async function createSpeakerIdentification(
           'enrollOfflineSegments() requires at least one non-empty speech span'
         );
       }
+      const progressSession = createSpeakerIdentificationProgressSession(
+        segmentOptions?.onProgress
+      );
       const embeddings: Float32Array[] = [];
-      for (const span of spans) {
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]!;
+        progressSession.emitStep(i, spans.length, spanDurationMs(span));
         embeddings.push(
           await engine.extractFromOfflineAudio(audioIn, {
             startSample: span.startSample,
@@ -160,15 +210,24 @@ export async function createSpeakerIdentification(
       audioIn: OfflineAudioBufferIdSource,
       segmentsIn: OfflineSegmentBufferIdSource,
       segmentsOut: OfflineSegmentBufferIdSource,
-      thresholdOptions?: SpeakerIdentificationThresholdOptions
+      segmentOptions?: SpeakerIdentificationLabelOptions
     ): Promise<LabelOfflineSegmentsResult> {
       guard();
+      assertLabelOptions(segmentOptions);
       const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       resolveOfflineSegmentBufferId(segmentsOut);
-      const threshold = resolveThreshold(thresholdOptions);
+      const threshold = resolveThreshold(segmentOptions);
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
+      );
+
+      if (spans.length === 0) {
+        return { labeledCount: 0, unknownCount: 0 };
+      }
+
+      const progressSession = createSpeakerIdentificationProgressSession(
+        segmentOptions?.onProgress
       );
 
       let labeledCount = 0;
@@ -182,7 +241,11 @@ export async function createSpeakerIdentification(
         });
         stagingLiveBufferId = staging.bufferId;
 
-        for (const span of spans) {
+        for (let i = 0; i < spans.length; i++) {
+          const span = spans[i]!;
+          const durationMs = spanDurationMs(span);
+          progressSession.emitStep(i, spans.length, durationMs);
+
           const embedding = await engine.extractFromOfflineAudio(audioIn, {
             startSample: span.startSample,
             endSample: span.endSample,
@@ -197,16 +260,6 @@ export async function createSpeakerIdentification(
           }
 
           const sampleRate = span.sampleRate;
-          const durationMs =
-            typeof span.durationMs === 'number' &&
-            Number.isFinite(span.durationMs) &&
-            span.durationMs > 0
-              ? span.durationMs
-              : sampleRate > 0
-              ? Math.round(
-                  ((span.endSample - span.startSample) * 1000) / sampleRate
-                )
-              : 0;
 
           await appendLiveSegment(stagingLiveBufferId, {
             kind: 'speech',
@@ -217,6 +270,16 @@ export async function createSpeakerIdentification(
             durationMs,
             ...(span.confidence != null ? { confidence: span.confidence } : {}),
             payload: { source: 'sid', speakerName },
+          });
+
+          segmentOptions?.onLabeled?.({
+            segmentIndex: i,
+            totalSegments: spans.length,
+            startSample: span.startSample,
+            endSample: span.endSample,
+            sampleRate,
+            durationMs,
+            speakerName,
           });
         }
 

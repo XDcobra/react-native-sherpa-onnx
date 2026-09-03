@@ -101,7 +101,18 @@ try {
     interviewAudio,
     vadSegs, // speech spans from VAD (or manual)
     labeledOut,
-    { threshold: 0.5 }
+    {
+      threshold: 0.5,
+      onProgress: (p) =>
+        console.log(
+          `sid label ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
+        ),
+      onLabeled: (e) =>
+        console.log(
+          `labeled ${e.segmentIndex + 1}/${e.totalSegments}`,
+          e.speakerName
+        ),
+    }
   );
   console.log({ labeledCount, unknownCount });
 
@@ -182,7 +193,8 @@ interface SpeakerIdentificationEngine {
   enrollOfflineSegments(
     name: string,
     audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource
+    segmentsIn: OfflineSegmentBufferIdSource,
+    options?: SpeakerIdentificationSegmentOptions
   ): Promise<void>;
 
   identify(
@@ -194,7 +206,7 @@ interface SpeakerIdentificationEngine {
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
     segmentsOut: OfflineSegmentBufferIdSource,
-    options?: { threshold?: number }
+    options?: SpeakerIdentificationLabelOptions
   ): Promise<{ labeledCount: number; unknownCount: number }>;
 
   verify(
@@ -214,11 +226,56 @@ interface SpeakerIdentificationEngine {
 | Method | Behavior |
 | --- | --- |
 | `enroll` | Extract embedding(s) from whole buffer(s); native manager averages multiple clips (L2-normalized). Fails if the name already exists. |
-| `enrollOfflineSegments` | Same average path, one embedding per non-empty speech span. |
+| `enrollOfflineSegments` | Same average path, one embedding per non-empty speech span. Optional `onProgress` (see below). |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
-| `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. |
+| `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `verify` | Cosine check against one enrolled name. |
 | `destroy` | Releases manager + drops extractor ref-count. |
+
+`SpeakerIdentificationSegmentOptions` = `{ threshold?: number; onProgress?: (p: OrchestrationProgress) => void }` (enroll + label).  
+`SpeakerIdentificationLabelOptions` = segment options + `{ onLabeled?: (e: SidLabeledSegmentEvent) => void }` (**label only**). Whole-buffer `identify` / `verify` only accept `{ threshold? }`.
+
+---
+
+## Offline progress (`onProgress`) and results (`onLabeled`)
+
+### `onProgress` (start-of-step)
+
+Multi-span SID paths support optional coarse offline progress via `onProgress` on `enrollOfflineSegments` and `labelOfflineSegments`. The payload is shared **`OrchestrationProgress`** (same fields as VAD offline / Alignment):
+
+- Fires at the **start** of step `i` (before extract / search / append for that span).
+- `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
+- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span’s duration.
+- Zero usable speech spans → **no** progress events (`enrollOfflineSegments` rejects; `labelOfflineSegments` returns `{ labeledCount: 0, unknownCount: 0 }`).
+- Non-function `onProgress` → `SID_INVALID_OPTIONS`. If the callback throws, the run aborts.
+
+Whole-buffer `enroll` / `identify` / `verify` do **not** emit progress. Internal staging for `labelOfflineSegments` stays silent (no `onSegmentAppended`).
+
+### `onLabeled` (per-span result — `labelOfflineSegments` only)
+
+Fires **after** search + successful staging append for each speech span:
+
+| Field | Meaning |
+| --- | --- |
+| `segmentIndex` / `totalSegments` | 0-based index and span count |
+| `startSample` / `endSample` / `sampleRate` / `durationMs` | Span range |
+| `speakerName` | Matched enrolled name, or `null` if below threshold / unknown |
+
+Order per span: `onProgress` → extract/search/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
+
+```ts
+await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
+  threshold: 0.5,
+  onProgress: (p) => {
+    console.log(
+      `sid ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
+    );
+  },
+  onLabeled: (e) => {
+    console.log(`result ${e.segmentIndex}:`, e.speakerName);
+  },
+});
+```
 
 ---
 
@@ -306,8 +363,12 @@ import {
   createSpeakerIdentification,
   type IdentifyResult,
   type LabelOfflineSegmentsResult,
+  type OrchestrationProgress,
+  type SidLabeledSegmentEvent,
   type SpeakerIdentificationEngine,
+  type SpeakerIdentificationLabelOptions,
   type SpeakerIdentificationOptions,
+  type SpeakerIdentificationSegmentOptions,
   type SpeakerIdentificationThresholdOptions,
 } from 'react-native-sherpa-onnx/speaker-identification';
 
@@ -324,8 +385,10 @@ import {
 - **`IdentifyResult`:** `{ name: string | null }`
 - **`LabelOfflineSegmentsResult`:** `{ labeledCount: number; unknownCount: number }`
 - **`SpeakerIdentificationThresholdOptions`:** `{ threshold?: number }` (default `0.5`)
-
----
+- **`SpeakerIdentificationSegmentOptions`:** threshold + optional `onProgress`
+- **`SpeakerIdentificationLabelOptions`:** segment options + optional `onLabeled`
+- **`SidLabeledSegmentEvent`:** per-span label result (`speakerName`, ranges, …)
+- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)---
 
 ## Error codes
 
@@ -341,6 +404,7 @@ Typical **promise rejection `code`** strings from the native speaker-embedding l
 | `SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH` | A non-offline audio buffer was passed to offline extract. |
 | `SPEAKER_EMBEDDING_BUFFER_EMPTY` | Offline audio buffer (or extracted range) has no samples. |
 | `SPEAKER_EMBEDDING_INVALID_ARGUMENT` | Invalid `customConfig` / init arguments on the JS custom-path resolver. |
+| `SID_INVALID_OPTIONS` | JS guard: `onProgress` / `onLabeled` provided but not a function (message includes this token). |
 | `SEGMENT_INVALID_ARGUMENT` | Bad segment buffer id or invalid speech payload during `labelOfflineSegments` staging (`source: 'sid'`). |
 | `SEGMENT_BUFFER_NOT_FOUND` | Segment In/Out or staging live buffer id missing from the segment registry. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during detect/init. |

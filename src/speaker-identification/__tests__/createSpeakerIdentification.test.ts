@@ -381,4 +381,299 @@ describe('createSpeakerIdentification', () => {
       STAGING_LIVE
     );
   });
+
+  it('labelOfflineSegments emits onProgress before each span extract', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+      {
+        id: 'b',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 2000,
+        endSample: 3600,
+        sampleRate: 16000,
+        durationMs: 200,
+      },
+    ]);
+
+    const onProgress = jest.fn();
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+      onProgress,
+    });
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 2,
+        fraction: 0,
+        currentSegmentDurationMs: 100,
+      })
+    );
+    expect(onProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        currentSegment: 1,
+        totalSegments: 2,
+        fraction: 0.5,
+        currentSegmentDurationMs: 200,
+      })
+    );
+    const firstElapsed = onProgress.mock.calls[0]![0].elapsedMs as number;
+    const secondElapsed = onProgress.mock.calls[1]![0].elapsedMs as number;
+    expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
+
+    const firstProgressOrder = onProgress.mock.invocationCallOrder[0]!;
+    const firstSliceOrder =
+      audiobuffer.getOfflineAudioBufferSamplesSlice.mock
+        .invocationCallOrder[0]!;
+    expect(firstProgressOrder).toBeLessThan(firstSliceOrder);
+  });
+
+  it('labelOfflineSegments rejects non-function onProgress', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([]);
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+        onProgress: 123 as any,
+      })
+    ).rejects.toThrow(/onProgress must be a function/);
+  });
+
+  it('labelOfflineSegments aborts when onProgress throws and releases staging', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+    ]);
+    const onProgress = jest.fn(() => {
+      throw new Error('progress failed');
+    });
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onProgress })
+    ).rejects.toThrow(/progress failed/);
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
+    expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+      STAGING_LIVE
+    );
+  });
+
+  it('labelOfflineSegments with zero speech spans skips onProgress', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'alignment',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 100,
+        sampleRate: 16000,
+        durationMs: 10,
+        payload: {
+          text: 'x',
+          timingMode: 'proportional',
+          granularity: 'word',
+        },
+      },
+    ]);
+    const onProgress = jest.fn();
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onProgress })
+    ).resolves.toEqual({ labeledCount: 0, unknownCount: 0 });
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(segs.createLiveSegmentBuffer).not.toHaveBeenCalled();
+  });
+
+  it('enrollOfflineSegments emits onProgress per speech span', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+      {
+        id: 'c',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 3200,
+        endSample: 4800,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+    ]);
+    const onProgress = jest.fn();
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await sid.enrollOfflineSegments('alice', AUDIO_ID, SEGS_IN, { onProgress });
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 2,
+        fraction: 0,
+      })
+    );
+    expect(onProgress).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        currentSegment: 1,
+        totalSegments: 2,
+        fraction: 0.5,
+      })
+    );
+  });
+
+  it('labelOfflineSegments emits onLabeled after each append with speakerName', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+      {
+        id: 'b',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 2000,
+        endSample: 3600,
+        sampleRate: 16000,
+        durationMs: 200,
+      },
+    ]);
+    native.speakerEmbeddingManagerSearch
+      .mockResolvedValueOnce({ name: 'alice' })
+      .mockResolvedValueOnce({ name: '' });
+
+    const onProgress = jest.fn();
+    const onLabeled = jest.fn();
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+      onProgress,
+      onLabeled,
+    });
+
+    expect(onLabeled).toHaveBeenCalledTimes(2);
+    expect(onLabeled).toHaveBeenNthCalledWith(1, {
+      segmentIndex: 0,
+      totalSegments: 2,
+      startSample: 0,
+      endSample: 1600,
+      sampleRate: 16000,
+      durationMs: 100,
+      speakerName: 'alice',
+    });
+    expect(onLabeled).toHaveBeenNthCalledWith(2, {
+      segmentIndex: 1,
+      totalSegments: 2,
+      startSample: 2000,
+      endSample: 3600,
+      sampleRate: 16000,
+      durationMs: 200,
+      speakerName: null,
+    });
+
+    const progress0 = onProgress.mock.invocationCallOrder[0]!;
+    const append0 = segs.appendLiveSegment.mock.invocationCallOrder[0]!;
+    const labeled0 = onLabeled.mock.invocationCallOrder[0]!;
+    expect(progress0).toBeLessThan(append0);
+    expect(append0).toBeLessThan(labeled0);
+  });
+
+  it('labelOfflineSegments rejects non-function onLabeled', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+        onLabeled: 123 as any,
+      })
+    ).rejects.toThrow(/onLabeled must be a function/);
+  });
+
+  it('labelOfflineSegments aborts when onLabeled throws and releases staging', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+    ]);
+    const onLabeled = jest.fn(() => {
+      throw new Error('labeled failed');
+    });
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onLabeled })
+    ).rejects.toThrow(/labeled failed/);
+    expect(segs.appendLiveSegment).toHaveBeenCalledTimes(1);
+    expect(segs.finalizeLiveSegmentBuffer).not.toHaveBeenCalled();
+    expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+      STAGING_LIVE
+    );
+  });
+
+  it('labelOfflineSegments with zero speech spans skips onLabeled', async () => {
+    segs.getOfflineSegmentBufferSegments.mockResolvedValue([]);
+    const onLabeled = jest.fn();
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await expect(
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onLabeled })
+    ).resolves.toEqual({ labeledCount: 0, unknownCount: 0 });
+    expect(onLabeled).not.toHaveBeenCalled();
+  });
 });
