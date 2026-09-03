@@ -37,6 +37,12 @@
       "label": "Speaker embedding",
       "config": "sherpa_speaker_embedding_model_release_streams.json",
       "commit_message": "chore(testdata): update speaker embedding model structures, expected CSV, and license status from speaker-recongition-models release"
+    },
+    {
+      "id": "diarization",
+      "label": "Speaker diarization",
+      "config": "sherpa_diarization_model_release_streams.json",
+      "commit_message": "chore(testdata): update speaker segmentation model structures, expected CSV, and license status from speaker-segmentation-models release"
     }
   ]
 }

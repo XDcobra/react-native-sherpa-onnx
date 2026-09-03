@@ -159,7 +159,7 @@ if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] ||
   [ -n "$SEPARATION_MISSING" ] && echo -e "Source separation (source-separation-models) assets missing from $SEPARATION_CSV:\n$SEPARATION_MISSING"
   [ -n "$SPEAKER_EMB_MISSING" ] && echo -e "Speaker embedding (speaker-recongition-models) assets missing from $SPEAKER_EMB_CSV:\n$SPEAKER_EMB_MISSING"
   echo "Please run the collect workflows to update fixtures:"
-  echo "  - Testdata - Collect model structures (workflow_dispatch; stream=all, asr, tts, punctuation, enhancement, separation, or speaker-embedding)"
+  echo "  - Testdata - Collect model structures (workflow_dispatch; stream=all, asr, tts, punctuation, enhancement, separation, speaker-embedding, or diarization)"
   exit 0
 fi
 

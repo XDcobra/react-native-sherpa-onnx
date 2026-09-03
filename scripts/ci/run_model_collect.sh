@@ -12,6 +12,7 @@
 #   enhancement  — Speech enhancement
 #   separation   — Source separation
 #   speaker-embedding — Speaker embedding / recognition
+#   diarization  — Speaker diarization / segmentation
 #
 # Env: ASSET_LIMIT (0 = no limit), COLLECT_JOBS (parallel download+tar-list workers, default 4),
 set -euo pipefail
