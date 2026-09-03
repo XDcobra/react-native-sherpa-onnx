@@ -50,7 +50,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diagnostic/NativeDiagnosticIOS.mm",
     # Shared separation inference core. JNI bridge excluded below.
     "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.cpp",
-    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h"
+    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h",
+    # Shared diarization core (decomposed pyannote + embedding + clustering).
+    "android/src/main/cpp/diarization/*.cpp",
+    "android/src/main/cpp/diarization/*.h"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -66,7 +69,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/audio/audio_encode_jni.cpp",
     "android/src/main/cpp/jni/diagnostic/NativeDiagnosticAndroid.cpp",
     "android/src/main/cpp/jni/diagnostic/native_diagnostic_jni.cpp",
-    "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp"
+    "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp",
+    "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -78,7 +82,15 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
     "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
     "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h",
-    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h"
+    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h",
+    "android/src/main/cpp/diarization/sherpa-onnx-diarization-wrapper.h",
+    "android/src/main/cpp/diarization/diarization-types.h",
+    "android/src/main/cpp/diarization/powerset.h",
+    "android/src/main/cpp/diarization/pyannote-segmentation-model.h",
+    "android/src/main/cpp/diarization/speaker-timeline.h",
+    "android/src/main/cpp/diarization/speaker-embedding-runner.h",
+    "android/src/main/cpp/diarization/agglomerative-clustering.h",
+    "android/src/main/cpp/diarization/diarization-session.h"
   ]
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
@@ -149,6 +161,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/speaker\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/diarization\"",
     "\"#{pod_root}/android/src/main/cpp/separation\"",
+    "\"#{pod_root}/android/src/main/cpp/diarization\"",
+    "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",

@@ -124,6 +124,14 @@ set(SOURCES
     jni/model_detect/diarization/sherpa-onnx-diarization-detect-wrapper.cpp
     separation/sherpa-onnx-separation-wrapper.cpp
     jni/separation/sherpa-onnx-separation-jni.cpp
+    diarization/powerset.cpp
+    diarization/pyannote-segmentation-model.cpp
+    diarization/speaker-timeline.cpp
+    diarization/speaker-embedding-runner.cpp
+    diarization/agglomerative-clustering.cpp
+    diarization/diarization-session.cpp
+    diarization/sherpa-onnx-diarization-wrapper.cpp
+    jni/diarization/sherpa-onnx-diarization-jni.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-online-guard.cpp
     jni/model_detect/punctuation/sherpa-onnx-model-detect-punctuation.cpp
@@ -248,7 +256,10 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/separation
+    ${CMAKE_CURRENT_SOURCE_DIR}/diarization
     ${ORT_INCLUDE_DIR}
+    # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
+    ${ORT_INCLUDE_DIR}/onnxruntime/core/session
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
