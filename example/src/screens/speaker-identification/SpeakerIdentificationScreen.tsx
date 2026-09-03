@@ -239,6 +239,17 @@ export default function SpeakerIdentificationScreen() {
   >('idle');
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [liveLabelLog, setLiveLabelLog] = useState<string[]>([]);
+  const [liveLabelEvents, setLiveLabelEvents] = useState<
+    Array<{
+      segmentIndex: number;
+      speakerName: string;
+      startSample: number;
+      endSample: number;
+      sampleRate: number;
+      durationMs: number;
+      confidence?: number;
+    }>
+  >([]);
 
   const engineRef = useRef<SpeakerIdentificationEngine | null>(null);
   const pipelineRef = useRef<SpeakerIdentificationPipelineHandle | null>(null);
@@ -288,6 +299,17 @@ export default function SpeakerIdentificationScreen() {
     const parsed = Number.parseFloat(thresholdText);
     return Number.isFinite(parsed) ? parsed : DEFAULT_THRESHOLD;
   }, [thresholdText]);
+
+  const formatSecondsToMMSS = useCallback((seconds: number): string => {
+    const clamped = Math.max(0, seconds);
+    const total = Math.floor(clamped);
+    const mm = Math.floor(total / 60);
+    const ss = total % 60;
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(
+      2,
+      '0'
+    )}`;
+  }, []);
 
   const showActionError = (
     source: 'init' | 'action' | 'live',
@@ -992,6 +1014,7 @@ export default function SpeakerIdentificationScreen() {
     setErrorSource(null);
     setLiveStatus(null);
     setLiveLabelLog([]);
+    setLiveLabelEvents([]);
     setActionResult(null);
     setLabeledLog([]);
     setSpanLabelNames([]);
@@ -1018,6 +1041,15 @@ export default function SpeakerIdentificationScreen() {
       liveSegOutRef.current = labeledOut.bufferId;
 
       const lines: string[] = [];
+      const events: Array<{
+        segmentIndex: number;
+        speakerName: string;
+        startSample: number;
+        endSample: number;
+        sampleRate: number;
+        durationMs: number;
+        confidence?: number;
+      }> = [];
       const pipeline = await engine.labelLiveSegments(
         liveIn.bufferId,
         labeledOut.bufferId,
@@ -1028,11 +1060,23 @@ export default function SpeakerIdentificationScreen() {
           },
           threshold: resolveThreshold(),
           onLabeled: (e) => {
-            const line = `#${e.segmentIndex} ${e.speakerName ?? 'unknown'} (${
-              e.durationMs
-            }ms)`;
+            const speakerName = e.speakerName ?? 'unknown';
+            const startTime = formatSecondsToMMSS(e.startSample / e.sampleRate);
+            const endTime = formatSecondsToMMSS(e.endSample / e.sampleRate);
+            const left = `#${e.segmentIndex}: ${speakerName} (${e.durationMs}ms)`;
+            const line = `${left}  ${startTime} - ${endTime}`;
             lines.push(line);
+            events.push({
+              segmentIndex: e.segmentIndex,
+              speakerName,
+              startSample: e.startSample,
+              endSample: e.endSample,
+              sampleRate: e.sampleRate,
+              durationMs: e.durationMs,
+              confidence: e.confidence,
+            });
             setLiveLabelLog([...lines.slice(-20)]);
+            setLiveLabelEvents([...events.slice(-20)]);
           },
         }
       );
@@ -1431,10 +1475,16 @@ export default function SpeakerIdentificationScreen() {
 
   const renderProgressBlock = (
     progress: { label: string; percent: number | null },
-    opts?: { titled?: boolean }
+    opts?: { titled?: boolean; tight?: boolean }
   ) => (
     <View
-      style={opts?.titled ? screenStyles.card : screenStyles.inlineProgress}
+      style={
+        opts?.titled
+          ? screenStyles.card
+          : opts?.tight
+            ? screenStyles.inlineProgressTight
+            : screenStyles.inlineProgress
+      }
     >
       {opts?.titled ? (
         <Text style={screenStyles.cardTitle}>In progress</Text>
@@ -2102,10 +2152,13 @@ export default function SpeakerIdentificationScreen() {
                 </TouchableOpacity>
               )}
               {liveBusy && liveProgressLabel
-                ? renderProgressBlock({
-                    label: liveProgressLabel,
-                    percent: null,
-                  })
+                ? renderProgressBlock(
+                    {
+                      label: liveProgressLabel,
+                      percent: null,
+                    },
+                    { tight: true }
+                  )
                 : liveStatus && !liveBusy ? (
                     <Text
                       style={[screenStyles.bodyText, screenStyles.statusAfterRun]}
@@ -2113,11 +2166,111 @@ export default function SpeakerIdentificationScreen() {
                       {liveStatus}
                     </Text>
                   ) : null}
-              {liveLabelLog.map((line) => (
-                <Text key={line} style={screenStyles.monoResultText}>
-                  {line}
-                </Text>
-              ))}
+
+              {liveLabelEvents.length > 0 ? (
+                <View
+                  style={[
+                    screenStyles.buttonRow,
+                    {
+                      justifyContent: 'flex-end',
+                      flexWrap: 'nowrap',
+                      alignSelf: 'flex-end',
+                      marginTop: 8,
+                      marginBottom: 8,
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={[
+                      baseStyles.secondaryButton,
+                      {
+                        flex: 0.5,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        borderRadius: 10,
+                      },
+                    ]}
+                    onPress={() => {
+                      Clipboard.setString(liveLabelLog.join('\n'));
+                      Alert.alert(
+                        'Copied',
+                        `Copied ${liveLabelEvents.length} live label(s) as text.`
+                      );
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                    disabled={liveBusy}
+                  >
+                    <Text
+                      style={[
+                        baseStyles.secondaryButtonText,
+                        { fontSize: 12, fontWeight: '600' },
+                      ]}
+                    >
+                      Copy live labels
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      baseStyles.secondaryButton,
+                      {
+                        flex: 0.5,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        borderRadius: 10,
+                      },
+                    ]}
+                    onPress={() => {
+                      Clipboard.setString(
+                        JSON.stringify(
+                          {
+                            version: 1,
+                            labels: liveLabelEvents,
+                          },
+                          null,
+                          2
+                        )
+                      );
+                      Alert.alert(
+                        'Copied',
+                        `Copied ${liveLabelEvents.length} live label(s) as JSON.`
+                      );
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                    disabled={liveBusy}
+                  >
+                    <Text
+                      style={[
+                        baseStyles.secondaryButtonText,
+                        { fontSize: 12, fontWeight: '600' },
+                      ]}
+                    >
+                      Copy live labels (JSON)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {liveLabelEvents.map((e) => {
+                const startTime = formatSecondsToMMSS(
+                  e.startSample / e.sampleRate
+                );
+                const endTime = formatSecondsToMMSS(
+                  e.endSample / e.sampleRate
+                );
+                return (
+                  <View key={e.segmentIndex} style={screenStyles.liveLabelRow}>
+                    <Text
+                      style={[screenStyles.monoResultText, { flexShrink: 1 }]}
+                    >
+                      #{e.segmentIndex}: {e.speakerName} ({e.durationMs}ms)
+                    </Text>
+                    <Text style={screenStyles.liveLabelTimeText}>
+                      {startTime} - {endTime}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           </>
         )}
@@ -2698,6 +2851,24 @@ const screenStyles = StyleSheet.create({
   },
   inlineProgress: {
     marginTop: 12,
+  },
+  inlineProgressTight: {
+    marginTop: 0,
+  },
+  liveLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  liveLabelTimeText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6B7280',
+    fontFamily: 'Menlo',
+    textAlign: 'right',
+    flexShrink: 0,
+    minWidth: 110,
   },
   progressStatusRow: {
     flexDirection: 'row',
