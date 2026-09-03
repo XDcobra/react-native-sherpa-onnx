@@ -259,9 +259,15 @@ export default function SpeakerIdentificationScreen() {
     Alert.alert(title, message);
   };
 
-  const showActionSuccess = (message: string) => {
+  const showActionSuccess = (
+    message: string,
+    options?: { keepLabeledLog?: boolean }
+  ) => {
     setError(null);
     setErrorSource(null);
+    if (!options?.keepLabeledLog) {
+      setLabeledLog([]);
+    }
     setActionResult(message);
   };
 
@@ -632,6 +638,8 @@ export default function SpeakerIdentificationScreen() {
     setActionProgress({ label, percent: null });
     setError(null);
     setErrorSource(null);
+    setActionResult(null);
+    setLabeledLog([]);
   };
 
   const updateBusyProgress = (
@@ -739,7 +747,6 @@ export default function SpeakerIdentificationScreen() {
 
   const handleLabelOffline = async () => {
     beginBusy('label', 'Labeling segments…');
-    setLabeledLog([]);
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
@@ -778,7 +785,8 @@ export default function SpeakerIdentificationScreen() {
             segmentsOut.bufferId
           );
           showActionSuccess(
-            `Labeled ${result.labeledCount}, unknown ${result.unknownCount}, out rows ${segs.length}`
+            `Labeled ${result.labeledCount}, unknown ${result.unknownCount}, out rows ${segs.length}`,
+            { keepLabeledLog: true }
           );
         } finally {
           await releasePipelineSegmentBuffer(segmentsOut.bufferId).catch(
@@ -847,6 +855,7 @@ export default function SpeakerIdentificationScreen() {
     setLiveStatus(null);
     setLiveLabelLog([]);
     setActionResult(null);
+    setLabeledLog([]);
     await cleanupLiveRuntime();
     if (runEpoch !== liveRunEpochRef.current) {
       return;
@@ -1497,79 +1506,118 @@ export default function SpeakerIdentificationScreen() {
               autoCapitalize="none"
               editable={!busy && !liveBusy}
             />
-            <View style={screenStyles.buttonRow}>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  !canRunBatch && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleEnroll().catch(() => {});
-                }}
-                disabled={!canRunBatch}
-              >
-                {busyAction === 'enroll' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>Enroll</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  !canRunBatch && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleIdentify().catch(() => {});
-                }}
-                disabled={!canRunBatch}
-              >
-                {busyAction === 'identify' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>Identify</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            <View style={screenStyles.buttonRow}>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  !canRunBatch && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleVerify().catch(() => {});
-                }}
-                disabled={!canRunBatch}
-              >
-                {busyAction === 'verify' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>Verify</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  (!canRunBatch || segBatchConfig.mode === 'off') &&
-                    screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleLabelOffline().catch(() => {});
-                }}
-                disabled={!canRunBatch || segBatchConfig.mode === 'off'}
-              >
-                {busyAction === 'label' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>Label segs</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            {segBatchConfig.mode === 'off' ? (
+              <>
+                <Text style={screenStyles.sectionHint}>
+                  Segmentation off — whole-buffer enroll / identify / verify.
+                </Text>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleEnroll().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'enroll' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>Enroll</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleIdentify().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'identify' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        Identify
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleVerify().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'verify' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>Verify</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={screenStyles.sectionHint}>
+                  Segmentation on — enroll averages speech spans; label
+                  identifies each span. There is no per-span verify API (use
+                  whole-buffer Verify with segmentation off).
+                </Text>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleEnroll().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'enroll' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        Enroll segs
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      !canRunBatch && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleLabelOffline().catch(() => {});
+                    }}
+                    disabled={!canRunBatch}
+                  >
+                    {busyAction === 'label' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        Label segs
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         ) : (
           <View style={screenStyles.card}>
