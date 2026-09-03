@@ -18,6 +18,11 @@
     {
       "category": "diarization",
       "tag": "speaker-segmentation-models",
+      "id": "sherpa-onnx-pyannote-segmentation-3-0"
+    },
+    {
+      "category": "diarization",
+      "tag": "speaker-segmentation-models",
       "id": "sherpa-onnx-reverb-diarization-v1"
     },
     {

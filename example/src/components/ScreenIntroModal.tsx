@@ -86,8 +86,8 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
   },
   Diarization: {
-    title: 'Speaker diarization preview',
-    body: 'This placeholder screen shows where speaker diarization will land later. It is intended to help you think about speaker separation in multi-speaker pipelines and outputs.',
+    title: 'Speaker diarization demo',
+    body: 'Offline batch diarization: load a pyannote/reverb segmentation model plus a speaker-embedding model, pick audio, and get anonymous speaker clusters with timestamps. Re-cluster and match centroids to enrolled SID names when you need real labels.',
   },
   Enhancement: {
     title: 'Speech enhancement demo',

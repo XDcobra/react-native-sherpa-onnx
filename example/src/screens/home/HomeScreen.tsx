@@ -190,7 +190,7 @@ const FEATURES: HomeFeature[] = [
     description: 'Identify who spoke when in audio',
     icon: 'people',
     screen: 'Diarization',
-    implemented: false,
+    implemented: true,
   },
   {
     id: 'speaker_identification',
