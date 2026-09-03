@@ -86,7 +86,7 @@ extern "C" void slm_release_all_link_maps(void);
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError", @"sherpaAssetPackDeliveryProgress" ];
+    return @[ @"extractArchiveProgress", @"pipelineLiveAudioChunk", @"pipelineLiveAudioError", @"pipelineLiveTextPartial", @"pipelineLiveTextError", @"pipelineLiveTextSegmentAppended", @"pipelineLiveSegmentAppended", @"pipelineLiveSegmentError", @"fileIOProgress", @"decodeProgress", @"decodeComplete", @"visualizationProgress", @"streamingPipelineCompleted", @"pcmPlayerEnded", @"vadEvent", @"diarizationProgress", @"sherpaForegroundDownloadBegin", @"sherpaForegroundDownloadProgress", @"sherpaForegroundDownloadComplete", @"sherpaForegroundDownloadError", @"sherpaAssetPackDeliveryProgress" ];
 }
 
 - (void)addListener:(NSString *)eventName

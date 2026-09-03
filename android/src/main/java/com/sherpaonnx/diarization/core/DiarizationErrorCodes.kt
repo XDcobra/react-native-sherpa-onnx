@@ -1,0 +1,12 @@
+package com.sherpaonnx.diarization.core
+
+object DiarizationErrorCodes {
+  const val TAG = "SherpaOnnxDiarization"
+
+  const val DETECT_ERROR = "DIARIZATION_DETECT_ERROR"
+  const val DIARIZATION_INIT_ERROR = "DIARIZATION_INIT_ERROR"
+  const val DIARIZATION_ERROR = "DIARIZATION_ERROR"
+  const val DIARIZATION_BUFFER_NOT_FOUND = "DIARIZATION_BUFFER_NOT_FOUND"
+  const val DIARIZATION_CANCELLED = "DIARIZATION_CANCELLED"
+  const val DIARIZATION_NOT_INITIALIZED = "DIARIZATION_NOT_INITIALIZED"
+}

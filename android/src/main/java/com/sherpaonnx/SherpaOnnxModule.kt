@@ -217,6 +217,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private val diarizationHelper = SherpaOnnxDiarizationHelper(
+    reactApplicationContext,
     { modelDir, assetName, modelType ->
       Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType)
     }
@@ -414,6 +415,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
     speakerEmbeddingHelper.shutdown()
+    diarizationHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -4165,7 +4167,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (normalizedKind != "speech" && normalizedKind != "alignment") {
         promise.reject(
           com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-          "kind must be one of speech or alignment"
+          "kind must be one of speech, alignment, or diarization"
         )
         return
       }
@@ -4788,6 +4790,49 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeDiarization(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    diarizationHelper.initializeDiarization(instanceId, options, promise)
+  }
+
+  override fun diarizeOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    includeOverlap: Boolean?,
+    promise: Promise
+  ) {
+    diarizationHelper.diarizeOffline(
+      instanceId,
+      audioInBufferId,
+      includeOverlap == true,
+      promise,
+    )
+  }
+
+  override fun reclusterDiarization(
+    instanceId: String,
+    numClusters: Double,
+    threshold: Double,
+    promise: Promise
+  ) {
+    diarizationHelper.reclusterDiarization(instanceId, numClusters, threshold, promise)
+  }
+
+  override fun getDiarizationClusterEmbeddings(instanceId: String, promise: Promise) {
+    diarizationHelper.getDiarizationClusterEmbeddings(instanceId, promise)
+  }
+
+  override fun cancelDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.cancelDiarization(instanceId, promise)
+  }
+
+  override fun unloadDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.unloadDiarization(instanceId, promise)
   }
 
   override fun initializeSpeakerEmbeddingExtractor(

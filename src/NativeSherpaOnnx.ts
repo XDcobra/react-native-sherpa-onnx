@@ -136,6 +136,31 @@ export type SpeakerEmbeddingInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeDiarization(instanceId, options)`. */
+export type DiarizationInitBridgeOptions = {
+  segmentationModel: string;
+  embeddingModel: string;
+  windowShiftRatio?: number;
+  numClusters?: number;
+  threshold?: number;
+  minDurationOn?: number;
+  minDurationOff?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `diarizeOffline` / `reclusterDiarization`. */
+export type DiarizationProcessNativeResult = {
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+  segments: Array<{ start: number; end: number; speaker: number }>;
+  numSpeakers: number;
+  sampleRate: number;
+  speakersPerFrame?: number[];
+};
+
 /** Native result from `initializeSeparation`. */
 export type SeparationInitializeNativeResult = {
   success: boolean;
@@ -948,7 +973,7 @@ export interface Spec extends TurboModule {
 
   appendLiveSegment(
     liveBufferId: string,
-    kind: 'speech' | 'alignment',
+    kind: 'speech' | 'alignment' | 'diarization',
     sourceAudioBufferId: string,
     startSample: number,
     endSample: number,
@@ -963,6 +988,7 @@ export interface Spec extends TurboModule {
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
      * - kind='alignment': strict alignment payload contract
+     * - kind='diarization': payload.source='diarization', speaker (number)
      */
     payload?: Object
   ): Promise<{ segmentId: string; segmentIndex: number }>;
@@ -1553,6 +1579,36 @@ export interface Spec extends TurboModule {
       model?: string;
     };
   }>;
+
+  initializeDiarization(
+    instanceId: string,
+    options: DiarizationInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    sampleRate?: number;
+  }>;
+
+  diarizeOffline(
+    instanceId: string,
+    audioInBufferId: string,
+    includeOverlap?: boolean
+  ): Promise<DiarizationProcessNativeResult>;
+
+  reclusterDiarization(
+    instanceId: string,
+    numClusters: number,
+    threshold: number
+  ): Promise<DiarizationProcessNativeResult>;
+
+  getDiarizationClusterEmbeddings(
+    instanceId: string
+  ): Promise<Array<{ speaker: number; embedding: number[] }>>;
+
+  cancelDiarization(instanceId: string): Promise<void>;
+
+  unloadDiarization(instanceId: string): Promise<void>;
 
   initializeSpeakerEmbeddingExtractor(
     instanceId: string,
