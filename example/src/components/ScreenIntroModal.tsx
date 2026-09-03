@@ -101,6 +101,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Source separation demo',
     body: 'Split mixed audio into stems (typically vocals and accompaniment) using Spleeter or UVR models. Try offline batch with optional segmentation, or live overload with file ingest or microphone input. Download models from the Download screen if needed.',
   },
+  SpeakerIdentification: {
+    title: 'Speaker identification demo',
+    body: 'Enroll named speakers from offline audio, then identify, verify, or label speech segments. Switch to live overload to label a mic or file stream with the same embedding model (mandatory speech segmentation). Export/import enrollment JSON for cross-session restore.',
+  },
   Settings: {
     title: 'Runtime capability dashboard',
     body: 'This screen is for checking execution-provider support and other runtime capabilities. It helps you verify what the current build and device can actually use.',
