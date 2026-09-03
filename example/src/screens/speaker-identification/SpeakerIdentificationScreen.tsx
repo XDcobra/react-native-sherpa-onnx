@@ -674,7 +674,7 @@ export default function SpeakerIdentificationScreen() {
   const parseEnrollNames = (raw: string): string | string[] => {
     const trimmed = raw.trim();
     if (!trimmed) {
-      throw new Error('Enter a speaker name to enroll.');
+      throw new Error('Enter a speaker name (or comma-separated names).');
     }
     if (!trimmed.includes(',')) {
       return trimmed;
@@ -787,25 +787,28 @@ export default function SpeakerIdentificationScreen() {
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
-      const name = parseSingleSpeakerName(speakerName, 'verify');
+      const names = parseEnrollNames(speakerName);
       if (segBatchConfig.mode === 'off') {
         throw new Error('Verify speech spans requires segmentation mode Auto.');
       }
 
       const lines: string[] = [];
+      const progressLabel = Array.isArray(names)
+        ? `Verifying ${names.length} spans`
+        : `Verifying '${names}'`;
       setActionProgress({ label: 'Segmenting speech…', percent: null });
       await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
         const result = await engine.verifyOfflineSegments(
-          name,
+          names,
           audio.bufferId,
           segmentsIn,
           {
             threshold: resolveThreshold(),
             onProgress: (p) => {
-              updateBusyProgress(`Verifying '${name}'`, p);
+              updateBusyProgress(progressLabel, p);
             },
             onVerified: (e) => {
-              const line = `#${e.segmentIndex} ${
+              const line = `#${e.segmentIndex} ${e.expectedName} → ${
                 e.matched ? 'match' : 'no match'
               } (${e.durationMs}ms)`;
               lines.push(line);
@@ -814,7 +817,9 @@ export default function SpeakerIdentificationScreen() {
           }
         );
         showActionSuccess(
-          `Verify '${name}' → ${result.matchCount} match, ${result.mismatchCount} no match`,
+          Array.isArray(names)
+            ? `Verify spans → ${result.matchCount} match, ${result.mismatchCount} no match`
+            : `Verify '${names}' → ${result.matchCount} match, ${result.mismatchCount} no match`,
           { keepLabeledLog: true }
         );
       });
@@ -1663,10 +1668,10 @@ export default function SpeakerIdentificationScreen() {
             ) : (
               <>
                 <Text style={screenStyles.sectionHint}>
-                  Segmentation on — one enroll name averages all speech spans;
-                  comma-separated names assign one speaker per span (same
-                  count). Label identifies each span; verify checks the first
-                  name against each span.
+                  Segmentation on — one name averages/checks all speech spans;
+                  comma-separated names assign one speaker per span for enroll
+                  and verify (same count). Label identifies each span against
+                  all enrollments.
                 </Text>
                 <View style={screenStyles.buttonRow}>
                   <TouchableOpacity

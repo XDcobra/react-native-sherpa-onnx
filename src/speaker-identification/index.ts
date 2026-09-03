@@ -225,6 +225,40 @@ function collectSpeechSpans(segments: SegmentMeta[]): SegmentMeta[] {
 }
 
 /**
+ * Expand `string | string[]` to one trimmed name per speech span.
+ * List length must match `speechSpanCount`; a single string is repeated.
+ */
+function resolvePerSpanSpeakerNames(
+  nameOrNames: string | string[],
+  speechSpanCount: number,
+  apiLabel: string
+): string[] {
+  if (Array.isArray(nameOrNames)) {
+    if (nameOrNames.length !== speechSpanCount) {
+      throw new Error(
+        `${apiLabel}() name list length (${nameOrNames.length}) must match speech span count (${speechSpanCount})`
+      );
+    }
+    const out: string[] = [];
+    for (let i = 0; i < nameOrNames.length; i++) {
+      const trimmed =
+        typeof nameOrNames[i] === 'string' ? nameOrNames[i]!.trim() : '';
+      if (trimmed.length === 0) {
+        throw new Error(`${apiLabel}() names[${i}] must be a non-empty string`);
+      }
+      out.push(trimmed);
+    }
+    return out;
+  }
+
+  const trimmed = nameOrNames.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`${apiLabel}() requires a non-empty speaker name`);
+  }
+  return Array.from({ length: speechSpanCount }, () => trimmed);
+}
+
+/**
  * Create a Speaker Identification engine on the shared embedding extractor +
  * named-speaker manager. The extractor is ref-counted so future diarization
  * can share the same model weights via `acquireSpeakerEmbeddingEngine`.
@@ -313,43 +347,11 @@ export async function createSpeakerIdentification(
         );
       }
 
-      const nameList: string[] = Array.isArray(nameOrNames)
-        ? nameOrNames
-        : [nameOrNames];
-
-      if (Array.isArray(nameOrNames)) {
-        if (nameList.length !== spans.length) {
-          throw new Error(
-            `enrollOfflineSegments() name list length (${nameList.length}) must match speech span count (${spans.length})`
-          );
-        }
-      } else {
-        const trimmed = nameOrNames.trim();
-        if (trimmed.length === 0) {
-          throw new Error(
-            'enrollOfflineSegments() requires a non-empty speaker name'
-          );
-        }
-      }
-
-      const trimmedPerSpan: string[] = [];
-      if (Array.isArray(nameOrNames)) {
-        for (let i = 0; i < nameList.length; i++) {
-          const trimmed =
-            typeof nameList[i] === 'string' ? nameList[i]!.trim() : '';
-          if (trimmed.length === 0) {
-            throw new Error(
-              `enrollOfflineSegments() names[${i}] must be a non-empty string`
-            );
-          }
-          trimmedPerSpan.push(trimmed);
-        }
-      } else {
-        const single = nameOrNames.trim();
-        for (let i = 0; i < spans.length; i++) {
-          trimmedPerSpan.push(single);
-        }
-      }
+      const trimmedPerSpan = resolvePerSpanSpeakerNames(
+        nameOrNames,
+        spans.length,
+        'enrollOfflineSegments'
+      );
 
       const uniqueNames = [...new Set(trimmedPerSpan)];
       for (const uniqueName of uniqueNames) {
@@ -525,19 +527,13 @@ export async function createSpeakerIdentification(
       );
     },
     async verifyOfflineSegments(
-      name: string,
+      nameOrNames: string | string[],
       audioIn: OfflineAudioBufferIdSource,
       segmentsIn: OfflineSegmentBufferIdSource,
       verifyOptions?: SpeakerIdentificationVerifyOptions
     ): Promise<VerifyOfflineSegmentsResult> {
       guard();
       assertVerifyOptions(verifyOptions);
-      const trimmed = name.trim();
-      if (trimmed.length === 0) {
-        throw new Error(
-          'verifyOfflineSegments() requires a non-empty speaker name'
-        );
-      }
       resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const threshold = resolveThreshold(verifyOptions);
@@ -550,6 +546,12 @@ export async function createSpeakerIdentification(
         );
       }
 
+      const expectedPerSpan = resolvePerSpanSpeakerNames(
+        nameOrNames,
+        spans.length,
+        'verifyOfflineSegments'
+      );
+
       const progressSession = createSpeakerIdentificationProgressSession(
         verifyOptions?.onProgress
       );
@@ -559,13 +561,18 @@ export async function createSpeakerIdentification(
 
       for (let i = 0; i < spans.length; i++) {
         const span = spans[i]!;
+        const expectedName = expectedPerSpan[i]!;
         const durationMs = spanDurationMs(span);
         progressSession.emitStep(i, spans.length, durationMs);
         const embedding = await engine.extractFromOfflineAudio(audioIn, {
           startSample: span.startSample,
           endSample: span.endSample,
         });
-        const matched = await manager.verify(trimmed, embedding, threshold);
+        const matched = await manager.verify(
+          expectedName,
+          embedding,
+          threshold
+        );
         matches.push(matched);
         if (matched) {
           matchCount += 1;
@@ -579,6 +586,7 @@ export async function createSpeakerIdentification(
           endSample: span.endSample,
           sampleRate: span.sampleRate,
           durationMs,
+          expectedName,
           matched,
         });
       }

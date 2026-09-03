@@ -144,7 +144,7 @@ try {
 | --- | --- | --- |
 | **Enroll** | `enroll(name, audio \| audio[])` | `enrollOfflineSegments(name \| names[], audioIn, segmentsIn)` |
 | **Identify** | `identify(audio)` → `{ name }` | `labelOfflineSegments(audioIn, segmentsIn, segmentsOut)` |
-| **Verify** | `verify(name, audio)` → `boolean` | `verifyOfflineSegments(name, audioIn, segmentsIn)` → counts + per-span flags |
+| **Verify** | `verify(name, audio)` → `boolean` | `verifyOfflineSegments(name \| names[], audioIn, segmentsIn)` → counts + per-span flags |
 
 Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech` rows are skipped. `enrollOfflineSegments` / `verifyOfflineSegments` reject when no usable speech span remains.
 
@@ -240,7 +240,7 @@ interface SpeakerIdentificationEngine {
   ): Promise<boolean>;
 
   verifyOfflineSegments(
-    name: string,
+    nameOrNames: string | string[],
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
     options?: SpeakerIdentificationVerifyOptions
@@ -273,7 +273,7 @@ interface SpeakerIdentificationEngine {
 | `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
 | `verify` | Cosine check against one enrolled name (whole buffer). |
-| `verifyOfflineSegments` | Per speech span: extract → `verify(name, …)`. Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
+| `verifyOfflineSegments` | Per speech span: extract → verify. `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
 | `exportEnrollments` / `importEnrollments` | Cross-session enrollment snapshot — see [Persistence](#persistence). |
 | `destroy` | Releases manager + drops extractor ref-count. |
 
@@ -325,17 +325,20 @@ await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
 
 ### `onVerified` (per-span result — `verifyOfflineSegments` only)
 
-Fires **after** extract + cosine verify for each speech span (same fields as `onLabeled` ranges, plus `matched: boolean` instead of `speakerName`). Order: `onProgress` → extract/verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
+Fires **after** extract + cosine verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → extract/verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
 
 ```ts
 const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
-  'alice',
+  ['alice', 'bob', 'alice'],
   audio,
   vadSegs,
   {
     threshold: 0.5,
     onVerified: (e) => {
-      console.log(`span ${e.segmentIndex}:`, e.matched ? 'match' : 'no match');
+      console.log(
+        `span ${e.segmentIndex} vs ${e.expectedName}:`,
+        e.matched ? 'match' : 'no match'
+      );
     },
   }
 );
@@ -484,7 +487,7 @@ import {
 - **`SpeakerIdentificationLabelOptions`:** segment options + optional `onLabeled`
 - **`SpeakerIdentificationVerifyOptions`:** segment options + optional `onVerified`
 - **`SidLabeledSegmentEvent`:** per-span offline label result (`speakerName`, ranges, `totalSegments`, …)
-- **`SidVerifiedSegmentEvent`:** per-span offline verify result (`matched`, ranges, `totalSegments`, …)
+- **`SidVerifiedSegmentEvent`:** per-span offline verify result (`expectedName`, `matched`, ranges, `totalSegments`, …)
 - **`SpeakerIdentificationLiveLabelOptions` / `SidLiveLabeledSegmentEvent` / `SpeakerIdentificationPipelineHandle`:** live overload — see [speaker-identification-live.md](speaker-identification-live.md)
 - **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)
 

@@ -62,7 +62,7 @@ export type SpeakerIdentificationLabelOptions =
     onLabeled?: (event: SidLabeledSegmentEvent) => void;
   };
 
-/** Fired after a speech span is verified against one enrolled name. */
+/** Fired after a speech span is verified against an enrolled name. */
 export type SidVerifiedSegmentEvent = {
   segmentIndex: number;
   totalSegments: number;
@@ -70,6 +70,8 @@ export type SidVerifiedSegmentEvent = {
   endSample: number;
   sampleRate: number;
   durationMs: number;
+  /** Expected enrolled name for this span. */
+  expectedName: string;
   matched: boolean;
 };
 
@@ -198,11 +200,16 @@ export interface SpeakerIdentificationEngine {
   ): Promise<boolean>;
 
   /**
-   * Verify one enrolled name against each speech span (no segment Out buffer).
+   * Verify enrolled name(s) against each speech span (no segment Out buffer).
+   *
+   * - `string`: the same name is checked against every speech span.
+   * - `string[]`: one expected name per speech span (`names.length` must equal
+   *   the speech-span count after skipping silence/empty rows).
+   *
    * Returns per-span match flags plus aggregate counts.
    */
   verifyOfflineSegments(
-    name: string,
+    nameOrNames: string | string[],
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
     options?: SpeakerIdentificationVerifyOptions
