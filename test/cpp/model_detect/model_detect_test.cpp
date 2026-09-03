@@ -79,6 +79,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream sepCsv(dir + "/source-separation-models-expected.csv");
     std::ifstream speakerStruct(dir + "/speaker-recongition-models-structure.txt");
     std::ifstream speakerCsv(dir + "/speaker-recongition-models-expected.csv");
+    std::ifstream diarizationStruct(dir + "/speaker-segmentation-models-structure.txt");
+    std::ifstream diarizationCsv(dir + "/speaker-segmentation-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -93,6 +95,10 @@ TEST(ModelDetectTest, FixturesExist) {
         << "Missing: " << dir << "/speaker-recongition-models-structure.txt";
     ASSERT_TRUE(speakerCsv.is_open())
         << "Missing: " << dir << "/speaker-recongition-models-expected.csv";
+    ASSERT_TRUE(diarizationStruct.is_open())
+        << "Missing: " << dir << "/speaker-segmentation-models-structure.txt";
+    ASSERT_TRUE(diarizationCsv.is_open())
+        << "Missing: " << dir << "/speaker-segmentation-models-expected.csv";
 }
 
 /**
@@ -414,6 +420,63 @@ TEST(ModelDetectTest, DetectSpeakerEmbeddingFromFileListMatchesExpected) {
             << ") but got "
             << model_detect_test::SpeakerEmbeddingKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
+    }
+}
+
+TEST(ModelDetectTest, DetectDiarizationFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/speaker-segmentation-models-structure.txt";
+    std::string csvPath = dir + "/speaker-segmentation-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files =
+                model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectDiarizationModelFromFileList(
+                files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::DiarizationModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::DiarizationModelKind expectedKind =
+            model_detect_test::DiarizationKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::DiarizationModelKind::kUnknown)
+            continue;
+
+        auto files =
+            model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result =
+            sherpaonnx::DetectDiarizationModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_FALSE(result.isStreaming) << "Asset " << block.assetName;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got "
+            << model_detect_test::DiarizationKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+        EXPECT_FALSE(result.paths.model.empty()) << "Asset " << block.assetName;
+        EXPECT_NE(result.paths.model.find("model.onnx"), std::string::npos)
+            << "Asset " << block.assetName
+            << ": prefer model.onnx over int8, got " << result.paths.model;
     }
 }
 

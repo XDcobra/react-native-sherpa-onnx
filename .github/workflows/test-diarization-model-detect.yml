@@ -1,0 +1,36 @@
+# Speaker diarization / segmentation model detection tests:
+# C++ tests vs speaker-segmentation-models-expected.csv.
+# Triggered on PR (via test-model-detect) or manually.
+
+name: Test – Diarization model detection
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-diarization-detect
+  cancel-in-progress: true
+
+jobs:
+  diarization-model-detect:
+    name: Diarization model detection (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build .
+
+      - name: Run diarization model detection tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ./test/cpp/build/model_detect_test \
+            --gtest_filter=ModelDetectTest.FixturesExist:ModelDetectTest.DetectDiarizationFromFileListMatchesExpected

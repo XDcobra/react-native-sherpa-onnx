@@ -126,6 +126,7 @@ createSpeakerDiarization({
 | **`Diarization`** | [speaker-segmentation-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) — pyannote (and ReVerb) **segmentation** packs only; **no** bundled embedding `.onnx` | Diarization segmentation leg + future `speech_pyannote_segmentation` evaluator |
 
 `detectSpeakerEmbeddingModel` and unified catalog detection (`speakerEmbedding` domain) are implemented.
+`detectDiarizationModel` and unified catalog detection (`diarization` domain) are implemented for segmentation packs (pyannote / reverb).
 
 ---
 
@@ -175,7 +176,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 > **collect + license** (see plan) → **detect** → **core** (below).
 
 1. Collect + license for `speaker-segmentation-models` (fixtures + CSV + `licenses.ts`)
-2. Model detect wiring (`CATEGORY_BY_NATIVE`, `CATALOG_DETECT_CATEGORIES`)
+2. [x] Model detect wiring (`CATEGORY_BY_NATIVE`, `CATALOG_DETECT_CATEGORIES`, native detect)
 3. **Shared C++** diarization wrapper over the C API (Separation pattern) — one core, thin JNI + thin `.mm`
 4. Replace diarization placeholder; buffer-in timeline-out API (`{ startSec, endSec, speakerIndex }`)
 5. Example diarization screen

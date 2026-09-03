@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Compare GitHub release assets (asr-models, tts-models, speech-enhancement-models,
-# source-separation-models, speaker-recongition-models) with local CSV fixtures.
+# source-separation-models, speaker-recongition-models, speaker-segmentation-models)
+# with local CSV fixtures.
 # If any asset exists on GitHub but is not listed in the corresponding CSV,
 # print a warning (non-fatal) with the list and a hint to run the collect workflows.
 # Exit code is always 0 so this can be used as an informational step.
@@ -14,6 +15,7 @@ SPEECH_ENH_CSV="${SPEECH_ENH_CSV:-test/fixtures/speech-enhancement-models-expect
 VAD_CSV="${VAD_CSV:-test/fixtures/vad-models-expected.csv}"
 SEPARATION_CSV="${SEPARATION_CSV:-test/fixtures/source-separation-models-expected.csv}"
 SPEAKER_EMB_CSV="${SPEAKER_EMB_CSV:-test/fixtures/speaker-recongition-models-expected.csv}"
+DIARIZATION_CSV="${DIARIZATION_CSV:-test/fixtures/speaker-segmentation-models-expected.csv}"
 
 # Optional: GITHUB_TOKEN or GH_TOKEN for api.github.com rate limits / private forks
 CURL_GH_API=(-sL)
@@ -44,6 +46,10 @@ if [ ! -f "$SEPARATION_CSV" ]; then
 fi
 if [ ! -f "$SPEAKER_EMB_CSV" ]; then
   echo "::warning::Missing $SPEAKER_EMB_CSV (run from repo root or set SPEAKER_EMB_CSV)"
+  exit 0
+fi
+if [ ! -f "$DIARIZATION_CSV" ]; then
+  echo "::warning::Missing $DIARIZATION_CSV (run from repo root or set DIARIZATION_CSV)"
   exit 0
 fi
 
@@ -92,6 +98,15 @@ else
   echo "::warning::Could not fetch speaker-recongition-models release or it has no assets"
 fi
 
+# Fetch speaker-segmentation-models release assets (.tar.bz2)
+DIARIZATION_ASSETS=""
+DIARIZATION_RESP="${DIARIZATION_RESP:-$(curl "${CURL_GH_API[@]}" "https://api.github.com/repos/${REPO}/releases/tags/speaker-segmentation-models")}"
+if echo "$DIARIZATION_RESP" | jq -e '.assets' >/dev/null 2>&1; then
+  DIARIZATION_ASSETS=$(echo "$DIARIZATION_RESP" | jq -r '.assets[] | select(.name | endswith(".tar.bz2") or endswith(".onnx")) | .name')
+else
+  echo "::warning::Could not fetch speaker-segmentation-models release or it has no assets"
+fi
+
 # First column of CSV (asset_name); strip optional quotes and whitespace; skip header
 csv_asset_names() { awk -F',' '{ gsub(/^ *"|" *$/, "", $1); gsub(/^ | $/, "", $1); if (NR>1 && $1 != "") print $1 }' "$1"; }
 
@@ -101,6 +116,7 @@ SPEECH_CSV_NAMES=$(csv_asset_names "$SPEECH_ENH_CSV")
 VAD_CSV_NAMES=$(csv_asset_names "$VAD_CSV")
 SEPARATION_CSV_NAMES=$(csv_asset_names "$SEPARATION_CSV")
 SPEAKER_EMB_CSV_NAMES=$(csv_asset_names "$SPEAKER_EMB_CSV")
+DIARIZATION_CSV_NAMES=$(csv_asset_names "$DIARIZATION_CSV")
 
 ASR_MISSING=""
 while IFS= read -r asset; do
@@ -150,7 +166,15 @@ while IFS= read -r asset; do
   fi
 done <<< "$SPEAKER_EMB_ASSETS"
 
-if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] || [ -n "$VAD_MISSING" ] || [ -n "$SEPARATION_MISSING" ] || [ -n "$SPEAKER_EMB_MISSING" ]; then
+DIARIZATION_MISSING=""
+while IFS= read -r asset; do
+  [ -z "$asset" ] && continue
+  if ! grep -qFx -- "$asset" <<< "$DIARIZATION_CSV_NAMES"; then
+    DIARIZATION_MISSING="${DIARIZATION_MISSING}  - ${asset}\n"
+  fi
+done <<< "$DIARIZATION_ASSETS"
+
+if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] || [ -n "$VAD_MISSING" ] || [ -n "$SEPARATION_MISSING" ] || [ -n "$SPEAKER_EMB_MISSING" ] || [ -n "$DIARIZATION_MISSING" ]; then
   echo "::warning::New assets are available on GitHub but not yet listed in the expected CSV files."
   [ -n "$ASR_MISSING" ] && echo -e "ASR (asr-models) assets missing from $ASR_CSV:\n$ASR_MISSING"
   [ -n "$TTS_MISSING" ] && echo -e "TTS (tts-models) assets missing from $TTS_CSV:\n$TTS_MISSING"
@@ -158,6 +182,7 @@ if [ -n "$ASR_MISSING" ] || [ -n "$TTS_MISSING" ] || [ -n "$SPEECH_MISSING" ] ||
   [ -n "$VAD_MISSING" ] && echo -e "ASR release assets missing from VAD expected CSV ($VAD_CSV):\n$VAD_MISSING"
   [ -n "$SEPARATION_MISSING" ] && echo -e "Source separation (source-separation-models) assets missing from $SEPARATION_CSV:\n$SEPARATION_MISSING"
   [ -n "$SPEAKER_EMB_MISSING" ] && echo -e "Speaker embedding (speaker-recongition-models) assets missing from $SPEAKER_EMB_CSV:\n$SPEAKER_EMB_MISSING"
+  [ -n "$DIARIZATION_MISSING" ] && echo -e "Diarization (speaker-segmentation-models) assets missing from $DIARIZATION_CSV:\n$DIARIZATION_MISSING"
   echo "Please run the collect workflows to update fixtures:"
   echo "  - Testdata - Collect model structures (workflow_dispatch; stream=all, asr, tts, punctuation, enhancement, separation, speaker-embedding, or diarization)"
   exit 0
