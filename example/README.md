@@ -216,7 +216,7 @@ This screen initializes offline separation engines (Spleeter or UVR) with auto o
 
 ## Source separation (live overload)
 
-| ![Separation streaming 1](../docs/images/example/separation_streaming_1.png) | ![Separation streaming 2](../docs/images/example/separation_streaming_2.png) | ![Separation streaming 3](../docs/images/example/separation_streaming_3.png) |
+| ![Separation live overload 1](../docs/images/example/separation_streaming_1.png) | ![Separation live overload 2](../docs/images/example/separation_streaming_2.png) | ![Separation live overload 3](../docs/images/example/separation_streaming_3.png) |
 | --- | --- | --- |
 
 This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation-streaming.md](../docs/separation-streaming.md), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
