@@ -112,7 +112,7 @@ Same control surface as other streaming / live-overload features ([streaming-pip
 | `flush()` | Await labeling of **already-committed** spans. Does not force a mid-utterance cut; the open tail is emitted on `stop` / input finalize. |
 | `reset()` | Soft JS counter reset only (`chunksProcessed` / `unitsRead` / `unitsWritten`). Native segmentation reset is not exposed (matches the intentional no-op on `OfflineLivePipelineWorker.reset`). |
 | `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` — JS-tracked counters (`unitsRead` = samples sliced, `unitsWritten` = labeled segments appended). |
-| `completed` | Resolves on graceful input finalize (`reason: 'completed'`) or `stop()` (`reason: 'stopped'`); rejects on fatal labeling errors (`code: 'STREAMING_PIPELINE_ERROR'`, optional `onError`). |
+| `completed` | Resolves on graceful input finalize (`reason: 'completed'`) or `stop()` (`reason: 'stopped'`); rejects on fatal labeling errors (`code: 'STREAMING_PIPELINE_ERROR'`). |
 
 ## `sid` payload
 
@@ -142,7 +142,6 @@ type SpeakerIdentificationLiveLabelOptions = {
   };
   threshold?: number; // default 0.5
   onLabeled?: (event: SidLiveLabeledSegmentEvent) => void;
-  onError?: (error: unknown) => void;
 };
 
 type SidLiveLabeledSegmentEvent = {
@@ -178,7 +177,7 @@ More patterns: [feature-pipelines.md#speaker-identification-live-patterns](featu
 | --- | --- |
 | `LIVE_OFFLINE_SEGMENTATION_REQUIRED` | Missing `segmentation` / `policy`, or `mode !== 'auto'`. |
 | `SID_INVALID_ARGUMENT` | Non-live audio or segment Out (use offline `labelOfflineSegments` instead). |
-| `SID_INVALID_OPTIONS` | `onLabeled` / `onError` provided but not a function. |
+| `SID_INVALID_OPTIONS` | `onLabeled` provided but not a function. |
 | `SID_LABEL_FAILED` | Segmentation engine did not produce an internal segment buffer. |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during labeling; `completed` rejects with this `code`. |
 | `SPEAKER_EMBEDDING_*` / `SEGMENT_*` | Same native / segment codes as [offline SID](speaker-identification-offline.md#error-codes). |

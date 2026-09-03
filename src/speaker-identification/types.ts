@@ -78,7 +78,6 @@ export type SpeakerIdentificationLiveLabelOptions =
   LiveOfflinePipelineBaseOptions &
     SpeakerIdentificationThresholdOptions & {
       onLabeled?: (event: SidLiveLabeledSegmentEvent) => void;
-      onError?: (error: unknown) => void;
     };
 
 export interface SpeakerIdentificationEngine {

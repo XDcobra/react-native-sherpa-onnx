@@ -240,7 +240,7 @@ describe('labelLiveSegments', () => {
     ).rejects.toThrow(/SID_INVALID_ARGUMENT/);
   });
 
-  it('rejects non-function onLabeled / onError', async () => {
+  it('rejects non-function onLabeled', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -251,13 +251,6 @@ describe('labelLiveSegments', () => {
         onLabeled: 1 as any,
       })
     ).rejects.toThrow(/onLabeled must be a function/);
-
-    await expect(
-      sid.labelLiveSegments(AUDIO_LIVE, SEGS_OUT, {
-        segmentation: { policy: defaultPolicy },
-        onError: 1 as any,
-      })
-    ).rejects.toThrow(/onError must be a function/);
   });
 
   it('labels committed spans: extract → search → append → onLabeled', async () => {
@@ -421,7 +414,7 @@ describe('labelLiveSegments', () => {
     await handle.stop();
   });
 
-  it('onError is called and completed rejects when labeling throws', async () => {
+  it('completed rejects when labeling throws', async () => {
     const spans = [speechSpan(0, 1600)];
     let committed = 0;
     segs.getLiveSegmentBufferSegmentCount.mockImplementation(async () => {
@@ -434,13 +427,11 @@ describe('labelLiveSegments', () => {
     );
     segs.appendLiveSegment.mockRejectedValue(new Error('append failed'));
 
-    const onError = jest.fn();
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
     const handle = await sid.labelLiveSegments(AUDIO_LIVE, SEGS_OUT, {
       segmentation: { policy: defaultPolicy },
-      onError,
     });
 
     committed = 1;
@@ -448,9 +439,6 @@ describe('labelLiveSegments', () => {
       code: 'STREAMING_PIPELINE_ERROR',
       message: expect.stringContaining('append failed'),
     });
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'append failed' })
-    );
     expect(seg.detachSegmentationEngine).toHaveBeenCalled();
     expect(segs.finalizeLiveSegmentBuffer).toHaveBeenCalledWith(SEGS_OUT);
   });

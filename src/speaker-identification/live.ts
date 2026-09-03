@@ -59,9 +59,6 @@ function assertLiveLabelOptions(
       'SID_INVALID_OPTIONS: options.onLabeled must be a function'
     );
   }
-  if (options?.onError != null && typeof options.onError !== 'function') {
-    throw new Error('SID_INVALID_OPTIONS: options.onError must be a function');
-  }
 }
 
 export function isLiveAudioSource(
@@ -405,11 +402,6 @@ export async function labelLiveSegments(
       }
     } catch (err) {
       state.error = err instanceof Error ? err.message : String(err);
-      try {
-        options.onError?.(err);
-      } catch {
-        // Ignore secondary errors from onError.
-      }
       await detachIfNeeded(false).catch(() => undefined);
       await finalizeOutIfNeeded().catch(() => undefined);
       settle('error');
