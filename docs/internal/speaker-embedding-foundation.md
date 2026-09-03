@@ -253,218 +253,138 @@ Contrast with our existing engine (`src/segment/`, `SegmentationEngineRegistry.k
 answer only **"speech vs silence"** and emit flat, non-overlapping speech spans. They
 are speaker-agnostic.
 
-### 10.2 Decision 1 — shared C++ (C API), not duplicated Kotlin + `.mm`
+### 10.2 Decision 1 — shared C++, not duplicated Kotlin + `.mm`
 
-**Decision:** implement the diarization core as **one portable C++ wrapper over the
-sherpa-onnx C API**, with a thin Android JNI bridge and a thin iOS ObjC++ bridge —
-the **Separation pattern**. Do **not** follow the speaker-embedding/segmentation
-pattern of duplicating full logic in Kotlin (Android) and `.mm` (iOS).
+**Decision:** implement the diarization core as **one portable C++ library** under
+`android/src/main/cpp/diarization/`, with a thin Android JNI bridge and a thin iOS
+ObjC++ bridge — the **Separation pattern** for packaging, but a **decomposed**
+pipeline for the algorithm (see §10.3). Do **not** duplicate full logic in Kotlin
+(Android) and `.mm` (iOS).
 
 **Why:**
 
-- **Precedent already in the tree.** Source separation is exactly this: a single
-  wrapper compiled on both platforms. It includes the C API and PIMPLs the handle:
-
-  ```1:34:android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h
-  #ifndef SHERPA_ONNX_SEPARATION_WRAPPER_H
-  #define SHERPA_ONNX_SEPARATION_WRAPPER_H
-  // ... portable, no jni.h; C-API based; class SeparationWrapper { ... std::unique_ptr<Impl> pImpl; };
-  ```
-
-- **The diarization C API already ships in both prebuilts.** `libsherpa-onnx-c-api.so`
-  (Android) and `SherpaOnnxC.framework` (iOS, `-force_load`) both export
-  `SherpaOnnxCreateOfflineSpeakerDiarization` / `...Process` / … . No new sherpa build
-  flag is needed (`SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION` is upstream-only, default ON).
+- **Precedent already in the tree.** Source separation is a single PIMPL wrapper
+  compiled on both platforms (`sherpa-onnx-separation-wrapper.{h,cpp}`).
+- **ORT + embedding C-API already available** on both platforms (alignment links
+  `libonnxruntime`; iOS resolves ORT from force-loaded `SherpaOnnxC`; embedding
+  extractor symbols are exported from the same C API libs).
 - **Avoids the exact duplication pain** this doc already calls out for speaker
   embedding and the segmentation engine (Kotlin 530/1636 lines vs `.mm` 270/3289 lines).
   One inference/marshalling implementation instead of two.
 
 > **Supersedes** the earlier §6 rule ("Android inference uses `com.k2fsa` Kotlin
-> classes; iOS uses cxx-API"). That rule stands for **speaker embedding** (already
-> shipped that way). **Diarization** deliberately uses the **shared C-API** path
-> instead, matching separation. The upstream Kotlin `OfflineSpeakerDiarization.kt`
-> is **not** used.
+> classes; iOS uses cxx-API"). That rule stands for **speaker embedding SID**
+> (already shipped that way) until Phase 6 migrates SID onto the shared C++
+> `EmbeddingRunner`. **Diarization** uses a **decomposed shared C++ pipeline**
+> (pyannote ONNX via ORT + C-API embedding extractor + own clustering). The
+> upstream Kotlin `OfflineSpeakerDiarization.kt` and the C API monolith
+> `SherpaOnnxOfflineSpeakerDiarization*` are **not** used for inference.
 
 **Build wiring (concrete):**
 
-- **Android** — add the wrapper + JNI to `android/src/main/cpp/CMakeLists.txt`
-  `SOURCES`, next to separation:
+- **Android** — add diarization core + JNI next to separation in
+  `android/src/main/cpp/CMakeLists.txt` `SOURCES`. Link `onnxruntime` (already
+  required for CTC alignment) and `sherpa-onnx-c-api` (embedding extractor).
+- **iOS** — add diarization `.cpp/.h` to `SherpaOnnx.podspec` `source_files`;
+  exclude `jni/diarization/*-jni.cpp`. ORT symbols come from force-loaded
+  `SherpaOnnxC`; headers from `third_party/onnxruntime/include`.
 
-  ```122:123:android/src/main/cpp/CMakeLists.txt
-      separation/sherpa-onnx-separation-wrapper.cpp
-      jni/separation/sherpa-onnx-separation-jni.cpp
-  ```
+### 10.3 Decision 2 — decomposed C++ pipeline (Track 1 monolith REJECTED)
 
-  `libsherpaonnx.so` already links the C API, so no new link step is needed:
+#### Why the C API monolith was rejected
 
-  ```287:289:android/src/main/cpp/CMakeLists.txt
-  if(SHERPA_C_API_LIB_DIR)
-      target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
-      target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
-  ```
+`SHERPA_ONNX_EXIT(code)` expands to `_Exit(code)` — an uncatchable process kill.
+Reachable sites in the upstream diarization path:
 
-- **iOS** — add the wrapper `.cpp/.h` to `SherpaOnnx.podspec` `source_files` and
-  exclude the JNI file, mirroring separation:
+1. Missing ONNX metadata key (`SHERPA_ONNX_READ_META_DATA` in pyannote model load)
+2. `powerset_max_classes > 2` in `InitPowersetMapping`
+3. "segment too short" in `ComputeEmbeddings`
 
-  ```51:53:SherpaOnnx.podspec
-      # Shared separation inference core. JNI bridge excluded below.
-      "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.cpp",
-      "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h"
-  ```
+A bad/mismatched model would kill the host app. Avoiding that requires reading
+metadata ourselves — at which point we have already built the core of our own
+pipeline. Additionally the monolith: loads its own embedding (no SID instance
+reuse), exposes no overlap/powerset add-on, cannot recluster without full
+re-inference, and ignores progress-callback return values (no cancellation).
 
-  ```69:69:SherpaOnnx.podspec
-      "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp"
-  ```
-
-  Add the wrapper dir to `HEADER_SEARCH_PATHS` (next to
-  `"#{pod_root}/android/src/main/cpp/separation"`).
-
-### 10.3 Decision 2 — whole-block core for v1, plus an additive pyannote segmentation mode
-
-The C API `...Process()` is **monolithic**: it internally (1) runs the pyannote
-segmentation model, (2) extracts embeddings from *its own* embedding extractor, and
-(3) clusters. It returns only the final `{start, end, speaker}` timeline. It does
-**not** expose the powerset/overlap add-on, and it constructs its **own** embedding
-extractor from `config.embedding.model` — it cannot be handed our already-loaded
-`SpeakerEmbeddingEngine`. `FastClustering` is likewise **not** exposed by the C API.
-
-This creates a real tension with the desired "pyannote as a mode of our segmentation
-engine + optional add-on info". We resolve it with **three tracks**:
-
-#### Track 1 — Diarization v1 = shared C++ wrapper of the whole block  (recommended first)
-
-- Wrap `SherpaOnnxCreateOfflineSpeakerDiarization` / `...Process` /
-  `...ProcessWithCallback` / `...ResultSortByStartTime` in the shared C++ wrapper.
-- **Pros:** correct, minimal, one implementation, already in both prebuilts, fastest
-  path to shipping offline diarization.
-- **Cons / constraints (document for API design):**
-  - Loads its **own** embedding model from a path → **no reuse** of a live SID engine
-    instance (may double-load weights if SID + diarization run together). Acceptable
-    for offline v1; JS can still share the *model file*, not the *instance*.
-  - **No** overlap/powerset add-on exposed.
-  - Clustering is opaque (`num_clusters` / `threshold` only, via `SetConfig`).
-
-#### Track 2 — pyannote as a new segmentation-engine evaluator (additive, independent value)
-
-- Add `speech_pyannote_segmentation` to `SegmentationEvaluator` in
-  `src/segment/engine-types.ts`, implemented in the **shared C++** segmentation core
-  (new), running the pyannote seg ONNX **standalone** via onnxruntime (already linked
-  on Android; inside `SherpaOnnxC` on iOS) and porting the powerset decode
-  (`InitPowersetMapping` / `ToMultiLabel` / `ExcludeOverlap` /
-  `GetChunkSpeakerSampleIndexes`).
-- **Default output:** collapse "any speaker active" → speech spans, matching the
-  existing engine contract (drop-in for SID enroll, STT chunking — better turn
-  boundaries than energy/VAD).
-- **Opt-in add-on:** expose per-frame powerset / overlap / local `(chunk, speaker)`
-  regions via a separate call, only materialized when requested. This is the
-  "simple boundaries + add-on info on demand" the product wants.
-- The C API does **not** expose the standalone segmentation model, so Track 2 runs
-  the ONNX directly; it is genuinely new native code (but shared, single-impl).
-
-#### Track 3 — convergence (optional, later)
-
-- Once Track 2 exists and we expose a clustering primitive (port `FastClustering`
-  or add a small clustering helper), diarization can be **rebuilt** as:
-  our pyannote seg mode → our shared `SpeakerEmbeddingEngine` → clustering → relabel.
-  This fully de-duplicates model loading and reuses the add-on, realizing the shared
-  vision — *without* being bound to the sherpa monolith.
-- **Do this only if** the reuse benefits (single embedding instance, add-on reuse)
-  prove worth porting `ReLabel` / `FinalizeLabels` / clustering. **Track 1 stays** as
-  the reference/fallback for correctness.
-
-```mermaid
-flowchart TB
-  subgraph t1 [Track 1 - diarization v1]
-    w["shared C++ wrapper"] --> capi["C API SherpaOnnxOfflineSpeakerDiarizationProcess"]
-    capi --> tl["timeline {start,end,speaker}"]
-  end
-  subgraph t2 [Track 2 - segmentation engine mode]
-    py["pyannote ONNX standalone via ORT"] --> spans["speech spans (default)"]
-    py --> addon["overlap / powerset add-on (opt-in)"]
-    spans --> sid["SID enroll / STT chunking benefit"]
-  end
-  subgraph t3 [Track 3 - convergence optional]
-    addon --> emb["shared SpeakerEmbeddingEngine"]
-    emb --> clus["clustering + relabel"]
-    clus --> tl2["timeline {start,end,speaker}"]
-  end
-```
-
-### 10.4 C API surface (authoritative reference)
-
-Header `third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h`. Config struct:
-
-```3895:3906:third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h
-typedef struct SherpaOnnxOfflineSpeakerDiarizationConfig {
-  SherpaOnnxOfflineSpeakerSegmentationModelConfig segmentation;
-  SherpaOnnxSpeakerEmbeddingExtractorConfig embedding;
-  SherpaOnnxFastClusteringConfig clustering;
-  float min_duration_on;
-  float min_duration_off;
-} SherpaOnnxOfflineSpeakerDiarizationConfig;
-```
-
-| Function | Purpose |
-|----------|---------|
-| `SherpaOnnxCreateOfflineSpeakerDiarization(cfg)` | Create pipeline (NULL on error) |
-| `SherpaOnnxDestroyOfflineSpeakerDiarization(sd)` | Destroy |
-| `SherpaOnnxOfflineSpeakerDiarizationGetSampleRate(sd)` | Required input rate (Hz) |
-| `SherpaOnnxOfflineSpeakerDiarizationSetConfig(sd, cfg)` | Update **clustering only** |
-| `...Process(sd, samples, n)` | Run; mono PCM in `[-1,1]` |
-| `...ProcessWithCallback(sd, samples, n, cb, arg)` | With progress callback |
-| `...ResultGetNumSpeakers(r)` / `...ResultGetNumSegments(r)` | Result metadata |
-| `...ResultSortByStartTime(r)` | Segment array (sorted) |
-| `...DestroySegment(s)` / `...DestroyResult(r)` | Free |
-
-Config fields:
-- `segmentation.pyannote.model` (path), `segmentation.pyannote.window_shift_ratio`
-  (`(0,1]`, `0` → default `0.1`), `segmentation.num_threads/debug/provider`.
-- `embedding.model` (path — the diarizer builds its **own** extractor here),
-  `embedding.num_threads/debug/provider`.
-- `clustering.num_clusters` (`>0` → threshold ignored) / `clustering.threshold`.
-- `min_duration_on` (discard shorter segments) / `min_duration_off` (merge small gaps).
-
-Segment: `{ float start; float end; int32_t speaker; }` (seconds; speaker = cluster id).
-
-### 10.5 Proposed file layout (shared C++, mirrors separation)
+#### Chosen architecture — decomposed shared C++ (former Track 3, now primary)
 
 ```text
 android/src/main/cpp/diarization/
-  sherpa-onnx-diarization-wrapper.h      # portable, C-API based, PIMPL (no jni.h)
-  sherpa-onnx-diarization-wrapper.cpp    # compiled on BOTH platforms
+  pyannote-segmentation-model.{h,cpp}   # Ort::Session + safe metadata
+  powerset.{h,cpp}                      # generic powerset (max_classes >= 3)
+  speaker-timeline.{h,cpp}              # stitch / exclude-overlap / finalize
+  speaker-embedding-runner.{h,cpp}      # C-API extractor + refcounted registry
+  agglomerative-clustering.{h,cpp}      # complete-linkage, no fastcluster dep
+  diarization-session.{h,cpp}           # orchestrate + cache + cancel + recluster
+  sherpa-onnx-diarization-wrapper.{h,cpp}  # PIMPL facade (Separation pattern)
+```
+
+Robustness properties:
+
+- Errors as `{success, errorCode, message}` — never `_Exit`
+- Immediate float→int8 multi-label reduction per chunk (memory)
+- `std::atomic<bool>` cancel between chunks / embeddings
+- Weighted progress across segmentation + embedding phases
+- `recluster()` on embedding cache only (no re-inference)
+- Optional overlap / speakers-per-frame add-on
+- Cluster centroids for JS→`SpeakerEmbeddingManager.search` naming
+- Sample-rate mismatch → resample (not reject)
+- Hard build failure if ORT headers missing (unlike optional `ort_guard_utils`)
+
+#### Additive tracks (no rework of the core)
+
+| Track | What | When |
+|-------|------|------|
+| **Segmentation mode** | `speech_pyannote_segmentation` evaluator using layers 1–3 | After core ships; large Kotlin+`.mm` touch set |
+| **SID migration** | Move SID onto shared C++ `EmbeddingRunner` registry | Restores original shared-instance vision |
+| **Live diarization** | Incremental append + recluster on session cache | Architecture-ready; not in first ship |
+
+```mermaid
+flowchart TB
+  subgraph core [Diarization core - shared C++]
+    py["pyannote ONNX via ORT"] --> pow["powerset decode"]
+    pow --> tl["timeline stitch / finalize"]
+    tl --> emb["EmbeddingRunner C-API + registry"]
+    emb --> clus["agglomerative clustering"]
+    clus --> out["timeline + optional overlap + centroids"]
+  end
+  subgraph later [Later additive]
+    pow --> segMode["speech_pyannote_segmentation evaluator"]
+    emb --> sidShare["SID migrates to same registry"]
+  end
+```
+
+### 10.4 Upstream algorithm reference (not used at runtime)
+
+The upstream C API / `OfflineSpeakerDiarizationPyannoteImpl` remain the **algorithmic
+reference** for parity tests (golden vectors). Config semantics we preserve in our
+own types:
+
+- Segmentation: `model` path, `window_shift_ratio` (default `0.1`), threads/provider
+- Embedding: separate `model` path (tarballs contain **no** embedding ONNX)
+- Clustering: `num_clusters` (`>0` → threshold ignored) / `threshold`
+- `min_duration_on` / `min_duration_off`
+- Segment: `{ start, end, speaker }` in seconds (speaker = cluster id)
+
+ONNX metadata keys (must all be present): `sample_rate`, `window_size`,
+`receptive_field_size`, `receptive_field_shift`, `num_speakers`,
+`powerset_max_classes`, `num_classes`.
+
+### 10.5 File layout + wrapper shape
+
+```text
+android/src/main/cpp/diarization/     # shared core (see §10.3)
 android/src/main/cpp/jni/diarization/
-  sherpa-onnx-diarization-jni.cpp        # Android-only; excluded from podspec
+  sherpa-onnx-diarization-jni.cpp     # Android-only; excluded from podspec
 ios/diarization/
-  core/DiarizationBridgeState.h          # instance map (iOS)
-  bridge/SherpaOnnx+DiarizationOffline.mm # thin ObjC++ over the shared wrapper
+  core/DiarizationBridgeState.{h,mm}
+  bridge/SherpaOnnx+DiarizationOffline.mm
+  bridge/SherpaOnnx+DiarizationDetect.mm   # already shipped (detect phase)
 ```
 
-Wrapper shape (proposed):
-
-```cpp
-namespace sherpaonnx {
-struct DiarizationInitializeResult { bool success; std::string error; int32_t sampleRate; /* + detected models */ };
-struct DiarizationSegment { float start; float end; int32_t speaker; };
-struct DiarizationProcessResult { bool success; std::string error; std::vector<DiarizationSegment> segments; int32_t numSpeakers; };
-
-class DiarizationWrapper {
- public:
-  DiarizationInitializeResult initialize(const std::string& segmentationModel,
-                                         const std::string& embeddingModel,
-                                         int32_t numClusters, float threshold,
-                                         float minDurationOn, float minDurationOff,
-                                         int32_t numThreads, const std::optional<std::string>& provider,
-                                         bool debug);
-  DiarizationProcessResult processMonoSamples(const std::vector<float>& mono, int32_t sampleRate,
-                                              const ProgressFn& onProgress);
-  void setClustering(int32_t numClusters, float threshold);  // -> SetConfig
-  int32_t getSampleRate() const;
-  void release();
- private:
-  class Impl; std::unique_ptr<Impl> pImpl;  // owns SherpaOnnxOfflineSpeakerDiarization*
-};
-}  // namespace sherpaonnx
-```
+Public facade (`DiarizationWrapper`): `initialize` / `processMonoSamples` /
+`recluster` / `getClusterEmbeddings` / `cancel` / `release`. Errors never throw
+across the boundary.
 
 ### 10.6 Collect finding (Phase 1) — segmentation-only tarballs
 
@@ -480,9 +400,8 @@ model** (`model.onnx` + `model.int8.onnx`) plus LICENSE/README/export scripts:
 
 **Implication for core:** diarization always needs a **separate** embedding model
 from `speaker-recongition-models` (`ModelCategory.SpeakerEmbedding`). The TS API
-must take both `segmentationModelSource` and an embedding path / shared engine
-(Track 1 still loads its own extractor from that path). The example C-API snippet
-in `c-api.h` already pairs `sherpa-onnx-pyannote-segmentation-3-0/model.onnx` with
+takes both `segmentation.modelSource` and `embedding.modelSource`. The C-API
+example pairs `sherpa-onnx-pyannote-segmentation-3-0/model.onnx` with
 `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`.
 
 Fixtures: `test/fixtures/speaker-segmentation-models-{structure.txt,expected.csv}`.
@@ -491,11 +410,14 @@ License CSV: `android/src/main/assets/model_licenses/speaker-segmentation-models
 
 ### 10.7 Design rules addendum (diarization)
 
-- [ ] Diarization core is **shared C++** over the C API (Separation pattern), not Kotlin+`.mm`.
-- [ ] Upstream `OfflineSpeakerDiarization.kt` (Kotlin) is **not** used.
-- [ ] v1 wraps the whole block; document that it loads its **own** embedding model
-      (no live-SID engine-instance reuse) and exposes **no** add-on.
-- [ ] pyannote-as-segmentation-mode (Track 2) is a **separate** additive evaluator;
-      default emits speech spans, add-on is **opt-in**.
-- [ ] Do **not** store diarization cluster ids in `SpeakerEmbeddingManager`.
-- [ ] No new sherpa build flag; rely on diarization already in shipped C API libs.
+- [x] Diarization core is **shared decomposed C++** (ORT + C-API embedding + own
+      clustering), not a monolith C-API wrapper and not Kotlin+`.mm` inference.
+- [x] Upstream `OfflineSpeakerDiarization.kt` / `SherpaOnnxOfflineSpeakerDiarization*`
+      are **not** used for inference (`_Exit` risk + structural limits).
+- [x] Embedding via shared C++ `EmbeddingRunner` registry (SID migrates later for
+      true instance sharing).
+- [ ] pyannote-as-segmentation-mode is a **separate** additive evaluator; default
+      emits speech spans, add-on is **opt-in**.
+- [x] Do **not** store diarization cluster ids in `SpeakerEmbeddingManager`.
+- [x] No new sherpa build flag; use ORT already linked + embedding C-API already
+      in shipped libs.
