@@ -19,11 +19,18 @@ import type {
 } from '../segmentbuffer/types';
 import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
+import {
+  buildSpeakerEmbeddingInitBridgeOptions,
+  speakerEmbeddingEngineCacheKeyFromBridgeOptions,
+} from '../speaker-embedding/speakerEmbeddingNativeBridge';
 import { labelLiveSegments } from './live';
 import { createSpeakerIdentificationProgressSession } from './progress';
 import type {
   IdentifyResult,
+  ImportEnrollmentsOptions,
+  ImportEnrollmentsResult,
   LabelOfflineSegmentsResult,
+  SpeakerEnrollmentBundle,
   SpeakerIdentificationEngine,
   SpeakerIdentificationLabelOptions,
   SpeakerIdentificationLiveLabelOptions,
@@ -34,10 +41,14 @@ import type {
 
 export type {
   IdentifyResult,
+  ImportEnrollmentsOptions,
+  ImportEnrollmentsResult,
   LabelOfflineSegmentsResult,
   OrchestrationProgress,
   SidLabeledSegmentEvent,
   SidLiveLabeledSegmentEvent,
+  SpeakerEnrollmentBundle,
+  SpeakerEnrollmentEntry,
   SpeakerIdentificationEngine,
   SpeakerIdentificationLabelOptions,
   SpeakerIdentificationLiveLabelOptions,
@@ -65,12 +76,91 @@ export type {
 } from '../speaker-embedding';
 
 const DEFAULT_THRESHOLD = 0.5;
+const ENROLLMENT_BUNDLE_VERSION = 1 as const;
 
 function resolveThreshold(
   options?: SpeakerIdentificationThresholdOptions
 ): number {
   const t = options?.threshold;
   return typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_THRESHOLD;
+}
+
+function cloneEmbeddings(embeddings: Float32Array[]): Float32Array[] {
+  return embeddings.map((embedding) => new Float32Array(embedding));
+}
+
+function embeddingsToNumberArrays(embeddings: Float32Array[]): number[][] {
+  return embeddings.map((embedding) => Array.from(embedding));
+}
+
+function numberArraysToEmbeddings(
+  arrays: number[][],
+  dim: number
+): Float32Array[] {
+  const out: Float32Array[] = [];
+  for (let i = 0; i < arrays.length; i++) {
+    const row = arrays[i]!;
+    if (!Array.isArray(row) || row.length !== dim) {
+      throw new Error(
+        `SID_ENROLLMENT_BUNDLE_INVALID: embeddings[${i}] must be a number[] of length ${dim}`
+      );
+    }
+    const embedding = new Float32Array(dim);
+    for (let j = 0; j < dim; j++) {
+      const value = row[j]!;
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `SID_ENROLLMENT_BUNDLE_INVALID: embeddings[${i}][${j}] must be a finite number`
+        );
+      }
+      embedding[j] = value;
+    }
+    out.push(embedding);
+  }
+  return out;
+}
+
+function assertEnrollmentBundle(
+  bundle: SpeakerEnrollmentBundle,
+  expectedDim: number,
+  expectedModelKey: string | undefined
+): void {
+  if (bundle == null || typeof bundle !== 'object') {
+    throw new Error(
+      'SID_ENROLLMENT_BUNDLE_INVALID: bundle must be an object'
+    );
+  }
+  if (bundle.version !== ENROLLMENT_BUNDLE_VERSION) {
+    throw new Error(
+      `SID_ENROLLMENT_BUNDLE_INVALID: unsupported version ${String(
+        (bundle as { version?: unknown }).version
+      )} (expected ${ENROLLMENT_BUNDLE_VERSION})`
+    );
+  }
+  if (typeof bundle.dim !== 'number' || !Number.isFinite(bundle.dim)) {
+    throw new Error('SID_ENROLLMENT_BUNDLE_INVALID: dim must be a finite number');
+  }
+  if (bundle.dim !== expectedDim) {
+    throw new Error(
+      `SID_ENROLLMENT_DIM_MISMATCH: bundle dim ${bundle.dim} does not match manager dim ${expectedDim}`
+    );
+  }
+  if (
+    typeof bundle.modelKey === 'string' &&
+    bundle.modelKey.length > 0 &&
+    typeof expectedModelKey === 'string' &&
+    expectedModelKey.length > 0 &&
+    bundle.modelKey !== expectedModelKey
+  ) {
+    throw new Error(
+      'SID_ENROLLMENT_MODEL_MISMATCH: bundle modelKey does not match this SID instance'
+    );
+  }
+  if (!Array.isArray(bundle.speakers)) {
+    throw new Error(
+      'SID_ENROLLMENT_BUNDLE_INVALID: speakers must be an array'
+    );
+  }
 }
 
 function assertSegmentOptions(
@@ -128,8 +218,14 @@ function collectSpeechSpans(segments: SegmentMeta[]): SegmentMeta[] {
 export async function createSpeakerIdentification(
   options: SpeakerIdentificationOptions
 ): Promise<SpeakerIdentificationEngine> {
+  const bridgeOptions = await buildSpeakerEmbeddingInitBridgeOptions(options);
+  const modelKey =
+    speakerEmbeddingEngineCacheKeyFromBridgeOptions(bridgeOptions);
   const engine = await acquireSpeakerEmbeddingEngine(options);
   const manager = await createSpeakerEmbeddingManager(engine.dim);
+
+  /** JS mirror of vectors passed to `manager.add` (native cannot read embeddings back). */
+  const enrollmentMirror = new Map<string, Float32Array[]>();
 
   let destroyed = false;
   const guard = () => {
@@ -138,6 +234,10 @@ export async function createSpeakerIdentification(
         `Speaker identification instance ${engine.instanceId} has been destroyed; cannot call methods on it.`
       );
     }
+  };
+
+  const rememberEnrollment = (name: string, embeddings: Float32Array[]) => {
+    enrollmentMirror.set(name, cloneEmbeddings(embeddings));
   };
 
   return {
@@ -173,6 +273,7 @@ export async function createSpeakerIdentification(
           `Failed to enroll speaker '${trimmed}' (name may already exist)`
         );
       }
+      rememberEnrollment(trimmed, embeddings);
     },
     async enrollOfflineSegments(
       name: string,
@@ -218,6 +319,7 @@ export async function createSpeakerIdentification(
           `Failed to enroll speaker '${trimmed}' (name may already exist)`
         );
       }
+      rememberEnrollment(trimmed, embeddings);
     },
     async identify(
       audio: OfflineAudioBufferIdSource,
@@ -355,7 +457,12 @@ export async function createSpeakerIdentification(
     },
     async removeSpeaker(name: string): Promise<boolean> {
       guard();
-      return manager.remove(name);
+      const trimmed = name.trim();
+      const ok = await manager.remove(trimmed);
+      if (ok) {
+        enrollmentMirror.delete(trimmed);
+      }
+      return ok;
     },
     async listSpeakers(): Promise<string[]> {
       guard();
@@ -369,9 +476,79 @@ export async function createSpeakerIdentification(
       guard();
       return manager.numSpeakers();
     },
+    async exportEnrollments(): Promise<SpeakerEnrollmentBundle> {
+      guard();
+      const speakers = Array.from(enrollmentMirror.entries()).map(
+        ([name, embeddings]) => ({
+          name,
+          embeddings: embeddingsToNumberArrays(embeddings),
+        })
+      );
+      return {
+        version: ENROLLMENT_BUNDLE_VERSION,
+        dim: manager.dim,
+        modelKey,
+        speakers,
+      };
+    },
+    async importEnrollments(
+      bundle: SpeakerEnrollmentBundle,
+      importOptions?: ImportEnrollmentsOptions
+    ): Promise<ImportEnrollmentsResult> {
+      guard();
+      assertEnrollmentBundle(bundle, manager.dim, modelKey);
+      const replaceExisting = importOptions?.replaceExisting === true;
+
+      let imported = 0;
+      const skipped = 0;
+
+      for (let i = 0; i < bundle.speakers.length; i++) {
+        const entry = bundle.speakers[i];
+        if (entry == null || typeof entry !== 'object') {
+          throw new Error(
+            `SID_ENROLLMENT_BUNDLE_INVALID: speakers[${i}] must be an object`
+          );
+        }
+        const trimmed =
+          typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (trimmed.length === 0) {
+          throw new Error(
+            `SID_ENROLLMENT_BUNDLE_INVALID: speakers[${i}].name must be a non-empty string`
+          );
+        }
+        if (!Array.isArray(entry.embeddings) || entry.embeddings.length === 0) {
+          throw new Error(
+            `SID_ENROLLMENT_BUNDLE_INVALID: speakers[${i}].embeddings must be a non-empty array`
+          );
+        }
+        const embeddings = numberArraysToEmbeddings(
+          entry.embeddings,
+          manager.dim
+        );
+
+        if (replaceExisting) {
+          const removed = await manager.remove(trimmed);
+          if (removed) {
+            enrollmentMirror.delete(trimmed);
+          }
+        }
+
+        const ok = await manager.add(trimmed, embeddings);
+        if (!ok) {
+          throw new Error(
+            `Failed to import speaker '${trimmed}' (name may already exist)`
+          );
+        }
+        rememberEnrollment(trimmed, embeddings);
+        imported += 1;
+      }
+
+      return { imported, skipped };
+    },
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
+      enrollmentMirror.clear();
       await manager.destroy();
       await engine.destroy();
     },

@@ -80,6 +80,38 @@ export type SpeakerIdentificationLiveLabelOptions =
       onLabeled?: (event: SidLiveLabeledSegmentEvent) => void;
     };
 
+/** One enrolled speaker in a {@link SpeakerEnrollmentBundle}. */
+export type SpeakerEnrollmentEntry = {
+  name: string;
+  /** Exact embedding vectors that were (or will be) passed to `manager.add`. */
+  embeddings: number[][];
+};
+
+/**
+ * Versioned enrollment snapshot for cross-session persistence.
+ * The SDK does not write files — apps store / load this object themselves.
+ */
+export type SpeakerEnrollmentBundle = {
+  version: 1;
+  dim: number;
+  /** Optional engine cache key fingerprint from SID init (safer reload). */
+  modelKey?: string;
+  speakers: SpeakerEnrollmentEntry[];
+};
+
+export type ImportEnrollmentsOptions = {
+  /**
+   * When `true`, remove an existing speaker before re-adding.
+   * Default `false` — name collision throws (same as `enroll`).
+   */
+  replaceExisting?: boolean;
+};
+
+export type ImportEnrollmentsResult = {
+  imported: number;
+  skipped: number;
+};
+
 export interface SpeakerIdentificationEngine {
   readonly instanceId: string;
   readonly managerId: string;
@@ -141,5 +173,21 @@ export interface SpeakerIdentificationEngine {
   listSpeakers(): Promise<string[]>;
   contains(name: string): Promise<boolean>;
   numSpeakers(): Promise<number>;
+
+  /**
+   * Snapshot enrolled speakers from the JS enrollment mirror
+   * (speakers enrolled via this SID instance's `enroll*` / `importEnrollments`).
+   */
+  exportEnrollments(): Promise<SpeakerEnrollmentBundle>;
+
+  /**
+   * Restore speakers from a {@link SpeakerEnrollmentBundle} into this manager.
+   * Does not write or read files — pass a previously exported (or app-built) bundle.
+   */
+  importEnrollments(
+    bundle: SpeakerEnrollmentBundle,
+    options?: ImportEnrollmentsOptions
+  ): Promise<ImportEnrollmentsResult>;
+
   destroy(): Promise<void>;
 }

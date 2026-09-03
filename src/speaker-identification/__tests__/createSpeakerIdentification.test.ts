@@ -676,4 +676,119 @@ describe('createSpeakerIdentification', () => {
     ).resolves.toEqual({ labeledCount: 0, unknownCount: 0 });
     expect(onLabeled).not.toHaveBeenCalled();
   });
+
+  it('exportEnrollments / importEnrollments round-trip restores speakers', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await sid.enroll('alice', ['off_a', 'off_b']);
+    const bundle = await sid.exportEnrollments();
+    expect(bundle).toEqual({
+      version: 1,
+      dim: 4,
+      modelKey: expect.any(String),
+      speakers: [
+        {
+          name: 'alice',
+          embeddings: [emb, emb],
+        },
+      ],
+    });
+
+    await sid.destroy();
+    __resetSpeakerEmbeddingEngineCacheForTests();
+
+    const sid2 = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    native.speakerEmbeddingManagerAdd.mockClear();
+
+    await expect(sid2.importEnrollments(bundle)).resolves.toEqual({
+      imported: 1,
+      skipped: 0,
+    });
+    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+      sid2.managerId,
+      'alice',
+      [...emb, ...emb],
+      2
+    );
+
+    const reexported = await sid2.exportEnrollments();
+    expect(reexported.speakers).toEqual(bundle.speakers);
+    expect(reexported.modelKey).toBe(bundle.modelKey);
+  });
+
+  it('importEnrollments rejects name collision unless replaceExisting', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await sid.enroll('alice', 'off_a');
+    const bundle = await sid.exportEnrollments();
+
+    native.speakerEmbeddingManagerAdd.mockResolvedValueOnce({ ok: false });
+    await expect(sid.importEnrollments(bundle)).rejects.toThrow(
+      /name may already exist/
+    );
+
+    native.speakerEmbeddingManagerAdd.mockResolvedValue({ ok: true });
+    native.speakerEmbeddingManagerRemove.mockResolvedValue({ ok: true });
+    await expect(
+      sid.importEnrollments(bundle, { replaceExisting: true })
+    ).resolves.toEqual({ imported: 1, skipped: 0 });
+    expect(native.speakerEmbeddingManagerRemove).toHaveBeenCalledWith(
+      sid.managerId,
+      'alice'
+    );
+    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalled();
+  });
+
+  it('importEnrollments rejects dim mismatch', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await expect(
+      sid.importEnrollments({
+        version: 1,
+        dim: 8,
+        speakers: [{ name: 'alice', embeddings: [[1, 2, 3, 4, 5, 6, 7, 8]] }],
+      })
+    ).rejects.toThrow(/SID_ENROLLMENT_DIM_MISMATCH/);
+  });
+
+  it('importEnrollments rejects modelKey mismatch', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await expect(
+      sid.importEnrollments({
+        version: 1,
+        dim: 4,
+        modelKey: JSON.stringify({
+          modelKey: '/other-model',
+          provider: 'cpu',
+          numThreads: 1,
+        }),
+        speakers: [{ name: 'alice', embeddings: [emb] }],
+      })
+    ).rejects.toThrow(/SID_ENROLLMENT_MODEL_MISMATCH/);
+  });
+
+  it('removeSpeaker drops the enrollment mirror entry', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    await sid.enroll('alice', 'off_a');
+    await expect(sid.exportEnrollments()).resolves.toEqual(
+      expect.objectContaining({
+        speakers: [expect.objectContaining({ name: 'alice' })],
+      })
+    );
+
+    await expect(sid.removeSpeaker('alice')).resolves.toBe(true);
+    await expect(sid.exportEnrollments()).resolves.toEqual(
+      expect.objectContaining({ speakers: [] })
+    );
+  });
 });
