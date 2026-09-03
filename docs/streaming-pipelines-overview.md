@@ -1,6 +1,6 @@
 # Streaming pipelines — shared lifecycle
 
-This page describes what is **common** to native **streaming pipeline** workers (STT, enhancement, separation live overload, VAD, TTS live overload, punctuation, …). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming doc.
+This page describes what is **common** to native **streaming pipeline** workers (STT, enhancement, separation live overload, VAD, TTS live overload, punctuation, …) and to **parity-shaped** live overloads that share the same handle verbs (including SID `labelLiveSegments`, which is JS-orchestrated today). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming doc.
 
 ## Mental model
 
@@ -13,7 +13,7 @@ This page describes what is **common** to native **streaming pipeline** workers 
 
 Note: offline alignment progress is exposed on `alignTextToAudio(..., { onProgress })` as `OrchestrationProgress`; alignment has no streaming pipeline handle progress contract.
 
-Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`, …) but share the same **verbs** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`). They are thin JS facades over native `pipelineId` control (`stopStreamingPipeline`, `flushStreamingPipeline`, …).
+Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`, …) but share the same **verbs** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`). Most are thin JS facades over native `pipelineId` control (`stopStreamingPipeline`, `flushStreamingPipeline`, …). SID live overload uses the same verb surface with a **JS-orchestrated** implementation today (see [speaker-identification-live.md](speaker-identification-live.md#native-migration-path)).
 
 | Method / field | Role | Typical interplay |
 | --- | --- | --- |
@@ -39,6 +39,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | Separation live overload + `SeparationPipelineHandle` | [separation-streaming.md](separation-streaming.md) · [separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption](separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption) |
 | VAD streaming + `VADPipelineHandle` | [vad-streaming.md](vad-streaming.md) |
 | Punctuation streaming + `PunctuationPipelineHandle` | [punctuation-streaming.md](punctuation-streaming.md) |
+| SID live overload + `SpeakerIdentificationPipelineHandle` | [speaker-identification-live.md](speaker-identification-live.md) (JS-orchestrated; same handle verbs) |
 | Live audio as pipeline operand | [audiobuffer-streaming.md](audiobuffer-streaming.md) |
 | Live text as pipeline operand | [textbuffer-streaming.md](textbuffer-streaming.md) |
 | Live segments as pipeline operand | [segmentbuffer-streaming.md](segmentbuffer-streaming.md) |

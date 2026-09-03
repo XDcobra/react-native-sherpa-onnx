@@ -12,7 +12,7 @@ On-device **named-speaker** enrollment and identification on a shared speaker-em
 
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
-Model detect lives on **`react-native-sherpa-onnx/speaker-embedding`** (`detectSpeakerEmbeddingModel`). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
+Model detect is available on the SID package (`detectSpeakerEmbeddingModel`) and on **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
 
 SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (planned). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
 
@@ -23,8 +23,8 @@ Live labeling is available via **`labelLiveSegments`** — see [speaker-identifi
 ```ts
 import {
   createSpeakerIdentification,
+  detectSpeakerEmbeddingModel,
 } from 'react-native-sherpa-onnx/speaker-identification';
-import { detectSpeakerEmbeddingModel } from 'react-native-sherpa-onnx/speaker-embedding';
 import {
   createOfflineAudioBufferFromFile,
   releasePipelineAudioBuffer,
@@ -149,7 +149,7 @@ Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech
 
 #### `detectSpeakerEmbeddingModel(source, options?)`
 
-Exported from **`react-native-sherpa-onnx/speaker-embedding`**.
+Available from **`react-native-sherpa-onnx/speaker-identification`** (DX re-export) and **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation).
 
 ```ts
 function detectSpeakerEmbeddingModel(
@@ -162,6 +162,16 @@ function detectSpeakerEmbeddingModel(
 ```
 
 Supported families: **WeSpeaker**, **3D-Speaker**, **NeMo** embedding packs (see [sherpa-onnx speaker-recognition models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models)). Prefer detect before `createSpeakerIdentification`.
+
+### Models and required files
+
+| `modelType` | Required files | Optional | Custom-init keys |
+| --- | --- | --- | --- |
+| `wespeaker` | `*.onnx` (WeSpeaker embedding) | — | `model` |
+| `3d-speaker` | `*.onnx` (3D-Speaker embedding) | — | `model` |
+| `nemo` | `*.onnx` (NeMo speaker embedding) | — | `model` |
+
+Validate category for custom path helpers: **`speakerEmbedding`**.
 
 ### Factory
 
@@ -209,6 +219,13 @@ interface SpeakerIdentificationEngine {
     options?: SpeakerIdentificationLabelOptions
   ): Promise<{ labeledCount: number; unknownCount: number }>;
 
+  /** Live overload — see speaker-identification-live.md */
+  labelLiveSegments(
+    audioIn: LiveAudioBufferIdSource,
+    segmentsOut: LiveSegmentBufferIdSource,
+    options: SpeakerIdentificationLiveLabelOptions
+  ): Promise<SpeakerIdentificationPipelineHandle>;
+
   verify(
     name: string,
     audio: OfflineAudioBufferIdSource,
@@ -229,6 +246,7 @@ interface SpeakerIdentificationEngine {
 | `enrollOfflineSegments` | Same average path, one embedding per non-empty speech span. Optional `onProgress` (see below). |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
 | `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
+| `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
 | `verify` | Cosine check against one enrolled name. |
 | `destroy` | Releases manager + drops extractor ref-count. |
 
@@ -316,11 +334,12 @@ Enrollment lives in the native manager for the process lifetime of the SID insta
 
 ## Out of scope (this release)
 
-- Live overload / native SID worker
+- Native SID live worker (JS orchestration ships today; see [live doc](speaker-identification-live.md#native-migration-path))
 - `kind: 'diarization'` segment rows
 - Score / top-N search results
 - In-place mutation of VAD segment buffers
 - Enroll from a segment buffer **without** PCM audio
+- Enrollment export/import persistence helpers
 
 ---
 
@@ -361,24 +380,24 @@ More end-to-end patterns: [feature-pipelines.md#speaker-identification-offline-p
 ```ts
 import {
   createSpeakerIdentification,
+  detectSpeakerEmbeddingModel,
+  SPEAKER_EMBEDDING_MODEL_TYPES,
+  SpeakerEmbeddingErrorCode,
   type IdentifyResult,
   type LabelOfflineSegmentsResult,
   type OrchestrationProgress,
   type SidLabeledSegmentEvent,
+  type SidLiveLabeledSegmentEvent,
+  type SpeakerEmbeddingDetectResult,
+  type SpeakerEmbeddingModelType,
   type SpeakerIdentificationEngine,
   type SpeakerIdentificationLabelOptions,
+  type SpeakerIdentificationLiveLabelOptions,
   type SpeakerIdentificationOptions,
+  type SpeakerIdentificationPipelineHandle,
   type SpeakerIdentificationSegmentOptions,
   type SpeakerIdentificationThresholdOptions,
 } from 'react-native-sherpa-onnx/speaker-identification';
-
-import {
-  detectSpeakerEmbeddingModel,
-  SPEAKER_EMBEDDING_MODEL_TYPES,
-  SpeakerEmbeddingErrorCode,
-  type SpeakerEmbeddingDetectResult,
-  type SpeakerEmbeddingModelType,
-} from 'react-native-sherpa-onnx/speaker-embedding';
 ```
 
 - **`SpeakerEmbeddingModelType`:** `'wespeaker' | '3d-speaker' | 'nemo'`
@@ -387,8 +406,11 @@ import {
 - **`SpeakerIdentificationThresholdOptions`:** `{ threshold?: number }` (default `0.5`)
 - **`SpeakerIdentificationSegmentOptions`:** threshold + optional `onProgress`
 - **`SpeakerIdentificationLabelOptions`:** segment options + optional `onLabeled`
-- **`SidLabeledSegmentEvent`:** per-span label result (`speakerName`, ranges, …)
-- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)---
+- **`SidLabeledSegmentEvent`:** per-span offline label result (`speakerName`, ranges, `totalSegments`, …)
+- **`SpeakerIdentificationLiveLabelOptions` / `SidLiveLabeledSegmentEvent` / `SpeakerIdentificationPipelineHandle`:** live overload — see [speaker-identification-live.md](speaker-identification-live.md)
+- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)
+
+---
 
 ## Error codes
 

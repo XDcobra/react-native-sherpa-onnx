@@ -48,6 +48,22 @@ export type {
 
 export type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
 
+// DX parity with other feature packages: detect / model types / error codes
+// also live on `react-native-sherpa-onnx/speaker-embedding` (shared foundation).
+export {
+  detectSpeakerEmbeddingModel,
+  SPEAKER_EMBEDDING_MODEL_TYPES,
+  SpeakerEmbeddingErrorCode,
+  assertSpeakerEmbeddingCustomConfig,
+  resolveSpeakerEmbeddingCustomConfigPaths,
+} from '../speaker-embedding';
+export type {
+  SpeakerEmbeddingCustomConfig,
+  SpeakerEmbeddingCustomPathKey,
+  SpeakerEmbeddingDetectResult,
+  SpeakerEmbeddingModelType,
+} from '../speaker-embedding';
+
 const DEFAULT_THRESHOLD = 0.5;
 
 function resolveThreshold(

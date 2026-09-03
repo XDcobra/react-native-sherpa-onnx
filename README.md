@@ -41,7 +41,7 @@ npm install react-native-sherpa-onnx
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
-- ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md)
+- ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
 
 ### Pipeline & buffers
 
@@ -358,7 +358,7 @@ Speaker identification uses **speaker-embedding** ONNX packs (WeSpeaker, 3D-Spea
 | **3D-Speaker** | `'3d-speaker'` | 3D-Speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | **NeMo** | `'nemo'` | NeMo speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 
-APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md). Speaker **diarization** (anonymous clusters) is still planned — see [Diarization](./docs/diarization.md).
+APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters) is still planned — see [Diarization](./docs/diarization.md).
 
 </details>
 
@@ -428,7 +428,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
-- **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) – enroll / identify / verify; segment-buffer label Out
+- **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
 
 ### Segmentation
 
@@ -483,7 +483,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/streaming), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/streaming), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline + live overload)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks

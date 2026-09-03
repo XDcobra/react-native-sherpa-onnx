@@ -243,6 +243,7 @@ Path keys per feature: [Required files per feature](#required-files-per-feature)
 | TTS | `createTTS` | `modelSource` | `customConfig` |
 | VAD | `createStreamingVAD` | `modelSource` | `customConfig` |
 | Enhancement | `createEnhancement` / `createStreamingEnhancement` | `modelSource` | `customConfig` |
+| Speaker identification | `createSpeakerIdentification` | `modelSource` | `customConfig` |
 | Punctuation offline | `createOfflinePunctuation` | `modelSource` | `customConfig` |
 | Punctuation streaming | `createStreamingPunctuation` | `modelSource` | `customConfig` |
 | Alignment | `alignTextToAudio` (`mode: 'accurate'` only) | `modelSource` | `customConfig` — **per call**, no engine init |
@@ -283,7 +284,7 @@ if (!result.ok) {
 | `getCustomModelPathRequirements(category, modelType)` | Read-only schema — ordered `fields[]` with `required` and `kind` (`file` \| `dir`) |
 | `validateCustomModelPaths(category, modelType, paths)` | Enforces non-empty paths + family-specific rules |
 
-Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `separation`, `punctuation`, `alignment`.
+Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `separation`, `punctuation`, `alignment`, `speakerEmbedding`.
 
 > [!NOTE]
 > **`stt_streaming`** keys differ from offline `stt` (e.g. streaming transducer uses `encoder`/`decoder`/`joiner`/`tokens`; offline CTC uses `ctcModel`/`tokens`). Always query the schema for the exact category.
@@ -306,6 +307,7 @@ Each feature doc has the full per-`modelType` table. Summary of where to look:
 | VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
 | Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
 | Separation | [separation-offline.md](separation-offline.md#validation-required-files) | `detectSeparationModel` | `separation` |
+| Speaker identification | [speaker-identification-offline.md](speaker-identification-offline.md#models-and-required-files) | `detectSpeakerEmbeddingModel` | `speakerEmbedding` |
 | Punctuation offline | [punctuation-offline.md](punctuation-offline.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Punctuation streaming | [punctuation-streaming.md](punctuation-streaming.md#validation-required-files) | `detectPunctuationModel` | `punctuation` |
 | Alignment | [alignment-offline.md](alignment-offline.md#validation-required-files) | `detectAlignmentModel` | `alignment` |
@@ -327,7 +329,8 @@ flowchart LR
   vad -->|no match| punct[Punctuation]
   punct -->|no match| enh[Enhancement]
   enh -->|no match| sep[Separation]
-  sep -->|no match| align[Alignment]
+  sep -->|no match| sid[SpeakerEmbedding]
+  sid -->|no match| align[Alignment]
   align -->|no match| none["matched: false"]
 ```
 
@@ -528,6 +531,8 @@ Full payloads (`success`, `error`, `detectedModels`, `paths`, `detectionSources`
 | VAD | `detectVadModel` | [vad-streaming.md — Model detection](vad-streaming.md#model-detection) |
 | Punctuation | `detectPunctuationModel` | [punctuation-offline.md](punctuation-offline.md#model-detection) |
 | Enhancement | `detectEnhancementModel` | [enhancement-offline.md](enhancement-offline.md#model-detection) |
+| Separation | `detectSeparationModel` | [separation-offline.md](separation-offline.md#model-detection) |
+| Speaker identification | `detectSpeakerEmbeddingModel` | [speaker-identification-offline.md](speaker-identification-offline.md#detection) |
 | Alignment | `detectAlignmentModel` | [alignment-offline.md](alignment-offline.md#model-detection) |
 
 The download module uses unified batch detection internally. App catalog code should prefer `detect` over calling multiple `detect*Model` APIs in sequence.

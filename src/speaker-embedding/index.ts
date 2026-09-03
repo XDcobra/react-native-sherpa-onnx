@@ -35,7 +35,11 @@ export type {
   SpeakerEmbeddingCustomConfig,
   SpeakerEmbeddingCustomPathKey,
 } from './customConfig';
-export { SpeakerEmbeddingErrorCode } from './customConfig';
+export {
+  SpeakerEmbeddingErrorCode,
+  assertSpeakerEmbeddingCustomConfig,
+  resolveSpeakerEmbeddingCustomConfigPaths,
+} from './customConfig';
 
 export async function detectSpeakerEmbeddingModel(
   source: FileSource,
