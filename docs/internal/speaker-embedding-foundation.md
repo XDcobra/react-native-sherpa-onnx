@@ -158,7 +158,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 5. [x] `src/speaker-embedding/` — engine, manager, buffer helpers, engine cache
 6. [x] Model detect + `ModelCategory.SpeakerEmbedding`
 7. [x] `src/speaker-identification/` — public API (offline + live overload + enrollment import/export)
-8. [ ] Example screen: enroll + identify (file + optional mic via `labelLiveSegments`)
+8. [x] Example screen: enroll + identify (file + optional mic via `labelLiveSegments`)
 9. [x] Tests: bridge mocks, enroll/search/verify, offline label, live label, enrollment import/export
 
 ### Phase 2 — Diarization
