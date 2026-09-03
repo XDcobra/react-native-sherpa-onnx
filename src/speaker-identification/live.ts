@@ -139,9 +139,9 @@ type PipelineState = {
 
 /**
  * Live overload for SID: attach speech segmentation to `audioIn`, label each
- * committed utterance into `segmentsOut`, return a parity-shaped pipeline handle.
+ * committed utterance into `segmentsOut`, return a pipeline handle.
  *
- * Implementation is JS orchestration (no native SID worker in this release).
+ * Maintainer note: JS orchestration — see docs/internal/live-overload.md §11.
  */
 export async function labelLiveSegments(
   embeddingEngine: SpeakerEmbeddingEngine,

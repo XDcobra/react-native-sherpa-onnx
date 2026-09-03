@@ -315,7 +315,7 @@ Allowed keys: `source`, `speakerName` only. See [segmentbuffer-offline.md](segme
 
 VAD (or manual spans) produces speech segments. The app knows heuristically that every other segment is speaker A:
 
-1. Build or filter an `OfflineSegmentBuffer` that contains **only** Alice’s spans (today: new live buffer → append selected spans → finalize/populate; segment buffers are not mutated in place).
+1. Build or filter an `OfflineSegmentBuffer` that contains **only** Alice’s spans (rebuild via live staging → finalize/populate; segment buffers are not mutated in place).
 2. `enrollOfflineSegments('alice', audio, aliceOnlySegs)`.
 3. Repeat for Bob.
 4. Later `labelOfflineSegments(audio, allVadSegs, labeledOut)` to stamp names on the full timeline.
@@ -328,18 +328,17 @@ PCM stays native via buffer ids. Only the compact embedding (`dim` floats, typic
 
 ### Persistence
 
-Enrollment lives in the native manager for the process lifetime of the SID instance. Export/import of enrollments is **not** in this SDK surface yet; persist names + clips (or embeddings) in the app if you need cross-session memory.
+Enrollment lives in the native manager for the lifetime of the SID instance. Persist names + clips (or embeddings) in the app if you need cross-session memory.
 
 ---
 
-## Out of scope (this release)
+## Out of scope
 
-- Native SID live worker (JS orchestration ships today; see [live doc](speaker-identification-live.md#native-migration-path))
-- `kind: 'diarization'` segment rows
+- `kind: 'diarization'` segment rows (see [diarization.md](diarization.md))
 - Score / top-N search results
 - In-place mutation of VAD segment buffers
 - Enroll from a segment buffer **without** PCM audio
-- Enrollment export/import persistence helpers
+- Built-in enrollment export/import helpers
 
 ---
 
@@ -361,7 +360,7 @@ Enrollment lives in the native manager for the process lifetime of the SID insta
 | Identify result | `{ name: string \| null }` | Whole-buffer `identify` — no segment Out. |
 | Labeled timeline | `OfflineSegmentBuffer` (`seg_off_*`) | Empty `segmentsOut` filled with `payload.source: 'sid'`. |
 | UI / export | Segment metadata | Read via `getOfflineSegmentBufferSegments(...)`. |
-| Future diarization | Shared embedding engine | Same weights via extractor cache; anonymous clusters are **not** SID. |
+| Future diarization | Shared embedding engine | Same weights via extractor cache; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
 
 ```mermaid
 flowchart LR

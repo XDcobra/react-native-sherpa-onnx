@@ -317,6 +317,7 @@ Both buffers must be live **or** both offline. Mixed calls throw `*_INVALID_ARGU
 | **Punctuation** | ✅ `punctuate(LiveText, LiveText, { segmentation })` | Implemented |
 | **Enhancement** | ✅ `enhance(LiveAudio, LiveAudio, { segmentation: continuous_frames })` | Implemented (restricted) |
 | **Separation** | ✅ `separate(LiveAudio, LiveAudio[], { segmentation: continuous_frames })` | Implemented (restricted; N stem outputs) |
+| **Speaker identification** | ✅ `labelLiveSegments(LiveAudio, LiveSegment, { segmentation })` | Implemented — **JS orchestration** (see §11); no native `start*OfflineLivePipeline` yet |
 | VAD | ❌ | N/A — VAD **is** the segmentation primitive; `createStreamingVAD.process()` already accepts both buffer families |
 | Alignment | ❌ | Structurally incompatible (closed, bounded problem) |
 | Diarization | ❌ | Placeholder — revisit at implementation time |
@@ -365,3 +366,33 @@ flowchart LR
 4. **No `chunkSize` on TTS/Punctuation/Enhancement.** The migration plan mentioned `chunkSize` as a shared option. In practice, only STT exposes `chunkSize` in its bridge options. TTS, Punctuation, and Enhancement do not accept `chunkSize` in their bridge calls.
 
 5. **TTS voice cloning options are flattened.** The TTS live-overload passes `referenceAudioBufferId` and `referenceText` as top-level bridge fields, resolved from the `voiceClone` discriminated union in `toNativeOfflineLivePipelineOptions()`.
+
+---
+
+## 11. Speaker Identification live overload (JS orchestration)
+
+Public API: `createSpeakerIdentification().labelLiveSegments(LiveAudio, LiveSegment, options)` — see [speaker-identification-live.md](../speaker-identification-live.md) for the consumer contract.
+
+### Why JS (not a native worker)
+
+SID live inference is a cheap per-utterance embedding extract + cosine search. Every building block already exists (`labelOfflineSegments` staging pattern, `getLiveAudioBufferSamplesSlice`, temp offline buffer → `extractFromOfflineAudio`, `manager.search`, `appendLiveSegment` with `payload.source: 'sid'`). A native `OfflineLivePipelineWorker` subclass would be precedent-less for **segment-buffer label output** and would need cross-subsystem access to the `SpeakerEmbeddingManager`. Design note: [speaker-embedding-foundation.md](speaker-embedding-foundation.md).
+
+### Current drain loop (`src/speaker-identification/live.ts`)
+
+1. `validateLiveOfflinePipelineOptions` (`speech_energy_silence` | `speech_vad_model`)
+2. `attachSegmentationEngine(audioIn, { policy })` → internal `seg_live_*`
+3. JS poll/cursor over `getLiveSegmentBufferSegmentCount` / `getLiveSegmentBufferSegments`
+4. Per speech span: live PCM slice → temp offline buffer → extract → search → `appendLiveSegment(segmentsOut, { payload: { source: 'sid', speakerName } })` → `onLabeled`
+5. Handle (`SpeakerIdentificationPipelineHandle`) synthesizes `stop` / `flush` / `reset` / `getStatus` / `completed` in JS (not via `StreamingPipelineRegistry` / `streamingPipelineCompleted`)
+
+`finalizeLiveAudioBuffer(audioIn)` → detach with `flushFinal: true` → drain tail → finalize `segmentsOut` → `completed` with `reason: 'completed'`.
+
+### Possible native migration (same public API)
+
+Keep `labelLiveSegments` signature + handle shape; swap the body for:
+
+1. TurboModule `startSpeakerIdentificationOfflineLivePipeline(instanceId, audioIn, segmentsOut, { attachedSegmentationEngineId, segmentLiveBufferId, threshold })`
+2. Kotlin / iOS `SpeakerIdentificationOfflineLivePipelineWorker` extending `OfflineLivePipelineWorker`
+3. `completed` / `getStatus` via `createStreamingPipelineCompletionPromise` + native streaming pipeline registry
+
+No public API change required.

@@ -1,9 +1,11 @@
 # Speaker embedding foundation — Internal design
 
-> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments` (JS orchestration). Phase 2 (diarization) still planned. Example screen for SID is the remaining Phase‑1 demo item.
+> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 (diarization) still planned. Example screen for SID is the remaining Phase‑1 demo item.
 > **Audience:** SDK maintainers.
 > **Strategy:** Ship **Speaker Identification (SID)** first on a shared **Extractor + Manager** layer designed so **Speaker Diarization** can reuse the same embedding engine without rework.
 > **User request:** [Discussion #113 — Speaker Identification](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
+>
+> Live-overload implementation details (JS drain loop, native migration notes): [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration).
 
 ---
 
@@ -78,7 +80,7 @@ engine.destroy(): Promise<void>
 
 **Persistence:** Enrollment storage stays **outside** the extractor — either app-owned or a future thin SID helper (`exportEnrollments` / `importEnrollments`). Diarization does not need persistence.
 
-**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search. Public handle matches other live overloads; implementation is **JS orchestration** today (native worker is a documented migration path).
+**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search. Public handle matches other live overloads. Drain loop is JS orchestration — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration).
 
 ### 2.3 `src/diarization/` (Phase 2 — replace placeholder)
 
@@ -171,8 +173,8 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
-- Enrollment export/import (optional later)
-- Native SID live worker (optional migration; JS orchestration ships)
+- Enrollment export/import helpers
+- Native SID live worker (optional; JS orchestration ships — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration))
 
 ---
 

@@ -13,7 +13,7 @@ On-device **named-speaker labeling** over a live audio stream. SID owns speech s
 
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
-This is a **live overload** of the offline embedding model (same weights / manager as [speaker-identification-offline.md](speaker-identification-offline.md)). There is no separate streaming SID model. Implementation is **JS orchestration** in this release (attach segmentation → drain committed spans → extract/search/append); the public handle shape matches other live overloads so a future native worker can replace the loop without changing the API (see [Native migration path](#native-migration-path)).
+This is a **live overload** of the offline embedding model (same weights / manager as [speaker-identification-offline.md](speaker-identification-offline.md)). There is no separate streaming SID model.
 
 Enrollment stays offline (`enroll` / `enrollOfflineSegments`). Live SID only **labels**.
 
@@ -104,14 +104,14 @@ SID owns the attach — you do **not** pass a pre-built VAD segment In buffer. P
 
 ## Pipeline handle
 
-Same control surface as other streaming / live-overload features ([streaming-pipelines-overview.md](streaming-pipelines-overview.md)), with JS-backed semantics in this release:
+Same control surface as other streaming / live-overload features ([streaming-pipelines-overview.md](streaming-pipelines-overview.md)):
 
 | Method | Behavior |
 | --- | --- |
-| `stop()` | Stop the poll loop, detach segmentation (`flushFinal: true`), drain remaining committed spans, finalize `segmentsOut`, resolve `completed` with `reason: 'stopped'`. |
-| `flush()` | Await labeling of **already-committed** spans. Does not force a mid-utterance cut; the open tail is emitted on `stop` / input finalize. |
-| `reset()` | Soft JS counter reset only (`chunksProcessed` / `unitsRead` / `unitsWritten`). Native segmentation reset is not exposed (matches the intentional no-op on `OfflineLivePipelineWorker.reset`). |
-| `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` — JS-tracked counters (`unitsRead` = samples sliced, `unitsWritten` = labeled segments appended). |
+| `stop()` | Stop labeling, flush remaining committed spans into `segmentsOut`, finalize the Out buffer, resolve `completed` with `reason: 'stopped'`. |
+| `flush()` | Label **already-committed** spans. Does not force a mid-utterance cut; the open tail is emitted on `stop` / input finalize. |
+| `reset()` | Clears progress counters on the handle (`chunksProcessed` / `unitsRead` / `unitsWritten`) while the pipeline remains running. |
+| `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` (`unitsRead` = samples consumed for extract, `unitsWritten` = labeled segments appended). |
 | `completed` | Resolves on graceful input finalize (`reason: 'completed'`) or `stop()` (`reason: 'stopped'`); rejects on fatal labeling errors (`code: 'STREAMING_PIPELINE_ERROR'`). |
 
 ## `sid` payload
@@ -181,18 +181,6 @@ More patterns: [feature-pipelines.md#speaker-identification-live-patterns](featu
 | `SID_LABEL_FAILED` | Segmentation engine did not produce an internal segment buffer. |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during labeling; `completed` rejects with this `code`. |
 | `SPEAKER_EMBEDDING_*` / `SEGMENT_*` | Same native / segment codes as [offline SID](speaker-identification-offline.md#error-codes). |
-
-## Native migration path
-
-Today the drain loop is JS (poll internal segmentation segment buffer → `getLiveAudioBufferSamplesSlice` → temp offline buffer → `extractFromOfflineAudio` → `manager.search` → `appendLiveSegment`).
-
-A future release can keep the **identical** `labelLiveSegments` signature and handle while swapping the body for:
-
-1. TurboModule `startSpeakerIdentificationOfflineLivePipeline(instanceId, audioIn, segmentsOut, { attachedSegmentationEngineId, segmentLiveBufferId, threshold })`
-2. Kotlin / iOS `SpeakerIdentificationOfflineLivePipelineWorker` extending `OfflineLivePipelineWorker`
-3. `completed` / `getStatus` backed by `createStreamingPipelineCompletionPromise` + native streaming pipeline registry
-
-No public API change is required for that migration.
 
 ## See also
 
