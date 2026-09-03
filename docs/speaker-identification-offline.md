@@ -236,6 +236,13 @@ interface SpeakerIdentificationEngine {
   listSpeakers(): Promise<string[]>;
   contains(name: string): Promise<boolean>;
   numSpeakers(): Promise<number>;
+
+  exportEnrollments(): Promise<SpeakerEnrollmentBundle>;
+  importEnrollments(
+    bundle: SpeakerEnrollmentBundle,
+    options?: { replaceExisting?: boolean }
+  ): Promise<{ imported: number; skipped: number }>;
+
   destroy(): Promise<void>;
 }
 ```
@@ -248,6 +255,7 @@ interface SpeakerIdentificationEngine {
 | `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
 | `verify` | Cosine check against one enrolled name. |
+| `exportEnrollments` / `importEnrollments` | Cross-session enrollment snapshot — see [Persistence](#persistence). |
 | `destroy` | Releases manager + drops extractor ref-count. |
 
 `SpeakerIdentificationSegmentOptions` = `{ threshold?: number; onProgress?: (p: OrchestrationProgress) => void }` (enroll + label).  
@@ -328,7 +336,27 @@ PCM stays native via buffer ids. Only the compact embedding (`dim` floats, typic
 
 ### Persistence
 
-Enrollment lives in the native manager for the lifetime of the SID instance. Persist names + clips (or embeddings) in the app if you need cross-session memory.
+The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors passed to `manager.add` on `enroll` / `enrollOfflineSegments` / `importEnrollments`, and clears it on `removeSpeaker` / `destroy`.
+
+```ts
+// After enroll…
+const bundle = await sid.exportEnrollments();
+// App stores JSON somewhere (file, key-value store, share) — SDK does not write files.
+await saveJson('sid-enrollments.json', bundle);
+
+// Later session, same embedding model:
+const restored = await loadJson('sid-enrollments.json') as SpeakerEnrollmentBundle;
+await sid.importEnrollments(restored);
+// Name collision → throws (like enroll). Overwrite with:
+await sid.importEnrollments(restored, { replaceExisting: true });
+```
+
+**`SpeakerEnrollmentBundle`:** `{ version: 1, dim, modelKey?, speakers: { name, embeddings: number[][] }[] }`.
+
+- `dim` must match the current manager (else `SID_ENROLLMENT_DIM_MISMATCH`).
+- When both the bundle and this SID instance have a `modelKey`, a mismatch rejects with `SID_ENROLLMENT_MODEL_MISMATCH`.
+- Export only includes speakers enrolled through this SID instance’s enroll/import paths (not a raw native-only manager).
+- Future: native readout via upstream `GetEmbedding` — [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
 
 ---
 
@@ -338,7 +366,8 @@ Enrollment lives in the native manager for the lifetime of the SID instance. Per
 - Score / top-N search results
 - In-place mutation of VAD segment buffers
 - Enroll from a segment buffer **without** PCM audio
-- Built-in enrollment export/import helpers
+- Native embedding dump / Upstream `GetEmbedding` (export uses the JS mirror; see [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md))
+- Automatic file / cloud I/O for enrollment bundles (app-owned storage)
 
 ---
 
@@ -383,12 +412,16 @@ import {
   SPEAKER_EMBEDDING_MODEL_TYPES,
   SpeakerEmbeddingErrorCode,
   type IdentifyResult,
+  type ImportEnrollmentsOptions,
+  type ImportEnrollmentsResult,
   type LabelOfflineSegmentsResult,
   type OrchestrationProgress,
   type SidLabeledSegmentEvent,
   type SidLiveLabeledSegmentEvent,
   type SpeakerEmbeddingDetectResult,
   type SpeakerEmbeddingModelType,
+  type SpeakerEnrollmentBundle,
+  type SpeakerEnrollmentEntry,
   type SpeakerIdentificationEngine,
   type SpeakerIdentificationLabelOptions,
   type SpeakerIdentificationLiveLabelOptions,
@@ -402,6 +435,8 @@ import {
 - **`SpeakerEmbeddingModelType`:** `'wespeaker' | '3d-speaker' | 'nemo'`
 - **`IdentifyResult`:** `{ name: string | null }`
 - **`LabelOfflineSegmentsResult`:** `{ labeledCount: number; unknownCount: number }`
+- **`SpeakerEnrollmentBundle` / `SpeakerEnrollmentEntry`:** versioned enrollment snapshot for `exportEnrollments` / `importEnrollments`
+- **`ImportEnrollmentsOptions` / `ImportEnrollmentsResult`:** `{ replaceExisting? }` → `{ imported, skipped }`
 - **`SpeakerIdentificationThresholdOptions`:** `{ threshold?: number }` (default `0.5`)
 - **`SpeakerIdentificationSegmentOptions`:** threshold + optional `onProgress`
 - **`SpeakerIdentificationLabelOptions`:** segment options + optional `onLabeled`
@@ -426,11 +461,14 @@ Typical **promise rejection `code`** strings from the native speaker-embedding l
 | `SPEAKER_EMBEDDING_BUFFER_EMPTY` | Offline audio buffer (or extracted range) has no samples. |
 | `SPEAKER_EMBEDDING_INVALID_ARGUMENT` | Invalid `customConfig` / init arguments on the JS custom-path resolver. |
 | `SID_INVALID_OPTIONS` | JS guard: `onProgress` / `onLabeled` provided but not a function (message includes this token). |
+| `SID_ENROLLMENT_BUNDLE_INVALID` | JS guard: malformed `SpeakerEnrollmentBundle` (version, speakers, embeddings). |
+| `SID_ENROLLMENT_DIM_MISMATCH` | JS guard: bundle `dim` ≠ current manager dim. |
+| `SID_ENROLLMENT_MODEL_MISMATCH` | JS guard: bundle `modelKey` ≠ this SID instance’s model key. |
 | `SEGMENT_INVALID_ARGUMENT` | Bad segment buffer id or invalid speech payload during `labelOfflineSegments` staging (`source: 'sid'`). |
 | `SEGMENT_BUFFER_NOT_FOUND` | Segment In/Out or staging live buffer id missing from the segment registry. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during detect/init. |
 
-JS-side SID guards (message match, not always a native `code`): empty speaker name, no audio buffers for `enroll`, no speech spans for `enrollOfflineSegments`, enroll when the name already exists, and calls after `destroy()`.
+JS-side SID guards (message match, not always a native `code`): empty speaker name, no audio buffers for `enroll`, no speech spans for `enrollOfflineSegments`, enroll/import when the name already exists, enrollment bundle validation, and calls after `destroy()`.
 
 ---
 

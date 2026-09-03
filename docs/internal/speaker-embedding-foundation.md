@@ -75,10 +75,11 @@ engine.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, options?): Promise
 engine.labelLiveSegments(audioIn, segmentsOut, options): Promise<SpeakerIdentificationPipelineHandle>
 engine.verify(name, audio, threshold?): Promise<boolean>
 engine.removeSpeaker / listSpeakers / contains / numSpeakers
+engine.exportEnrollments / importEnrollments
 engine.destroy(): Promise<void>
 ```
 
-**Persistence:** Enrollment storage stays **outside** the extractor — either app-owned or a future thin SID helper (`exportEnrollments` / `importEnrollments`). Diarization does not need persistence.
+**Persistence:** Thin SID helpers `exportEnrollments` / `importEnrollments` return/accept a versioned embeddings JSON bundle (`SpeakerEnrollmentBundle`). The SDK does not write files — the app stores the object. Export is fed by a JS enrollment mirror (native manager cannot read embeddings back). Diarization does not need persistence.
 
 **Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search. Public handle matches other live overloads. Drain loop is JS orchestration — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration).
 
@@ -156,9 +157,9 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 4. [x] TurboModule + `speakerEmbeddingNativeBridge.ts`
 5. [x] `src/speaker-embedding/` — engine, manager, buffer helpers, engine cache
 6. [x] Model detect + `ModelCategory.SpeakerEmbedding`
-7. [x] `src/speaker-identification/` — public API (offline + live overload)
+7. [x] `src/speaker-identification/` — public API (offline + live overload + enrollment import/export)
 8. [ ] Example screen: enroll + identify (file + optional mic via `labelLiveSegments`)
-9. [x] Tests: bridge mocks, enroll/search/verify, offline label, live label
+9. [x] Tests: bridge mocks, enroll/search/verify, offline label, live label, enrollment import/export
 
 ### Phase 2 — Diarization
 
@@ -173,7 +174,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
-- Enrollment export/import helpers
+- Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
 - Native SID live worker (optional; JS orchestration ships — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration))
 
 ---
@@ -196,6 +197,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [Discussion #113 — Speaker Identification request](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
 - [speaker-identification-offline.md](../speaker-identification-offline.md)
 - [speaker-identification-live.md](../speaker-identification-live.md)
+- [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
 - [diarization.md](../diarization.md) — public stub (to replace when Phase 2 ships)
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
 - Upstream: `third_party/sherpa-onnx/sherpa-onnx/kotlin-api/Speaker.kt`, `OfflineSpeakerDiarization.kt`
