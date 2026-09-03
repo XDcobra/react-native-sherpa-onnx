@@ -51,6 +51,7 @@ Live segment buffers collect **time-range events** (VAD, future streaming alignm
   - `source: 'vad'` -> allowed keys: `source`, `engine`, `decision`, `score`
   - `source: 'stt'` -> allowed keys: `source`, `transcript`, `tokenCount`, `isFinal`
   - `source: 'tts'` -> allowed keys: `source`, `text`, `chunkIndex`, `isFinalChunk`
+  - `source: 'sid'` -> allowed keys: `source`, `speakerName` (`string | null`)
 - `kind: 'alignment'` -> `AlignmentSegmentPayload` (strict contract):
   - required: `text`, `timingMode`, `granularity`
   - optional: `confidence`, `tokenMetadata`, `wordMetadata`, `languageHints`

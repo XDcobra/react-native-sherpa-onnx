@@ -193,6 +193,15 @@ const FEATURES: HomeFeature[] = [
     implemented: false,
   },
   {
+    id: 'speaker_identification',
+    sectionTitle: 'Speakers & Separation',
+    title: 'Speaker Identification',
+    description: 'Enroll / identify / label — offline batch + live overload',
+    icon: 'person',
+    screen: 'SpeakerIdentification',
+    implemented: true,
+  },
+  {
     id: 'separation',
     sectionTitle: 'Speakers & Separation',
     title: 'Source Separation',

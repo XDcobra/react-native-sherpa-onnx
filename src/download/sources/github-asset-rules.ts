@@ -36,6 +36,8 @@ export function isAssetSupportedForCategory(
       return ext === 'onnx';
     case ModelCategory.Separation:
       return ext === 'tar.bz2' || ext === 'onnx';
+    case ModelCategory.SpeakerEmbedding:
+      return ext === 'onnx';
     case ModelCategory.Qnn:
       return (
         ext === 'tar.bz2' &&

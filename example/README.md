@@ -216,9 +216,16 @@ This screen initializes offline separation engines (Spleeter or UVR) with auto o
 
 ## Source separation (live overload)
 
-| ![Separation streaming 1](../docs/images/example/separation_streaming_1.png) | ![Separation streaming 2](../docs/images/example/separation_streaming_2.png) | ![Separation streaming 3](../docs/images/example/separation_streaming_3.png) |
+| ![Separation live overload 1](../docs/images/example/separation_streaming_1.png) | ![Separation live overload 2](../docs/images/example/separation_streaming_2.png) | ![Separation live overload 3](../docs/images/example/separation_streaming_3.png) |
 | --- | --- | --- |
 
-This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation-streaming.md](../docs/separation-streaming.md) and the [live overload section in separation-offline.md](../docs/separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
+This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation-streaming.md](../docs/separation-streaming.md), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
+
+## Speaker identification
+
+| ![Speaker identification 1](../docs/images/example/speaker_identification_1.png) | ![Speaker identification 2](../docs/images/example/speaker_identification_2.png) | ![Speaker identification 3](../docs/images/example/speaker_identification_3.png) |
+| --- | --- | --- |
+
+This screen enrolls named speakers from offline audio, then identify / verify / label speech segments. Toggle **Offline batch** vs **Live overload** (same embedding weights). Auto or custom model init (`ModelCategory.SpeakerEmbedding`). Offline segmentation can be Off (whole-buffer) or Auto (`segmentOfflineBuffer` → `enrollOfflineSegments` / `labelOfflineSegments`). Live labeling requires mandatory speech segmentation (`speech_energy_silence` / `speech_vad_model`) over file ingest or mic. Includes export/import of the enrollment JSON bundle. See [docs/speaker-identification-offline.md](../docs/speaker-identification-offline.md) and [docs/speaker-identification-live.md](../docs/speaker-identification-live.md).
 
 ## Speaker diarization (coming soon)

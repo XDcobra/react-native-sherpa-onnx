@@ -46,6 +46,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'separation-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/separation`,
   },
+  [ModelCategory.SpeakerEmbedding]: {
+    tag: 'speaker-recongition-models',
+    cacheFile: 'speaker-embedding-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/speaker-embedding`,
+  },
   [ModelCategory.Qnn]: {
     tag: 'asr-models-qnn-binary',
     cacheFile: 'qnn-models.json',

@@ -26,6 +26,10 @@ export {
   type SeparationCustomInitFormState,
 } from './SeparationCustomInitForm';
 export {
+  SpeakerIdentificationCustomInitForm,
+  type SpeakerIdentificationCustomInitFormState,
+} from './SpeakerIdentificationCustomInitForm';
+export {
   PunctuationOfflineCustomInitForm,
   type PunctuationOfflineCustomInitFormState,
 } from './PunctuationOfflineCustomInitForm';

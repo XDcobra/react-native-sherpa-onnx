@@ -4,17 +4,15 @@
 
 ## Introduction
 
-On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**. There is no separate `createStreamingSeparation` factory.
+On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**.
 
-For **streaming** separation (live overload on live buffers), see [Source separation (streaming)](separation-streaming.md).
-
-For live separation with pipeline handles, see [Live overload](#live-overload-on-offline-separation-offline-weights-live-consumption) below. Shared **`SeparationPipelineHandle`** lifecycle (`stop` / `flush` / `reset` / `getStatus` / `completed`) is also documented in [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+For **live overload** (same offline weights on live buffers — not a true streaming model), see [Source separation (live overload)](separation-streaming.md). Shared pipeline-handle lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 | Role | Type | Notes |
 | --- | --- | --- |
 | **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Mono mixed PCM (file-backed or in-memory) |
 | **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) × N | N empty buffers at separation sample rate; MVP writes **mono-downmixed** stems |
-| **Engine** | `SeparationEngine` via `createSeparation` | Offline: `separate(Offline, Offline[], options?)` → `SeparationResult`. Live overload: `separate(Live, Live[], options)` → `SeparationPipelineHandle`. Also `getSampleRate`, `getNumStems`, `destroy` |
+| **Engine** | `SeparationEngine` via `createSeparation` | `separate(Offline, Offline[], options?)` → `SeparationResult`. Also `getSampleRate`, `getNumStems`, `destroy` |
 
 Import path: `react-native-sherpa-onnx/separation`
 
@@ -145,24 +143,16 @@ const sep = await createSeparation({
 Runs batch source separation: reads mono PCM from **`audioIn`**, writes one mono-downmixed stem into each empty output buffer.
 
 ```ts
-// Offline batch (default)
 separate(
   audioIn: OfflineAudioBufferIdSource,
   audioOuts: readonly OfflineAudioBufferIdSource[],
   options?: SeparateOptions
 ): Promise<SeparationResult>;
-
-// Live overload (mandatory continuous_frames segmentation)
-separate(
-  audioIn: LiveAudioBufferIdSource,
-  audioOuts: readonly LiveAudioBufferIdSource[],
-  options: SeparationLivePipelineOptions
-): Promise<SeparationPipelineHandle>;
 ```
 
-**Offline constraints:** `audioOuts.length` must equal **`getNumStems()`** (typically `2`); all outputs must be empty `off_*` buffers.
+**Constraints:** `audioOuts.length` must equal **`getNumStems()`** (typically `2`); all outputs must be empty `off_*` buffers.
 
-**Live constraints:** same stem count; all buffers must be `live_*`. Segmentation policy **`continuous_frames` only** (see [Live overload](#live-overload-on-offline-separation) below).
+Live overload signature (`Live` → `SeparationPipelineHandle`): [separation-streaming.md](separation-streaming.md).
 
 ```ts
 const mixed = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/mix.wav' });
@@ -359,57 +349,6 @@ try {
 
 Segment boundaries can introduce audible artifacts at chunk edges (same tradeoff as offline enhancement). See [segmentation-engine.md](segmentation-engine.md) for policy fields and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
-## Live overload on offline separation (offline weights, live consumption)
-
-> Mandatory `segmentation.policy` with `continuous_frames`. Commit-only — no partial stems per segment boundary.
-
-The offline separation engine can drive a **live pipeline**: mixed audio flows into a `LiveAudioBuffer`, committed segments are separated with the offline model, and **N live stem buffers** grow in lockstep.
-
-> [!WARNING]
-> Offline separators are designed for whole-utterance batch inference. Chunking via segmentation can introduce **audible artifacts at segment boundaries**. There is no true online separation model in sherpa-onnx — tune `checkpointIntervalMs` for RAM vs. boundary quality. Future overlap/crossfade options are tracked in [future-work/live-overload-audio-overlap-crossfade-future-work.md](future-work/live-overload-audio-overlap-crossfade-future-work.md).
-
-`'off'` and `'manual'` segmentation modes are **not** supported on the live overload path.
-
-```ts
-import { createSeparation } from 'react-native-sherpa-onnx/separation';
-import {
-  createEmptyLiveAudioBuffer,
-  finalizeLiveAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-
-const sep = await createSeparation({
-  modelSource: { kind: 'fs', path: '/absolute/path/to/uvr-model-dir' },
-});
-
-const sr = await sep.getSampleRate();
-const numStems = await sep.getNumStems();
-const liveIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
-const liveOuts = await Promise.all(
-  Array.from({ length: numStems }, () =>
-    createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 })
-  )
-);
-
-const handle = await sep.separate(liveIn, liveOuts, {
-  segmentation: {
-    mode: 'auto',
-    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
-  },
-  // optional: onSegment fires on stem [0] (vocals) live buffer events
-});
-
-// Mic ingest → liveIn, then stop / finalize when done
-const completion = await handle.completed;
-console.log(`Separated ${completion.unitsWritten} samples (stem 0 reference)`);
-
-await handle.stop();
-await finalizeLiveAudioBuffer(liveOuts[0]);
-await finalizeLiveAudioBuffer(liveOuts[1]);
-await sep.destroy();
-```
-
-Pipeline handle lifecycle (`stop`, `flush`, `reset`, `getStatus`, `completed`) matches other live-overload features — see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
-
 ## Pipeline composition
 
 ### Typical upstream
@@ -449,8 +388,6 @@ import {
   type SeparationDetectResult,
   type SeparationResult,
   type SeparateOptions,
-  type SeparationLivePipelineOptions,
-  type SeparationPipelineHandle,
 } from 'react-native-sherpa-onnx/separation';
 ```
 
@@ -458,8 +395,8 @@ import {
 - **`SEPARATION_STEM_LABELS`:** `['vocals', 'accompaniment']` — index labels for the two-stem MVP
 - **`SeparationDetectResult`:** shared detection base (`success`, `error`, `detectedModels`, `modelType`, optional `paths`, `languages`, …)
 - **`SeparationResult`:** offline `separate()` return — `status`, `totalSegments`, `completedSegments`, `skippedSegments`, optional `failedSegment`, `processingTimeMs`
-- **`SeparationLivePipelineOptions`:** live overload — mandatory `segmentation.policy` with `continuous_frames`; optional `onSegment` (stem `[0]`)
-- **`SeparationPipelineHandle`:** live overload return — `instanceId`, `pipelineId`, `completed`, `stop`, `flush`, `reset`, `getStatus`
+
+Live pipeline types (`SeparationLivePipelineOptions`, `SeparationPipelineHandle`): [separation-streaming.md](separation-streaming.md#types-and-constants).
 
 ---
 
@@ -478,13 +415,15 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `SEPARATION_OUTPUT_NOT_EMPTY` | An output buffer must be empty before calling `separate(...)`. |
 | `SEPARATION_STEM_COUNT_MISMATCH` | `audioOuts.length !== getNumStems()`. |
 | `OFFLINE_OOM` | Not enough memory for offline separation (JVM `OutOfMemoryError`, catchable C++ `std::bad_alloc` during process, or related native alloc failure). Prefer `segmentation.mode: 'auto'` for long inputs, or process shorter clips. See [segmentation-engine.md](./segmentation-engine.md). OS low-memory kills / hard native aborts may still terminate the process without this code — see [memory-and-models.md](./memory-and-models.md). |
-| `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, offline/live overload mismatch, unsupported offline segmentation mode). |
-| `LIVE_OFFLINE_SEGMENTATION_REQUIRED` | Live overload called without a valid `segmentation.policy` or with a disallowed evaluator (not `continuous_frames`). |
+| `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, unsupported offline segmentation mode). |
+
+Live-overload-specific codes (`LIVE_OFFLINE_SEGMENTATION_REQUIRED`, …): [separation-streaming.md](separation-streaming.md#error-codes).
 
 ---
 
 ## See also
 
+- [Source separation (live overload)](separation-streaming.md)
 - [Speech enhancement (offline)](enhancement-offline.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)

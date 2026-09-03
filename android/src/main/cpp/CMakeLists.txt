@@ -115,6 +115,10 @@ set(SOURCES
     jni/model_detect/separation/sherpa-onnx-model-detect-separation.cpp
     jni/model_detect/separation/sherpa-onnx-validate-separation.cpp
     jni/model_detect/separation/sherpa-onnx-separation-detect-wrapper.cpp
+    jni/model_detect/speaker/sherpa-onnx-model-detect-speaker-embedding.cpp
+    jni/model_detect/speaker/sherpa-onnx-validate-speaker-embedding.cpp
+    jni/model_detect/speaker/sherpa-onnx-speaker-embedding-online-guard.cpp
+    jni/model_detect/speaker/sherpa-onnx-speaker-embedding-detect-wrapper.cpp
     separation/sherpa-onnx-separation-wrapper.cpp
     jni/separation/sherpa-onnx-separation-jni.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
@@ -250,6 +254,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/separation
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/speaker
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment

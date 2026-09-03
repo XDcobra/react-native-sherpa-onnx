@@ -60,6 +60,16 @@
       "types": "./lib/typescript/src/enhancement/index.d.ts",
       "default": "./lib/module/enhancement/index.js"
     },
+    "./speaker-embedding": {
+      "source": "./src/speaker-embedding/index.ts",
+      "types": "./lib/typescript/src/speaker-embedding/index.d.ts",
+      "default": "./lib/module/speaker-embedding/index.js"
+    },
+    "./speaker-identification": {
+      "source": "./src/speaker-identification/index.ts",
+      "types": "./lib/typescript/src/speaker-identification/index.d.ts",
+      "default": "./lib/module/speaker-identification/index.js"
+    },
     "./punctuation": {
       "source": "./src/punctuation/index.ts",
       "types": "./lib/typescript/src/punctuation/index.d.ts",

@@ -88,39 +88,53 @@ std::unordered_map<std::string, VadInstanceState> g_vad_instances;
 std::unordered_map<std::string, VadPipelineState> g_vad_pipelines;
 std::unordered_map<std::string, std::string> g_vad_instance_to_pipeline;
 
-void ApplyVadInitScalars(VadInstanceState &state, NSDictionary *options, NSString *resolvedModelType) {
-  if ([options[@"sampleRate"] respondsToSelector:@selector(intValue)]) {
-    state.sampleRate = MAX(1, [options[@"sampleRate"] intValue]);
+void ApplyVadInitScalars(
+    VadInstanceState &state,
+    const JS::NativeSherpaOnnx::VadInitBridgeOptions &options,
+    NSString *resolvedModelType) {
+  auto sampleRate = options.sampleRate();
+  if (sampleRate.has_value()) {
+    state.sampleRate = MAX(1, (int)sampleRate.value());
   }
-  if ([options[@"numThreads"] respondsToSelector:@selector(intValue)]) {
-    state.numThreads = MAX(1, [options[@"numThreads"] intValue]);
+  auto numThreads = options.numThreads();
+  if (numThreads.has_value()) {
+    state.numThreads = MAX(1, (int)numThreads.value());
   }
-  if ([options[@"provider"] isKindOfClass:[NSString class]] &&
-      [options[@"provider"] length] > 0) {
-    state.provider = std::string([options[@"provider"] UTF8String]);
+  NSString *provider = options.provider();
+  if (provider != nil && [provider length] > 0) {
+    state.provider = std::string([provider UTF8String]);
   }
-  if ([options[@"debug"] respondsToSelector:@selector(boolValue)]) {
-    state.debug = [options[@"debug"] boolValue];
+  auto debug = options.debug();
+  if (debug.has_value()) {
+    state.debug = debug.value();
   }
-  if ([options[@"threshold"] respondsToSelector:@selector(doubleValue)]) {
-    state.scoreThreshold = MAX(0.0, [options[@"threshold"] doubleValue]);
+  auto threshold = options.threshold();
+  if (threshold.has_value()) {
+    state.scoreThreshold = MAX(0.0, threshold.value());
   }
-  if ([options[@"minSpeechDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSpeechDurationMs = MAX(0, [options[@"minSpeechDurationMs"] intValue]);
-  } else if ([options[@"speechDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSpeechDurationMs = MAX(0, [options[@"speechDurationMs"] intValue]);
+  auto minSpeechDurationMs = options.minSpeechDurationMs();
+  if (minSpeechDurationMs.has_value()) {
+    state.minSpeechDurationMs = MAX(0, (int)minSpeechDurationMs.value());
+  } else {
+    auto speechDurationMs = options.speechDurationMs();
+    if (speechDurationMs.has_value()) {
+      state.minSpeechDurationMs = MAX(0, (int)speechDurationMs.value());
+    }
   }
-  if ([options[@"silenceDurationMs"] respondsToSelector:@selector(intValue)]) {
-    state.minSilenceDurationMs = MAX(0, [options[@"silenceDurationMs"] intValue]);
+  auto silenceDurationMs = options.silenceDurationMs();
+  if (silenceDurationMs.has_value()) {
+    state.minSilenceDurationMs = MAX(0, (int)silenceDurationMs.value());
   }
-  if ([options[@"windowSize"] respondsToSelector:@selector(intValue)]) {
-    state.windowSize = MAX(1, [options[@"windowSize"] intValue]);
+  auto windowSize = options.windowSize();
+  if (windowSize.has_value()) {
+    state.windowSize = MAX(1, (int)windowSize.value());
   } else if ([resolvedModelType isEqualToString:@"ten_vad"]) {
     state.windowSize = 256;
   }
-  if ([options[@"maxSpeechDurationS"] respondsToSelector:@selector(doubleValue)]) {
+  auto maxSpeechDurationS = options.maxSpeechDurationS();
+  if (maxSpeechDurationS.has_value()) {
     state.maxSpeechDurationMs =
-        MAX(0, (int)llround([options[@"maxSpeechDurationS"] doubleValue] * 1000.0));
+        MAX(0, (int)llround(maxSpeechDurationS.value() * 1000.0));
   }
 }
 
@@ -249,7 +263,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 }
 
 - (void)initializeVad:(NSString *)instanceId
-              options:(NSDictionary *)options
+              options:(JS::NativeSherpaOnnx::VadInitBridgeOptions &)options
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
@@ -258,7 +272,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     return;
   }
 
-  NSString *initMode = options[@"initMode"];
+  NSString *initMode = options.initMode();
   if (initMode == nil || [initMode length] == 0) {
     initMode = @"auto";
   }
@@ -266,12 +280,12 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   const std::string instanceIdStr = [instanceId UTF8String];
 
   if (isCustomInit) {
-    NSString *modelType = options[@"modelType"];
+    NSString *modelType = options.modelType();
     if (modelType == nil || [modelType length] == 0 || [modelType isEqualToString:@"auto"]) {
       reject(@"VAD_MODEL_INIT_FAILED", @"modelType is required for initMode custom", nil);
       return;
     }
-    id pathsRaw = options[@"modelPaths"];
+    id pathsRaw = options.modelPaths();
     NSDictionary *pathsDict =
         [pathsRaw isKindOfClass:[NSDictionary class]] ? (NSDictionary *)pathsRaw : nil;
     if (pathsDict == nil || pathsDict.count == 0) {
@@ -302,16 +316,16 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     return;
   }
 
-  NSString *modelDir = options[@"modelDir"];
+  NSString *modelDir = options.modelDir();
   if (modelDir == nil || [modelDir length] == 0) {
     reject(@"VAD_MODEL_INIT_FAILED", @"modelDir is required for initMode auto", nil);
     return;
   }
 
+  NSString *requestedModelTypeNs = options.modelType();
   const std::string requestedModelType =
-      ([options[@"modelType"] isKindOfClass:[NSString class]] &&
-       [options[@"modelType"] length] > 0)
-          ? std::string([options[@"modelType"] UTF8String])
+      (requestedModelTypeNs != nil && [requestedModelTypeNs length] > 0)
+          ? std::string([requestedModelTypeNs UTF8String])
           : "auto";
 
   sherpaonnx::VadDetectResult detect =

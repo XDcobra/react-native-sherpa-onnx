@@ -1,0 +1,13 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "speaker-recongition-models",
+      "release_tag": "speaker-recongition-models",
+      "tree_cache_dir": "tree-cache/speaker-recongition-models",
+      "structure_file": "test/fixtures/speaker-recongition-models-structure.txt",
+      "expected_csv": "test/fixtures/speaker-recongition-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/speaker-recongition-models-license-status.csv"
+    }
+  ]
+}

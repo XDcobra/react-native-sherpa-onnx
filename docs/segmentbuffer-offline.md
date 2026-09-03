@@ -151,6 +151,7 @@ Returned segment payloads are kind-discriminated:
   - `source: 'vad'` -> `source`, `engine`, `decision`, `score`
   - `source: 'stt'` -> `source`, `transcript`, `tokenCount`, `isFinal`
   - `source: 'tts'` -> `source`, `text`, `chunkIndex`, `isFinalChunk`
+  - `source: 'sid'` -> `source`, `speakerName` (`string | null`)
 - `kind: 'alignment'` -> strict `AlignmentSegmentPayload` (`text`, `timingMode`, `granularity`, ...)
 
 ```ts

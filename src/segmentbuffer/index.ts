@@ -65,6 +65,7 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'vad',
   'stt',
   'tts',
+  'sid',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
@@ -73,6 +74,7 @@ const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   vad: new Set(['source', 'engine', 'decision', 'score']),
   stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
   tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
+  sid: new Set(['source', 'speakerName']),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -202,7 +204,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -255,7 +257,7 @@ function assertSpeechPayload(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinal must be a boolean when provided.`
       );
     }
-  } else {
+  } else if (typedSource === 'tts') {
     if (obj.text !== undefined && typeof obj.text !== 'string') {
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.text must be a string when provided.`
@@ -278,6 +280,18 @@ function assertSpeechPayload(
     ) {
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinalChunk must be a boolean when provided.`
+      );
+    }
+  } else {
+    // sid
+    if (!Object.prototype.hasOwnProperty.call(obj, 'speakerName')) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speakerName is required for speech source "sid" (string or null).`
+      );
+    }
+    if (obj.speakerName !== null && typeof obj.speakerName !== 'string') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speakerName must be a string or null.`
       );
     }
   }
@@ -903,6 +917,8 @@ export type {
   AlignmentGranularity,
   AlignmentSegmentPayload,
   SpeechSegmentPayload,
+  SpeechSegmentPayloadSource,
+  SidSpeechSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,
   SegmentMeta,

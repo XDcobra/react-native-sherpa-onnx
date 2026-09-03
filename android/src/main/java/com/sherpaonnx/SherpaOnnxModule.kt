@@ -28,6 +28,7 @@ import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
+import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -208,6 +209,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val separationHelper = SherpaOnnxSeparationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
+  )
+  private val speakerEmbeddingHelper = SherpaOnnxSpeakerEmbeddingHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
+    }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
@@ -401,6 +407,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
+    speakerEmbeddingHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -4065,7 +4072,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts"
+        "speech payload.source must be one of vad, stt, tts, sid"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4073,10 +4080,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "vad" -> setOf("source", "engine", "decision", "score", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, manual"
       )
     }
 
@@ -4108,6 +4116,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
               com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
               "speech payload.decision must be model"
+            )
+          }
+        }
+      }
+      "sid" -> {
+        if (!payload.hasKey("speakerName")) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.speakerName is required for source=sid (string or null)"
+          )
+        }
+        if (!payload.isNull("speakerName")) {
+          try {
+            payload.getString("speakerName")
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.speakerName must be a string or null"
             )
           }
         }
@@ -4738,6 +4764,117 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun detectSpeakerEmbeddingModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
+  }
+
+  override fun initializeSpeakerEmbeddingExtractor(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.initializeSpeakerEmbeddingExtractor(instanceId, options, promise)
+  }
+
+  override fun computeSpeakerEmbeddingOffline(
+    instanceId: String,
+    audioBufferId: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.computeSpeakerEmbeddingOffline(instanceId, audioBufferId, promise)
+  }
+
+  override fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
+    speakerEmbeddingHelper.unloadSpeakerEmbeddingExtractor(instanceId, promise)
+  }
+
+  override fun createSpeakerEmbeddingManager(
+    managerId: String,
+    dim: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.createSpeakerEmbeddingManager(managerId, dim, promise)
+  }
+
+  override fun speakerEmbeddingManagerAdd(
+    managerId: String,
+    name: String,
+    embeddings: ReadableArray,
+    count: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerAdd(
+      managerId,
+      name,
+      embeddings,
+      count,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerRemove(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerRemove(managerId, name, promise)
+  }
+
+  override fun speakerEmbeddingManagerSearch(
+    managerId: String,
+    embedding: ReadableArray,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerSearch(
+      managerId,
+      embedding,
+      threshold,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerVerify(
+    managerId: String,
+    name: String,
+    embedding: ReadableArray,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerVerify(
+      managerId,
+      name,
+      embedding,
+      threshold,
+      promise,
+    )
+  }
+
+  override fun speakerEmbeddingManagerContains(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerContains(managerId, name, promise)
+  }
+
+  override fun speakerEmbeddingManagerNumSpeakers(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerNumSpeakers(managerId, promise)
+  }
+
+  override fun speakerEmbeddingManagerAllSpeakerNames(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerAllSpeakerNames(managerId, promise)
+  }
+
+  override fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
+    speakerEmbeddingHelper.destroySpeakerEmbeddingManager(managerId, promise)
   }
 
   override fun initializeSeparation(
@@ -5460,6 +5597,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for source separation: Spleeter or UVR layout (offline only). */
     @JvmStatic
     private external fun nativeDetectSeparationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    /** Model detection for speaker embedding: wespeaker / 3d-speaker / nemo (offline only). */
+    @JvmStatic
+    private external fun nativeDetectSpeakerEmbeddingModel(
       modelDir: String?,
       assetName: String?,
       modelType: String

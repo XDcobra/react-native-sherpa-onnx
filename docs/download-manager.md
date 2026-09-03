@@ -38,6 +38,7 @@ The following mapping is relevant when using the built-in GitHub providers (`git
 | `Diarization`   | [`speaker-segmentation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
 | `Enhancement`   | [`speech-enhancement-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models)     |
 | `Separation`    | [`source-separation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models)       |
+| `SpeakerEmbedding` | [`speaker-recongition-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | `Qnn`           | [`asr-models-qnn-binary`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary)             |
 | `Alignment`     | [`alignment-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models)         |
 

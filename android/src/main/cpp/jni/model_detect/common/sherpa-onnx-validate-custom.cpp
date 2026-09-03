@@ -5,6 +5,7 @@
 #include "sherpa-onnx-validate-alignment.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
+#include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-validate-punctuation.h"
 #include "sherpa-onnx-validate-stt.h"
 #include "sherpa-onnx-validate-online-stt.h"
@@ -77,6 +78,15 @@ SeparationModelKind ParseSeparationModelTypeLocal(const std::string& modelType) 
     if (modelType == "spleeter") return SeparationModelKind::kSpleeter;
     if (modelType == "uvr") return SeparationModelKind::kUvr;
     return SeparationModelKind::kUnknown;
+}
+
+SpeakerEmbeddingModelKind ParseSpeakerEmbeddingModelTypeLocal(
+    const std::string& modelType
+) {
+    if (modelType == "wespeaker") return SpeakerEmbeddingModelKind::kWespeaker;
+    if (modelType == "3d-speaker") return SpeakerEmbeddingModelKind::k3dSpeaker;
+    if (modelType == "nemo") return SpeakerEmbeddingModelKind::kNemo;
+    return SpeakerEmbeddingModelKind::kUnknown;
 }
 
 }  // namespace
@@ -179,6 +189,26 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "speakerembedding" || cat == "speaker_embedding") {
+        const SpeakerEmbeddingModelKind kind =
+            ParseSpeakerEmbeddingModelTypeLocal(modelType);
+        if (kind == SpeakerEmbeddingModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom speaker embedding model type: " + modelType
+            );
+        }
+        SpeakerEmbeddingModelPaths speakerEmbeddingPaths;
+        FillSpeakerEmbeddingModelPathsFromStringMap(paths, speakerEmbeddingPaths);
+        const auto vr = ValidateSpeakerEmbeddingPaths(
+            kind,
+            speakerEmbeddingPaths,
+            contextLabel
+        );
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);
         if (kind == PunctuationModelKind::kUnknown) {
@@ -251,6 +281,12 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const SeparationModelKind kind = ParseSeparationModelTypeLocal(modelType);
         if (kind == SeparationModelKind::kUnknown) return {};
         return FromSpecs(GetSeparationPathRequirements(kind));
+    }
+    if (cat == "speakerembedding" || cat == "speaker_embedding") {
+        const SpeakerEmbeddingModelKind kind =
+            ParseSpeakerEmbeddingModelTypeLocal(modelType);
+        if (kind == SpeakerEmbeddingModelKind::kUnknown) return {};
+        return FromSpecs(GetSpeakerEmbeddingPathRequirements(kind));
     }
     if (cat == "punctuation") {
         const PunctuationModelKind kind = ParsePunctuationModelTypeLocal(modelType);

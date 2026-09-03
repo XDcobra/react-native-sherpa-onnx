@@ -1,6 +1,17 @@
 # Streaming pipelines — shared lifecycle
 
-This page describes what is **common** to native **streaming pipeline** workers (STT, enhancement, separation live overload, VAD, TTS live overload, punctuation, …). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming doc.
+This page describes what is **common** to **streaming pipeline** / live-overload handles (STT, enhancement, separation live overload, VAD, TTS live overload, punctuation, SID `labelLiveSegments`, …). Feature-specific buffer rules and ordering (e.g. when to finalize which buffer) stay on each feature’s streaming / live doc.
+
+## Live overload vs true streaming
+
+Two different engines can return the same **pipeline handle** surface (`stop` / `flush` / `reset` / `getStatus` / `completed`):
+
+| Kind | What it is | Doc signal |
+| --- | --- | --- |
+| **True streaming** | Streaming-capable model + native online worker (`createStreamingSTT`, `createStreamingEnhancement`, `createStreamingVAD`, …) | Feature `*-streaming.md` titled for real-time / streaming recognition or enhancement |
+| **Live overload** | **Offline** weights on **live** buffers; mandatory **segmentation** commits chunks for batch inference (“fake” streaming) | Feature live / streaming doc titled **live overload** — e.g. [speaker-identification-live.md](speaker-identification-live.md), [separation-streaming.md](separation-streaming.md), TTS live overload |
+
+Offline guides stay batch-only and **link out** to the dedicated live-overload doc (SID / Separation pattern). Do not bury live-overload API detail inside offline docs.
 
 ## Mental model
 
@@ -13,7 +24,7 @@ This page describes what is **common** to native **streaming pipeline** workers 
 
 Note: offline alignment progress is exposed on `alignTextToAudio(..., { onProgress })` as `OrchestrationProgress`; alignment has no streaming pipeline handle progress contract.
 
-Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`, …) but share the same **verbs** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`). They are thin JS facades over native `pipelineId` control (`stopStreamingPipeline`, `flushStreamingPipeline`, …).
+Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`, `SpeakerIdentificationPipelineHandle`, …) but share the same **verbs** (see `StreamingPipelineHandle` in `react-native-sherpa-onnx/audiobuffer`).
 
 | Method / field | Role | Typical interplay |
 | --- | --- | --- |
@@ -36,9 +47,10 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | STT streaming + `SttPipelineHandle` | [stt-streaming.md](stt-streaming.md) |
 | TTS live overload + `TtsPipelineHandle` | [tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption](tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption) and [tts-streaming.md](tts-streaming.md) |
 | Enhancement streaming + `EnhancementPipelineHandle` | [enhancement-streaming.md](enhancement-streaming.md) |
-| Separation live overload + `SeparationPipelineHandle` | [separation-streaming.md](separation-streaming.md) · [separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption](separation-offline.md#live-overload-on-offline-separation-offline-weights-live-consumption) |
+| Separation live overload + `SeparationPipelineHandle` | [separation-streaming.md](separation-streaming.md) |
 | VAD streaming + `VADPipelineHandle` | [vad-streaming.md](vad-streaming.md) |
 | Punctuation streaming + `PunctuationPipelineHandle` | [punctuation-streaming.md](punctuation-streaming.md) |
+| SID live overload + `SpeakerIdentificationPipelineHandle` | [speaker-identification-live.md](speaker-identification-live.md) |
 | Live audio as pipeline operand | [audiobuffer-streaming.md](audiobuffer-streaming.md) |
 | Live text as pipeline operand | [textbuffer-streaming.md](textbuffer-streaming.md) |
 | Live segments as pipeline operand | [segmentbuffer-streaming.md](segmentbuffer-streaming.md) |

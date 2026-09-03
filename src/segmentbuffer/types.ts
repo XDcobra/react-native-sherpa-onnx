@@ -22,7 +22,7 @@ export type AlignmentTimingMode =
 
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
 
-export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts';
+export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts' | 'sid';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -45,10 +45,17 @@ export interface TtsSpeechSegmentPayload {
   isFinalChunk?: boolean;
 }
 
+export interface SidSpeechSegmentPayload {
+  source: 'sid';
+  /** Enrolled name, or null when below threshold / unknown. */
+  speakerName: string | null;
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
-  | TtsSpeechSegmentPayload;
+  | TtsSpeechSegmentPayload
+  | SidSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;

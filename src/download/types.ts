@@ -9,6 +9,7 @@ export enum ModelCategory {
   Diarization = 'diarization',
   Enhancement = 'enhancement',
   Separation = 'separation',
+  SpeakerEmbedding = 'speakerEmbedding',
   Qnn = 'qnn',
   Alignment = 'alignment',
 }

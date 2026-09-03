@@ -1,0 +1,84 @@
+# Asset: 3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
+# updated_at: 2024-10-14T03:41:21Z
+./
+./3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx
+# Asset: 3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
+# updated_at: 2024-10-14T03:41:20Z
+./
+./3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
+# Asset: 3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+# updated_at: 2024-10-14T03:41:19Z
+./
+./3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+# Asset: 3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx
+# updated_at: 2024-10-14T03:41:08Z
+./
+./3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx
+# Asset: 3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx
+# updated_at: 2024-10-14T03:41:18Z
+./
+./3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx
+# Asset: 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+# updated_at: 2024-10-14T03:41:16Z
+./
+./3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+# Asset: 3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx
+# updated_at: 2024-10-14T03:41:15Z
+./
+./3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx
+# Asset: 3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+# updated_at: 2024-10-14T03:41:13Z
+./
+./3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx
+# Asset: 3dspeaker_speech_eres2net_sv_zh-cn_16k-common.onnx
+# updated_at: 2024-10-14T03:41:12Z
+./
+./3dspeaker_speech_eres2net_sv_zh-cn_16k-common.onnx
+# Asset: nemo_en_speakerverification_speakernet.onnx
+# updated_at: 2024-10-14T07:03:10Z
+./
+./nemo_en_speakerverification_speakernet.onnx
+# Asset: nemo_en_titanet_large.onnx
+# updated_at: 2024-10-14T07:03:08Z
+./
+./nemo_en_titanet_large.onnx
+# Asset: nemo_en_titanet_small.onnx
+# updated_at: 2024-10-14T07:03:03Z
+./
+./nemo_en_titanet_small.onnx
+# Asset: wespeaker_en_voxceleb_CAM++.onnx
+# updated_at: 2024-10-14T02:33:09Z
+./
+./wespeaker_en_voxceleb_CAM++.onnx
+# Asset: wespeaker_en_voxceleb_CAM++_LM.onnx
+# updated_at: 2024-10-14T02:33:08Z
+./
+./wespeaker_en_voxceleb_CAM++_LM.onnx
+# Asset: wespeaker_en_voxceleb_resnet152_LM.onnx
+# updated_at: 2024-10-14T02:33:06Z
+./
+./wespeaker_en_voxceleb_resnet152_LM.onnx
+# Asset: wespeaker_en_voxceleb_resnet221_LM.onnx
+# updated_at: 2024-10-14T02:33:03Z
+./
+./wespeaker_en_voxceleb_resnet221_LM.onnx
+# Asset: wespeaker_en_voxceleb_resnet293_LM.onnx
+# updated_at: 2024-10-14T02:32:59Z
+./
+./wespeaker_en_voxceleb_resnet293_LM.onnx
+# Asset: wespeaker_en_voxceleb_resnet34.onnx
+# updated_at: 2024-10-14T02:32:55Z
+./
+./wespeaker_en_voxceleb_resnet34.onnx
+# Asset: wespeaker_en_voxceleb_resnet34_LM.onnx
+# updated_at: 2024-10-14T02:32:53Z
+./
+./wespeaker_en_voxceleb_resnet34_LM.onnx
+# Asset: wespeaker_zh_cnceleb_resnet34.onnx
+# updated_at: 2024-10-14T02:32:51Z
+./
+./wespeaker_zh_cnceleb_resnet34.onnx
+# Asset: wespeaker_zh_cnceleb_resnet34_LM.onnx
+# updated_at: 2024-10-14T02:32:49Z
+./
+./wespeaker_zh_cnceleb_resnet34_LM.onnx

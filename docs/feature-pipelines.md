@@ -22,6 +22,8 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 - [Punctuation offline patterns](#punctuation-offline-patterns)
 - [Punctuation streaming patterns](#punctuation-streaming-patterns)
 - [VAD streaming patterns](#vad-streaming-patterns)
+- [Speaker identification offline patterns](#speaker-identification-offline-patterns)
+- [Speaker identification live patterns](#speaker-identification-live-patterns)
 - [Alignment offline patterns](#alignment-offline-patterns)
 - [Segmentation for offline memory control](#segmentation-for-offline-memory-control)
 
@@ -30,11 +32,11 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 | Public concept | Typical producers | Typical consumers | Notes |
 | --- | --- | --- | --- |
 | `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createSeparation().separate`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
-| `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, PCM player | Continuous stream; supports running pipelines |
+| `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, `labelLiveSegments`, PCM player | Continuous stream; supports running pipelines |
 | `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff |
 | `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
-| `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
-| `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments | gating, timeline UI, downstream orchestration | Event-driven segment stream |
+| `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs, SID `labelOfflineSegments` | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
+| `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments, SID `labelLiveSegments` | gating, timeline UI, downstream orchestration | Event-driven segment stream |
 | Segmentation engine (`react-native-sherpa-onnx/segment`) | attached to text/audio streams or offline orchestrators | STT/TTS/enhancement/separation/punctuation/alignment chunk orchestration | Use to bound peak memory on offline-heavy workloads |
 
 ## STT offline patterns
@@ -185,6 +187,7 @@ When to use:
 - Mandatory `continuous_frames` segmentation on the live overload path.
 
 Related docs:
+- [separation-streaming.md](separation-streaming.md) — live overload guide
 - [separation-offline.md](separation-offline.md)
 - [streaming-pipelines-overview.md](streaming-pipelines-overview.md)
 - [audiobuffer-streaming.md](audiobuffer-streaming.md)
@@ -242,6 +245,48 @@ Related docs:
 - [vad-streaming.md](vad-streaming.md)
 - [stt-streaming.md](stt-streaming.md)
 - [segmentbuffer-streaming.md](segmentbuffer-streaming.md)
+
+## Speaker identification offline patterns
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer] --> C[createSpeakerIdentification]
+  B[OfflineSegmentBuffer speech spans] --> C
+  C --> D[enroll / enrollOfflineSegments]
+  C --> E[identify]
+  C --> F[labelOfflineSegments]
+  F --> G[OfflineSegmentBuffer source sid]
+```
+
+When to use:
+- Named-speaker enroll and identify against offline PCM clips.
+- Label VAD (or manual) speech spans with enrolled names into a new segment Out buffer.
+- App-filtered enroll spans (e.g. every other interview turn) via `enrollOfflineSegments`.
+
+Related docs:
+- [speaker-identification-offline.md](speaker-identification-offline.md)
+- [segmentbuffer-offline.md](segmentbuffer-offline.md)
+- [audiobuffer-offline.md](audiobuffer-offline.md)
+- [diarization.md](diarization.md)
+
+## Speaker identification live patterns
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B["createSpeakerIdentification().labelLiveSegments"]
+  B --> C[LiveSegmentBuffer source sid]
+```
+
+When to use:
+- Label live mic/file audio with enrolled speaker names as utterances commit.
+- SID owns speech segmentation (`speech_energy_silence` / `speech_vad_model`); enroll offline first.
+
+Related docs:
+- [speaker-identification-live.md](speaker-identification-live.md)
+- [speaker-identification-offline.md](speaker-identification-offline.md)
+- [segmentbuffer-streaming.md](segmentbuffer-streaming.md)
+- [audiobuffer-streaming.md](audiobuffer-streaming.md)
+- [streaming-pipelines-overview.md](streaming-pipelines-overview.md)
 
 ## Alignment offline patterns
 
