@@ -1532,6 +1532,28 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Speaker diarization segmentation model detection: pyannote / reverb.
+   * Offline only — prefers model.onnx over model.int8.onnx.
+   */
+  detectDiarizationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+    };
+  }>;
+
   initializeSpeakerEmbeddingExtractor(
     instanceId: string,
     options: SpeakerEmbeddingInitBridgeOptions

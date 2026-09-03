@@ -29,6 +29,7 @@ import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
+import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -213,6 +214,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val speakerEmbeddingHelper = SherpaOnnxSpeakerEmbeddingHelper(
     { modelDir, assetName, modelType ->
       Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
+    }
+  )
+  private val diarizationHelper = SherpaOnnxDiarizationHelper(
+    { modelDir, assetName, modelType ->
+      Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType)
     }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
@@ -4775,6 +4781,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
   }
 
+  override fun detectDiarizationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    promise: Promise
+  ) {
+    diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, promise)
+  }
+
   override fun initializeSpeakerEmbeddingExtractor(
     instanceId: String,
     options: ReadableMap,
@@ -5605,6 +5620,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for speaker embedding: wespeaker / 3d-speaker / nemo (offline only). */
     @JvmStatic
     private external fun nativeDetectSpeakerEmbeddingModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String
+    ): HashMap<String, Any>?
+
+    /** Model detection for diarization segmentation: pyannote / reverb (offline only). */
+    @JvmStatic
+    private external fun nativeDetectDiarizationModel(
       modelDir: String?,
       assetName: String?,
       modelType: String
