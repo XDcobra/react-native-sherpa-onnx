@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Clipboard from '@react-native-clipboard/clipboard';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
   DocumentDirectoryPath,
@@ -141,6 +144,21 @@ function isSidHint(folder: string, hint: string): boolean {
   );
 }
 
+const EXPORT_SPEAKER_ALL = '__all__';
+
+function filterEnrollmentBundle(
+  bundle: SpeakerEnrollmentBundle,
+  speakerFilter: string
+): SpeakerEnrollmentBundle {
+  if (speakerFilter === EXPORT_SPEAKER_ALL) {
+    return bundle;
+  }
+  return {
+    ...bundle,
+    speakers: bundle.speakers.filter((entry) => entry.name === speakerFilter),
+  };
+}
+
 export default function SpeakerIdentificationScreen() {
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -198,6 +216,13 @@ export default function SpeakerIdentificationScreen() {
   const [enrolledSpeakers, setEnrolledSpeakers] = useState<string[]>([]);
   const [actionResult, setActionResult] = useState<string | null>(null);
   const [labeledLog, setLabeledLog] = useState<string[]>([]);
+  /** Speaker names from the last label run — for comma-separated copy. */
+  const [spanLabelNames, setSpanLabelNames] = useState<string[]>([]);
+  const [enrollmentJson, setEnrollmentJson] = useState('');
+  const [jsonBufferExpanded, setJsonBufferExpanded] = useState(false);
+  const [exportSpeakerFilter, setExportSpeakerFilter] =
+    useState<string>(EXPORT_SPEAKER_ALL);
+  const [exportSpeakerPickerOpen, setExportSpeakerPickerOpen] = useState(false);
 
   const [liveSourceMode, setLiveSourceMode] = useState<LiveSourceMode>('file');
   const [liveFileSourceType, setLiveFileSourceType] =
@@ -212,8 +237,6 @@ export default function SpeakerIdentificationScreen() {
   >('idle');
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [liveLabelLog, setLiveLabelLog] = useState<string[]>([]);
-
-  const [enrollmentJson, setEnrollmentJson] = useState('');
 
   const engineRef = useRef<SpeakerIdentificationEngine | null>(null);
   const pipelineRef = useRef<SpeakerIdentificationPipelineHandle | null>(null);
@@ -231,7 +254,13 @@ export default function SpeakerIdentificationScreen() {
       return;
     }
     try {
-      setEnrolledSpeakers(await engine.listSpeakers());
+      const names = await engine.listSpeakers();
+      setEnrolledSpeakers(names);
+      setExportSpeakerFilter((prev) =>
+        prev === EXPORT_SPEAKER_ALL || names.includes(prev)
+          ? prev
+          : EXPORT_SPEAKER_ALL
+      );
     } catch {
       setEnrolledSpeakers([]);
     }
@@ -248,6 +277,7 @@ export default function SpeakerIdentificationScreen() {
   ) => {
     setActionResult(null);
     setLabeledLog([]);
+    setSpanLabelNames([]);
     setErrorSource(source);
     setError(message);
     const title =
@@ -267,6 +297,7 @@ export default function SpeakerIdentificationScreen() {
     setErrorSource(null);
     if (!options?.keepLabeledLog) {
       setLabeledLog([]);
+      setSpanLabelNames([]);
     }
     setActionResult(message);
   };
@@ -594,6 +625,7 @@ export default function SpeakerIdentificationScreen() {
     setLiveStatus(null);
     setLiveLabelLog([]);
     setEnrollmentJson('');
+    setJsonBufferExpanded(false);
   };
 
   const requireEngine = (): SpeakerIdentificationEngine => {
@@ -637,6 +669,7 @@ export default function SpeakerIdentificationScreen() {
     setErrorSource(null);
     setActionResult(null);
     setLabeledLog([]);
+    setSpanLabelNames([]);
   };
 
   const updateBusyProgress = (
@@ -842,6 +875,7 @@ export default function SpeakerIdentificationScreen() {
       }
 
       const lines: string[] = [];
+      const labelNames: string[] = [];
       setActionProgress({ label: 'Segmenting speech…', percent: null });
       await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
         const segmentsOut = await createEmptyOfflineSegmentBuffer({
@@ -858,11 +892,12 @@ export default function SpeakerIdentificationScreen() {
                 updateBusyProgress('Labeling', p);
               },
               onLabeled: (e) => {
-                const line = `#${e.segmentIndex} ${
-                  e.speakerName ?? 'unknown'
-                } (${e.durationMs}ms)`;
+                const name = e.speakerName ?? 'unknown';
+                const line = `#${e.segmentIndex} ${name} (${e.durationMs}ms)`;
                 lines.push(line);
+                labelNames.push(name);
                 setLabeledLog([...lines]);
+                setSpanLabelNames([...labelNames]);
               },
             }
           );
@@ -941,6 +976,7 @@ export default function SpeakerIdentificationScreen() {
     setLiveLabelLog([]);
     setActionResult(null);
     setLabeledLog([]);
+    setSpanLabelNames([]);
     await cleanupLiveRuntime();
     if (runEpoch !== liveRunEpochRef.current) {
       return;
@@ -1094,8 +1130,19 @@ export default function SpeakerIdentificationScreen() {
     beginBusy('exportEditor', 'Exporting to editor…');
     try {
       const engine = requireEngine();
-      const bundle = await engine.exportEnrollments();
+      const bundle = filterEnrollmentBundle(
+        await engine.exportEnrollments(),
+        exportSpeakerFilter
+      );
+      if (bundle.speakers.length === 0) {
+        throw new Error(
+          exportSpeakerFilter === EXPORT_SPEAKER_ALL
+            ? 'No enrolled speakers to export.'
+            : `Speaker '${exportSpeakerFilter}' is not in the enrollment mirror.`
+        );
+      }
       setEnrollmentJson(JSON.stringify(bundle, null, 2));
+      setJsonBufferExpanded(true);
       showActionSuccess(
         `Exported ${bundle.speakers.length} speaker(s) (dim=${bundle.dim}) to editor.`
       );
@@ -1112,9 +1159,20 @@ export default function SpeakerIdentificationScreen() {
     beginBusy('exportFile', 'Exporting to JSON file…');
     try {
       const engine = requireEngine();
-      const bundle = await engine.exportEnrollments();
+      const bundle = filterEnrollmentBundle(
+        await engine.exportEnrollments(),
+        exportSpeakerFilter
+      );
+      if (bundle.speakers.length === 0) {
+        throw new Error(
+          exportSpeakerFilter === EXPORT_SPEAKER_ALL
+            ? 'No enrolled speakers to export.'
+            : `Speaker '${exportSpeakerFilter}' is not in the enrollment mirror.`
+        );
+      }
       const json = JSON.stringify(bundle, null, 2);
       setEnrollmentJson(json);
+      setJsonBufferExpanded(true);
 
       await mkdir(stagingDir).catch(() => {});
       await writeFile(stagingPath, json, 'utf8');
@@ -1123,10 +1181,14 @@ export default function SpeakerIdentificationScreen() {
           ? stagingPath
           : `file://${stagingPath}`
       );
+      const fileLabel =
+        exportSpeakerFilter === EXPORT_SPEAKER_ALL
+          ? `speaker-enrollments_${Date.now()}.json`
+          : `speaker-${exportSpeakerFilter}_${Date.now()}.json`;
       const responses = await DocumentPicker.saveDocuments({
         sourceUris: [sourceUri],
         mimeType: 'application/json',
-        fileName: `speaker-enrollments_${Date.now()}.json`,
+        fileName: fileLabel,
       });
       const first = responses[0];
       if (first?.error) {
@@ -1264,6 +1326,7 @@ export default function SpeakerIdentificationScreen() {
         } catch {
           setEnrollmentJson(raw);
         }
+        setJsonBufferExpanded(true);
         showActionSuccess(`Loaded '${fileName}' into editor.`);
       } finally {
         endBusy();
@@ -2009,13 +2072,37 @@ export default function SpeakerIdentificationScreen() {
 
         {(error || actionResult || labeledLog.length > 0) && (
           <View style={screenStyles.card}>
-            <Text style={screenStyles.cardTitle}>Result</Text>
+            <View style={screenStyles.resultHeaderRow}>
+              <Text style={[screenStyles.cardTitle, { marginBottom: 0 }]}>
+                Result
+              </Text>
+              {spanLabelNames.length > 0 ? (
+                <TouchableOpacity
+                  style={screenStyles.copyLabelsButton}
+                  onPress={() => {
+                    Clipboard.setString(spanLabelNames.join(', '));
+                    Alert.alert(
+                      'Copied',
+                      `Copied ${spanLabelNames.length} label(s) as comma-separated names.`
+                    );
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#0F62FE" />
+                  <Text style={screenStyles.copyLabelsButtonText}>
+                    Copy labels
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
             {error ? (
-              <Text style={screenStyles.errorText}>
+              <Text style={[screenStyles.errorText, { marginTop: 12 }]}>
                 [{errorSource ?? 'error'}] {error}
               </Text>
             ) : actionResult ? (
-              <Text style={screenStyles.monoResultText}>{actionResult}</Text>
+              <Text style={[screenStyles.monoResultText, { marginTop: 12 }]}>
+                {actionResult}
+              </Text>
             ) : null}
             {labeledLog.map((line) => (
               <Text key={line} style={screenStyles.monoResultText}>
@@ -2026,107 +2113,184 @@ export default function SpeakerIdentificationScreen() {
         )}
 
         <View style={screenStyles.card}>
-          <Text style={screenStyles.cardTitle}>Export / import</Text>
+          <Text style={screenStyles.cardTitle}>Enrollment transfer</Text>
           <Text style={screenStyles.bodyText}>
-            Export enrollments to the editor or a JSON file. Import from a file
-            loads into the editor; Import from editor applies the JSON to the
-            engine (existing names prompt before replace).
+            Move enrolled speaker embeddings in or out as JSON. This card is
+            independent of the Speaker name field above — export picks from the
+            enrolled list; import reads names from speakers[].name in the JSON.
           </Text>
-          <View style={screenStyles.buttonRow}>
+
+          <View style={screenStyles.sectionBlock}>
+            <Text style={screenStyles.sectionLabel}>Export</Text>
+            <Text style={screenStyles.sectionHint}>
+              Choose all enrolled speakers or one speaker, then write into the
+              JSON buffer and/or a file.
+            </Text>
+            <Text style={screenStyles.fieldLabel}>Speakers to export</Text>
             <TouchableOpacity
               style={[
-                screenStyles.primaryButton,
-                screenStyles.flexButton,
+                screenStyles.dropdownTrigger,
                 (!engineReady || busy || liveBusy) &&
                   screenStyles.buttonDisabled,
               ]}
-              onPress={() => {
-                handleExportToEditor().catch(() => {});
-              }}
+              onPress={() => setExportSpeakerPickerOpen(true)}
               disabled={!engineReady || busy || liveBusy}
             >
-              {busyAction === 'exportEditor' ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={screenStyles.primaryButtonText}>
-                  Export to editor
-                </Text>
-              )}
+              <Text style={screenStyles.dropdownTriggerText} numberOfLines={1}>
+                {exportSpeakerFilter === EXPORT_SPEAKER_ALL
+                  ? `All speakers (${enrolledSpeakers.length})`
+                  : exportSpeakerFilter}
+              </Text>
+              <Text style={screenStyles.dropdownChevron}>▼</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                screenStyles.primaryButton,
-                screenStyles.flexButton,
-                (!engineReady || busy || liveBusy) &&
-                  screenStyles.buttonDisabled,
-              ]}
-              onPress={() => {
-                handleExportToJsonFile().catch(() => {});
-              }}
-              disabled={!engineReady || busy || liveBusy}
-            >
-              {busyAction === 'exportFile' ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={screenStyles.primaryButtonText}>
-                  Export to JSON file
-                </Text>
-              )}
-            </TouchableOpacity>
+            <View style={screenStyles.buttonRow}>
+              <TouchableOpacity
+                style={[
+                  screenStyles.primaryButton,
+                  screenStyles.flexButton,
+                  (!engineReady || busy || liveBusy) &&
+                    screenStyles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  handleExportToEditor().catch(() => {});
+                }}
+                disabled={!engineReady || busy || liveBusy}
+              >
+                {busyAction === 'exportEditor' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>
+                    To JSON buffer
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  screenStyles.primaryButton,
+                  screenStyles.flexButton,
+                  (!engineReady || busy || liveBusy) &&
+                    screenStyles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  handleExportToJsonFile().catch(() => {});
+                }}
+                disabled={!engineReady || busy || liveBusy}
+              >
+                {busyAction === 'exportFile' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>
+                    To JSON file
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-          <View style={[screenStyles.buttonRow, { marginTop: 8 }]}>
-            <TouchableOpacity
-              style={[
-                screenStyles.primaryButton,
-                screenStyles.flexButton,
-                (!engineReady || !enrollmentJson.trim() || busy || liveBusy) &&
-                  screenStyles.buttonDisabled,
-              ]}
-              onPress={() => {
-                handleImportFromEditor().catch(() => {});
-              }}
-              disabled={
-                !engineReady || !enrollmentJson.trim() || busy || liveBusy
-              }
-            >
-              {busyAction === 'importEditor' ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={screenStyles.primaryButtonText}>
-                  Import from editor
+
+          <View style={screenStyles.sectionBlock}>
+            <View style={screenStyles.jsonBufferHeaderRow}>
+              <Text style={[screenStyles.sectionLabel, { marginBottom: 0 }]}>
+                JSON buffer
+              </Text>
+              <TouchableOpacity
+                style={screenStyles.jsonBufferToggleBadge}
+                onPress={() => setJsonBufferExpanded((open) => !open)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={screenStyles.jsonBufferToggleBadgeText}>
+                  {jsonBufferExpanded
+                    ? 'Collapse'
+                    : enrollmentJson.trim()
+                      ? `Expand (${enrollmentJson.length} chars)`
+                      : 'Expand'}
                 </Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                screenStyles.primaryButton,
-                screenStyles.flexButton,
-                (busy || liveBusy) && screenStyles.buttonDisabled,
-              ]}
-              onPress={() => {
-                handleImportFromFile().catch(() => {});
-              }}
-              disabled={busy || liveBusy}
-            >
-              {busyAction === 'importFile' ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={screenStyles.primaryButtonText}>
-                  Import from file
+              </TouchableOpacity>
+            </View>
+            <Text style={screenStyles.sectionHint}>
+              Editable SpeakerEnrollmentBundle. Paste here, load from a file, or
+              fill via Export. Collapse when the embeddings list gets long.
+            </Text>
+            {jsonBufferExpanded ? (
+              <TextInput
+                style={screenStyles.multilineInput}
+                value={enrollmentJson}
+                onChangeText={setEnrollmentJson}
+                multiline
+                editable={!busy && !liveBusy}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="{ version: 1, dim, speakers: [{ name, embeddings }] }"
+              />
+            ) : (
+              <TouchableOpacity
+                style={screenStyles.jsonBufferCollapsed}
+                onPress={() => setJsonBufferExpanded(true)}
+                disabled={busy || liveBusy}
+              >
+                <Text style={screenStyles.jsonBufferCollapsedText} numberOfLines={2}>
+                  {enrollmentJson.trim()
+                    ? enrollmentJson.trim().slice(0, 120) +
+                      (enrollmentJson.trim().length > 120 ? '…' : '')
+                    : 'Empty — export or load a file, then expand to edit.'}
                 </Text>
-              )}
-            </TouchableOpacity>
+              </TouchableOpacity>
+            )}
           </View>
-          <TextInput
-            style={[screenStyles.multilineInput, { marginTop: 12 }]}
-            value={enrollmentJson}
-            onChangeText={setEnrollmentJson}
-            multiline
-            editable={!busy && !liveBusy}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="{ version: 1, dim, speakers: [...] }"
-          />
+
+          <View style={screenStyles.sectionBlock}>
+            <Text style={screenStyles.sectionLabel}>Import</Text>
+            <Text style={screenStyles.sectionHint}>
+              Load a file into the JSON buffer, then apply it to the engine.
+              Speaker names come only from the JSON (speakers[].name), never
+              from the enroll name field.
+            </Text>
+            <View style={screenStyles.buttonRow}>
+              <TouchableOpacity
+                style={[
+                  screenStyles.primaryButton,
+                  screenStyles.flexButton,
+                  (busy || liveBusy) && screenStyles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  handleImportFromFile().catch(() => {});
+                }}
+                disabled={busy || liveBusy}
+              >
+                {busyAction === 'importFile' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>
+                    Load file → buffer
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  screenStyles.primaryButton,
+                  screenStyles.flexButton,
+                  (!engineReady ||
+                    !enrollmentJson.trim() ||
+                    busy ||
+                    liveBusy) &&
+                    screenStyles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  handleImportFromEditor().catch(() => {});
+                }}
+                disabled={
+                  !engineReady || !enrollmentJson.trim() || busy || liveBusy
+                }
+              >
+                {busyAction === 'importEditor' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>
+                    Apply buffer
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
 
         <Text style={screenStyles.footerHint}>
@@ -2134,6 +2298,80 @@ export default function SpeakerIdentificationScreen() {
           speech segmentation
         </Text>
       </ScrollView>
+      <Modal
+        visible={exportSpeakerPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExportSpeakerPickerOpen(false)}
+      >
+        <Pressable
+          style={screenStyles.dropdownOverlay}
+          onPress={() => setExportSpeakerPickerOpen(false)}
+        >
+          <Pressable
+            style={screenStyles.dropdownSheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={screenStyles.dropdownSheetTitle}>
+              Speakers to export
+            </Text>
+            <ScrollView style={screenStyles.dropdownList}>
+              <TouchableOpacity
+                style={[
+                  screenStyles.dropdownItem,
+                  exportSpeakerFilter === EXPORT_SPEAKER_ALL &&
+                    screenStyles.dropdownItemActive,
+                ]}
+                onPress={() => {
+                  setExportSpeakerFilter(EXPORT_SPEAKER_ALL);
+                  setExportSpeakerPickerOpen(false);
+                }}
+              >
+                <Text
+                  style={[
+                    screenStyles.dropdownItemText,
+                    exportSpeakerFilter === EXPORT_SPEAKER_ALL &&
+                      screenStyles.dropdownItemTextActive,
+                  ]}
+                >
+                  All speakers ({enrolledSpeakers.length})
+                </Text>
+              </TouchableOpacity>
+              {enrolledSpeakers.map((name) => {
+                const active = exportSpeakerFilter === name;
+                return (
+                  <TouchableOpacity
+                    key={name}
+                    style={[
+                      screenStyles.dropdownItem,
+                      active && screenStyles.dropdownItemActive,
+                    ]}
+                    onPress={() => {
+                      setExportSpeakerFilter(name);
+                      setExportSpeakerPickerOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        screenStyles.dropdownItemText,
+                        active && screenStyles.dropdownItemTextActive,
+                      ]}
+                    >
+                      {name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity
+              style={screenStyles.dropdownCancel}
+              onPress={() => setExportSpeakerPickerOpen(false)}
+            >
+              <Text style={screenStyles.dropdownCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <ScreenIntroModal screenId="SpeakerIdentification" />
     </SafeAreaView>
   );
@@ -2183,6 +2421,100 @@ const screenStyles = StyleSheet.create({
     color: '#111827',
     marginBottom: 12,
   },
+  resultHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  copyLabelsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#E8F1FF',
+  },
+  copyLabelsButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0F62FE',
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#F9FAFB',
+    marginBottom: 12,
+  },
+  dropdownTriggerText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#111827',
+    marginRight: 8,
+  },
+  dropdownChevron: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  dropdownOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  dropdownSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+    maxHeight: '70%',
+  },
+  dropdownSheetTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  dropdownList: {
+    paddingHorizontal: 8,
+  },
+  dropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
+  },
+  dropdownItemActive: {
+    backgroundColor: '#E8F1FF',
+  },
+  dropdownItemText: {
+    fontSize: 15,
+    color: '#111827',
+  },
+  dropdownItemTextActive: {
+    fontWeight: '700',
+    color: '#0F62FE',
+  },
+  dropdownCancel: {
+    marginTop: 8,
+    marginHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  dropdownCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
   sectionBlock: {
     marginTop: 16,
     paddingTop: 16,
@@ -2194,6 +2526,38 @@ const screenStyles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
     marginBottom: 4,
+  },
+  jsonBufferHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 4,
+  },
+  jsonBufferToggleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#E8F1FF',
+  },
+  jsonBufferToggleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F62FE',
+  },
+  jsonBufferCollapsed: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#F9FAFB',
+  },
+  jsonBufferCollapsedText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6B7280',
+    fontFamily: 'Menlo',
   },
   sectionHint: {
     fontSize: 13,
