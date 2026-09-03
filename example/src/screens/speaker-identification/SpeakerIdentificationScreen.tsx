@@ -670,29 +670,72 @@ export default function SpeakerIdentificationScreen() {
     setActionProgress(null);
   };
 
+  /** One name, or comma-separated names (one per speech span when segmenting). */
+  const parseEnrollNames = (raw: string): string | string[] => {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      throw new Error('Enter a speaker name to enroll.');
+    }
+    if (!trimmed.includes(',')) {
+      return trimmed;
+    }
+    return trimmed.split(',').map((part) => part.trim());
+  };
+
+  /** First non-empty name — used by verify (and whole-buffer enroll). */
+  const parseSingleSpeakerName = (raw: string, action: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      throw new Error(`Enter a speaker name to ${action}.`);
+    }
+    if (!trimmed.includes(',')) {
+      return trimmed;
+    }
+    const first = trimmed
+      .split(',')
+      .map((part) => part.trim())
+      .find((part) => part.length > 0);
+    if (!first) {
+      throw new Error(`Enter a speaker name to ${action}.`);
+    }
+    return first;
+  };
+
   const handleEnroll = async () => {
     beginBusy('enroll', 'Enrolling…');
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
-      const name = speakerName.trim();
-      if (!name) {
-        throw new Error('Enter a speaker name to enroll.');
-      }
 
       if (segBatchConfig.mode === 'off') {
+        const name = parseSingleSpeakerName(speakerName, 'enroll');
         await engine.enroll(name, audio.bufferId);
         showActionSuccess(`Enrolled '${name}' from whole buffer.`);
       } else {
+        const names = parseEnrollNames(speakerName);
+        const progressLabel = Array.isArray(names)
+          ? `Enrolling ${names.length} spans`
+          : `Enrolling '${names}'`;
         setActionProgress({ label: 'Segmenting speech…', percent: null });
         await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
-          await engine.enrollOfflineSegments(name, audio.bufferId, segmentsIn, {
-            onProgress: (p) => {
-              updateBusyProgress(`Enrolling '${name}'`, p);
-            },
-          });
+          await engine.enrollOfflineSegments(
+            names,
+            audio.bufferId,
+            segmentsIn,
+            {
+              onProgress: (p) => {
+                updateBusyProgress(progressLabel, p);
+              },
+            }
+          );
         });
-        showActionSuccess(`Enrolled '${name}' from speech segments.`);
+        showActionSuccess(
+          Array.isArray(names)
+            ? `Enrolled ${
+                [...new Set(names.filter(Boolean))].length
+              } speaker(s) from ${names.length} speech spans.`
+            : `Enrolled '${names}' from speech spans.`
+        );
       }
       await refreshSpeakers();
     } catch (err) {
@@ -727,10 +770,7 @@ export default function SpeakerIdentificationScreen() {
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
-      const name = speakerName.trim();
-      if (!name) {
-        throw new Error('Enter a speaker name to verify.');
-      }
+      const name = parseSingleSpeakerName(speakerName, 'verify');
       const ok = await engine.verify(name, audio.bufferId, {
         threshold: resolveThreshold(),
       });
@@ -747,10 +787,7 @@ export default function SpeakerIdentificationScreen() {
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
-      const name = speakerName.trim();
-      if (!name) {
-        throw new Error('Enter a speaker name to verify.');
-      }
+      const name = parseSingleSpeakerName(speakerName, 'verify');
       if (segBatchConfig.mode === 'off') {
         throw new Error('Verify speech spans requires segmentation mode Auto.');
       }
@@ -1543,13 +1580,22 @@ export default function SpeakerIdentificationScreen() {
               onBufferReady={setPreparedInputBuffer}
               onBufferReleased={() => setPreparedInputBuffer(null)}
             />
-            <Text style={screenStyles.bodyText}>Speaker name</Text>
+            <Text style={screenStyles.fieldLabel}>
+              {segBatchConfig.mode === 'off'
+                ? 'Speaker name'
+                : 'Speaker name(s)'}
+            </Text>
             <TextInput
               style={screenStyles.textInput}
               value={speakerName}
               onChangeText={setSpeakerName}
               autoCapitalize="none"
               editable={!busy && !liveBusy}
+              placeholder={
+                segBatchConfig.mode === 'off'
+                  ? 'e.g. alice'
+                  : 'alice   or   alice, bob, alice'
+              }
             />
             {segBatchConfig.mode === 'off' ? (
               <>
@@ -1617,9 +1663,10 @@ export default function SpeakerIdentificationScreen() {
             ) : (
               <>
                 <Text style={screenStyles.sectionHint}>
-                  Segmentation on — enroll averages speech spans; label
-                  identifies who spoke each span; verify checks one name per
-                  span.
+                  Segmentation on — one enroll name averages all speech spans;
+                  comma-separated names assign one speaker per span (same
+                  count). Label identifies each span; verify checks the first
+                  name against each span.
                 </Text>
                 <View style={screenStyles.buttonRow}>
                   <TouchableOpacity
@@ -1725,15 +1772,20 @@ export default function SpeakerIdentificationScreen() {
                 onBufferReady={setPreparedInputBuffer}
                 onBufferReleased={() => setPreparedInputBuffer(null)}
               />
-              <Text style={screenStyles.fieldLabel}>Speaker name</Text>
+              <Text style={screenStyles.fieldLabel}>Speaker name(s)</Text>
               <TextInput
                 style={screenStyles.textInput}
                 value={speakerName}
                 onChangeText={setSpeakerName}
                 autoCapitalize="none"
                 editable={!busy && !liveBusy}
-                placeholder="e.g. alice"
+                placeholder="alice   or   alice, bob, alice"
               />
+              <Text style={screenStyles.sectionHint}>
+                Same name field as offline. With segmentation Auto on the
+                offline controls, comma-separated names enroll one speaker per
+                speech span.
+              </Text>
               <TouchableOpacity
                 style={[
                   screenStyles.primaryButton,
