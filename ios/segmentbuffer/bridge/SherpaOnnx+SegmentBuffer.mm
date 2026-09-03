@@ -208,7 +208,7 @@ static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy
 }
 
 bool seg_is_valid_kind(const std::string &kind) {
-  return kind == "speech" || kind == "alignment";
+  return kind == "speech" || kind == "alignment" || kind == "diarization";
 }
 
 bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorMessage) {
@@ -1062,7 +1062,7 @@ bool seg_live_append_segment(
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.empty() ? "speech" : kind;
     if (!seg_is_valid_kind(seg.kind)) {
-      if (error) *error = "SEGMENT_INVALID_ARGUMENT: kind must be one of speech or alignment";
+      if (error) *error = "SEGMENT_INVALID_ARGUMENT: kind must be one of speech, alignment, or diarization";
       return false;
     }
     if (seg.kind == "speech") {
@@ -2788,7 +2788,7 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
     seg.id = "seg_" + seg_uuid();
     seg.kind = kind.length > 0 ? kind.UTF8String : "speech";
     if (!seg_is_valid_kind(seg.kind)) {
-      reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech or alignment", nil);
+      reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech, alignment, or diarization", nil);
       return;
     }
     if (seg.kind == "speech") {

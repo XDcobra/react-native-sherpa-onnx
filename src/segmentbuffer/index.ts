@@ -32,6 +32,8 @@ import type {
   SpeechSegmentPayload,
   SpeechSegmentMeta,
   AlignmentSegmentMeta,
+  DiarizationSegmentPayload,
+  DiarizationSegmentMeta,
   SegmentBufferSpoolingMode,
 } from './types';
 
@@ -40,7 +42,11 @@ const getNative = (): Spec =>
 
 const SEGMENT_BUFFER_ID_PATTERN =
   /^(seg_off|seg_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const SEGMENT_KIND_VALUES = new Set<SegmentKind>(['speech', 'alignment']);
+const SEGMENT_KIND_VALUES = new Set<SegmentKind>([
+  'speech',
+  'alignment',
+  'diarization',
+]);
 const ALIGNMENT_TIMING_MODE_VALUES = new Set<AlignmentTimingMode>([
   'proportional',
   'estimated',
@@ -96,7 +102,7 @@ function assertValidSegmentKind(
   throw new Error(
     `${
       PipelineSegmentErrorCode.INVALID_ARGUMENT
-    }: ${sourceName} must be one of "speech" or "alignment"; received "${String(
+    }: ${sourceName} must be one of "speech", "alignment", or "diarization"; received "${String(
       value
     )}".`
   );
@@ -300,7 +306,10 @@ function assertSpeechPayload(
 
 function assertValidSegmentInput(segment: SegmentInput): {
   kind: SegmentKind;
-  payload?: SpeechSegmentPayload | AlignmentSegmentPayload;
+  payload?:
+    | SpeechSegmentPayload
+    | AlignmentSegmentPayload
+    | DiarizationSegmentPayload;
 } {
   const kind = assertValidSegmentKind(segment.kind ?? 'speech', 'segment.kind');
   if (kind === 'alignment') {
@@ -309,12 +318,44 @@ function assertValidSegmentInput(segment: SegmentInput): {
       payload: assertAlignmentPayload(segment.payload, 'segment.payload'),
     };
   }
+  if (kind === 'diarization') {
+    return {
+      kind,
+      payload: assertDiarizationPayload(segment.payload, 'segment.payload'),
+    };
+  }
   return {
     kind,
     payload:
       segment.payload === undefined
         ? undefined
         : assertSpeechPayload(segment.payload, 'segment.payload'),
+  };
+}
+
+function assertDiarizationPayload(
+  value: unknown,
+  sourceName: string
+): DiarizationSegmentPayload {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} must be an object for kind "diarization".`
+    );
+  }
+  const obj = value as Record<string, unknown>;
+  if (obj.source !== 'diarization') {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be "diarization".`
+    );
+  }
+  if (typeof obj.speaker !== 'number' || !Number.isFinite(obj.speaker)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speaker must be a finite number.`
+    );
+  }
+  return {
+    source: 'diarization',
+    speaker: Math.trunc(obj.speaker),
   };
 }
 
@@ -551,6 +592,19 @@ function ensureLiveSegmentEventSubscriptions(): void {
                 ...(raw.payload !== undefined
                   ? {
                       payload: assertAlignmentPayload(
+                        raw.payload,
+                        'event.payload'
+                      ),
+                    }
+                  : {}),
+              }
+            : eventKind === 'diarization'
+            ? {
+                ...eventBase,
+                kind: 'diarization',
+                ...(raw.payload !== undefined
+                  ? {
+                      payload: assertDiarizationPayload(
                         raw.payload,
                         'event.payload'
                       ),
@@ -829,6 +883,16 @@ export async function getOfflineSegmentBufferSegments(
         ...(payload !== undefined ? { payload } : {}),
       } as AlignmentSegmentMeta;
     }
+    if (kind === 'diarization') {
+      const payload =
+        segment.payload != null
+          ? assertDiarizationPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as DiarizationSegmentMeta;
+    }
     const payload =
       segment.payload != null
         ? assertSpeechPayload(segment.payload, 'segment.payload')
@@ -887,6 +951,16 @@ export async function getLiveSegmentBufferSegments(
         ...(payload !== undefined ? { payload } : {}),
       } as AlignmentSegmentMeta;
     }
+    if (kind === 'diarization') {
+      const payload =
+        segment.payload != null
+          ? assertDiarizationPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as DiarizationSegmentMeta;
+    }
     const payload =
       segment.payload != null
         ? assertSpeechPayload(segment.payload, 'segment.payload')
@@ -916,6 +990,9 @@ export type {
   AlignmentTimingMode,
   AlignmentGranularity,
   AlignmentSegmentPayload,
+  DiarizationSegmentMeta,
+  DiarizationSegmentPayload,
+  DiarizationSegmentInput,
   SpeechSegmentPayload,
   SpeechSegmentPayloadSource,
   SidSpeechSegmentPayload,

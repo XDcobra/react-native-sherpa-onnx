@@ -26,7 +26,7 @@ class LiveSegmentEntry(
   )
 
   companion object {
-    private val ALLOWED_KINDS = setOf("speech", "alignment")
+    private val ALLOWED_KINDS = setOf("speech", "alignment", "diarization")
   }
 
   enum class State { RECORDING, FINISHED }
@@ -93,7 +93,7 @@ class LiveSegmentEntry(
     if (!ALLOWED_KINDS.contains(normalizedKind)) {
       throw SegmentPipelineException(
         SegmentErrorCodes.INVALID_ARGUMENT,
-        "kind must be one of speech or alignment; received $kind"
+        "kind must be one of speech, alignment, or diarization; received $kind"
       )
     }
     if (sampleRate <= 0) {
