@@ -11,7 +11,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import {
+  DocumentDirectoryPath,
+  mkdir,
+  readFile,
+  unlink,
+  writeFile,
+} from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   assertSpeakerEmbeddingCustomConfig,
@@ -160,6 +166,21 @@ export default function SpeakerIdentificationScreen() {
   const [initResult, setInitResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<
+    | 'enroll'
+    | 'identify'
+    | 'verify'
+    | 'label'
+    | 'exportEditor'
+    | 'exportFile'
+    | 'importEditor'
+    | 'importFile'
+    | null
+  >(null);
+  const [actionProgress, setActionProgress] = useState<{
+    label: string;
+    percent: number | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<
     'init' | 'action' | 'live' | null
@@ -192,8 +213,7 @@ export default function SpeakerIdentificationScreen() {
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [liveLabelLog, setLiveLabelLog] = useState<string[]>([]);
 
-  const [exportJson, setExportJson] = useState('');
-  const [importJson, setImportJson] = useState('');
+  const [enrollmentJson, setEnrollmentJson] = useState('');
 
   const engineRef = useRef<SpeakerIdentificationEngine | null>(null);
   const pipelineRef = useRef<SpeakerIdentificationPipelineHandle | null>(null);
@@ -221,6 +241,29 @@ export default function SpeakerIdentificationScreen() {
     const parsed = Number.parseFloat(thresholdText);
     return Number.isFinite(parsed) ? parsed : DEFAULT_THRESHOLD;
   }, [thresholdText]);
+
+  const showActionError = (
+    source: 'init' | 'action' | 'live',
+    message: string
+  ) => {
+    setActionResult(null);
+    setLabeledLog([]);
+    setErrorSource(source);
+    setError(message);
+    const title =
+      source === 'init'
+        ? 'Initialization failed'
+        : source === 'live'
+          ? 'Live pipeline error'
+          : 'Action failed';
+    Alert.alert(title, message);
+  };
+
+  const showActionSuccess = (message: string) => {
+    setError(null);
+    setErrorSource(null);
+    setActionResult(message);
+  };
 
   const loadAvailableModels = useCallback(async () => {
     setLoadingModels(true);
@@ -270,8 +313,8 @@ export default function SpeakerIdentificationScreen() {
       setAvailableModels(combined);
 
       if (combined.length === 0) {
-        setErrorSource('init');
-        setError(
+        showActionError(
+          'init',
           'No speaker-embedding models found. Add a WeSpeaker / 3D-Speaker / NeMo model as a bundled asset, download, or PAD model.'
         );
       }
@@ -280,8 +323,7 @@ export default function SpeakerIdentificationScreen() {
         'SpeakerIdentificationScreen: Failed to load models:',
         loadErr
       );
-      setErrorSource('init');
-      setError('Failed to load available models');
+      showActionError('init', 'Failed to load available models');
       setAvailableModels([]);
     } finally {
       setLoadingModels(false);
@@ -411,8 +453,7 @@ export default function SpeakerIdentificationScreen() {
       );
     } catch (fillErr) {
       setCustomFillHint(null);
-      setErrorSource('init');
-      setError(normalizeErrorMessage(fillErr));
+      showActionError('init', normalizeErrorMessage(fillErr));
     } finally {
       setCustomFillLoading(false);
     }
@@ -461,8 +502,7 @@ export default function SpeakerIdentificationScreen() {
       setActionResult(null);
       await refreshSpeakers();
     } catch (initErr) {
-      setErrorSource('init');
-      setError(normalizeErrorMessage(initErr));
+      showActionError('init', normalizeErrorMessage(initErr));
       setInitResult(
         `Custom initialization failed: ${normalizeErrorMessage(initErr)}`
       );
@@ -492,8 +532,10 @@ export default function SpeakerIdentificationScreen() {
         modelType: 'auto',
       });
       if (!detectResult.success || !detectResult.detectedModels?.length) {
-        setErrorSource('init');
-        setError('No speaker-embedding models detected in the directory');
+        showActionError(
+          'init',
+          'No speaker-embedding models detected in the directory'
+        );
         return;
       }
 
@@ -522,8 +564,7 @@ export default function SpeakerIdentificationScreen() {
       setActionResult(null);
       await refreshSpeakers();
     } catch (initErr) {
-      setErrorSource('init');
-      setError(normalizeErrorMessage(initErr));
+      showActionError('init', normalizeErrorMessage(initErr));
       setInitResult(`Initialization failed: ${normalizeErrorMessage(initErr)}`);
     } finally {
       setLoading(false);
@@ -546,7 +587,7 @@ export default function SpeakerIdentificationScreen() {
     setLabeledLog([]);
     setLiveStatus(null);
     setLiveLabelLog([]);
-    setExportJson('');
+    setEnrollmentJson('');
   };
 
   const requireEngine = (): SpeakerIdentificationEngine => {
@@ -582,10 +623,50 @@ export default function SpeakerIdentificationScreen() {
     }
   };
 
-  const handleEnroll = async () => {
+  const beginBusy = (
+    action: NonNullable<typeof busyAction>,
+    label: string
+  ) => {
     setBusy(true);
+    setBusyAction(action);
+    setActionProgress({ label, percent: null });
     setError(null);
     setErrorSource(null);
+  };
+
+  const updateBusyProgress = (
+    baseLabel: string,
+    progress: {
+      currentSegment: number;
+      totalSegments: number;
+      fraction: number;
+    }
+  ) => {
+    const percent =
+      progress.totalSegments > 0
+        ? Math.min(
+            99,
+            Math.round(
+              ((progress.currentSegment + 1) / progress.totalSegments) * 100
+            )
+          )
+        : Math.min(99, Math.round(progress.fraction * 100));
+    setActionProgress({
+      label: `${baseLabel} · ${progress.currentSegment + 1}/${
+        progress.totalSegments
+      }`,
+      percent,
+    });
+  };
+
+  const endBusy = () => {
+    setBusy(false);
+    setBusyAction(null);
+    setActionProgress(null);
+  };
+
+  const handleEnroll = async () => {
+    beginBusy('enroll', 'Enrolling…');
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
@@ -596,57 +677,48 @@ export default function SpeakerIdentificationScreen() {
 
       if (segBatchConfig.mode === 'off') {
         await engine.enroll(name, audio.bufferId);
-        setActionResult(`Enrolled '${name}' from whole buffer.`);
+        showActionSuccess(`Enrolled '${name}' from whole buffer.`);
       } else {
+        setActionProgress({ label: 'Segmenting speech…', percent: null });
         await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
           await engine.enrollOfflineSegments(name, audio.bufferId, segmentsIn, {
             onProgress: (p) => {
-              setActionResult(
-                `Enrolling '${name}'… ${p.currentSegment + 1}/${
-                  p.totalSegments
-                }`
-              );
+              updateBusyProgress(`Enrolling '${name}'`, p);
             },
           });
         });
-        setActionResult(`Enrolled '${name}' from speech segments.`);
+        showActionSuccess(`Enrolled '${name}' from speech segments.`);
       }
       await refreshSpeakers();
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
 
   const handleIdentify = async () => {
-    setBusy(true);
-    setError(null);
-    setErrorSource(null);
+    beginBusy('identify', 'Identifying…');
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
       const result = await engine.identify(audio.bufferId, {
         threshold: resolveThreshold(),
       });
-      setActionResult(
+      showActionSuccess(
         result.name
           ? `Identify → ${result.name}`
           : 'Identify → unknown (below threshold)'
       );
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
 
   const handleVerify = async () => {
-    setBusy(true);
-    setError(null);
-    setErrorSource(null);
+    beginBusy('verify', 'Verifying…');
     try {
       const engine = requireEngine();
       const audio = requirePreparedAudio();
@@ -657,19 +729,16 @@ export default function SpeakerIdentificationScreen() {
       const ok = await engine.verify(name, audio.bufferId, {
         threshold: resolveThreshold(),
       });
-      setActionResult(`Verify '${name}' → ${ok ? 'match' : 'no match'}`);
+      showActionSuccess(`Verify '${name}' → ${ok ? 'match' : 'no match'}`);
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
 
   const handleLabelOffline = async () => {
-    setBusy(true);
-    setError(null);
-    setErrorSource(null);
+    beginBusy('label', 'Labeling segments…');
     setLabeledLog([]);
     try {
       const engine = requireEngine();
@@ -681,6 +750,7 @@ export default function SpeakerIdentificationScreen() {
       }
 
       const lines: string[] = [];
+      setActionProgress({ label: 'Segmenting speech…', percent: null });
       await withSpeechSegments(audio.bufferId, async (segmentsIn) => {
         const segmentsOut = await createEmptyOfflineSegmentBuffer({
           sourceAudioBufferId: audio.bufferId,
@@ -692,6 +762,9 @@ export default function SpeakerIdentificationScreen() {
             segmentsOut.bufferId,
             {
               threshold: resolveThreshold(),
+              onProgress: (p) => {
+                updateBusyProgress('Labeling', p);
+              },
               onLabeled: (e) => {
                 const line = `#${e.segmentIndex} ${
                   e.speakerName ?? 'unknown'
@@ -704,7 +777,7 @@ export default function SpeakerIdentificationScreen() {
           const segs = await getOfflineSegmentBufferSegments(
             segmentsOut.bufferId
           );
-          setActionResult(
+          showActionSuccess(
             `Labeled ${result.labeledCount}, unknown ${result.unknownCount}, out rows ${segs.length}`
           );
         } finally {
@@ -714,10 +787,9 @@ export default function SpeakerIdentificationScreen() {
         }
       });
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
     } finally {
-      setBusy(false);
+      endBusy();
     }
   };
 
@@ -742,13 +814,14 @@ export default function SpeakerIdentificationScreen() {
 
   const handleLabelLive = async () => {
     if (!engineRef.current) {
-      setErrorSource('live');
-      setError('Initialize a speaker-embedding model first.');
+      showActionError('live', 'Initialize a speaker-embedding model first.');
       return;
     }
     if (enrolledSpeakers.length === 0) {
-      setErrorSource('live');
-      setError('Enroll at least one speaker offline before live labeling.');
+      showActionError(
+        'live',
+        'Enroll at least one speaker offline before live labeling.'
+      );
       return;
     }
 
@@ -760,8 +833,8 @@ export default function SpeakerIdentificationScreen() {
       (segOption.policy.evaluator !== 'speech_energy_silence' &&
         segOption.policy.evaluator !== 'speech_vad_model')
     ) {
-      setErrorSource('live');
-      setError(
+      showActionError(
+        'live',
         'Live overload requires speech_energy_silence or speech_vad_model segmentation.'
       );
       return;
@@ -847,7 +920,7 @@ export default function SpeakerIdentificationScreen() {
         pipelineRef.current = null;
         await pipeline.stop().catch(() => {});
         setLiveStatus(`Done — ${lines.length} labeled utterance(s).`);
-        setActionResult(`Live label complete (${lines.length} events).`);
+        showActionSuccess(`Live label complete (${lines.length} events).`);
         setLiveRunState('idle');
         await cleanupLiveRuntime().catch(() => {});
       } else {
@@ -859,8 +932,7 @@ export default function SpeakerIdentificationScreen() {
       if (runEpoch !== liveRunEpochRef.current) {
         return;
       }
-      setErrorSource('live');
-      setError(normalizeErrorMessage(err));
+      showActionError('live', normalizeErrorMessage(err));
       setLiveRunState('idle');
       setLiveStatus(null);
       await cleanupLiveRuntime().catch(() => {});
@@ -896,7 +968,7 @@ export default function SpeakerIdentificationScreen() {
         await pipeline.stop().catch(() => {});
         pipelineRef.current = null;
         setLiveStatus('Stopped — mic session complete.');
-        setActionResult('Live mic label stopped.');
+        showActionSuccess('Live mic label stopped.');
       } else if (pipeline) {
         await pipeline.stop().catch(() => {});
         pipelineRef.current = null;
@@ -908,38 +980,204 @@ export default function SpeakerIdentificationScreen() {
     }
   };
 
-  const handleExport = async () => {
+  const isDocumentPickerCanceled = (err: unknown): boolean => {
+    if (
+      DocumentPicker.isErrorWithCode?.(err) &&
+      (err as { code?: string }).code ===
+        DocumentPicker.errorCodes?.OPERATION_CANCELED
+    ) {
+      return true;
+    }
+    return (
+      (DocumentPicker as { isCancel?: (e: unknown) => boolean }).isCancel?.(
+        err
+      ) === true ||
+      (err as { name?: string })?.name === 'DocumentPickerCanceled'
+    );
+  };
+
+  const handleExportToEditor = async () => {
+    beginBusy('exportEditor', 'Exporting to editor…');
+    try {
+      const engine = requireEngine();
+      const bundle = await engine.exportEnrollments();
+      setEnrollmentJson(JSON.stringify(bundle, null, 2));
+      showActionSuccess(
+        `Exported ${bundle.speakers.length} speaker(s) (dim=${bundle.dim}) to editor.`
+      );
+    } catch (err) {
+      showActionError('action', normalizeErrorMessage(err));
+    } finally {
+      endBusy();
+    }
+  };
+
+  const handleExportToJsonFile = async () => {
+    const stagingDir = `${DocumentDirectoryPath}/SherpaOnnxSid/exports`;
+    const stagingPath = `${stagingDir}/enrollments_${Date.now()}.json`;
+    beginBusy('exportFile', 'Exporting to JSON file…');
     try {
       const engine = requireEngine();
       const bundle = await engine.exportEnrollments();
       const json = JSON.stringify(bundle, null, 2);
-      setExportJson(json);
-      setImportJson(json);
-      setActionResult(
-        `Exported ${bundle.speakers.length} speaker(s) (dim=${bundle.dim}).`
+      setEnrollmentJson(json);
+
+      await mkdir(stagingDir).catch(() => {});
+      await writeFile(stagingPath, json, 'utf8');
+      const sourceUri = encodeURI(
+        stagingPath.startsWith('file://') ? stagingPath : `file://${stagingPath}`
+      );
+      const responses = await DocumentPicker.saveDocuments({
+        sourceUris: [sourceUri],
+        mimeType: 'application/json',
+        fileName: `speaker-enrollments_${Date.now()}.json`,
+      });
+      const first = responses[0];
+      if (first?.error) {
+        throw new Error(first.error);
+      }
+      showActionSuccess(
+        `Saved ${bundle.speakers.length} speaker(s) to ${
+          first?.name?.trim() || 'JSON file'
+        }.`
       );
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      if (isDocumentPickerCanceled(err)) {
+        return;
+      }
+      showActionError('action', normalizeErrorMessage(err));
+    } finally {
+      await unlink(stagingPath).catch(() => {});
+      endBusy();
     }
   };
 
-  const handleImport = async (replaceExisting: boolean) => {
+  const applyImportBundle = async (
+    parsed: SpeakerEnrollmentBundle,
+    replaceExisting: boolean
+  ) => {
+    beginBusy('importEditor', 'Importing enrollments…');
     try {
       const engine = requireEngine();
-      const parsed = JSON.parse(importJson) as SpeakerEnrollmentBundle;
       const result = await engine.importEnrollments(parsed, {
         replaceExisting,
       });
       await refreshSpeakers();
-      setActionResult(
+      showActionSuccess(
         `Imported ${result.imported} speaker(s)${
-          replaceExisting ? ' (replace)' : ''
+          replaceExisting ? ' (replaced existing names)' : ''
         }.`
       );
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
+    } finally {
+      endBusy();
+    }
+  };
+
+  const handleImportFromEditor = async () => {
+    try {
+      const engine = requireEngine();
+      let parsed: SpeakerEnrollmentBundle;
+      try {
+        parsed = JSON.parse(enrollmentJson) as SpeakerEnrollmentBundle;
+      } catch {
+        throw new Error('Editor JSON is invalid.');
+      }
+      if (!Array.isArray(parsed?.speakers)) {
+        throw new Error('Bundle must include a speakers array.');
+      }
+
+      const existing = new Set(await engine.listSpeakers());
+      const collisions = [
+        ...new Set(
+          parsed.speakers
+            .map((entry) =>
+              typeof entry?.name === 'string' ? entry.name.trim() : ''
+            )
+            .filter((name) => name.length > 0 && existing.has(name))
+        ),
+      ];
+
+      if (collisions.length > 0) {
+        Alert.alert(
+          'Overwrite existing speakers?',
+          `These names already exist and would be replaced:\n${collisions.join(
+            ', '
+          )}`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Import & replace',
+              style: 'destructive',
+              onPress: () => {
+                applyImportBundle(parsed, true).catch(() => {});
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      await applyImportBundle(parsed, false);
+    } catch (err) {
+      showActionError('action', normalizeErrorMessage(err));
+    }
+  };
+
+  const handleImportFromFile = async () => {
+    try {
+      const [picked] = await DocumentPicker.pick({
+        type: [DocumentPicker.types.json, DocumentPicker.types.plainText],
+        allowMultiSelection: false,
+      });
+      const uri = picked?.uri?.trim();
+      if (!uri) {
+        return;
+      }
+      const fileName =
+        picked.name?.trim() ||
+        uri.split('/').pop()?.split('?')[0] ||
+        'enrollments.json';
+
+      beginBusy('importFile', 'Loading JSON file…');
+      try {
+        const [localCopy] = await DocumentPicker.keepLocalCopy({
+          files: [
+            {
+              uri,
+              fileName: fileName.endsWith('.json')
+                ? fileName
+                : `${fileName}.json`,
+            },
+          ],
+          destination: 'cachesDirectory',
+        });
+        if (!localCopy || localCopy.status !== 'success') {
+          throw new Error(
+            localCopy && 'copyError' in localCopy && localCopy.copyError
+              ? String(localCopy.copyError)
+              : 'Could not copy the picked JSON file.'
+          );
+        }
+        const localPath = localCopy.localUri.replace(/^file:\/\//, '');
+        const raw = await readFile(decodeURI(localPath), 'utf8');
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          setEnrollmentJson(JSON.stringify(parsed, null, 2));
+        } catch {
+          setEnrollmentJson(raw);
+        }
+        showActionSuccess(`Loaded '${fileName}' into editor.`);
+      } finally {
+        endBusy();
+      }
+    } catch (err) {
+      if (isDocumentPickerCanceled(err)) {
+        return;
+      }
+      showActionError('action', normalizeErrorMessage(err));
+      endBusy();
     }
   };
 
@@ -948,10 +1186,9 @@ export default function SpeakerIdentificationScreen() {
       const engine = requireEngine();
       await engine.removeSpeaker(name);
       await refreshSpeakers();
-      setActionResult(`Removed '${name}'.`);
+      showActionSuccess(`Removed '${name}'.`);
     } catch (err) {
-      setErrorSource('action');
-      setError(normalizeErrorMessage(err));
+      showActionError('action', normalizeErrorMessage(err));
     }
   };
 
@@ -977,8 +1214,7 @@ export default function SpeakerIdentificationScreen() {
       if (canceled) {
         return;
       }
-      setErrorSource('live');
-      setError(normalizeErrorMessage(err));
+      showActionError('live', normalizeErrorMessage(err));
     }
   };
 
@@ -1273,7 +1509,11 @@ export default function SpeakerIdentificationScreen() {
                 }}
                 disabled={!canRunBatch}
               >
-                <Text style={screenStyles.primaryButtonText}>Enroll</Text>
+                {busyAction === 'enroll' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>Enroll</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1286,7 +1526,11 @@ export default function SpeakerIdentificationScreen() {
                 }}
                 disabled={!canRunBatch}
               >
-                <Text style={screenStyles.primaryButtonText}>Identify</Text>
+                {busyAction === 'identify' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>Identify</Text>
+                )}
               </TouchableOpacity>
             </View>
             <View style={screenStyles.buttonRow}>
@@ -1301,7 +1545,11 @@ export default function SpeakerIdentificationScreen() {
                 }}
                 disabled={!canRunBatch}
               >
-                <Text style={screenStyles.primaryButtonText}>Verify</Text>
+                {busyAction === 'verify' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>Verify</Text>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1315,7 +1563,11 @@ export default function SpeakerIdentificationScreen() {
                 }}
                 disabled={!canRunBatch || segBatchConfig.mode === 'off'}
               >
-                <Text style={screenStyles.primaryButtonText}>Label segs</Text>
+                {busyAction === 'label' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>Label segs</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1323,30 +1575,37 @@ export default function SpeakerIdentificationScreen() {
           <View style={screenStyles.card}>
             <Text style={screenStyles.cardTitle}>Live label</Text>
             <Text style={screenStyles.bodyText}>
-              Enroll speakers offline first (switch to Offline batch, or use the
-              buffer below after stopping live). Live only labels.
+              Enroll speakers offline first (switch to Offline batch, or use
+              Quick enroll below). Live only labels speech segments.
             </Text>
-            <OfflineAudioBufferWidget
-              ref={offlineWidgetRef}
-              audioFiles={AUDIO_FILES}
-              visible={engineReady && !liveBusy}
-              disabled={!engineReady || busy || liveBusy}
-              onBufferReady={setPreparedInputBuffer}
-              onBufferReleased={() => setPreparedInputBuffer(null)}
-            />
-            <View style={screenStyles.buttonRow}>
+
+            <View style={screenStyles.sectionBlock}>
+              <Text style={screenStyles.sectionLabel}>Quick enroll</Text>
+              <Text style={screenStyles.sectionHint}>
+                Optional — prepare a short buffer and enroll a name before
+                starting live.
+              </Text>
+              <OfflineAudioBufferWidget
+                ref={offlineWidgetRef}
+                audioFiles={AUDIO_FILES}
+                visible={engineReady && !liveBusy}
+                disabled={!engineReady || busy || liveBusy}
+                onBufferReady={setPreparedInputBuffer}
+                onBufferReleased={() => setPreparedInputBuffer(null)}
+              />
+              <Text style={screenStyles.fieldLabel}>Speaker name</Text>
               <TextInput
-                style={[screenStyles.textInput, screenStyles.flexButton]}
+                style={screenStyles.textInput}
                 value={speakerName}
                 onChangeText={setSpeakerName}
                 autoCapitalize="none"
                 editable={!busy && !liveBusy}
-                placeholder="Speaker name"
+                placeholder="e.g. alice"
               />
               <TouchableOpacity
                 style={[
                   screenStyles.primaryButton,
-                  screenStyles.flexButton,
+                  screenStyles.sectionPrimaryButton,
                   (!engineReady || !preparedInputBuffer || busy || liveBusy) &&
                     screenStyles.buttonDisabled,
                 ]}
@@ -1357,69 +1616,41 @@ export default function SpeakerIdentificationScreen() {
                   !engineReady || !preparedInputBuffer || busy || liveBusy
                 }
               >
-                <Text style={screenStyles.primaryButtonText}>Enroll</Text>
+                {busyAction === 'enroll' ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={screenStyles.primaryButtonText}>Enroll</Text>
+                )}
               </TouchableOpacity>
             </View>
 
-            <Text style={screenStyles.cardTitle}>Source</Text>
-            <View style={lpStyles.sourceToggle}>
-              {(
-                [
-                  ['file', 'File'],
-                  ['mic', 'Mic'],
-                ] as const
-              ).map(([mode, label]) => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[
-                    lpStyles.sourceToggleBtn,
-                    liveSourceMode === mode && lpStyles.sourceToggleBtnActive,
-                  ]}
-                  onPress={() => {
-                    if (liveBusy) return;
-                    setLiveSourceMode(mode);
-                  }}
-                  disabled={liveBusy}
-                >
-                  <Text
-                    style={[
-                      lpStyles.sourceToggleText,
-                      liveSourceMode === mode &&
-                        lpStyles.sourceToggleTextActive,
-                    ]}
-                  >
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {liveSourceMode === 'file' ? (
-              <>
+            <View style={screenStyles.sectionBlock}>
+              <Text style={screenStyles.sectionLabel}>Live source</Text>
+              <View style={screenStyles.toggleGroup}>
                 <View style={lpStyles.sourceToggle}>
                   {(
                     [
-                      ['example', 'Example'],
-                      ['own', 'Own file'],
+                      ['file', 'File'],
+                      ['mic', 'Mic'],
                     ] as const
                   ).map(([mode, label]) => (
                     <TouchableOpacity
                       key={mode}
                       style={[
                         lpStyles.sourceToggleBtn,
-                        liveFileSourceType === mode &&
+                        liveSourceMode === mode &&
                           lpStyles.sourceToggleBtnActive,
                       ]}
                       onPress={() => {
                         if (liveBusy) return;
-                        setLiveFileSourceType(mode);
+                        setLiveSourceMode(mode);
                       }}
                       disabled={liveBusy}
                     >
                       <Text
                         style={[
                           lpStyles.sourceToggleText,
-                          liveFileSourceType === mode &&
+                          liveSourceMode === mode &&
                             lpStyles.sourceToggleTextActive,
                         ]}
                       >
@@ -1428,58 +1659,100 @@ export default function SpeakerIdentificationScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {liveFileSourceType === 'example' ? (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={screenStyles.chipRow}
-                  >
-                    {AUDIO_FILES.map((file) => {
-                      const active = selectedExampleAudioId === file.id;
-                      return (
+              </View>
+
+              {liveSourceMode === 'file' ? (
+                <>
+                  <Text style={screenStyles.fieldLabel}>File input</Text>
+                  <View style={screenStyles.toggleGroup}>
+                    <View style={lpStyles.sourceToggle}>
+                      {(
+                        [
+                          ['example', 'Example'],
+                          ['own', 'Own file'],
+                        ] as const
+                      ).map(([mode, label]) => (
                         <TouchableOpacity
-                          key={file.id}
+                          key={mode}
                           style={[
-                            screenStyles.chip,
-                            active && screenStyles.chipActive,
+                            lpStyles.sourceToggleBtn,
+                            liveFileSourceType === mode &&
+                              lpStyles.sourceToggleBtnActive,
                           ]}
-                          onPress={() => setSelectedExampleAudioId(file.id)}
+                          onPress={() => {
+                            if (liveBusy) return;
+                            setLiveFileSourceType(mode);
+                          }}
                           disabled={liveBusy}
                         >
                           <Text
                             style={[
-                              screenStyles.chipText,
-                              active && screenStyles.chipTextActive,
+                              lpStyles.sourceToggleText,
+                              liveFileSourceType === mode &&
+                                lpStyles.sourceToggleTextActive,
                             ]}
                           >
-                            {file.name}
+                            {label}
                           </Text>
                         </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                ) : (
-                  <TouchableOpacity
-                    style={baseStyles.secondaryButton}
-                    onPress={() => {
-                      pickOwnFile().catch(() => {});
-                    }}
-                    disabled={liveBusy}
-                  >
-                    <Text style={baseStyles.secondaryButtonText}>
-                      {selectedFileName
-                        ? `File: ${selectedFileName}`
-                        : 'Pick audio file'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            ) : null}
+                      ))}
+                    </View>
+                  </View>
+                  {liveFileSourceType === 'example' ? (
+                    <View style={screenStyles.chipWrap}>
+                      {AUDIO_FILES.map((file) => {
+                        const active = selectedExampleAudioId === file.id;
+                        return (
+                          <TouchableOpacity
+                            key={file.id}
+                            style={[
+                              screenStyles.chip,
+                              active && screenStyles.chipActive,
+                            ]}
+                            onPress={() => setSelectedExampleAudioId(file.id)}
+                            disabled={liveBusy}
+                          >
+                            <Text
+                              style={[
+                                screenStyles.chipText,
+                                active && screenStyles.chipTextActive,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {file.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={baseStyles.secondaryButton}
+                      onPress={() => {
+                        pickOwnFile().catch(() => {});
+                      }}
+                      disabled={liveBusy}
+                    >
+                      <Text style={baseStyles.secondaryButtonText}>
+                        {selectedFileName
+                          ? `File: ${selectedFileName}`
+                          : 'Pick audio file'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              ) : (
+                <Text style={screenStyles.sectionHint}>
+                  Microphone audio is labeled in real time. Stop when finished.
+                </Text>
+              )}
+            </View>
 
             {liveRunState === 'idle' ? (
               <TouchableOpacity
                 style={[
                   screenStyles.primaryButton,
+                  screenStyles.sectionPrimaryButton,
                   !canRunLive && screenStyles.buttonDisabled,
                 ]}
                 onPress={() => {
@@ -1493,7 +1766,11 @@ export default function SpeakerIdentificationScreen() {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[screenStyles.primaryButton, screenStyles.stopButton]}
+                style={[
+                  screenStyles.primaryButton,
+                  screenStyles.sectionPrimaryButton,
+                  screenStyles.stopButton,
+                ]}
                 onPress={() => {
                   handleStopLive().catch(() => {});
                 }}
@@ -1502,7 +1779,9 @@ export default function SpeakerIdentificationScreen() {
               </TouchableOpacity>
             )}
             {liveStatus ? (
-              <Text style={screenStyles.bodyText}>{liveStatus}</Text>
+              <Text style={[screenStyles.bodyText, { marginTop: 12 }]}>
+                {liveStatus}
+              </Text>
             ) : null}
             {liveLabelLog.map((line) => (
               <Text key={line} style={screenStyles.monoResultText}>
@@ -1512,6 +1791,33 @@ export default function SpeakerIdentificationScreen() {
           </View>
         )}
 
+        {actionProgress ? (
+          <View style={screenStyles.card}>
+            <Text style={screenStyles.cardTitle}>In progress</Text>
+            <View style={screenStyles.progressStatusRow}>
+              <ActivityIndicator color="#0F62FE" />
+              <Text style={screenStyles.progressStatusText}>
+                {actionProgress.label}
+              </Text>
+              {actionProgress.percent != null ? (
+                <Text style={screenStyles.progressPercentText}>
+                  {actionProgress.percent}%
+                </Text>
+              ) : null}
+            </View>
+            <View style={screenStyles.progressBarTrack}>
+              <View
+                style={[
+                  screenStyles.progressBarFill,
+                  actionProgress.percent != null
+                    ? { width: `${actionProgress.percent}%` }
+                    : screenStyles.progressBarIndeterminate,
+                ]}
+              />
+            </View>
+          </View>
+        ) : null}
+
         {(error || actionResult || labeledLog.length > 0) && (
           <View style={screenStyles.card}>
             <Text style={screenStyles.cardTitle}>Result</Text>
@@ -1519,8 +1825,7 @@ export default function SpeakerIdentificationScreen() {
               <Text style={screenStyles.errorText}>
                 [{errorSource ?? 'error'}] {error}
               </Text>
-            ) : null}
-            {actionResult ? (
+            ) : actionResult ? (
               <Text style={screenStyles.monoResultText}>{actionResult}</Text>
             ) : null}
             {labeledLog.map((line) => (
@@ -1534,68 +1839,105 @@ export default function SpeakerIdentificationScreen() {
         <View style={screenStyles.card}>
           <Text style={screenStyles.cardTitle}>Export / import</Text>
           <Text style={screenStyles.bodyText}>
-            Snapshot of the JS enrollment mirror. App owns persistence — this
-            screen only shows the JSON.
+            Export enrollments to the editor or a JSON file. Import from a file
+            loads into the editor; Import from editor applies the JSON to the
+            engine (existing names prompt before replace).
           </Text>
-          <TouchableOpacity
-            style={[
-              screenStyles.primaryButton,
-              (!engineReady || busy || liveBusy) && screenStyles.buttonDisabled,
-            ]}
-            onPress={() => {
-              handleExport().catch(() => {});
-            }}
-            disabled={!engineReady || busy || liveBusy}
-          >
-            <Text style={screenStyles.primaryButtonText}>
-              Export enrollments
-            </Text>
-          </TouchableOpacity>
-          {exportJson ? (
-            <Text style={screenStyles.monoResultText} selectable>
-              {exportJson}
-            </Text>
-          ) : null}
-          <Text style={screenStyles.bodyText}>Import JSON</Text>
-          <TextInput
-            style={screenStyles.multilineInput}
-            value={importJson}
-            onChangeText={setImportJson}
-            multiline
-            editable={!busy && !liveBusy}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
           <View style={screenStyles.buttonRow}>
             <TouchableOpacity
               style={[
                 screenStyles.primaryButton,
                 screenStyles.flexButton,
-                (!engineReady || !importJson.trim() || busy || liveBusy) &&
+                (!engineReady || busy || liveBusy) &&
                   screenStyles.buttonDisabled,
               ]}
               onPress={() => {
-                handleImport(false).catch(() => {});
+                handleExportToEditor().catch(() => {});
               }}
-              disabled={!engineReady || !importJson.trim() || busy || liveBusy}
+              disabled={!engineReady || busy || liveBusy}
             >
-              <Text style={screenStyles.primaryButtonText}>Import</Text>
+              {busyAction === 'exportEditor' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={screenStyles.primaryButtonText}>
+                  Export to editor
+                </Text>
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 screenStyles.primaryButton,
                 screenStyles.flexButton,
-                (!engineReady || !importJson.trim() || busy || liveBusy) &&
+                (!engineReady || busy || liveBusy) &&
                   screenStyles.buttonDisabled,
               ]}
               onPress={() => {
-                handleImport(true).catch(() => {});
+                handleExportToJsonFile().catch(() => {});
               }}
-              disabled={!engineReady || !importJson.trim() || busy || liveBusy}
+              disabled={!engineReady || busy || liveBusy}
             >
-              <Text style={screenStyles.primaryButtonText}>Import replace</Text>
+              {busyAction === 'exportFile' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={screenStyles.primaryButtonText}>
+                  Export to JSON file
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
+          <View style={[screenStyles.buttonRow, { marginTop: 8 }]}>
+            <TouchableOpacity
+              style={[
+                screenStyles.primaryButton,
+                screenStyles.flexButton,
+                (!engineReady || !enrollmentJson.trim() || busy || liveBusy) &&
+                  screenStyles.buttonDisabled,
+              ]}
+              onPress={() => {
+                handleImportFromEditor().catch(() => {});
+              }}
+              disabled={
+                !engineReady || !enrollmentJson.trim() || busy || liveBusy
+              }
+            >
+              {busyAction === 'importEditor' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={screenStyles.primaryButtonText}>
+                  Import from editor
+                </Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                screenStyles.primaryButton,
+                screenStyles.flexButton,
+                (busy || liveBusy) && screenStyles.buttonDisabled,
+              ]}
+              onPress={() => {
+                handleImportFromFile().catch(() => {});
+              }}
+              disabled={busy || liveBusy}
+            >
+              {busyAction === 'importFile' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={screenStyles.primaryButtonText}>
+                  Import from file
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={[screenStyles.multilineInput, { marginTop: 12 }]}
+            value={enrollmentJson}
+            onChangeText={setEnrollmentJson}
+            multiline
+            editable={!busy && !liveBusy}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="{ version: 1, dim, speakers: [...] }"
+          />
         </View>
 
         <Text style={screenStyles.footerHint}>
@@ -1652,6 +1994,71 @@ const screenStyles = StyleSheet.create({
     color: '#111827',
     marginBottom: 12,
   },
+  sectionBlock: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  sectionHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  toggleGroup: {
+    marginBottom: 12,
+  },
+  sectionPrimaryButton: {
+    marginTop: 12,
+  },
+  progressStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  progressStatusText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#374151',
+  },
+  progressPercentText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F62FE',
+    minWidth: 44,
+    textAlign: 'right',
+  },
+  progressBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#E5E7EB',
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0F62FE',
+  },
+  progressBarIndeterminate: {
+    width: '35%',
+    opacity: 0.55,
+  },
   bodyText: {
     marginTop: 4,
     marginBottom: 8,
@@ -1692,10 +2099,13 @@ const screenStyles = StyleSheet.create({
   },
   buttonRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   flexButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 110,
   },
   textInput: {
     borderWidth: 1,
@@ -1761,9 +2171,10 @@ const screenStyles = StyleSheet.create({
     fontWeight: '600',
     color: '#B42318',
   },
-  chipRow: {
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    paddingVertical: 8,
   },
   chip: {
     paddingHorizontal: 12,

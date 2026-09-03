@@ -259,6 +259,11 @@ export async function createSpeakerIdentification(
       if (trimmed.length === 0) {
         throw new Error('enroll() requires a non-empty speaker name');
       }
+      if (await manager.contains(trimmed)) {
+        throw new Error(
+          `Speaker '${trimmed}' is already enrolled. Remove them first or choose another name.`
+        );
+      }
       const buffers = Array.isArray(audio) ? audio : [audio];
       if (buffers.length === 0) {
         throw new Error('enroll() requires at least one audio buffer');
@@ -287,6 +292,11 @@ export async function createSpeakerIdentification(
       if (trimmed.length === 0) {
         throw new Error(
           'enrollOfflineSegments() requires a non-empty speaker name'
+        );
+      }
+      if (await manager.contains(trimmed)) {
+        throw new Error(
+          `Speaker '${trimmed}' is already enrolled. Remove them first or choose another name.`
         );
       }
       resolvePipelineAudioBufferId(audioIn);
