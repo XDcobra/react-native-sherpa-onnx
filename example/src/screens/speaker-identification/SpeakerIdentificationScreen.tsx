@@ -220,6 +220,8 @@ export default function SpeakerIdentificationScreen() {
   const [spanLabelNames, setSpanLabelNames] = useState<string[]>([]);
   const [enrollmentJson, setEnrollmentJson] = useState('');
   const [jsonBufferExpanded, setJsonBufferExpanded] = useState(false);
+  const [exportSectionExpanded, setExportSectionExpanded] = useState(true);
+  const [importSectionExpanded, setImportSectionExpanded] = useState(true);
   const [exportSpeakerFilter, setExportSpeakerFilter] =
     useState<string>(EXPORT_SPEAKER_ALL);
   const [exportSpeakerPickerOpen, setExportSpeakerPickerOpen] = useState(false);
@@ -246,6 +248,22 @@ export default function SpeakerIdentificationScreen() {
   const cleanupLockRef = useRef(false);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const liveRunEpochRef = useRef(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const enrollmentTransferYRef = useRef(0);
+  const jsonBufferSectionYRef = useRef(0);
+
+  const scrollToJsonBuffer = useCallback(() => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const y =
+          enrollmentTransferYRef.current + jsonBufferSectionYRef.current;
+        scrollViewRef.current?.scrollTo({
+          y: Math.max(0, y - 12),
+          animated: true,
+        });
+      }, 80);
+    });
+  }, []);
 
   const refreshSpeakers = useCallback(async () => {
     const engine = engineRef.current;
@@ -1128,6 +1146,7 @@ export default function SpeakerIdentificationScreen() {
 
   const handleExportToEditor = async () => {
     beginBusy('exportEditor', 'Exporting to editor…');
+    let didExport = false;
     try {
       const engine = requireEngine();
       const bundle = filterEnrollmentBundle(
@@ -1146,10 +1165,14 @@ export default function SpeakerIdentificationScreen() {
       showActionSuccess(
         `Exported ${bundle.speakers.length} speaker(s) (dim=${bundle.dim}) to editor.`
       );
+      didExport = true;
     } catch (err) {
       showActionError('action', normalizeErrorMessage(err));
     } finally {
       endBusy();
+      if (didExport) {
+        scrollToJsonBuffer();
+      }
     }
   };
 
@@ -1406,12 +1429,59 @@ export default function SpeakerIdentificationScreen() {
       (liveFileSourceType === 'example' && !!selectedExampleAudioId) ||
       (liveFileSourceType === 'own' && !!selectedFileUri));
 
+  const renderProgressBlock = (
+    progress: { label: string; percent: number | null },
+    opts?: { titled?: boolean }
+  ) => (
+    <View
+      style={opts?.titled ? screenStyles.card : screenStyles.inlineProgress}
+    >
+      {opts?.titled ? (
+        <Text style={screenStyles.cardTitle}>In progress</Text>
+      ) : null}
+      <View style={screenStyles.progressStatusRow}>
+        <ActivityIndicator color="#0F62FE" />
+        <Text style={screenStyles.progressStatusText}>{progress.label}</Text>
+        {progress.percent != null ? (
+          <Text style={screenStyles.progressPercentText}>
+            {progress.percent}%
+          </Text>
+        ) : null}
+      </View>
+      <View style={screenStyles.progressBarTrack}>
+        <View
+          style={[
+            screenStyles.progressBarFill,
+            progress.percent != null
+              ? { width: `${progress.percent}%` }
+              : screenStyles.progressBarIndeterminate,
+          ]}
+        />
+      </View>
+    </View>
+  );
+
+  const liveProgressLabel =
+    liveStatus ??
+    (liveRunState === 'stopping'
+      ? 'Stopping…'
+      : liveRunState === 'running'
+        ? 'Live labeling…'
+        : null);
+
+  const showSharedActionProgress =
+    !!actionProgress &&
+    !(processingMode === 'liveOverload' && busyAction === 'enroll');
+
   return (
     <SafeAreaView
       style={screenStyles.container}
       edges={['left', 'right', 'bottom']}
     >
-      <ScrollView contentContainerStyle={screenStyles.content}>
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={screenStyles.content}
+      >
         <View style={screenStyles.headerRow}>
           <View style={screenStyles.headerIconWrap}>
             <Ionicons name="person" size={20} color="#0F62FE" />
@@ -1441,9 +1511,6 @@ export default function SpeakerIdentificationScreen() {
                 onPress={() => {
                   if (liveBusy || busy) return;
                   setProcessingMode(mode);
-                  if (mode === 'liveOverload') {
-                    setSegLiveConfig(LIVE_SEG_DEFAULT);
-                  }
                 }}
                 disabled={liveBusy || busy}
               >
@@ -1566,44 +1633,21 @@ export default function SpeakerIdentificationScreen() {
           ) : null}
         </View>
 
-        <View style={screenStyles.card}>
-          <Text style={screenStyles.cardTitle}>Segmentation</Text>
-          {processingMode === 'batch' ? (
-            <>
-              <Text style={screenStyles.bodyText}>
-                Off: whole-buffer enroll / identify. Auto: speech spans via
-                segmentOfflineBuffer for enrollOfflineSegments / label.
-              </Text>
-              <SegmentationPolicyControls
-                variant="speech-offline"
-                value={segBatchConfig}
-                onChange={setSegBatchConfig}
-                disabled={busy || liveBusy}
-              />
-            </>
-          ) : (
-            <>
-              <Text style={screenStyles.bodyText}>
-                Live overload requires speech segmentation
-                (speech_energy_silence or speech_vad_model). Off and manual are
-                disabled.
-              </Text>
-              <SegmentationPolicyControls
-                variant="speech-streaming"
-                value={segLiveConfig}
-                onChange={setSegLiveConfig}
-                disabled={liveBusy}
-                disableOff
-                disableManual
-                allowedEvaluators={[
-                  'speech_energy_silence',
-                  'speech_vad_model',
-                ]}
-                offDisabledMessage="Live SID overload requires mandatory speech segmentation."
-              />
-            </>
-          )}
-        </View>
+        {processingMode === 'batch' ? (
+          <View style={screenStyles.card}>
+            <Text style={screenStyles.cardTitle}>Segmentation</Text>
+            <Text style={screenStyles.sectionHint}>
+              Off: whole-buffer enroll / identify. Auto: speech spans via
+              segmentOfflineBuffer for enroll / label / verify.
+            </Text>
+            <SegmentationPolicyControls
+              variant="speech-offline"
+              value={segBatchConfig}
+              onChange={setSegBatchConfig}
+              disabled={busy || liveBusy}
+            />
+          </View>
+        ) : null}
 
         <View style={screenStyles.card}>
           <Text style={screenStyles.cardTitle}>Enrolled speakers</Text>
@@ -1819,19 +1863,15 @@ export default function SpeakerIdentificationScreen() {
             )}
           </View>
         ) : (
-          <View style={screenStyles.card}>
-            <Text style={screenStyles.cardTitle}>Live label</Text>
-            <Text style={screenStyles.bodyText}>
-              Enroll speakers offline first (switch to Offline batch, or use
-              Quick enroll below). Live only labels speech segments.
-            </Text>
-
-            <View style={screenStyles.sectionBlock}>
-              <Text style={screenStyles.sectionLabel}>Quick enroll</Text>
-              <Text style={screenStyles.sectionHint}>
-                Optional — prepare a short buffer and enroll a name before
-                starting live.
-              </Text>
+          <>
+            <View style={screenStyles.card}>
+              <Text style={screenStyles.cardTitle}>Quick enroll (offline)</Text>
+              <SegmentationPolicyControls
+                variant="speech-offline"
+                value={segBatchConfig}
+                onChange={setSegBatchConfig}
+                disabled={busy || liveBusy}
+              />
               <OfflineAudioBufferWidget
                 ref={offlineWidgetRef}
                 audioFiles={AUDIO_FILES}
@@ -1840,20 +1880,29 @@ export default function SpeakerIdentificationScreen() {
                 onBufferReady={setPreparedInputBuffer}
                 onBufferReleased={() => setPreparedInputBuffer(null)}
               />
-              <Text style={screenStyles.fieldLabel}>Speaker name(s)</Text>
+              <Text style={screenStyles.fieldLabel}>
+                {segBatchConfig.mode === 'off'
+                  ? 'Speaker name'
+                  : 'Speaker name(s)'}
+              </Text>
               <TextInput
                 style={screenStyles.textInput}
                 value={speakerName}
                 onChangeText={setSpeakerName}
                 autoCapitalize="none"
                 editable={!busy && !liveBusy}
-                placeholder="alice   or   alice, bob, alice"
+                placeholder={
+                  segBatchConfig.mode === 'off'
+                    ? 'e.g. alice'
+                    : 'alice   or   alice, bob, alice'
+                }
               />
-              <Text style={screenStyles.sectionHint}>
-                Same name field as offline. With segmentation Auto on the
-                offline controls, comma-separated names enroll one speaker per
-                speech span.
-              </Text>
+              {segBatchConfig.mode !== 'off' ? (
+                <Text style={screenStyles.sectionHint}>
+                  One name averages all speech spans; comma-separated names assign
+                  one speaker per span.
+                </Text>
+              ) : null}
               <TouchableOpacity
                 style={[
                   screenStyles.primaryButton,
@@ -1874,9 +1923,32 @@ export default function SpeakerIdentificationScreen() {
                   <Text style={screenStyles.primaryButtonText}>Enroll</Text>
                 )}
               </TouchableOpacity>
+              {busyAction === 'enroll' && actionProgress
+                ? renderProgressBlock(actionProgress)
+                : null}
             </View>
 
-            <View style={screenStyles.sectionBlock}>
+            <View style={screenStyles.card}>
+              <Text style={screenStyles.cardTitle}>Live label</Text>
+              <SegmentationPolicyControls
+                variant="speech-streaming"
+                value={segLiveConfig}
+                onChange={setSegLiveConfig}
+                disabled={liveBusy}
+                disableOff
+                disableManual
+                allowedEvaluators={[
+                  'speech_energy_silence',
+                  'speech_vad_model',
+                ]}
+                offDisabledMessage="Live SID overload requires mandatory speech segmentation."
+              />
+              <Text style={screenStyles.sectionHint}>
+                Live commits on silence or maxSegmentMs. Continuous speech with a
+                high max (e.g. 120s default) can yield long labels; lower
+                maxSegmentMs to force shorter utterances.
+              </Text>
+
               <Text style={screenStyles.sectionLabel}>Live source</Text>
               <View style={screenStyles.toggleGroup}>
                 <View style={lpStyles.sourceToggle}>
@@ -1998,77 +2070,61 @@ export default function SpeakerIdentificationScreen() {
                   Microphone audio is labeled in real time. Stop when finished.
                 </Text>
               )}
-            </View>
 
-            {liveRunState === 'idle' ? (
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.sectionPrimaryButton,
-                  !canRunLive && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleLabelLive().catch(() => {});
-                }}
-                disabled={!canRunLive}
-              >
-                <Text style={screenStyles.primaryButtonText}>
-                  Start live label
+              {liveRunState === 'idle' ? (
+                <TouchableOpacity
+                  style={[
+                    screenStyles.primaryButton,
+                    screenStyles.sectionPrimaryButton,
+                    !canRunLive && screenStyles.buttonDisabled,
+                  ]}
+                  onPress={() => {
+                    handleLabelLive().catch(() => {});
+                  }}
+                  disabled={!canRunLive}
+                >
+                  <Text style={screenStyles.primaryButtonText}>
+                    Start live label
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    screenStyles.primaryButton,
+                    screenStyles.sectionPrimaryButton,
+                    screenStyles.stopButton,
+                  ]}
+                  onPress={() => {
+                    handleStopLive().catch(() => {});
+                  }}
+                >
+                  <Text style={screenStyles.primaryButtonText}>Stop</Text>
+                </TouchableOpacity>
+              )}
+              {liveBusy && liveProgressLabel
+                ? renderProgressBlock({
+                    label: liveProgressLabel,
+                    percent: null,
+                  })
+                : liveStatus && !liveBusy ? (
+                    <Text
+                      style={[screenStyles.bodyText, screenStyles.statusAfterRun]}
+                    >
+                      {liveStatus}
+                    </Text>
+                  ) : null}
+              {liveLabelLog.map((line) => (
+                <Text key={line} style={screenStyles.monoResultText}>
+                  {line}
                 </Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.sectionPrimaryButton,
-                  screenStyles.stopButton,
-                ]}
-                onPress={() => {
-                  handleStopLive().catch(() => {});
-                }}
-              >
-                <Text style={screenStyles.primaryButtonText}>Stop</Text>
-              </TouchableOpacity>
-            )}
-            {liveStatus ? (
-              <Text style={[screenStyles.bodyText, { marginTop: 12 }]}>
-                {liveStatus}
-              </Text>
-            ) : null}
-            {liveLabelLog.map((line) => (
-              <Text key={line} style={screenStyles.monoResultText}>
-                {line}
-              </Text>
-            ))}
-          </View>
+              ))}
+            </View>
+          </>
         )}
 
-        {actionProgress ? (
-          <View style={screenStyles.card}>
-            <Text style={screenStyles.cardTitle}>In progress</Text>
-            <View style={screenStyles.progressStatusRow}>
-              <ActivityIndicator color="#0F62FE" />
-              <Text style={screenStyles.progressStatusText}>
-                {actionProgress.label}
-              </Text>
-              {actionProgress.percent != null ? (
-                <Text style={screenStyles.progressPercentText}>
-                  {actionProgress.percent}%
-                </Text>
-              ) : null}
-            </View>
-            <View style={screenStyles.progressBarTrack}>
-              <View
-                style={[
-                  screenStyles.progressBarFill,
-                  actionProgress.percent != null
-                    ? { width: `${actionProgress.percent}%` }
-                    : screenStyles.progressBarIndeterminate,
-                ]}
-              />
-            </View>
-          </View>
-        ) : null}
+        {showSharedActionProgress && actionProgress
+          ? renderProgressBlock(actionProgress, { titled: true })
+          : null}
 
         {(error || actionResult || labeledLog.length > 0) && (
           <View style={screenStyles.card}>
@@ -2112,103 +2168,208 @@ export default function SpeakerIdentificationScreen() {
           </View>
         )}
 
-        <View style={screenStyles.card}>
+        <View
+          style={screenStyles.card}
+          onLayout={(e) => {
+            enrollmentTransferYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           <Text style={screenStyles.cardTitle}>Enrollment transfer</Text>
           <Text style={screenStyles.bodyText}>
-            Move enrolled speaker embeddings in or out as JSON. This card is
-            independent of the Speaker name field above — export picks from the
-            enrolled list; import reads names from speakers[].name in the JSON.
+            Move enrolled speaker embeddings in or out as JSON. Independent of
+            the Speaker name field — export picks from the enrolled list; import
+            reads speakers[].name from the JSON.
           </Text>
 
           <View style={screenStyles.sectionBlock}>
-            <Text style={screenStyles.sectionLabel}>Export</Text>
-            <Text style={screenStyles.sectionHint}>
-              Choose all enrolled speakers or one speaker, then write into the
-              JSON buffer and/or a file.
-            </Text>
-            <Text style={screenStyles.fieldLabel}>Speakers to export</Text>
             <TouchableOpacity
-              style={[
-                screenStyles.dropdownTrigger,
-                (!engineReady || busy || liveBusy) &&
-                  screenStyles.buttonDisabled,
-              ]}
-              onPress={() => setExportSpeakerPickerOpen(true)}
-              disabled={!engineReady || busy || liveBusy}
+              style={screenStyles.collapseHeader}
+              onPress={() => setExportSectionExpanded((open) => !open)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
             >
-              <Text style={screenStyles.dropdownTriggerText} numberOfLines={1}>
-                {exportSpeakerFilter === EXPORT_SPEAKER_ALL
-                  ? `All speakers (${enrolledSpeakers.length})`
-                  : exportSpeakerFilter}
-              </Text>
-              <Text style={screenStyles.dropdownChevron}>▼</Text>
+              <Text style={screenStyles.collapseHeaderTitle}>Export</Text>
+              <Ionicons
+                name={
+                  exportSectionExpanded ? 'chevron-down' : 'chevron-forward'
+                }
+                size={18}
+                color="#6B7280"
+              />
             </TouchableOpacity>
-            <View style={screenStyles.buttonRow}>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  (!engineReady || busy || liveBusy) &&
-                    screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleExportToEditor().catch(() => {});
-                }}
-                disabled={!engineReady || busy || liveBusy}
-              >
-                {busyAction === 'exportEditor' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    To JSON buffer
+            {exportSectionExpanded ? (
+              <>
+                <Text style={screenStyles.sectionHint}>
+                  Choose all enrolled speakers or one speaker, then write into
+                  the JSON buffer and/or a file.
+                </Text>
+                <Text style={screenStyles.fieldLabel}>Speakers to export</Text>
+                <TouchableOpacity
+                  style={[
+                    screenStyles.dropdownTrigger,
+                    (!engineReady || busy || liveBusy) &&
+                      screenStyles.buttonDisabled,
+                  ]}
+                  onPress={() => setExportSpeakerPickerOpen(true)}
+                  disabled={!engineReady || busy || liveBusy}
+                >
+                  <Text
+                    style={screenStyles.dropdownTriggerText}
+                    numberOfLines={1}
+                  >
+                    {exportSpeakerFilter === EXPORT_SPEAKER_ALL
+                      ? `All speakers (${enrolledSpeakers.length})`
+                      : exportSpeakerFilter}
                   </Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  (!engineReady || busy || liveBusy) &&
-                    screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleExportToJsonFile().catch(() => {});
-                }}
-                disabled={!engineReady || busy || liveBusy}
-              >
-                {busyAction === 'exportFile' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    To JSON file
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
+                  <Text style={screenStyles.dropdownChevron}>▼</Text>
+                </TouchableOpacity>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      (!engineReady || busy || liveBusy) &&
+                        screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleExportToEditor().catch(() => {});
+                    }}
+                    disabled={!engineReady || busy || liveBusy}
+                  >
+                    {busyAction === 'exportEditor' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        To JSON buffer
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      (!engineReady || busy || liveBusy) &&
+                        screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleExportToJsonFile().catch(() => {});
+                    }}
+                    disabled={!engineReady || busy || liveBusy}
+                  >
+                    {busyAction === 'exportFile' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        To JSON file
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
           </View>
 
           <View style={screenStyles.sectionBlock}>
-            <View style={screenStyles.jsonBufferHeaderRow}>
-              <Text style={[screenStyles.sectionLabel, { marginBottom: 0 }]}>
-                JSON buffer
-              </Text>
-              <TouchableOpacity
-                style={screenStyles.jsonBufferToggleBadge}
-                onPress={() => setJsonBufferExpanded((open) => !open)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={screenStyles.jsonBufferToggleBadgeText}>
-                  {jsonBufferExpanded
-                    ? 'Collapse'
-                    : enrollmentJson.trim()
-                      ? `Expand (${enrollmentJson.length} chars)`
-                      : 'Expand'}
+            <TouchableOpacity
+              style={screenStyles.collapseHeader}
+              onPress={() => setImportSectionExpanded((open) => !open)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            >
+              <Text style={screenStyles.collapseHeaderTitle}>Import</Text>
+              <Ionicons
+                name={
+                  importSectionExpanded ? 'chevron-down' : 'chevron-forward'
+                }
+                size={18}
+                color="#6B7280"
+              />
+            </TouchableOpacity>
+            {importSectionExpanded ? (
+              <>
+                <Text style={screenStyles.sectionHint}>
+                  Load a file into the JSON buffer, then apply it to the engine.
+                  Speaker names come only from the JSON (speakers[].name).
                 </Text>
-              </TouchableOpacity>
-            </View>
+                <View style={screenStyles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      (busy || liveBusy) && screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleImportFromFile().catch(() => {});
+                    }}
+                    disabled={busy || liveBusy}
+                  >
+                    {busyAction === 'importFile' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        Load file → buffer
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      screenStyles.primaryButton,
+                      screenStyles.flexButton,
+                      (!engineReady ||
+                        !enrollmentJson.trim() ||
+                        busy ||
+                        liveBusy) &&
+                        screenStyles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleImportFromEditor().catch(() => {});
+                    }}
+                    disabled={
+                      !engineReady ||
+                      !enrollmentJson.trim() ||
+                      busy ||
+                      liveBusy
+                    }
+                  >
+                    {busyAction === 'importEditor' ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={screenStyles.primaryButtonText}>
+                        Apply buffer
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          <View
+            style={screenStyles.sectionBlock}
+            onLayout={(e) => {
+              jsonBufferSectionYRef.current = e.nativeEvent.layout.y;
+            }}
+          >
+            <TouchableOpacity
+              style={screenStyles.collapseHeader}
+              onPress={() => setJsonBufferExpanded((open) => !open)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            >
+              <View style={screenStyles.collapseHeaderTitleWrap}>
+                <Text style={screenStyles.collapseHeaderTitle}>JSON buffer</Text>
+                {!jsonBufferExpanded && enrollmentJson.trim() ? (
+                  <Text style={screenStyles.collapseHeaderMeta}>
+                    {enrollmentJson.length} chars
+                  </Text>
+                ) : null}
+              </View>
+              <Ionicons
+                name={jsonBufferExpanded ? 'chevron-down' : 'chevron-forward'}
+                size={18}
+                color="#6B7280"
+              />
+            </TouchableOpacity>
             <Text style={screenStyles.sectionHint}>
               Editable SpeakerEnrollmentBundle. Paste here, load from a file, or
-              fill via Export. Collapse when the embeddings list gets long.
+              fill via Export.
             </Text>
             {jsonBufferExpanded ? (
               <TextInput
@@ -2227,7 +2388,10 @@ export default function SpeakerIdentificationScreen() {
                 onPress={() => setJsonBufferExpanded(true)}
                 disabled={busy || liveBusy}
               >
-                <Text style={screenStyles.jsonBufferCollapsedText} numberOfLines={2}>
+                <Text
+                  style={screenStyles.jsonBufferCollapsedText}
+                  numberOfLines={2}
+                >
                   {enrollmentJson.trim()
                     ? enrollmentJson.trim().slice(0, 120) +
                       (enrollmentJson.trim().length > 120 ? '…' : '')
@@ -2235,61 +2399,6 @@ export default function SpeakerIdentificationScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
-
-          <View style={screenStyles.sectionBlock}>
-            <Text style={screenStyles.sectionLabel}>Import</Text>
-            <Text style={screenStyles.sectionHint}>
-              Load a file into the JSON buffer, then apply it to the engine.
-              Speaker names come only from the JSON (speakers[].name), never
-              from the enroll name field.
-            </Text>
-            <View style={screenStyles.buttonRow}>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  (busy || liveBusy) && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleImportFromFile().catch(() => {});
-                }}
-                disabled={busy || liveBusy}
-              >
-                {busyAction === 'importFile' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Load file → buffer
-                  </Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  screenStyles.flexButton,
-                  (!engineReady ||
-                    !enrollmentJson.trim() ||
-                    busy ||
-                    liveBusy) &&
-                    screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleImportFromEditor().catch(() => {});
-                }}
-                disabled={
-                  !engineReady || !enrollmentJson.trim() || busy || liveBusy
-                }
-              >
-                {busyAction === 'importEditor' ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Apply buffer
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
 
@@ -2521,29 +2630,35 @@ const screenStyles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E5E7EB',
   },
-  sectionLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  jsonBufferHeaderRow: {
+  collapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
     marginBottom: 4,
+    minHeight: 28,
   },
-  jsonBufferToggleBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: '#E8F1FF',
+  collapseHeaderTitleWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
   },
-  jsonBufferToggleBadgeText: {
-    fontSize: 12,
+  collapseHeaderTitle: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#0F62FE',
+    color: '#111827',
+  },
+  collapseHeaderMeta: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
   },
   jsonBufferCollapsed: {
     borderWidth: 1,
@@ -2565,6 +2680,9 @@ const screenStyles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 12,
   },
+  statusAfterRun: {
+    marginTop: 12,
+  },
   fieldLabel: {
     fontSize: 13,
     fontWeight: '600',
@@ -2576,6 +2694,9 @@ const screenStyles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionPrimaryButton: {
+    marginTop: 12,
+  },
+  inlineProgress: {
     marginTop: 12,
   },
   progressStatusRow: {
