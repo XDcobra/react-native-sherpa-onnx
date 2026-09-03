@@ -223,6 +223,9 @@ This screen streams mixed audio from a file or microphone into live input buffer
 
 ## Speaker identification
 
+| ![Speaker identification 1](../docs/images/example/speaker_identification_1.png) | ![Speaker identification 2](../docs/images/example/speaker_identification_2.png) | ![Speaker identification 3](../docs/images/example/speaker_identification_3.png) |
+| --- | --- | --- |
+
 This screen enrolls named speakers from offline audio, then identify / verify / label speech segments. Toggle **Offline batch** vs **Live overload** (same embedding weights). Auto or custom model init (`ModelCategory.SpeakerEmbedding`). Offline segmentation can be Off (whole-buffer) or Auto (`segmentOfflineBuffer` → `enrollOfflineSegments` / `labelOfflineSegments`). Live labeling requires mandatory speech segmentation (`speech_energy_silence` / `speech_vad_model`) over file ingest or mic. Includes export/import of the enrollment JSON bundle. See [docs/speaker-identification-offline.md](../docs/speaker-identification-offline.md) and [docs/speaker-identification-live.md](../docs/speaker-identification-live.md).
 
 ## Speaker diarization (coming soon)
