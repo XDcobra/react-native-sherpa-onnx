@@ -1,7 +1,15 @@
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
-import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
+import type {
+  LiveSegmentBufferIdSource,
+  OfflineSegmentBufferIdSource,
+} from '../segmentbuffer/types';
 import type { SpeakerEmbeddingInitializeOptions } from '../speaker-embedding/types';
+import type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
 
 export type { OrchestrationProgress };
 
@@ -47,6 +55,32 @@ export type SpeakerIdentificationLabelOptions =
     onLabeled?: (event: SidLabeledSegmentEvent) => void;
   };
 
+/**
+ * Fired after each committed utterance is labeled during `labelLiveSegments`.
+ * No `totalSegments` — the live stream is unbounded.
+ */
+export type SidLiveLabeledSegmentEvent = {
+  segmentIndex: number;
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  durationMs: number;
+  /** Matched enrolled name, or null when below threshold / unknown. */
+  speakerName: string | null;
+  confidence?: number;
+};
+
+/**
+ * Options for `labelLiveSegments`.
+ * `segmentation` is mandatory (live-overload contract); SID owns the speech policy.
+ */
+export type SpeakerIdentificationLiveLabelOptions =
+  LiveOfflinePipelineBaseOptions &
+    SpeakerIdentificationThresholdOptions & {
+      onLabeled?: (event: SidLiveLabeledSegmentEvent) => void;
+      onError?: (error: unknown) => void;
+    };
+
 export interface SpeakerIdentificationEngine {
   readonly instanceId: string;
   readonly managerId: string;
@@ -87,6 +121,16 @@ export interface SpeakerIdentificationEngine {
     segmentsOut: OfflineSegmentBufferIdSource,
     options?: SpeakerIdentificationLabelOptions
   ): Promise<LabelOfflineSegmentsResult>;
+
+  /**
+   * Live overload: attach speech segmentation to `audioIn`, label each committed
+   * utterance into `segmentsOut`, and return a pipeline handle.
+   */
+  labelLiveSegments(
+    audioIn: LiveAudioBufferIdSource,
+    segmentsOut: LiveSegmentBufferIdSource,
+    options: SpeakerIdentificationLiveLabelOptions
+  ): Promise<SpeakerIdentificationPipelineHandle>;
 
   verify(
     name: string,

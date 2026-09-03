@@ -1,4 +1,7 @@
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import {
   appendLiveSegment,
@@ -10,17 +13,20 @@ import {
   resolveOfflineSegmentBufferId,
 } from '../segmentbuffer';
 import type {
+  LiveSegmentBufferIdSource,
   OfflineSegmentBufferIdSource,
   SegmentMeta,
 } from '../segmentbuffer/types';
 import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
+import { labelLiveSegments } from './live';
 import { createSpeakerIdentificationProgressSession } from './progress';
 import type {
   IdentifyResult,
   LabelOfflineSegmentsResult,
   SpeakerIdentificationEngine,
   SpeakerIdentificationLabelOptions,
+  SpeakerIdentificationLiveLabelOptions,
   SpeakerIdentificationOptions,
   SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
@@ -31,12 +37,16 @@ export type {
   LabelOfflineSegmentsResult,
   OrchestrationProgress,
   SidLabeledSegmentEvent,
+  SidLiveLabeledSegmentEvent,
   SpeakerIdentificationEngine,
   SpeakerIdentificationLabelOptions,
+  SpeakerIdentificationLiveLabelOptions,
   SpeakerIdentificationOptions,
   SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
 } from './types';
+
+export type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
 
 const DEFAULT_THRESHOLD = 0.5;
 
@@ -299,6 +309,20 @@ export async function createSpeakerIdentification(
       }
 
       return { labeledCount, unknownCount };
+    },
+    async labelLiveSegments(
+      audioIn: LiveAudioBufferIdSource,
+      segmentsOut: LiveSegmentBufferIdSource,
+      liveOptions: SpeakerIdentificationLiveLabelOptions
+    ) {
+      guard();
+      return labelLiveSegments(
+        engine,
+        manager,
+        audioIn,
+        segmentsOut,
+        liveOptions
+      );
     },
     async verify(
       name: string,

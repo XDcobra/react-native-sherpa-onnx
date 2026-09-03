@@ -437,9 +437,9 @@ describe('createSpeakerIdentification', () => {
     expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
 
     const firstProgressOrder = onProgress.mock.invocationCallOrder[0]!;
-    const firstSliceOrder =
-      audiobuffer.getOfflineAudioBufferSamplesSlice.mock
-        .invocationCallOrder[0]!;
+    const firstSliceOrder = (
+      audiobuffer.getOfflineAudioBufferSamplesSlice as unknown as jest.Mock
+    ).mock.invocationCallOrder[0]!;
     expect(firstProgressOrder).toBeLessThan(firstSliceOrder);
   });
 
