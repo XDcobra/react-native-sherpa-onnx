@@ -25,15 +25,22 @@ export type LabelOfflineSegmentsResult = {
   unknownCount: number;
 };
 
+export type VerifyOfflineSegmentsResult = {
+  matchCount: number;
+  mismatchCount: number;
+  /** Per speech-span match flags, in span order. */
+  matches: boolean[];
+};
+
 export type SpeakerIdentificationThresholdOptions = {
   /** Cosine similarity threshold in `[0, 1]`. Default `0.5`. */
   threshold?: number;
 };
 
-/** Shared by enrollOfflineSegments + label (progress only). */
+/** Shared by enroll / label / verify offline segment loops (progress). */
 export type SpeakerIdentificationSegmentOptions =
   SpeakerIdentificationThresholdOptions & {
-    /** Coarse start-of-step progress for multi-span enroll/label loops. */
+    /** Coarse start-of-step progress for multi-span enroll/label/verify loops. */
     onProgress?: (progress: OrchestrationProgress) => void;
   };
 
@@ -53,6 +60,23 @@ export type SidLabeledSegmentEvent = {
 export type SpeakerIdentificationLabelOptions =
   SpeakerIdentificationSegmentOptions & {
     onLabeled?: (event: SidLabeledSegmentEvent) => void;
+  };
+
+/** Fired after a speech span is verified against one enrolled name. */
+export type SidVerifiedSegmentEvent = {
+  segmentIndex: number;
+  totalSegments: number;
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  durationMs: number;
+  matched: boolean;
+};
+
+/** Options for `verifyOfflineSegments` only. */
+export type SpeakerIdentificationVerifyOptions =
+  SpeakerIdentificationSegmentOptions & {
+    onVerified?: (event: SidVerifiedSegmentEvent) => void;
   };
 
 /**
@@ -127,11 +151,15 @@ export interface SpeakerIdentificationEngine {
   ): Promise<void>;
 
   /**
-   * Enroll a named speaker from speech spans in an offline segment buffer.
-   * All non-empty speech ranges are extracted and averaged under `name`.
+   * Enroll from speech spans in an offline segment buffer.
+   *
+   * - `string`: all non-empty speech spans are extracted and averaged under that name.
+   * - `string[]`: one name per speech span (`names.length` must equal the speech-span
+   *   count after skipping silence/empty rows). Duplicate names in the list are
+   *   grouped and averaged under that speaker (same multi-embedding `add` path).
    */
   enrollOfflineSegments(
-    name: string,
+    nameOrNames: string | string[],
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
     options?: SpeakerIdentificationSegmentOptions
@@ -168,6 +196,17 @@ export interface SpeakerIdentificationEngine {
     audio: OfflineAudioBufferIdSource,
     options?: SpeakerIdentificationThresholdOptions
   ): Promise<boolean>;
+
+  /**
+   * Verify one enrolled name against each speech span (no segment Out buffer).
+   * Returns per-span match flags plus aggregate counts.
+   */
+  verifyOfflineSegments(
+    name: string,
+    audioIn: OfflineAudioBufferIdSource,
+    segmentsIn: OfflineSegmentBufferIdSource,
+    options?: SpeakerIdentificationVerifyOptions
+  ): Promise<VerifyOfflineSegmentsResult>;
 
   removeSpeaker(name: string): Promise<boolean>;
   listSpeakers(): Promise<string[]>;
