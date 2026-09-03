@@ -42,6 +42,7 @@ npm install react-native-sherpa-onnx
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
+- ✅ Speaker diarization: [Offline](./docs/diarization-offline.md)
 
 ### Pipeline & buffers
 
@@ -58,10 +59,6 @@ npm install react-native-sherpa-onnx
 - ✅ Runtime acceleration: [Execution providers](./docs/execution-providers.md)
 - ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/model-delivery-pad-odr.md) — install-time, fast-follow, on-demand
-
-### Planned / not yet
-
-- ⏳ Speaker diarization: [Diarization](./docs/diarization.md)
 
 ## How to start
 
@@ -358,7 +355,7 @@ Speaker identification uses **speaker-embedding** ONNX packs (WeSpeaker, 3D-Spea
 | **3D-Speaker** | `'3d-speaker'` | 3D-Speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | **NeMo** | `'nemo'` | NeMo speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 
-APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters) is still planned — see [Diarization](./docs/diarization.md).
+APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters): [Offline](./docs/diarization-offline.md).
 
 </details>
 
@@ -453,7 +450,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - [Execution providers](./docs/execution-providers.md) – CPU, NNAPI, XNNPACK, Core ML, QNN
 - [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cross-platform drift)
-- **Planned:** [Speaker diarization](./docs/diarization.md)
+- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Overview](./docs/diarization.md)
 
 ## Requirements
 
