@@ -103,6 +103,15 @@ export interface SpeakerEmbeddingDetectModelResult
   };
 }
 
+// ─── Diarization extension ─────────────────────────────────────────────
+
+export interface DiarizationDetectModelResult extends ModelDetectResultBase {
+  /** Resolved segmentation ONNX path from detection. */
+  paths?: {
+    model?: string;
+  };
+}
+
 // ─── Source separation extension ───────────────────────────────────────
 
 export interface SeparationDetectModelResult extends ModelDetectResultBase {

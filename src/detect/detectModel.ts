@@ -71,6 +71,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   enhancement: ModelCategory.Enhancement,
   separation: ModelCategory.Separation,
   speakerEmbedding: ModelCategory.SpeakerEmbedding,
+  diarization: ModelCategory.Diarization,
   alignment: ModelCategory.Alignment,
 };
 

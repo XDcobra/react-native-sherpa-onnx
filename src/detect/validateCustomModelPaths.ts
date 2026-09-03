@@ -24,6 +24,7 @@ export type CustomModelPathCategory =
   | ModelCategory.Enhancement
   | ModelCategory.Separation
   | ModelCategory.SpeakerEmbedding
+  | ModelCategory.Diarization
   | ModelCategory.Punctuation
   | ModelCategory.Alignment;
 

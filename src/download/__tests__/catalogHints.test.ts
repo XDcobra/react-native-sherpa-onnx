@@ -96,10 +96,10 @@ describe('categoryUsesCatalogDetect', () => {
     expect(categoryUsesCatalogDetect(ModelCategory.Punctuation)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Enhancement)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Separation)).toBe(true);
+    expect(categoryUsesCatalogDetect(ModelCategory.SpeakerEmbedding)).toBe(
+      true
+    );
+    expect(categoryUsesCatalogDetect(ModelCategory.Diarization)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Alignment)).toBe(true);
-  });
-
-  it('excludes diarization', () => {
-    expect(categoryUsesCatalogDetect(ModelCategory.Diarization)).toBe(false);
   });
 });

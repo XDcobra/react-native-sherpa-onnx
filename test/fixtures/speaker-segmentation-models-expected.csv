@@ -1,4 +1,4 @@
 asset_name,model_type
-sherpa-onnx-pyannote-segmentation-3-0.tar.bz2,
-sherpa-onnx-reverb-diarization-v1.tar.bz2,
-sherpa-onnx-reverb-diarization-v2.tar.bz2,
+sherpa-onnx-pyannote-segmentation-3-0.tar.bz2,pyannote
+sherpa-onnx-reverb-diarization-v1.tar.bz2,reverb
+sherpa-onnx-reverb-diarization-v2.tar.bz2,reverb
