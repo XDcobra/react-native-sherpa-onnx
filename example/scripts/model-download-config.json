@@ -29,6 +29,21 @@
       "category": "separation",
       "tag": "source-separation-models",
       "id": "sherpa-onnx-spleeter-2stems-fp16"
+    },
+    {
+      "category": "speakerEmbedding",
+      "tag": "speaker-recongition-models",
+      "id": "wespeaker_en_voxceleb_resnet34"
+    },
+    {
+      "category": "speakerEmbedding",
+      "tag": "speaker-recongition-models",
+      "id": "nemo_en_titanet_small"
+    },
+    {
+      "category": "speakerEmbedding",
+      "tag": "speaker-recongition-models",
+      "id": "3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k"
     }
   ]
 }

@@ -37,6 +37,8 @@ import type {
   SpeakerIdentificationOptions,
   SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
+  SpeakerIdentificationVerifyOptions,
+  VerifyOfflineSegmentsResult,
 } from './types';
 
 export type {
@@ -47,6 +49,7 @@ export type {
   OrchestrationProgress,
   SidLabeledSegmentEvent,
   SidLiveLabeledSegmentEvent,
+  SidVerifiedSegmentEvent,
   SpeakerEnrollmentBundle,
   SpeakerEnrollmentEntry,
   SpeakerIdentificationEngine,
@@ -55,6 +58,8 @@ export type {
   SpeakerIdentificationOptions,
   SpeakerIdentificationSegmentOptions,
   SpeakerIdentificationThresholdOptions,
+  SpeakerIdentificationVerifyOptions,
+  VerifyOfflineSegmentsResult,
 } from './types';
 
 export type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
@@ -126,9 +131,7 @@ function assertEnrollmentBundle(
   expectedModelKey: string | undefined
 ): void {
   if (bundle == null || typeof bundle !== 'object') {
-    throw new Error(
-      'SID_ENROLLMENT_BUNDLE_INVALID: bundle must be an object'
-    );
+    throw new Error('SID_ENROLLMENT_BUNDLE_INVALID: bundle must be an object');
   }
   if (bundle.version !== ENROLLMENT_BUNDLE_VERSION) {
     throw new Error(
@@ -138,7 +141,9 @@ function assertEnrollmentBundle(
     );
   }
   if (typeof bundle.dim !== 'number' || !Number.isFinite(bundle.dim)) {
-    throw new Error('SID_ENROLLMENT_BUNDLE_INVALID: dim must be a finite number');
+    throw new Error(
+      'SID_ENROLLMENT_BUNDLE_INVALID: dim must be a finite number'
+    );
   }
   if (bundle.dim !== expectedDim) {
     throw new Error(
@@ -157,9 +162,7 @@ function assertEnrollmentBundle(
     );
   }
   if (!Array.isArray(bundle.speakers)) {
-    throw new Error(
-      'SID_ENROLLMENT_BUNDLE_INVALID: speakers must be an array'
-    );
+    throw new Error('SID_ENROLLMENT_BUNDLE_INVALID: speakers must be an array');
   }
 }
 
@@ -178,6 +181,17 @@ function assertLabelOptions(options?: SpeakerIdentificationLabelOptions): void {
   if (options?.onLabeled != null && typeof options.onLabeled !== 'function') {
     throw new Error(
       'SID_INVALID_OPTIONS: options.onLabeled must be a function'
+    );
+  }
+}
+
+function assertVerifyOptions(
+  options?: SpeakerIdentificationVerifyOptions
+): void {
+  assertSegmentOptions(options);
+  if (options?.onVerified != null && typeof options.onVerified !== 'function') {
+    throw new Error(
+      'SID_INVALID_OPTIONS: options.onVerified must be a function'
     );
   }
 }
@@ -208,6 +222,40 @@ function collectSpeechSpans(segments: SegmentMeta[]): SegmentMeta[] {
       Number.isFinite(seg.endSample) &&
       seg.endSample > seg.startSample
   );
+}
+
+/**
+ * Expand `string | string[]` to one trimmed name per speech span.
+ * List length must match `speechSpanCount`; a single string is repeated.
+ */
+function resolvePerSpanSpeakerNames(
+  nameOrNames: string | string[],
+  speechSpanCount: number,
+  apiLabel: string
+): string[] {
+  if (Array.isArray(nameOrNames)) {
+    if (nameOrNames.length !== speechSpanCount) {
+      throw new Error(
+        `${apiLabel}() name list length (${nameOrNames.length}) must match speech span count (${speechSpanCount})`
+      );
+    }
+    const out: string[] = [];
+    for (let i = 0; i < nameOrNames.length; i++) {
+      const trimmed =
+        typeof nameOrNames[i] === 'string' ? nameOrNames[i]!.trim() : '';
+      if (trimmed.length === 0) {
+        throw new Error(`${apiLabel}() names[${i}] must be a non-empty string`);
+      }
+      out.push(trimmed);
+    }
+    return out;
+  }
+
+  const trimmed = nameOrNames.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`${apiLabel}() requires a non-empty speaker name`);
+  }
+  return Array.from({ length: speechSpanCount }, () => trimmed);
 }
 
 /**
@@ -259,6 +307,11 @@ export async function createSpeakerIdentification(
       if (trimmed.length === 0) {
         throw new Error('enroll() requires a non-empty speaker name');
       }
+      if (await manager.contains(trimmed)) {
+        throw new Error(
+          `Speaker '${trimmed}' is already enrolled. Remove them first or choose another name.`
+        );
+      }
       const buffers = Array.isArray(audio) ? audio : [audio];
       if (buffers.length === 0) {
         throw new Error('enroll() requires at least one audio buffer');
@@ -276,19 +329,13 @@ export async function createSpeakerIdentification(
       rememberEnrollment(trimmed, embeddings);
     },
     async enrollOfflineSegments(
-      name: string,
+      nameOrNames: string | string[],
       audioIn: OfflineAudioBufferIdSource,
       segmentsIn: OfflineSegmentBufferIdSource,
       segmentOptions?: SpeakerIdentificationSegmentOptions
     ): Promise<void> {
       guard();
       assertSegmentOptions(segmentOptions);
-      const trimmed = name.trim();
-      if (trimmed.length === 0) {
-        throw new Error(
-          'enrollOfflineSegments() requires a non-empty speaker name'
-        );
-      }
       resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const spans = collectSpeechSpans(
@@ -299,27 +346,51 @@ export async function createSpeakerIdentification(
           'enrollOfflineSegments() requires at least one non-empty speech span'
         );
       }
+
+      const trimmedPerSpan = resolvePerSpanSpeakerNames(
+        nameOrNames,
+        spans.length,
+        'enrollOfflineSegments'
+      );
+
+      const uniqueNames = [...new Set(trimmedPerSpan)];
+      for (const uniqueName of uniqueNames) {
+        if (await manager.contains(uniqueName)) {
+          throw new Error(
+            `Speaker '${uniqueName}' is already enrolled. Remove them first or choose another name.`
+          );
+        }
+      }
+
       const progressSession = createSpeakerIdentificationProgressSession(
         segmentOptions?.onProgress
       );
-      const embeddings: Float32Array[] = [];
+      const byName = new Map<string, Float32Array[]>();
       for (let i = 0; i < spans.length; i++) {
         const span = spans[i]!;
+        const speakerName = trimmedPerSpan[i]!;
         progressSession.emitStep(i, spans.length, spanDurationMs(span));
-        embeddings.push(
-          await engine.extractFromOfflineAudio(audioIn, {
-            startSample: span.startSample,
-            endSample: span.endSample,
-          })
-        );
+        const embedding = await engine.extractFromOfflineAudio(audioIn, {
+          startSample: span.startSample,
+          endSample: span.endSample,
+        });
+        const bucket = byName.get(speakerName);
+        if (bucket) {
+          bucket.push(embedding);
+        } else {
+          byName.set(speakerName, [embedding]);
+        }
       }
-      const ok = await manager.add(trimmed, embeddings);
-      if (!ok) {
-        throw new Error(
-          `Failed to enroll speaker '${trimmed}' (name may already exist)`
-        );
+
+      for (const [speakerName, embeddings] of byName) {
+        const ok = await manager.add(speakerName, embeddings);
+        if (!ok) {
+          throw new Error(
+            `Failed to enroll speaker '${speakerName}' (name may already exist)`
+          );
+        }
+        rememberEnrollment(speakerName, embeddings);
       }
-      rememberEnrollment(trimmed, embeddings);
     },
     async identify(
       audio: OfflineAudioBufferIdSource,
@@ -455,6 +526,73 @@ export async function createSpeakerIdentification(
         resolveThreshold(thresholdOptions)
       );
     },
+    async verifyOfflineSegments(
+      nameOrNames: string | string[],
+      audioIn: OfflineAudioBufferIdSource,
+      segmentsIn: OfflineSegmentBufferIdSource,
+      verifyOptions?: SpeakerIdentificationVerifyOptions
+    ): Promise<VerifyOfflineSegmentsResult> {
+      guard();
+      assertVerifyOptions(verifyOptions);
+      resolvePipelineAudioBufferId(audioIn);
+      resolveOfflineSegmentBufferId(segmentsIn);
+      const threshold = resolveThreshold(verifyOptions);
+      const spans = collectSpeechSpans(
+        await getOfflineSegmentBufferSegments(segmentsIn)
+      );
+      if (spans.length === 0) {
+        throw new Error(
+          'verifyOfflineSegments() requires at least one non-empty speech span'
+        );
+      }
+
+      const expectedPerSpan = resolvePerSpanSpeakerNames(
+        nameOrNames,
+        spans.length,
+        'verifyOfflineSegments'
+      );
+
+      const progressSession = createSpeakerIdentificationProgressSession(
+        verifyOptions?.onProgress
+      );
+      const matches: boolean[] = [];
+      let matchCount = 0;
+      let mismatchCount = 0;
+
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]!;
+        const expectedName = expectedPerSpan[i]!;
+        const durationMs = spanDurationMs(span);
+        progressSession.emitStep(i, spans.length, durationMs);
+        const embedding = await engine.extractFromOfflineAudio(audioIn, {
+          startSample: span.startSample,
+          endSample: span.endSample,
+        });
+        const matched = await manager.verify(
+          expectedName,
+          embedding,
+          threshold
+        );
+        matches.push(matched);
+        if (matched) {
+          matchCount += 1;
+        } else {
+          mismatchCount += 1;
+        }
+        verifyOptions?.onVerified?.({
+          segmentIndex: i,
+          totalSegments: spans.length,
+          startSample: span.startSample,
+          endSample: span.endSample,
+          sampleRate: span.sampleRate,
+          durationMs,
+          expectedName,
+          matched,
+        });
+      }
+
+      return { matchCount, mismatchCount, matches };
+    },
     async removeSpeaker(name: string): Promise<boolean> {
       guard();
       const trimmed = name.trim();
@@ -509,8 +647,7 @@ export async function createSpeakerIdentification(
             `SID_ENROLLMENT_BUNDLE_INVALID: speakers[${i}] must be an object`
           );
         }
-        const trimmed =
-          typeof entry.name === 'string' ? entry.name.trim() : '';
+        const trimmed = typeof entry.name === 'string' ? entry.name.trim() : '';
         if (trimmed.length === 0) {
           throw new Error(
             `SID_ENROLLMENT_BUNDLE_INVALID: speakers[${i}].name must be a non-empty string`

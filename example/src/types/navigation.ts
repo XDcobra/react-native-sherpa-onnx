@@ -13,6 +13,7 @@ export type RootStackParamList = {
   VAD: undefined;
   SegmentationShowcase: undefined;
   Diarization: undefined;
+  SpeakerIdentification: undefined;
   Enhancement: undefined;
   EnhancementStreaming: undefined;
   Separation: undefined;
@@ -35,6 +36,7 @@ export type FeatureId =
   | 'vad'
   | 'segmentation_showcase'
   | 'diarization'
+  | 'speaker_identification'
   | 'enhancement'
   | 'enhancement_streaming'
   | 'separation'

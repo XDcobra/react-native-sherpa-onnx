@@ -23,6 +23,8 @@
       "react-native-sherpa-onnx/diarization": ["../src/diarization/index.ts"],
       "react-native-sherpa-onnx/enhancement": ["../src/enhancement/index.ts"],
       "react-native-sherpa-onnx/separation": ["../src/separation/index.ts"],
+      "react-native-sherpa-onnx/speaker-embedding": ["../src/speaker-embedding/index.ts"],
+      "react-native-sherpa-onnx/speaker-identification": ["../src/speaker-identification/index.ts"],
       "react-native-sherpa-onnx/extraction": ["../src/extraction/index.ts"],
       "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"],
       "react-native-sherpa-onnx/fileio": ["../src/fileio/index.ts"]

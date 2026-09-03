@@ -37,7 +37,7 @@ npm install react-native-sherpa-onnx
 - ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
 - ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Streaming](./docs/separation-streaming.md)
+- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-streaming.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
@@ -342,7 +342,7 @@ Source separation splits mixed audio into stems (e.g. vocals / accompaniment).
 | **Spleeter** | `'spleeter'` | Two-stem pack (`vocals` + `accompaniment` ONNX). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
 | **UVR** | `'uvr'` | Single-model UVR-style separator. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
 
-APIs and initialization: [offline batch](./docs/separation-offline.md), [streaming / live overload](./docs/separation-streaming.md).
+APIs and initialization: [offline batch](./docs/separation-offline.md), [live overload](./docs/separation-streaming.md).
 
 </details>
 
@@ -425,6 +425,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
 - **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md) · [Android system engine](./docs/android-system-tts.md) *(Kotlin, opt-in)*
 - **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
+- **Source separation:** [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-streaming.md)
 - **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
@@ -483,7 +484,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/streaming), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline + live overload)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline + live overload)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
