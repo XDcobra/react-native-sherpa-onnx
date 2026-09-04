@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Finding 1 (native SID live) **done**. Findings 2–5 remain open.  
+**Status:** Findings 1–2 **done**. Findings 3–5 remain open.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding** and **speaker-identification** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance work stays in-process, no PCM or embedding vectors bouncing through JS.
 
@@ -58,38 +58,33 @@ That was a **triple PCM path** plus two embedding-related bridge calls.
 
 ---
 
-## 2. Finding — No native extract-by-range (HIGH)
+## 2. Finding — No native extract-by-range (HIGH) — **DONE**
 
-### Problem
+**Status:** Implemented. `computeSpeakerEmbeddingOffline(instanceId, bufferId, startSample?, endSample?)` reads an offline slice natively (`OfflineEntry.readSlice` / `pa_get_offline_samples_slice`). `extractFromOfflineAudio(audio, range?)` no longer stages PCM through JS.
 
-`SpeakerEmbeddingRunner` already supports `SampleRange` / ranged `Compute`. The TS engine still emulates ranges by **JS staging** on the **offline** path (`labelOfflineSegments` / `extractFromOfflineAudio` with range):
+### Problem (historical)
+
+The TS engine previously emulated ranges by **JS staging** on the offline path:
 
 ```ts
-// src/speaker-embedding/engine.ts — range path today
 getOfflineAudioBufferSamplesSlice(...)
 createOfflineAudioBufferFromSamples(...)
 computeSpeakerEmbeddingOffline(temp.bufferId)
 releasePipelineAudioBuffer(temp.bufferId)
 ```
 
-(Live labeling no longer uses this path after Finding 1.)
-
-### Direction
-
-Extend the bridge:
+### What shipped
 
 ```ts
 computeSpeakerEmbeddingOffline(
   instanceId: string,
   audioBufferId: string,
-  startSample?: number,
-  endSample?: number
-): Promise<{ embedding: number[] /* or ArrayBuffer — see §4 */ }>
+  startSample?: number | null,
+  endSample?: number | null
+): Promise<{ embedding: number[] }>
 ```
 
-Native side: read `[start, end)` from the offline/live registry (or mmap slice) and call `Runner::Compute` with ranges — **no** PCM through JS.
-
-**Priority:** High for offline label/enroll range paths.
+Half-open `[start, end)`; both omitted = full buffer; exactly one set = reject; zero-length = empty embedding without ONNX.
 
 ---
 
@@ -170,7 +165,7 @@ This is contention risk more than copy cost; listed for completeness after the t
 | Step | Finding | Effort | Impact | Status |
 |------|---------|--------|--------|--------|
 | C | §1 native SID live pipeline | Medium–large | Matches STT/TTS target architecture | **Done** |
-| A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | Open |
+| A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | **Done** |
 | B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | Open |
 | D | §4 JSI / unbox embeddings | Small–medium | Residual path for apps that still pull vectors | Open |
 | E | §5 JNI lock narrowing | Small | Contention hygiene | Open |
@@ -184,10 +179,12 @@ Instrument with a stable tag (e.g. `[SherpaOnnx:sid-live]` / `[SherpaOnnx:sid-br
 | Probe | What to log |
 |-------|-------------|
 | Live span (native worker) | `startSample`, `endSample`, frame count, compute/search/append |
-| Offline range (until §2) | JSI slice ms, createOffline ms, release ms |
+| Offline range extract | native slice + compute only (no JS staging) |
 | Extract/search TM (low-level APIs) | wall ms, dim |
 
 Success criteria for §1 (met): **no** PCM `Float32Array` in JS on the live label hot path; one `startSpeakerIdentificationOfflineLivePipeline` call per session; embedding vectors stay native unless the app calls low-level extract.
+
+Success criteria for §2 (met): ranged `extractFromOfflineAudio` calls `computeSpeakerEmbeddingOffline(..., start, end)` with **no** JSI slice / temp offline buffer.
 
 ---
 ## 8. Non-goals

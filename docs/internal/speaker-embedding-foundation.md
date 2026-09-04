@@ -198,7 +198,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
 - Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
-- Remaining SID bridge roundtrip fixes (range extract, combined identify, embedding marshalling) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Finding 1 native live **done**)
+- Remaining SID bridge roundtrip fixes (combined identify, embedding marshalling, JNI mutex) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Findings 1–2 **done**)
 
 ---
 
