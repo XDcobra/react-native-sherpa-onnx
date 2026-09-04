@@ -8,6 +8,8 @@
 
 #include "sherpa-onnx-model-path-fill.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -189,6 +191,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
 
 - (void)computeSpeakerEmbeddingOffline:(NSString *)instanceId
                         audioBufferId:(NSString *)audioBufferId
+                          startSample:(NSNumber *)startSample
+                            endSample:(NSNumber *)endSample
                               resolve:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject
 {
@@ -198,6 +202,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
   if (audioBufferId == nil || [audioBufferId length] == 0) {
     reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR", @"audioBufferId is required", nil);
+    return;
+  }
+
+  const bool hasStart = startSample != nil;
+  const bool hasEnd = endSample != nil;
+  if (hasStart != hasEnd) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
+           @"startSample and endSample must both be provided or both omitted",
+           nil);
     return;
   }
 
@@ -229,12 +242,37 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
 
   @try {
     std::vector<float> inputSamples;
-    int inputSr = 0;
-    if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
-      reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
-             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
-             nil);
-      return;
+    int inputSr = inSampleRate;
+
+    if (!hasStart) {
+      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+        reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+               nil);
+        return;
+      }
+    } else {
+      const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
+      const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
+      const int end = std::min(endRaw, inNumSamples);
+      const int frameCount = std::max(0, end - start);
+      if (frameCount == 0) {
+        resolve(@{ @"embedding": @[] });
+        return;
+      }
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_get_offline_samples_slice(
+              audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
+        NSString *code = sliceErrCode.empty()
+            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+        NSString *msg = sliceErrMsg.empty()
+            ? @"Failed to read offline audio slice"
+            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+        reject(code, msg, nil);
+        return;
+      }
     }
 
     std::vector<float> embedding;

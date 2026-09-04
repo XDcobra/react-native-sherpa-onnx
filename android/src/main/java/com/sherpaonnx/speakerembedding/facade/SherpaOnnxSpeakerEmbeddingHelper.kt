@@ -155,6 +155,8 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
   fun computeSpeakerEmbeddingOffline(
     instanceId: String,
     audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise,
   ) {
     if (!audioBufferId.startsWith("off_")) {
@@ -173,8 +175,43 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
       return
     }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
     try {
-      val inputSamples = audioInEntry.readAllSamples()
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          val out = Arguments.createMap()
+          out.putArray("embedding", Arguments.createArray())
+          promise.resolve(out)
+          return
+        }
+        inputSamples = audioInEntry.readSlice(start, frameCount)
+      }
+
       val result = nativeComputeEmbedding(
         instanceId,
         inputSamples,
@@ -465,6 +502,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     private const val BUFFER_KIND_MISMATCH = "SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH"
     private const val BUFFER_NOT_FOUND = "SPEAKER_EMBEDDING_BUFFER_NOT_FOUND"
     private const val BUFFER_EMPTY = "SPEAKER_EMBEDDING_BUFFER_EMPTY"
+    private const val INVALID_ARGUMENT = "SPEAKER_EMBEDDING_INVALID_ARGUMENT"
     private val SUPPORTED_TYPES = setOf("wespeaker", "3d-speaker", "nemo")
 
     @JvmStatic

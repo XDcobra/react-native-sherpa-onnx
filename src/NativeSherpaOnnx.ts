@@ -1622,7 +1622,9 @@ export interface Spec extends TurboModule {
 
   computeSpeakerEmbeddingOffline(
     instanceId: string,
-    audioBufferId: string
+    audioBufferId: string,
+    startSample?: number | null,
+    endSample?: number | null
   ): Promise<{ embedding: number[] }>;
 
   /**
