@@ -27,18 +27,25 @@ import {
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type {
   SegmentationPolicy,
+  SpeechPyannoteSegmentationPolicy,
   SpeechVadSegmentationPolicy,
 } from 'react-native-sherpa-onnx/segment';
 import {
   ModelCategory,
   onModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
+import { detectDiarizationModel } from 'react-native-sherpa-onnx/diarization';
 import {
   createOfflinePunctuation,
   type OfflinePunctuationEngine,
 } from 'react-native-sherpa-onnx/punctuation';
 import { detectVadModel } from 'react-native-sherpa-onnx/vad';
 import { getModelDisplayName, toDetectSource } from '../modelConfig';
+import {
+  getDiarizationSegmentationModelPathConfig,
+  loadDiarizationSegmentationModelCatalog,
+  type DiarizationSegmentationCatalogSnapshot,
+} from '../utils/diarizationSegmentationModelCatalog';
 import {
   getPunctuationModelPathConfig,
   loadPunctuationModelCatalog,
@@ -682,6 +689,216 @@ function VadPolicyFields({
   );
 }
 
+type PyannotePolicyFieldsProps = {
+  policy: SpeechPyannoteSegmentationPolicy;
+  disabled: boolean;
+  onPolicyChange: (policy: SegmentationPolicy) => void;
+};
+
+function PyannotePolicyFields({
+  policy,
+  disabled,
+  onPolicyChange,
+}: PyannotePolicyFieldsProps) {
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
+
+  const [snapshot, setSnapshot] =
+    useState<DiarizationSegmentationCatalogSnapshot | null>(null);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [statusLine, setStatusLine] = useState<string | null>(null);
+
+  const refreshCatalog = useCallback(async () => {
+    setLoadingCatalog(true);
+    setDetectError(null);
+    try {
+      const snap = await loadDiarizationSegmentationModelCatalog();
+      setSnapshot(snap);
+      setSelectedModelId((prev) => {
+        if (snap.entries.length === 0) {
+          return null;
+        }
+        if (prev && snap.entries.some((e) => e.id === prev)) {
+          return prev;
+        }
+        return snap.entries[0]!.id;
+      });
+    } catch (e) {
+      setDetectError(e instanceof Error ? e.message : String(e));
+      setSnapshot(null);
+    } finally {
+      setLoadingCatalog(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCatalog().catch(() => {});
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    const unsub = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Diarization) {
+        return;
+      }
+      refreshCatalog().catch(() => {});
+    });
+    return unsub;
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    if (!snapshot || !selectedModelId || snapshot.entries.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDetectError(null);
+      setStatusLine(null);
+      try {
+        const cfg = getDiarizationSegmentationModelPathConfig(selectedModelId, {
+          padModelIds: snapshot.padModelIds,
+          padModelsPath: snapshot.padModelsPath,
+          bundledFolders: snapshot.bundledFolders,
+          downloadedIds: new Set(snapshot.downloadedIds),
+        });
+        const fileSource = await toDetectSource(cfg);
+        const det = await detectDiarizationModel(fileSource, {
+          modelType: 'auto',
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!det.success) {
+          setDetectError(det.error ?? 'Diarization model detection failed.');
+          return;
+        }
+        onPolicyChange({
+          ...policyRef.current,
+          modelPath: fileSource,
+        } as SpeechPyannoteSegmentationPolicy);
+        setStatusLine(
+          `policy.modelPath set · detected: ${
+            det.modelType ?? 'ok'
+          } (${getModelDisplayName(selectedModelId)})`
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setDetectError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot, selectedModelId, onPolicyChange]);
+
+  const update = useCallback(
+    (patch: Partial<SpeechPyannoteSegmentationPolicy>) =>
+      onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
+    [policy, onPolicyChange]
+  );
+
+  return (
+    <>
+      <Text style={[s.noteText, { marginBottom: 6 }]}>
+        Choose a pyannote/reverb pack; detect sets{' '}
+        <Text style={{ fontWeight: '600' }}>policy.modelPath</Text>{' '}
+        (FileSource). Offline <Text style={{ fontWeight: '600' }}>
+          segmentOfflineBuffer
+        </Text>{' '}
+        only — live attach is rejected.
+      </Text>
+
+      {loadingCatalog ? (
+        <View style={s.vadLoadingRow}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={s.noteText}>Loading diarization packs…</Text>
+        </View>
+      ) : !snapshot || snapshot.entries.length === 0 ? (
+        <View style={s.vadWarningBox}>
+          <Text style={s.vadWarningText}>
+            No pyannote/reverb packs found. Add one under assets/models, PAD,
+            documents/models, or downloads (category: diarization).
+          </Text>
+        </View>
+      ) : (
+        <View style={s.vadModelScroll}>
+          {snapshot.entries.map((entry) => {
+            const active = selectedModelId === entry.id;
+            return (
+              <TouchableOpacity
+                key={entry.id}
+                style={[
+                  s.vadModelChip,
+                  active && s.vadModelChipActive,
+                  disabled && s.evaluatorChipDisabled,
+                ]}
+                onPress={() => {
+                  setSelectedModelId(entry.id);
+                  setDetectError(null);
+                }}
+                disabled={disabled}
+              >
+                <Text style={s.vadModelChipTitle}>{entry.label}</Text>
+                <Text style={s.vadModelChipId} numberOfLines={1}>
+                  {entry.id}
+                </Text>
+                {entry.recommended ? (
+                  <View style={s.vadRecommendedBadge}>
+                    <Text style={s.vadRecommendedBadgeText}>Recommended</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {detectError ? <Text style={s.vadErrorText}>{detectError}</Text> : null}
+      {statusLine && !detectError ? (
+        <Text style={s.vadOkText}>{statusLine}</Text>
+      ) : null}
+
+      <NumericField
+        label="Window shift ratio"
+        value={policy.windowShiftRatio}
+        placeholder="0.1"
+        disabled={disabled}
+        onChange={(v) => update({ windowShiftRatio: v })}
+      />
+      <NumericField
+        label="Min duration on (s)"
+        value={policy.minDurationOn}
+        placeholder="0.3"
+        disabled={disabled}
+        onChange={(v) => update({ minDurationOn: v })}
+      />
+      <NumericField
+        label="Min duration off (s)"
+        value={policy.minDurationOff}
+        placeholder="0.5"
+        disabled={disabled}
+        onChange={(v) => update({ minDurationOff: v })}
+      />
+      <NumericField
+        label="Min segment (ms)"
+        value={policy.minSegmentMs}
+        placeholder={ph(SEG_NUM_DEFAULTS.minSegmentMs)}
+        disabled={disabled}
+        onChange={(v) => update({ minSegmentMs: v })}
+      />
+      <NumericField
+        label="Max segment (ms)"
+        value={policy.maxSegmentMs}
+        placeholder={ph(SEG_NUM_DEFAULTS.maxSegmentMs)}
+        disabled={disabled}
+        onChange={(v) => update({ maxSegmentMs: v })}
+      />
+    </>
+  );
+}
+
 function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
@@ -740,49 +957,11 @@ function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
 
       {/* ── speech_pyannote_segmentation ── */}
       {evaluator === 'speech_pyannote_segmentation' && (
-        <>
-          <NumericField
-            label="Window shift ratio"
-            value={
-              typeof (policy as Record<string, unknown>).windowShiftRatio ===
-              'number'
-                ? ((policy as Record<string, unknown>)
-                    .windowShiftRatio as number)
-                : undefined
-            }
-            placeholder="0.1"
-            disabled={disabled}
-            onChange={(v) => update({ windowShiftRatio: v } as any)}
-          />
-          <NumericField
-            label="Min duration on (s)"
-            value={
-              typeof (policy as Record<string, unknown>).minDurationOn ===
-              'number'
-                ? ((policy as Record<string, unknown>).minDurationOn as number)
-                : undefined
-            }
-            placeholder="0.3"
-            disabled={disabled}
-            onChange={(v) => update({ minDurationOn: v } as any)}
-          />
-          <NumericField
-            label="Min duration off (s)"
-            value={
-              typeof (policy as Record<string, unknown>).minDurationOff ===
-              'number'
-                ? ((policy as Record<string, unknown>).minDurationOff as number)
-                : undefined
-            }
-            placeholder="0.5"
-            disabled={disabled}
-            onChange={(v) => update({ minDurationOff: v } as any)}
-          />
-          <Text style={s.evaluatorHint}>
-            Set policy.modelPath to a pyannote/reverb pack (FileSource). Live
-            attach is rejected — offline segmentOfflineBuffer only.
-          </Text>
-        </>
+        <PyannotePolicyFields
+          policy={policy as SpeechPyannoteSegmentationPolicy}
+          disabled={disabled}
+          onPolicyChange={onPolicyChange}
+        />
       )}
 
       {/* ── continuous_frames ── */}
@@ -880,9 +1059,14 @@ export function SegmentationPolicyControls({
       if (evaluator !== 'speech_energy_silence') {
         delete (base as Record<string, unknown>).silenceThresholdMs;
         delete (base as Record<string, unknown>).energyThresholdDb;
+        delete (base as Record<string, unknown>).hangoverMs;
+      }
+      if (
+        evaluator !== 'speech_energy_silence' &&
+        evaluator !== 'speech_pyannote_segmentation'
+      ) {
         delete (base as Record<string, unknown>).minSegmentMs;
         delete (base as Record<string, unknown>).maxSegmentMs;
-        delete (base as Record<string, unknown>).hangoverMs;
       }
       if (evaluator !== 'speech_vad_model') {
         delete (base as Record<string, unknown>).vadThreshold;
