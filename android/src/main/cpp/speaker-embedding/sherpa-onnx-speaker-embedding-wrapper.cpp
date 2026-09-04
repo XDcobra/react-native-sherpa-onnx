@@ -2,6 +2,7 @@
 
 #include "sherpa-onnx-validate-speaker-embedding.h"
 
+#include <mutex>
 #include <utility>
 
 namespace sherpaonnx {
@@ -214,6 +215,7 @@ void SpeakerEmbeddingExtractorWrapper::release() {
 
 class SpeakerEmbeddingManagerWrapper::Impl {
  public:
+  mutable std::mutex mu;
   speaker_embedding::SpeakerEmbeddingManagerCore core;
 };
 
@@ -223,50 +225,63 @@ SpeakerEmbeddingManagerWrapper::SpeakerEmbeddingManagerWrapper()
 SpeakerEmbeddingManagerWrapper::~SpeakerEmbeddingManagerWrapper() { release(); }
 
 bool SpeakerEmbeddingManagerWrapper::create(int32_t dim) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Create(dim).ok;
 }
 
 bool SpeakerEmbeddingManagerWrapper::add(const std::string& name,
                                          const std::vector<float>& flattened,
                                          int32_t count) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Add(name, flattened, count).ok;
 }
 
 bool SpeakerEmbeddingManagerWrapper::remove(const std::string& name) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Remove(name).ok;
 }
 
 std::string SpeakerEmbeddingManagerWrapper::search(
     const std::vector<float>& embedding, float threshold) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Search(embedding, threshold);
 }
 
 bool SpeakerEmbeddingManagerWrapper::verify(
     const std::string& name, const std::vector<float>& embedding,
     float threshold) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Verify(name, embedding, threshold);
 }
 
 bool SpeakerEmbeddingManagerWrapper::contains(const std::string& name) {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.Contains(name);
 }
 
 int32_t SpeakerEmbeddingManagerWrapper::numSpeakers() const {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.NumSpeakers();
 }
 
 std::vector<std::string> SpeakerEmbeddingManagerWrapper::allSpeakers() const {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.AllSpeakers();
 }
 
 int32_t SpeakerEmbeddingManagerWrapper::dim() const {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.dim();
 }
 
 bool SpeakerEmbeddingManagerWrapper::isInitialized() const {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.isReady();
 }
 
-void SpeakerEmbeddingManagerWrapper::release() { pImpl->core.Release(); }
+void SpeakerEmbeddingManagerWrapper::release() {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
+  pImpl->core.Release();
+}
 
 }  // namespace sherpaonnx
