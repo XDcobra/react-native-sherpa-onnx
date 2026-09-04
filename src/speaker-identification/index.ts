@@ -1,3 +1,4 @@
+import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
@@ -397,12 +398,13 @@ export async function createSpeakerIdentification(
       thresholdOptions?: SpeakerIdentificationThresholdOptions
     ): Promise<IdentifyResult> {
       guard();
-      const embedding = await engine.extractFromOfflineAudio(audio);
-      const name = await manager.search(
-        embedding,
+      const result = await SherpaOnnx.identifySpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        resolvePipelineAudioBufferId(audio),
         resolveThreshold(thresholdOptions)
       );
-      const trimmed = name.trim();
+      const trimmed = result.name.trim();
       return { name: trimmed.length > 0 ? trimmed : null };
     },
     async labelOfflineSegments(
@@ -445,12 +447,15 @@ export async function createSpeakerIdentification(
           const durationMs = spanDurationMs(span);
           progressSession.emitStep(i, spans.length, durationMs);
 
-          const embedding = await engine.extractFromOfflineAudio(audioIn, {
-            startSample: span.startSample,
-            endSample: span.endSample,
-          });
-          const rawName = await manager.search(embedding, threshold);
-          const trimmed = rawName.trim();
+          const result = await SherpaOnnx.identifySpeakerOffline(
+            engine.instanceId,
+            manager.managerId,
+            audioBufferId,
+            threshold,
+            span.startSample,
+            span.endSample
+          );
+          const trimmed = result.name.trim();
           const speakerName = trimmed.length > 0 ? trimmed : null;
           if (speakerName == null) {
             unknownCount += 1;
