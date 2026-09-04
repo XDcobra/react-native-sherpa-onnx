@@ -272,8 +272,8 @@ interface SpeakerIdentificationEngine {
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
 | `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
-| `verify` | Cosine check against one enrolled name (whole buffer). |
-| `verifyOfflineSegments` | Per speech span: extract → verify. `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
+| `verify` | Native `verifySpeakerOffline` cosine check against one enrolled name (whole buffer). |
+| `verifyOfflineSegments` | Per speech span: native `verifySpeakerOffline` (extract+verify in one call). `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
 | `exportEnrollments` / `importEnrollments` | Cross-session enrollment snapshot — see [Persistence](#persistence). |
 | `destroy` | Releases manager + drops extractor ref-count. |
 
@@ -325,7 +325,7 @@ await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
 
 ### `onVerified` (per-span result — `verifyOfflineSegments` only)
 
-Fires **after** extract + cosine verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → extract/verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
+Fires **after** native verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
 
 ```ts
 const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
@@ -373,7 +373,7 @@ SID does **not** invent the name list; the app supplies who each span belongs to
 
 ### Buffer-first embeddings
 
-PCM stays native via buffer ids. Only the compact embedding (`dim` floats, typically ~256) crosses the TurboModule for enroll/search — not the full waveform.
+PCM stays native via buffer ids. Identify / label / verify use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline`) so embeddings stay off the JS hot path. Only enroll (and low-level extract/search) still move compact `dim` floats (~256) across the TurboModule — not the full waveform.
 
 ### Persistence
 

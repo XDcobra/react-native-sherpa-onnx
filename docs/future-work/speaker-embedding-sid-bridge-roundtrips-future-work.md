@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–3 **done**. Findings 4–5 remain open.  
+**Status:** Findings 1–4 **done**. Finding 5 remains open.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding** and **speaker-identification** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance work stays in-process, no PCM or embedding vectors bouncing through JS.
 
@@ -114,29 +114,37 @@ identifySpeakerOffline(
 ): Promise<{ name: string }>
 ```
 
-Empty `name` = no match. Range rules match Finding 2. Combined `verifySpeakerOffline` is still open (verify path unchanged).
+Empty `name` = no match. Range rules match Finding 2. Combined `verifySpeakerOffline` shipped in Finding 4.
 
 ---
 
-## 4. Finding — Embedding transport as `number[]` / boxed floats (MEDIUM)
+## 4. Finding — Embedding transport as `number[]` / boxed floats (MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented (path D). Offline `verify` / `verifyOfflineSegments` call `verifySpeakerOffline` (compute + manager verify in one TM → `{ ok }`). Android `nativeComputeEmbedding` returns `jfloatArray` instead of boxed `ArrayList&lt;Float&gt;`. **No** embedding JSI in this finding; enroll and low-level extract still use TurboModule `number[]` (infrequent / app-facing). Optional later: JSI `ArrayBuffer` if apps need faster raw-vector pull.
+
+### Problem (historical)
 
 Return path (Android sketch):
 
-`std::vector<float>` → `ArrayList<Float>` (boxed) → `WritableArray` of doubles → JS `number[]` → TS `Float32Array`
+`std::vector<float>` → `ArrayList&lt;Float&gt;` (boxed) → `WritableArray` of doubles → JS `number[]` → TS `Float32Array`
 
-Inbound search/verify reverses a similar chain. Dim is small (~192–512) vs PCM, but live multiplies extract+search roundtrips. Audio already has JSI `ArrayBuffer` transport; embeddings do not.
+Inbound search/verify reversed a similar chain. Dim is small (~192–512) vs PCM; after Findings 1–3 the remaining product path that still crossed JS was verify.
 
-### Direction (pick one or combine)
+### What shipped
 
-1. **Prefer not crossing JS** for hot paths (§1 / §3) — best fix.
-2. If JS must see vectors: return / accept **`ArrayBuffer` / `Float32Array` via JSI** (extend `__SherpaOnnxJSI` or a dedicated embedding transfer id), same spirit as `getOfflineAudioBufferSamplesSlice`.
-3. On Android JNI interim: prefer `jfloatArray` (or fill `WritableArray` from `float*` without `ArrayList<Float>` boxing).
+```ts
+verifySpeakerOffline(
+  instanceId: string,
+  managerId: string,
+  audioBufferId: string,
+  name: string,
+  threshold: number,
+  startSample?: number | null,
+  endSample?: number | null
+): Promise<{ ok: boolean }>
+```
 
-Enrollment `manager.add` flatten to `number[]` is **low** priority (infrequent).
-
-**Priority:** Medium; collapses if §1/§3 land first.
+Zero-length range → `{ ok: false }` without ONNX. Android compute JNI uses `NewFloatArray` / `SetFloatArrayRegion` (same spirit as diarization).
 
 ---
 
@@ -165,7 +173,7 @@ This is contention risk more than copy cost; listed for completeness after the t
 | C | §1 native SID live pipeline | Medium–large | Matches STT/TTS target architecture | **Done** |
 | A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | **Done** |
 | B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | **Done** |
-| D | §4 JSI / unbox embeddings | Small–medium | Residual path for apps that still pull vectors | Open |
+| D | §4 combined verify + Android unbox (path D) | Small–medium | Residual verify path + JNI boxing hygiene | **Done** |
 | E | §5 JNI lock narrowing | Small | Contention hygiene | Open |
 
 ---
@@ -185,6 +193,8 @@ Success criteria for §1 (met): **no** PCM `Float32Array` in JS on the live labe
 Success criteria for §2 (met): ranged `extractFromOfflineAudio` calls `computeSpeakerEmbeddingOffline(..., start, end)` with **no** JSI slice / temp offline buffer.
 
 Success criteria for §3 (met): offline `identify` / `labelOfflineSegments` use `identifySpeakerOffline` only (no compute→JS→search); empty name maps to `null` in SID TS.
+
+Success criteria for §4 path D (met): offline `verify` / `verifyOfflineSegments` use `verifySpeakerOffline` only; Android compute returns `jfloatArray` (no `ArrayList&lt;Float&gt;` boxing). JSI embedding transport remains optional later.
 
 ---
 ## 8. Non-goals
