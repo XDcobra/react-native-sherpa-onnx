@@ -1628,6 +1628,19 @@ export interface Spec extends TurboModule {
   ): Promise<{ embedding: number[] }>;
 
   /**
+   * Compute embedding from an offline buffer (optional range) and search the
+   * manager in one native call. Empty `name` means no match above threshold.
+   */
+  identifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ name: string }>;
+
+  /**
    * Start a live-offline Speaker Identification pipeline.
    * Labels committed speech spans into a live segment buffer (payload.source = sid).
    */

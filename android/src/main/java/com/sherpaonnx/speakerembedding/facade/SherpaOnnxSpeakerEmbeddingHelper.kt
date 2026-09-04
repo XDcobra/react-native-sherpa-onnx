@@ -241,6 +241,97 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     }
   }
 
+  fun identifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise,
+  ) {
+    if (!audioBufferId.startsWith("off_")) {
+      promise.reject(
+        BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*) , got: $audioBufferId",
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+    if (audioInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioBufferId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
+      return
+    }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
+    try {
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          val out = Arguments.createMap()
+          out.putString("name", "")
+          promise.resolve(out)
+          return
+        }
+        inputSamples = audioInEntry.readSlice(start, frameCount)
+      }
+
+      val embedding =
+        computeEmbeddingFromSamples(
+          instanceId,
+          inputSamples,
+          audioInEntry.sampleRate,
+        )
+      val name = searchSpeaker(managerId, embedding, threshold.toFloat())
+      val out = Arguments.createMap()
+      out.putString("name", name)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      Log.e(TAG, "Speaker identify offline failed", e)
+      val message = e.message.orEmpty()
+      val code =
+        when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+      val detail =
+        when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker identify offline failed"
+        }
+      promise.reject(code, detail, e)
+    }
+  }
+
   fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
     nativeUnloadExtractor(instanceId)
     promise.resolve(null)
