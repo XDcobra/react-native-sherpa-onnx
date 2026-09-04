@@ -4810,12 +4810,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun diarizeOffline(
     instanceId: String,
     audioInBufferId: String,
+    segmentsOutBufferId: String,
     includeOverlap: Boolean?,
     promise: Promise
   ) {
     diarizationHelper.diarizeOffline(
       instanceId,
       audioInBufferId,
+      segmentsOutBufferId,
       includeOverlap == true,
       promise,
     )

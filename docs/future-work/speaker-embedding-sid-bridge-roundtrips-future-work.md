@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–5, **§6–§8**, and **§10** **done**. Open follow-up: **§9** (diarization native segment write). Optional later: embedding JSI.  
+**Status:** Findings 1–5, **§6–§10** **done**. Optional later: embedding JSI.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding**, **speaker-identification**, and **diarization** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID (and keep diarization) with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance / batch work stays in-process, no PCM or embedding vectors bouncing through JS on product hot paths.
 
@@ -22,7 +22,7 @@
 |-------|---------|
 | Shared C++ `SpeakerEmbeddingRunner` / `ManagerCore` | **Not** the bottleneck. Diarization already uses the same core **without** JS between embed and cluster — still the target pattern for compute. |
 | C++ registry weight sharing | **Win** (fewer ONNX loads). Orthogonal to transport cost. |
-| TurboModule `number[]` embeddings + JS live drain | **Was** the real cost on SID; Findings 1–5 and §8 closed product hot paths. Residuals: low-level extract, diarization post-result JS materialization. |
+| TurboModule `number[]` embeddings + JS live drain | **Was** the real cost on SID; Findings 1–5 and §8–§9 closed product hot paths. Residual: low-level extract (optional embedding JSI). |
 
 **Hop count from JS did not increase** at the shared-Runner migration. Findings 1–5 fixed live orchestration, range extract, combined identify/verify, Android embedding unbox, and Android JNI lock narrowing.
 
@@ -32,10 +32,10 @@ STT / TTS / Punctuation / Enhancement / Separation / SID live
   Native worker: read seg_live_* + PCM → infer → write outputs
   ✅ Target architecture (SID live met)
 
-Diarization offline compute
-  JS: buffer ids → diarizeOffline once
-  Native: PCM → embed → cluster → timeline
-  ✅ Compute path met; segment materialization still JS (Finding 9)
+Diarization offline
+  JS: buffer ids → diarizeOffline once (audioIn + segmentsOut)
+  Native: PCM → embed → cluster → populate seg_off_*
+  ✅ Target architecture met (Finding 9)
 ```
 
 ### Post–Finding 1–5 audit snapshot
@@ -45,7 +45,7 @@ Diarization offline compute
 | SID live / identify / verify | **Met** (no PCM/embedding through JS) |
 | SID enroll | **Met** (`enrollSpeakerOffline` compute+add; mirror from returned flats) |
 | Diarization compute→cluster | **Met** (in-process) |
-| Diarization result → offline segments | **Gap** — JS live-append materialize loop |
+| Diarization result → offline segments | **Met** (native `segmentsOut` populate; Finding 9) |
 | Android SID JNI lifetime | **Met** (`shared_ptr` + narrow map lock) |
 | Diarization JNI lifetime | **Met** (`shared_ptr` + narrow map lock; Finding 6) |
 | iOS SID TM mutex | **Met** (`shared_ptr` + narrow map lock; Finding 7) |
@@ -238,25 +238,27 @@ iOS `g_speaker_embedding_mutex` (TurboModule path in `SherpaOnnx+SpeakerEmbeddin
 
 ---
 
-## 9. Finding — Diarization result materialization still in JS (MEDIUM)
+## 9. Finding — Diarization result materialization still in JS (MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented. Product `diarizeOffline` takes `segmentsOutBufferId`, builds `kind: 'diarization'` records after `processMonoSamples`, and populates the empty offline segment buffer in-process (Android `OfflineSegmentEntry.populate` / iOS `g_seg_offline`). JS no longer live-appends the timeline. Return carries `segmentCount` (timeline array omitted on the write path). `reclusterDiarization` unchanged (cache-only).
 
-`diarizeOffline` returns a timeline `{ start, end, speaker }[]`. JS then materializes into the offline segment buffer via a live-append → finalize → populate loop (`materializeSegmentsIntoOfflineBuffer` in `src/diarization/index.ts`). Compute→cluster never left C++ (correct), but the **result write** is many small TurboModule hops — same class of “orchestration in JS” as pre-Finding-1 SID live, without PCM/embedding cost.
+### Problem (historical)
 
-### Direction
+`diarizeOffline` returned a timeline `{ start, end, speaker }[]`. JS then materialized via live-append → finalize → populate (`materializeSegmentsIntoOfflineBuffer`).
 
-Native write into the empty `segmentsOut` offline segment buffer (or one TM that accepts `audioIn` + `segmentsOut` and fills diarization segments with `kind: 'diarization'`), so JS only awaits completion / counts.
+### What shipped
 
-Public `diarize(audioIn, segmentsOut)` shape can stay; internal swap only.
+- Spec + Android Helper/Module + iOS Offline.mm: `segmentsOut` write
+- TS `diarize` passes `segmentOut` into TM; materialize helper removed
+- Unit tests assert no staging append/populate on success
 
-**Priority:** Medium. Medium–large effort. After Finding 6 (lifetime) so process + write share safe session ownership.
+**Priority:** Medium — **met**.
 
 ---
 
 ## 10. Finding — Stale foundation / cursor docs vs shipped diarization (LOW) — **DONE**
 
-**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at §9 / live diarization / pyannote evaluator — not greenfield native.
+**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at live diarization / pyannote evaluator / optional embedding JSI — not greenfield native.
 
 ### Problem (historical)
 
@@ -277,7 +279,7 @@ Offline diarization was shipped, but some internal docs still read as Phase-2-pl
 
 ## 11. Suggested implementation order
 
-Findings 1–5, §6–§8, and §10 are **done**. Remaining open follow-up:
+Findings 1–5 and §6–§10 are **done**. Remaining optional work:
 
 | Step | Finding | Effort | Impact | Status | Why this order |
 |------|---------|--------|--------|--------|----------------|
@@ -290,10 +292,10 @@ Findings 1–5, §6–§8, and §10 are **done**. Remaining open follow-up:
 | G | §6 diarization `shared_ptr` lifetime | Small–medium | Unload-during-process safety | **Done** | Same pattern as §5; prerequisite for §9 |
 | H | §7 iOS SID TM mutex parity | Small | Contention hygiene parity with Android | **Done** | Independent of enroll / segment write |
 | I | §8 combined enroll (no JS embedding add) | Medium | Closes last SID product embedding gap | **Done** | Builds on stable locks (§5/§7) |
-| J | §9 diarization native `segmentsOut` write | Medium–large | Drops JS materialize loop | Open | After §6 lifetime |
+| J | §9 diarization native `segmentsOut` write | Medium–large | Drops JS materialize loop | **Done** | After §6 lifetime |
 | K | Optional embedding JSI | Small–medium | Faster raw-vector apps only | Deferred | Only if low-level extract still hot in profiles |
 
-**Recommendation summary:** next **J** (diarization native `segmentsOut` write). Defer embedding JSI unless profiling shows low-level extract as a real cost.
+**Recommendation summary:** bridge roundtrip findings complete. Defer embedding JSI unless profiling shows low-level extract as a real cost.
 
 Draft an **explicit implementation plan per open finding** in that order (one finding at a time), same style as Findings 1–5.
 
@@ -327,9 +329,9 @@ Success criteria for §7 (met): iOS TM compute/identify/verify/manager ops do no
 
 Success criteria for §8 (met): `enroll` / `enrollOfflineSegments` do not call separate compute + `manager.add` with embedding `number[]` on the product path (mirror policy documented).
 
-Success criteria for §9: `diarize` fills `segmentsOut` natively (no JS per-segment materialize loop).
+Success criteria for §9 (met): `diarize` fills `segmentsOut` natively (no JS per-segment materialize loop).
 
-Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at §9 / live diarization — not greenfield native.
+Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at live diarization / optional embedding JSI — not greenfield native.
 
 ---
 

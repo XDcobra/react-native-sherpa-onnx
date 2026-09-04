@@ -17,21 +17,11 @@ import {
   getPipelineAudioBufferInfo,
   resolvePipelineAudioBufferId,
 } from '../audiobuffer';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import {
-  appendLiveSegment,
-  createLiveSegmentBuffer,
-  finalizeLiveSegmentBuffer,
   getPipelineSegmentBufferInfo,
-  populateOfflineSegmentBufferIfEmpty,
-  releasePipelineSegmentBuffer,
   resolveOfflineSegmentBufferId,
 } from '../segmentbuffer';
-import type {
-  OfflineSegmentBufferIdSource,
-  OfflineSegmentBufferInfo,
-  OfflineSegmentBufferRef,
-} from '../segmentbuffer/types';
+import type { OfflineSegmentBufferInfo } from '../segmentbuffer/types';
 import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import { isDetectionSource } from './types';
 import type {
@@ -174,51 +164,77 @@ export async function detectDiarizationModel(
   };
 }
 
-async function materializeSegmentsIntoOfflineBuffer(params: {
-  audioInBufferId: string;
-  segmentOutBufferId: string;
-  sampleRate: number;
-  segments: Array<{ start: number; end: number; speaker: number }>;
-}): Promise<number> {
-  const live = await createLiveSegmentBuffer({
-    sourceAudioBufferId: params.audioInBufferId,
-  });
-  try {
-    for (const seg of params.segments) {
-      const startSample = Math.max(
-        0,
-        Math.round(seg.start * params.sampleRate)
-      );
-      const endSample = Math.max(
-        startSample,
-        Math.round(seg.end * params.sampleRate)
-      );
-      const durationMs =
-        params.sampleRate > 0
-          ? ((endSample - startSample) / params.sampleRate) * 1000
-          : 0;
-      await appendLiveSegment(live.bufferId, {
-        kind: 'diarization',
-        sourceAudioBufferId: params.audioInBufferId,
-        startSample,
-        endSample,
-        sampleRate: params.sampleRate,
-        durationMs,
-        payload: {
-          source: 'diarization',
-          speaker: seg.speaker,
-        },
-      });
+async function finishDiarizeResult(params: {
+  nativeResult: {
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    segments?: Array<{ start: number; end: number; speaker: number }>;
+    segmentCount?: number;
+    numSpeakers: number;
+    sampleRate: number;
+    speakersPerFrame?: number[];
+  };
+  startedAtMs: number;
+  engineSampleRate: number;
+  diarizeOptions?: DiarizeOptions;
+}): Promise<DiarizeResult> {
+  const { nativeResult, startedAtMs, engineSampleRate, diarizeOptions } =
+    params;
+
+  if (!nativeResult.success) {
+    const code =
+      typeof nativeResult.errorCode === 'string' &&
+      nativeResult.errorCode.length > 0
+        ? nativeResult.errorCode
+        : DiarizationErrorCode.INVALID_ARGUMENT;
+    if (
+      code === DiarizationErrorCode.CANCELLED ||
+      code === 'DIARIZATION_CANCELLED'
+    ) {
+      return {
+        status: 'cancelled',
+        numSpeakers: 0,
+        segmentCount: 0,
+        sampleRate: nativeResult.sampleRate || engineSampleRate,
+        processingTimeMs: Date.now() - startedAtMs,
+      };
     }
-    await finalizeLiveSegmentBuffer(live.bufferId);
-    await populateOfflineSegmentBufferIfEmpty(
-      params.segmentOutBufferId,
-      live.bufferId
+    throw new Error(
+      `${code}: ${nativeResult.error?.trim() || 'diarization failed'}`
     );
-  } finally {
-    await releasePipelineSegmentBuffer(live.bufferId).catch(() => undefined);
   }
-  return params.segments.length;
+
+  const sr =
+    nativeResult.sampleRate > 0 ? nativeResult.sampleRate : engineSampleRate;
+  const count =
+    typeof nativeResult.segmentCount === 'number' &&
+    Number.isFinite(nativeResult.segmentCount)
+      ? Math.max(0, nativeResult.segmentCount)
+      : nativeResult.segments?.length ?? 0;
+
+  if (diarizeOptions?.onProgress) {
+    const progress: OrchestrationProgress = {
+      currentSegment: Math.max(1, count),
+      totalSegments: Math.max(1, count),
+      fraction: 1,
+      currentSegmentDurationMs: 0,
+      elapsedMs: Date.now() - startedAtMs,
+    };
+    diarizeOptions.onProgress(progress);
+  }
+
+  return {
+    status: 'complete',
+    numSpeakers: nativeResult.numSpeakers ?? 0,
+    segmentCount: count,
+    sampleRate: sr,
+    processingTimeMs: Date.now() - startedAtMs,
+    ...(diarizeOptions?.includeOverlap &&
+    Array.isArray(nativeResult.speakersPerFrame)
+      ? { speakersPerFrame: nativeResult.speakersPerFrame }
+      : {}),
+  };
 }
 
 export async function createDiarization(
@@ -256,95 +272,6 @@ export async function createDiarization(
     }
   };
 
-  const runMaterialize = async (
-    audioIn: OfflineAudioBufferIdSource,
-    segmentOut: OfflineSegmentBufferIdSource | OfflineSegmentBufferRef,
-    nativeResult: {
-      success: boolean;
-      error?: string;
-      errorCode?: string;
-      segments: Array<{ start: number; end: number; speaker: number }>;
-      numSpeakers: number;
-      sampleRate: number;
-      speakersPerFrame?: number[];
-    },
-    startedAtMs: number,
-    materializeOptions?: DiarizeOptions
-  ): Promise<DiarizeResult> => {
-    if (!nativeResult.success) {
-      const code =
-        typeof nativeResult.errorCode === 'string' &&
-        nativeResult.errorCode.length > 0
-          ? nativeResult.errorCode
-          : DiarizationErrorCode.INVALID_ARGUMENT;
-      if (
-        code === DiarizationErrorCode.CANCELLED ||
-        code === 'DIARIZATION_CANCELLED'
-      ) {
-        return {
-          status: 'cancelled',
-          numSpeakers: 0,
-          segmentCount: 0,
-          sampleRate: nativeResult.sampleRate || sampleRate,
-          processingTimeMs: Date.now() - startedAtMs,
-        };
-      }
-      throw new Error(
-        `${code}: ${nativeResult.error?.trim() || 'diarization failed'}`
-      );
-    }
-
-    const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
-    const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
-    const audioInfo = await getPipelineAudioBufferInfo(audioInBufferId);
-    if (audioInfo.kind !== 'offlinePcmBuffer') {
-      throw new Error(
-        `${DiarizationErrorCode.INVALID_ARGUMENT}: audioIn must be an offline audio buffer`
-      );
-    }
-    const segmentOutInfo = asOfflineSegmentBufferInfo(
-      await getPipelineSegmentBufferInfo(segmentOutBufferId),
-      'segmentOut'
-    );
-    if ((segmentOutInfo.segmentCount ?? 0) > 0) {
-      throw new Error(
-        `${DiarizationErrorCode.INVALID_ARGUMENT}: segmentOut must be an empty offline segment buffer`
-      );
-    }
-
-    const sr =
-      nativeResult.sampleRate > 0 ? nativeResult.sampleRate : sampleRate;
-    const count = await materializeSegmentsIntoOfflineBuffer({
-      audioInBufferId,
-      segmentOutBufferId,
-      sampleRate: sr,
-      segments: nativeResult.segments ?? [],
-    });
-
-    if (materializeOptions?.onProgress) {
-      const progress: OrchestrationProgress = {
-        currentSegment: Math.max(1, count),
-        totalSegments: Math.max(1, count),
-        fraction: 1,
-        currentSegmentDurationMs: 0,
-        elapsedMs: Date.now() - startedAtMs,
-      };
-      materializeOptions.onProgress(progress);
-    }
-
-    return {
-      status: 'complete',
-      numSpeakers: nativeResult.numSpeakers ?? 0,
-      segmentCount: count,
-      sampleRate: sr,
-      processingTimeMs: Date.now() - startedAtMs,
-      ...(materializeOptions?.includeOverlap &&
-      Array.isArray(nativeResult.speakersPerFrame)
-        ? { speakersPerFrame: nativeResult.speakersPerFrame }
-        : {}),
-    };
-  };
-
   return {
     instanceId,
     sampleRate,
@@ -362,6 +289,23 @@ export async function createDiarization(
 
       const startedAtMs = Date.now();
       const audioInBufferId = resolvePipelineAudioBufferId(audioIn);
+      const segmentOutBufferId = resolveOfflineSegmentBufferId(segmentOut);
+
+      const audioInfo = await getPipelineAudioBufferInfo(audioInBufferId);
+      if (audioInfo.kind !== 'offlinePcmBuffer') {
+        throw new Error(
+          `${DiarizationErrorCode.INVALID_ARGUMENT}: audioIn must be an offline audio buffer`
+        );
+      }
+      const segmentOutInfo = asOfflineSegmentBufferInfo(
+        await getPipelineSegmentBufferInfo(segmentOutBufferId),
+        'segmentOut'
+      );
+      if ((segmentOutInfo.segmentCount ?? 0) > 0) {
+        throw new Error(
+          `${DiarizationErrorCode.INVALID_ARGUMENT}: segmentOut must be an empty offline segment buffer`
+        );
+      }
 
       let abortHandler: (() => void) | null = null;
       try {
@@ -372,7 +316,9 @@ export async function createDiarization(
             });
           }
           abortHandler = () => {
-            SherpaOnnx.cancelDiarization(instanceId).catch(() => undefined);
+            Promise.resolve(SherpaOnnx.cancelDiarization(instanceId)).catch(
+              () => undefined
+            );
           };
           diarizeOptions.signal.addEventListener('abort', abortHandler);
         }
@@ -380,15 +326,15 @@ export async function createDiarization(
         const nativeResult = await SherpaOnnx.diarizeOffline(
           instanceId,
           audioInBufferId,
+          segmentOutBufferId,
           diarizeOptions?.includeOverlap === true
         );
-        return runMaterialize(
-          audioIn,
-          segmentOut,
+        return finishDiarizeResult({
           nativeResult,
           startedAtMs,
-          diarizeOptions
-        );
+          engineSampleRate: sampleRate,
+          diarizeOptions,
+        });
       } finally {
         if (abortHandler && diarizeOptions?.signal) {
           diarizeOptions.signal.removeEventListener('abort', abortHandler);

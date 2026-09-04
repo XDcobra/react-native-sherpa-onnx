@@ -155,7 +155,14 @@ export type DiarizationProcessNativeResult = {
   success: boolean;
   error?: string;
   errorCode?: string;
-  segments: Array<{ start: number; end: number; speaker: number }>;
+  /**
+   * Timeline in seconds. Returned by `reclusterDiarization`.
+   * Product `diarizeOffline` writes `segmentsOut` natively and may omit this
+   * (prefer `segmentCount`).
+   */
+  segments?: Array<{ start: number; end: number; speaker: number }>;
+  /** Number of segments written to `segmentsOut` (product `diarizeOffline`). */
+  segmentCount?: number;
   numSpeakers: number;
   sampleRate: number;
   speakersPerFrame?: number[];
@@ -1593,6 +1600,7 @@ export interface Spec extends TurboModule {
   diarizeOffline(
     instanceId: string,
     audioInBufferId: string,
+    segmentsOutBufferId: string,
     includeOverlap?: boolean
   ): Promise<DiarizationProcessNativeResult>;
 

@@ -84,8 +84,8 @@ Detects `pyannote` / `reverb` packs (prefers `model.onnx` over `model.int8.onnx`
 
 ### `engine.diarize(audioIn, segmentOut, options?)`
 
-Runs the full pipeline and materializes `{start,end,speaker}` into `segmentOut`
-(`kind: 'diarization'`, payload `{ source: 'diarization', speaker }`).
+Runs the full pipeline and writes `{start,end,speaker}` into `segmentOut`
+natively (`kind: 'diarization'`, payload `{ source: 'diarization', speaker }`).
 
 `segmentOut` must be an **empty** offline segment buffer.
 

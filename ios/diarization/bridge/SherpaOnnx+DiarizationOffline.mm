@@ -2,10 +2,12 @@
 #import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "sherpa-onnx-diarization-wrapper.h"
 #include "../core/DiarizationBridgeState.h"
 
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -54,6 +56,35 @@ NSDictionary *ProcessResultToDict(const sherpaonnx::DiarizationProcessResult &re
     @"segments": segments,
     @"numSpeakers": @(result.numSpeakers),
     @"sampleRate": @(result.sampleRate),
+  } mutableCopy];
+
+  if (!result.error.empty()) {
+    out[@"error"] = [NSString stringWithUTF8String:result.error.c_str()];
+  }
+  if (!result.errorCode.empty()) {
+    out[@"errorCode"] = [NSString stringWithUTF8String:result.errorCode.c_str()];
+  }
+  if (!result.speakersPerFrame.empty()) {
+    NSMutableArray *spf = [NSMutableArray arrayWithCapacity:result.speakersPerFrame.size()];
+    for (int32_t v : result.speakersPerFrame) {
+      [spf addObject:@(v)];
+    }
+    out[@"speakersPerFrame"] = spf;
+  }
+  return out;
+}
+
+/** Product diarize path: segments already written to segmentsOut; omit timeline array. */
+NSDictionary *ProcessResultToDictWritten(
+    const sherpaonnx::DiarizationProcessResult &result,
+    NSUInteger segmentCount,
+    int sampleRate) {
+  NSMutableDictionary *out = [@{
+    @"success": @(result.success),
+    @"segments": @[],
+    @"segmentCount": @(segmentCount),
+    @"numSpeakers": @(result.numSpeakers),
+    @"sampleRate": @(sampleRate),
   } mutableCopy];
 
   if (!result.error.empty()) {
@@ -172,6 +203,7 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
 
 - (void)diarizeOffline:(NSString *)instanceId
        audioInBufferId:(NSString *)audioInBufferId
+  segmentsOutBufferId:(NSString *)segmentsOutBufferId
         includeOverlap:(BOOL)includeOverlap
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
@@ -184,9 +216,19 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
     reject(@"DIARIZATION_BUFFER_NOT_FOUND", @"audioInBufferId is required", nil);
     return;
   }
+  if (segmentsOutBufferId == nil || [segmentsOutBufferId length] == 0 ||
+      ![segmentsOutBufferId hasPrefix:@"seg_off_"]) {
+    reject(@"DIARIZATION_ERROR",
+           [NSString stringWithFormat:
+               @"Expected empty offline segment buffer (seg_off_*) for segmentsOut, got: %@",
+               segmentsOutBufferId ?: @"(null)"],
+           nil);
+    return;
+  }
 
   std::string instanceIdStr = [instanceId UTF8String];
   std::string audioInId = [audioInBufferId UTF8String];
+  std::string segmentsOutId = [segmentsOutBufferId UTF8String];
   if (audioInId.find("off_") != 0) {
     reject(@"DIARIZATION_ERROR",
            [NSString stringWithFormat:@"Expected offline audio buffer (off_*) for audioIn, got: %@",
@@ -210,6 +252,24 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
            [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
            nil);
     return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_seg_mutex);
+    auto it = g_seg_offline.find(segmentsOutId);
+    if (it == g_seg_offline.end() || !it->second) {
+      reject(@"DIARIZATION_BUFFER_NOT_FOUND",
+             [NSString stringWithFormat:@"Offline segment buffer not found: %@",
+                                        segmentsOutBufferId],
+             nil);
+      return;
+    }
+    if (!it->second->segments.empty()) {
+      reject(@"DIARIZATION_ERROR",
+             @"segmentOut must be an empty offline segment buffer",
+             nil);
+      return;
+    }
   }
 
   dispatch_async(DiarizationSerialQueue(), ^{
@@ -242,7 +302,53 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
                nil);
         return;
       }
-      resolve(ProcessResultToDict(result));
+
+      const int sampleRate =
+          result.sampleRate > 0 ? result.sampleRate : inSampleRate;
+      std::vector<SegRecord> records;
+      records.reserve(result.segments.size());
+      for (const auto &seg : result.segments) {
+        const int startSample =
+            std::max(0, static_cast<int>(std::lround(seg.start * sampleRate)));
+        const int endSample =
+            std::max(startSample, static_cast<int>(std::lround(seg.end * sampleRate)));
+        const int durationMs =
+            sampleRate > 0 ? ((endSample - startSample) * 1000) / sampleRate : 0;
+        SegRecord r;
+        r.id = "seg_off_" + std::to_string(startSample) + "_" + std::to_string(endSample);
+        r.kind = "diarization";
+        r.sourceAudioBufferId = audioInId;
+        r.startSample = startSample;
+        r.endSample = endSample;
+        r.sampleRate = sampleRate;
+        r.durationMs = durationMs;
+        r.hasConfidence = false;
+        r.payloadJson =
+            std::string("{\"source\":\"diarization\",\"speaker\":") +
+            std::to_string(seg.speaker) + "}";
+        records.push_back(std::move(r));
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(g_seg_mutex);
+        auto it = g_seg_offline.find(segmentsOutId);
+        if (it == g_seg_offline.end() || !it->second) {
+          reject(@"DIARIZATION_BUFFER_NOT_FOUND",
+                 [NSString stringWithFormat:@"Offline segment buffer not found: %@",
+                                            segmentsOutBufferId],
+                 nil);
+          return;
+        }
+        if (!it->second->segments.empty()) {
+          reject(@"DIARIZATION_ERROR",
+                 @"segmentOut must be an empty offline segment buffer",
+                 nil);
+          return;
+        }
+        it->second->segments = std::move(records);
+      }
+
+      resolve(ProcessResultToDictWritten(result, result.segments.size(), sampleRate));
     } @catch (NSException *exception) {
       reject(@"DIARIZATION_ERROR",
              [NSString stringWithFormat:@"Diarization process failed: %@", exception.reason],

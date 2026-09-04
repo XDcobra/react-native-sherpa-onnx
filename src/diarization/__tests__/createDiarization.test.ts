@@ -59,6 +59,7 @@ jest.mock('../../segmentbuffer', () => ({
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
+import * as segmentbuffer from '../../segmentbuffer';
 import { createDiarization, DiarizationErrorCode } from '../index';
 
 describe('createDiarization', () => {
@@ -80,10 +81,7 @@ describe('createDiarization', () => {
     native.unloadDiarization.mockResolvedValue(undefined);
     native.diarizeOffline.mockResolvedValue({
       success: true,
-      segments: [
-        { start: 0, end: 1, speaker: 0 },
-        { start: 1.5, end: 2.5, speaker: 1 },
-      ],
+      segmentCount: 2,
       numSpeakers: 2,
       sampleRate: 16000,
     });
@@ -118,8 +116,14 @@ describe('createDiarization', () => {
     expect(native.diarizeOffline).toHaveBeenCalledWith(
       engine.instanceId,
       'off_audio',
+      'seg_off_out',
       false
     );
+    expect(segmentbuffer.createLiveSegmentBuffer).not.toHaveBeenCalled();
+    expect(segmentbuffer.appendLiveSegment).not.toHaveBeenCalled();
+    expect(
+      segmentbuffer.populateOfflineSegmentBufferIfEmpty
+    ).not.toHaveBeenCalled();
 
     await engine.destroy();
     expect(native.unloadDiarization).toHaveBeenCalledWith(engine.instanceId);
@@ -166,7 +170,7 @@ describe('createDiarization', () => {
       controller.abort();
       return {
         success: true,
-        segments: [],
+        segmentCount: 0,
         numSpeakers: 0,
         sampleRate: 16000,
       };

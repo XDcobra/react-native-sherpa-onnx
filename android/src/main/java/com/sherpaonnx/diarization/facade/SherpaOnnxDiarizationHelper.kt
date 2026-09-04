@@ -8,6 +8,9 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.diarization.core.DiarizationErrorCodes
+import com.sherpaonnx.segment.pipeline.SegmentPipelineException
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.segment.pipeline.SegmentRecord
 import java.util.concurrent.Executors
 
 internal class SherpaOnnxDiarizationHelper(
@@ -137,6 +140,7 @@ internal class SherpaOnnxDiarizationHelper(
   fun diarizeOffline(
     instanceId: String,
     audioInBufferId: String,
+    segmentsOutBufferId: String,
     includeOverlap: Boolean,
     promise: Promise,
   ) {
@@ -155,6 +159,13 @@ internal class SherpaOnnxDiarizationHelper(
       promise.reject(
         DiarizationErrorCodes.DIARIZATION_ERROR,
         "Expected offline audio buffer (off_*) for audioIn, got: $audioInBufferId",
+      )
+      return
+    }
+    if (segmentsOutBufferId.isBlank() || !segmentsOutBufferId.startsWith("seg_off_")) {
+      promise.reject(
+        DiarizationErrorCodes.DIARIZATION_ERROR,
+        "Expected empty offline segment buffer (seg_off_*) for segmentsOut, got: $segmentsOutBufferId",
       )
       return
     }
@@ -177,9 +188,26 @@ internal class SherpaOnnxDiarizationHelper(
           return@execute
         }
 
+        val offlineOut = SegmentPipelineRegistry.getOffline(segmentsOutBufferId)
+        if (offlineOut == null) {
+          promise.reject(
+            DiarizationErrorCodes.DIARIZATION_BUFFER_NOT_FOUND,
+            "Offline segment buffer not found: $segmentsOutBufferId",
+          )
+          return@execute
+        }
+        if (offlineOut.snapshotSegments().isNotEmpty()) {
+          promise.reject(
+            DiarizationErrorCodes.DIARIZATION_ERROR,
+            "segmentOut must be an empty offline segment buffer",
+          )
+          return@execute
+        }
+
         Log.i(
           DiarizationErrorCodes.TAG,
           "diarizeOffline: instanceId=$instanceId audioIn=$audioInBufferId " +
+            "segmentsOut=$segmentsOutBufferId " +
             "numSamples=${audioInEntry.numSamples} sampleRate=${audioInEntry.sampleRate}",
         )
         val inputSamples = audioInEntry.readAllSamples()
@@ -215,7 +243,60 @@ internal class SherpaOnnxDiarizationHelper(
           )
           return@execute
         }
-        promise.resolve(processResultToWritable(result))
+
+        val sampleRate =
+          (result["sampleRate"] as? Number)?.toInt()?.takeIf { it > 0 }
+            ?: audioInEntry.sampleRate
+        @Suppress("UNCHECKED_CAST")
+        val segments =
+          result["segments"] as? ArrayList<HashMap<String, Any>> ?: arrayListOf()
+        val records = ArrayList<SegmentRecord>(segments.size)
+        for (seg in segments) {
+          val startSec = (seg["start"] as? Number)?.toDouble() ?: 0.0
+          val endSec = (seg["end"] as? Number)?.toDouble() ?: 0.0
+          val speaker = (seg["speaker"] as? Number)?.toInt() ?: 0
+          val startSample =
+            kotlin.math
+              .round(startSec * sampleRate)
+              .toInt()
+              .coerceAtLeast(0)
+          val endSample =
+            kotlin.math
+              .round(endSec * sampleRate)
+              .toInt()
+              .coerceAtLeast(startSample)
+          val durationMs =
+            if (sampleRate > 0) {
+              ((endSample - startSample) * 1000) / sampleRate
+            } else {
+              0
+            }
+          records.add(
+            SegmentRecord(
+              id = "seg_off_${startSample}_${endSample}",
+              kind = "diarization",
+              sourceAudioBufferId = audioInBufferId,
+              startSample = startSample,
+              endSample = endSample,
+              sampleRate = sampleRate,
+              durationMs = durationMs,
+              confidence = null,
+              payloadJson = """{"source":"diarization","speaker":$speaker}""",
+            ),
+          )
+        }
+        try {
+          offlineOut.populate(records)
+        } catch (e: SegmentPipelineException) {
+          promise.reject(
+            e.code,
+            e.message ?: "Failed to populate offline segment buffer",
+            e,
+          )
+          return@execute
+        }
+
+        promise.resolve(processResultToWritableWritten(result, records.size, sampleRate))
       } catch (e: Exception) {
         Log.e(DiarizationErrorCodes.TAG, "diarizeOffline failed", e)
         promise.reject(
@@ -404,6 +485,39 @@ internal class SherpaOnnxDiarizationHelper(
     val numSpeakers = (result["numSpeakers"] as? Number)?.toInt() ?: 0
     map.putInt("numSpeakers", numSpeakers)
     val sampleRate = (result["sampleRate"] as? Number)?.toInt() ?: 0
+    map.putInt("sampleRate", sampleRate)
+
+    @Suppress("UNCHECKED_CAST")
+    val spf = result["speakersPerFrame"] as? ArrayList<*>
+    if (!spf.isNullOrEmpty()) {
+      val spfArr = Arguments.createArray()
+      for (entry in spf) {
+        val v = (entry as? Number)?.toInt() ?: continue
+        spfArr.pushInt(v)
+      }
+      if (spfArr.size() > 0) {
+        map.putArray("speakersPerFrame", spfArr)
+      }
+    }
+    return map
+  }
+
+  /** Product diarize path: segments already written to segmentsOut; omit timeline array. */
+  private fun processResultToWritableWritten(
+    result: HashMap<String, Any>,
+    segmentCount: Int,
+    sampleRate: Int,
+  ): WritableMap {
+    val map = Arguments.createMap()
+    map.putBoolean("success", result["success"] as? Boolean ?: false)
+    val error = result["error"] as? String
+    if (!error.isNullOrBlank()) map.putString("error", error)
+    val errorCode = result["errorCode"] as? String
+    if (!errorCode.isNullOrBlank()) map.putString("errorCode", errorCode)
+    map.putArray("segments", Arguments.createArray())
+    map.putInt("segmentCount", segmentCount)
+    val numSpeakers = (result["numSpeakers"] as? Number)?.toInt() ?: 0
+    map.putInt("numSpeakers", numSpeakers)
     map.putInt("sampleRate", sampleRate)
 
     @Suppress("UNCHECKED_CAST")
