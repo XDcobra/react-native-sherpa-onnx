@@ -4886,6 +4886,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun verifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    name: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.verifySpeakerOffline(
+      instanceId,
+      managerId,
+      audioBufferId,
+      name,
+      threshold,
+      startSample,
+      endSample,
+      promise,
+    )
+  }
+
   override fun startSpeakerIdentificationOfflineLivePipeline(
     instanceId: String,
     managerId: String,

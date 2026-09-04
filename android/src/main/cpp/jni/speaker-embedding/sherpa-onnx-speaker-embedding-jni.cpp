@@ -234,35 +234,18 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     return map;
   }
 
-  jclass listClass = env->FindClass("java/util/ArrayList");
-  jclass floatClass = env->FindClass("java/lang/Float");
-  if (!listClass || !floatClass) {
-    if (listClass) env->DeleteLocalRef(listClass);
-    if (floatClass) env->DeleteLocalRef(floatClass);
-    return map;
-  }
-  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
-  jmethodID listAdd =
-      env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
-  jmethodID floatValueOf =
-      env->GetStaticMethodID(floatClass, "valueOf", "(F)Ljava/lang/Float;");
-  jobject arr = env->NewObject(listClass, listInit);
-  if (arr && listAdd && floatValueOf) {
-    for (float v : embedding) {
-      jobject boxed =
-          env->CallStaticObjectMethod(floatClass, floatValueOf, v);
-      if (boxed) {
-        env->CallBooleanMethod(arr, listAdd, boxed);
-        env->DeleteLocalRef(boxed);
-      }
+  jfloatArray embArray =
+      env->NewFloatArray(static_cast<jsize>(embedding.size()));
+  if (embArray) {
+    if (!embedding.empty()) {
+      env->SetFloatArrayRegion(
+          embArray, 0, static_cast<jsize>(embedding.size()), embedding.data());
     }
     jstring key = env->NewStringUTF("embedding");
-    env->CallObjectMethod(map, mapPut, key, arr);
+    env->CallObjectMethod(map, mapPut, key, embArray);
     env->DeleteLocalRef(key);
+    env->DeleteLocalRef(embArray);
   }
-  if (arr) env->DeleteLocalRef(arr);
-  env->DeleteLocalRef(listClass);
-  env->DeleteLocalRef(floatClass);
   return map;
 }
 

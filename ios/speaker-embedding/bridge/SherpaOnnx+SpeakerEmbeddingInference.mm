@@ -477,6 +477,169 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
 }
 
+- (void)verifySpeakerOffline:(NSString *)instanceId
+                   managerId:(NSString *)managerId
+               audioBufferId:(NSString *)audioBufferId
+                        name:(NSString *)name
+                   threshold:(double)threshold
+                 startSample:(NSNumber *)startSample
+                   endSample:(NSNumber *)endSample
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR", @"instanceId is required", nil);
+    return;
+  }
+  if (managerId == nil || [managerId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR", @"managerId is required", nil);
+    return;
+  }
+  if (name == nil || [name length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR", @"name is required", nil);
+    return;
+  }
+  if (audioBufferId == nil || [audioBufferId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR", @"audioBufferId is required", nil);
+    return;
+  }
+
+  const bool hasStart = startSample != nil;
+  const bool hasEnd = endSample != nil;
+  if (hasStart != hasEnd) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
+           @"startSample and endSample must both be provided or both omitted",
+           nil);
+    return;
+  }
+
+  const std::string instanceIdStr = [instanceId UTF8String];
+  const std::string managerIdStr = [managerId UTF8String];
+  const std::string nameStr = [name UTF8String];
+  const std::string audioInId = [audioBufferId UTF8String];
+  if (audioInId.find("off_") != 0) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH",
+           [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioBufferId],
+           nil);
+    return;
+  }
+
+  int inSampleRate = 0;
+  int inNumSamples = 0;
+  std::string errCode;
+  std::string errMsg;
+  if (!pa_get_offline_metadata(audioInId, &inSampleRate, &inNumSamples, &errCode, &errMsg)) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioBufferId],
+           nil);
+    return;
+  }
+  if (inSampleRate <= 0 || inNumSamples <= 0) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+           [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+           nil);
+    return;
+  }
+
+  @try {
+    std::vector<float> inputSamples;
+    int inputSr = inSampleRate;
+
+    if (!hasStart) {
+      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+        reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+               nil);
+        return;
+      }
+    } else {
+      const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
+      const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
+      const int end = std::min(endRaw, inNumSamples);
+      const int frameCount = std::max(0, end - start);
+      if (frameCount == 0) {
+        resolve(@{ @"ok": @NO });
+        return;
+      }
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_get_offline_samples_slice(
+              audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
+        NSString *code = sliceErrCode.empty()
+            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+        NSString *msg = sliceErrMsg.empty()
+            ? @"Failed to read offline audio slice"
+            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+        reject(code, msg, nil);
+        return;
+      }
+    }
+
+    bool verified = false;
+    std::string computeError;
+    std::string computeErrorCode;
+    bool computeFailed = false;
+    bool managerMissing = false;
+    {
+      std::lock_guard<std::mutex> lock(
+          sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
+      auto extractorIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
+                             .find(instanceIdStr);
+      if (extractorIt ==
+              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
+                  .end() ||
+          extractorIt->second == nullptr || extractorIt->second->wrapper == nullptr ||
+          !extractorIt->second->wrapper->isInitialized()) {
+        reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+               [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
+               nil);
+        return;
+      }
+      auto managerIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
+                           .find(managerIdStr);
+      if (managerIt ==
+              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
+          managerIt->second == nullptr || managerIt->second->wrapper == nullptr) {
+        managerMissing = true;
+      } else {
+        std::vector<float> embedding =
+            extractorIt->second->wrapper->computeFromSamples(inputSamples, inputSr);
+        if (embedding.empty()) {
+          computeFailed = true;
+          computeError = extractorIt->second->wrapper->lastError();
+          computeErrorCode = extractorIt->second->wrapper->lastErrorCode();
+        } else {
+          verified = managerIt->second->wrapper->verify(
+              nameStr, embedding, static_cast<float>(threshold));
+        }
+      }
+    }
+    if (managerMissing) {
+      reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
+             [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
+             nil);
+      return;
+    }
+    if (computeFailed) {
+      NSString *code = computeErrorCode.empty()
+          ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+          : [NSString stringWithUTF8String:computeErrorCode.c_str()];
+      NSString *msg = computeError.empty()
+          ? @"Speaker embedding compute failed"
+          : [NSString stringWithUTF8String:computeError.c_str()];
+      reject(code, msg, nil);
+      return;
+    }
+
+    resolve(@{ @"ok": @(verified) });
+  } @catch (NSException *exception) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+           [NSString stringWithFormat:@"Speaker verify offline failed: %@", exception.reason],
+           nil);
+  }
+}
+
 - (void)unloadSpeakerEmbeddingExtractor:(NSString *)instanceId
                                 resolve:(RCTPromiseResolveBlock)resolve
                                  reject:(RCTPromiseRejectBlock)reject

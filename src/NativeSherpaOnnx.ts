@@ -1641,6 +1641,20 @@ export interface Spec extends TurboModule {
   ): Promise<{ name: string }>;
 
   /**
+   * Compute embedding from an offline buffer (optional range) and verify against
+   * a named enrollment in one native call.
+   */
+  verifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    name: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ ok: boolean }>;
+
+  /**
    * Start a live-offline Speaker Identification pipeline.
    * Labels committed speech spans into a live segment buffer (payload.source = sid).
    */

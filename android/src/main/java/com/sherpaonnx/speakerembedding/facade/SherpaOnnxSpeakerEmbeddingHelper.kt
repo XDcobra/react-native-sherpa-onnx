@@ -226,8 +226,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
         promise.reject(code, error)
         return
       }
-      @Suppress("UNCHECKED_CAST")
-      val embedding = result["embedding"] as? ArrayList<Float> ?: arrayListOf()
+      val embedding = result["embedding"] as? FloatArray ?: floatArrayOf()
       val arr = Arguments.createArray()
       for (v in embedding) {
         arr.pushDouble(v.toDouble())
@@ -327,6 +326,94 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
           message.contains(':') -> message.substringAfter(':').trim()
           message.isNotBlank() -> message
           else -> "Speaker identify offline failed"
+        }
+      promise.reject(code, detail, e)
+    }
+  }
+
+  fun verifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    name: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise,
+  ) {
+    if (!audioBufferId.startsWith("off_")) {
+      promise.reject(
+        BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*) , got: $audioBufferId",
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+    if (audioInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioBufferId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
+      return
+    }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
+    try {
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          promise.resolve(okMap(false))
+          return
+        }
+        inputSamples = audioInEntry.readSlice(start, frameCount)
+      }
+
+      val embedding =
+        computeEmbeddingFromSamples(
+          instanceId,
+          inputSamples,
+          audioInEntry.sampleRate,
+        )
+      val ok = verifySpeaker(managerId, name, embedding, threshold.toFloat())
+      promise.resolve(okMap(ok))
+    } catch (e: Exception) {
+      Log.e(TAG, "Speaker verify offline failed", e)
+      val message = e.message.orEmpty()
+      val code =
+        when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+      val detail =
+        when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker verify offline failed"
         }
       promise.reject(code, detail, e)
     }
@@ -502,10 +589,9 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
           ?: "Speaker embedding compute failed"
       throw IllegalStateException("$code: $error")
     }
-    @Suppress("UNCHECKED_CAST")
-    val embedding = result["embedding"] as? ArrayList<Float>
+    val embedding = result["embedding"] as? FloatArray
       ?: throw IllegalStateException("Speaker embedding compute missing embedding")
-    return FloatArray(embedding.size) { i -> embedding[i] }
+    return embedding
   }
 
   /**
@@ -519,6 +605,19 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
   ): String {
     val result = nativeManagerSearch(managerId, embedding, threshold)
     return (result?.get("name") as? String).orEmpty()
+  }
+
+  /**
+   * Synchronous verify for combined offline verify (worker / Helper; not Promise/TM).
+   */
+  fun verifySpeaker(
+    managerId: String,
+    name: String,
+    embedding: FloatArray,
+    threshold: Float,
+  ): Boolean {
+    val result = nativeManagerVerify(managerId, name, embedding, threshold)
+    return result?.get("ok") as? Boolean == true
   }
 
   private fun okMap(ok: Boolean): WritableMap {
