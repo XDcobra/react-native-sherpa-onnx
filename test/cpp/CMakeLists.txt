@@ -142,10 +142,34 @@ add_executable(diarization_core_test
 )
 target_include_directories(diarization_core_test PRIVATE
   "${DIARIZATION_CORE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
 )
 target_link_libraries(diarization_core_test PRIVATE ${DIARIZATION_GTEST_LIBS})
 add_test(NAME diarization_core_test COMMAND $<TARGET_FILE:diarization_core_test>)
 set_tests_properties(diarization_core_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# --- Speaker-embedding core (registry key; no sherpa C-API) ---
+# Full Acquire/Compute/Manager coverage needs a host sherpa C-API build (future);
+# until then device logcat verifies sharing (docs/internal/speaker-embedding-sharing-verification.md).
+set(SPEAKER_EMBEDDING_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding")
+set(SPEAKER_EMBEDDING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding")
+if(GTest_FOUND)
+  set(SPEAKER_EMBEDDING_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(SPEAKER_EMBEDDING_GTEST_LIBS gtest gtest_main)
+endif()
+
+add_executable(speaker_embedding_core_test
+  "${SPEAKER_EMBEDDING_TEST_DIR}/speaker_embedding_core_test.cpp"
+)
+target_include_directories(speaker_embedding_core_test PRIVATE
+  "${SPEAKER_EMBEDDING_CORE_DIR}"
+)
+target_link_libraries(speaker_embedding_core_test PRIVATE ${SPEAKER_EMBEDDING_GTEST_LIBS})
+add_test(NAME speaker_embedding_core_test COMMAND $<TARGET_FILE:speaker_embedding_core_test>)
+set_tests_properties(speaker_embedding_core_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
