@@ -14,7 +14,7 @@ Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
 Model detect is available on the SID package (`detectSpeakerEmbeddingModel`) and on **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
 
-SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (planned). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
+SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (offline available). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
 
 Live labeling is available via **`labelLiveSegments`** — see [speaker-identification-live.md](speaker-identification-live.md). Enrollment remains offline (`enroll` / `enrollOfflineSegments`).
 
@@ -192,7 +192,7 @@ function createSpeakerIdentification(
 
 `SpeakerIdentificationOptions` is the same union as speaker-embedding init (`initMode: 'auto' | 'custom'`, `modelSource` / `customConfig`, `numThreads`, `provider`, `debug`).
 
-The extractor is **ref-counted** so a future diarization engine can share the same weights. Each SID instance still owns its own **named-speaker manager**.
+The extractor is **ref-counted** so diarization can share the same weights via the C++ `SpeakerEmbeddingRunner` registry. Each SID instance still owns its own **named-speaker manager**.
 
 ### Engine methods
 
@@ -430,7 +430,7 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 | Identify result | `{ name: string \| null }` | Whole-buffer `identify` — no segment Out. |
 | Labeled timeline | `OfflineSegmentBuffer` (`seg_off_*`) | Empty `segmentsOut` filled with `payload.source: 'sid'`. |
 | UI / export | Segment metadata | Read via `getOfflineSegmentBufferSegments(...)`. |
-| Future diarization | Shared embedding engine | Same weights via extractor cache; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
+| Diarization | Shared embedding Runner | Same weights via C++ registry; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
 
 ```mermaid
 flowchart LR
@@ -525,7 +525,7 @@ JS-side SID guards (message match, not always a native `code`): empty speaker na
 - [Pipeline segment buffers — offline](segmentbuffer-offline.md) — speech payload `sid`
 - [VAD streaming](vad-streaming.md) — speech boundaries (when)
 - [Speaker Identification (live overload)](speaker-identification-live.md) — `labelLiveSegments`
-- [Speaker diarization](diarization.md) — anonymous clustering (planned; shared embedding foundation)
+- [Speaker diarization](diarization.md) — anonymous clustering (offline shipped; shared embedding foundation)
 - [Feature pipelines](feature-pipelines.md)
 - [Model detect](model-detect.md)
 - [Model setup](model-setup.md)
