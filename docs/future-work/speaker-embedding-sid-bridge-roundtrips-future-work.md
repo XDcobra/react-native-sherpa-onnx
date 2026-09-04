@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–5 and **§10** **done**. Open follow-ups: **§6–§9** (diarization lifetime, iOS mutex parity, enroll without JS embeddings, diarization native segment write). Optional later: embedding JSI.  
+**Status:** Findings 1–5, **§6**, and **§10** **done**. Open follow-ups: **§7–§9** (iOS mutex parity, enroll without JS embeddings, diarization native segment write). Optional later: embedding JSI.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding**, **speaker-identification**, and **diarization** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID (and keep diarization) with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance / batch work stays in-process, no PCM or embedding vectors bouncing through JS on product hot paths.
 
@@ -47,7 +47,7 @@ Diarization offline compute
 | Diarization compute→cluster | **Met** (in-process) |
 | Diarization result → offline segments | **Gap** — JS live-append materialize loop |
 | Android SID JNI lifetime | **Met** (`shared_ptr` + narrow map lock) |
-| Diarization JNI lifetime | **Gap** — raw pointer after unlock (Finding 6) |
+| Diarization JNI lifetime | **Met** (`shared_ptr` + narrow map lock; Finding 6) |
 | iOS SID TM mutex | **Gap** — still coarse on TurboModule paths (Finding 7) |
 | Internal docs / cursor rule | **Met** (Finding 10) |
 
@@ -184,23 +184,21 @@ Zero-length range → `{ ok: false }` without ONNX. Android compute JNI uses `Ne
 
 ---
 
-## 6. Finding — Diarization JNI lifetime (raw pointer after unlock) (MEDIUM)
+## 6. Finding — Diarization JNI lifetime (raw pointer after unlock) (MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented. Android `g_diarization_instances` and iOS `DiarizationBridgeState` hold `shared_ptr<DiarizationWrapper>`. Hot paths (`process` / `diarizeOffline`, `recluster`, `getClusterEmbeddings`, `cancel`) copy via `LookupDiarization` then run outside the map lock. Init replaces the map entry on success; unload cancels + move-out + erase (no in-place `release()`). Matches SID Finding 5.
 
-Diarization already unlocks `g_diarization_mutex` before `processMonoSamples` (good for cancel). The instance is held as a **raw pointer** copied under the lock. Unload / destroy while a process is running can UAF. SID Finding 5 fixed the analogous bug with `shared_ptr` map entries.
+### Problem (historical)
 
-Android: `android/.../jni/diarization/sherpa-onnx-diarization-jni.cpp`  
-iOS: same pattern under diarization bridge state.
+Diarization already unlocked `g_diarization_mutex` before `processMonoSamples` (good for cancel). The instance was held as a **raw pointer** copied under the lock. Unload / destroy while a process was running could UAF.
 
-### Direction
+### What shipped
 
-- Store diarization sessions as `shared_ptr` in the registry map.
-- Lookup → copy `shared_ptr` → unlock → `processMonoSamples` / recluster / get embeddings.
-- Unload erases the map entry only; in-flight holders keep the session alive until process finishes.
-- Re-init replaces the map entry (do not `release()` in place while others may hold the pointer).
+- Map type: `unique_ptr` → `shared_ptr`
+- `LookupDiarization` on Android JNI + iOS bridge
+- Replace-on-init; move-out unload; cancel still reaches in-flight wrapper
 
-**Priority:** Medium (correctness / concurrency hygiene). Small–medium effort. Do **before** larger diarization bridge refactors (Finding 9).
+**Priority:** Medium (correctness / concurrency hygiene). Prerequisite for Finding 9 — **met**.
 
 ---
 
@@ -276,7 +274,7 @@ Public `diarize(audioIn, segmentsOut)` shape can stay; internal swap only.
 
 ## 10. Finding — Stale foundation / cursor docs vs shipped diarization (LOW) — **DONE**
 
-**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at §6–§9 / live diarization / pyannote evaluator — not greenfield native.
+**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at §7–§9 / live diarization / pyannote evaluator — not greenfield native.
 
 ### Problem (historical)
 
@@ -297,7 +295,7 @@ Offline diarization was shipped, but some internal docs still read as Phase-2-pl
 
 ## 11. Suggested implementation order
 
-Findings 1–5 and §10 are **done**. Recommended order for the remaining open follow-ups (safety before larger API moves):
+Findings 1–5, §6, and §10 are **done**. Recommended order for the remaining open follow-ups (safety before larger API moves):
 
 | Step | Finding | Effort | Impact | Status | Why this order |
 |------|---------|--------|--------|--------|----------------|
@@ -307,13 +305,13 @@ Findings 1–5 and §10 are **done**. Recommended order for the remaining open f
 | D | §4 combined verify + Android unbox | Small–medium | Residual verify path + JNI boxing | **Done** | — |
 | E | §5 Android JNI lock narrowing | Small | Contention / lifetime hygiene | **Done** | — |
 | F | §10 docs sync (foundation + cursor rule) | Small | Stops stale “diarization missing” planning | **Done** | Cheap; clear mental model before more work |
-| G | §6 diarization `shared_ptr` lifetime | Small–medium | Unload-during-process safety | Open | Same pattern as §5; prerequisite for §9 |
+| G | §6 diarization `shared_ptr` lifetime | Small–medium | Unload-during-process safety | **Done** | Same pattern as §5; prerequisite for §9 |
 | H | §7 iOS SID TM mutex parity | Small | Contention hygiene parity with Android | Open | Independent of enroll / segment write |
 | I | §8 combined enroll (no JS embedding add) | Medium | Closes last SID product embedding gap | Open | Builds on stable locks (§5/§7) |
 | J | §9 diarization native `segmentsOut` write | Medium–large | Drops JS materialize loop | Open | After §6 lifetime |
 | K | Optional embedding JSI | Small–medium | Faster raw-vector apps only | Deferred | Only if enroll/low-level still hot in profiles |
 
-**Recommendation summary:** next `G → H → I → J` (diarization lifetime → iOS mutex → enroll TM → diarization segment write). Defer embedding JSI unless profiling shows enroll/low-level extract as a real cost.
+**Recommendation summary:** next `H → I → J` (iOS mutex → enroll TM → diarization segment write). Defer embedding JSI unless profiling shows enroll/low-level extract as a real cost.
 
 Draft an **explicit implementation plan per open finding** in that order (one finding at a time), same style as Findings 1–5.
 
@@ -341,7 +339,7 @@ Success criteria for §4 path D (met): offline `verify` / `verifyOfflineSegments
 
 Success criteria for §5 (met): Android JNI does not hold `g_speaker_embedding_mutex` across ONNX compute or manager C-API ops; maps use `shared_ptr`; ManagerWrapper serializes C-API calls.
 
-Success criteria for §6: diarization process holds a `shared_ptr` session; unload during process does not UAF.
+Success criteria for §6 (met): diarization process holds a `shared_ptr` session; unload during process does not UAF.
 
 Success criteria for §7: iOS TM compute/identify/verify/manager ops do not hold `g_speaker_embedding_mutex` across ONNX / C-API work.
 
@@ -349,7 +347,7 @@ Success criteria for §8: `enroll` / `enrollOfflineSegments` do not call separat
 
 Success criteria for §9: `diarize` fills `segmentsOut` natively (no JS per-segment materialize loop).
 
-Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at §6–§9 / live diarization — not greenfield native.
+Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at §7–§9 / live diarization — not greenfield native.
 
 ---
 

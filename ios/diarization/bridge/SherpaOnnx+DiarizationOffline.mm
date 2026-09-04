@@ -120,12 +120,8 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   dispatch_async(DiarizationSerialQueue(), ^{
     @try {
       std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-      auto &inst = sherpaonnx::diarization::bridge::g_diarization_instances[instanceIdStr];
-      if (inst == nullptr) {
-        inst = std::make_unique<sherpaonnx::DiarizationWrapper>();
-      } else {
-        inst->release();
-      }
+      // Replace the map entry so in-flight shared_ptrs keep the old wrapper.
+      auto inst = std::make_shared<sherpaonnx::DiarizationWrapper>();
 
       sherpaonnx::DiarizationInitializeResult result = inst->initialize(
           std::string([segmentationModel UTF8String]),
@@ -151,6 +147,9 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
         reject(errorCode, errorMsg, nil);
         return;
       }
+
+      sherpaonnx::diarization::bridge::g_diarization_instances[instanceIdStr] =
+          std::move(inst);
 
       NSMutableDictionary *out = [@{
         @"success": @YES,
@@ -224,18 +223,13 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
         return;
       }
 
-      sherpaonnx::DiarizationWrapper *wrapper = nullptr;
-      {
-        std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-        auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
-        if (it == sherpaonnx::diarization::bridge::g_diarization_instances.end() ||
-            it->second == nullptr) {
-          reject(@"DIARIZATION_NOT_INITIALIZED",
-                 [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
-                 nil);
-          return;
-        }
-        wrapper = it->second.get();
+      auto wrapper =
+          sherpaonnx::diarization::bridge::LookupDiarization(instanceIdStr);
+      if (!wrapper) {
+        reject(@"DIARIZATION_NOT_INITIALIZED",
+               [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
+               nil);
+        return;
       }
 
       sherpaonnx::DiarizationProcessResult result =
@@ -271,20 +265,17 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   std::string instanceIdStr = [instanceId UTF8String];
   dispatch_async(DiarizationSerialQueue(), ^{
     @try {
-      sherpaonnx::DiarizationProcessResult result;
-      {
-        std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-        auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
-        if (it == sherpaonnx::diarization::bridge::g_diarization_instances.end() ||
-            it->second == nullptr) {
-          reject(@"DIARIZATION_NOT_INITIALIZED",
-                 [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
-                 nil);
-          return;
-        }
-        result = it->second->recluster(static_cast<int32_t>(numClusters),
-                                       static_cast<float>(threshold));
+      auto wrapper =
+          sherpaonnx::diarization::bridge::LookupDiarization(instanceIdStr);
+      if (!wrapper) {
+        reject(@"DIARIZATION_NOT_INITIALIZED",
+               [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
+               nil);
+        return;
       }
+      sherpaonnx::DiarizationProcessResult result =
+          wrapper->recluster(static_cast<int32_t>(numClusters),
+                             static_cast<float>(threshold));
       if (!result.success) {
         reject(RejectCodeForProcess(result),
                result.error.empty()
@@ -314,19 +305,16 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   std::string instanceIdStr = [instanceId UTF8String];
   dispatch_async(DiarizationSerialQueue(), ^{
     @try {
-      std::vector<sherpaonnx::DiarizationClusterEmbeddingDto> embeddings;
-      {
-        std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-        auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
-        if (it == sherpaonnx::diarization::bridge::g_diarization_instances.end() ||
-            it->second == nullptr) {
-          reject(@"DIARIZATION_NOT_INITIALIZED",
-                 [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
-                 nil);
-          return;
-        }
-        embeddings = it->second->getClusterEmbeddings();
+      auto wrapper =
+          sherpaonnx::diarization::bridge::LookupDiarization(instanceIdStr);
+      if (!wrapper) {
+        reject(@"DIARIZATION_NOT_INITIALIZED",
+               [NSString stringWithFormat:@"Diarization instance not found: %@", instanceId],
+               nil);
+        return;
       }
+      std::vector<sherpaonnx::DiarizationClusterEmbeddingDto> embeddings =
+          wrapper->getClusterEmbeddings();
 
       NSMutableArray *out = [NSMutableArray arrayWithCapacity:embeddings.size()];
       for (const auto &entry : embeddings) {
@@ -359,11 +347,10 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   }
   const std::string instanceIdStr = [instanceId UTF8String];
   @try {
-    std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-    auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
-    if (it != sherpaonnx::diarization::bridge::g_diarization_instances.end() &&
-        it->second != nullptr) {
-      it->second->cancel();
+    auto wrapper =
+        sherpaonnx::diarization::bridge::LookupDiarization(instanceIdStr);
+    if (wrapper) {
+      wrapper->cancel();
     }
     resolve(nil);
   } @catch (NSException *exception) {
@@ -384,15 +371,19 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   const std::string instanceIdStr = [instanceId UTF8String];
   dispatch_async(DiarizationSerialQueue(), ^{
     @try {
-      std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
-      auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
-      if (it != sherpaonnx::diarization::bridge::g_diarization_instances.end()) {
-        if (it->second != nullptr) {
-          it->second->cancel();
-          it->second->release();
+      std::shared_ptr<sherpaonnx::DiarizationWrapper> doomed;
+      {
+        std::lock_guard<std::mutex> lock(sherpaonnx::diarization::bridge::g_diarization_mutex);
+        auto it = sherpaonnx::diarization::bridge::g_diarization_instances.find(instanceIdStr);
+        if (it != sherpaonnx::diarization::bridge::g_diarization_instances.end()) {
+          if (it->second) {
+            it->second->cancel();
+          }
+          doomed = std::move(it->second);
+          sherpaonnx::diarization::bridge::g_diarization_instances.erase(it);
         }
-        sherpaonnx::diarization::bridge::g_diarization_instances.erase(it);
       }
+      // Destructor releases when last shared_ptr drops (after in-flight process).
       resolve(nil);
     } @catch (NSException *exception) {
       reject(@"DIARIZATION_ERROR",

@@ -20,8 +20,16 @@
 namespace {
 
 std::mutex g_diarization_mutex;
-std::unordered_map<std::string, std::unique_ptr<sherpaonnx::DiarizationWrapper>>
+std::unordered_map<std::string, std::shared_ptr<sherpaonnx::DiarizationWrapper>>
     g_diarization_instances;
+
+std::shared_ptr<sherpaonnx::DiarizationWrapper> LookupDiarization(
+    const std::string& id) {
+  std::lock_guard<std::mutex> lock(g_diarization_mutex);
+  auto it = g_diarization_instances.find(id);
+  if (it == g_diarization_instances.end() || !it->second) return nullptr;
+  return it->second;
+}
 
 std::string CopyRequiredJstring(JNIEnv* env, jstring value) {
   if (value == nullptr) return {};
@@ -240,12 +248,8 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
   sherpaonnx::DiarizationInitializeResult result;
   {
     std::lock_guard<std::mutex> lock(g_diarization_mutex);
-    auto& inst = g_diarization_instances[instanceIdStr];
-    if (inst == nullptr) {
-      inst = std::make_unique<sherpaonnx::DiarizationWrapper>();
-    } else {
-      inst->release();
-    }
+    // Replace the map entry so in-flight shared_ptrs keep the old wrapper.
+    auto inst = std::make_shared<sherpaonnx::DiarizationWrapper>();
     result = inst->initialize(
         segmentationPath,
         embeddingPath,
@@ -267,6 +271,7 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
       );
       g_diarization_instances.erase(instanceIdStr);
     } else {
+      g_diarization_instances[instanceIdStr] = std::move(inst);
       LOGI(
           "nativeInitializeDiarization ok: instanceId=%s sampleRate=%d",
           instanceIdStr.c_str(),
@@ -315,19 +320,14 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcess
   env->GetFloatArrayRegion(samples, 0, n, input.data());
 
   // Unlock during process so nativeCancelDiarization can interrupt.
-  sherpaonnx::DiarizationWrapper* wrapper = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_diarization_mutex);
-    auto it = g_diarization_instances.find(instanceIdStr);
-    if (it == g_diarization_instances.end() || it->second == nullptr) {
-      LOGE("nativeProcessDiarization: instance not found: %s", instanceIdStr.c_str());
-      sherpaonnx::DiarizationProcessResult missing;
-      missing.success = false;
-      missing.errorCode = "DIARIZATION_NOT_INITIALIZED";
-      missing.error = "Diarization instance not found: " + instanceIdStr;
-      return DiarizationProcessResultToJava(env, missing);
-    }
-    wrapper = it->second.get();
+  auto wrapper = LookupDiarization(instanceIdStr);
+  if (!wrapper) {
+    LOGE("nativeProcessDiarization: instance not found: %s", instanceIdStr.c_str());
+    sherpaonnx::DiarizationProcessResult missing;
+    missing.success = false;
+    missing.errorCode = "DIARIZATION_NOT_INITIALIZED";
+    missing.error = "Diarization instance not found: " + instanceIdStr;
+    return DiarizationProcessResultToJava(env, missing);
   }
 
   sherpaonnx::DiarizationProcessResult result =
@@ -366,17 +366,14 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeReclust
   );
 
   sherpaonnx::DiarizationProcessResult result;
-  {
-    std::lock_guard<std::mutex> lock(g_diarization_mutex);
-    auto it = g_diarization_instances.find(instanceIdStr);
-    if (it == g_diarization_instances.end() || it->second == nullptr) {
-      result.success = false;
-      result.errorCode = "DIARIZATION_NOT_INITIALIZED";
-      result.error = "Diarization instance not found: " + instanceIdStr;
-      return DiarizationProcessResultToJava(env, result);
-    }
-    result = it->second->recluster(numClusters, threshold);
+  auto wrapper = LookupDiarization(instanceIdStr);
+  if (!wrapper) {
+    result.success = false;
+    result.errorCode = "DIARIZATION_NOT_INITIALIZED";
+    result.error = "Diarization instance not found: " + instanceIdStr;
+    return DiarizationProcessResultToJava(env, result);
   }
+  result = wrapper->recluster(numClusters, threshold);
   return DiarizationProcessResultToJava(env, result);
 }
 
@@ -389,15 +386,12 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeGetClus
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
 
   std::vector<sherpaonnx::DiarizationClusterEmbeddingDto> embeddings;
-  {
-    std::lock_guard<std::mutex> lock(g_diarization_mutex);
-    auto it = g_diarization_instances.find(instanceIdStr);
-    if (it == g_diarization_instances.end() || it->second == nullptr) {
-      LOGW("nativeGetClusterEmbeddings: instance not found: %s", instanceIdStr.c_str());
-      embeddings.clear();
-    } else {
-      embeddings = it->second->getClusterEmbeddings();
-    }
+  auto wrapper = LookupDiarization(instanceIdStr);
+  if (!wrapper) {
+    LOGW("nativeGetClusterEmbeddings: instance not found: %s", instanceIdStr.c_str());
+    embeddings.clear();
+  } else {
+    embeddings = wrapper->getClusterEmbeddings();
   }
 
   jclass listClass = env->FindClass("java/util/ArrayList");
@@ -461,10 +455,9 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeCancelD
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   LOGI("nativeCancelDiarization: instanceId=%s", instanceIdStr.c_str());
-  std::lock_guard<std::mutex> lock(g_diarization_mutex);
-  auto it = g_diarization_instances.find(instanceIdStr);
-  if (it != g_diarization_instances.end() && it->second != nullptr) {
-    it->second->cancel();
+  auto wrapper = LookupDiarization(instanceIdStr);
+  if (wrapper) {
+    wrapper->cancel();
   }
 }
 
@@ -476,15 +469,19 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeUnloadD
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   LOGI("nativeUnloadDiarization: instanceId=%s", instanceIdStr.c_str());
-  std::lock_guard<std::mutex> lock(g_diarization_mutex);
-  auto it = g_diarization_instances.find(instanceIdStr);
-  if (it != g_diarization_instances.end()) {
-    if (it->second != nullptr) {
-      it->second->cancel();
-      it->second->release();
+  std::shared_ptr<sherpaonnx::DiarizationWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(g_diarization_mutex);
+    auto it = g_diarization_instances.find(instanceIdStr);
+    if (it != g_diarization_instances.end()) {
+      if (it->second) {
+        it->second->cancel();
+      }
+      doomed = std::move(it->second);
+      g_diarization_instances.erase(it);
     }
-    g_diarization_instances.erase(it);
   }
+  // Destructor releases when last shared_ptr drops (after in-flight process).
 }
 
 }  // extern "C"
