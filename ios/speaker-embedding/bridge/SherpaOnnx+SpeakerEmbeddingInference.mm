@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -109,26 +110,11 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   const SpeakerEmbeddingInitScalars scalars = ParseSpeakerEmbeddingInitScalars(options);
 
   @try {
-    std::lock_guard<std::mutex> lock(
-        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-    auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                  .find(instanceIdStr);
-    if (it ==
-        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.end()) {
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors[instanceIdStr] =
-          std::make_unique<
-              sherpaonnx::speaker_embedding::bridge::SpeakerEmbeddingExtractorState>();
-    }
-
-    auto *inst =
-        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors[instanceIdStr]
-            .get();
-    if (inst->wrapper == nullptr) {
-      inst->wrapper =
-          std::make_unique<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
-    }
-
-    sherpaonnx::SpeakerEmbeddingInitializeResult result;
+    // Validate custom/auto args before allocating a wrapper under the map lock.
+    sherpaonnx::SpeakerEmbeddingModelPaths customPaths;
+    std::string customModelType;
+    std::string autoModelDir;
+    std::string autoModelType;
     if (isCustomInit) {
       NSString *modelType = options.modelType();
       if (modelType == nil || [modelType length] == 0 ||
@@ -143,14 +129,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
                @"custom init requires modelPaths", nil);
         return;
       }
-      sherpaonnx::SpeakerEmbeddingModelPaths paths;
-      FillSpeakerEmbeddingModelPathsFromDict((NSDictionary *)modelPathsObj, paths);
-      result = inst->wrapper->initializeCustom(
-          std::string([modelType UTF8String]),
-          paths,
-          scalars.numThreads,
-          scalars.provider,
-          scalars.debug);
+      customModelType = std::string([modelType UTF8String]);
+      FillSpeakerEmbeddingModelPathsFromDict((NSDictionary *)modelPathsObj, customPaths);
     } else {
       NSString *modelDir = options.modelDir();
       if (modelDir == nil || [modelDir length] == 0) {
@@ -158,24 +138,45 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
                @"modelDir is required for initMode auto", nil);
         return;
       }
-      NSString *modelType = options.modelType();
-      std::string modelTypeStr =
-          sherpaonnx::speaker_embedding::bridge::ModelTypeOrAuto(modelType);
-      result = inst->wrapper->initialize(
-          std::string([modelDir UTF8String]),
-          modelTypeStr,
+      autoModelDir = std::string([modelDir UTF8String]);
+      autoModelType = sherpaonnx::speaker_embedding::bridge::ModelTypeOrAuto(
+          options.modelType());
+    }
+
+    std::lock_guard<std::mutex> lock(
+        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
+    // Replace the map entry so in-flight shared_ptrs keep the old wrapper.
+    auto inst = std::make_shared<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
+
+    sherpaonnx::SpeakerEmbeddingInitializeResult result;
+    if (isCustomInit) {
+      result = inst->initializeCustom(
+          customModelType,
+          customPaths,
+          scalars.numThreads,
+          scalars.provider,
+          scalars.debug);
+    } else {
+      result = inst->initialize(
+          autoModelDir,
+          autoModelType,
           scalars.numThreads,
           scalars.provider,
           scalars.debug);
     }
 
     if (!result.success) {
+      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.erase(
+          instanceIdStr);
       NSString *errorMsg = result.error.empty()
           ? @"Failed to initialize speaker embedding extractor"
           : [NSString stringWithUTF8String:result.error.c_str()];
       reject(@"SPEAKER_EMBEDDING_INIT_ERROR", errorMsg, nil);
       return;
     }
+
+    sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors[instanceIdStr] =
+        std::move(inst);
 
     resolve(@{
       @"success": @YES,
@@ -275,31 +276,19 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       }
     }
 
-    std::vector<float> embedding;
-    std::string computeError;
-    std::string computeErrorCode;
-    {
-      std::lock_guard<std::mutex> lock(
-          sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-      auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                    .find(instanceIdStr);
-      if (it ==
-              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                  .end() ||
-          it->second == nullptr || it->second->wrapper == nullptr ||
-          !it->second->wrapper->isInitialized()) {
-        reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
-               [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
-               nil);
-        return;
-      }
-      embedding = it->second->wrapper->computeFromSamples(inputSamples, inputSr);
-      if (embedding.empty()) {
-        computeError = it->second->wrapper->lastError();
-        computeErrorCode = it->second->wrapper->lastErrorCode();
-      }
+    auto extractor =
+        sherpaonnx::speaker_embedding::bridge::LookupExtractor(instanceIdStr);
+    if (!extractor || !extractor->isInitialized()) {
+      reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+             [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
+             nil);
+      return;
     }
+    std::vector<float> embedding =
+        extractor->computeFromSamples(inputSamples, inputSr);
     if (embedding.empty()) {
+      const std::string &computeError = extractor->lastError();
+      const std::string &computeErrorCode = extractor->lastErrorCode();
       NSString *code = computeErrorCode.empty()
           ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
           : [NSString stringWithUTF8String:computeErrorCode.c_str()];
@@ -411,52 +400,27 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       }
     }
 
-    std::string matchedName;
-    std::string computeError;
-    std::string computeErrorCode;
-    bool computeFailed = false;
-    bool managerMissing = false;
-    {
-      std::lock_guard<std::mutex> lock(
-          sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-      auto extractorIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                             .find(instanceIdStr);
-      if (extractorIt ==
-              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                  .end() ||
-          extractorIt->second == nullptr || extractorIt->second->wrapper == nullptr ||
-          !extractorIt->second->wrapper->isInitialized()) {
-        reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
-               [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
-               nil);
-        return;
-      }
-      auto managerIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                           .find(managerIdStr);
-      if (managerIt ==
-              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-          managerIt->second == nullptr || managerIt->second->wrapper == nullptr) {
-        managerMissing = true;
-      } else {
-        std::vector<float> embedding =
-            extractorIt->second->wrapper->computeFromSamples(inputSamples, inputSr);
-        if (embedding.empty()) {
-          computeFailed = true;
-          computeError = extractorIt->second->wrapper->lastError();
-          computeErrorCode = extractorIt->second->wrapper->lastErrorCode();
-        } else {
-          matchedName =
-              managerIt->second->wrapper->search(embedding, static_cast<float>(threshold));
-        }
-      }
+    auto extractor =
+        sherpaonnx::speaker_embedding::bridge::LookupExtractor(instanceIdStr);
+    if (!extractor || !extractor->isInitialized()) {
+      reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+             [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
+             nil);
+      return;
     }
-    if (managerMissing) {
+    auto manager =
+        sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+    if (!manager) {
       reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
              [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
              nil);
       return;
     }
-    if (computeFailed) {
+    std::vector<float> embedding =
+        extractor->computeFromSamples(inputSamples, inputSr);
+    if (embedding.empty()) {
+      const std::string &computeError = extractor->lastError();
+      const std::string &computeErrorCode = extractor->lastErrorCode();
       NSString *code = computeErrorCode.empty()
           ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
           : [NSString stringWithUTF8String:computeErrorCode.c_str()];
@@ -466,6 +430,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       reject(code, msg, nil);
       return;
     }
+    std::string matchedName =
+        manager->search(embedding, static_cast<float>(threshold));
 
     resolve(@{
       @"name": [NSString stringWithUTF8String:matchedName.c_str()] ?: @""
@@ -576,52 +542,27 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       }
     }
 
-    bool verified = false;
-    std::string computeError;
-    std::string computeErrorCode;
-    bool computeFailed = false;
-    bool managerMissing = false;
-    {
-      std::lock_guard<std::mutex> lock(
-          sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-      auto extractorIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                             .find(instanceIdStr);
-      if (extractorIt ==
-              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                  .end() ||
-          extractorIt->second == nullptr || extractorIt->second->wrapper == nullptr ||
-          !extractorIt->second->wrapper->isInitialized()) {
-        reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
-               [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
-               nil);
-        return;
-      }
-      auto managerIt = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                           .find(managerIdStr);
-      if (managerIt ==
-              sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-          managerIt->second == nullptr || managerIt->second->wrapper == nullptr) {
-        managerMissing = true;
-      } else {
-        std::vector<float> embedding =
-            extractorIt->second->wrapper->computeFromSamples(inputSamples, inputSr);
-        if (embedding.empty()) {
-          computeFailed = true;
-          computeError = extractorIt->second->wrapper->lastError();
-          computeErrorCode = extractorIt->second->wrapper->lastErrorCode();
-        } else {
-          verified = managerIt->second->wrapper->verify(
-              nameStr, embedding, static_cast<float>(threshold));
-        }
-      }
+    auto extractor =
+        sherpaonnx::speaker_embedding::bridge::LookupExtractor(instanceIdStr);
+    if (!extractor || !extractor->isInitialized()) {
+      reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+             [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
+             nil);
+      return;
     }
-    if (managerMissing) {
+    auto manager =
+        sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+    if (!manager) {
       reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
              [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
              nil);
       return;
     }
-    if (computeFailed) {
+    std::vector<float> embedding =
+        extractor->computeFromSamples(inputSamples, inputSr);
+    if (embedding.empty()) {
+      const std::string &computeError = extractor->lastError();
+      const std::string &computeErrorCode = extractor->lastErrorCode();
       NSString *code = computeErrorCode.empty()
           ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
           : [NSString stringWithUTF8String:computeErrorCode.c_str()];
@@ -631,6 +572,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       reject(code, msg, nil);
       return;
     }
+    bool verified =
+        manager->verify(nameStr, embedding, static_cast<float>(threshold));
 
     resolve(@{ @"ok": @(verified) });
   } @catch (NSException *exception) {
@@ -649,17 +592,19 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string instanceIdStr = [instanceId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
-                .find(instanceIdStr);
-  if (it !=
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.end()) {
-    if (it->second != nullptr && it->second->wrapper != nullptr) {
-      it->second->wrapper->release();
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(
+        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
+    auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
+                  .find(instanceIdStr);
+    if (it !=
+        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.end()) {
+      doomed = std::move(it->second);
+      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.erase(it);
     }
-    sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors.erase(it);
   }
+  // Destructor releases when last shared_ptr drops (after in-flight compute).
   resolve(nil);
 }
 
@@ -682,27 +627,17 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   @try {
     std::lock_guard<std::mutex> lock(
         sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-    auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                  .find(managerIdStr);
-    if (it ==
-        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end()) {
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers[managerIdStr] =
-          std::make_unique<
-              sherpaonnx::speaker_embedding::bridge::SpeakerEmbeddingManagerState>();
-    }
-    auto *inst =
-        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers[managerIdStr]
-            .get();
-    if (inst->wrapper == nullptr) {
-      inst->wrapper = std::make_unique<sherpaonnx::SpeakerEmbeddingManagerWrapper>();
-    } else {
-      inst->wrapper->release();
-    }
-    if (!inst->wrapper->create(dimInt)) {
+    // Replace the map entry so in-flight shared_ptrs keep the old wrapper.
+    auto inst = std::make_shared<sherpaonnx::SpeakerEmbeddingManagerWrapper>();
+    if (!inst->create(dimInt)) {
+      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.erase(
+          managerIdStr);
       reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
              @"Failed to create speaker embedding manager", nil);
       return;
     }
+    sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers[managerIdStr] =
+        std::move(inst);
     resolve(@{ @"success": @YES });
   } @catch (NSException *exception) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
@@ -726,20 +661,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   const int32_t countInt = (int32_t)count;
   auto flat = NSArrayToFloatVector(embeddings);
 
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr ||
-      !it->second->wrapper->isInitialized()) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager || !manager->isInitialized()) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  bool ok = it->second->wrapper->add(
-      std::string([name UTF8String]), flat, countInt);
+  bool ok = manager->add(std::string([name UTF8String]), flat, countInt);
   resolve(@{ @"ok": @(ok) });
 }
 
@@ -753,18 +683,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string managerIdStr = [managerId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  bool ok = it->second->wrapper->remove(std::string([name UTF8String]));
+  bool ok = manager->remove(std::string([name UTF8String]));
   resolve(@{ @"ok": @(ok) });
 }
 
@@ -780,19 +707,16 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
   const std::string managerIdStr = [managerId UTF8String];
   auto emb = NSArrayToFloatVector(embedding);
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
   std::string name =
-      it->second->wrapper->search(emb, static_cast<float>(threshold));
+      manager->search(emb, static_cast<float>(threshold));
   resolve(@{
     @"name": [NSString stringWithUTF8String:name.c_str()] ?: @""
   });
@@ -811,18 +735,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
   const std::string managerIdStr = [managerId UTF8String];
   auto emb = NSArrayToFloatVector(embedding);
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  bool ok = it->second->wrapper->verify(
+  bool ok = manager->verify(
       std::string([name UTF8String]), emb, static_cast<float>(threshold));
   resolve(@{ @"ok": @(ok) });
 }
@@ -837,18 +758,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string managerIdStr = [managerId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  bool ok = it->second->wrapper->contains(std::string([name UTF8String]));
+  bool ok = manager->contains(std::string([name UTF8String]));
   resolve(@{ @"ok": @(ok) });
 }
 
@@ -861,18 +779,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string managerIdStr = [managerId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  resolve(@(it->second->wrapper->numSpeakers()));
+  resolve(@(manager->numSpeakers()));
 }
 
 - (void)speakerEmbeddingManagerAllSpeakerNames:(NSString *)managerId
@@ -884,18 +799,15 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string managerIdStr = [managerId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it == sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end() ||
-      it->second == nullptr || it->second->wrapper == nullptr) {
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
     reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
            [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
            nil);
     return;
   }
-  auto names = it->second->wrapper->allSpeakers();
+  auto names = manager->allSpeakers();
   NSMutableArray *arr = [NSMutableArray arrayWithCapacity:names.size()];
   for (const auto &n : names) {
     [arr addObject:[NSString stringWithUTF8String:n.c_str()] ?: @""];
@@ -912,17 +824,19 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     return;
   }
   const std::string managerIdStr = [managerId UTF8String];
-  std::lock_guard<std::mutex> lock(
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
-  auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
-                .find(managerIdStr);
-  if (it !=
-      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end()) {
-    if (it->second != nullptr && it->second->wrapper != nullptr) {
-      it->second->wrapper->release();
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(
+        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
+    auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers
+                  .find(managerIdStr);
+    if (it !=
+        sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.end()) {
+      doomed = std::move(it->second);
+      sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.erase(it);
     }
-    sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_managers.erase(it);
   }
+  // Destructor releases when last shared_ptr drops (after in-flight manager ops).
   resolve(nil);
 }
 

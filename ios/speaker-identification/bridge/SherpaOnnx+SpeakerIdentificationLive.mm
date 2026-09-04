@@ -67,29 +67,17 @@
   std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
-  sherpaonnx::SpeakerEmbeddingExtractorWrapper *extractor = nullptr;
-  sherpaonnx::SpeakerEmbeddingManagerWrapper *manager = nullptr;
-  {
-    using namespace sherpaonnx::speaker_embedding::bridge;
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto eit = g_speaker_embedding_extractors.find(instanceIdStr);
-    if (eit == g_speaker_embedding_extractors.end() ||
-        eit->second == nullptr ||
-        eit->second->wrapper == nullptr ||
-        !eit->second->wrapper->isInitialized()) {
-      reject(@"SID_INSTANCE_NOT_FOUND", @"Speaker embedding extractor not initialized", nil);
-      return;
-    }
-    auto mit = g_speaker_embedding_managers.find(managerIdStr);
-    if (mit == g_speaker_embedding_managers.end() ||
-        mit->second == nullptr ||
-        mit->second->wrapper == nullptr ||
-        !mit->second->wrapper->isInitialized()) {
-      reject(@"SID_MANAGER_NOT_FOUND", @"Speaker embedding manager not found", nil);
-      return;
-    }
-    extractor = eit->second->wrapper.get();
-    manager = mit->second->wrapper.get();
+  auto extractor =
+      sherpaonnx::speaker_embedding::bridge::LookupExtractor(instanceIdStr);
+  if (!extractor || !extractor->isInitialized()) {
+    reject(@"SID_INSTANCE_NOT_FOUND", @"Speaker embedding extractor not initialized", nil);
+    return;
+  }
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager || !manager->isInitialized()) {
+    reject(@"SID_MANAGER_NOT_FOUND", @"Speaker embedding manager not found", nil);
+    return;
   }
 
   auto inputEntry = pa_get_live_entry(audioInIdStr);
@@ -136,8 +124,8 @@
       segmentBufferIdStr,
       audioInIdStr,
       segmentsOutIdStr,
-      extractor,
-      manager,
+      std::move(extractor),
+      std::move(manager),
       threshold
     );
 

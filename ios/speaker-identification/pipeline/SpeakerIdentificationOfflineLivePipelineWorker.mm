@@ -33,8 +33,8 @@ SpeakerIdentificationOfflineLivePipelineWorker::SpeakerIdentificationOfflineLive
   std::string audioSegmentInputBufferId,
   std::string audioInBufferId,
   std::string segmentsOutBufferId,
-  sherpaonnx::SpeakerEmbeddingExtractorWrapper *extractor,
-  sherpaonnx::SpeakerEmbeddingManagerWrapper *manager,
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> extractor,
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> manager,
   float threshold
 )
   : OfflineLivePipelineWorker(
@@ -47,8 +47,8 @@ SpeakerIdentificationOfflineLivePipelineWorker::SpeakerIdentificationOfflineLive
     audioInput_(std::move(audioInput)),
     audioInBufferId_(std::move(audioInBufferId)),
     segmentsOutBufferId_(std::move(segmentsOutBufferId)),
-    extractor_(extractor),
-    manager_(manager),
+    extractor_(std::move(extractor)),
+    manager_(std::move(manager)),
     threshold_(threshold)
 {}
 

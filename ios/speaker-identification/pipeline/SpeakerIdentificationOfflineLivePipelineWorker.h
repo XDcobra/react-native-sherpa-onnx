@@ -15,8 +15,8 @@ public:
     std::string audioSegmentInputBufferId,
     std::string audioInBufferId,
     std::string segmentsOutBufferId,
-    sherpaonnx::SpeakerEmbeddingExtractorWrapper *extractor,
-    sherpaonnx::SpeakerEmbeddingManagerWrapper *manager,
+    std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> extractor,
+    std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> manager,
     float threshold
   );
 
@@ -27,7 +27,7 @@ private:
   std::shared_ptr<PaLiveEntry> audioInput_;
   std::string audioInBufferId_;
   std::string segmentsOutBufferId_;
-  sherpaonnx::SpeakerEmbeddingExtractorWrapper *extractor_ = nullptr;
-  sherpaonnx::SpeakerEmbeddingManagerWrapper *manager_ = nullptr;
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> extractor_;
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> manager_;
   float threshold_ = 0.5f;
 };
