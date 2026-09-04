@@ -1,6 +1,8 @@
 #ifndef SHERPA_ONNX_DIARIZATION_TYPES_H
 #define SHERPA_ONNX_DIARIZATION_TYPES_H
 
+#include "speaker-embedding-types.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -16,6 +18,9 @@ inline constexpr const char* kErrEmbedding = "DIARIZATION_EMBEDDING_ERROR";
 inline constexpr const char* kErrCancelled = "DIARIZATION_CANCELLED";
 inline constexpr const char* kErrNoSpeakers = "DIARIZATION_NO_SPEAKERS";
 inline constexpr const char* kErrInternal = "DIARIZATION_INTERNAL_ERROR";
+
+using SampleRange = ::sherpaonnx::speaker_embedding::SampleRange;
+using Status = ::sherpaonnx::speaker_embedding::Status;
 
 struct DiarizationSegment {
   float start = 0.f;
@@ -87,33 +92,12 @@ struct FloatMatrix {
   }
 };
 
-struct SampleRange {
-  int32_t start = 0;
-  int32_t end = 0;
-};
-
 struct ChunkSpeakerKey {
   int32_t chunk = 0;
   int32_t local_speaker = 0;
 
   bool operator==(const ChunkSpeakerKey& o) const {
     return chunk == o.chunk && local_speaker == o.local_speaker;
-  }
-};
-
-struct Status {
-  bool ok = true;
-  std::string code;
-  std::string message;
-
-  static Status Ok() { return {}; }
-
-  static Status Fail(const char* c, const std::string& msg) {
-    Status s;
-    s.ok = false;
-    s.code = c != nullptr ? c : kErrInternal;
-    s.message = msg;
-    return s;
   }
 };
 

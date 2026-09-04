@@ -1,5 +1,6 @@
 #include "speaker-embedding-runner.h"
 
+#include "speaker-embedding-registry-key.h"
 #include "sherpa-onnx/c-api/c-api.h"
 
 #include <cmath>
@@ -8,35 +9,22 @@
 #include <unordered_map>
 #include <utility>
 
-namespace sherpaonnx::diarization {
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define SE_RUNNER_LOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:SpeakerEmbedding", __VA_ARGS__)
+#else
+#define SE_RUNNER_LOGI(...) ((void)0)
+#endif
+
+namespace sherpaonnx::speaker_embedding {
 namespace {
-
-struct RegistryKey {
-  std::string model_path;
-  std::string provider;
-  int32_t num_threads = 1;
-
-  bool operator==(const RegistryKey& o) const {
-    return num_threads == o.num_threads && model_path == o.model_path &&
-           provider == o.provider;
-  }
-};
-
-struct RegistryKeyHash {
-  size_t operator()(const RegistryKey& k) const {
-    size_t h = std::hash<std::string>{}(k.model_path);
-    h ^= std::hash<std::string>{}(k.provider) + 0x9e3779b9 + (h << 6) +
-         (h >> 2);
-    h ^= std::hash<int32_t>{}(k.num_threads) + 0x9e3779b9 + (h << 6) +
-         (h >> 2);
-    return h;
-  }
-};
 
 struct SharedExtractor {
   RegistryKey key;
   const SherpaOnnxSpeakerEmbeddingExtractor* extractor = nullptr;
   int32_t dim = 0;
+  mutable std::mutex compute_mutex;
 
   ~SharedExtractor() {
     if (extractor != nullptr) {
@@ -91,16 +79,17 @@ Status SpeakerEmbeddingRunner::Acquire(const EmbeddingRunnerOptions& options) {
     return Status::Fail(kErrInvalidArgument, "embedding model path is empty");
   }
 
-  RegistryKey key;
-  key.model_path = options.model_path;
-  key.provider = options.provider.empty() ? "cpu" : options.provider;
-  key.num_threads = std::max(1, options.num_threads);
+  const RegistryKey key = MakeRegistryKey(options);
 
   std::lock_guard<std::mutex> lock(g_registry_mutex);
   auto it = g_registry.find(key);
   if (it != g_registry.end()) {
     if (auto existing = it->second.lock()) {
       impl_->shared = std::move(existing);
+      SE_RUNNER_LOGI(
+          "Acquire cache-hit model=%s provider=%s threads=%d debug=%d dim=%d",
+          key.model_path.c_str(), key.provider.c_str(), key.num_threads,
+          key.debug ? 1 : 0, impl_->shared->dim);
       return Status::Ok();
     }
     g_registry.erase(it);
@@ -110,13 +99,13 @@ Status SpeakerEmbeddingRunner::Acquire(const EmbeddingRunnerOptions& options) {
   std::memset(&config, 0, sizeof(config));
   config.model = key.model_path.c_str();
   config.num_threads = key.num_threads;
-  config.debug = options.debug ? 1 : 0;
+  config.debug = key.debug ? 1 : 0;
   config.provider = key.provider.c_str();
 
   const SherpaOnnxSpeakerEmbeddingExtractor* extractor =
       SherpaOnnxCreateSpeakerEmbeddingExtractor(&config);
   if (extractor == nullptr) {
-    return Status::Fail(kErrEmbedding,
+    return Status::Fail(kErrInit,
                         "SherpaOnnxCreateSpeakerEmbeddingExtractor failed");
   }
 
@@ -125,12 +114,22 @@ Status SpeakerEmbeddingRunner::Acquire(const EmbeddingRunnerOptions& options) {
   created->extractor = extractor;
   created->dim = SherpaOnnxSpeakerEmbeddingExtractorDim(extractor);
   if (created->dim <= 0) {
-    return Status::Fail(kErrEmbedding, "embedding dim is invalid");
+    return Status::Fail(kErrInit, "embedding dim is invalid");
   }
 
   g_registry[key] = created;
   impl_->shared = std::move(created);
+  SE_RUNNER_LOGI(
+      "Acquire cache-miss create model=%s provider=%s threads=%d debug=%d dim=%d",
+      key.model_path.c_str(), key.provider.c_str(), key.num_threads,
+      key.debug ? 1 : 0, impl_->shared->dim);
   return Status::Ok();
+}
+
+Status SpeakerEmbeddingRunner::ComputeFull(
+    const float* audio, int32_t num_samples, int32_t sample_rate,
+    std::vector<float>* out_embedding) const {
+  return Compute(audio, num_samples, sample_rate, {}, out_embedding);
 }
 
 Status SpeakerEmbeddingRunner::Compute(
@@ -140,9 +139,20 @@ Status SpeakerEmbeddingRunner::Compute(
   if (!isReady()) {
     return Status::Fail(kErrNotInitialized, "embedding runner not acquired");
   }
-  if (audio == nullptr || out_embedding == nullptr || sample_rate <= 0) {
+  if (audio == nullptr || out_embedding == nullptr || sample_rate <= 0 ||
+      num_samples < 0) {
     return Status::Fail(kErrInvalidArgument, "invalid embedding compute args");
   }
+
+  std::vector<SampleRange> effective = ranges;
+  if (effective.empty()) {
+    if (num_samples <= 0) {
+      return Status::Fail(kErrInvalidArgument, "empty embedding audio");
+    }
+    effective.push_back(SampleRange{0, num_samples});
+  }
+
+  std::lock_guard<std::mutex> compute_lock(impl_->shared->compute_mutex);
 
   const auto* extractor = impl_->shared->extractor;
   const int32_t dim = impl_->shared->dim;
@@ -150,10 +160,10 @@ Status SpeakerEmbeddingRunner::Compute(
   const SherpaOnnxOnlineStream* stream =
       SherpaOnnxSpeakerEmbeddingExtractorCreateStream(extractor);
   if (stream == nullptr) {
-    return Status::Fail(kErrEmbedding, "failed to create embedding stream");
+    return Status::Fail(kErrCompute, "failed to create embedding stream");
   }
 
-  for (const auto& range : ranges) {
+  for (const auto& range : effective) {
     int32_t end = range.end <= num_samples ? range.end : num_samples;
     int32_t start = range.start;
     if (start < 0) {
@@ -169,14 +179,14 @@ Status SpeakerEmbeddingRunner::Compute(
 
   if (!SherpaOnnxSpeakerEmbeddingExtractorIsReady(extractor, stream)) {
     SherpaOnnxDestroyOnlineStream(stream);
-    return Status::Fail(kErrEmbedding, "embedding segment too short");
+    return Status::Fail(kErrCompute, "embedding segment too short");
   }
 
   const float* emb =
       SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding(extractor, stream);
   if (emb == nullptr) {
     SherpaOnnxDestroyOnlineStream(stream);
-    return Status::Fail(kErrEmbedding, "ComputeEmbedding returned null");
+    return Status::Fail(kErrCompute, "ComputeEmbedding returned null");
   }
 
   out_embedding->assign(emb, emb + dim);
@@ -185,9 +195,9 @@ Status SpeakerEmbeddingRunner::Compute(
 
   if (EmbeddingHasNaN(*out_embedding)) {
     out_embedding->clear();
-    return Status::Fail(kErrEmbedding, "embedding contains NaN");
+    return Status::Fail(kErrCompute, "embedding contains NaN");
   }
   return Status::Ok();
 }
 
-}  // namespace sherpaonnx::diarization
+}  // namespace sherpaonnx::speaker_embedding

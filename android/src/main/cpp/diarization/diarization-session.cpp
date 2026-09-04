@@ -62,7 +62,7 @@ Status DiarizationSession::Initialize(const DiarizationInitConfig& config) {
     return st;
   }
 
-  EmbeddingRunnerOptions emb_opts;
+  ::sherpaonnx::speaker_embedding::EmbeddingRunnerOptions emb_opts;
   emb_opts.model_path = config.embedding_model;
   emb_opts.num_threads = config.num_threads;
   emb_opts.provider = config.provider;

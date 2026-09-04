@@ -90,7 +90,7 @@ class DiarizationSession {
                                       int32_t src_rate, int32_t dst_rate) const;
 
   PyannoteSegmentationModel segmentation_;
-  SpeakerEmbeddingRunner embedding_;
+  ::sherpaonnx::speaker_embedding::SpeakerEmbeddingRunner embedding_;
   AgglomerativeClusterer clusterer_{ClusteringConfig{}};
   TimelineConfig timeline_config_{};
 
