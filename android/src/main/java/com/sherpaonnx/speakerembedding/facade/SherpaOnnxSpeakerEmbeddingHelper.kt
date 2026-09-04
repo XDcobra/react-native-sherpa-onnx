@@ -356,6 +356,43 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     promise.resolve(null)
   }
 
+  /**
+   * Synchronous compute for offline-live workers (worker thread; not Promise/TM).
+   */
+  fun computeEmbeddingFromSamples(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ): FloatArray {
+    val result = nativeComputeEmbedding(instanceId, samples, sampleRate)
+      ?: throw IllegalStateException("Speaker embedding compute returned null")
+    if (result["success"] as? Boolean != true) {
+      val code =
+        (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
+      val error =
+        (result["error"] as? String)?.takeIf { it.isNotBlank() }
+          ?: "Speaker embedding compute failed"
+      throw IllegalStateException("$code: $error")
+    }
+    @Suppress("UNCHECKED_CAST")
+    val embedding = result["embedding"] as? ArrayList<Float>
+      ?: throw IllegalStateException("Speaker embedding compute missing embedding")
+    return FloatArray(embedding.size) { i -> embedding[i] }
+  }
+
+  /**
+   * Synchronous search for offline-live workers (worker thread; not Promise/TM).
+   * Returns empty string when no match.
+   */
+  fun searchSpeaker(
+    managerId: String,
+    embedding: FloatArray,
+    threshold: Float,
+  ): String {
+    val result = nativeManagerSearch(managerId, embedding, threshold)
+    return (result?.get("name") as? String).orEmpty()
+  }
+
   private fun okMap(ok: Boolean): WritableMap {
     val out = Arguments.createMap()
     out.putBoolean("ok", ok)

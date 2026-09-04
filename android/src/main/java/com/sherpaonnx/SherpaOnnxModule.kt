@@ -29,6 +29,7 @@ import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
+import com.sherpaonnx.speakeridentification.facade.SherpaOnnxSpeakerIdentificationLivePipelineHelper
 import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
@@ -216,6 +217,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
     }
   )
+  private val speakerIdentificationLivePipelineHelper =
+    SherpaOnnxSpeakerIdentificationLivePipelineHelper(
+      reactApplicationContext,
+      speakerEmbeddingHelper,
+      NAME,
+    )
   private val diarizationHelper = SherpaOnnxDiarizationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType ->
@@ -4849,6 +4856,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     speakerEmbeddingHelper.computeSpeakerEmbeddingOffline(instanceId, audioBufferId, promise)
+  }
+
+  override fun startSpeakerIdentificationOfflineLivePipeline(
+    instanceId: String,
+    managerId: String,
+    audioInLiveBufferId: String,
+    segmentsOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    speakerIdentificationLivePipelineHelper.startSpeakerIdentificationOfflineLivePipeline(
+      instanceId = instanceId,
+      managerId = managerId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      segmentsOutLiveBufferId = segmentsOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
   }
 
   override fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
