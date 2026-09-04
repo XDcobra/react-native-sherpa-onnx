@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–2 **done**. Findings 3–5 remain open.  
+**Status:** Findings 1–3 **done**. Findings 4–5 remain open.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding** and **speaker-identification** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance work stays in-process, no PCM or embedding vectors bouncing through JS.
 
@@ -88,20 +88,20 @@ Half-open `[start, end)`; both omitted = full buffer; exactly one set = reject; 
 
 ---
 
-## 3. Finding — Separate extract + search TurboModule calls (MEDIUM)
+## 3. Finding — Separate extract + search TurboModule calls (MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented. Offline `identify` / `labelOfflineSegments` call `identifySpeakerOffline` (one TurboModule: native slice/full → compute → manager search → `{ name }`). Embeddings no longer round-trip through JS on those paths. Low-level `computeSpeakerEmbeddingOffline` / `speakerEmbeddingManagerSearch` remain for enroll and apps that need raw vectors. Live SID already searches in-process (Finding 1).
 
-Every identify does:
+### Problem (historical)
+
+Every identify did:
 
 1. Extract → embedding marshalled to JS (`number[]` → `Float32Array`)
 2. Search → embedding marshalled back to native (`Float32Array` → `number[]` → JNI/`NSArray`)
 
 Two async bridges, two marshallings, and (on Android) the global JNI lock twice. Diarization never leaves C++ between compute and cluster logic.
 
-### Direction
-
-Combined native identify APIs, e.g.:
+### What shipped
 
 ```ts
 identifySpeakerOffline(
@@ -109,14 +109,12 @@ identifySpeakerOffline(
   managerId: string,
   audioBufferId: string,
   threshold: number,
-  startSample?: number,
-  endSample?: number
+  startSample?: number | null,
+  endSample?: number | null
 ): Promise<{ name: string }>
 ```
 
-Keep low-level `compute` / `search` for apps that need raw vectors; hot path (SID label) should not require them.
-
-**Priority:** Medium alone; **high** when bundled with §1 or §2 (native worker or range extract can call Manager in-process without a public combined TM if the worker owns both IDs).
+Empty `name` = no match. Range rules match Finding 2. Combined `verifySpeakerOffline` is still open (verify path unchanged).
 
 ---
 
@@ -166,7 +164,7 @@ This is contention risk more than copy cost; listed for completeness after the t
 |------|---------|--------|--------|--------|
 | C | §1 native SID live pipeline | Medium–large | Matches STT/TTS target architecture | **Done** |
 | A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | **Done** |
-| B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | Open |
+| B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | **Done** |
 | D | §4 JSI / unbox embeddings | Small–medium | Residual path for apps that still pull vectors | Open |
 | E | §5 JNI lock narrowing | Small | Contention hygiene | Open |
 
@@ -185,6 +183,8 @@ Instrument with a stable tag (e.g. `[SherpaOnnx:sid-live]` / `[SherpaOnnx:sid-br
 Success criteria for §1 (met): **no** PCM `Float32Array` in JS on the live label hot path; one `startSpeakerIdentificationOfflineLivePipeline` call per session; embedding vectors stay native unless the app calls low-level extract.
 
 Success criteria for §2 (met): ranged `extractFromOfflineAudio` calls `computeSpeakerEmbeddingOffline(..., start, end)` with **no** JSI slice / temp offline buffer.
+
+Success criteria for §3 (met): offline `identify` / `labelOfflineSegments` use `identifySpeakerOffline` only (no compute→JS→search); empty name maps to `null` in SID TS.
 
 ---
 ## 8. Non-goals

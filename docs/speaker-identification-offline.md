@@ -270,7 +270,7 @@ interface SpeakerIdentificationEngine {
 | `enroll` | Extract embedding(s) from whole buffer(s); native manager averages multiple clips (L2-normalized). Fails if the name already exists. |
 | `enrollOfflineSegments` | Speech spans → embeddings. `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
-| `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
+| `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
 | `verify` | Cosine check against one enrolled name (whole buffer). |
 | `verifyOfflineSegments` | Per speech span: extract → verify. `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
@@ -307,7 +307,7 @@ Fires **after** search + successful staging append for each speech span:
 | `startSample` / `endSample` / `sampleRate` / `durationMs` | Span range |
 | `speakerName` | Matched enrolled name, or `null` if below threshold / unknown |
 
-Order per span: `onProgress` → extract/search/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
+Order per span: `onProgress` → identify/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
 
 ```ts
 await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {

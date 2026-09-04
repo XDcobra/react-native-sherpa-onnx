@@ -383,4 +383,4 @@ Public API: `createSpeakerIdentification().labelLiveSegments(LiveAudio, LiveSegm
 
 `onLabeled` is wired like STT `onSegment`: `subscribeLiveSegmentBufferEvents(segmentsOut)` mapping `payload.source === 'sid'`.
 
-Remaining bridge follow-ups (offline range extract, combined identify TM, embedding marshalling): [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md).
+Remaining bridge follow-ups (embedding marshalling, JNI mutex; combined verify still open): [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md).
