@@ -691,6 +691,21 @@ function registerLiveSegmentBufferCallbacks(
   };
 }
 
+/**
+ * Subscribe to live segment-buffer events without creating a new buffer.
+ * Used by SID live `onLabeled` (native worker → segmentAppended → JS).
+ */
+export function subscribeLiveSegmentBufferEvents(
+  liveBufferId: LiveSegmentBufferIdSource,
+  callbacks: {
+    onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
+    onError?: (event: LiveSegmentBufferErrorEvent) => void;
+  }
+): () => void {
+  const id = resolveLiveSegmentBufferId(liveBufferId);
+  return registerLiveSegmentBufferCallbacks(id, callbacks);
+}
+
 export async function createLiveSegmentBuffer(
   options: CreateLiveSegmentBufferOptions = {}
 ): Promise<LiveSegmentBufferRef> {

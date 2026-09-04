@@ -13,6 +13,11 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     speakerEmbeddingManagerContains: jest.fn(),
     speakerEmbeddingManagerNumSpeakers: jest.fn(),
     speakerEmbeddingManagerAllSpeakerNames: jest.fn(),
+    startSpeakerIdentificationOfflineLivePipeline: jest.fn(),
+    stopStreamingPipeline: jest.fn(),
+    flushStreamingPipeline: jest.fn(),
+    resetStreamingPipeline: jest.fn(),
+    getStreamingPipelineStatus: jest.fn(),
   },
 }));
 
@@ -23,28 +28,6 @@ jest.mock('../../detect/resolveModelInput', () => ({
 }));
 
 jest.mock('../../audiobuffer', () => ({
-  createOfflineAudioBufferFromSamples: jest.fn((samples: Float32Array) => ({
-    bufferId: `off_temp_${samples.length}`,
-  })),
-  getOfflineAudioBufferSamplesSlice: jest.fn(
-    () => new Float32Array([0.1, 0.2, 0.3, 0.4])
-  ),
-  getLiveAudioBufferSamplesSlice: jest.fn(
-    () => new Float32Array([0.1, 0.2, 0.3, 0.4])
-  ),
-  getPipelineAudioBufferInfo: jest.fn(async () => ({
-    bufferId: 'live_audio',
-    kind: 'livePcmBuffer',
-    state: 'recording',
-    sampleRate: 16000,
-    channelCount: 1,
-    numSamples: 0,
-    durationMs: 0,
-    totalSamplesWritten: 0,
-    ringEvictedSamples: 0,
-    hasActiveSpool: false,
-  })),
-  releasePipelineAudioBuffer: jest.fn(async () => undefined),
   resolvePipelineAudioBufferId: jest.fn((value: unknown) => {
     if (typeof value === 'string') return value;
     if (
@@ -58,14 +41,9 @@ jest.mock('../../audiobuffer', () => ({
   }),
 }));
 
+const mockSubscribeLiveSegmentBufferEvents = jest.fn();
 jest.mock('../../segmentbuffer', () => ({
-  getOfflineSegmentBufferSegments: jest.fn(),
-  createLiveSegmentBuffer: jest.fn(),
-  appendLiveSegment: jest.fn(),
-  finalizeLiveSegmentBuffer: jest.fn(),
-  populateOfflineSegmentBufferIfEmpty: jest.fn(),
-  releasePipelineSegmentBuffer: jest.fn(),
-  resolveOfflineSegmentBufferId: jest.fn((value: unknown) => String(value)),
+  finalizeLiveSegmentBuffer: jest.fn(async () => undefined),
   resolveLiveSegmentBufferId: jest.fn((value: unknown) => {
     if (typeof value === 'string') return value;
     if (
@@ -77,8 +55,8 @@ jest.mock('../../segmentbuffer', () => ({
     }
     return String(value);
   }),
-  getLiveSegmentBufferSegmentCount: jest.fn(),
-  getLiveSegmentBufferSegments: jest.fn(),
+  subscribeLiveSegmentBufferEvents: (...args: unknown[]) =>
+    mockSubscribeLiveSegmentBufferEvents(...args),
 }));
 
 jest.mock('../../segment', () => ({
@@ -87,8 +65,13 @@ jest.mock('../../segment', () => ({
   getSegmentationEngineInfo: jest.fn(),
 }));
 
+const mockCreateStreamingPipelineCompletionPromise = jest.fn();
+jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
+  createStreamingPipelineCompletionPromise: (pipelineId: string) =>
+    mockCreateStreamingPipelineCompletionPromise(pipelineId),
+}));
+
 import SherpaOnnx from '../../NativeSherpaOnnx';
-import * as audiobuffer from '../../audiobuffer';
 import * as segment from '../../segment';
 import * as segmentbuffer from '../../segmentbuffer';
 import { createSpeakerIdentification } from '../index';
@@ -102,14 +85,11 @@ describe('labelLiveSegments', () => {
     createSpeakerEmbeddingManager: jest.Mock;
     destroySpeakerEmbeddingManager: jest.Mock;
     speakerEmbeddingManagerSearch: jest.Mock;
-  };
-
-  const segs = segmentbuffer as unknown as {
-    appendLiveSegment: jest.Mock;
-    finalizeLiveSegmentBuffer: jest.Mock;
-    resolveLiveSegmentBufferId: jest.Mock;
-    getLiveSegmentBufferSegmentCount: jest.Mock;
-    getLiveSegmentBufferSegments: jest.Mock;
+    startSpeakerIdentificationOfflineLivePipeline: jest.Mock;
+    stopStreamingPipeline: jest.Mock;
+    flushStreamingPipeline: jest.Mock;
+    resetStreamingPipeline: jest.Mock;
+    getStreamingPipelineStatus: jest.Mock;
   };
 
   const seg = segment as unknown as {
@@ -118,35 +98,35 @@ describe('labelLiveSegments', () => {
     getSegmentationEngineInfo: jest.Mock;
   };
 
-  const AUDIO_LIVE = 'live_123e4567-e89b-12d3-a456-426614174000';
-  const SEGS_OUT = 'seg_live_223e4567-e89b-12d3-a456-426614174000';
-  const INTERNAL_SEGS = 'seg_live_323e4567-e89b-12d3-a456-426614174000';
-  const ENGINE_ID = 'seg_engine_1';
-  const emb = [1, 2, 3, 4];
-
-  const defaultPolicy = {
-    evaluator: 'speech_energy_silence' as const,
-    silenceThresholdMs: 500,
-    energyThresholdDb: -40,
-    minSegmentMs: 1000,
-    maxSegmentMs: 120000,
-    hangoverMs: 300,
+  const segs = segmentbuffer as unknown as {
+    finalizeLiveSegmentBuffer: jest.Mock;
   };
 
-  const speechSpan = (start: number, end: number, durationMs = 100) => ({
-    id: `s_${start}`,
-    kind: 'speech' as const,
-    sourceAudioBufferId: AUDIO_LIVE,
-    startSample: start,
-    endSample: end,
-    sampleRate: 16000,
-    durationMs,
-    confidence: 0.9,
-  });
+  const AUDIO_LIVE = 'live_audio';
+  const SEGS_OUT = 'seg_live_out';
+  const ENGINE_ID = 'seg_engine_1';
+  const SEG_LIVE_INTERNAL = 'seg_live_internal';
+  const PIPELINE_ID = 'sid_live_pipe_1';
+
+  const defaultPolicy = { evaluator: 'speech_energy_silence' as const };
+
+  const emb = [0.1, 0.2, 0.3, 0.4];
+
+  let completionResolve: ((value: unknown) => void) | undefined;
+  let completionReject: ((reason?: unknown) => void) | undefined;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useRealTimers();
+    completionResolve = undefined;
+    completionReject = undefined;
+
+    mockCreateStreamingPipelineCompletionPromise.mockImplementation(
+      () =>
+        new Promise((resolve, reject) => {
+          completionResolve = resolve;
+          completionReject = reject;
+        })
+    );
 
     native.initializeSpeakerEmbeddingExtractor.mockResolvedValue({
       success: true,
@@ -154,10 +134,24 @@ describe('labelLiveSegments', () => {
       modelType: 'wespeaker',
     });
     native.unloadSpeakerEmbeddingExtractor.mockResolvedValue(null);
-    native.computeSpeakerEmbeddingOffline.mockResolvedValue({ embedding: emb });
     native.createSpeakerEmbeddingManager.mockResolvedValue({ success: true });
     native.destroySpeakerEmbeddingManager.mockResolvedValue(null);
-    native.speakerEmbeddingManagerSearch.mockResolvedValue({ name: 'alice' });
+    native.computeSpeakerEmbeddingOffline.mockResolvedValue({ embedding: emb });
+    native.speakerEmbeddingManagerSearch.mockResolvedValue({ name: '' });
+    native.startSpeakerIdentificationOfflineLivePipeline.mockResolvedValue({
+      pipelineId: PIPELINE_ID,
+    });
+    native.stopStreamingPipeline.mockResolvedValue(undefined);
+    native.flushStreamingPipeline.mockResolvedValue(undefined);
+    native.resetStreamingPipeline.mockResolvedValue(undefined);
+    native.getStreamingPipelineStatus.mockResolvedValue({
+      pipelineId: PIPELINE_ID,
+      isRunning: true,
+      chunksProcessed: 0,
+      unitsRead: 0,
+      unitsWritten: 0,
+      error: null,
+    });
 
     seg.attachSegmentationEngine.mockResolvedValue({ engineId: ENGINE_ID });
     seg.getSegmentationEngineInfo.mockResolvedValue({
@@ -167,34 +161,11 @@ describe('labelLiveSegments', () => {
       policy: defaultPolicy,
       state: 'active',
       totalSegmentsCommitted: 0,
-      segmentBufferId: INTERNAL_SEGS,
+      segmentBufferId: SEG_LIVE_INTERNAL,
     });
     seg.detachSegmentationEngine.mockResolvedValue(undefined);
 
-    segs.appendLiveSegment.mockResolvedValue({
-      segmentId: 'labeled_1',
-      segmentIndex: 0,
-    });
-    segs.finalizeLiveSegmentBuffer.mockResolvedValue(undefined);
-    segs.getLiveSegmentBufferSegmentCount.mockResolvedValue(0);
-    segs.getLiveSegmentBufferSegments.mockResolvedValue([]);
-
-    (audiobuffer.getPipelineAudioBufferInfo as jest.Mock).mockResolvedValue({
-      bufferId: AUDIO_LIVE,
-      kind: 'livePcmBuffer',
-      state: 'recording',
-      sampleRate: 16000,
-      channelCount: 1,
-      numSamples: 0,
-      durationMs: 0,
-      totalSamplesWritten: 0,
-      ringEvictedSamples: 0,
-      hasActiveSpool: false,
-    });
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
+    mockSubscribeLiveSegmentBufferEvents.mockImplementation(() => jest.fn());
   });
 
   it('rejects missing segmentation with LIVE_OFFLINE_SEGMENTATION_REQUIRED', async () => {
@@ -251,22 +222,28 @@ describe('labelLiveSegments', () => {
     ).rejects.toThrow(/onLabeled must be a function/);
   });
 
-  it('labels committed spans: extract → search → append → onLabeled', async () => {
-    const spans = [speechSpan(0, 1600), speechSpan(2000, 3600, 200)];
-    let committed = 0;
-    segs.getLiveSegmentBufferSegmentCount.mockImplementation(async () => {
-      return committed;
-    });
-    segs.getLiveSegmentBufferSegments.mockImplementation(
-      async (_id: string, start: number, max: number) => {
-        return spans.slice(start, start + max);
+  it('starts native live pipeline with extractor, manager, and segmentation context', async () => {
+    const onLabeled = jest.fn();
+    let onAppended:
+      | ((event: {
+          kind: string;
+          segmentIndex: number;
+          startSample: number;
+          endSample: number;
+          sampleRate: number;
+          durationMs: number;
+          confidence?: number;
+          payload?: { source: string; speakerName: string | null };
+        }) => void)
+      | undefined;
+
+    mockSubscribeLiveSegmentBufferEvents.mockImplementation(
+      (_id: unknown, callbacks: { onSegmentAppended?: typeof onAppended }) => {
+        onAppended = callbacks.onSegmentAppended;
+        return jest.fn();
       }
     );
-    native.speakerEmbeddingManagerSearch
-      .mockResolvedValueOnce({ name: 'alice' })
-      .mockResolvedValueOnce({ name: '' });
 
-    const onLabeled = jest.fn();
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -281,50 +258,48 @@ describe('labelLiveSegments', () => {
       AUDIO_LIVE,
       expect.objectContaining({ policy: defaultPolicy })
     );
-    expect(handle.pipelineId).toMatch(/^sid_live_/);
+    expect(
+      native.startSpeakerIdentificationOfflineLivePipeline
+    ).toHaveBeenCalledWith(
+      sid.instanceId,
+      sid.managerId,
+      AUDIO_LIVE,
+      SEGS_OUT,
+      {
+        attachedSegmentationEngineId: ENGINE_ID,
+        segmentLiveBufferId: SEG_LIVE_INTERNAL,
+        threshold: 0.55,
+      }
+    );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
+    expect(handle.pipelineId).toBe(PIPELINE_ID);
     expect(handle.instanceId).toBe(sid.instanceId);
+    expect(mockSubscribeLiveSegmentBufferEvents).toHaveBeenCalledWith(
+      SEGS_OUT,
+      expect.objectContaining({ onSegmentAppended: expect.any(Function) })
+    );
 
-    // Simulate segmentation committing two spans, then finalize input.
-    committed = 2;
-    (audiobuffer.getPipelineAudioBufferInfo as jest.Mock).mockResolvedValue({
-      bufferId: AUDIO_LIVE,
-      kind: 'livePcmBuffer',
-      state: 'finished',
+    onAppended?.({
+      kind: 'speech',
+      segmentIndex: 0,
+      startSample: 0,
+      endSample: 1600,
       sampleRate: 16000,
-      channelCount: 1,
-      numSamples: 3600,
-      durationMs: 225,
-      totalSamplesWritten: 3600,
-      ringEvictedSamples: 0,
-      hasActiveSpool: false,
+      durationMs: 100,
+      confidence: 0.9,
+      payload: { source: 'sid', speakerName: 'alice' },
+    });
+    onAppended?.({
+      kind: 'speech',
+      segmentIndex: 1,
+      startSample: 2000,
+      endSample: 3600,
+      sampleRate: 16000,
+      durationMs: 100,
+      payload: { source: 'sid', speakerName: null },
     });
 
-    await handle.completed;
-
-    expect(audiobuffer.getLiveAudioBufferSamplesSlice).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerSearch).toHaveBeenCalledWith(
-      sid.managerId,
-      emb,
-      0.55
-    );
-    expect(segs.appendLiveSegment).toHaveBeenCalledTimes(2);
-    expect(segs.appendLiveSegment).toHaveBeenNthCalledWith(
-      1,
-      SEGS_OUT,
-      expect.objectContaining({
-        kind: 'speech',
-        startSample: 0,
-        endSample: 1600,
-        payload: { source: 'sid', speakerName: 'alice' },
-      })
-    );
-    expect(segs.appendLiveSegment).toHaveBeenNthCalledWith(
-      2,
-      SEGS_OUT,
-      expect.objectContaining({
-        payload: { source: 'sid', speakerName: null },
-      })
-    );
     expect(onLabeled).toHaveBeenCalledTimes(2);
     expect(onLabeled).toHaveBeenNthCalledWith(
       1,
@@ -343,25 +318,24 @@ describe('labelLiveSegments', () => {
         speakerName: null,
       })
     );
+
+    completionResolve?.({
+      pipelineId: PIPELINE_ID,
+      reason: 'completed',
+      chunksProcessed: 2,
+      unitsRead: 3200,
+      unitsWritten: 2,
+      error: null,
+    });
+    await handle.completed;
+
     expect(seg.detachSegmentationEngine).toHaveBeenCalledWith(ENGINE_ID, {
       flushFinal: true,
     });
     expect(segs.finalizeLiveSegmentBuffer).toHaveBeenCalledWith(SEGS_OUT);
-    expect(audiobuffer.releasePipelineAudioBuffer).toHaveBeenCalled();
   });
 
-  it('stop() drains tail, finalizes, resolves completed with reason stopped', async () => {
-    const spans = [speechSpan(0, 1600)];
-    let committed = 0;
-    segs.getLiveSegmentBufferSegmentCount.mockImplementation(async () => {
-      return committed;
-    });
-    segs.getLiveSegmentBufferSegments.mockImplementation(
-      async (_id: string, start: number, max: number) => {
-        return spans.slice(start, start + max);
-      }
-    );
-
+  it('stop() resolves completed with reason stopped and finalizes', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -369,14 +343,29 @@ describe('labelLiveSegments', () => {
       segmentation: { policy: defaultPolicy },
     });
 
-    committed = 1;
-    await handle.flush();
-    expect(segs.appendLiveSegment).toHaveBeenCalledTimes(1);
+    native.stopStreamingPipeline.mockImplementation(async () => {
+      completionResolve?.({
+        pipelineId: PIPELINE_ID,
+        reason: 'stopped',
+        chunksProcessed: 1,
+        unitsRead: 1600,
+        unitsWritten: 1,
+        error: null,
+      });
+    });
+    native.getStreamingPipelineStatus.mockResolvedValue({
+      pipelineId: PIPELINE_ID,
+      isRunning: false,
+      chunksProcessed: 1,
+      unitsRead: 1600,
+      unitsWritten: 1,
+      error: null,
+    });
 
     await handle.stop();
     const completion = await handle.completed;
     expect(completion.reason).toBe('stopped');
-    expect(completion.chunksProcessed).toBe(1);
+    expect(native.stopStreamingPipeline).toHaveBeenCalledWith(PIPELINE_ID);
     expect(segs.finalizeLiveSegmentBuffer).toHaveBeenCalledWith(SEGS_OUT);
     expect(seg.detachSegmentationEngine).toHaveBeenCalledWith(ENGINE_ID, {
       flushFinal: true,
@@ -389,7 +378,6 @@ describe('labelLiveSegments', () => {
   });
 
   it('getStatus reports counters while running', async () => {
-    segs.getLiveSegmentBufferSegmentCount.mockResolvedValue(0);
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -409,22 +397,20 @@ describe('labelLiveSegments', () => {
       })
     );
 
+    native.stopStreamingPipeline.mockImplementation(async () => {
+      completionResolve?.({
+        pipelineId: PIPELINE_ID,
+        reason: 'stopped',
+        chunksProcessed: 0,
+        unitsRead: 0,
+        unitsWritten: 0,
+        error: null,
+      });
+    });
     await handle.stop();
   });
 
-  it('completed rejects when labeling throws', async () => {
-    const spans = [speechSpan(0, 1600)];
-    let committed = 0;
-    segs.getLiveSegmentBufferSegmentCount.mockImplementation(async () => {
-      return committed;
-    });
-    segs.getLiveSegmentBufferSegments.mockImplementation(
-      async (_id: string, start: number, max: number) => {
-        return spans.slice(start, start + max);
-      }
-    );
-    segs.appendLiveSegment.mockRejectedValue(new Error('append failed'));
-
+  it('completed rejects when pipeline errors and still finalizes', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -432,12 +418,18 @@ describe('labelLiveSegments', () => {
       segmentation: { policy: defaultPolicy },
     });
 
-    committed = 1;
+    const err = Object.assign(new Error('append failed'), {
+      code: 'STREAMING_PIPELINE_ERROR',
+    });
+    completionReject?.(err);
+
     await expect(handle.completed).rejects.toMatchObject({
       code: 'STREAMING_PIPELINE_ERROR',
       message: expect.stringContaining('append failed'),
     });
-    expect(seg.detachSegmentationEngine).toHaveBeenCalled();
+    expect(seg.detachSegmentationEngine).toHaveBeenCalledWith(ENGINE_ID, {
+      flushFinal: false,
+    });
     expect(segs.finalizeLiveSegmentBuffer).toHaveBeenCalledWith(SEGS_OUT);
   });
 
@@ -463,5 +455,8 @@ describe('labelLiveSegments', () => {
     expect(seg.detachSegmentationEngine).toHaveBeenCalledWith(ENGINE_ID, {
       flushFinal: false,
     });
+    expect(
+      native.startSpeakerIdentificationOfflineLivePipeline
+    ).not.toHaveBeenCalled();
   });
 });

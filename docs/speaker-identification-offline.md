@@ -14,7 +14,7 @@ Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
 Model detect is available on the SID package (`detectSpeakerEmbeddingModel`) and on **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
 
-SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (planned). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
+SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (offline available). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
 
 Live labeling is available via **`labelLiveSegments`** — see [speaker-identification-live.md](speaker-identification-live.md). Enrollment remains offline (`enroll` / `enrollOfflineSegments`).
 
@@ -192,7 +192,7 @@ function createSpeakerIdentification(
 
 `SpeakerIdentificationOptions` is the same union as speaker-embedding init (`initMode: 'auto' | 'custom'`, `modelSource` / `customConfig`, `numThreads`, `provider`, `debug`).
 
-The extractor is **ref-counted** so a future diarization engine can share the same weights. Each SID instance still owns its own **named-speaker manager**.
+The extractor is **ref-counted** so diarization can share the same weights via the C++ `SpeakerEmbeddingRunner` registry. Each SID instance still owns its own **named-speaker manager**.
 
 ### Engine methods
 
@@ -267,13 +267,13 @@ interface SpeakerIdentificationEngine {
 
 | Method | Behavior |
 | --- | --- |
-| `enroll` | Extract embedding(s) from whole buffer(s); native manager averages multiple clips (L2-normalized). Fails if the name already exists. |
-| `enrollOfflineSegments` | Speech spans → embeddings. `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
+| `enroll` | Combined `enrollSpeakerOffline` (whole buffer(s) → compute + manager.add). Fails if the name already exists. |
+| `enrollOfflineSegments` | Combined `enrollSpeakerOffline` per name group (speech spans → embeddings + add). `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
-| `labelOfflineSegments` | Per speech span: extract → search → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
+| `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
-| `verify` | Cosine check against one enrolled name (whole buffer). |
-| `verifyOfflineSegments` | Per speech span: extract → verify. `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
+| `verify` | Native `verifySpeakerOffline` cosine check against one enrolled name (whole buffer). |
+| `verifyOfflineSegments` | Per speech span: native `verifySpeakerOffline` (extract+verify in one call). `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
 | `exportEnrollments` / `importEnrollments` | Cross-session enrollment snapshot — see [Persistence](#persistence). |
 | `destroy` | Releases manager + drops extractor ref-count. |
 
@@ -307,7 +307,7 @@ Fires **after** search + successful staging append for each speech span:
 | `startSample` / `endSample` / `sampleRate` / `durationMs` | Span range |
 | `speakerName` | Matched enrolled name, or `null` if below threshold / unknown |
 
-Order per span: `onProgress` → extract/search/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
+Order per span: `onProgress` → identify/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
 
 ```ts
 await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
@@ -325,7 +325,7 @@ await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
 
 ### `onVerified` (per-span result — `verifyOfflineSegments` only)
 
-Fires **after** extract + cosine verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → extract/verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
+Fires **after** native verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
 
 ```ts
 const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
@@ -373,11 +373,11 @@ SID does **not** invent the name list; the app supplies who each span belongs to
 
 ### Buffer-first embeddings
 
-PCM stays native via buffer ids. Only the compact embedding (`dim` floats, typically ~256) crosses the TurboModule for enroll/search — not the full waveform.
+PCM stays native via buffer ids. Identify / label / verify / enroll use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline` / `enrollSpeakerOffline`) so embeddings stay off the JS product hot path. Low-level extract/search still move compact `dim` floats (~256) across the TurboModule when apps need raw vectors — not the full waveform.
 
 ### Persistence
 
-The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors passed to `manager.add` on `enroll` / `enrollOfflineSegments` / `importEnrollments`, and clears it on `removeSpeaker` / `destroy`.
+The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors returned once from `enrollSpeakerOffline` (and from `importEnrollments`), and clears it on `removeSpeaker` / `destroy`. Product enroll does **not** call a separate `manager.add` with embedding arrays.
 
 ```ts
 // After enroll…
@@ -430,7 +430,7 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 | Identify result | `{ name: string \| null }` | Whole-buffer `identify` — no segment Out. |
 | Labeled timeline | `OfflineSegmentBuffer` (`seg_off_*`) | Empty `segmentsOut` filled with `payload.source: 'sid'`. |
 | UI / export | Segment metadata | Read via `getOfflineSegmentBufferSegments(...)`. |
-| Future diarization | Shared embedding engine | Same weights via extractor cache; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
+| Diarization | Shared embedding Runner | Same weights via C++ registry; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
 
 ```mermaid
 flowchart LR
@@ -525,7 +525,7 @@ JS-side SID guards (message match, not always a native `code`): empty speaker na
 - [Pipeline segment buffers — offline](segmentbuffer-offline.md) — speech payload `sid`
 - [VAD streaming](vad-streaming.md) — speech boundaries (when)
 - [Speaker Identification (live overload)](speaker-identification-live.md) — `labelLiveSegments`
-- [Speaker diarization](diarization.md) — anonymous clustering (planned; shared embedding foundation)
+- [Speaker diarization](diarization.md) — anonymous clustering (offline shipped; shared embedding foundation)
 - [Feature pipelines](feature-pipelines.md)
 - [Model detect](model-detect.md)
 - [Model setup](model-setup.md)

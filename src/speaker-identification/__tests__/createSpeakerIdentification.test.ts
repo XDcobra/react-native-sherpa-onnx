@@ -4,6 +4,9 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     initializeSpeakerEmbeddingExtractor: jest.fn(),
     unloadSpeakerEmbeddingExtractor: jest.fn(),
     computeSpeakerEmbeddingOffline: jest.fn(),
+    identifySpeakerOffline: jest.fn(),
+    verifySpeakerOffline: jest.fn(),
+    enrollSpeakerOffline: jest.fn(),
     createSpeakerEmbeddingManager: jest.fn(),
     destroySpeakerEmbeddingManager: jest.fn(),
     speakerEmbeddingManagerAdd: jest.fn(),
@@ -57,6 +60,9 @@ describe('createSpeakerIdentification', () => {
     initializeSpeakerEmbeddingExtractor: jest.Mock;
     unloadSpeakerEmbeddingExtractor: jest.Mock;
     computeSpeakerEmbeddingOffline: jest.Mock;
+    identifySpeakerOffline: jest.Mock;
+    verifySpeakerOffline: jest.Mock;
+    enrollSpeakerOffline: jest.Mock;
     createSpeakerEmbeddingManager: jest.Mock;
     destroySpeakerEmbeddingManager: jest.Mock;
     speakerEmbeddingManagerAdd: jest.Mock;
@@ -93,6 +99,22 @@ describe('createSpeakerIdentification', () => {
     });
     native.unloadSpeakerEmbeddingExtractor.mockResolvedValue(null);
     native.computeSpeakerEmbeddingOffline.mockResolvedValue({ embedding: emb });
+    native.identifySpeakerOffline.mockResolvedValue({ name: 'alice' });
+    native.verifySpeakerOffline.mockResolvedValue({ ok: true });
+    native.enrollSpeakerOffline.mockImplementation(
+      async (
+        _instanceId: string,
+        _managerId: string,
+        _name: string,
+        audioBufferIds: string[]
+      ) => ({
+        ok: true,
+        embeddings: Array.from(
+          { length: Math.max(1, audioBufferIds.length) },
+          () => emb
+        ).flat(),
+      })
+    );
     native.createSpeakerEmbeddingManager.mockResolvedValue({ success: true });
     native.destroySpeakerEmbeddingManager.mockResolvedValue(null);
     native.speakerEmbeddingManagerAdd.mockResolvedValue({ ok: true });
@@ -139,29 +161,39 @@ describe('createSpeakerIdentification', () => {
     );
 
     await sid.enroll('alice', ['off_a', 'off_b']);
-    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledTimes(1);
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
       'alice',
-      [...emb, ...emb],
-      2
+      ['off_a', 'off_b'],
+      null,
+      null
     );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
 
     const identified = await sid.identify('off_query', { threshold: 0.6 });
     expect(identified).toEqual({ name: 'alice' });
-    expect(native.speakerEmbeddingManagerSearch).toHaveBeenCalledWith(
+    expect(native.identifySpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
-      emb,
+      'off_query',
       0.6
     );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
 
     await expect(sid.verify('alice', 'off_query')).resolves.toBe(true);
-    expect(native.speakerEmbeddingManagerVerify).toHaveBeenCalledWith(
+    expect(native.verifySpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
+      'off_query',
       'alice',
-      emb,
       0.5
     );
+    expect(native.speakerEmbeddingManagerVerify).not.toHaveBeenCalled();
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
 
     await expect(sid.listSpeakers()).resolves.toEqual(['alice']);
     native.speakerEmbeddingManagerContains.mockResolvedValue({ ok: true });
@@ -186,11 +218,18 @@ describe('createSpeakerIdentification', () => {
   });
 
   it('returns null name when search misses', async () => {
-    native.speakerEmbeddingManagerSearch.mockResolvedValue({ name: '' });
+    native.identifySpeakerOffline.mockResolvedValue({ name: '' });
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
     await expect(sid.identify('off_query')).resolves.toEqual({ name: null });
+    expect(native.identifySpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
+      sid.managerId,
+      'off_query',
+      0.5
+    );
+    expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
   });
 
   it('enroll rejects duplicate name before extracting embeddings', async () => {
@@ -201,6 +240,7 @@ describe('createSpeakerIdentification', () => {
     await expect(sid.enroll('alice', 'off_a')).rejects.toThrow(
       /already enrolled/
     );
+    expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
@@ -223,11 +263,12 @@ describe('createSpeakerIdentification', () => {
     await expect(
       sid.enrollOfflineSegments('alice', AUDIO_ID, SEGS_IN)
     ).rejects.toThrow(/already enrolled/);
+    expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
 
-  it('enrollOfflineSegments extracts each speech span then manager.add', async () => {
+  it('enrollOfflineSegments enrolls speech spans via enrollSpeakerOffline', async () => {
     segs.getOfflineSegmentBufferSegments.mockResolvedValue([
       {
         id: 'a',
@@ -279,15 +320,23 @@ describe('createSpeakerIdentification', () => {
     await sid.enrollOfflineSegments('alice', AUDIO_ID, SEGS_IN);
 
     expect(segs.getOfflineSegmentBufferSegments).toHaveBeenCalledWith(SEGS_IN);
-    expect(audiobuffer.getOfflineAudioBufferSamplesSlice).toHaveBeenCalledTimes(
-      2
-    );
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledTimes(1);
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
       'alice',
-      [...emb, ...emb],
-      2
+      [AUDIO_ID, AUDIO_ID],
+      [0, 3200],
+      [1600, 4800]
     );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
+    expect(
+      audiobuffer.createOfflineAudioBufferFromSamples
+    ).not.toHaveBeenCalled();
   });
 
   it('enrollOfflineSegments rejects when no speech spans', async () => {
@@ -345,22 +394,27 @@ describe('createSpeakerIdentification', () => {
 
     await sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN);
 
-    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenNthCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledTimes(2);
+    expect(native.enrollSpeakerOffline).toHaveBeenNthCalledWith(
       1,
+      sid.instanceId,
       sid.managerId,
       'alice',
-      emb,
-      1
+      [AUDIO_ID],
+      [0],
+      [1600]
     );
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenNthCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenNthCalledWith(
       2,
+      sid.instanceId,
       sid.managerId,
       'bob',
-      emb,
-      1
+      [AUDIO_ID],
+      [3200],
+      [4800]
     );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
 
   it('enrollOfflineSegments name list groups duplicate names into one add', async () => {
@@ -404,19 +458,24 @@ describe('createSpeakerIdentification', () => {
       SEGS_IN
     );
 
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledTimes(2);
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
       'alice',
-      [...emb, ...emb],
-      2
+      [AUDIO_ID, AUDIO_ID],
+      [0, 4000],
+      [1600, 5600]
     );
-    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+    expect(native.enrollSpeakerOffline).toHaveBeenCalledWith(
+      sid.instanceId,
       sid.managerId,
       'bob',
-      emb,
-      1
+      [AUDIO_ID],
+      [2000],
+      [3600]
     );
+    expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
 
   it('enrollOfflineSegments rejects name list length mismatch before extract', async () => {
@@ -450,6 +509,7 @@ describe('createSpeakerIdentification', () => {
     ).rejects.toThrow(
       /name list length \(1\) must match speech span count \(2\)/
     );
+    expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
@@ -474,6 +534,7 @@ describe('createSpeakerIdentification', () => {
     await expect(
       sid.enrollOfflineSegments(['  '], AUDIO_ID, SEGS_IN)
     ).rejects.toThrow(/names\[0\] must be a non-empty string/);
+    expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
   });
 
@@ -509,6 +570,7 @@ describe('createSpeakerIdentification', () => {
     await expect(
       sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN)
     ).rejects.toThrow(/Speaker 'bob' is already enrolled/);
+    expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerAdd).not.toHaveBeenCalled();
   });
@@ -535,7 +597,7 @@ describe('createSpeakerIdentification', () => {
         durationMs: 100,
       },
     ]);
-    native.speakerEmbeddingManagerSearch
+    native.identifySpeakerOffline
       .mockResolvedValueOnce({ name: 'alice' })
       .mockResolvedValueOnce({ name: '' });
 
@@ -548,6 +610,29 @@ describe('createSpeakerIdentification', () => {
     });
 
     expect(result).toEqual({ labeledCount: 1, unknownCount: 1 });
+    expect(native.identifySpeakerOffline).toHaveBeenNthCalledWith(
+      1,
+      sid.instanceId,
+      sid.managerId,
+      AUDIO_ID,
+      0.55,
+      0,
+      1600
+    );
+    expect(native.identifySpeakerOffline).toHaveBeenNthCalledWith(
+      2,
+      sid.instanceId,
+      sid.managerId,
+      AUDIO_ID,
+      0.55,
+      2000,
+      3600
+    );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
     expect(segs.createLiveSegmentBuffer).toHaveBeenCalledWith({
       sourceAudioBufferId: AUDIO_ID,
       spooling: { mode: 'on' },
@@ -569,11 +654,6 @@ describe('createSpeakerIdentification', () => {
       expect.objectContaining({
         payload: { source: 'sid', speakerName: null },
       })
-    );
-    expect(native.speakerEmbeddingManagerSearch).toHaveBeenCalledWith(
-      sid.managerId,
-      emb,
-      0.55
     );
     expect(segs.finalizeLiveSegmentBuffer).toHaveBeenCalledWith(STAGING_LIVE);
     expect(segs.populateOfflineSegmentBufferIfEmpty).toHaveBeenCalledWith(
@@ -666,10 +746,12 @@ describe('createSpeakerIdentification', () => {
     expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
 
     const firstProgressOrder = onProgress.mock.invocationCallOrder[0]!;
-    const firstSliceOrder = (
-      audiobuffer.getOfflineAudioBufferSamplesSlice as unknown as jest.Mock
-    ).mock.invocationCallOrder[0]!;
-    expect(firstProgressOrder).toBeLessThan(firstSliceOrder);
+    const firstIdentifyOrder =
+      native.identifySpeakerOffline.mock.invocationCallOrder[0]!;
+    expect(firstProgressOrder).toBeLessThan(firstIdentifyOrder);
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
   });
 
   it('labelOfflineSegments rejects non-function onProgress', async () => {
@@ -706,9 +788,8 @@ describe('createSpeakerIdentification', () => {
     await expect(
       sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onProgress })
     ).rejects.toThrow(/progress failed/);
-    expect(
-      audiobuffer.getOfflineAudioBufferSamplesSlice
-    ).not.toHaveBeenCalled();
+    expect(native.identifySpeakerOffline).not.toHaveBeenCalled();
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
       STAGING_LIVE
     );
@@ -811,7 +892,7 @@ describe('createSpeakerIdentification', () => {
         durationMs: 200,
       },
     ]);
-    native.speakerEmbeddingManagerVerify
+    native.verifySpeakerOffline
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: false });
 
@@ -833,14 +914,28 @@ describe('createSpeakerIdentification', () => {
       matches: [true, false],
     });
 
-    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenCalledTimes(2);
-    expect(native.speakerEmbeddingManagerVerify).toHaveBeenNthCalledWith(
+    expect(native.verifySpeakerOffline).toHaveBeenNthCalledWith(
       1,
+      sid.instanceId,
       sid.managerId,
+      AUDIO_ID,
       'alice',
-      emb,
-      0.55
+      0.55,
+      0,
+      1600
     );
+    expect(native.verifySpeakerOffline).toHaveBeenNthCalledWith(
+      2,
+      sid.instanceId,
+      sid.managerId,
+      AUDIO_ID,
+      'alice',
+      0.55,
+      2000,
+      3600
+    );
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.speakerEmbeddingManagerVerify).not.toHaveBeenCalled();
     expect(onProgress).toHaveBeenCalledTimes(2);
     expect(onVerified).toHaveBeenNthCalledWith(
       1,
@@ -884,7 +979,7 @@ describe('createSpeakerIdentification', () => {
         durationMs: 200,
       },
     ]);
-    native.speakerEmbeddingManagerVerify
+    native.verifySpeakerOffline
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({ ok: false });
 
@@ -903,20 +998,27 @@ describe('createSpeakerIdentification', () => {
       matches: [true, false],
     });
 
-    expect(native.speakerEmbeddingManagerVerify).toHaveBeenNthCalledWith(
+    expect(native.verifySpeakerOffline).toHaveBeenNthCalledWith(
       1,
+      sid.instanceId,
       sid.managerId,
+      AUDIO_ID,
       'alice',
-      emb,
-      0.5
+      0.5,
+      0,
+      1600
     );
-    expect(native.speakerEmbeddingManagerVerify).toHaveBeenNthCalledWith(
+    expect(native.verifySpeakerOffline).toHaveBeenNthCalledWith(
       2,
+      sid.instanceId,
       sid.managerId,
+      AUDIO_ID,
       'bob',
-      emb,
-      0.5
+      0.5,
+      2000,
+      3600
     );
+    expect(native.speakerEmbeddingManagerVerify).not.toHaveBeenCalled();
     expect(onVerified).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ expectedName: 'alice', matched: true })
@@ -957,6 +1059,7 @@ describe('createSpeakerIdentification', () => {
       /name list length \(1\) must match speech span count \(2\)/
     );
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.verifySpeakerOffline).not.toHaveBeenCalled();
   });
 
   it('verifyOfflineSegments rejects when no speech spans', async () => {
@@ -977,6 +1080,7 @@ describe('createSpeakerIdentification', () => {
       sid.verifyOfflineSegments('alice', AUDIO_ID, SEGS_IN)
     ).rejects.toThrow(/at least one non-empty speech span/);
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
+    expect(native.verifySpeakerOffline).not.toHaveBeenCalled();
   });
 
   it('verifyOfflineSegments rejects non-function onVerified', async () => {
@@ -1011,7 +1115,7 @@ describe('createSpeakerIdentification', () => {
         durationMs: 200,
       },
     ]);
-    native.speakerEmbeddingManagerSearch
+    native.identifySpeakerOffline
       .mockResolvedValueOnce({ name: 'alice' })
       .mockResolvedValueOnce({ name: '' });
 

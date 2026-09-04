@@ -155,7 +155,14 @@ export type DiarizationProcessNativeResult = {
   success: boolean;
   error?: string;
   errorCode?: string;
-  segments: Array<{ start: number; end: number; speaker: number }>;
+  /**
+   * Timeline in seconds. Returned by `reclusterDiarization`.
+   * Product `diarizeOffline` writes `segmentsOut` natively and may omit this
+   * (prefer `segmentCount`).
+   */
+  segments?: Array<{ start: number; end: number; speaker: number }>;
+  /** Number of segments written to `segmentsOut` (product `diarizeOffline`). */
+  segmentCount?: number;
   numSpeakers: number;
   sampleRate: number;
   speakersPerFrame?: number[];
@@ -1593,6 +1600,7 @@ export interface Spec extends TurboModule {
   diarizeOffline(
     instanceId: string,
     audioInBufferId: string,
+    segmentsOutBufferId: string,
     includeOverlap?: boolean
   ): Promise<DiarizationProcessNativeResult>;
 
@@ -1622,8 +1630,67 @@ export interface Spec extends TurboModule {
 
   computeSpeakerEmbeddingOffline(
     instanceId: string,
-    audioBufferId: string
+    audioBufferId: string,
+    startSample?: number | null,
+    endSample?: number | null
   ): Promise<{ embedding: number[] }>;
+
+  /**
+   * Compute embedding from an offline buffer (optional range) and search the
+   * manager in one native call. Empty `name` means no match above threshold.
+   */
+  identifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ name: string }>;
+
+  /**
+   * Compute embedding from an offline buffer (optional range) and verify against
+   * a named enrollment in one native call.
+   */
+  verifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    name: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ ok: boolean }>;
+
+  /**
+   * Compute embeddings from one or more offline buffers (optional per-item ranges)
+   * and `manager.add` in one native call. Returns flattened embeddings (`dim * count`)
+   * for the JS enrollment mirror only — not for a second add roundtrip.
+   */
+  enrollSpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    name: string,
+    audioBufferIds: string[],
+    startSamples?: Array<number | null> | null,
+    endSamples?: Array<number | null> | null
+  ): Promise<{ ok: boolean; embeddings: number[] }>;
+
+  /**
+   * Start a live-offline Speaker Identification pipeline.
+   * Labels committed speech spans into a live segment buffer (payload.source = sid).
+   */
+  startSpeakerIdentificationOfflineLivePipeline(
+    instanceId: string,
+    managerId: string,
+    audioInLiveBufferId: string,
+    segmentsOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      threshold: number;
+    }
+  ): Promise<{ pipelineId: string }>;
 
   unloadSpeakerEmbeddingExtractor(instanceId: string): Promise<void>;
 

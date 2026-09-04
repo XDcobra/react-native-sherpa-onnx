@@ -20,11 +20,11 @@
 namespace {
 
 std::mutex g_speaker_embedding_mutex;
-std::unordered_map<std::string,
-                   std::unique_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper>>
+std::unordered_map<
+    std::string, std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper>>
     g_extractors;
 std::unordered_map<std::string,
-                   std::unique_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper>>
+                   std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper>>
     g_managers;
 
 std::string CopyRequiredJstring(JNIEnv* env, jstring value) {
@@ -111,6 +111,22 @@ jobject OkMap(JNIEnv* env, bool ok) {
   return map;
 }
 
+std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> LookupExtractor(
+    const std::string& id) {
+  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
+  auto it = g_extractors.find(id);
+  if (it == g_extractors.end() || !it->second) return nullptr;
+  return it->second;
+}
+
+std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> LookupManager(
+    const std::string& id) {
+  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
+  auto it = g_managers.find(id);
+  if (it == g_managers.end() || !it->second) return nullptr;
+  return it->second;
+}
+
 }  // namespace
 
 extern "C" {
@@ -127,12 +143,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   sherpaonnx::SpeakerEmbeddingInitializeResult result;
   {
     std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto& inst = g_extractors[id];
-    if (inst == nullptr) {
-      inst = std::make_unique<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
-    } else {
-      inst->release();
-    }
+    // Replace the map entry so in-flight shared_ptrs keep the old wrapper.
+    auto inst =
+        std::make_shared<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
     result = inst->initialize(dir, type.empty() ? "auto" : type,
                               numThreads > 0 ? numThreads : 1, providerOpt,
                               debug == JNI_TRUE);
@@ -141,6 +154,7 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
            result.errorCode.c_str());
       g_extractors.erase(id);
     } else {
+      g_extractors[id] = std::move(inst);
       LOGI("nativeInitializeExtractorAuto ok: id=%s dim=%d", id.c_str(),
            result.dim);
     }
@@ -163,17 +177,15 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   sherpaonnx::SpeakerEmbeddingInitializeResult result;
   {
     std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto& inst = g_extractors[id];
-    if (inst == nullptr) {
-      inst = std::make_unique<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
-    } else {
-      inst->release();
-    }
+    auto inst =
+        std::make_shared<sherpaonnx::SpeakerEmbeddingExtractorWrapper>();
     result = inst->initializeCustom(type, paths, numThreads > 0 ? numThreads : 1,
                                     providerOpt, debug == JNI_TRUE);
     if (!result.success) {
       LOGE("nativeInitializeExtractorCustom failed: %s", result.error.c_str());
       g_extractors.erase(id);
+    } else {
+      g_extractors[id] = std::move(inst);
     }
   }
   return InitResultToJava(env, result);
@@ -202,28 +214,25 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     env->GetFloatArrayRegion(samples, 0, n, input.data());
   }
 
+  auto extractor = LookupExtractor(id);
   std::vector<float> embedding;
   std::string error;
   std::string errorCode;
   bool ok = false;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_extractors.find(id);
-    if (it == g_extractors.end() || it->second == nullptr) {
-      error = "Speaker embedding extractor not found: " + id;
-      errorCode = "SPEAKER_EMBEDDING_NOT_INITIALIZED";
+  if (!extractor) {
+    error = "Speaker embedding extractor not found: " + id;
+    errorCode = "SPEAKER_EMBEDDING_NOT_INITIALIZED";
+  } else {
+    embedding = extractor->computeFromSamples(input, sampleRate);
+    if (embedding.empty()) {
+      error = extractor->lastError().empty()
+                  ? "Speaker embedding compute failed"
+                  : extractor->lastError();
+      errorCode = extractor->lastErrorCode().empty()
+                      ? "SPEAKER_EMBEDDING_COMPUTE_ERROR"
+                      : extractor->lastErrorCode();
     } else {
-      embedding = it->second->computeFromSamples(input, sampleRate);
-      if (embedding.empty()) {
-        error = it->second->lastError().empty()
-                    ? "Speaker embedding compute failed"
-                    : it->second->lastError();
-        errorCode = it->second->lastErrorCode().empty()
-                        ? "SPEAKER_EMBEDDING_COMPUTE_ERROR"
-                        : it->second->lastErrorCode();
-      } else {
-        ok = true;
-      }
+      ok = true;
     }
   }
 
@@ -234,35 +243,18 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     return map;
   }
 
-  jclass listClass = env->FindClass("java/util/ArrayList");
-  jclass floatClass = env->FindClass("java/lang/Float");
-  if (!listClass || !floatClass) {
-    if (listClass) env->DeleteLocalRef(listClass);
-    if (floatClass) env->DeleteLocalRef(floatClass);
-    return map;
-  }
-  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
-  jmethodID listAdd =
-      env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
-  jmethodID floatValueOf =
-      env->GetStaticMethodID(floatClass, "valueOf", "(F)Ljava/lang/Float;");
-  jobject arr = env->NewObject(listClass, listInit);
-  if (arr && listAdd && floatValueOf) {
-    for (float v : embedding) {
-      jobject boxed =
-          env->CallStaticObjectMethod(floatClass, floatValueOf, v);
-      if (boxed) {
-        env->CallBooleanMethod(arr, listAdd, boxed);
-        env->DeleteLocalRef(boxed);
-      }
+  jfloatArray embArray =
+      env->NewFloatArray(static_cast<jsize>(embedding.size()));
+  if (embArray) {
+    if (!embedding.empty()) {
+      env->SetFloatArrayRegion(
+          embArray, 0, static_cast<jsize>(embedding.size()), embedding.data());
     }
     jstring key = env->NewStringUTF("embedding");
-    env->CallObjectMethod(map, mapPut, key, arr);
+    env->CallObjectMethod(map, mapPut, key, embArray);
     env->DeleteLocalRef(key);
+    env->DeleteLocalRef(embArray);
   }
-  if (arr) env->DeleteLocalRef(arr);
-  env->DeleteLocalRef(listClass);
-  env->DeleteLocalRef(floatClass);
   return map;
 }
 
@@ -270,12 +262,16 @@ JNIEXPORT void JNICALL
 Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeUnloadExtractor(
     JNIEnv* env, jclass /* clazz */, jstring instanceId) {
   const std::string id = CopyRequiredJstring(env, instanceId);
-  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-  auto it = g_extractors.find(id);
-  if (it != g_extractors.end()) {
-    if (it->second) it->second->release();
-    g_extractors.erase(it);
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
+    auto it = g_extractors.find(id);
+    if (it != g_extractors.end()) {
+      doomed = std::move(it->second);
+      g_extractors.erase(it);
+    }
   }
+  // Destructor releases when last shared_ptr drops (after in-flight compute).
 }
 
 JNIEXPORT jobject JNICALL
@@ -289,15 +285,12 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   bool ok = false;
   {
     std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto& inst = g_managers[id];
-    if (inst == nullptr) {
-      inst = std::make_unique<sherpaonnx::SpeakerEmbeddingManagerWrapper>();
-    } else {
-      inst->release();
-    }
+    auto inst = std::make_shared<sherpaonnx::SpeakerEmbeddingManagerWrapper>();
     ok = inst->create(dim);
     if (!ok) {
       g_managers.erase(id);
+    } else {
+      g_managers[id] = std::move(inst);
     }
   }
   sherpaonnx::PutBoolean(env, map, mapPut, "success", ok);
@@ -322,12 +315,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     env->GetFloatArrayRegion(embeddings, 0, n, flat.data());
   }
   bool ok = false;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      ok = it->second->add(nameStr, flat, count);
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    ok = manager->add(nameStr, flat, count);
   }
   return OkMap(env, ok);
 }
@@ -338,12 +328,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   const std::string id = CopyRequiredJstring(env, managerId);
   const std::string nameStr = CopyRequiredJstring(env, name);
   bool ok = false;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      ok = it->second->remove(nameStr);
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    ok = manager->remove(nameStr);
   }
   return OkMap(env, ok);
 }
@@ -359,12 +346,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     env->GetFloatArrayRegion(embedding, 0, n, emb.data());
   }
   std::string name;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      name = it->second->search(emb, threshold);
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    name = manager->search(emb, threshold);
   }
   jmethodID mapPut = nullptr;
   jobject map = NewHashMap(env, &mapPut);
@@ -385,12 +369,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     env->GetFloatArrayRegion(embedding, 0, n, emb.data());
   }
   bool ok = false;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      ok = it->second->verify(nameStr, emb, threshold);
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    ok = manager->verify(nameStr, emb, threshold);
   }
   return OkMap(env, ok);
 }
@@ -401,12 +382,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   const std::string id = CopyRequiredJstring(env, managerId);
   const std::string nameStr = CopyRequiredJstring(env, name);
   bool ok = false;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      ok = it->second->contains(nameStr);
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    ok = manager->contains(nameStr);
   }
   return OkMap(env, ok);
 }
@@ -415,10 +393,9 @@ JNIEXPORT jint JNICALL
 Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeManagerNumSpeakers(
     JNIEnv* env, jclass /* clazz */, jstring managerId) {
   const std::string id = CopyRequiredJstring(env, managerId);
-  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-  auto it = g_managers.find(id);
-  if (it == g_managers.end() || !it->second) return 0;
-  return it->second->numSpeakers();
+  auto manager = LookupManager(id);
+  if (!manager) return 0;
+  return manager->numSpeakers();
 }
 
 JNIEXPORT jobject JNICALL
@@ -426,12 +403,9 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     JNIEnv* env, jclass /* clazz */, jstring managerId) {
   const std::string id = CopyRequiredJstring(env, managerId);
   std::vector<std::string> names;
-  {
-    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-    auto it = g_managers.find(id);
-    if (it != g_managers.end() && it->second) {
-      names = it->second->allSpeakers();
-    }
+  auto manager = LookupManager(id);
+  if (manager) {
+    names = manager->allSpeakers();
   }
   jmethodID mapPut = nullptr;
   jobject map = NewHashMap(env, &mapPut);
@@ -464,26 +438,34 @@ JNIEXPORT void JNICALL
 Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeDestroyManager(
     JNIEnv* env, jclass /* clazz */, jstring managerId) {
   const std::string id = CopyRequiredJstring(env, managerId);
-  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-  auto it = g_managers.find(id);
-  if (it != g_managers.end()) {
-    if (it->second) it->second->release();
-    g_managers.erase(it);
+  std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
+    auto it = g_managers.find(id);
+    if (it != g_managers.end()) {
+      doomed = std::move(it->second);
+      g_managers.erase(it);
+    }
   }
 }
 
 JNIEXPORT void JNICALL
 Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeShutdownAll(
     JNIEnv* /* env */, jclass /* clazz */) {
-  std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
-  for (auto& kv : g_extractors) {
-    if (kv.second) kv.second->release();
+  std::unordered_map<
+      std::string,
+      std::shared_ptr<sherpaonnx::SpeakerEmbeddingExtractorWrapper>>
+      extractors;
+  std::unordered_map<
+      std::string, std::shared_ptr<sherpaonnx::SpeakerEmbeddingManagerWrapper>>
+      managers;
+  {
+    std::lock_guard<std::mutex> lock(g_speaker_embedding_mutex);
+    extractors.swap(g_extractors);
+    managers.swap(g_managers);
   }
-  g_extractors.clear();
-  for (auto& kv : g_managers) {
-    if (kv.second) kv.second->release();
-  }
-  g_managers.clear();
+  // Drop map ownership outside the global lock; in-flight shared_ptrs keep
+  // wrappers alive until compute/search finish.
 }
 
 }  // extern "C"

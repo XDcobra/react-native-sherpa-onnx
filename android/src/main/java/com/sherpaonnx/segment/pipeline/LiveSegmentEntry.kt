@@ -88,6 +88,7 @@ class LiveSegmentEntry(
     annotationReason: String? = null,
     annotationSource: String? = null,
     annotationCreatedAtMs: Long? = null,
+    forceEmitAppendedEvent: Boolean = false,
   ): Pair<String, Int> {
     val normalizedKind = kind.trim().ifEmpty { "speech" }
     if (!ALLOWED_KINDS.contains(normalizedKind)) {
@@ -171,9 +172,13 @@ class LiveSegmentEntry(
       )
     }
 
-    if (emitSegmentAppendedEvents) {
+    if (emitSegmentAppendedEvents || forceEmitAppendedEvent) {
       val now = System.currentTimeMillis()
-      if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {
+      if (
+        forceEmitAppendedEvent ||
+        segmentEventMinIntervalMs <= 0L ||
+        now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs
+      ) {
         lastSegmentEventEmitAtMs = now
         try {
           SegmentBufferEventBridge.emitSegmentAppended?.invoke(
