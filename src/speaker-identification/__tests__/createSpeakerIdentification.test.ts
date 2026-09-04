@@ -279,9 +279,27 @@ describe('createSpeakerIdentification', () => {
     await sid.enrollOfflineSegments('alice', AUDIO_ID, SEGS_IN);
 
     expect(segs.getOfflineSegmentBufferSegments).toHaveBeenCalledWith(SEGS_IN);
-    expect(audiobuffer.getOfflineAudioBufferSamplesSlice).toHaveBeenCalledTimes(
-      2
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenCalledTimes(2);
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      1,
+      sid.instanceId,
+      AUDIO_ID,
+      0,
+      1600
     );
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      2,
+      sid.instanceId,
+      AUDIO_ID,
+      3200,
+      4800
+    );
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
+    expect(
+      audiobuffer.createOfflineAudioBufferFromSamples
+    ).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
       sid.managerId,
       'alice',
@@ -346,6 +364,20 @@ describe('createSpeakerIdentification', () => {
     await sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN);
 
     expect(native.computeSpeakerEmbeddingOffline).toHaveBeenCalledTimes(2);
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      1,
+      sid.instanceId,
+      AUDIO_ID,
+      0,
+      1600
+    );
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      2,
+      sid.instanceId,
+      AUDIO_ID,
+      3200,
+      4800
+    );
     expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledTimes(2);
     expect(native.speakerEmbeddingManagerAdd).toHaveBeenNthCalledWith(
       1,
@@ -548,6 +580,23 @@ describe('createSpeakerIdentification', () => {
     });
 
     expect(result).toEqual({ labeledCount: 1, unknownCount: 1 });
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      1,
+      sid.instanceId,
+      AUDIO_ID,
+      0,
+      1600
+    );
+    expect(native.computeSpeakerEmbeddingOffline).toHaveBeenNthCalledWith(
+      2,
+      sid.instanceId,
+      AUDIO_ID,
+      2000,
+      3600
+    );
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
     expect(segs.createLiveSegmentBuffer).toHaveBeenCalledWith({
       sourceAudioBufferId: AUDIO_ID,
       spooling: { mode: 'on' },
@@ -666,10 +715,12 @@ describe('createSpeakerIdentification', () => {
     expect(secondElapsed).toBeGreaterThanOrEqual(firstElapsed);
 
     const firstProgressOrder = onProgress.mock.invocationCallOrder[0]!;
-    const firstSliceOrder = (
-      audiobuffer.getOfflineAudioBufferSamplesSlice as unknown as jest.Mock
-    ).mock.invocationCallOrder[0]!;
-    expect(firstProgressOrder).toBeLessThan(firstSliceOrder);
+    const firstComputeOrder =
+      native.computeSpeakerEmbeddingOffline.mock.invocationCallOrder[0]!;
+    expect(firstProgressOrder).toBeLessThan(firstComputeOrder);
+    expect(
+      audiobuffer.getOfflineAudioBufferSamplesSlice
+    ).not.toHaveBeenCalled();
   });
 
   it('labelOfflineSegments rejects non-function onProgress', async () => {
@@ -706,9 +757,7 @@ describe('createSpeakerIdentification', () => {
     await expect(
       sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, { onProgress })
     ).rejects.toThrow(/progress failed/);
-    expect(
-      audiobuffer.getOfflineAudioBufferSamplesSlice
-    ).not.toHaveBeenCalled();
+    expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
       STAGING_LIVE
     );
