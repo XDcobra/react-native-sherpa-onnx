@@ -1655,6 +1655,20 @@ export interface Spec extends TurboModule {
   ): Promise<{ ok: boolean }>;
 
   /**
+   * Compute embeddings from one or more offline buffers (optional per-item ranges)
+   * and `manager.add` in one native call. Returns flattened embeddings (`dim * count`)
+   * for the JS enrollment mirror only — not for a second add roundtrip.
+   */
+  enrollSpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    name: string,
+    audioBufferIds: string[],
+    startSamples?: Array<number | null> | null,
+    endSamples?: Array<number | null> | null
+  ): Promise<{ ok: boolean; embeddings: number[] }>;
+
+  /**
    * Start a live-offline Speaker Identification pipeline.
    * Labels committed speech spans into a live segment buffer (payload.source = sid).
    */

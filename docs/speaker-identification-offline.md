@@ -267,8 +267,8 @@ interface SpeakerIdentificationEngine {
 
 | Method | Behavior |
 | --- | --- |
-| `enroll` | Extract embedding(s) from whole buffer(s); native manager averages multiple clips (L2-normalized). Fails if the name already exists. |
-| `enrollOfflineSegments` | Speech spans → embeddings. `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
+| `enroll` | Combined `enrollSpeakerOffline` (whole buffer(s) → compute + manager.add). Fails if the name already exists. |
+| `enrollOfflineSegments` | Combined `enrollSpeakerOffline` per name group (speech spans → embeddings + add). `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
 | `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
@@ -373,11 +373,11 @@ SID does **not** invent the name list; the app supplies who each span belongs to
 
 ### Buffer-first embeddings
 
-PCM stays native via buffer ids. Identify / label / verify use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline`) so embeddings stay off the JS hot path. Only enroll (and low-level extract/search) still move compact `dim` floats (~256) across the TurboModule — not the full waveform.
+PCM stays native via buffer ids. Identify / label / verify / enroll use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline` / `enrollSpeakerOffline`) so embeddings stay off the JS product hot path. Low-level extract/search still move compact `dim` floats (~256) across the TurboModule when apps need raw vectors — not the full waveform.
 
 ### Persistence
 
-The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors passed to `manager.add` on `enroll` / `enrollOfflineSegments` / `importEnrollments`, and clears it on `removeSpeaker` / `destroy`.
+The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors returned once from `enrollSpeakerOffline` (and from `importEnrollments`), and clears it on `removeSpeaker` / `destroy`. Product enroll does **not** call a separate `manager.add` with embedding arrays.
 
 ```ts
 // After enroll…

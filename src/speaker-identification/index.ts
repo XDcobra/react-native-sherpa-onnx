@@ -95,6 +95,38 @@ function cloneEmbeddings(embeddings: Float32Array[]): Float32Array[] {
   return embeddings.map((embedding) => new Float32Array(embedding));
 }
 
+function unflattenEmbeddings(flat: number[], dim: number): Float32Array[] {
+  if (!(dim > 0)) {
+    throw new Error('unflattenEmbeddings requires dim > 0');
+  }
+  if (!Array.isArray(flat) || flat.length === 0 || flat.length % dim !== 0) {
+    throw new Error(
+      `SID_ENROLL_INVALID_RESULT: embeddings length ${
+        Array.isArray(flat) ? flat.length : -1
+      } must be a positive multiple of dim ${dim}`
+    );
+  }
+  const count = flat.length / dim;
+  const out: Float32Array[] = [];
+  for (let i = 0; i < count; i++) {
+    const embedding = new Float32Array(dim);
+    const offset = i * dim;
+    for (let j = 0; j < dim; j++) {
+      const value = flat[offset + j]!;
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `SID_ENROLL_INVALID_RESULT: embeddings[${
+            offset + j
+          }] must be a finite number`
+        );
+      }
+      embedding[j] = value;
+    }
+    out.push(embedding);
+  }
+  return out;
+}
+
 function embeddingsToNumberArrays(embeddings: Float32Array[]): number[][] {
   return embeddings.map((embedding) => Array.from(embedding));
 }
@@ -317,17 +349,26 @@ export async function createSpeakerIdentification(
       if (buffers.length === 0) {
         throw new Error('enroll() requires at least one audio buffer');
       }
-      const embeddings: Float32Array[] = [];
-      for (const buffer of buffers) {
-        embeddings.push(await engine.extractFromOfflineAudio(buffer));
-      }
-      const ok = await manager.add(trimmed, embeddings);
-      if (!ok) {
+      const audioBufferIds = buffers.map((buffer) =>
+        resolvePipelineAudioBufferId(buffer)
+      );
+      const result = await SherpaOnnx.enrollSpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        trimmed,
+        audioBufferIds,
+        null,
+        null
+      );
+      if (!result.ok) {
         throw new Error(
           `Failed to enroll speaker '${trimmed}' (name may already exist)`
         );
       }
-      rememberEnrollment(trimmed, embeddings);
+      rememberEnrollment(
+        trimmed,
+        unflattenEmbeddings(result.embeddings ?? [], engine.dim)
+      );
     },
     async enrollOfflineSegments(
       nameOrNames: string | string[],
@@ -337,7 +378,7 @@ export async function createSpeakerIdentification(
     ): Promise<void> {
       guard();
       assertSegmentOptions(segmentOptions);
-      resolvePipelineAudioBufferId(audioIn);
+      const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
@@ -366,31 +407,45 @@ export async function createSpeakerIdentification(
       const progressSession = createSpeakerIdentificationProgressSession(
         segmentOptions?.onProgress
       );
-      const byName = new Map<string, Float32Array[]>();
+      const byName = new Map<
+        string,
+        { startSamples: number[]; endSamples: number[] }
+      >();
       for (let i = 0; i < spans.length; i++) {
         const span = spans[i]!;
         const speakerName = trimmedPerSpan[i]!;
         progressSession.emitStep(i, spans.length, spanDurationMs(span));
-        const embedding = await engine.extractFromOfflineAudio(audioIn, {
-          startSample: span.startSample,
-          endSample: span.endSample,
-        });
         const bucket = byName.get(speakerName);
         if (bucket) {
-          bucket.push(embedding);
+          bucket.startSamples.push(span.startSample);
+          bucket.endSamples.push(span.endSample);
         } else {
-          byName.set(speakerName, [embedding]);
+          byName.set(speakerName, {
+            startSamples: [span.startSample],
+            endSamples: [span.endSample],
+          });
         }
       }
 
-      for (const [speakerName, embeddings] of byName) {
-        const ok = await manager.add(speakerName, embeddings);
-        if (!ok) {
+      for (const [speakerName, ranges] of byName) {
+        const audioBufferIds = ranges.startSamples.map(() => audioBufferId);
+        const result = await SherpaOnnx.enrollSpeakerOffline(
+          engine.instanceId,
+          manager.managerId,
+          speakerName,
+          audioBufferIds,
+          ranges.startSamples,
+          ranges.endSamples
+        );
+        if (!result.ok) {
           throw new Error(
             `Failed to enroll speaker '${speakerName}' (name may already exist)`
           );
         }
-        rememberEnrollment(speakerName, embeddings);
+        rememberEnrollment(
+          speakerName,
+          unflattenEmbeddings(result.embeddings ?? [], engine.dim)
+        );
       }
     },
     async identify(

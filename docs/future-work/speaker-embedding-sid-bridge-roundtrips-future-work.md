@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–5, **§6–§7**, and **§10** **done**. Open follow-ups: **§8–§9** (enroll without JS embeddings, diarization native segment write). Optional later: embedding JSI.  
+**Status:** Findings 1–5, **§6–§8**, and **§10** **done**. Open follow-up: **§9** (diarization native segment write). Optional later: embedding JSI.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding**, **speaker-identification**, and **diarization** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID (and keep diarization) with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance / batch work stays in-process, no PCM or embedding vectors bouncing through JS on product hot paths.
 
@@ -22,7 +22,7 @@
 |-------|---------|
 | Shared C++ `SpeakerEmbeddingRunner` / `ManagerCore` | **Not** the bottleneck. Diarization already uses the same core **without** JS between embed and cluster — still the target pattern for compute. |
 | C++ registry weight sharing | **Win** (fewer ONNX loads). Orthogonal to transport cost. |
-| TurboModule `number[]` embeddings + JS live drain | **Was** the real cost on SID; Findings 1–5 closed product hot paths. Residuals: enroll, low-level extract, diarization post-result JS materialization. |
+| TurboModule `number[]` embeddings + JS live drain | **Was** the real cost on SID; Findings 1–5 and §8 closed product hot paths. Residuals: low-level extract, diarization post-result JS materialization. |
 
 **Hop count from JS did not increase** at the shared-Runner migration. Findings 1–5 fixed live orchestration, range extract, combined identify/verify, Android embedding unbox, and Android JNI lock narrowing.
 
@@ -43,7 +43,7 @@ Diarization offline compute
 | Path | vs target |
 |------|-----------|
 | SID live / identify / verify | **Met** (no PCM/embedding through JS) |
-| SID enroll | **Partial** — no JS PCM; embeddings still cross JS for `manager.add` + mirror |
+| SID enroll | **Met** (`enrollSpeakerOffline` compute+add; mirror from returned flats) |
 | Diarization compute→cluster | **Met** (in-process) |
 | Diarization result → offline segments | **Gap** — JS live-append materialize loop |
 | Android SID JNI lifetime | **Met** (`shared_ptr` + narrow map lock) |
@@ -140,7 +140,7 @@ Empty `name` = no match. Range rules match Finding 2. Combined `verifySpeakerOff
 
 ## 4. Finding — Embedding transport as `number[]` / boxed floats (MEDIUM) — **DONE**
 
-**Status:** Implemented (path D). Offline `verify` / `verifyOfflineSegments` call `verifySpeakerOffline` (compute + manager verify in one TM → `{ ok }`). Android `nativeComputeEmbedding` returns `jfloatArray` instead of boxed `ArrayList&lt;Float&gt;`. **No** embedding JSI in this finding; enroll and low-level extract still use TurboModule `number[]` (see Finding 8). Optional later: JSI `ArrayBuffer` if apps need faster raw-vector pull.
+**Status:** Implemented (path D). Offline `verify` / `verifyOfflineSegments` call `verifySpeakerOffline` (compute + manager verify in one TM → `{ ok }`). Android `nativeComputeEmbedding` returns `jfloatArray` instead of boxed `ArrayList&lt;Float&gt;`. **No** embedding JSI in this finding; enroll closed later in Finding 8; low-level extract still uses TurboModule `number[]`. Optional later: JSI `ArrayBuffer` if apps need faster raw-vector pull.
 
 ### Problem (historical)
 
@@ -220,39 +220,21 @@ iOS `g_speaker_embedding_mutex` (TurboModule path in `SherpaOnnx+SpeakerEmbeddin
 
 ---
 
-## 8. Finding — SID enroll still marshals embeddings through JS (MEDIUM)
+## 8. Finding — SID enroll still marshals embeddings through JS (MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented. Product `enroll` / `enrollOfflineSegments` call `enrollSpeakerOffline` (batch buffer ids + optional per-item ranges → compute → `manager.add` in one TM). Returns flattened embeddings once for the JS enrollment mirror. Low-level `compute` / `manager.add` unchanged for apps / `importEnrollments`.
 
-`enroll` / `enrollOfflineSegments` still:
+### Problem (historical)
 
-1. `computeSpeakerEmbeddingOffline` → embedding `number[]` → JS `Float32Array`
-2. Flatten → `speakerEmbeddingManagerAdd` with `number[]`
+`enroll` / `enrollOfflineSegments` did `computeSpeakerEmbeddingOffline` → embedding `number[]` → JS → `speakerEmbeddingManagerAdd`.
 
-No PCM through JS (Finding 2), but the last product path that **needs** vectors for `manager.add` + the JS enrollment mirror still crosses the bridge twice per utterance. Infrequent vs live label, but still the only SID product embedding gap after Findings 3–4.
+### What shipped
 
-### Direction
+- Spec + Android Helper/Module + iOS Inference: `enrollSpeakerOffline`
+- Multi-buffer / multi-span same-name enroll is one native add (`count > 1`)
+- Unit tests expect combined TM only on enroll paths
 
-Combined native enroll API, e.g.:
-
-```ts
-enrollSpeakerOffline(
-  instanceId: string,
-  managerId: string,
-  name: string,
-  audioBufferId: string,
-  startSample?: number | null,
-  endSample?: number | null
-): Promise<{ ok: boolean; embedding?: number[] }>
-```
-
-Or multi-buffer variant for `enroll(name, buffers[])` / per-span enroll.
-
-- Native: slice/full → compute → `manager.add` in-process → `{ ok }`.
-- If the JS enrollment mirror must stay: return embedding once (or a compact transfer) **only for mirror**, not a second add roundtrip — or extend native export later ([speaker-embedding-manager-upstream-export-import.md](speaker-embedding-manager-upstream-export-import.md)).
-- Keep low-level `compute` / `manager.add` for apps that need raw vectors.
-
-**Priority:** Medium. Medium effort. After lifetime/mutex hygiene (§6–§7) so enroll hot path lands on stable locks.
+**Priority:** Medium — **met**.
 
 ---
 
@@ -274,7 +256,7 @@ Public `diarize(audioIn, segmentsOut)` shape can stay; internal swap only.
 
 ## 10. Finding — Stale foundation / cursor docs vs shipped diarization (LOW) — **DONE**
 
-**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at §8–§9 / live diarization / pyannote evaluator — not greenfield native.
+**Status:** Implemented. Foundation status/phase table, `.cursor/rules/separation-diarization-pre-1.0.mdc`, and SID offline cross-links describe offline diarization as **shipped**. Backlog points at §9 / live diarization / pyannote evaluator — not greenfield native.
 
 ### Problem (historical)
 
@@ -295,7 +277,7 @@ Offline diarization was shipped, but some internal docs still read as Phase-2-pl
 
 ## 11. Suggested implementation order
 
-Findings 1–5, §6–§7, and §10 are **done**. Recommended order for the remaining open follow-ups (safety before larger API moves):
+Findings 1–5, §6–§8, and §10 are **done**. Remaining open follow-up:
 
 | Step | Finding | Effort | Impact | Status | Why this order |
 |------|---------|--------|--------|--------|----------------|
@@ -307,11 +289,11 @@ Findings 1–5, §6–§7, and §10 are **done**. Recommended order for the rema
 | F | §10 docs sync (foundation + cursor rule) | Small | Stops stale “diarization missing” planning | **Done** | Cheap; clear mental model before more work |
 | G | §6 diarization `shared_ptr` lifetime | Small–medium | Unload-during-process safety | **Done** | Same pattern as §5; prerequisite for §9 |
 | H | §7 iOS SID TM mutex parity | Small | Contention hygiene parity with Android | **Done** | Independent of enroll / segment write |
-| I | §8 combined enroll (no JS embedding add) | Medium | Closes last SID product embedding gap | Open | Builds on stable locks (§5/§7) |
+| I | §8 combined enroll (no JS embedding add) | Medium | Closes last SID product embedding gap | **Done** | Builds on stable locks (§5/§7) |
 | J | §9 diarization native `segmentsOut` write | Medium–large | Drops JS materialize loop | Open | After §6 lifetime |
-| K | Optional embedding JSI | Small–medium | Faster raw-vector apps only | Deferred | Only if enroll/low-level still hot in profiles |
+| K | Optional embedding JSI | Small–medium | Faster raw-vector apps only | Deferred | Only if low-level extract still hot in profiles |
 
-**Recommendation summary:** next `I → J` (enroll TM → diarization segment write). Defer embedding JSI unless profiling shows enroll/low-level extract as a real cost.
+**Recommendation summary:** next **J** (diarization native `segmentsOut` write). Defer embedding JSI unless profiling shows low-level extract as a real cost.
 
 Draft an **explicit implementation plan per open finding** in that order (one finding at a time), same style as Findings 1–5.
 
@@ -343,11 +325,11 @@ Success criteria for §6 (met): diarization process holds a `shared_ptr` session
 
 Success criteria for §7 (met): iOS TM compute/identify/verify/manager ops do not hold `g_speaker_embedding_mutex` across ONNX / C-API work.
 
-Success criteria for §8: `enroll` / `enrollOfflineSegments` do not call separate compute + `manager.add` with embedding `number[]` on the product path (mirror policy documented).
+Success criteria for §8 (met): `enroll` / `enrollOfflineSegments` do not call separate compute + `manager.add` with embedding `number[]` on the product path (mirror policy documented).
 
 Success criteria for §9: `diarize` fills `segmentsOut` natively (no JS per-segment materialize loop).
 
-Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at §8–§9 / live diarization — not greenfield native.
+Success criteria for §10 (met): foundation status + cursor rule describe diarization offline as shipped; backlog points at §9 / live diarization — not greenfield native.
 
 ---
 
