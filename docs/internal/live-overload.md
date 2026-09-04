@@ -396,3 +396,5 @@ Keep `labelLiveSegments` signature + handle shape; swap the body for:
 3. `completed` / `getStatus` via `createStreamingPipelineCompletionPromise` + native streaming pipeline registry
 
 No public API change required.
+
+Full bottleneck analysis (live JS drain, range extract staging, extract+search roundtrips, embedding `number[]` marshalling, JNI mutex) and suggested order: [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md).
