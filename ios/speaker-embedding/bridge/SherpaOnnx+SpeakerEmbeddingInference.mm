@@ -4,7 +4,7 @@
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../core/SpeakerEmbeddingBridgeState.h"
 #include "../core/SpeakerEmbeddingBridgeUtils.h"
-#include "../native/sherpa-onnx-speaker-embedding-wrapper.h"
+#include "sherpa-onnx-speaker-embedding-wrapper.h"
 
 #include "sherpa-onnx-model-path-fill.h"
 
@@ -238,7 +238,9 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
     }
 
     std::vector<float> embedding;
-    try {
+    std::string computeError;
+    std::string computeErrorCode;
+    {
       std::lock_guard<std::mutex> lock(
           sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_mutex);
       auto it = sherpaonnx::speaker_embedding::bridge::g_speaker_embedding_extractors
@@ -254,10 +256,19 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
         return;
       }
       embedding = it->second->wrapper->computeFromSamples(inputSamples, inputSr);
-    } catch (const std::exception &ex) {
-      reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
-             [NSString stringWithUTF8String:ex.what()],
-             nil);
+      if (embedding.empty()) {
+        computeError = it->second->wrapper->lastError();
+        computeErrorCode = it->second->wrapper->lastErrorCode();
+      }
+    }
+    if (embedding.empty()) {
+      NSString *code = computeErrorCode.empty()
+          ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+          : [NSString stringWithUTF8String:computeErrorCode.c_str()];
+      NSString *msg = computeError.empty()
+          ? @"Speaker embedding compute failed"
+          : [NSString stringWithUTF8String:computeError.c_str()];
+      reject(code, msg, nil);
       return;
     }
 
