@@ -524,12 +524,14 @@ export async function createSpeakerIdentification(
       thresholdOptions?: SpeakerIdentificationThresholdOptions
     ): Promise<boolean> {
       guard();
-      const embedding = await engine.extractFromOfflineAudio(audio);
-      return manager.verify(
+      const result = await SherpaOnnx.verifySpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        resolvePipelineAudioBufferId(audio),
         name,
-        embedding,
         resolveThreshold(thresholdOptions)
       );
+      return result.ok;
     },
     async verifyOfflineSegments(
       nameOrNames: string | string[],
@@ -539,7 +541,7 @@ export async function createSpeakerIdentification(
     ): Promise<VerifyOfflineSegmentsResult> {
       guard();
       assertVerifyOptions(verifyOptions);
-      resolvePipelineAudioBufferId(audioIn);
+      const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const threshold = resolveThreshold(verifyOptions);
       const spans = collectSpeechSpans(
@@ -569,15 +571,16 @@ export async function createSpeakerIdentification(
         const expectedName = expectedPerSpan[i]!;
         const durationMs = spanDurationMs(span);
         progressSession.emitStep(i, spans.length, durationMs);
-        const embedding = await engine.extractFromOfflineAudio(audioIn, {
-          startSample: span.startSample,
-          endSample: span.endSample,
-        });
-        const matched = await manager.verify(
+        const result = await SherpaOnnx.verifySpeakerOffline(
+          engine.instanceId,
+          manager.managerId,
+          audioBufferId,
           expectedName,
-          embedding,
-          threshold
+          threshold,
+          span.startSample,
+          span.endSample
         );
+        const matched = result.ok;
         matches.push(matched);
         if (matched) {
           matchCount += 1;
