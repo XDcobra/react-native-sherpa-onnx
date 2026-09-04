@@ -5,6 +5,7 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
+import com.sherpaonnx.segment.core.PyannoteSegmentationRuntime
 import com.sherpaonnx.segment.pipeline.OfflineSegmentEntry
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
@@ -19,6 +20,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.log10
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import org.json.JSONObject
 
@@ -112,6 +114,12 @@ data class SegmentationEnginePolicy(
   val vadThreshold: Double? = null,
   val vadMinSpeechMs: Int? = null,
   val vadMinSilenceMs: Int? = null,
+  /** Pyannote window shift ratio (speech_pyannote_segmentation). */
+  val windowShiftRatio: Double = 0.1,
+  /** Pyannote min speech duration in seconds. */
+  val minDurationOn: Double = 0.3,
+  /** Pyannote max gap merge in seconds. */
+  val minDurationOff: Double = 0.5,
 )
 
 data class SegmentationEngineInfoSnapshot(
@@ -950,6 +958,7 @@ private fun parsePolicy(
   val speechEvaluators = setOf(
     "speech_energy_silence",
     "speech_vad_model",
+    "speech_pyannote_segmentation",
     "continuous_frames",
   )
 
@@ -992,6 +1001,10 @@ private fun parsePolicy(
     vadThreshold = (rawPolicy["vadThreshold"] as? Number)?.toDouble(),
     vadMinSpeechMs = (rawPolicy["vadMinSpeechMs"] as? Number)?.toInt(),
     vadMinSilenceMs = (rawPolicy["vadMinSilenceMs"] as? Number)?.toInt(),
+    windowShiftRatio = readDouble(rawPolicy, "windowShiftRatio", 0.1)
+      .coerceIn(0.01, 1.0),
+    minDurationOn = readDouble(rawPolicy, "minDurationOn", 0.3).coerceAtLeast(0.0),
+    minDurationOff = readDouble(rawPolicy, "minDurationOff", 0.5).coerceAtLeast(0.0),
   )
 }
 
@@ -1105,6 +1118,14 @@ object SegmentationEngineRegistry {
           policy.copy(evaluator = "continuous_frames")
         } else {
           policy
+        }
+
+        if (effectivePolicy.evaluator == "speech_pyannote_segmentation") {
+          throw SegmentationEngineException(
+            code = "POLICY_INVALID",
+            message =
+              "Policy evaluator 'speech_pyannote_segmentation' is offline-only and invalid for live attach",
+          )
         }
 
         if (effectivePolicy.evaluator == "speech_vad_model") {
@@ -1495,6 +1516,114 @@ object SegmentationEngineRegistry {
             if (speechSamples > 0) {
               appendVadRecord("finalize", null)
             }
+          } finally {
+            runtime.close()
+          }
+        } else if (policy.evaluator == "speech_pyannote_segmentation") {
+          val modelPath = policy.modelPath?.trim().orEmpty()
+          if (modelPath.isEmpty() || !File(modelPath).isFile) {
+            throw SegmentationEngineException(
+              code = "POLICY_MODEL_UNAVAILABLE",
+              message =
+                "speech_pyannote_segmentation modelPath must be an existing .onnx file: $modelPath",
+            )
+          }
+
+          val samples = if (offline.numSamples <= 0) {
+            FloatArray(0)
+          } else {
+            offline.readSlice(0, offline.numSamples)
+          }
+
+          val runtime = try {
+            PyannoteSegmentationRuntime.create(
+              PyannoteSegmentationRuntime.Options(
+                modelPath = modelPath,
+                windowShiftRatio = policy.windowShiftRatio.toFloat(),
+                minDurationOn = policy.minDurationOn.toFloat(),
+                minDurationOff = policy.minDurationOff.toFloat(),
+              ),
+            )
+          } catch (error: Exception) {
+            throw SegmentationEngineException(
+              code = "POLICY_MODEL_UNAVAILABLE",
+              message = error.message
+                ?: "speech_pyannote_segmentation failed to initialize runtime",
+            )
+          }
+
+          try {
+            val spans = if (samples.isEmpty()) {
+              emptyList()
+            } else {
+              runtime.process(samples, sr)
+            }
+            val minSamples =
+              ((policy.minSegmentMs.toDouble() * sr) / 1000.0).toInt().coerceAtLeast(1)
+            val maxSamples =
+              ((policy.maxSegmentMs.toDouble() * sr) / 1000.0)
+                .toInt()
+                .coerceAtLeast(minSamples)
+            val payload = JSONObject().put("source", "pyannote").toString()
+            val totalSamples = offline.numSamples.coerceAtLeast(0)
+
+            fun appendPyannoteRecord(
+              startSample: Int,
+              endSample: Int,
+              reason: String,
+            ) {
+              if (endSample <= startSample) return
+              val durationMs = (((endSample - startSample) * 1000.0) / sr).toInt()
+              if (durationMs < policy.minSegmentMs) return
+              val record = SegmentRecord(
+                id = "seg_${UUID.randomUUID()}",
+                kind = "speech",
+                sourceAudioBufferId = bufferId,
+                startSample = startSample,
+                endSample = endSample,
+                sampleRate = sr,
+                durationMs = durationMs,
+                confidence = null,
+                payloadJson = payload,
+              )
+              records.add(record)
+              recordSegmentAnnotation(
+                record.id,
+                SegmentAnnotationSnapshot(
+                  reason = reason,
+                  source = "segmentation_engine",
+                  createdAtMs = nowMs(),
+                  segmentIndex = records.lastIndex,
+                ),
+              )
+            }
+
+            for ((index, span) in spans.withIndex()) {
+              var start = (span.startSec * sr).roundToInt().coerceIn(0, totalSamples)
+              var end = (span.endSec * sr).roundToInt().coerceIn(0, totalSamples)
+              if (end <= start) continue
+              if (end - start < minSamples) continue
+
+              while (end - start > maxSamples) {
+                val chunkEnd = start + maxSamples
+                appendPyannoteRecord(start, chunkEnd, "length_limit")
+                start = chunkEnd
+              }
+              val reason = if (index == spans.lastIndex) {
+                "finalize"
+              } else {
+                "pyannote_boundary"
+              }
+              appendPyannoteRecord(start, end, reason)
+            }
+          } catch (error: SegmentationEngineException) {
+            throw error
+          } catch (error: Exception) {
+            throw SegmentationEngineException(
+              code = "POLICY_MODEL_UNAVAILABLE",
+              message = error.message
+                ?: "speech_pyannote_segmentation process failed",
+            )
           } finally {
             runtime.close()
           }

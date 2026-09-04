@@ -22,7 +22,12 @@ export type AlignmentTimingMode =
 
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
 
-export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts' | 'sid';
+export type SpeechSegmentPayloadSource =
+  | 'vad'
+  | 'stt'
+  | 'tts'
+  | 'sid'
+  | 'pyannote';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -51,11 +56,16 @@ export interface SidSpeechSegmentPayload {
   speakerName: string | null;
 }
 
+export interface PyannoteSpeechSegmentPayload {
+  source: 'pyannote';
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
   | TtsSpeechSegmentPayload
-  | SidSpeechSegmentPayload;
+  | SidSpeechSegmentPayload
+  | PyannoteSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;

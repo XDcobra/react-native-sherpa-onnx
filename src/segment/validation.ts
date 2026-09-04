@@ -2,6 +2,7 @@ import type { FileSource } from '../fileio/types';
 import { assertVadCustomConfig } from '../vad/customConfig';
 import type { SegmentationPolicy } from './engine-types';
 import { isSpeechVadSegmentationPolicy } from './resolveSpeechVadModelForPolicy';
+import { isSpeechPyannoteSegmentationPolicy } from './resolveSpeechPyannoteModelForPolicy';
 
 function isFileSource(value: unknown): value is FileSource {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -121,7 +122,8 @@ export function validateSegmentationConfig(
   } else {
     if (
       evaluator !== 'speech_energy_silence' &&
-      evaluator !== 'speech_vad_model'
+      evaluator !== 'speech_vad_model' &&
+      evaluator !== 'speech_pyannote_segmentation'
     ) {
       throw new Error(
         `${errorPrefix}: ${featureName} requires a speech segmentation evaluator; received ${evaluator}`
@@ -130,10 +132,11 @@ export function validateSegmentationConfig(
     if (
       'modelPath' in policy &&
       policy.modelPath != null &&
-      evaluator !== 'speech_vad_model'
+      evaluator !== 'speech_vad_model' &&
+      evaluator !== 'speech_pyannote_segmentation'
     ) {
       throw new Error(
-        `${errorPrefix}: policy.modelPath is only valid for speech_vad_model`
+        `${errorPrefix}: policy.modelPath is only valid for speech_vad_model or speech_pyannote_segmentation`
       );
     }
     if (evaluator === 'speech_vad_model') {
@@ -171,6 +174,49 @@ export function validateSegmentationConfig(
       } else if (!isFileSource(speechVadPolicy.modelPath)) {
         throw new Error(
           `${errorPrefix}: speech_vad_model requires policy.modelPath to be a valid FileSource`
+        );
+      }
+    }
+    if (evaluator === 'speech_pyannote_segmentation') {
+      if (!isSpeechPyannoteSegmentationPolicy(policy)) {
+        throw new Error(
+          `${errorPrefix}: speech_pyannote_segmentation policy shape is invalid`
+        );
+      }
+      if (!isFileSource(policy.modelPath)) {
+        throw new Error(
+          `${errorPrefix}: speech_pyannote_segmentation requires policy.modelPath to be a valid FileSource`
+        );
+      }
+      if (
+        policy.windowShiftRatio != null &&
+        (typeof policy.windowShiftRatio !== 'number' ||
+          !Number.isFinite(policy.windowShiftRatio) ||
+          policy.windowShiftRatio <= 0 ||
+          policy.windowShiftRatio > 1)
+      ) {
+        throw new Error(
+          `${errorPrefix}: speech_pyannote_segmentation windowShiftRatio must be in (0, 1]`
+        );
+      }
+      if (
+        policy.minDurationOn != null &&
+        (typeof policy.minDurationOn !== 'number' ||
+          !Number.isFinite(policy.minDurationOn) ||
+          policy.minDurationOn < 0)
+      ) {
+        throw new Error(
+          `${errorPrefix}: speech_pyannote_segmentation minDurationOn must be a non-negative number`
+        );
+      }
+      if (
+        policy.minDurationOff != null &&
+        (typeof policy.minDurationOff !== 'number' ||
+          !Number.isFinite(policy.minDurationOff) ||
+          policy.minDurationOff < 0)
+      ) {
+        throw new Error(
+          `${errorPrefix}: speech_pyannote_segmentation minDurationOff must be a non-negative number`
         );
       }
     }

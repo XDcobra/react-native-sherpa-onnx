@@ -5,7 +5,7 @@
  * (STT, Enhancement, TTS, Punctuation, **offline VAD** `process` segmentation).
  *
  * Variant matrix (per segmentation-policy.md):
- *  - 'speech-offline' : modes off/auto; evaluators speech_energy_silence, speech_vad_model
+ *  - 'speech-offline' : modes off/auto; evaluators speech_energy_silence, speech_vad_model, speech_pyannote_segmentation
  *  - 'text-offline'   : modes off/auto; evaluators text_synthetic_auto, text_punctuation_assisted
  *  - 'speech-streaming': modes off/manual/auto; evaluators continuous_frames, speech_energy_silence, speech_vad_model
  *  - 'text-streaming'  : modes off/manual/auto; evaluators text_synthetic_auto, text_punctuation_assisted
@@ -95,6 +95,7 @@ type Props = {
 const SPEECH_EVALUATORS = [
   { key: 'speech_energy_silence', label: 'Energy/Silence' },
   { key: 'speech_vad_model', label: 'VAD model' },
+  { key: 'speech_pyannote_segmentation', label: 'Pyannote' },
 ] as const;
 
 const SPEECH_STREAMING_EVALUATORS = [
@@ -165,6 +166,8 @@ const EVALUATOR_HINTS: Record<SegmentationPolicy['evaluator'], string> = {
     'Splits at silence using RMS energy — no VAD model required. Commits after enough quiet time (silence threshold + hangover) once min segment length is met, or when max segment length is reached. Boundaries follow natural pauses; works offline and on live audio.',
   speech_vad_model:
     'Uses a VAD ONNX model for speech boundaries — usually more robust than energy/silence in noisy audio. Requires a VAD model bundle. Tune threshold and min speech/silence durations below. Works offline and on live audio.',
+  speech_pyannote_segmentation:
+    'Uses a pyannote/reverb segmentation ONNX for speech boundaries (shared diarization layers, no embedding/clustering). Emits disjoint union spans with payload source pyannote. Offline only — live attach is rejected. Overlap / who-spoke-when remains on createDiarization.',
   text_synthetic_auto:
     'Rule-based split on sentence delimiters and/or max character length — no external model. Offline: scans the full buffer. Live: commits at the last delimiter or length cap as partial text grows.',
   text_punctuation_assisted:
@@ -679,11 +682,7 @@ function VadPolicyFields({
   );
 }
 
-function PolicyFields({
-  policy,
-  disabled,
-  onPolicyChange,
-}: PolicyFieldsProps) {
+function PolicyFields({ policy, disabled, onPolicyChange }: PolicyFieldsProps) {
   const update = useCallback(
     (patch: Partial<SegmentationPolicy>) =>
       onPolicyChange({ ...policy, ...patch } as SegmentationPolicy),
@@ -737,6 +736,53 @@ function PolicyFields({
           disabled={disabled}
           onPolicyChange={onPolicyChange}
         />
+      )}
+
+      {/* ── speech_pyannote_segmentation ── */}
+      {evaluator === 'speech_pyannote_segmentation' && (
+        <>
+          <NumericField
+            label="Window shift ratio"
+            value={
+              typeof (policy as Record<string, unknown>).windowShiftRatio ===
+              'number'
+                ? ((policy as Record<string, unknown>)
+                    .windowShiftRatio as number)
+                : undefined
+            }
+            placeholder="0.1"
+            disabled={disabled}
+            onChange={(v) => update({ windowShiftRatio: v } as any)}
+          />
+          <NumericField
+            label="Min duration on (s)"
+            value={
+              typeof (policy as Record<string, unknown>).minDurationOn ===
+              'number'
+                ? ((policy as Record<string, unknown>).minDurationOn as number)
+                : undefined
+            }
+            placeholder="0.3"
+            disabled={disabled}
+            onChange={(v) => update({ minDurationOn: v } as any)}
+          />
+          <NumericField
+            label="Min duration off (s)"
+            value={
+              typeof (policy as Record<string, unknown>).minDurationOff ===
+              'number'
+                ? ((policy as Record<string, unknown>).minDurationOff as number)
+                : undefined
+            }
+            placeholder="0.5"
+            disabled={disabled}
+            onChange={(v) => update({ minDurationOff: v } as any)}
+          />
+          <Text style={s.evaluatorHint}>
+            Set policy.modelPath to a pyannote/reverb pack (FileSource). Live
+            attach is rejected — offline segmentOfflineBuffer only.
+          </Text>
+        </>
       )}
 
       {/* ── continuous_frames ── */}
@@ -842,10 +888,20 @@ export function SegmentationPolicyControls({
         delete (base as Record<string, unknown>).vadThreshold;
         delete (base as Record<string, unknown>).vadMinSpeechMs;
         delete (base as Record<string, unknown>).vadMinSilenceMs;
-        delete (base as Record<string, unknown>).modelPath;
         delete (base as Record<string, unknown>).initMode;
         delete (base as Record<string, unknown>).modelType;
         delete (base as Record<string, unknown>).customConfig;
+      }
+      if (
+        evaluator !== 'speech_vad_model' &&
+        evaluator !== 'speech_pyannote_segmentation'
+      ) {
+        delete (base as Record<string, unknown>).modelPath;
+      }
+      if (evaluator !== 'speech_pyannote_segmentation') {
+        delete (base as Record<string, unknown>).windowShiftRatio;
+        delete (base as Record<string, unknown>).minDurationOn;
+        delete (base as Record<string, unknown>).minDurationOff;
       }
       if (evaluator !== 'continuous_frames') {
         delete (base as Record<string, unknown>).checkpointIntervalMs;

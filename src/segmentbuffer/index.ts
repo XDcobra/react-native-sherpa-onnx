@@ -72,6 +72,7 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'stt',
   'tts',
   'sid',
+  'pyannote',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
@@ -81,6 +82,7 @@ const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
   tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
   sid: new Set(['source', 'speakerName']),
+  pyannote: new Set(['source']),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -210,7 +212,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -288,8 +290,7 @@ function assertSpeechPayload(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinalChunk must be a boolean when provided.`
       );
     }
-  } else {
-    // sid
+  } else if (typedSource === 'sid') {
     if (!Object.prototype.hasOwnProperty.call(obj, 'speakerName')) {
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speakerName is required for speech source "sid" (string or null).`
@@ -301,6 +302,7 @@ function assertSpeechPayload(
       );
     }
   }
+  // pyannote: source-only payload
   return obj as unknown as SpeechSegmentPayload;
 }
 
@@ -1011,6 +1013,8 @@ export type {
   SpeechSegmentPayload,
   SpeechSegmentPayloadSource,
   SidSpeechSegmentPayload,
+  PyannoteSpeechSegmentPayload,
+  VadSpeechSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,
   SegmentMeta,

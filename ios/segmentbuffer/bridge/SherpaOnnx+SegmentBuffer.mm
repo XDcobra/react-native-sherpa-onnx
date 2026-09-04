@@ -5,6 +5,7 @@
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
 #include "../../vad/core/VadRuntime.h"
+#include "pyannote-segmentation-session.h"
 
 #ifdef __cplusplus
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <unordered_set>
@@ -1158,6 +1160,9 @@ struct SegEnginePolicy {
   double vadThreshold = 0.5;
   int vadMinSpeechMs = 250;
   int vadMinSilenceMs = 250;
+  double windowShiftRatio = 0.1;
+  double minDurationOn = 0.3;
+  double minDurationOff = 0.5;
 };
 
 struct SegEngineAnnotation {
@@ -1302,6 +1307,7 @@ static bool seg_init_vad_runtime(
 
 static std::string seg_reason_from_eval(const std::string &eval, bool silenceCommit) {
   if (eval == "speech_vad_model") return "vad_boundary";
+  if (eval == "speech_pyannote_segmentation") return "pyannote_boundary";
   return silenceCommit ? "energy_silence" : "length_limit";
 }
 
@@ -1797,6 +1803,18 @@ static SegEnginePolicy seg_policy_from_dict(NSDictionary *policy, SegEngineDomai
   if ([p[@"vadThreshold"] respondsToSelector:@selector(doubleValue)]) out.vadThreshold = [p[@"vadThreshold"] doubleValue];
   if ([p[@"vadMinSpeechMs"] respondsToSelector:@selector(intValue)]) out.vadMinSpeechMs = std::max(1, [p[@"vadMinSpeechMs"] intValue]);
   if ([p[@"vadMinSilenceMs"] respondsToSelector:@selector(intValue)]) out.vadMinSilenceMs = std::max(1, [p[@"vadMinSilenceMs"] intValue]);
+  if ([p[@"windowShiftRatio"] respondsToSelector:@selector(doubleValue)]) {
+    double ratio = [p[@"windowShiftRatio"] doubleValue];
+    if (ratio > 0.0 && ratio <= 1.0) {
+      out.windowShiftRatio = ratio;
+    }
+  }
+  if ([p[@"minDurationOn"] respondsToSelector:@selector(doubleValue)]) {
+    out.minDurationOn = std::max(0.0, [p[@"minDurationOn"] doubleValue]);
+  }
+  if ([p[@"minDurationOff"] respondsToSelector:@selector(doubleValue)]) {
+    out.minDurationOff = std::max(0.0, [p[@"minDurationOff"] doubleValue]);
+  }
   return out;
 }
 
@@ -1815,6 +1833,9 @@ static NSDictionary *seg_engine_policy_to_dict(const SegEnginePolicy &p) {
     @"vadThreshold": @(p.vadThreshold),
     @"vadMinSpeechMs": @(p.vadMinSpeechMs),
     @"vadMinSilenceMs": @(p.vadMinSilenceMs),
+    @"windowShiftRatio": @(p.windowShiftRatio),
+    @"minDurationOn": @(p.minDurationOn),
+    @"minDurationOff": @(p.minDurationOff),
   } mutableCopy];
   if (!p.sentenceBoundaryChars.empty()) {
     NSMutableArray *arr = [NSMutableArray array];
@@ -2099,10 +2120,17 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
     if (d == SegEngineDomain::SPEECH) {
       if (!(engine->policy.evaluator == "speech_energy_silence" ||
             engine->policy.evaluator == "speech_vad_model" ||
+            engine->policy.evaluator == "speech_pyannote_segmentation" ||
             engine->policy.evaluator == "continuous_frames")) {
         reject(@"POLICY_INVALID",
                [NSString stringWithFormat:@"Policy evaluator '%@' is invalid for speech domain",
                                           policy[@"evaluator"] ?: @""],
+               nil);
+        return;
+      }
+      if (engine->policy.evaluator == "speech_pyannote_segmentation") {
+        reject(@"POLICY_INVALID",
+               @"Policy evaluator 'speech_pyannote_segmentation' is offline-only and invalid for live attach",
                nil);
         return;
       }
@@ -2497,6 +2525,133 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
         for (const auto &segment : segments) {
           appendRecord(segment.startSample, segment.endSample, "finalize");
         }
+      }
+    } else if (p.evaluator == "speech_pyannote_segmentation") {
+      if (p.modelPath.empty()) {
+        reject(@"POLICY_MODEL_UNAVAILABLE",
+               @"speech_pyannote_segmentation modelPath must be an existing .onnx file",
+               nil);
+        return;
+      }
+      {
+        NSString *path = [NSString stringWithUTF8String:p.modelPath.c_str()];
+        if (path == nil || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+          reject(@"POLICY_MODEL_UNAVAILABLE",
+                 [NSString stringWithFormat:
+                   @"speech_pyannote_segmentation modelPath must be an existing .onnx file: %@",
+                   path ?: @""],
+                 nil);
+          return;
+        }
+      }
+
+      auto session =
+        std::make_shared<sherpaonnx::diarization::PyannoteSegmentationSession>();
+      sherpaonnx::diarization::PyannoteSegOptions options;
+      options.model_path = p.modelPath;
+      options.window_shift_ratio = static_cast<float>(p.windowShiftRatio);
+      options.min_duration_on = static_cast<float>(p.minDurationOn);
+      options.min_duration_off = static_cast<float>(p.minDurationOff);
+      auto initStatus = session->Initialize(options);
+      if (!initStatus.ok) {
+        NSString *message =
+          [NSString stringWithUTF8String:
+            (initStatus.message.empty()
+               ? (initStatus.code.empty() ? "init failed"
+                                          : initStatus.code.c_str())
+               : initStatus.message.c_str())]
+          ?: @"speech_pyannote_segmentation failed to initialize runtime";
+        reject(@"POLICY_MODEL_UNAVAILABLE", message, nil);
+        return;
+      }
+
+      std::vector<float> samples;
+      if (totalSamples > 0) {
+        std::string sliceErrCode;
+        std::string sliceErrMessage;
+        if (!pa_get_offline_samples_slice(
+              bid,
+              0,
+              totalSamples,
+              &samples,
+              &sliceErrCode,
+              &sliceErrMessage
+            )) {
+          NSString *message =
+            [NSString stringWithUTF8String:sliceErrMessage.c_str()]
+            ?: @"Failed to read offline audio slice";
+          reject(@"BUFFER_STATE_INVALID", message, nil);
+          return;
+        }
+      }
+
+      std::vector<sherpaonnx::diarization::PyannoteSpeechSpan> spans;
+      if (!samples.empty()) {
+        auto processStatus = session->ProcessMono(
+          samples.data(),
+          static_cast<int32_t>(samples.size()),
+          sampleRate,
+          &spans
+        );
+        if (!processStatus.ok) {
+          NSString *message =
+            [NSString stringWithUTF8String:
+              (processStatus.message.empty()
+                 ? (processStatus.code.empty() ? "process failed"
+                                               : processStatus.code.c_str())
+                 : processStatus.message.c_str())]
+            ?: @"speech_pyannote_segmentation process failed";
+          reject(@"POLICY_MODEL_UNAVAILABLE", message, nil);
+          return;
+        }
+      }
+
+      const int minSamples =
+        std::max(1, (int)((p.minSegmentMs / 1000.0) * sampleRate));
+      const int maxSamples =
+        std::max(minSamples, (int)((p.maxSegmentMs / 1000.0) * sampleRate));
+      NSDictionary *payloadObj = @{ @"source": @"pyannote" };
+      NSData *payloadData =
+        [NSJSONSerialization dataWithJSONObject:payloadObj options:0 error:nil];
+
+      auto appendPyannote = [&](int startSample, int endSample, const std::string &reason) {
+        if (endSample <= startSample) return;
+        const int durationMs =
+          (int)(((endSample - startSample) * 1000.0) / std::max(1, sampleRate));
+        if (durationMs < p.minSegmentMs) return;
+        SegRecord rec;
+        rec.id = "seg_" + seg_uuid();
+        rec.kind = "speech";
+        rec.sourceAudioBufferId = bid;
+        rec.startSample = startSample;
+        rec.endSample = endSample;
+        rec.sampleRate = sampleRate;
+        rec.durationMs = durationMs;
+        if (payloadData) {
+          rec.payloadJson.assign(
+            (const char *)payloadData.bytes, payloadData.length
+          );
+        }
+        records.push_back(rec);
+        seg_record_annotation(rec.id, reason, (int)records.size() - 1);
+      };
+
+      for (size_t i = 0; i < spans.size(); ++i) {
+        int start = (int)std::lround(spans[i].start * sampleRate);
+        int end = (int)std::lround(spans[i].end * sampleRate);
+        start = std::max(0, std::min(start, totalSamples));
+        end = std::max(0, std::min(end, totalSamples));
+        if (end <= start) continue;
+        if (end - start < minSamples) continue;
+
+        while (end - start > maxSamples) {
+          const int chunkEnd = start + maxSamples;
+          appendPyannote(start, chunkEnd, "length_limit");
+          start = chunkEnd;
+        }
+        const std::string reason =
+          (i + 1 == spans.size()) ? "finalize" : "pyannote_boundary";
+        appendPyannote(start, end, reason);
       }
     } else {
       int minSamples = std::max(1, (int)((p.minSegmentMs / 1000.0) * sampleRate));
