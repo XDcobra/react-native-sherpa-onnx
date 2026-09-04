@@ -17,7 +17,7 @@ import type {
   OfflineSegmentBufferIdSource,
   SegmentMeta,
 } from '../segmentbuffer/types';
-import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
+import { createSpeakerEmbeddingEngine } from '../speaker-embedding/engine';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
 import {
   buildSpeakerEmbeddingInitBridgeOptions,
@@ -260,8 +260,8 @@ function resolvePerSpanSpeakerNames(
 
 /**
  * Create a Speaker Identification engine on the shared embedding extractor +
- * named-speaker manager. The extractor is ref-counted so future diarization
- * can share the same model weights via `acquireSpeakerEmbeddingEngine`.
+ * named-speaker manager. Extractor ONNX weights are shared process-wide with
+ * diarization via the C++ `SpeakerEmbeddingRunner` registry.
  */
 export async function createSpeakerIdentification(
   options: SpeakerIdentificationOptions
@@ -269,7 +269,7 @@ export async function createSpeakerIdentification(
   const bridgeOptions = await buildSpeakerEmbeddingInitBridgeOptions(options);
   const modelKey =
     speakerEmbeddingEngineCacheKeyFromBridgeOptions(bridgeOptions);
-  const engine = await acquireSpeakerEmbeddingEngine(options);
+  const engine = await createSpeakerEmbeddingEngine(options);
   const manager = await createSpeakerEmbeddingManager(engine.dim);
 
   /** JS mirror of vectors passed to `manager.add` (native cannot read embeddings back). */

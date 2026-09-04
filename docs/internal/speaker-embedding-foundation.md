@@ -104,14 +104,25 @@ Replace `src/diarization/index.ts` (file-path throws) with a real module that:
 
 ## 3. Engine sharing
 
-**Engine cache key:** `{ modelPath, provider, numThreads }` — implemented in `engineCache.ts` via `acquireSpeakerEmbeddingEngine`.
+ONNX weights are shared **in native C++** via `SpeakerEmbeddingRunner`
+(`android/src/main/cpp/speaker-embedding/`), keyed by
+`(model_path, provider, num_threads, debug)`. SID and diarization both
+`Acquire` from that registry — a second open with the same key is a cache hit
+(no second model load).
 
-Preferred diarization pattern (Phase 2):
+There is **no** JS-level engine cache. Each `createSpeakerIdentification` /
+`createSpeakerEmbeddingEngine` still gets its own TurboModule `instanceId`;
+the heavy extractor behind them is refcounted in C++. Enrollment
+`modelKey` for export/import continues to use
+`speakerEmbeddingEngineCacheKeyFromBridgeOptions` (identity string only).
+
+Diarization does **not** take a shared JS `embeddingEngine` handle — it opens
+its own session and shares weights through the C++ registry:
 
 ```typescript
-createSpeakerDiarization({
-  segmentationModelSource,
-  embeddingEngine: sharedEngine, // from SID or cache
+createDiarization({
+  segmentation: { modelSource: segmentationModelSource },
+  embedding: { modelSource: embeddingModelSource },
   clustering: { threshold, numClusters? },
 })
 ```
@@ -187,20 +198,19 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
 - Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
-- Native SID live worker (optional; JS orchestration ships — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration))
+- Native SID live worker + bridge roundtrip fixes (JS orchestration ships today) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md); see also [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration)
 
 ---
 
 ## 8. Design rules (checklist)
 
 - [x] Extractor API is buffer-first (`OfflineAudioBuffer` slices), not file-path-first.
-- [x] Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; iOS uses cxx-API wrappers — **not** the Separation-style C-API inference path.
-- [x] C++ under `android/src/main/cpp/` is for detect (and other non-Kotlin features), not duplicate extractor JNI.
-- [x] One TurboModule bridge surface; no duplicate extractor init in diarization init (cache ready for Phase 2).
+- [x] SID + diarization embedding inference shares C++ under `android/src/main/cpp/speaker-embedding/` (C-API); Kotlin / `.mm` are thin bridges only.
+- [x] One TurboModule bridge surface; diarization acquires the same `SpeakerEmbeddingRunner` registry (no second ONNX load for the same key).
 - [x] Manager holds **names**, not diarization cluster indices.
-- [x] Engine cache prevents double load when SID and diarization share weights.
+- [x] Weight sharing is C++ registry only (JS `engineCache` removed).
 - [x] Do not extend the old placeholder API (`initializeDiarization` / `diarizeAudio(path)`).
-- [x] Document that SID “live” = segment orchestration, not a streaming model family.
+- [x] Document that SID “live” = segment orchestration, not a streaming model family (native live worker still future work).
 
 ---
 
@@ -210,6 +220,8 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [speaker-identification-offline.md](../speaker-identification-offline.md)
 - [speaker-identification-live.md](../speaker-identification-live.md)
 - [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
+- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — native live + range extract + identify bridge costs
+- [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
 - [diarization.md](../diarization.md) — public stub (to replace when Phase 2 ships)
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
 - [Diarization core design](#10-diarization-core-design-phase-2--decisions) — this doc, §10
@@ -269,14 +281,15 @@ pipeline for the algorithm (see §10.3). Do **not** duplicate full logic in Kotl
   `libonnxruntime`; iOS resolves ORT from force-loaded `SherpaOnnxC`; embedding
   extractor symbols are exported from the same C API libs).
 - **Avoids the exact duplication pain** this doc already calls out for speaker
-  embedding and the segmentation engine (Kotlin 530/1636 lines vs `.mm` 270/3289 lines).
-  One inference/marshalling implementation instead of two.
+  embedding and the segmentation engine. SID inference is now also shared C++
+  (Kotlin / `.mm` are thin bridges only). One inference/marshalling
+  implementation instead of two.
 
 > **Supersedes** the earlier §6 rule ("Android inference uses `com.k2fsa` Kotlin
-> classes; iOS uses cxx-API"). That rule stands for **speaker embedding SID**
-> (already shipped that way) until Phase 6 migrates SID onto the shared C++
-> `EmbeddingRunner`. **Diarization** uses a **decomposed shared C++ pipeline**
-> (pyannote ONNX via ORT + C-API embedding extractor + own clustering). The
+> classes; iOS uses cxx-API"). That rule stood for **speaker embedding SID** until
+> the SID migration onto the shared C++ `SpeakerEmbeddingRunner` (completed —
+> see §10.3 additive tracks). **Diarization** and **SID** now share one C-API
+> extractor registry under `android/src/main/cpp/speaker-embedding/`. The
 > upstream Kotlin `OfflineSpeakerDiarization.kt` and the C API monolith
 > `SherpaOnnxOfflineSpeakerDiarization*` are **not** used for inference.
 
@@ -313,10 +326,14 @@ android/src/main/cpp/diarization/
   pyannote-segmentation-model.{h,cpp}   # Ort::Session + safe metadata
   powerset.{h,cpp}                      # generic powerset (max_classes >= 3)
   speaker-timeline.{h,cpp}              # stitch / exclude-overlap / finalize
-  speaker-embedding-runner.{h,cpp}      # C-API extractor + refcounted registry
   agglomerative-clustering.{h,cpp}      # complete-linkage, no fastcluster dep
   diarization-session.{h,cpp}           # orchestrate + cache + cancel + recluster
   sherpa-onnx-diarization-wrapper.{h,cpp}  # PIMPL facade (Separation pattern)
+
+android/src/main/cpp/speaker-embedding/   # shared with SID
+  speaker-embedding-runner.{h,cpp}      # C-API extractor + refcounted registry
+  speaker-embedding-manager.{h,cpp}     # C-API named enrollment
+  sherpa-onnx-speaker-embedding-wrapper.{h,cpp}  # SID PIMPL facade
 ```
 
 Robustness properties:
@@ -336,7 +353,7 @@ Robustness properties:
 | Track | What | When |
 |-------|------|------|
 | **Segmentation mode** | `speech_pyannote_segmentation` evaluator using layers 1–3 | After core ships; large Kotlin+`.mm` touch set |
-| **SID migration** | Move SID onto shared C++ `EmbeddingRunner` registry | Restores original shared-instance vision |
+| **SID migration** | Move SID onto shared C++ `EmbeddingRunner` registry | **Done** — Kotlin AAR + iOS cxx-API inference replaced; registry shared with diarization |
 | **Live diarization** | Incremental append + recluster on session cache | Architecture-ready; not in first ship |
 
 ```mermaid
@@ -344,16 +361,18 @@ flowchart TB
   subgraph core [Diarization core - shared C++]
     py["pyannote ONNX via ORT"] --> pow["powerset decode"]
     pow --> tl["timeline stitch / finalize"]
-    tl --> emb["EmbeddingRunner C-API + registry"]
+    tl --> emb["SpeakerEmbeddingRunner C-API + registry"]
     emb --> clus["agglomerative clustering"]
     clus --> out["timeline + optional overlap + centroids"]
   end
+  subgraph sharedEmb [Shared speaker-embedding]
+    emb --> sid["SID facade uses same registry"]
+    emb --> mgr["Manager C-API for named enrollments"]
+  end
   subgraph later [Later additive]
     pow --> segMode["speech_pyannote_segmentation evaluator"]
-    emb --> sidShare["SID migrates to same registry"]
   end
 ```
-
 ### 10.4 Upstream algorithm reference (not used at runtime)
 
 The upstream C API / `OfflineSpeakerDiarizationPyannoteImpl` remain the **algorithmic
@@ -414,8 +433,8 @@ License CSV: `android/src/main/assets/model_licenses/speaker-segmentation-models
       clustering), not a monolith C-API wrapper and not Kotlin+`.mm` inference.
 - [x] Upstream `OfflineSpeakerDiarization.kt` / `SherpaOnnxOfflineSpeakerDiarization*`
       are **not** used for inference (`_Exit` risk + structural limits).
-- [x] Embedding via shared C++ `EmbeddingRunner` registry (SID migrates later for
-      true instance sharing).
+- [x] Embedding via shared C++ `SpeakerEmbeddingRunner` registry; **SID migrated**
+      onto the same registry (Kotlin AAR / iOS cxx-API inference removed).
 - [ ] pyannote-as-segmentation-mode is a **separate** additive evaluator; default
       emits speech spans, add-on is **opt-in**.
 - [x] Do **not** store diarization cluster ids in `SpeakerEmbeddingManager`.

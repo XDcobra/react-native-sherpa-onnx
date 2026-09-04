@@ -81,6 +81,12 @@ jobs:
     uses: ./.github/workflows/test-diarization-core.yml
     secrets: inherit
 
+  speaker-embedding-core:
+    name: Speaker embedding core
+    needs: [check-csvs]
+    uses: ./.github/workflows/test-speaker-embedding-core.yml
+    secrets: inherit
+
   asr-validate:
     name: ASR validation
     needs: [check-csvs]

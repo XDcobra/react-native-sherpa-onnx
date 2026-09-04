@@ -26,7 +26,8 @@ function embeddingArrayToFloat32(values: number[]): Float32Array {
 
 /**
  * Create a standalone speaker-embedding extractor engine (no enrollment manager).
- * Prefer {@link acquireSpeakerEmbeddingEngine} when SID and diarization may share weights.
+ * ONNX weights are shared process-wide with other SID/diarization acquires via
+ * the C++ `SpeakerEmbeddingRunner` registry (same model/provider/threads/debug).
  */
 export async function createSpeakerEmbeddingEngine(
   options: SpeakerEmbeddingInitializeOptions
