@@ -1,6 +1,6 @@
 # Speaker embedding foundation — Internal design
 
-> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream), pyannote segmentation-engine evaluator (`speech_pyannote_segmentation`).
+> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream). `speech_pyannote_segmentation` offline evaluator **shipped**.
 > **Audience:** SDK maintainers.
 > **Strategy:** Ship **Speaker Identification (SID)** first on a shared **Extractor + Manager** layer designed so **Speaker Diarization** can reuse the same embedding engine without rework.
 > **User request:** [Discussion #113 — Speaker Identification](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
@@ -128,7 +128,7 @@ createDiarization({
 | Category | Models | Used by |
 |----------|--------|---------|
 | **`SpeakerEmbedding`** | [speaker-recongition-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) (WeSpeaker, NeMo, 3D-Speaker, …) | SID + diarization embedding leg |
-| **`Diarization`** | [speaker-segmentation-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) — pyannote (and ReVerb) **segmentation** packs only; **no** bundled embedding `.onnx` | Diarization segmentation leg + future `speech_pyannote_segmentation` evaluator |
+| **`Diarization`** | [speaker-segmentation-models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) — pyannote (and ReVerb) **segmentation** packs only; **no** bundled embedding `.onnx` | Diarization segmentation leg + `speech_pyannote_segmentation` evaluator |
 
 `detectSpeakerEmbeddingModel` and unified catalog detection (`speakerEmbedding` domain) are implemented.
 `detectDiarizationModel` and unified catalog detection (`diarization` domain) are implemented for segmentation packs (pyannote / reverb).
@@ -184,7 +184,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 3. [x] Shared C++ diarization session over Runner + clustering (thin JNI + thin `.mm`)
 4. [x] Buffer-in timeline-out public API (`createDiarization` / `diarize` → `kind: 'diarization'`)
 5. [x] Example diarization screen
-6. Additive: `speech_pyannote_segmentation` evaluator in the segmentation engine (simple spans + opt-in overlap/powerset add-on) — **open**
+6. Additive: `speech_pyannote_segmentation` evaluator in the segmentation engine (union-only offline spans) — **done**
 
 ### Out of scope for initial phases
 
@@ -345,7 +345,7 @@ Robustness properties:
 
 | Track | What | When |
 |-------|------|------|
-| **Segmentation mode** | `speech_pyannote_segmentation` evaluator using layers 1–3 | After core ships; large Kotlin+`.mm` touch set |
+| **Segmentation mode** | `speech_pyannote_segmentation` evaluator using layers 1–3 (union-only, offline) | **Done** |
 | **SID migration** | Move SID onto shared C++ `EmbeddingRunner` registry | **Done** — Kotlin AAR + iOS cxx-API inference replaced; registry shared with diarization |
 | **Live diarization** | Incremental append + recluster on session cache | Architecture-ready; not in first ship |
 
@@ -428,8 +428,9 @@ License CSV: `android/src/main/assets/model_licenses/speaker-segmentation-models
       are **not** used for inference (`_Exit` risk + structural limits).
 - [x] Embedding via shared C++ `SpeakerEmbeddingRunner` registry; **SID migrated**
       onto the same registry (Kotlin AAR / iOS cxx-API inference removed).
-- [ ] pyannote-as-segmentation-mode is a **separate** additive evaluator; default
-      emits speech spans, add-on is **opt-in**.
+- [x] pyannote-as-segmentation-mode is a **separate** additive evaluator
+      (`speech_pyannote_segmentation`); offline **union** speech spans only —
+      overlap / who-spoke-when remains on diarization.
 - [x] Do **not** store diarization cluster ids in `SpeakerEmbeddingManager`.
 - [x] No new sherpa build flag; use ORT already linked + embedding C-API already
       in shipped libs.

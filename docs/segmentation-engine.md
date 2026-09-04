@@ -32,13 +32,14 @@ Features (STT, TTS, enhancement, punctuation, …) pass **`segmentation`** on th
 
 Policies are **domain-specific**: only **text** evaluators go on text buffers; only **speech** evaluators on speech buffers. Wrong domain → `POLICY_INVALID`.
 
-| Evaluator | Domain | `segmentOfflineBuffer` · `attachSegmentationEngine` | Behavior |
+| Evaluator | Offline (`segmentOfflineBuffer`) | Live (`attachSegmentationEngine`) | Behavior |
 | --- | --- | --- | --- |
-| `text_synthetic_auto` | Text | Offline + live (text) | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
-| `text_punctuation_assisted` | Text | Offline + live (text); needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
-| `speech_energy_silence` | Speech | Offline + live (speech) | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
-| `speech_vad_model` | Speech | Offline + live (speech); needs VAD model config | Spans from VAD ONNX. **Auto:** `modelPath` (**`FileSource`**) — JS runs **`detectVadModel`**, then native uses resolved `.onnx` + `modelType`. **Custom:** `initMode: 'custom'`, concrete `modelType` (`silero_vad` / `ten_vad`), `customConfig.model` — no detect (same VAD keys as [`createStreamingVAD`](vad-streaming.md)). Runtime fields: `vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, … |
-| `continuous_frames` | Speech | **Live speech only** (offline → `POLICY_INVALID_FOR_OFFLINE`) | Frame checkpoints (`checkpointIntervalMs`). |
+| `text_synthetic_auto` | ✅ Text | ✅ Text | **Offline:** forward scan — delimiter first ([delimiters below](#text-sentenceboundary-delimiters)), else `maxLengthChars`. **Live:** commit at **last** delimiter or length cap in partial. |
+| `text_punctuation_assisted` | ✅ Text; needs `policy.punctuationInstanceId` | ✅ Text; needs `policy.punctuationInstanceId` | Punctuation pass (`punctuationInstanceId`), then same split as `text_synthetic_auto`. Missing instance → `POLICY_PUNCTUATION_INSTANCE_NOT_FOUND`. |
+| `speech_energy_silence` | ✅ Speech | ✅ Speech | Spans from energy + silence (`silenceThresholdMs`, `energyThresholdDb`, `minSegmentMs`, `maxSegmentMs`, `hangoverMs`). No VAD ONNX. |
+| `speech_vad_model` | ✅ Speech; needs VAD model config | ✅ Speech; needs VAD model config | Spans from VAD ONNX. **Auto:** `modelPath` (**`FileSource`**) — JS runs **`detectVadModel`**, then native uses resolved `.onnx` + `modelType`. **Custom:** `initMode: 'custom'`, concrete `modelType` (`silero_vad` / `ten_vad`), `customConfig.model` — no detect (same VAD keys as [`createStreamingVAD`](vad-streaming.md)). Runtime fields: `vadThreshold`, `vadMinSpeechMs`, `vadMinSilenceMs`, … |
+| `speech_pyannote_segmentation` | ✅ Speech; needs pyannote/reverb model | ❌ Live attach → `POLICY_INVALID` / JS guard | Disjoint **union** speech spans from pyannote/reverb ONNX (shared diarization layers 1–3; no embedding/clustering). `modelPath` (**`FileSource`**) — JS runs **`detectDiarizationModel`**. Optional: `windowShiftRatio`, `minDurationOn`, `minDurationOff` (seconds). Payload `{ source: 'pyannote' }`. Overlap / who-spoke-when stays on [`createDiarization`](diarization-offline.md). |
+| `continuous_frames` | ❌ Offline → `POLICY_INVALID_FOR_OFFLINE` | ✅ Speech | Frame checkpoints (`checkpointIntervalMs`). |
 
 ### Text `sentenceBoundary` delimiters
 
@@ -187,7 +188,7 @@ const ref = await segmentOfflineBuffer(offlineAudioBuffer, {
 });
 ```
 
-Materializes segments for offline text/audio. For `speech_vad_model`, pass either auto `modelPath` (**`FileSource`**) or custom `initMode: 'custom'` with `customConfig.model` — see [Custom model path](#custom-model-path-initmode-custom) below.
+Materializes segments for offline text/audio. For `speech_vad_model`, pass either auto `modelPath` (**`FileSource`**) or custom `initMode: 'custom'` with `customConfig.model` — see [Custom model path](#custom-model-path-initmode-custom) below. For `speech_pyannote_segmentation`, pass `modelPath` (**`FileSource`**) to a pyannote/reverb pack; JS resolves via **`detectDiarizationModel`**. Live attach of pyannote is rejected (offline-only).
 
 ## Custom model path (`initMode: 'custom'`)
 
@@ -299,7 +300,7 @@ const items = await getSegments(segRef, 0, 64);
 
 Reads text or speech segments from the resolved source. Throws `SEGMENT_INDEX_OUT_OF_RANGE` on invalid windows.
 
-**`reason` / `source` / `createdAtMs`:** Segments produced by engines (for example offline `segmentOfflineBuffer` with `speech_vad_model`, or streaming VAD writing into a pipeline segment buffer) carry the native annotation on each row — typically `vad_boundary`, `length_limit` when a max-duration policy splits a span, or `finalize` at end-of-input. **`manual_commit` applies to explicit `commitSegment(...)` calls only.** Optional `source` and `createdAtMs` are included when the bridge provides them.
+**`reason` / `source` / `createdAtMs`:** Segments produced by engines (for example offline `segmentOfflineBuffer` with `speech_vad_model` / `speech_pyannote_segmentation`, or streaming VAD writing into a pipeline segment buffer) carry the native annotation on each row — typically `vad_boundary` / `pyannote_boundary`, `length_limit` when a max-duration policy splits a span, or `finalize` at end-of-input. **`manual_commit` applies to explicit `commitSegment(...)` calls only.** Optional `source` and `createdAtMs` are included when the bridge provides them.
 
 #### `getSegmentCount(buffer)`
 
