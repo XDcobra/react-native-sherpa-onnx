@@ -1625,6 +1625,22 @@ export interface Spec extends TurboModule {
     audioBufferId: string
   ): Promise<{ embedding: number[] }>;
 
+  /**
+   * Start a live-offline Speaker Identification pipeline.
+   * Labels committed speech spans into a live segment buffer (payload.source = sid).
+   */
+  startSpeakerIdentificationOfflineLivePipeline(
+    instanceId: string,
+    managerId: string,
+    audioInLiveBufferId: string,
+    segmentsOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      threshold: number;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   unloadSpeakerEmbeddingExtractor(instanceId: string): Promise<void>;
 
   createSpeakerEmbeddingManager(
