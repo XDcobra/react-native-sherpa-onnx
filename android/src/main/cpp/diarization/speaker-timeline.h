@@ -53,6 +53,12 @@ std::vector<DiarizationSegment> ComputeResult(const Int8Matrix& final_labels,
                                               const TimelineConfig& config);
 
 /**
+ * Collapse speakers-per-frame into a single speech/silence column
+ * (`1` when count >= 1). Used by `speech_pyannote_segmentation` (union-only).
+ */
+Int8Matrix SpeechUnionLabels(const std::vector<int32_t>& speakers_per_frame);
+
+/**
  * One-chunk special case: trim trailing frames when audio ends mid-window.
  */
 Int8Matrix TrimLabelsForNumSamples(const Int8Matrix& labels,

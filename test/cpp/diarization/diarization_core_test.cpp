@@ -131,3 +131,31 @@ TEST(DiarizationTimeline, ComputeResultMergesAndFilters) {
   EXPECT_EQ(segs[0].speaker, 0);
   EXPECT_GT(segs[0].end, segs[0].start);
 }
+
+TEST(DiarizationTimeline, SpeechUnionLabelsMarksSpeechFrames) {
+  std::vector<int32_t> speakers_per_frame = {0, 1, 2, 0, 1};
+  auto union_labels = SpeechUnionLabels(speakers_per_frame);
+  ASSERT_EQ(union_labels.rows, 5);
+  ASSERT_EQ(union_labels.cols, 1);
+  EXPECT_EQ(union_labels.at(0, 0), 0);
+  EXPECT_EQ(union_labels.at(1, 0), 1);
+  EXPECT_EQ(union_labels.at(2, 0), 1);
+  EXPECT_EQ(union_labels.at(3, 0), 0);
+  EXPECT_EQ(union_labels.at(4, 0), 1);
+
+  TimelineConfig cfg;
+  cfg.meta.sample_rate = 16000;
+  cfg.meta.receptive_field_shift = 160;
+  cfg.meta.receptive_field_size = 160;
+  cfg.meta.window_size = 16000;
+  cfg.meta.window_shift = 1600;
+  cfg.min_duration_on = 0.0f;
+  cfg.min_duration_off = 0.0f;
+
+  auto segs = ComputeResult(union_labels, cfg);
+  ASSERT_EQ(segs.size(), 2u);
+  EXPECT_EQ(segs[0].speaker, 0);
+  EXPECT_EQ(segs[1].speaker, 0);
+  EXPECT_GT(segs[0].end, segs[0].start);
+  EXPECT_GT(segs[1].end, segs[1].start);
+}
