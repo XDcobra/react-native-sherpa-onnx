@@ -173,6 +173,16 @@ export interface SpeakerIdentificationEngine {
   ): Promise<IdentifyResult>;
 
   /**
+   * Search the enrollment gallery with a precomputed embedding (e.g. a
+   * diarization cluster centroid from `getClusterEmbeddings()`).
+   * Returns the best enrolled name above threshold, or `null`.
+   */
+  search(
+    embedding: Float32Array,
+    options?: SpeakerIdentificationThresholdOptions
+  ): Promise<string | null>;
+
+  /**
    * Identify each speech span and write a labeled copy into an empty
    * `segmentsOut` buffer (`payload.source: 'sid'`).
    */

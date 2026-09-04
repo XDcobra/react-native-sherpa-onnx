@@ -100,8 +100,19 @@ timeline rewritten into a buffer, or read `getClusterEmbeddings()`.
 
 ### `engine.getClusterEmbeddings()`
 
-Mean embedding per cluster — useful to match against
-`SpeakerEmbeddingManager.search` for named speakers (SID × diarization).
+Mean embedding per cluster after the last `diarize` / `recluster`. Use these
+centroids to match enrolled SID names (who-spoke-when with labels), either via
+**`mapDiarizationToNames(diar, sid, diarizationSegments)`** or manually with
+`sid.search(embedding)`.
+
+End-to-end example (3 enrolled speakers + meeting with an unknown guest):
+**[diarization-named-timeline.md](./diarization-named-timeline.md)**.
+
+### `mapDiarizationToNames(diar, sid, diarizationSegments, options?)`
+
+Composes `getClusterEmbeddings` + `sid.search` + reading the buffer filled by
+`diarize` (`diarizationSegments`) into `{ clusterToName, timeline }`. See
+[diarization-named-timeline.md](./diarization-named-timeline.md).
 
 ## Models
 
@@ -124,3 +135,15 @@ registry), and own agglomerative clustering. It does **not** wrap the upstream
 - Offline batch: Android / iOS
 - Live / streaming diarization: not yet (architecture-ready)
 - `speech_pyannote_segmentation` evaluator for the shared segmentation engine: **shipped** (offline union spans; see [segmentation-engine.md](./segmentation-engine.md))
+
+## Related
+
+- [diarization-named-timeline.md](./diarization-named-timeline.md) — SID enroll + diarize → named who-spoke-when
+- [speaker-identification-offline.md](./speaker-identification-offline.md) — named-speaker gallery
+- [segmentation-engine.md](./segmentation-engine.md) — `speech_pyannote_segmentation` (union speech spans only)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread,
+inspect the SDK **last-activity ring buffer**. Full details:
+[native-diagnostics.md](./native-diagnostics.md).

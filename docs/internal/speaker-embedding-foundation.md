@@ -215,7 +215,8 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [speaker-identification-live.md](../speaker-identification-live.md)
 - [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
-- [diarization.md](../diarization.md) — overview → [diarization-offline.md](../diarization-offline.md) (offline shipped)
+- [diarization-offline.md](../diarization-offline.md) — offline batch (shipped)
+- [diarization-named-timeline.md](../diarization-named-timeline.md) — SID × diarization named timeline
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
 - [Diarization core design](#10-diarization-core-design-phase-2--decisions) — this doc, §10
 - Upstream: `third_party/sherpa-onnx/sherpa-onnx/kotlin-api/Speaker.kt`, `OfflineSpeakerDiarization.kt` (Kotlin API — **not** used for diarization; see §10.2)

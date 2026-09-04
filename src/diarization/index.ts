@@ -48,10 +48,14 @@ export type {
   DiarizationEngine,
   DiarizationInitializeOptions,
   DiarizationModelKind,
+  DiarizationNameSearch,
   DiarizationReclusterOptions,
   DiarizationSegmentationOptions,
   DiarizeOptions,
   DiarizeResult,
+  MapDiarizationToNamesOptions,
+  MapDiarizationToNamesResult,
+  NamedDiarizationSpan,
 } from './types';
 
 export {
@@ -60,6 +64,8 @@ export {
   DiarizationErrorCode,
   isDetectionSource,
 } from './types';
+
+export { mapDiarizationToNames } from './mapDiarizationToNames';
 
 let diarizationInstanceCounter = 0;
 

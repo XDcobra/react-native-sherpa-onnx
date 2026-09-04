@@ -86,6 +86,34 @@ export interface DiarizationClusterEmbedding {
   embedding: Float32Array;
 }
 
+/** Duck-typed SID (or any gallery) used by {@link mapDiarizationToNames}. */
+export type DiarizationNameSearch = {
+  search(
+    embedding: Float32Array,
+    options?: { threshold?: number }
+  ): Promise<string | null>;
+};
+
+export type MapDiarizationToNamesOptions = {
+  /** Cosine similarity threshold in `[0, 1]`. Default `0.5`. */
+  threshold?: number;
+};
+
+export type NamedDiarizationSpan = {
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  startSec: number;
+  endSec: number;
+  clusterId: number;
+  name: string | null;
+};
+
+export type MapDiarizationToNamesResult = {
+  clusterToName: Map<number, string | null>;
+  timeline: NamedDiarizationSpan[];
+};
+
 export interface DiarizationEngine {
   readonly instanceId: string;
   readonly sampleRate: number;

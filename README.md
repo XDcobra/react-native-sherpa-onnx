@@ -43,6 +43,7 @@ npm install react-native-sherpa-onnx
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
 - ✅ Speaker diarization: [Offline](./docs/diarization-offline.md)
+- ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
 
 ### Pipeline & buffers
 
@@ -427,7 +428,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
 - **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
-- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Overview](./docs/diarization.md) – anonymous clusters; pyannote + embedding
+- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) – anonymous clusters; pyannote + embedding
 
 ### Segmentation
 

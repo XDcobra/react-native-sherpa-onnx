@@ -14,7 +14,7 @@ Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
 Model detect is available on the SID package (`detectSpeakerEmbeddingModel`) and on **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
 
-SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization.md) (offline available). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
+SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization-offline.md) (offline available). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
 
 Live labeling is available via **`labelLiveSegments`** — see [speaker-identification-live.md](speaker-identification-live.md). Enrollment remains offline (`enroll` / `enrollOfflineSegments`).
 
@@ -144,6 +144,7 @@ try {
 | --- | --- | --- |
 | **Enroll** | `enroll(name, audio \| audio[])` | `enrollOfflineSegments(name \| names[], audioIn, segmentsIn)` |
 | **Identify** | `identify(audio)` → `{ name }` | `labelOfflineSegments(audioIn, segmentsIn, segmentsOut)` |
+| **Search embedding** | `search(embedding)` → `name \| null` | — (used by diarization cluster centroids) |
 | **Verify** | `verify(name, audio)` → `boolean` | `verifyOfflineSegments(name \| names[], audioIn, segmentsIn)` → counts + per-span flags |
 
 Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech` rows are skipped. `enrollOfflineSegments` / `verifyOfflineSegments` reject when no usable speech span remains.
@@ -219,6 +220,12 @@ interface SpeakerIdentificationEngine {
     options?: { threshold?: number }
   ): Promise<{ name: string | null }>;
 
+  /** Precomputed embedding (e.g. diarization cluster centroid) → enrolled name. */
+  search(
+    embedding: Float32Array,
+    options?: { threshold?: number }
+  ): Promise<string | null>;
+
   labelOfflineSegments(
     audioIn: OfflineAudioBufferIdSource,
     segmentsIn: OfflineSegmentBufferIdSource,
@@ -270,6 +277,7 @@ interface SpeakerIdentificationEngine {
 | `enroll` | Combined `enrollSpeakerOffline` (whole buffer(s) → compute + manager.add). Fails if the name already exists. |
 | `enrollOfflineSegments` | Combined `enrollSpeakerOffline` per name group (speech spans → embeddings + add). `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
 | `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
+| `search` | Gallery search with a precomputed `Float32Array` (e.g. `getClusterEmbeddings()`). Empty / below threshold → `null`. Used by `mapDiarizationToNames` — see [diarization-named-timeline.md](diarization-named-timeline.md). |
 | `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
 | `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
 | `verify` | Native `verifySpeakerOffline` cosine check against one enrolled name (whole buffer). |
@@ -403,7 +411,7 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 
 ## Out of scope
 
-- `kind: 'diarization'` segment rows (see [diarization.md](diarization.md))
+- `kind: 'diarization'` segment rows (see [diarization-offline.md](diarization-offline.md))
 - Score / top-N search results
 - In-place mutation of VAD segment buffers
 - Enroll from a segment buffer **without** PCM audio
@@ -430,7 +438,7 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 | Identify result | `{ name: string \| null }` | Whole-buffer `identify` — no segment Out. |
 | Labeled timeline | `OfflineSegmentBuffer` (`seg_off_*`) | Empty `segmentsOut` filled with `payload.source: 'sid'`. |
 | UI / export | Segment metadata | Read via `getOfflineSegmentBufferSegments(...)`. |
-| Diarization | Shared embedding Runner | Same weights via C++ registry; anonymous clusters are **not** SID — see [diarization.md](diarization.md). |
+| Diarization | Shared embedding Runner | Same weights via C++ registry; anonymous clusters are **not** SID — see [diarization-offline.md](diarization-offline.md). |
 
 ```mermaid
 flowchart LR
@@ -525,7 +533,8 @@ JS-side SID guards (message match, not always a native `code`): empty speaker na
 - [Pipeline segment buffers — offline](segmentbuffer-offline.md) — speech payload `sid`
 - [VAD streaming](vad-streaming.md) — speech boundaries (when)
 - [Speaker Identification (live overload)](speaker-identification-live.md) — `labelLiveSegments`
-- [Speaker diarization](diarization.md) — anonymous clustering (offline shipped; shared embedding foundation)
+- [Speaker diarization](diarization-offline.md) — anonymous clustering (offline shipped; shared embedding foundation)
+- [Named diarization timeline](diarization-named-timeline.md) — map clusters to SID enrollments
 - [Feature pipelines](feature-pipelines.md)
 - [Model detect](model-detect.md)
 - [Model setup](model-setup.md)

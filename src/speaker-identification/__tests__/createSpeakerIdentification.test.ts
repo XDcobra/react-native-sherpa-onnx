@@ -238,6 +238,37 @@ describe('createSpeakerIdentification', () => {
     expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
   });
 
+  it('search matches a precomputed embedding against the gallery', async () => {
+    const emb = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+    native.speakerEmbeddingManagerSearch.mockResolvedValue({ name: 'alice' });
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    await expect(sid.search(emb, { threshold: 0.55 })).resolves.toBe('alice');
+    expect(native.speakerEmbeddingManagerSearch).toHaveBeenCalledTimes(1);
+    expect(native.speakerEmbeddingManagerSearch.mock.calls[0]![0]).toBe(
+      sid.managerId
+    );
+    expect(native.speakerEmbeddingManagerSearch.mock.calls[0]![1]).toEqual(
+      Array.from(emb)
+    );
+    expect(native.speakerEmbeddingManagerSearch.mock.calls[0]![2]).toBe(0.55);
+
+    native.speakerEmbeddingManagerSearch.mockResolvedValue({ name: '  ' });
+    await expect(sid.search(emb)).resolves.toBeNull();
+    expect(native.speakerEmbeddingManagerSearch.mock.calls.at(-1)![2]).toBe(
+      0.5
+    );
+
+    await expect(sid.search(new Float32Array([1, 2]))).rejects.toThrow(
+      /does not match manager dim/
+    );
+    await expect(sid.search(new Float32Array(0))).rejects.toThrow(
+      /non-empty Float32Array/
+    );
+  });
+
   it('enroll rejects duplicate name before extracting embeddings', async () => {
     native.speakerEmbeddingManagerContains.mockResolvedValue({ ok: true });
     const sid = await createSpeakerIdentification({

@@ -464,6 +464,26 @@ export async function createSpeakerIdentification(
       const trimmed = result.name.trim();
       return { name: trimmed.length > 0 ? trimmed : null };
     },
+    async search(
+      embedding: Float32Array,
+      thresholdOptions?: SpeakerIdentificationThresholdOptions
+    ): Promise<string | null> {
+      guard();
+      if (!(embedding instanceof Float32Array) || embedding.length === 0) {
+        throw new Error('search() requires a non-empty Float32Array embedding');
+      }
+      if (embedding.length !== manager.dim) {
+        throw new Error(
+          `search() embedding length ${embedding.length} does not match manager dim ${manager.dim}`
+        );
+      }
+      const name = await manager.search(
+        embedding,
+        resolveThreshold(thresholdOptions)
+      );
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      return trimmed.length > 0 ? trimmed : null;
+    },
     async labelOfflineSegments(
       audioIn: OfflineAudioBufferIdSource,
       segmentsIn: OfflineSegmentBufferIdSource,

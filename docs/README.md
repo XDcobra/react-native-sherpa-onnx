@@ -93,8 +93,8 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [speaker-identification-offline.md](./speaker-identification-offline.md) | Named-speaker enroll / identify / verify; segment-buffer label Out |
 | [speaker-identification-live.md](./speaker-identification-live.md) | Live overload — `labelLiveSegments` on `LiveAudioBuffer` → labeled `LiveSegmentBuffer` |
-| [diarization.md](./diarization.md) | Speaker diarization overview |
 | [diarization-offline.md](./diarization-offline.md) | Offline batch diarization — create / diarize / recluster / cluster embeddings |
+| [diarization-named-timeline.md](./diarization-named-timeline.md) | SID × diarization — enroll names, diarize meeting, named who-spoke-when timeline |
 
 ---
 
