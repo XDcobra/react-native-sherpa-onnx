@@ -133,12 +133,14 @@ registry), and own agglomerative clustering. It does **not** wrap the upstream
 ## Status
 
 - Offline batch: Android / iOS
-- Live / streaming diarization: not yet (architecture-ready)
+- Streaming diarization: not shipped — see [diarization-streaming.md](./diarization-streaming.md)
+  (true streaming planned; **live overload intentionally not planned**)
 - `speech_pyannote_segmentation` evaluator for the shared segmentation engine: **shipped** (offline union spans; see [segmentation-engine.md](./segmentation-engine.md))
 
 ## Related
 
 - [diarization-named-timeline.md](./diarization-named-timeline.md) — SID enroll + diarize → named who-spoke-when
+- [diarization-streaming.md](./diarization-streaming.md) — streaming plans; why no live overload
 - [speaker-identification-offline.md](./speaker-identification-offline.md) — named-speaker gallery
 - [segmentation-engine.md](./segmentation-engine.md) — `speech_pyannote_segmentation` (union speech spans only)
 

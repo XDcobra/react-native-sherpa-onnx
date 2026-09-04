@@ -42,7 +42,7 @@ npm install react-native-sherpa-onnx
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
-- ✅ Speaker diarization: [Offline](./docs/diarization-offline.md)
+- ✅ Speaker diarization: [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md)
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
 
 ### Pipeline & buffers
@@ -356,7 +356,7 @@ Speaker identification uses **speaker-embedding** ONNX packs (WeSpeaker, 3D-Spea
 | **3D-Speaker** | `'3d-speaker'` | 3D-Speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | **NeMo** | `'nemo'` | NeMo speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 
-APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters): [Offline](./docs/diarization-offline.md).
+APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters): [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md).
 
 </details>
 
@@ -428,7 +428,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
 - **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
-- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) – anonymous clusters; pyannote + embedding
+- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) · [Streaming](./docs/diarization-streaming.md) – anonymous clusters; pyannote + embedding; no live overload
 
 ### Segmentation
 
