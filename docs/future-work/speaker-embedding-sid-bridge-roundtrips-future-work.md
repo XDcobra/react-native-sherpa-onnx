@@ -1,6 +1,6 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Findings 1–4 **done**. Finding 5 remains open.  
+**Status:** Findings 1–5 **done**. Optional follow-ups: iOS TM mutex narrowing (same pattern), embedding JSI for raw-vector apps.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding** and **speaker-identification** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance work stays in-process, no PCM or embedding vectors bouncing through JS.
 
@@ -22,7 +22,7 @@
 | C++ registry weight sharing | **Win** (fewer ONNX loads). Orthogonal to transport cost. |
 | TurboModule `number[]` embeddings + JS live drain | **Real** cost — pre-dates the migration in shape; migration replaced only the last inference hop (Kotlin AAR / iOS cxx-API → our JNI/C++). |
 
-**Hop count from JS did not increase.** Marshalling quality (e.g. Android `ArrayList<Float>` boxing) and live orchestration remain the issues to fix.
+**Hop count from JS did not increase.** Findings 1–5 address live orchestration, range extract, combined identify/verify, Android embedding unbox, and JNI lock narrowing. Optional later: embedding JSI; iOS TM mutex parity.
 
 ```text
 STT / TTS / Punctuation / Enhancement / Separation / SID live
@@ -148,21 +148,19 @@ Zero-length range → `{ ok: false }` without ONNX. Android compute JNI uses `Ne
 
 ---
 
-## 5. Finding — Coarse Android JNI mutex (LOW–MEDIUM)
+## 5. Finding — Coarse Android JNI mutex (LOW–MEDIUM) — **DONE**
 
-### Problem
+**Status:** Implemented. Android `g_speaker_embedding_mutex` is now registry lookup/mutate only. Extractor/manager maps hold `shared_ptr` so unload during compute cannot UAF. Hot paths (`nativeComputeEmbedding`, manager add/remove/search/verify/contains/numSpeakers/allSpeakers) copy the pointer out and run outside the global lock. `SpeakerEmbeddingManagerWrapper` has a per-manager mutex around C-API ops. Runner `compute_mutex` unchanged. iOS TurboModule coarse bridge mutex is an optional parity follow-up (iOS live already unlocks after pinning).
 
-`android/.../jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp` uses a process-wide `g_speaker_embedding_mutex` around extractor/manager operations. The shared Runner already has a **per-extractor** `compute_mutex`. The global lock serializes **all** SID instances and can contend with other JNI entry points that touch the same maps under concurrent SID + diarization / multi-session use.
+### Problem (historical)
 
-This is contention risk more than copy cost; listed for completeness after the transport findings.
+`android/.../jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp` used a process-wide `g_speaker_embedding_mutex` around extractor/manager operations, including ONNX compute and C-API search/verify. That serialized **all** SID instances even though Runner already has a per-extractor `compute_mutex`.
 
-### Direction
+### What shipped
 
-- Narrow the global lock to **registry map** mutate/lookup only.
-- Rely on Runner `compute_mutex` (and per-manager locks) for inference.
-- Do not hold the global lock across ONNX `Compute` / C-API search.
-
-**Priority:** After or alongside native live / range work if profiling shows lock wait; not the first knob to turn for PCM roundtrips.
+- Map lock: init / create / unload / destroy / shutdown only (plus short lookup)
+- Inference: Runner `compute_mutex` + ManagerWrapper mutex
+- Lifetime: `shared_ptr` maps; re-init replaces the map entry rather than `release()` in place
 
 ---
 
@@ -174,7 +172,7 @@ This is contention risk more than copy cost; listed for completeness after the t
 | A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | **Done** |
 | B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | **Done** |
 | D | §4 combined verify + Android unbox (path D) | Small–medium | Residual verify path + JNI boxing hygiene | **Done** |
-| E | §5 JNI lock narrowing | Small | Contention hygiene | Open |
+| E | §5 JNI lock narrowing | Small | Contention hygiene | **Done** |
 
 ---
 
@@ -195,6 +193,8 @@ Success criteria for §2 (met): ranged `extractFromOfflineAudio` calls `computeS
 Success criteria for §3 (met): offline `identify` / `labelOfflineSegments` use `identifySpeakerOffline` only (no compute→JS→search); empty name maps to `null` in SID TS.
 
 Success criteria for §4 path D (met): offline `verify` / `verifyOfflineSegments` use `verifySpeakerOffline` only; Android compute returns `jfloatArray` (no `ArrayList&lt;Float&gt;` boxing). JSI embedding transport remains optional later.
+
+Success criteria for §5 (met): Android JNI does not hold `g_speaker_embedding_mutex` across ONNX compute or manager C-API ops; maps use `shared_ptr`; ManagerWrapper serializes C-API calls.
 
 ---
 ## 8. Non-goals

@@ -198,7 +198,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
 - Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
-- Remaining SID bridge roundtrip fixes (JNI mutex; optional embedding JSI for raw-vector apps) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Findings 1–4 **done**)
+- Optional SID bridge follow-ups (iOS TM mutex narrowing; embedding JSI for raw-vector apps) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Findings 1–5 **done**)
 
 ---
 
@@ -221,7 +221,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [speaker-identification-offline.md](../speaker-identification-offline.md)
 - [speaker-identification-live.md](../speaker-identification-live.md)
 - [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
-- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — bridge costs; Findings 1–4 done
+- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — bridge costs; Findings 1–5 done
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
 - [diarization.md](../diarization.md) — public stub (to replace when Phase 2 ships)
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
