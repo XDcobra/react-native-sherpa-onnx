@@ -1,13 +1,13 @@
 # Speaker embedding / SID: bridge roundtrip bottlenecks (future work)
 
-**Status:** Design note — analysis complete; not implemented.  
+**Status:** Finding 1 (native SID live) **done**. Findings 2–5 remain open.  
 **Scope:** TurboModule / JS orchestration costs on the **speaker-embedding** and **speaker-identification** paths after the shared C++ `SpeakerEmbeddingRunner` / `SpeakerEmbeddingManager` migration.  
 **Motivation:** Align SID with the live-overload target architecture already used by STT/TTS (and punctuation / enhancement / separation): **one native start**, per-utterance work stays in-process, no PCM or embedding vectors bouncing through JS.
 
 **Related (today):**
 
 - [speaker-embedding-foundation.md](../internal/speaker-embedding-foundation.md) — shared C++ core, SID vs diarization ownership
-- [live-overload.md §11](../internal/live-overload.md#11-speaker-identification-live-overload-js-orchestration) — SID live is still JS-orchestrated
+- [live-overload.md §11](../internal/live-overload.md#11-speaker-identification-live-overload-native-worker) — SID live native worker (Finding 1 done)
 - [speaker-identification-live.md](../speaker-identification-live.md) — public `labelLiveSegments` contract
 - [speaker-embedding-sharing-verification.md](../internal/speaker-embedding-sharing-verification.md) — device logcat weight-sharing check
 - Audio JSI baseline: [liveaudiobuffer-internal.md](../internal/liveaudiobuffer-internal.md), `src/audiobuffer/jsi.ts`
@@ -25,23 +25,21 @@
 **Hop count from JS did not increase.** Marshalling quality (e.g. Android `ArrayList<Float>` boxing) and live orchestration remain the issues to fix.
 
 ```text
-STT / TTS / Punctuation / Enhancement / Separation live
+STT / TTS / Punctuation / Enhancement / Separation / SID live
   JS: attach segmentation → start*OfflineLivePipeline once
   Native worker: read seg_live_* + PCM → infer → write outputs
   ✅ Target architecture
-
-SID labelLiveSegments (today)
-  JS poll loop: slice PCM → temp offline → extract TM → search TM → append
-  ❌ Exception documented in live-overload.md §11
 ```
 
 ---
 
-## 1. Finding — Live SID JS orchestration (HIGH)
+## 1. Finding — Live SID JS orchestration (HIGH) — **DONE**
 
-### Problem
+**Status:** Implemented. `labelLiveSegments` now starts `startSpeakerIdentificationOfflineLivePipeline`; per-utterance work runs in `SpeakerIdentificationOfflineLivePipelineWorker` (Android Kotlin + iOS ObjC++). See [live-overload.md §11](../internal/live-overload.md#11-speaker-identification-live-overload-native-worker).
 
-`labelLiveSegments` (`src/speaker-identification/live.ts`) polls committed speech spans in JS and, per utterance, roughly:
+### Problem (historical)
+
+`labelLiveSegments` previously polled committed speech spans in JS and, per utterance:
 
 1. `getLiveAudioBufferSamplesSlice` (JSI → JS `Float32Array`)
 2. `createOfflineAudioBufferFromSamples` (JSI → temp `off_*`)
@@ -49,22 +47,14 @@ SID labelLiveSegments (today)
 4. `manager.search(embedding)` (TurboModule; embedding as `number[]`)
 5. `appendLiveSegment(...)`
 
-That is a **triple PCM path** for audio that already lived in the live ring, plus two embedding-related bridge calls, plus a ~50 ms poll. Unlike STT/TTS live, there is **no** `startSpeakerIdentificationOfflineLivePipeline`.
+That was a **triple PCM path** plus two embedding-related bridge calls.
 
-### Why it was left this way
+### What shipped
 
-Documented in [live-overload.md §11](../internal/live-overload.md#11-speaker-identification-live-overload-js-orchestration): cheap per-utterance math, existing offline staging building blocks, no prior native worker that writes **segment-buffer labels** with cross-subsystem access to `SpeakerEmbeddingManager`.
-
-### Direction
-
-Keep public `labelLiveSegments` + handle shape; swap the body for a native worker (same pattern as STT):
-
-1. TurboModule `startSpeakerIdentificationOfflineLivePipeline(instanceId, managerId?, audioIn, segmentsOut, { attachedSegmentationEngineId, segmentLiveBufferId, threshold })`
+1. TurboModule `startSpeakerIdentificationOfflineLivePipeline(instanceId, managerId, audioIn, segmentsOut, { attachedSegmentationEngineId, segmentLiveBufferId, threshold })`
 2. Android / iOS `SpeakerIdentificationOfflineLivePipelineWorker` extending `OfflineLivePipelineWorker`
-3. In-process: live ring slice → `SpeakerEmbeddingRunner::Compute` (ranges) → `SpeakerEmbeddingManager::Search` → `appendLiveSegment` with `payload.source: 'sid'`
-4. `completed` / `getStatus` via streaming pipeline registry (drop JS-synthesized handle internals)
-
-**Priority:** Do this **soon** — SID should match the live-overload target architecture; JS orchestration is the dominant cost on the live path.
+3. In-process: live ring slice → embed → manager search → append with `payload.source: 'sid'`
+4. `completed` / `getStatus` via streaming pipeline registry; `onLabeled` via `subscribeLiveSegmentBufferEvents`
 
 ---
 
@@ -72,7 +62,7 @@ Keep public `labelLiveSegments` + handle shape; swap the body for a native worke
 
 ### Problem
 
-`SpeakerEmbeddingRunner` already supports `SampleRange` / ranged `Compute`. The TS engine still emulates ranges by **JS staging**:
+`SpeakerEmbeddingRunner` already supports `SampleRange` / ranged `Compute`. The TS engine still emulates ranges by **JS staging** on the **offline** path (`labelOfflineSegments` / `extractFromOfflineAudio` with range):
 
 ```ts
 // src/speaker-embedding/engine.ts — range path today
@@ -82,7 +72,7 @@ computeSpeakerEmbeddingOffline(temp.bufferId)
 releasePipelineAudioBuffer(temp.bufferId)
 ```
 
-Offline `labelOfflineSegments` pays the same tax per span.
+(Live labeling no longer uses this path after Finding 1.)
 
 ### Direction
 
@@ -99,7 +89,7 @@ computeSpeakerEmbeddingOffline(
 
 Native side: read `[start, end)` from the offline/live registry (or mmap slice) and call `Runner::Compute` with ranges — **no** PCM through JS.
 
-**Priority:** Smallest high-ROI step if native live worker is not immediate; also unblocks a cleaner offline label path and is a building block for §1.
+**Priority:** High for offline label/enroll range paths.
 
 ---
 
@@ -177,34 +167,29 @@ This is contention risk more than copy cost; listed for completeness after the t
 
 ## 6. Suggested implementation order
 
-| Step | Finding | Effort | Impact |
-|------|---------|--------|--------|
-| A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range + simplifies live interim |
-| B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify |
-| C | §1 native SID live pipeline | Medium–large | Matches STT/TTS target architecture; removes poll + triple PCM |
-| D | §4 JSI / unbox embeddings | Small–medium | Residual path for apps that still pull vectors |
-| E | §5 JNI lock narrowing | Small | Contention hygiene |
-
-**Product priority stated for this note:** §1 (native live) should be **pulled forward soon** so SID matches the live-overload Zielbild; A/B are useful stepping stones and reduce risk when C lands.
+| Step | Finding | Effort | Impact | Status |
+|------|---------|--------|--------|--------|
+| C | §1 native SID live pipeline | Medium–large | Matches STT/TTS target architecture | **Done** |
+| A | §2 native extract-by-range | Small | Removes JS PCM staging for offline/range | Open |
+| B | §3 combined identify (or in-worker search) | Small–medium | Drops embedding roundtrip on identify APIs that still cross JS | Open |
+| D | §4 JSI / unbox embeddings | Small–medium | Residual path for apps that still pull vectors | Open |
+| E | §5 JNI lock narrowing | Small | Contention hygiene | Open |
 
 ---
 
 ## 7. Measurement checklist (before / after)
 
-Instrument with a stable tag (e.g. `[SherpaOnnx:sid-bridge]`) and compare Android logcat first:
+Instrument with a stable tag (e.g. `[SherpaOnnx:sid-live]` / `[SherpaOnnx:sid-bridge]`) and compare Android logcat first:
 
 | Probe | What to log |
 |-------|-------------|
-| Live span start/end | `startSample`, `endSample`, frame count |
-| Staging | JSI slice ms, createOffline ms, release ms |
-| Extract TM | wall ms, sample count into JNI, dim out |
-| Search TM | wall ms |
-| Native worker (after §1) | span → compute → search → append ms **without** JS staging markers |
+| Live span (native worker) | `startSample`, `endSample`, frame count, compute/search/append |
+| Offline range (until §2) | JSI slice ms, createOffline ms, release ms |
+| Extract/search TM (low-level APIs) | wall ms, dim |
 
-Success criteria for §1: **no** PCM `Float32Array` in JS on the live label hot path; one `start*OfflineLivePipeline`-style bridge call per session; embedding vectors never enter JS unless the app explicitly calls low-level extract.
+Success criteria for §1 (met): **no** PCM `Float32Array` in JS on the live label hot path; one `startSpeakerIdentificationOfflineLivePipeline` call per session; embedding vectors stay native unless the app calls low-level extract.
 
 ---
-
 ## 8. Non-goals
 
 - Reverting the shared C++ Runner/Manager migration

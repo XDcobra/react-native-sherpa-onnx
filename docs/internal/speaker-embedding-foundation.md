@@ -5,7 +5,7 @@
 > **Strategy:** Ship **Speaker Identification (SID)** first on a shared **Extractor + Manager** layer designed so **Speaker Diarization** can reuse the same embedding engine without rework.
 > **User request:** [Discussion #113 — Speaker Identification](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
 >
-> Live-overload implementation details (JS drain loop, native migration notes): [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration).
+> Live-overload implementation details: [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-native-worker).
 
 ---
 
@@ -81,7 +81,7 @@ engine.destroy(): Promise<void>
 
 **Persistence:** Thin SID helpers `exportEnrollments` / `importEnrollments` return/accept a versioned embeddings JSON bundle (`SpeakerEnrollmentBundle`). The SDK does not write files — the app stores the object. Export is fed by a JS enrollment mirror (native manager cannot read embeddings back). Diarization does not need persistence.
 
-**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search. Public handle matches other live overloads. Drain loop is JS orchestration — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration).
+**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search in a native `OfflineLivePipelineWorker`. Public handle matches other live overloads — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-native-worker).
 
 ### 2.3 `src/diarization/` (Phase 2 — replace placeholder)
 
@@ -198,7 +198,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
 - Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
-- Native SID live worker + bridge roundtrip fixes (JS orchestration ships today) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md); see also [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-js-orchestration)
+- Remaining SID bridge roundtrip fixes (range extract, combined identify, embedding marshalling) — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Finding 1 native live **done**)
 
 ---
 
@@ -210,7 +210,8 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [x] Manager holds **names**, not diarization cluster indices.
 - [x] Weight sharing is C++ registry only (JS `engineCache` removed).
 - [x] Do not extend the old placeholder API (`initializeDiarization` / `diarizeAudio(path)`).
-- [x] Document that SID “live” = segment orchestration, not a streaming model family (native live worker still future work).
+- [x] Document that SID “live” = segment orchestration, not a streaming model family.
+- [x] SID live uses native `OfflineLivePipelineWorker` (same Zielbild as STT/TTS).
 
 ---
 
@@ -220,7 +221,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [speaker-identification-offline.md](../speaker-identification-offline.md)
 - [speaker-identification-live.md](../speaker-identification-live.md)
 - [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
-- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — native live + range extract + identify bridge costs
+- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — bridge costs; Finding 1 (native live) done
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
 - [diarization.md](../diarization.md) — public stub (to replace when Phase 2 ships)
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
