@@ -354,6 +354,16 @@ std::vector<DiarizationSegment> ComputeResult(const Int8Matrix& final_labels,
   return result;
 }
 
+Int8Matrix SpeechUnionLabels(const std::vector<int32_t>& speakers_per_frame) {
+  Int8Matrix out;
+  const int32_t rows = static_cast<int32_t>(speakers_per_frame.size());
+  out.resize(rows, 1, 0);
+  for (int32_t r = 0; r < rows; ++r) {
+    out.at(r, 0) = speakers_per_frame[static_cast<size_t>(r)] >= 1 ? 1 : 0;
+  }
+  return out;
+}
+
 Int8Matrix TrimLabelsForNumSamples(const Int8Matrix& labels,
                                    int32_t num_samples,
                                    const PyannoteMeta& meta) {

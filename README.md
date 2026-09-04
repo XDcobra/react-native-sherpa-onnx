@@ -427,6 +427,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
 - **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
+- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Overview](./docs/diarization.md) – anonymous clusters; pyannote + embedding
 
 ### Segmentation
 
@@ -450,7 +451,6 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - [Execution providers](./docs/execution-providers.md) – CPU, NNAPI, XNNPACK, Core ML, QNN
 - [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
 - [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cross-platform drift)
-- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Overview](./docs/diarization.md)
 
 ## Requirements
 
@@ -481,7 +481,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, and speaker identification (offline + live overload)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, speaker identification (offline + live overload), and speaker diarization (offline)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks

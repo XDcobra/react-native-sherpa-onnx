@@ -123,4 +123,4 @@ registry), and own agglomerative clustering. It does **not** wrap the upstream
 
 - Offline batch: Android / iOS
 - Live / streaming diarization: not yet (architecture-ready)
-- `speech_pyannote_segmentation` evaluator for the shared segmentation engine: planned
+- `speech_pyannote_segmentation` evaluator for the shared segmentation engine: **shipped** (offline union spans; see [segmentation-engine.md](./segmentation-engine.md))

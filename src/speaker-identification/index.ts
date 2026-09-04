@@ -457,7 +457,9 @@ export async function createSpeakerIdentification(
         engine.instanceId,
         manager.managerId,
         resolvePipelineAudioBufferId(audio),
-        resolveThreshold(thresholdOptions)
+        resolveThreshold(thresholdOptions),
+        null,
+        null
       );
       const trimmed = result.name.trim();
       return { name: trimmed.length > 0 ? trimmed : null };
@@ -584,7 +586,9 @@ export async function createSpeakerIdentification(
         manager.managerId,
         resolvePipelineAudioBufferId(audio),
         name,
-        resolveThreshold(thresholdOptions)
+        resolveThreshold(thresholdOptions),
+        null,
+        null
       );
       return result.ok;
     },

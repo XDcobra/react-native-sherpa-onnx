@@ -179,7 +179,9 @@ describe('createSpeakerIdentification', () => {
       sid.instanceId,
       sid.managerId,
       'off_query',
-      0.6
+      0.6,
+      null,
+      null
     );
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
     expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
@@ -190,7 +192,9 @@ describe('createSpeakerIdentification', () => {
       sid.managerId,
       'off_query',
       'alice',
-      0.5
+      0.5,
+      null,
+      null
     );
     expect(native.speakerEmbeddingManagerVerify).not.toHaveBeenCalled();
     expect(native.computeSpeakerEmbeddingOffline).not.toHaveBeenCalled();
@@ -227,7 +231,9 @@ describe('createSpeakerIdentification', () => {
       sid.instanceId,
       sid.managerId,
       'off_query',
-      0.5
+      0.5,
+      null,
+      null
     );
     expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
   });

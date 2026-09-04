@@ -83,7 +83,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   SegmentationShowcase: {
     title: 'Segmentation playground',
-    body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
+    body: 'Integrator playground for offline text and audio segmentation via shared SegmentationPolicyControls. Text: synthetic or punctuation-assisted. Audio: energy, VAD, or pyannote packs (catalog + detect → policy.modelPath). Runs segmentOfflineBuffer and lists segments with reason badges.',
   },
   Diarization: {
     title: 'Speaker diarization demo',
