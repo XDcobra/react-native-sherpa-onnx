@@ -91,7 +91,6 @@ import SherpaOnnx from '../../NativeSherpaOnnx';
 import * as audiobuffer from '../../audiobuffer';
 import * as segment from '../../segment';
 import * as segmentbuffer from '../../segmentbuffer';
-import { __resetSpeakerEmbeddingEngineCacheForTests } from '../../speaker-embedding/engineCache';
 import { createSpeakerIdentification } from '../index';
 import { LIVE_OFFLINE_SEGMENTATION_REQUIRED } from '../../livePipeline';
 
@@ -148,7 +147,6 @@ describe('labelLiveSegments', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useRealTimers();
-    __resetSpeakerEmbeddingEngineCacheForTests();
 
     native.initializeSpeakerEmbeddingExtractor.mockResolvedValue({
       success: true,

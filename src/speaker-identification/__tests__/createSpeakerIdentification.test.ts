@@ -50,7 +50,6 @@ jest.mock('../../segmentbuffer', () => ({
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import * as audiobuffer from '../../audiobuffer';
 import * as segmentbuffer from '../../segmentbuffer';
-import { __resetSpeakerEmbeddingEngineCacheForTests } from '../../speaker-embedding/engineCache';
 import { createSpeakerIdentification } from '../index';
 
 describe('createSpeakerIdentification', () => {
@@ -87,7 +86,6 @@ describe('createSpeakerIdentification', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    __resetSpeakerEmbeddingEngineCacheForTests();
     native.initializeSpeakerEmbeddingExtractor.mockResolvedValue({
       success: true,
       dim: 4,
@@ -1128,7 +1126,6 @@ describe('createSpeakerIdentification', () => {
     });
 
     await sid.destroy();
-    __resetSpeakerEmbeddingEngineCacheForTests();
 
     const sid2 = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
