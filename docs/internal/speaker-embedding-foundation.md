@@ -1,6 +1,6 @@
 # Speaker embedding foundation — Internal design
 
-> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream), pyannote segmentation-engine evaluator, optional embedding JSI in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md).
+> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream), pyannote segmentation-engine evaluator (`speech_pyannote_segmentation`).
 > **Audience:** SDK maintainers.
 > **Strategy:** Ship **Speaker Identification (SID)** first on a shared **Extractor + Manager** layer designed so **Speaker Diarization** can reuse the same embedding engine without rework.
 > **User request:** [Discussion #113 — Speaker Identification](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
@@ -191,7 +191,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
 - Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
-- Optional embedding JSI — tracked in [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) (Findings 1–5 and §6–§10 **done**)
+- Optional embedding JSI (deferred; only if low-level extract profiles hot)
 
 ---
 
@@ -214,7 +214,6 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [speaker-identification-offline.md](../speaker-identification-offline.md)
 - [speaker-identification-live.md](../speaker-identification-live.md)
 - [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
-- [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md) — bridge costs; Findings 1–5 and §6–§10 done; optional embedding JSI deferred
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
 - [diarization.md](../diarization.md) — overview → [diarization-offline.md](../diarization-offline.md) (offline shipped)
 - [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)

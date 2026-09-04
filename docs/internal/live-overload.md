@@ -383,4 +383,4 @@ Public API: `createSpeakerIdentification().labelLiveSegments(LiveAudio, LiveSegm
 
 `onLabeled` is wired like STT `onSegment`: `subscribeLiveSegmentBufferEvents(segmentsOut)` mapping `payload.source === 'sid'`.
 
-Optional bridge follow-ups (iOS TM mutex narrowing; embedding JSI): [speaker-embedding-sid-bridge-roundtrips-future-work.md](../future-work/speaker-embedding-sid-bridge-roundtrips-future-work.md).
+Bridge roundtrip work (native live SID, combined identify/verify/enroll, lock narrowing, diarization `segmentsOut` write) is **done**. Optional embedding JSI remains deferred unless low-level extract profiles hot.
