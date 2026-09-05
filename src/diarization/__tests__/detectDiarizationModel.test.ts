@@ -63,4 +63,63 @@ describe('detectDiarizationModel', () => {
 
     expect(result.paths).toBeUndefined();
   });
+
+  it('maps sortformer model and metadata into result when both are present', async () => {
+    (SherpaOnnx.detectDiarizationModel as jest.Mock).mockResolvedValue({
+      success: true,
+      isStreaming: true,
+      modelType: 'sortformer',
+      detectedModels: [
+        {
+          type: 'sortformer',
+          modelDir: '/models/diar_streaming_sortformer_4spk',
+        },
+      ],
+      paths: {
+        model: '/models/diar_streaming_sortformer_4spk/model.onnx',
+        metadata: '/models/diar_streaming_sortformer_4spk/metadata.json',
+      },
+    });
+
+    const result = await detectDiarizationModel({
+      kind: 'fs',
+      path: '/models/diar_streaming_sortformer_4spk',
+    });
+
+    expect(result.isStreaming).toBe(true);
+    expect(result.modelType).toBe('sortformer');
+    expect(result.paths).toEqual({
+      model: '/models/diar_streaming_sortformer_4spk/model.onnx',
+      metadata: '/models/diar_streaming_sortformer_4spk/metadata.json',
+    });
+  });
+
+  it('maps sortformer model without metadata when metadata is absent', async () => {
+    (SherpaOnnx.detectDiarizationModel as jest.Mock).mockResolvedValue({
+      success: true,
+      isStreaming: true,
+      modelType: 'sortformer',
+      detectedModels: [
+        {
+          type: 'sortformer',
+          modelDir: '/models/diar_streaming_sortformer_4spk',
+        },
+      ],
+      paths: {
+        model: '/models/diar_streaming_sortformer_4spk/model.onnx',
+      },
+    });
+
+    const result = await detectDiarizationModel({
+      kind: 'fs',
+      path: '/models/diar_streaming_sortformer_4spk',
+    });
+
+    expect(result.isStreaming).toBe(true);
+    expect(result.modelType).toBe('sortformer');
+    expect(result.paths).toEqual({
+      model: '/models/diar_streaming_sortformer_4spk/model.onnx',
+    });
+    expect(result.paths?.metadata).toBeUndefined();
+  });
 });

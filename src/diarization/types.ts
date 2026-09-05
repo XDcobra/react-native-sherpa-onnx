@@ -16,12 +16,15 @@ export {
   type ModelDetectResultBase,
 } from '../types/modelDetect';
 
-export type DiarizationModelKind = 'pyannote' | 'reverb';
+export type DiarizationModelKind = 'pyannote' | 'reverb' | 'sortformer';
 
 export const DIARIZATION_MODEL_KINDS: readonly DiarizationModelKind[] = [
   'pyannote',
   'reverb',
+  'sortformer',
 ] as const;
+
+export type DiarizationConcreteModelType = DiarizationModelKind;
 
 export type DiarizationDetectResult = DiarizationDetectModelResult;
 

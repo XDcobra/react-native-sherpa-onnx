@@ -43,6 +43,7 @@ export type {
   DetectedModelEntry,
   DetectionSource,
   DiarizationClusterEmbedding,
+  DiarizationConcreteModelType,
   DiarizationDetectResult,
   DiarizationEmbeddingOptions,
   DiarizationEngine,
@@ -64,6 +65,16 @@ export {
   DiarizationErrorCode,
   isDetectionSource,
 } from './types';
+
+export type {
+  DiarizationCustomConfig,
+  DiarizationCustomPathKey,
+} from './customConfig';
+
+export {
+  assertDiarizationCustomConfig,
+  resolveDiarizationCustomConfigPaths,
+} from './customConfig';
 
 export { mapDiarizationToNames } from './mapDiarizationToNames';
 
@@ -154,6 +165,16 @@ export async function detectDiarizationModel(
       : undefined;
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
+  const metadataFilePath =
+    typeof raw.paths?.metadata === 'string' ? raw.paths.metadata.trim() : '';
+  const paths: { model?: string; metadata?: string } = {};
+  if (modelFilePath.length > 0) {
+    paths.model = modelFilePath;
+  }
+  if (metadataFilePath.length > 0) {
+    paths.metadata = metadataFilePath;
+  }
+  const hasPaths = Object.keys(paths).length > 0;
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -166,7 +187,7 @@ export async function detectDiarizationModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
-    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
+    ...(hasPaths ? { paths } : {}),
   };
 }
 

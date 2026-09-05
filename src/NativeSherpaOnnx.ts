@@ -1584,6 +1584,7 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
     paths?: {
       model?: string;
+      metadata?: string;
     };
   }>;
 

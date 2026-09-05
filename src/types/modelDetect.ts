@@ -106,9 +106,10 @@ export interface SpeakerEmbeddingDetectModelResult
 // ─── Diarization extension ─────────────────────────────────────────────
 
 export interface DiarizationDetectModelResult extends ModelDetectResultBase {
-  /** Resolved segmentation ONNX path from detection. */
+  /** Resolved segmentation ONNX path and optional metadata JSON from detection. */
   paths?: {
     model?: string;
+    metadata?: string;
   };
 }
 
