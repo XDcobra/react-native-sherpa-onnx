@@ -110,6 +110,10 @@ lib/
 build/alignment-models/
 dist/alignment-models/
 
+# diarization release asset pipeline outputs
+build/diarization-models/
+dist/diarization-models/
+
 # React Native Codegen
 ios/generated
 android/generated
