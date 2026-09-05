@@ -16,6 +16,7 @@ sherpaonnx::DiarizationModelKind ParseDiarizationModelType(
 ) {
     if (modelType == "pyannote") return sherpaonnx::DiarizationModelKind::kPyannote;
     if (modelType == "reverb") return sherpaonnx::DiarizationModelKind::kReverb;
+    if (modelType == "sortformer") return sherpaonnx::DiarizationModelKind::kSortformer;
     return sherpaonnx::DiarizationModelKind::kUnknown;
 }
 
@@ -25,6 +26,8 @@ const char* DiarizationKindToTag(sherpaonnx::DiarizationModelKind kind) {
             return "pyannote";
         case sherpaonnx::DiarizationModelKind::kReverb:
             return "reverb";
+        case sherpaonnx::DiarizationModelKind::kSortformer:
+            return "sortformer";
         default:
             return "unknown";
     }
@@ -48,6 +51,7 @@ std::string BasenameLower(const std::string& modelDir) {
 bool IsDiarizationPackName(const std::string& lowerBasename) {
     return lowerBasename.find("pyannote") != std::string::npos ||
            lowerBasename.find("reverb") != std::string::npos ||
+           lowerBasename.find("sortformer") != std::string::npos ||
            lowerBasename.find("diarization") != std::string::npos ||
            lowerBasename.find("segmentation") != std::string::npos;
 }
@@ -69,6 +73,9 @@ std::vector<sherpaonnx::DiarizationModelKind> GetKindsFromDirNameDiarization(
     }
     if (lower.find("reverb") != std::string::npos) {
         add(sherpaonnx::DiarizationModelKind::kReverb);
+    }
+    if (lower.find("sortformer") != std::string::npos) {
+        add(sherpaonnx::DiarizationModelKind::kSortformer);
     }
     return out;
 }
@@ -111,6 +118,7 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
             }
             AppendUniqueDetectionSource(
                 result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
+            result.isStreaming = (selected == sherpaonnx::DiarizationModelKind::kSortformer);
             result.selectedKind = selected;
             result.detectedModels.clear();
             result.detectedModels.push_back({DiarizationKindToTag(selected), modelDir});
@@ -121,10 +129,11 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
         if (nameKinds.empty()) {
             result.error =
                 "Diarization: no model type inferred from directory name "
-                "(require pyannote or reverb in name; name-only mode).";
+                "(require pyannote, reverb, or sortformer in name; name-only mode).";
             return result;
         }
         result.selectedKind = nameKinds[0];
+        result.isStreaming = (nameKinds[0] == sherpaonnx::DiarizationModelKind::kSortformer);
         AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
@@ -160,7 +169,7 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
     if (requestedModelType == "auto") {
         if (nameKinds.empty()) {
             result.error =
-                "Diarization: pack name matched but kind requires pyannote or reverb in "
+                "Diarization: pack name matched but kind requires pyannote, reverb, or sortformer in "
                 "directory/asset name: " +
                 modelDir;
             return result;
@@ -181,7 +190,13 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
     }
 
     result.selectedKind = selected;
+    result.isStreaming = (selected == sherpaonnx::DiarizationModelKind::kSortformer);
     result.paths.model = modelOnnx;
+
+    const std::string metadataJson = FindFileByName(files, "metadata.json");
+    if (!metadataJson.empty()) {
+        result.paths.metadata = metadataJson;
+    }
 
     auto validation =
         sherpaonnx::ValidateDiarizationPaths(selected, result.paths, modelDir);

@@ -93,6 +93,7 @@ SpeakerEmbeddingModelKind ParseSpeakerEmbeddingModelTypeLocal(
 DiarizationModelKind ParseDiarizationModelTypeLocal(const std::string& modelType) {
     if (modelType == "pyannote") return DiarizationModelKind::kPyannote;
     if (modelType == "reverb") return DiarizationModelKind::kReverb;
+    if (modelType == "sortformer") return DiarizationModelKind::kSortformer;
     return DiarizationModelKind::kUnknown;
 }
 

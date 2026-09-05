@@ -9,6 +9,11 @@ static const DiarizationFieldRequirement kGenericReqs[] = {
     {"model", &DiarizationModelPaths::model, true},
 };
 
+static const DiarizationFieldRequirement kSortformerReqs[] = {
+    {"model", &DiarizationModelPaths::model, true},
+    {"metadata", &DiarizationModelPaths::metadata, false},
+};
+
 static const DiarizationFieldRequirement* GetRequirements(
     DiarizationModelKind kind,
     size_t& count
@@ -18,6 +23,9 @@ static const DiarizationFieldRequirement* GetRequirements(
         case DiarizationModelKind::kReverb:
             count = std::size(kGenericReqs);
             return kGenericReqs;
+        case DiarizationModelKind::kSortformer:
+            count = std::size(kSortformerReqs);
+            return kSortformerReqs;
         default:
             count = 0;
             return nullptr;
@@ -30,6 +38,8 @@ static const char* DiarizationKindToName(DiarizationModelKind kind) {
             return "pyannote";
         case DiarizationModelKind::kReverb:
             return "reverb";
+        case DiarizationModelKind::kSortformer:
+            return "sortformer";
         default:
             return "Unknown";
     }

@@ -12,6 +12,8 @@ const char* DiarizationModelKindToString(DiarizationModelKind k) {
       return "pyannote";
     case DiarizationModelKind::kReverb:
       return "reverb";
+    case DiarizationModelKind::kSortformer:
+      return "sortformer";
     default:
       return "unknown";
   }
@@ -79,6 +81,9 @@ jobject DiarizationDetectResultToJava(
     env->DeleteLocalRef(hashMapClass);
     if (pathsMap) {
       PutString(env, pathsMap, mapPut, "model", result.paths.model);
+      if (!result.paths.metadata.empty()) {
+        PutString(env, pathsMap, mapPut, "metadata", result.paths.metadata);
+      }
       jstring keyPaths = env->NewStringUTF("paths");
       env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
       env->DeleteLocalRef(keyPaths);

@@ -584,6 +584,8 @@ internal class SherpaOnnxDiarizationHelper(
       val writablePaths = Arguments.createMap()
       val modelPath = paths["model"] as? String
       if (!modelPath.isNullOrBlank()) writablePaths.putString("model", modelPath)
+      val metadataPath = paths["metadata"] as? String
+      if (!metadataPath.isNullOrBlank()) writablePaths.putString("metadata", metadataPath)
       if (writablePaths.toHashMap().isNotEmpty()) {
         map.putMap("paths", writablePaths)
       }

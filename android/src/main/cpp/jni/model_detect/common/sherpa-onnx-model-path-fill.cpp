@@ -115,6 +115,7 @@ void FillDiarizationModelPathsFromStringMap(
     DiarizationModelPaths& out
 ) {
     SetPathFromMap(paths, "model", out.model);
+    SetPathFromMap(paths, "metadata", out.metadata);
 }
 
 void FillPunctuationModelPathsFromStringMap(
@@ -249,6 +250,7 @@ std::map<std::string, std::string> DiarizationModelPathsToStringMap(
     const DiarizationModelPaths& paths) {
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
+    PutPathIfNonEmpty(out, "metadata", paths.metadata);
     return out;
 }
 

@@ -267,6 +267,7 @@ DiarizationModelKind DiarizationKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "pyannote") return DiarizationModelKind::kPyannote;
     if (t == "reverb") return DiarizationModelKind::kReverb;
+    if (t == "sortformer") return DiarizationModelKind::kSortformer;
     return DiarizationModelKind::kUnknown;
 }
 
@@ -276,6 +277,8 @@ std::string DiarizationKindToString(DiarizationModelKind kind) {
             return "pyannote";
         case DiarizationModelKind::kReverb:
             return "reverb";
+        case DiarizationModelKind::kSortformer:
+            return "sortformer";
         default:
             return "unknown";
     }
