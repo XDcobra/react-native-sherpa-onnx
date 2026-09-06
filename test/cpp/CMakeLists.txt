@@ -125,61 +125,6 @@ set_tests_properties(model_detect_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
-# --- Diarization core unit tests (powerset / clustering / timeline; no ORT) ---
-set(DIARIZATION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/diarization")
-set(DIARIZATION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/diarization")
-if(GTest_FOUND)
-  set(DIARIZATION_GTEST_LIBS GTest::gtest GTest::gtest_main)
-else()
-  set(DIARIZATION_GTEST_LIBS gtest gtest_main)
-endif()
-
-add_executable(diarization_core_test
-  "${DIARIZATION_TEST_DIR}/diarization_core_test.cpp"
-  "${DIARIZATION_CORE_DIR}/powerset.cpp"
-  "${DIARIZATION_CORE_DIR}/agglomerative-clustering.cpp"
-  "${DIARIZATION_CORE_DIR}/speaker-timeline.cpp"
-)
-target_include_directories(diarization_core_test PRIVATE
-  "${DIARIZATION_CORE_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
-)
-target_link_libraries(diarization_core_test PRIVATE ${DIARIZATION_GTEST_LIBS})
-add_test(NAME diarization_core_test COMMAND $<TARGET_FILE:diarization_core_test>)
-set_tests_properties(diarization_core_test PROPERTIES
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-)
-
-# --- Speaker-embedding core (registry key; no sherpa C-API) ---
-# Full Acquire/Compute/Manager coverage needs a host sherpa C-API build (future);
-# until then device logcat verifies sharing (docs/internal/speaker-embedding-sharing-verification.md).
-set(SPEAKER_EMBEDDING_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding")
-set(SPEAKER_EMBEDDING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding")
-if(GTest_FOUND)
-  set(SPEAKER_EMBEDDING_GTEST_LIBS GTest::gtest GTest::gtest_main)
-else()
-  set(SPEAKER_EMBEDDING_GTEST_LIBS gtest gtest_main)
-endif()
-
-add_executable(speaker_embedding_core_test
-  "${SPEAKER_EMBEDDING_TEST_DIR}/speaker_embedding_core_test.cpp"
-)
-target_include_directories(speaker_embedding_core_test PRIVATE
-  "${SPEAKER_EMBEDDING_CORE_DIR}"
-)
-target_link_libraries(speaker_embedding_core_test PRIVATE ${SPEAKER_EMBEDDING_GTEST_LIBS})
-add_test(NAME speaker_embedding_core_test COMMAND $<TARGET_FILE:speaker_embedding_core_test>)
-set_tests_properties(speaker_embedding_core_test PROPERTIES
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-)
-
-if(TARGET audio_f32le_to_format_host_test)
-  add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
-  set_tests_properties(audio_f32le_to_format_host_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-  )
-endif()
-
 # --- CTC alignment + ORT smoke (downloads ONNX Runtime host build for Linux/macOS) ---
 # Default ORT semver: third_party/onnxruntime_prebuilt/VERSIONS (ONNXRUNTIME_VERSION) — same pin as Android QNN prebuilts.
 # Official Microsoft release zips use v${VER}/onnxruntime-{platform}-${VER}.tgz; override with -DSHERPA_ONNX_HOST_ORT_VERSION= or SHERPA_ONNX_HOST_ORT_ROOT=.
@@ -243,6 +188,93 @@ if(NOT _ORT_HOST_INCLUDE AND _ORT_PKG)
   endif()
   set(_ORT_HOST_INCLUDE "${_ORT_ROOT}/include")
   set(_ORT_HOST_LIBDIR "${_ORT_ROOT}/lib")
+endif()
+
+if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
+  set(_ORT_API_WRAPPER "${CMAKE_BINARY_DIR}/sherpa_onnx_ort_api_wrapper")
+  file(MAKE_DIRECTORY "${_ORT_API_WRAPPER}/onnxruntime/core/session")
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/core/session/onnxruntime_c_api.h")
+    file(WRITE "${_ORT_API_WRAPPER}/onnxruntime/core/session/onnxruntime_c_api.h"
+      "#pragma once\n#include \"${_ORT_HOST_INCLUDE}/onnxruntime/core/session/onnxruntime_c_api.h\"\n")
+  else()
+    file(WRITE "${_ORT_API_WRAPPER}/onnxruntime/core/session/onnxruntime_c_api.h"
+      "#pragma once\n#include \"${_ORT_HOST_INCLUDE}/onnxruntime_c_api.h\"\n")
+  endif()
+endif()
+
+# --- Diarization core unit tests ---
+set(DIARIZATION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/diarization")
+set(DIARIZATION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/diarization")
+if(GTest_FOUND)
+  set(DIARIZATION_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(DIARIZATION_GTEST_LIBS gtest gtest_main)
+endif()
+
+add_executable(diarization_core_test
+  "${DIARIZATION_TEST_DIR}/diarization_core_test.cpp"
+  "${DIARIZATION_TEST_DIR}/sortformer_fbank_test.cpp"
+  "${DIARIZATION_TEST_DIR}/sortformer_post_processing_test.cpp"
+  "${DIARIZATION_TEST_DIR}/sortformer_cache_test.cpp"
+  "${DIARIZATION_CORE_DIR}/powerset.cpp"
+  "${DIARIZATION_CORE_DIR}/agglomerative-clustering.cpp"
+  "${DIARIZATION_CORE_DIR}/speaker-timeline.cpp"
+  "${DIARIZATION_CORE_DIR}/sortformer-fbank.cpp"
+  "${DIARIZATION_CORE_DIR}/sortformer-post-processor.cpp"
+  "${DIARIZATION_CORE_DIR}/sortformer-streaming-model.cpp"
+  "${DIARIZATION_CORE_DIR}/sherpa-onnx-streaming-diarization-wrapper.cpp"
+)
+target_include_directories(diarization_core_test PRIVATE
+  "${DIARIZATION_CORE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
+  "${_ORT_API_WRAPPER}"
+  "${_ORT_HOST_INCLUDE}"
+)
+target_link_libraries(diarization_core_test PRIVATE ${DIARIZATION_GTEST_LIBS})
+if(_ORT_HOST_LIBDIR)
+  target_link_directories(diarization_core_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(diarization_core_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(diarization_core_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(diarization_core_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+endif()
+add_test(NAME diarization_core_test COMMAND $<TARGET_FILE:diarization_core_test>)
+set_tests_properties(diarization_core_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# --- Speaker-embedding core (registry key; no sherpa C-API) ---
+# Full Acquire/Compute/Manager coverage needs a host sherpa C-API build (future);
+# until then device logcat verifies sharing (docs/internal/speaker-embedding-sharing-verification.md).
+set(SPEAKER_EMBEDDING_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding")
+set(SPEAKER_EMBEDDING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding")
+if(GTest_FOUND)
+  set(SPEAKER_EMBEDDING_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(SPEAKER_EMBEDDING_GTEST_LIBS gtest gtest_main)
+endif()
+
+add_executable(speaker_embedding_core_test
+  "${SPEAKER_EMBEDDING_TEST_DIR}/speaker_embedding_core_test.cpp"
+)
+target_include_directories(speaker_embedding_core_test PRIVATE
+  "${SPEAKER_EMBEDDING_CORE_DIR}"
+)
+target_link_libraries(speaker_embedding_core_test PRIVATE ${SPEAKER_EMBEDDING_GTEST_LIBS})
+add_test(NAME speaker_embedding_core_test COMMAND $<TARGET_FILE:speaker_embedding_core_test>)
+set_tests_properties(speaker_embedding_core_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+if(TARGET audio_f32le_to_format_host_test)
+  add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
+  set_tests_properties(audio_f32le_to_format_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
 endif()
 
 if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)

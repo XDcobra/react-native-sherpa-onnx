@@ -126,11 +126,12 @@ enum class SpeakerEmbeddingModelKind {
     kNemo
 };
 
-/** Speaker diarization segmentation packs (pyannote / ReVerb); release tag speaker-segmentation-models. */
+/** Speaker diarization packs (pyannote / ReVerb offline; sortformer streaming). */
 enum class DiarizationModelKind {
     kUnknown,
     kPyannote,
-    kReverb
+    kReverb,
+    kSortformer
 };
 
 struct SttModelPaths {
@@ -292,8 +293,10 @@ struct SpeakerEmbeddingModelPaths {
 };
 
 struct DiarizationModelPaths {
-    /** Segmentation ONNX (prefer model.onnx over model.int8.onnx). */
+    /** Segmentation / Diarization ONNX (prefer model.onnx over model.int8.onnx). */
     std::string model;
+    /** Optional model metadata JSON (e.g. metadata.json for streaming Sortformer). */
+    std::string metadata;
 };
 
 struct PunctuationModelPaths {

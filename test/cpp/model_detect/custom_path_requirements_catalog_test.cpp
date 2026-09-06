@@ -257,6 +257,10 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
     ExpectRequirementsMatch("enhancement", "dpdfnet", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "pyannote", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "reverb", {{"model", true, std::nullopt}});
+    ExpectRequirementsMatch("diarization", "sortformer", {
+        {"model", true, std::nullopt},
+        {"metadata", false, std::nullopt},
+    });
     ExpectRequirementsMatch("separation", "spleeter", {
         {"vocals", true, std::nullopt},
         {"accompaniment", true, std::nullopt},

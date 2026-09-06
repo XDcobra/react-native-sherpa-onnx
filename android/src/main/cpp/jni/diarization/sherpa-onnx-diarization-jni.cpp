@@ -1,5 +1,6 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-diarization-wrapper.h"
+#include "sherpa-onnx-streaming-diarization-wrapper.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -23,11 +24,25 @@ std::mutex g_diarization_mutex;
 std::unordered_map<std::string, std::shared_ptr<sherpaonnx::DiarizationWrapper>>
     g_diarization_instances;
 
+std::mutex g_streaming_diarization_mutex;
+std::unordered_map<std::string,
+                   std::shared_ptr<sherpaonnx::StreamingDiarizationWrapper>>
+    g_streaming_diarization_instances;
+
 std::shared_ptr<sherpaonnx::DiarizationWrapper> LookupDiarization(
     const std::string& id) {
   std::lock_guard<std::mutex> lock(g_diarization_mutex);
   auto it = g_diarization_instances.find(id);
   if (it == g_diarization_instances.end() || !it->second) return nullptr;
+  return it->second;
+}
+
+std::shared_ptr<sherpaonnx::StreamingDiarizationWrapper>
+LookupStreamingDiarization(const std::string& id) {
+  std::lock_guard<std::mutex> lock(g_streaming_diarization_mutex);
+  auto it = g_streaming_diarization_instances.find(id);
+  if (it == g_streaming_diarization_instances.end() || !it->second)
+    return nullptr;
   return it->second;
 }
 
@@ -482,6 +497,225 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeUnloadD
     }
   }
   // Destructor releases when last shared_ptr drops (after in-flight process).
+}
+
+jobject SegmentListToArrayList(
+    JNIEnv* env,
+    const std::vector<sherpaonnx::StreamingDiarizationSegmentDto>& segments) {
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  jclass mapClass = env->FindClass("java/util/HashMap");
+  if (!listClass || !mapClass) {
+    if (listClass) env->DeleteLocalRef(listClass);
+    if (mapClass) env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+  jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  jmethodID mapInit = env->GetMethodID(mapClass, "<init>", "()V");
+  jmethodID mapPut =
+      env->GetMethodID(mapClass, "put",
+                       "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+
+  jobject list = env->NewObject(listClass, listInit);
+  env->DeleteLocalRef(listClass);
+  if (!list) {
+    env->DeleteLocalRef(mapClass);
+    return nullptr;
+  }
+
+  for (const auto& s : segments) {
+    jobject m = env->NewObject(mapClass, mapInit);
+    if (!m) continue;
+    PutFloat(env, m, mapPut, "start", s.start);
+    PutFloat(env, m, mapPut, "end", s.end);
+    PutInt(env, m, mapPut, "speaker", s.speaker);
+    env->CallBooleanMethod(list, listAdd, m);
+    env->DeleteLocalRef(m);
+  }
+  env->DeleteLocalRef(mapClass);
+  return list;
+}
+
+jobject StreamingFeedResultToHashMap(
+    JNIEnv* env,
+    const sherpaonnx::StreamingDiarizationFeedResult& result) {
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map || !mapPut) return nullptr;
+
+  sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
+  if (!result.error.empty()) {
+    sherpaonnx::PutString(env, map, mapPut, "error", result.error);
+  }
+  if (!result.errorCode.empty()) {
+    sherpaonnx::PutString(env, map, mapPut, "errorCode", result.errorCode);
+  }
+
+  jobject list = SegmentListToArrayList(env, result.segments);
+  if (list) {
+    jstring key = env->NewStringUTF("segments");
+    env->CallObjectMethod(map, mapPut, key, list);
+    env->DeleteLocalRef(key);
+    env->DeleteLocalRef(list);
+  }
+
+  return map;
+}
+
+jobject StreamingInitResultToHashMap(
+    JNIEnv* env,
+    const sherpaonnx::StreamingDiarizationInitResult& result) {
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map || !mapPut) return nullptr;
+
+  sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
+  if (!result.error.empty()) {
+    sherpaonnx::PutString(env, map, mapPut, "error", result.error);
+  }
+  if (!result.errorCode.empty()) {
+    sherpaonnx::PutString(env, map, mapPut, "errorCode", result.errorCode);
+  }
+  PutInt(env, map, mapPut, "sampleRate", result.sampleRate);
+  PutInt(env, map, mapPut, "maxSpeakers", result.maxSpeakers);
+  PutInt(env, map, mapPut, "feedSamples", result.feedSamples);
+  PutInt(env, map, mapPut, "strideSamples", result.strideSamples);
+  PutFloat(env, map, mapPut, "latencySeconds", result.latencySeconds);
+
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitializeStreamingDiarization(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId,
+    jstring modelPath,
+    jstring metadataPath,
+    jint numThreads,
+    jstring provider,
+    jboolean debug,
+    jfloat onset,
+    jfloat offset,
+    jfloat padOnset,
+    jfloat padOffset,
+    jfloat minDurationOn,
+    jfloat minDurationOff,
+    jint medianWindow
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  const std::string modelPathStr = CopyRequiredJstring(env, modelPath);
+  const std::string metadataPathStr = metadataPath ? CopyRequiredJstring(env, metadataPath) : "";
+  const auto providerOpt = CopyOptionalJstring(env, provider);
+
+  LOGI("nativeInitializeStreamingDiarization: id=%s model=%s meta=%s threads=%d",
+       instanceIdStr.c_str(), modelPathStr.c_str(), metadataPathStr.c_str(),
+       static_cast<int>(numThreads));
+
+  auto wrapper = std::make_shared<sherpaonnx::StreamingDiarizationWrapper>();
+  auto result = wrapper->initialize(
+      modelPathStr,
+      metadataPathStr,
+      numThreads,
+      providerOpt.value_or("cpu"),
+      debug,
+      onset,
+      offset,
+      padOnset,
+      padOffset,
+      minDurationOn,
+      minDurationOff,
+      medianWindow);
+
+  if (result.success) {
+    std::lock_guard<std::mutex> lock(g_streaming_diarization_mutex);
+    g_streaming_diarization_instances[instanceIdStr] = wrapper;
+  }
+
+  return StreamingInitResultToHashMap(env, result);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeFeedStreamingDiarization(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId,
+    jfloatArray samples
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  auto wrapper = LookupStreamingDiarization(instanceIdStr);
+  if (!wrapper) {
+    sherpaonnx::StreamingDiarizationFeedResult res;
+    res.success = false;
+    res.error = "Streaming diarization instance not found: " + instanceIdStr;
+    res.errorCode = "NOT_INITIALIZED";
+    return StreamingFeedResultToHashMap(env, res);
+  }
+
+  jsize count = samples ? env->GetArrayLength(samples) : 0;
+  std::vector<float> buf;
+  if (count > 0) {
+    buf.resize(static_cast<size_t>(count));
+    env->GetFloatArrayRegion(samples, 0, count, buf.data());
+  }
+
+  auto res = wrapper->feed(buf.empty() ? nullptr : buf.data(), buf.size());
+  return StreamingFeedResultToHashMap(env, res);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeFlushStreamingDiarization(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  auto wrapper = LookupStreamingDiarization(instanceIdStr);
+  if (!wrapper) {
+    sherpaonnx::StreamingDiarizationFeedResult res;
+    res.success = false;
+    res.error = "Streaming diarization instance not found: " + instanceIdStr;
+    res.errorCode = "NOT_INITIALIZED";
+    return StreamingFeedResultToHashMap(env, res);
+  }
+
+  auto res = wrapper->flush();
+  return StreamingFeedResultToHashMap(env, res);
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeResetStreamingDiarization(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  auto wrapper = LookupStreamingDiarization(instanceIdStr);
+  if (wrapper) {
+    wrapper->reset();
+  }
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeReleaseStreamingDiarization(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  LOGI("nativeReleaseStreamingDiarization: id=%s", instanceIdStr.c_str());
+  std::shared_ptr<sherpaonnx::StreamingDiarizationWrapper> doomed;
+  {
+    std::lock_guard<std::mutex> lock(g_streaming_diarization_mutex);
+    auto it = g_streaming_diarization_instances.find(instanceIdStr);
+    if (it != g_streaming_diarization_instances.end()) {
+      doomed = std::move(it->second);
+      g_streaming_diarization_instances.erase(it);
+    }
+  }
+  if (doomed) {
+    doomed->release();
+  }
 }
 
 }  // extern "C"

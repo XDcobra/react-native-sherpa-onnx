@@ -107,6 +107,7 @@ const char* DiarizationModelKindToString(DiarizationModelKind k) {
     switch (k) {
         case DiarizationModelKind::kPyannote: return "pyannote";
         case DiarizationModelKind::kReverb: return "reverb";
+        case DiarizationModelKind::kSortformer: return "sortformer";
         default: return "unknown";
     }
 }

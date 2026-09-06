@@ -4844,6 +4844,50 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     diarizationHelper.unloadDiarization(instanceId, promise)
   }
 
+  override fun initializeStreamingDiarization(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    diarizationHelper.initializeStreamingDiarization(instanceId, options, promise)
+  }
+
+  override fun startStreamingDiarizationPipeline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentsOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    diarizationHelper.startStreamingDiarizationPipeline(
+      instanceId,
+      audioInBufferId,
+      segmentsOutBufferId,
+      options,
+      promise,
+    )
+  }
+
+  override fun feedStreamingDiarization(
+    instanceId: String,
+    audioInBufferId: String,
+    promise: Promise,
+  ) {
+    diarizationHelper.feedStreamingDiarization(instanceId, audioInBufferId, promise)
+  }
+
+  override fun flushStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.flushStreamingDiarization(instanceId, promise)
+  }
+
+  override fun resetStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.resetStreamingDiarization(instanceId, promise)
+  }
+
+  override fun releaseStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.releaseStreamingDiarization(instanceId, promise)
+  }
+
   override fun initializeSpeakerEmbeddingExtractor(
     instanceId: String,
     options: ReadableMap,

@@ -4,6 +4,7 @@
 
 namespace sherpaonnx {
 class DiarizationWrapper;
+class StreamingDiarizationWrapper;
 }  // namespace sherpaonnx
 
 #include <memory>
@@ -19,8 +20,15 @@ extern std::unordered_map<std::string, std::shared_ptr<sherpaonnx::DiarizationWr
     g_diarization_instances;
 extern std::mutex g_diarization_mutex;
 
+extern std::unordered_map<std::string, std::shared_ptr<sherpaonnx::StreamingDiarizationWrapper>>
+    g_streaming_diarization_instances;
+extern std::mutex g_streaming_diarization_mutex;
+
 /** Copy a strong ref under the map lock; caller uses it outside the lock. */
 std::shared_ptr<sherpaonnx::DiarizationWrapper> LookupDiarization(
+    const std::string& id);
+
+std::shared_ptr<sherpaonnx::StreamingDiarizationWrapper> LookupStreamingDiarization(
     const std::string& id);
 
 }  // namespace bridge

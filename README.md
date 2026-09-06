@@ -428,7 +428,7 @@ Full index: [docs/README.md](./docs/README.md). New to models? See [How to start
 - **VAD:** [Streaming](./docs/vad-streaming.md)
 - **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
 - **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
-- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) · [Streaming](./docs/diarization-streaming.md) – anonymous clusters; pyannote + embedding; no live overload
+- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) · [Streaming](./docs/diarization-streaming.md) – offline pyannote + embedding, streaming Sortformer; no live overload
 
 ### Segmentation
 

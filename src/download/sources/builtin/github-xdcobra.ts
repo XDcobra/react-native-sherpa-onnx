@@ -22,14 +22,27 @@ function makeChecksumUrl(baseUrl: string, tag: string): string {
   return `https://github.com/${ownerAndRepo}/releases/download/${tag}/checksum.txt`;
 }
 
+function getXdcobraCategoryTag(category: ModelCategory): string {
+  if (category === ModelCategory.Alignment) {
+    return 'alignment-models';
+  }
+  if (category === ModelCategory.Diarization) {
+    return 'diarization-models';
+  }
+  return getCategoryTag(category);
+}
+
 export const githubXdcobraProvider: SourceProvider = {
   id: 'github_xdcobra',
   label: 'GitHub · XDcobra/react-native-sherpa-onnx',
   supportsCategory(category) {
-    return category === ModelCategory.Alignment;
+    return (
+      category === ModelCategory.Alignment ||
+      category === ModelCategory.Diarization
+    );
   },
   async listModels(category, ctx) {
-    const tag = getCategoryTag(category);
+    const tag = getXdcobraCategoryTag(category);
     const base = ctx.baseUrl ?? DEFAULT_BASE;
     const { response } = await sourceFetch(makeTagUrl(base, tag), ctx);
 
@@ -46,7 +59,7 @@ export const githubXdcobraProvider: SourceProvider = {
       return new Map<string, string>();
     }
 
-    const tag = getCategoryTag(category);
+    const tag = getXdcobraCategoryTag(category);
     const base = ctx.baseUrl ?? DEFAULT_BASE;
     let response: Response;
     try {

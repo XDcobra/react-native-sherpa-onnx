@@ -1,0 +1,2 @@
+asset_name,license_type,commercial_use,confidence,detection_source,license_file
+diar_streaming_sortformer_4spk-v2.1.tar.bz2,nvidia-open-model-license,yes,high,manual,https://huggingface.co/nvidia/NV-KERMT-70M-v2/raw/main/LICENSE

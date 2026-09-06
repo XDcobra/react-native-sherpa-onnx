@@ -12,6 +12,8 @@ NSString *DiarizationKindToNSString(sherpaonnx::DiarizationModelKind kind) {
       return @"pyannote";
     case K::kReverb:
       return @"reverb";
+    case K::kSortformer:
+      return @"sortformer";
     default:
       return @"unknown";
   }
@@ -52,10 +54,15 @@ NSDictionary *DiarizationDetectResultToDict(
     dict[@"quantization"] = [NSString stringWithUTF8String:result.quantization.c_str()] ?: @"";
   }
 
+  NSMutableDictionary *pathsDict = [NSMutableDictionary dictionary];
   if (!result.paths.model.empty()) {
-    dict[@"paths"] = @{
-      @"model": [NSString stringWithUTF8String:result.paths.model.c_str()] ?: @""
-    };
+    pathsDict[@"model"] = [NSString stringWithUTF8String:result.paths.model.c_str()] ?: @"";
+  }
+  if (!result.paths.metadata.empty()) {
+    pathsDict[@"metadata"] = [NSString stringWithUTF8String:result.paths.metadata.c_str()] ?: @"";
+  }
+  if ([pathsDict count] > 0) {
+    dict[@"paths"] = pathsDict;
   }
 
   if (!result.ok && !result.error.empty()) {
