@@ -419,3 +419,16 @@ export async function createDiarization(
     },
   };
 }
+
+export { createStreamingDiarization } from './streaming';
+export type {
+  StreamingDiarizationConcreteModelType,
+  StreamingDiarizationModelType,
+  StreamingDiarizationInitOptionsShared,
+  StreamingDiarizationAutoInitializeOptions,
+  StreamingDiarizationCustomInitializeOptions,
+  StreamingDiarizationInitializeOptions,
+  StreamingDiarizationOptions,
+  DiarizationPipelineHandle,
+  StreamingDiarizationEngine,
+} from './streamingTypes';

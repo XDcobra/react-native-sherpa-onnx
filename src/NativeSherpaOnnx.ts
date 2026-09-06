@@ -1619,6 +1619,48 @@ export interface Spec extends TurboModule {
 
   unloadDiarization(instanceId: string): Promise<void>;
 
+  initializeStreamingDiarization(
+    instanceId: string,
+    options: Object
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    sampleRate?: number;
+    maxSpeakers?: number;
+    feedSamples?: number;
+    strideSamples?: number;
+    latencySeconds?: number;
+  }>;
+
+  startStreamingDiarizationPipeline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentsOutBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
+
+  feedStreamingDiarization(
+    instanceId: string,
+    audioInBufferId: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    segments?: Array<{ start: number; end: number; speaker: number }>;
+  }>;
+
+  flushStreamingDiarization(instanceId: string): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    segments?: Array<{ start: number; end: number; speaker: number }>;
+  }>;
+
+  resetStreamingDiarization(instanceId: string): Promise<void>;
+
+  releaseStreamingDiarization(instanceId: string): Promise<void>;
+
   initializeSpeakerEmbeddingExtractor(
     instanceId: string,
     options: SpeakerEmbeddingInitBridgeOptions
