@@ -434,6 +434,38 @@ export const styles = StyleSheet.create({
   marginTop12: {
     marginTop: 12,
   },
+  latencyRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  latencyChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  latencyChipActive: {
+    backgroundColor: '#0F62FE',
+    borderColor: '#0F62FE',
+  },
+  latencyChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  latencyChipTextActive: {
+    color: '#FFFFFF',
+  },
+  latencyHint: {
+    fontSize: 12,
+    color: '#4B5563',
+    marginTop: 4,
+    marginBottom: 6,
+  },
   micHintContainer: {
     paddingVertical: 8,
     marginBottom: 8,

@@ -87,6 +87,8 @@ export type EventLogItem = {
   message: string;
 };
 
+export type LatencyProfile = 'low' | 'ultra_low' | 'default' | 'custom';
+
 function formatTime(sec: number): string {
   if (isNaN(sec) || sec < 0) return '00:00.00';
   const m = Math.floor(sec / 60);
@@ -116,6 +118,12 @@ export default function DiarizationStreamingScreen() {
     useState<DiarizationStreamingCustomInitFormState>({ fileSources: {} });
   const [customFillLoading, setCustomFillLoading] = useState(false);
   const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+
+  // Latency profile & window controls (default: 'low' for real-time live mic feedback)
+  const [latencyProfile, setLatencyProfile] = useState<LatencyProfile>('low');
+  const [customChunkLen, setCustomChunkLen] = useState(6);
+  const [customRightContext, setCustomRightContext] = useState(7);
+  const [customFifoLen, setCustomFifoLen] = useState(188);
 
   // Parameter tuning controls
   const [tuningExpanded, setTuningExpanded] = useState(false);
@@ -293,6 +301,19 @@ export default function DiarizationStreamingScreen() {
           );
         }
 
+        const latencyConfig =
+          latencyProfile === 'low'
+            ? { chunkLen: 6, rightContext: 7, fifoLen: 188 }
+            : latencyProfile === 'ultra_low'
+            ? { chunkLen: 3, rightContext: 1, fifoLen: 188 }
+            : latencyProfile === 'default'
+            ? { chunkLen: 124, rightContext: 1, fifoLen: 124 }
+            : {
+                chunkLen: customChunkLen,
+                rightContext: customRightContext,
+                fifoLen: customFifoLen,
+              };
+
         engine = await createStreamingDiarization({
           modelSource: source,
           modelType: 'sortformer',
@@ -300,11 +321,25 @@ export default function DiarizationStreamingScreen() {
           offset,
           minDurationOff,
           minDurationOn,
+          ...latencyConfig,
         });
       } else {
         if (!customFormState.fileSources.model) {
           throw new Error('Custom config requires a valid model file (.onnx)');
         }
+        const latencyConfig =
+          latencyProfile === 'low'
+            ? { chunkLen: 6, rightContext: 7, fifoLen: 188 }
+            : latencyProfile === 'ultra_low'
+            ? { chunkLen: 3, rightContext: 1, fifoLen: 188 }
+            : latencyProfile === 'default'
+            ? { chunkLen: 124, rightContext: 1, fifoLen: 124 }
+            : {
+                chunkLen: customChunkLen,
+                rightContext: customRightContext,
+                fifoLen: customFifoLen,
+              };
+
         engine = await createStreamingDiarization({
           initMode: 'custom',
           modelType: 'sortformer',
@@ -316,6 +351,7 @@ export default function DiarizationStreamingScreen() {
           offset,
           minDurationOff,
           minDurationOn,
+          ...latencyConfig,
         });
       }
 
@@ -340,8 +376,12 @@ export default function DiarizationStreamingScreen() {
     }
   }, [
     catalog,
+    customChunkLen,
+    customFifoLen,
     customFormState,
+    customRightContext,
     initMode,
+    latencyProfile,
     minDurationOff,
     minDurationOn,
     offset,
@@ -529,13 +569,7 @@ export default function DiarizationStreamingScreen() {
         liveSegRef.current = null;
       }
     }
-  }, [
-    chunkSize,
-    engineInfo,
-    offlineInputBuffer,
-    sourceMode,
-    appendEvent,
-  ]);
+  }, [chunkSize, engineInfo, offlineInputBuffer, sourceMode, appendEvent]);
 
   // Flush pipeline
   const flushPipeline = useCallback(async () => {
@@ -731,6 +765,180 @@ export default function DiarizationStreamingScreen() {
               disabled={engineInitBusy || streamState !== 'idle'}
             />
           )}
+
+          {/* Streaming Latency Profile */}
+          <Text style={[styles.paramLabel, styles.marginTop10]}>
+            Streaming Latency Profile
+          </Text>
+          <View style={styles.latencyRow}>
+            <TouchableOpacity
+              style={[
+                styles.latencyChip,
+                latencyProfile === 'low' && styles.latencyChipActive,
+              ]}
+              onPress={() => setLatencyProfile('low')}
+              disabled={streamState !== 'idle'}
+            >
+              <Text
+                style={[
+                  styles.latencyChipText,
+                  latencyProfile === 'low' && styles.latencyChipTextActive,
+                ]}
+              >
+                Low Latency (~1.0s) [Default]
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.latencyChip,
+                latencyProfile === 'ultra_low' && styles.latencyChipActive,
+              ]}
+              onPress={() => setLatencyProfile('ultra_low')}
+              disabled={streamState !== 'idle'}
+            >
+              <Text
+                style={[
+                  styles.latencyChipText,
+                  latencyProfile === 'ultra_low' &&
+                    styles.latencyChipTextActive,
+                ]}
+              >
+                Ultra-Low (~0.3s)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.latencyChip,
+                latencyProfile === 'default' && styles.latencyChipActive,
+              ]}
+              onPress={() => setLatencyProfile('default')}
+              disabled={streamState !== 'idle'}
+            >
+              <Text
+                style={[
+                  styles.latencyChipText,
+                  latencyProfile === 'default' && styles.latencyChipTextActive,
+                ]}
+              >
+                Standard (~10.0s)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.latencyChip,
+                latencyProfile === 'custom' && styles.latencyChipActive,
+              ]}
+              onPress={() => setLatencyProfile('custom')}
+              disabled={streamState !== 'idle'}
+            >
+              <Text
+                style={[
+                  styles.latencyChipText,
+                  latencyProfile === 'custom' && styles.latencyChipTextActive,
+                ]}
+              >
+                Custom
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.latencyHint}>
+            {latencyProfile === 'low'
+              ? '⚡ Real-time live mic feedback: updates every ~0.48s with a 1.04s lookahead window (chunkLen=6, rightContext=7).'
+              : latencyProfile === 'ultra_low'
+              ? '⚡⚡ Ultra-fast: updates every ~0.24s with a 0.32s lookahead window (chunkLen=3, rightContext=1).'
+              : latencyProfile === 'default'
+              ? '📁 High accuracy for audio files: updates every 9.92s with a 10.0s window (chunkLen=124, rightContext=1).'
+              : `Custom window: chunkLen=${customChunkLen}, rightContext=${customRightContext}, fifoLen=${customFifoLen}.`}
+          </Text>
+
+          {latencyProfile === 'custom' ? (
+            <View style={styles.tuningSectionContent}>
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Chunk Len (80ms frames)</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() => setCustomChunkLen((v) => Math.max(1, v - 1))}
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>{customChunkLen}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setCustomChunkLen((v) => Math.min(250, v + 1))
+                    }
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Right Context (frames)</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setCustomRightContext((v) => Math.max(0, v - 1))
+                    }
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {customRightContext}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setCustomRightContext((v) => Math.min(50, v + 1))
+                    }
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>FIFO Size (frames)</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setCustomFifoLen((v) => Math.max(10, v - 10))
+                    }
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>{customFifoLen}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setCustomFifoLen((v) => Math.min(300, v + 10))
+                    }
+                    disabled={streamState !== 'idle'}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : null}
 
           {/* Parameter Tuning Collapsible */}
           <TouchableOpacity
@@ -973,14 +1181,14 @@ export default function DiarizationStreamingScreen() {
               <View style={styles.metaBadge}>
                 <Text style={styles.metaBadgeLabel}>Feed Window</Text>
                 <Text style={styles.metaBadgeValue}>
-                  {(engineInfo.feedSamples / engineInfo.sampleRate).toFixed(1)}s
+                  {(engineInfo.feedSamples / engineInfo.sampleRate).toFixed(2)}s
                 </Text>
               </View>
               <View style={styles.metaBadge}>
                 <Text style={styles.metaBadgeLabel}>Step Stride</Text>
                 <Text style={styles.metaBadgeValue}>
                   {(engineInfo.strideSamples / engineInfo.sampleRate).toFixed(
-                    1
+                    2
                   )}
                   s
                 </Text>
@@ -988,7 +1196,7 @@ export default function DiarizationStreamingScreen() {
               <View style={styles.metaBadge}>
                 <Text style={styles.metaBadgeLabel}>Latency</Text>
                 <Text style={styles.metaBadgeValue}>
-                  {engineInfo.latencySeconds.toFixed(1)}s
+                  {engineInfo.latencySeconds.toFixed(2)}s
                 </Text>
               </View>
             </View>
@@ -1092,8 +1300,7 @@ export default function DiarizationStreamingScreen() {
                 ]}
                 onPress={startStreaming}
                 disabled={
-                  !engineInfo ||
-                  (sourceMode === 'file' && !offlineInputBuffer)
+                  !engineInfo || (sourceMode === 'file' && !offlineInputBuffer)
                 }
               >
                 <Ionicons name="play" size={18} color="#FFFFFF" />
