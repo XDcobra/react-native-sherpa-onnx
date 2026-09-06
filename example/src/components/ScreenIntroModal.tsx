@@ -89,6 +89,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Speaker diarization demo',
     body: 'Offline batch diarization: load a pyannote/reverb segmentation model plus a speaker-embedding model, pick audio, and get anonymous speaker clusters with timestamps. Re-cluster and match centroids to enrolled SID names when you need real labels.',
   },
+  DiarizationStreaming: {
+    title: 'Streaming speaker diarization',
+    body: 'Real-time speaker diarization powered by NeMo Sortformer: streams continuous audio through a native C++ worker pipeline directly into LiveSegmentBuffer (zero JS roundtrips). Detects up to 4 concurrent speakers, visualizes active speaking states, tracks conversation talk-time analytics, and maintains a chronological speaker turn timeline. Supports live microphone capture, custom audio files, and multi-speaker meeting presets.',
+  },
   Enhancement: {
     title: 'Speech enhancement demo',
     body: 'This screen demonstrates offline enhancement on noisy audio. It helps you see how the SDK improves the signal before downstream recognition or playback steps.',

@@ -15,6 +15,7 @@ import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcas
 import VADScreen from '../screens/vad/VADScreen';
 import SegmentationShowcaseScreen from '../screens/segmentation-showcase/SegmentationShowcaseScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
+import DiarizationStreamingScreen from '../screens/diarization-streaming/DiarizationStreamingScreen';
 import SpeakerIdentificationScreen from '../screens/speaker-identification/SpeakerIdentificationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
@@ -135,6 +136,13 @@ export default function RootNavigator() {
         component={DiarizationScreen}
         options={{
           title: 'Speaker Diarization',
+        }}
+      />
+      <Stack.Screen
+        name="DiarizationStreaming"
+        component={DiarizationStreamingScreen}
+        options={{
+          title: 'Speaker Diarization (Streaming)',
         }}
       />
       <Stack.Screen
