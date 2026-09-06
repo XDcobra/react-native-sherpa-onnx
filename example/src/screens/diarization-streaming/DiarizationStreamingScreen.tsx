@@ -175,6 +175,7 @@ export default function DiarizationStreamingScreen() {
 
   // Timeline & Analytics
   const [turns, setTurns] = useState<SpeakerTurn[]>([]);
+  const turnsRef = useRef<SpeakerTurn[]>([]);
   const [speakerFilter, setSpeakerFilter] = useState<number | null>(null);
   const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [pipelineStatus, setPipelineStatus] =
@@ -430,6 +431,7 @@ export default function DiarizationStreamingScreen() {
 
     setError(null);
     setStreamState('starting');
+    turnsRef.current = [];
     setTurns([]);
     setActiveSpeaker(null);
     appendEvent('Starting streaming pipeline...');
@@ -481,22 +483,81 @@ export default function DiarizationStreamingScreen() {
             setActiveSpeaker(null);
           }, 1800);
 
-          const newTurn: SpeakerTurn = {
-            id: event.segmentId,
-            speaker,
-            startSec,
-            endSec,
-            durationSec,
-            startSample: event.startSample,
-            endSample: event.endSample,
-          };
+          // Live turn-stitching: extend existing turn if within minDurationOff gap
+          const prev = turnsRef.current;
+          let lastSpeakerTurnIndex = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const t = prev[i];
+            if (t && t.speaker === speaker) {
+              lastSpeakerTurnIndex = i;
+              break;
+            }
+          }
 
-          setTurns((prev) => [...prev, newTurn]);
-          appendEvent(
-            `Speaker ${speaker}: ${formatTime(startSec)} → ${formatTime(
-              endSec
-            )} (${formatDuration(durationSec)})`
-          );
+          let isExtended = false;
+          let updatedTurn: SpeakerTurn | null = null;
+
+          if (lastSpeakerTurnIndex >= 0) {
+            const lastTurn = prev[lastSpeakerTurnIndex];
+            if (
+              lastTurn &&
+              startSec <= lastTurn.endSec + minDurationOff &&
+              endSec >= lastTurn.startSec
+            ) {
+              const newStartSec = Math.min(lastTurn.startSec, startSec);
+              const newEndSec = Math.max(lastTurn.endSec, endSec);
+              const newStartSample = Math.min(
+                lastTurn.startSample,
+                event.startSample
+              );
+              const newEndSample = Math.max(
+                lastTurn.endSample,
+                event.endSample
+              );
+              updatedTurn = {
+                id: lastTurn.id,
+                speaker: lastTurn.speaker,
+                startSec: newStartSec,
+                endSec: newEndSec,
+                durationSec: newEndSec - newStartSec,
+                startSample: newStartSample,
+                endSample: newEndSample,
+              };
+              isExtended = true;
+            }
+          }
+
+          if (isExtended && updatedTurn) {
+            const next = [...prev];
+            next[lastSpeakerTurnIndex] = updatedTurn;
+            turnsRef.current = next;
+            setTurns(next);
+            appendEvent(
+              `Speaker ${speaker} (extended): ${formatTime(
+                updatedTurn.startSec
+              )} → ${formatTime(updatedTurn.endSec)} (+${formatDuration(
+                updatedTurn.durationSec
+              )})`
+            );
+          } else {
+            const newTurn: SpeakerTurn = {
+              id: event.segmentId,
+              speaker,
+              startSec,
+              endSec,
+              durationSec,
+              startSample: event.startSample,
+              endSample: event.endSample,
+            };
+            const next = [...prev, newTurn];
+            turnsRef.current = next;
+            setTurns(next);
+            appendEvent(
+              `Speaker ${speaker} (new turn): ${formatTime(
+                startSec
+              )} → ${formatTime(endSec)} (+${formatDuration(durationSec)})`
+            );
+          }
         },
       });
       liveSegRef.current = liveSeg;
@@ -569,7 +630,14 @@ export default function DiarizationStreamingScreen() {
         liveSegRef.current = null;
       }
     }
-  }, [chunkSize, engineInfo, offlineInputBuffer, sourceMode, appendEvent]);
+  }, [
+    appendEvent,
+    chunkSize,
+    engineInfo,
+    minDurationOff,
+    offlineInputBuffer,
+    sourceMode,
+  ]);
 
   // Flush pipeline
   const flushPipeline = useCallback(async () => {
@@ -589,6 +657,7 @@ export default function DiarizationStreamingScreen() {
     try {
       appendEvent('Resetting pipeline...');
       await pipelineRef.current.reset();
+      turnsRef.current = [];
       setTurns([]);
       setActiveSpeaker(null);
       appendEvent('Pipeline reset');
