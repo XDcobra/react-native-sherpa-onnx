@@ -316,7 +316,7 @@ std::vector<DiarizationSegment> ComputeResult(const Int8Matrix& final_labels,
     if (is_active) {
       DiarizationSegment seg;
       seg.start = start_index * scale + scale_offset;
-      seg.end = (final_labels.rows - 1) * scale + scale_offset;
+      seg.end = final_labels.rows * scale + scale_offset;
       seg.speaker = speaker;
       this_speaker.push_back(seg);
     }

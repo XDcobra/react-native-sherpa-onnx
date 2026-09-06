@@ -131,6 +131,10 @@ set(SOURCES
     diarization/diarization-session.cpp
     diarization/pyannote-segmentation-session.cpp
     diarization/sherpa-onnx-diarization-wrapper.cpp
+    diarization/sortformer-fbank.cpp
+    diarization/sortformer-post-processor.cpp
+    diarization/sortformer-streaming-model.cpp
+    diarization/sherpa-onnx-streaming-diarization-wrapper.cpp
     jni/diarization/sherpa-onnx-diarization-jni.cpp
     jni/segment/sherpa-onnx-pyannote-segmentation-jni.cpp
     speaker-embedding/speaker-embedding-runner.cpp
