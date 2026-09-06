@@ -8,6 +8,10 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <sys/stat.h>
+#if !defined(_WIN32)
+#include <dirent.h>
+#endif
 
 #if defined(__ANDROID__)
 #include <android/log.h>
@@ -37,6 +41,37 @@ struct SharedExtractor {
 std::mutex g_registry_mutex;
 std::unordered_map<RegistryKey, std::weak_ptr<SharedExtractor>, RegistryKeyHash>
     g_registry;
+
+std::string ResolveEmbeddingModelFile(const std::string& path) {
+  if (path.empty()) return path;
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    std::string candidate = path + "/model.onnx";
+    if (stat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+      return candidate;
+    }
+    candidate = path + "/model.int8.onnx";
+    if (stat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+      return candidate;
+    }
+#if !defined(_WIN32)
+    DIR* dir = opendir(path.c_str());
+    if (dir) {
+      while (auto* entry = readdir(dir)) {
+        if (entry->d_name[0] == '\0') continue;
+        std::string name = entry->d_name;
+        if (name.size() > 5 && name.substr(name.size() - 5) == ".onnx") {
+          std::string found = path + "/" + name;
+          closedir(dir);
+          return found;
+        }
+      }
+      closedir(dir);
+    }
+#endif
+  }
+  return path;
+}
 
 bool EmbeddingHasNaN(const std::vector<float>& v) {
   for (float f : v) {
@@ -79,7 +114,10 @@ Status SpeakerEmbeddingRunner::Acquire(const EmbeddingRunnerOptions& options) {
     return Status::Fail(kErrInvalidArgument, "embedding model path is empty");
   }
 
-  const RegistryKey key = MakeRegistryKey(options);
+  EmbeddingRunnerOptions resolved_options = options;
+  resolved_options.model_path = ResolveEmbeddingModelFile(options.model_path);
+
+  const RegistryKey key = MakeRegistryKey(resolved_options);
 
   std::lock_guard<std::mutex> lock(g_registry_mutex);
   auto it = g_registry.find(key);
