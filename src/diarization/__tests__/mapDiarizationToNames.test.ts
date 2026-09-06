@@ -111,7 +111,9 @@ describe('mapDiarizationToNames', () => {
   it('rejects missing search / getClusterEmbeddings', async () => {
     await expect(
       mapDiarizationToNames(
-        { getClusterEmbeddings: async () => [] } as unknown as DiarizationEngine,
+        {
+          getClusterEmbeddings: async () => [],
+        } as unknown as DiarizationEngine,
         {} as DiarizationNameSearch,
         'seg_off_out'
       )

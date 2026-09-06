@@ -7,7 +7,7 @@ import {
   assertDiarizationCustomConfig,
   resolveDiarizationCustomConfigPaths,
 } from './customConfig';
-import { detectDiarizationModel } from './index';
+import { detectDiarizationModel } from './detectDiarizationModel';
 import type {
   DiarizationPipelineHandle,
   StreamingDiarizationEngine,
