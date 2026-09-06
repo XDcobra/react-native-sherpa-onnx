@@ -245,6 +245,7 @@ static NSString *TtsTrimmedString(NSString *value) {
 - (void)so_detectTtsModel:(NSString *)modelDir
                 assetName:(NSString *)assetName
                 modelType:(NSString *)modelType
+             quantization:(NSString *)quantization
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject
 {
@@ -258,10 +259,11 @@ static NSString *TtsTrimmedString(NSString *value) {
         if (assetName != nil && [assetName length] > 0) {
             assetNameOpt = std::string([assetName UTF8String]);
         }
+        std::string quantStr = (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
         std::string modelTypeStr = (modelType != nil && [modelType length] > 0 && ![modelType isEqualToString:@"auto"])
             ? [modelType UTF8String] : "auto";
         sherpaonnx::TtsDetectResult result =
-            sherpaonnx::DetectTtsModel(modelDirOpt, assetNameOpt, modelTypeStr);
+            sherpaonnx::DetectTtsModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);

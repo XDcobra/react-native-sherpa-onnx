@@ -8,6 +8,7 @@
 - (void)so_detectTtsModel:(NSString *)modelDir
                 assetName:(NSString *)assetName
                 modelType:(NSString *)modelType
+             quantization:(NSString *)quantization
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject;
 - (void)so_getTtsSampleRate:(NSString *)instanceId
@@ -33,9 +34,10 @@
 - (void)detectTtsModel:(NSString *)modelDir
              assetName:(NSString * _Nullable)assetName
              modelType:(NSString * _Nullable)modelType
+          quantization:(NSString * _Nullable)quantization
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject {
-  [self so_detectTtsModel:modelDir assetName:assetName modelType:modelType resolve:resolve reject:reject];
+  [self so_detectTtsModel:modelDir assetName:assetName modelType:modelType quantization:quantization resolve:resolve reject:reject];
 }
 
 - (void)getTtsSampleRate:(NSString *)instanceId

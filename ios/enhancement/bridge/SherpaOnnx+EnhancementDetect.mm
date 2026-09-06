@@ -67,15 +67,18 @@ EnhancementInitScalars ParseEnhancementInitScalars(
 - (void)detectEnhancementModel:(NSString *)modelDir
                      assetName:(NSString * _Nullable)assetName
                      modelType:(NSString * _Nullable)modelType
+                  quantization:(NSString * _Nullable)quantization
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     auto modelDirOpt = OptionalUtf8String(modelDir);
     auto assetNameOpt = OptionalUtf8String(assetName);
+    std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
     std::string modelTypeStr = sherpaonnx::enhancement::bridge::ModelTypeOrAuto(modelType);
 
-    auto result = sherpaonnx::DetectEnhancementModel(modelDirOpt, assetNameOpt, modelTypeStr);
+    auto result = sherpaonnx::DetectEnhancementModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
     resolve(sherpaonnx::enhancement::bridge::EnhancementDetectResultToDict(result));
   } @catch (NSException *exception) {
     reject(@"DETECT_ERROR",

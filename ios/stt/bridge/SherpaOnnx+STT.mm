@@ -155,11 +155,11 @@ static void FillSttModelPathsFromDict(
 
         std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
 
-        std::optional<bool> preferInt8Opt = std::nullopt;
+        std::string quantizationStr = "";
         if (!isCustomInit) {
-            auto preferInt8 = options.preferInt8();
-            if (preferInt8.has_value()) {
-                preferInt8Opt = preferInt8.value();
+            auto quantization = options.quantization();
+            if (quantization.has_value()) {
+                quantizationStr = [quantization.value() UTF8String];
             }
         }
 
@@ -308,7 +308,7 @@ static void FillSttModelPathsFromDict(
             );
         } else {
             result = inst->wrapper->initialize(
-                modelDirStr, preferInt8Opt, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
+                modelDirStr, quantizationStr, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
                 numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
                 whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
                 cohereTranscribeOptsPtr);
@@ -353,7 +353,7 @@ static void FillSttModelPathsFromDict(
 - (void)detectSttModel:(NSString *)modelDir
             assetName:(NSString * _Nullable)assetName
             modelType:(NSString * _Nullable)modelType
-           preferInt8:(NSNumber *)preferInt8
+         quantization:(NSString * _Nullable)quantization
                 debug:(NSNumber *)debug
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
@@ -368,15 +368,13 @@ static void FillSttModelPathsFromDict(
         if (assetName != nil && [assetName length] > 0) {
             assetNameOpt = std::string([assetName UTF8String]);
         }
-        std::optional<bool> preferInt8Opt = std::nullopt;
-        if (preferInt8 != nil) {
-            preferInt8Opt = [preferInt8 boolValue];
-        }
+        const std::string quantStr =
+            (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
         const std::string modelTypeStr =
             (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
         const bool debugVal = (debug != nil && [debug boolValue]);
         sherpaonnx::SttDetectResult result =
-            sherpaonnx::DetectSttModel(modelDirOpt, assetNameOpt, modelTypeStr, preferInt8Opt, debugVal);
+            sherpaonnx::DetectSttModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr, debugVal);
 
         NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
         resultDict[@"success"] = @(result.ok);
