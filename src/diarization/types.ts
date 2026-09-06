@@ -77,6 +77,7 @@ export interface DiarizeResult {
   sampleRate: number;
   processingTimeMs: number;
   speakersPerFrame?: number[];
+  segments?: Array<{ start: number; end: number; speaker: number }>;
 }
 
 export interface DiarizationReclusterOptions {

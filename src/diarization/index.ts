@@ -257,6 +257,9 @@ async function finishDiarizeResult(params: {
     segmentCount: count,
     sampleRate: sr,
     processingTimeMs: Date.now() - startedAtMs,
+    ...(Array.isArray(nativeResult.segments)
+      ? { segments: nativeResult.segments }
+      : {}),
     ...(diarizeOptions?.includeOverlap &&
     Array.isArray(nativeResult.speakersPerFrame)
       ? { speakersPerFrame: nativeResult.speakersPerFrame }
@@ -400,6 +403,9 @@ export async function createDiarization(
         segmentCount: nativeResult.segments?.length ?? 0,
         sampleRate: nativeResult.sampleRate || sampleRate,
         processingTimeMs: Date.now() - startedAtMs,
+        ...(Array.isArray(nativeResult.segments)
+          ? { segments: nativeResult.segments }
+          : {}),
       };
     },
 
