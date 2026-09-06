@@ -170,7 +170,7 @@ All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`de
 ```ts
 function detectSttModel(
   source: FileSource,
-  options?: { preferInt8?: boolean; modelType?: STTModelType; assetName?: string; debug?: boolean }
+  options?: { quantization?: QuantizationPreference; modelType?: STTModelType; assetName?: string; debug?: boolean }
 ): Promise<SttDetectModelResult>;
 ```
 
