@@ -72,6 +72,8 @@ export type OfflineAudioBufferInfo = {
 export type OfflineAudioBufferWidgetHandle = {
   /** Imperatively release the current buffer and reset. */
   clear: () => Promise<void>;
+  /** Imperatively stop playback without releasing the buffer. */
+  stopPlayback?: () => Promise<void>;
 };
 
 type Props = {
@@ -284,8 +286,11 @@ export const OfflineAudioBufferWidget = forwardRef<
         await resetAll(false);
         onBufferReleased();
       },
+      stopPlayback: async () => {
+        await stopPlayer();
+      },
     }),
-    [resetAll, onBufferReleased]
+    [resetAll, onBufferReleased, stopPlayer]
   );
 
   // ─────────────────────────────────────────────────────────────────────────

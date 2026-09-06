@@ -13,8 +13,6 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Clipboard from '@react-native-clipboard/clipboard';
-import * as DocumentPicker from '@react-native-documents/picker';
-import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
   createStreamingDiarization,
   detectDiarizationModel,
@@ -27,11 +25,12 @@ import {
 } from 'react-native-sherpa-onnx/download';
 import {
   createEmptyLiveAudioBuffer,
-  ingestFileToLiveAudioBuffer,
+  appendOfflineToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
-  type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
@@ -41,7 +40,6 @@ import {
   type LiveSegmentBufferSegmentAppendedEvent,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import type { StreamingPipelineStatus } from 'react-native-sherpa-onnx/audiobuffer';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { RootStackParamList } from '../../types/navigation';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
@@ -61,9 +59,10 @@ import {
 import { fillDiarizationStreamingCustomConfigFromModelFolder } from '../../utils/diarizationCustomInitFill';
 import { DIARIZATION_AUDIO_FILES } from '../../audioConfig';
 import {
-  fileSourceFromBundledPath,
-  toFileSource,
-} from '../../utils/fileSourceFromUri';
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
 import {
   SPEAKER_BG_COLORS,
   SPEAKER_COLORS,
@@ -140,13 +139,10 @@ export default function DiarizationStreamingScreen() {
   const [error, setError] = useState<string | null>(null);
 
   // Audio ingress selection
-  const [sourceMode, setSourceMode] = useState<'preset' | 'file' | 'mic'>(
-    'preset'
-  );
-  const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
-  const [customFileUri, setCustomFileUri] = useState<string | null>(null);
-  const [customFileName, setCustomFileName] = useState<string | null>(null);
-  const [ingestProgress, setIngestProgress] = useState<number | null>(null);
+  const [sourceMode, setSourceMode] = useState<'file' | 'mic'>('file');
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
+  const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
   // Streaming pipeline lifecycle
   const [streamState, setStreamState] = useState<
@@ -155,7 +151,6 @@ export default function DiarizationStreamingScreen() {
   const pipelineRef = useRef<DiarizationPipelineHandle | null>(null);
   const liveAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const liveSegRef = useRef<LiveSegmentBufferRef | null>(null);
-  const ingestHandleRef = useRef<FileIngestHandle | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Active Speaker HUD & Aliases
@@ -372,27 +367,6 @@ export default function DiarizationStreamingScreen() {
     }
   }, [appendEvent, streamState]);
 
-  // Pick custom audio file
-  const pickCustomFile = useCallback(async () => {
-    try {
-      const [res] = await DocumentPicker.pick({
-        type: DECODABLE_AUDIO_PICKER_TYPES,
-      });
-      if (res?.uri) {
-        setCustomFileUri(res.uri);
-        setCustomFileName(res.name ?? 'custom_audio.wav');
-        appendEvent(`Selected custom audio: ${res.name ?? res.uri}`);
-      }
-    } catch (e) {
-      const isCancel =
-        (DocumentPicker as any)?.isCancel?.(e) ||
-        (e as any)?.name === 'DocumentPickerCanceled';
-      if (!isCancel) {
-        appendEvent(`Pick file error: ${String(e)}`);
-      }
-    }
-  }, [appendEvent]);
-
   // Start streaming pipeline
   const startStreaming = useCallback(async () => {
     if (!engineRef.current || !engineInfo) {
@@ -403,6 +377,17 @@ export default function DiarizationStreamingScreen() {
       return;
     }
 
+    if (sourceMode === 'file' && !offlineInputBuffer) {
+      Alert.alert(
+        'No Audio Buffer',
+        'Please select and decode an audio buffer (preset or custom file) first.'
+      );
+      return;
+    }
+
+    // Stop preview playback if active
+    await offlineWidgetRef.current?.stopPlayback?.().catch(() => {});
+
     setError(null);
     setStreamState('starting');
     setTurns([]);
@@ -412,13 +397,32 @@ export default function DiarizationStreamingScreen() {
     try {
       const engine = engineRef.current;
 
-      // 1. Create live audio buffer (16 kHz mono)
+      // 1. Determine ring cache size (ensure full buffer fits in live ring buffer)
+      let ringSeconds = 60;
+      if (sourceMode === 'file' && offlineInputBuffer) {
+        try {
+          const bufInfo = await getPipelineAudioBufferInfo(
+            offlineInputBuffer.bufferId
+          );
+          if (bufInfo && bufInfo.durationMs > 0) {
+            ringSeconds = Math.max(
+              120,
+              Math.ceil(bufInfo.durationMs / 1000) + 30
+            );
+          }
+        } catch {
+          ringSeconds = 300;
+        }
+      }
+
+      // 2. Create live audio buffer (16 kHz mono)
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: engine.sampleRate,
+        ringSeconds,
       });
       liveAudioRef.current = liveAudio;
 
-      // 2. Create live segment buffer with onSegmentAppended listener
+      // 3. Create live segment buffer with onSegmentAppended listener
       const liveSeg = await createLiveSegmentBuffer({
         sourceAudioBufferId: liveAudio.bufferId,
         onSegmentAppended: (event: LiveSegmentBufferSegmentAppendedEvent) => {
@@ -457,59 +461,49 @@ export default function DiarizationStreamingScreen() {
       });
       liveSegRef.current = liveSeg;
 
-      // 3. Start native background worker thread
+      // 4. Start native background worker thread
       const pipeline = await engine.startPipeline(liveAudio, liveSeg, {
         chunkSize,
       });
       pipelineRef.current = pipeline;
       appendEvent(`Pipeline registered (ID=${pipeline.pipelineId})`);
 
-      // 4. Start audio ingress
+      // 5. Start audio ingress
       if (sourceMode === 'mic') {
         await startMicToLiveAudioBuffer(liveAudio, { emitToJs: false });
         appendEvent('Microphone ingestion active');
       } else {
-        let source: FileSource;
-        if (sourceMode === 'preset') {
-          const preset =
-            DIARIZATION_AUDIO_FILES[selectedPresetIndex] ??
-            DIARIZATION_AUDIO_FILES[0]!;
-          source = fileSourceFromBundledPath(preset.id);
-          appendEvent(`Ingesting preset: ${preset.name}`);
-        } else {
-          if (!customFileUri) throw new Error('No custom audio file chosen');
-          source = toFileSource(customFileUri, customFileName ?? undefined);
-          appendEvent(`Ingesting custom file: ${customFileName}`);
-        }
-
-        const ingest = await ingestFileToLiveAudioBuffer(
-          liveAudio.bufferId,
-          source,
-          {
-            targetSampleRateHz: engine.sampleRate,
-            forceMono: true,
-            autoFinalize: true,
-            onProgress: (p) => {
-              setIngestProgress(p.percent);
-            },
-          }
+        appendEvent(
+          `Ingesting offline audio buffer: ${offlineInputBuffer!.sourceLabel}`
         );
-        ingestHandleRef.current = ingest;
 
-        // When file decode finishes, log event
-        ingest.done
-          .then(() => {
-            setIngestProgress(100);
-            appendEvent('Audio file decode & ingestion complete');
-          })
-          .catch((e) => {
-            appendEvent(`Ingest failed: ${String(e)}`);
-          });
+        // Append all offline buffer samples into live audio buffer
+        await appendOfflineToLiveAudioBuffer(
+          liveAudio.bufferId,
+          offlineInputBuffer!.bufferId
+        );
+        // Finalize live audio buffer so streaming worker finishes once all chunks are processed
+        await finalizeLiveAudioBuffer(liveAudio.bufferId);
+        appendEvent('All buffer samples appended; live audio finalized');
       }
 
       setStreamState('running');
 
-      // 5. Poll status metrics
+      // Listen for pipeline completion (especially for file ingest)
+      pipeline.completed
+        .then(() => {
+          appendEvent('Pipeline completed (all audio processed)');
+          setStreamState('idle');
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+        })
+        .catch((e) => {
+          appendEvent(`Pipeline completion error: ${String(e)}`);
+        });
+
+      // 6. Poll status metrics
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       pollTimerRef.current = setInterval(async () => {
         if (!pipelineRef.current) return;
@@ -537,10 +531,8 @@ export default function DiarizationStreamingScreen() {
     }
   }, [
     chunkSize,
-    customFileName,
-    customFileUri,
     engineInfo,
-    selectedPresetIndex,
+    offlineInputBuffer,
     sourceMode,
     appendEvent,
   ]);
@@ -605,7 +597,6 @@ export default function DiarizationStreamingScreen() {
       appendEvent(`Stop error: ${String(e)}`);
     } finally {
       setStreamState('idle');
-      setIngestProgress(null);
     }
   }, [appendEvent, sourceMode, streamState]);
 
@@ -1010,28 +1001,11 @@ export default function DiarizationStreamingScreen() {
             2. Audio Ingress & Stream Controls
           </Text>
           <Text style={styles.cardSubtitle}>
-            Select live microphone, dedicated multi-speaker recordings, or a
-            custom audio file.
+            Select a decoded audio buffer (multi-speaker presets or custom file)
+            or stream live from the microphone.
           </Text>
 
           <View style={styles.toggleChipRow}>
-            <TouchableOpacity
-              style={[
-                styles.toggleChip,
-                sourceMode === 'preset' && styles.toggleChipActive,
-              ]}
-              onPress={() => setSourceMode('preset')}
-              disabled={streamState !== 'idle'}
-            >
-              <Text
-                style={[
-                  styles.toggleChipText,
-                  sourceMode === 'preset' && styles.toggleChipTextActive,
-                ]}
-              >
-                Multi-Speaker Presets
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.toggleChip,
@@ -1040,13 +1014,18 @@ export default function DiarizationStreamingScreen() {
               onPress={() => setSourceMode('file')}
               disabled={streamState !== 'idle'}
             >
+              <Ionicons
+                name="musical-notes-outline"
+                size={16}
+                color={sourceMode === 'file' ? '#FFFFFF' : '#4B5563'}
+              />
               <Text
                 style={[
                   styles.toggleChipText,
                   sourceMode === 'file' && styles.toggleChipTextActive,
                 ]}
               >
-                Custom Audio File
+                Audio Buffer (Preset / File)
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1057,6 +1036,11 @@ export default function DiarizationStreamingScreen() {
               onPress={() => setSourceMode('mic')}
               disabled={streamState !== 'idle'}
             >
+              <Ionicons
+                name="mic-outline"
+                size={16}
+                color={sourceMode === 'mic' ? '#FFFFFF' : '#4B5563'}
+              />
               <Text
                 style={[
                   styles.toggleChipText,
@@ -1068,76 +1052,32 @@ export default function DiarizationStreamingScreen() {
             </TouchableOpacity>
           </View>
 
-          {sourceMode === 'preset' ? (
-            <View style={styles.presetListContainer}>
-              {DIARIZATION_AUDIO_FILES.map((preset, idx) => (
-                <TouchableOpacity
-                  key={preset.id}
-                  style={[
-                    styles.statBox,
-                    selectedPresetIndex === idx && styles.presetSelectedBox,
-                  ]}
-                  onPress={() => setSelectedPresetIndex(idx)}
-                  disabled={streamState !== 'idle'}
-                >
-                  <Text style={[styles.cardTitle, styles.presetTitle]}>
-                    {preset.name}
-                  </Text>
-                  <Text style={styles.cardSubtitle}>{preset.description}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : sourceMode === 'file' ? (
-            <View style={styles.presetListContainer}>
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={pickCustomFile}
+          {sourceMode === 'file' ? (
+            <View style={styles.marginTop10}>
+              <OfflineAudioBufferWidget
+                ref={offlineWidgetRef}
+                audioFiles={DIARIZATION_AUDIO_FILES}
+                decodeTargetSampleRateHz={engineInfo?.sampleRate ?? 16000}
                 disabled={streamState !== 'idle'}
-              >
-                <Ionicons
-                  name="folder-open-outline"
-                  size={18}
-                  color="#374151"
-                />
-                <Text style={styles.secondaryButtonText}>
-                  {customFileName
-                    ? `Change File (${customFileName})`
-                    : 'Choose Audio File...'}
-                </Text>
-              </TouchableOpacity>
+                visible={true}
+                onBufferReady={(info) => {
+                  setOfflineInputBuffer(info);
+                  appendEvent(`Audio buffer ready: ${info.sourceLabel}`);
+                }}
+                onBufferReleased={() => {
+                  setOfflineInputBuffer(null);
+                  appendEvent('Audio buffer released');
+                }}
+              />
             </View>
           ) : (
             <View style={styles.micHintContainer}>
               <Text style={[styles.cardSubtitle, styles.micHintText]}>
                 Microphone captures directly into native LiveAudioBuffer at
-                16kHz mono.
+                16kHz mono. Grant microphone permission when prompted.
               </Text>
             </View>
           )}
-
-          {ingestProgress !== null ? (
-            <View style={styles.progressContainer}>
-              <Text style={styles.paramLabel}>
-                Ingest & Decode Progress: {ingestProgress.toFixed(0)}%
-              </Text>
-              <View style={[styles.airtimeBar, styles.airtimeProgressTrack]}>
-                <View
-                  style={[
-                    styles.airtimeSegment,
-                    { flex: ingestProgress },
-                    styles.airtimeProgressFilled,
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.airtimeSegment,
-                    { flex: Math.max(0, 100 - ingestProgress) },
-                    styles.airtimeProgressEmpty,
-                  ]}
-                />
-              </View>
-            </View>
-          ) : null}
 
           {/* Pipeline Action Controls */}
           <View style={styles.pipelineControlRow}>
@@ -1146,13 +1086,22 @@ export default function DiarizationStreamingScreen() {
                 style={[
                   styles.primaryButton,
                   styles.flex1,
-                  !engineInfo && styles.buttonDisabled,
+                  (!engineInfo ||
+                    (sourceMode === 'file' && !offlineInputBuffer)) &&
+                    styles.buttonDisabled,
                 ]}
                 onPress={startStreaming}
-                disabled={!engineInfo}
+                disabled={
+                  !engineInfo ||
+                  (sourceMode === 'file' && !offlineInputBuffer)
+                }
               >
                 <Ionicons name="play" size={18} color="#FFFFFF" />
-                <Text style={styles.buttonText}>Start Streaming</Text>
+                <Text style={styles.buttonText}>
+                  {sourceMode === 'file' && !offlineInputBuffer
+                    ? 'Select & Decode Audio First'
+                    : 'Start Streaming'}
+                </Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity

@@ -434,17 +434,6 @@ export const styles = StyleSheet.create({
   marginTop12: {
     marginTop: 12,
   },
-  presetListContainer: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  presetSelectedBox: {
-    borderColor: '#0F62FE',
-    backgroundColor: '#EFF6FF',
-  },
-  presetTitle: {
-    fontSize: 14,
-  },
   micHintContainer: {
     paddingVertical: 8,
     marginBottom: 8,
@@ -452,19 +441,6 @@ export const styles = StyleSheet.create({
   micHintText: {
     color: '#059669',
     fontWeight: '600',
-  },
-  progressContainer: {
-    marginBottom: 10,
-  },
-  airtimeProgressTrack: {
-    height: 6,
-    marginVertical: 4,
-  },
-  airtimeProgressFilled: {
-    backgroundColor: '#0F62FE',
-  },
-  airtimeProgressEmpty: {
-    backgroundColor: '#E5E7EB',
   },
   pipelineControlRow: {
     flexDirection: 'row',
