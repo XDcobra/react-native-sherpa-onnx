@@ -1,6 +1,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-diarization.h"
+#include "sherpa-onnx-catalog-metadata.h"
 
 #include <algorithm>
 #include <optional>
@@ -80,19 +81,61 @@ std::vector<sherpaonnx::DiarizationModelKind> GetKindsFromDirNameDiarization(
     return out;
 }
 
-/** Prefer model.onnx over model.int8.onnx (same preference as punctuation inverted). */
-std::string FindDiarizationModelOnnx(const std::vector<FileEntry>& files) {
-    std::string fp = FindFileByName(files, "model.onnx");
-    if (!fp.empty()) {
-        return fp;
+std::string FindDiarizationModelOnnx(const std::vector<FileEntry>& files, const std::string& quantization) {
+    if (!quantization.empty() && quantization != "auto") {
+        std::string target1 = "model." + ToLower(quantization) + ".onnx";
+        std::string p1 = FindFileByName(files, target1);
+        if (!p1.empty()) return p1;
+        std::string target2 = "model." + ToLower(quantization) + ".ort";
+        std::string p2 = FindFileByName(files, target2);
+        if (!p2.empty()) return p2;
+
+        std::string tokenMatch = FindOnnxByAnyToken(
+            files,
+            {"model", "sortformer", "pyannote", "reverb", "segmentation", "diarization"},
+            quantization);
+        if (!tokenMatch.empty()) return tokenMatch;
+
+        for (const auto& entry : files) {
+            bool isOnnx = (entry.nameLower.size() > 5 && entry.nameLower.substr(entry.nameLower.size() - 5) == ".onnx") ||
+                          (entry.nameLower.size() > 4 && entry.nameLower.substr(entry.nameLower.size() - 4) == ".ort");
+            if (isOnnx && MatchesQuantization(entry.nameLower, quantization)) {
+                return entry.path;
+            }
+        }
+        return "";
     }
-    return FindFileByName(files, "model.int8.onnx");
+
+    std::string exact = FindFileByName(files, "model.onnx");
+    if (!exact.empty()) return exact;
+    exact = FindFileByName(files, "model.ort");
+    if (!exact.empty()) return exact;
+
+    std::string candidate = FindOnnxByAnyToken(
+        files,
+        {"sortformer", "pyannote", "reverb", "segmentation", "diarization", "model"},
+        std::string(""));
+    if (!candidate.empty()) return candidate;
+
+    std::vector<std::string> onnxCandidates;
+    for (const auto& f : files) {
+        bool isOnnx = (f.nameLower.size() > 5 && f.nameLower.substr(f.nameLower.size() - 5) == ".onnx") ||
+                      (f.nameLower.size() > 4 && f.nameLower.substr(f.nameLower.size() - 4) == ".ort");
+        if (isOnnx) {
+            onnxCandidates.push_back(f.path);
+        }
+    }
+    if (onnxCandidates.size() == 1) {
+        return onnxCandidates[0];
+    }
+    return "";
 }
 
 sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     sherpaonnx::DiarizationDetectResult result;
     result.isStreaming = false;
@@ -142,19 +185,15 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
 
     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
-    const std::string lowerBase = BasenameLower(modelDir);
-    if (!IsDiarizationPackName(lowerBase)) {
-        result.error =
-            "Diarization: directory/asset name must indicate a diarization/segmentation pack "
-            "(pyannote, reverb, diarization, or segmentation): " +
-            modelDir;
-        return result;
-    }
-
-    const std::string modelOnnx = FindDiarizationModelOnnx(files);
+    const std::string modelOnnx = FindDiarizationModelOnnx(files, quantization);
     if (modelOnnx.empty()) {
-        result.error =
-            "Diarization: no model.onnx or model.int8.onnx in " + modelDir;
+        if (!quantization.empty() && quantization != "auto") {
+            result.error =
+                "Diarization: requested quantization '" + quantization + "' not found in " + modelDir;
+        } else {
+            result.error =
+                "Diarization: no compatible ONNX model found in " + modelDir;
+        }
         return result;
     }
 
@@ -166,17 +205,7 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
 
     sherpaonnx::DiarizationModelKind selected =
         sherpaonnx::DiarizationModelKind::kUnknown;
-    if (requestedModelType == "auto") {
-        if (nameKinds.empty()) {
-            result.error =
-                "Diarization: pack name matched but kind requires pyannote, reverb, or sortformer in "
-                "directory/asset name: " +
-                modelDir;
-            return result;
-        }
-        selected = nameKinds[0];
-        AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kDirName);
-    } else {
+    if (requestedModelType != "auto") {
         selected = ParseDiarizationModelType(requestedModelType);
         if (selected == sherpaonnx::DiarizationModelKind::kUnknown) {
             result.error = "Diarization: unknown model type: " + requestedModelType;
@@ -186,6 +215,41 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
             result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
         if (result.detectedModels.empty()) {
             result.detectedModels.push_back({DiarizationKindToTag(selected), modelDir});
+        }
+    } else {
+        if (!nameKinds.empty()) {
+            selected = nameKinds[0];
+            AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kDirName);
+        } else {
+            const std::string metadataJson = FindFileByName(files, "metadata.json");
+            if (!metadataJson.empty()) {
+                selected = sherpaonnx::DiarizationModelKind::kSortformer;
+                AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
+            } else {
+                std::string lowerModel = ToLower(modelOnnx);
+                if (lowerModel.find("sortformer") != std::string::npos) {
+                    selected = sherpaonnx::DiarizationModelKind::kSortformer;
+                    AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
+                } else if (lowerModel.find("reverb") != std::string::npos) {
+                    selected = sherpaonnx::DiarizationModelKind::kReverb;
+                    AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
+                } else if (lowerModel.find("pyannote") != std::string::npos || lowerModel.find("segmentation") != std::string::npos) {
+                    selected = sherpaonnx::DiarizationModelKind::kPyannote;
+                    AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
+                } else {
+                    const std::string lowerBase = BasenameLower(modelDir);
+                    if (IsDiarizationPackName(lowerBase)) {
+                        selected = sherpaonnx::DiarizationModelKind::kPyannote;
+                        AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
+                    }
+                }
+            }
+        }
+        if (selected == sherpaonnx::DiarizationModelKind::kUnknown) {
+            result.error =
+                "Diarization: could not infer model type (pyannote, reverb, sortformer) in " +
+                modelDir;
+            return result;
         }
     }
 
@@ -205,6 +269,16 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
         return result;
     }
 
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadataFromBasename(
+        result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -218,7 +292,8 @@ using namespace model_detect;
 DiarizationDetectResult DetectDiarizationModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     DiarizationDetectResult result;
     result.isStreaming = false;
@@ -235,7 +310,10 @@ DiarizationDetectResult DetectDiarizationModel(
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        return DetectDiarizationModelFromFiles({}, syntheticDir, requestedModelType);
+        result = DetectDiarizationModelFromFiles({}, syntheticDir, requestedModelType, quantization);
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        return result;
     }
 
     const std::string& modelDir = *model_dir_opt;
@@ -252,13 +330,19 @@ DiarizationDetectResult DetectDiarizationModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    return DetectDiarizationModelFromFiles(files, modelDir, requestedModelType);
+    result = DetectDiarizationModelFromFiles(files, modelDir, requestedModelType, quantization);
+    if (has_asset && (result.quantization.empty() || result.quantization == "unknown")) {
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
+    }
+    return result;
 }
 
 DiarizationDetectResult DetectDiarizationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     DiarizationDetectResult result;
     result.isStreaming = false;
@@ -266,7 +350,7 @@ DiarizationDetectResult DetectDiarizationModelFromFileList(
         result.error = "Diarization: model directory is empty";
         return result;
     }
-    return DetectDiarizationModelFromFiles(files, modelDir, modelType);
+    return DetectDiarizationModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 } // namespace sherpaonnx

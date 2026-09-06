@@ -39,17 +39,18 @@ bool IsOnnxOrOrtFile(const FileEntry& entry) {
     return EndsWith(entry.nameLower, ".onnx") || EndsWith(entry.nameLower, ".ort");
 }
 
+}  // namespace
+
 std::string BaseName(const std::string& path) {
     size_t pos = path.find_last_of("/\\");
     if (pos == std::string::npos) return path;
     return path.substr(pos + 1);
 }
 
-std::string ChooseLargest(
+std::string ChooseBestModelFile(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& excludeTokens,
-    bool onlyInt8,
-    bool onlyNonInt8
+    const std::string& preferQuant
 ) {
     std::string chosen;
     std::uint64_t bestSize = 0;
@@ -66,9 +67,11 @@ std::string ChooseLargest(
         }
         if (hasExcluded) continue;
 
-        bool isInt8 = ContainsToken(entry.nameLower, "int8");
-        if (onlyInt8 && !isInt8) continue;
-        if (onlyNonInt8 && isInt8) continue;
+        if (!preferQuant.empty() && preferQuant != "auto") {
+            if (!MatchesQuantization(entry.nameLower, preferQuant)) {
+                continue;
+            }
+        }
 
         if (entry.size >= bestSize) {
             bestSize = entry.size;
@@ -77,6 +80,20 @@ std::string ChooseLargest(
     }
 
     return chosen;
+}
+
+namespace {
+
+std::string ChooseLargest(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& excludeTokens,
+    bool onlyInt8,
+    bool onlyNonInt8
+) {
+    std::string quant = "";
+    if (onlyInt8) quant = "int8";
+    else if (onlyNonInt8) quant = "fp32";
+    return ChooseBestModelFile(files, excludeTokens, quant);
 }
 
 } // namespace
@@ -236,10 +253,46 @@ std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::s
     return "";
 }
 
+bool MatchesQuantization(const std::string& nameLower, const std::string& quant) {
+    std::string q = ToLower(quant);
+    if (q.empty() || q == "auto") return true;
+
+    if (q == "int8" || q == "int8-quantized") {
+        return nameLower.find("int8") != std::string::npos ||
+               ContainsWord(nameLower, "q8");
+    }
+    if (q == "fp16") {
+        return nameLower.find("fp16") != std::string::npos;
+    }
+    if (q == "int4") {
+        return nameLower.find("int4") != std::string::npos ||
+               ContainsWord(nameLower, "q4");
+    }
+    if (q == "uint8") {
+        return nameLower.find("uint8") != std::string::npos ||
+               ContainsWord(nameLower, "u8");
+    }
+    if (q == "bf16") {
+        return nameLower.find("bf16") != std::string::npos;
+    }
+    if (q == "fp32" || q == "unquantized") {
+        return nameLower.find("int8") == std::string::npos &&
+               nameLower.find("fp16") == std::string::npos &&
+               nameLower.find("int4") == std::string::npos &&
+               nameLower.find("uint8") == std::string::npos &&
+               nameLower.find("bf16") == std::string::npos &&
+               nameLower.find("quant") == std::string::npos &&
+               !ContainsWord(nameLower, "q4") &&
+               !ContainsWord(nameLower, "q8") &&
+               !ContainsWord(nameLower, "u8");
+    }
+    return nameLower.find(q) != std::string::npos;
+}
+
 std::string FindOnnxByToken(
     const std::vector<FileEntry>& files,
     const std::string& token,
-    const std::optional<bool>& preferInt8
+    const std::string& preferQuant
 ) {
     std::vector<FileEntry> matches;
     std::string tokenLower = ToLower(token);
@@ -253,13 +306,31 @@ std::string FindOnnxByToken(
     if (matches.empty()) return "";
 
     std::vector<std::string> emptyTokens;
-    bool wantInt8 = preferInt8.has_value() && preferInt8.value();
-    bool wantNonInt8 = preferInt8.has_value() && !preferInt8.value();
+    return ChooseBestModelFile(matches, emptyTokens, preferQuant);
+}
 
-    std::string preferred = ChooseLargest(matches, emptyTokens, wantInt8, wantNonInt8);
-    if (!preferred.empty()) return preferred;
+std::string FindOnnxByToken(
+    const std::vector<FileEntry>& files,
+    const std::string& token,
+    const std::optional<bool>& preferInt8
+) {
+    std::string quant = "";
+    if (preferInt8.has_value()) {
+        quant = preferInt8.value() ? "int8" : "fp32";
+    }
+    return FindOnnxByToken(files, token, quant);
+}
 
-    return ChooseLargest(matches, emptyTokens, false, false);
+std::string FindOnnxByAnyToken(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::string& preferQuant
+) {
+    for (const auto& token : tokens) {
+        std::string match = FindOnnxByToken(files, token, preferQuant);
+        if (!match.empty()) return match;
+    }
+    return "";
 }
 
 std::string FindOnnxByAnyToken(
@@ -267,18 +338,18 @@ std::string FindOnnxByAnyToken(
     const std::vector<std::string>& tokens,
     const std::optional<bool>& preferInt8
 ) {
-    for (const auto& token : tokens) {
-        std::string match = FindOnnxByToken(files, token, preferInt8);
-        if (!match.empty()) return match;
+    std::string quant = "";
+    if (preferInt8.has_value()) {
+        quant = preferInt8.value() ? "int8" : "fp32";
     }
-    return "";
+    return FindOnnxByAnyToken(files, tokens, quant);
 }
 
 std::string FindOnnxByAnyTokenExcluding(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& tokens,
     const std::vector<std::string>& excludeInName,
-    const std::optional<bool>& preferInt8
+    const std::string& preferQuant
 ) {
     for (const auto& token : tokens) {
         std::string tokenLower = ToLower(token);
@@ -298,26 +369,35 @@ std::string FindOnnxByAnyTokenExcluding(
         }
         if (matches.empty()) continue;
         std::vector<std::string> emptyTokens;
-        bool wantInt8 = preferInt8.has_value() && preferInt8.value();
-        bool wantNonInt8 = preferInt8.has_value() && !preferInt8.value();
-        std::string chosen = ChooseLargest(matches, emptyTokens, wantInt8, wantNonInt8);
-        if (!chosen.empty()) return chosen;
-        chosen = ChooseLargest(matches, emptyTokens, false, false);
+        std::string chosen = ChooseBestModelFile(matches, emptyTokens, preferQuant);
         if (!chosen.empty()) return chosen;
     }
     return "";
 }
 
+std::string FindOnnxByAnyTokenExcluding(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::vector<std::string>& excludeInName,
+    const std::optional<bool>& preferInt8
+) {
+    std::string quant = "";
+    if (preferInt8.has_value()) {
+        quant = preferInt8.value() ? "int8" : "fp32";
+    }
+    return FindOnnxByAnyTokenExcluding(files, tokens, excludeInName, quant);
+}
+
 std::string FindLargestOnnx(const std::vector<FileEntry>& files) {
     std::vector<std::string> emptyTokens;
-    return ChooseLargest(files, emptyTokens, false, false);
+    return ChooseBestModelFile(files, emptyTokens, "");
 }
 
 std::string FindLargestOnnxExcludingTokens(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& excludeTokens
 ) {
-    return ChooseLargest(files, excludeTokens, false, false);
+    return ChooseBestModelFile(files, excludeTokens, "");
 }
 
 bool ContainsWord(const std::string& haystack, const std::string& word) {

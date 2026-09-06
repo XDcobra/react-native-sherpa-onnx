@@ -1558,12 +1558,41 @@ TEST(UnifiedModelDetectTest, NameOnlyUvrAssetMatchesSeparationCategory) {
 
 TEST(UnifiedModelDetectTest, BatchPreservesOrderAndLength) {
     std::vector<sherpaonnx::UnifiedModelDetectInput> inputs = {
-        {std::nullopt, std::optional<std::string>("vits-piper-en")},
-        {std::nullopt, std::optional<std::string>("not-a-real-model-name-xyz")},
+        {std::nullopt, std::optional<std::string>("vits-piper-en"), ""},
+        {std::nullopt, std::optional<std::string>("not-a-real-model-name-xyz"), ""},
     };
     auto results = sherpaonnx::DetectModelsBatch(inputs);
     ASSERT_EQ(results.size(), 2u);
     EXPECT_TRUE(results[0].matched);
     EXPECT_EQ(results[0].category, "tts");
     EXPECT_FALSE(results[1].matched);
+}
+
+TEST(UnifiedModelDetectTest, QuantizationSelectionInFileList) {
+    std::vector<sherpaonnx::model_detect::FileEntry> files = {
+        {"/models/whisper/tiny-encoder.onnx", "tiny-encoder.onnx", "tiny-encoder.onnx", 1000},
+        {"/models/whisper/tiny-encoder.int8.onnx", "tiny-encoder.int8.onnx", "tiny-encoder.int8.onnx", 500},
+        {"/models/whisper/tiny-decoder.onnx", "tiny-decoder.onnx", "tiny-decoder.onnx", 2000},
+        {"/models/whisper/tiny-decoder.int8.onnx", "tiny-decoder.int8.onnx", "tiny-decoder.int8.onnx", 1000},
+        {"/models/whisper/tiny-tokens.txt", "tiny-tokens.txt", "tiny-tokens.txt", 100},
+    };
+
+    auto resInt8 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("int8"));
+    EXPECT_TRUE(resInt8.ok);
+    EXPECT_EQ(resInt8.quantization, "int8");
+    EXPECT_EQ(resInt8.paths.whisperEncoder, "/models/whisper/tiny-encoder.int8.onnx");
+    EXPECT_EQ(resInt8.paths.whisperDecoder, "/models/whisper/tiny-decoder.int8.onnx");
+
+    auto resFp32 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("fp32"));
+    EXPECT_TRUE(resFp32.ok);
+    EXPECT_EQ(resFp32.paths.whisperEncoder, "/models/whisper/tiny-encoder.onnx");
+    EXPECT_EQ(resFp32.paths.whisperDecoder, "/models/whisper/tiny-decoder.onnx");
+
+    // Test missing quantization preference error
+    auto resFp16 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("fp16"));
+    EXPECT_FALSE(resFp16.ok);
+    EXPECT_NE(resFp16.error, "");
 }

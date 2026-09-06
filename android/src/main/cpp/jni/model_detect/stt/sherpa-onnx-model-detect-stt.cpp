@@ -36,6 +36,7 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-stt-catalog-metadata.h"
 #include "model_language_catalog.h"
 #include "sherpa-onnx-stt-online-guard.h"
@@ -239,16 +240,16 @@ enum class SttResolutionSource {
 static SttCandidatePaths GatherSttCandidatePaths(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::optional<bool>& preferInt8
+    const std::string& quantization
 ) {
     using namespace model_detect;
     SttCandidatePaths p;
-    p.encoder = FindOnnxByAnyToken(files, {"encoder"}, preferInt8);
-    p.decoder = FindOnnxByAnyToken(files, {"decoder"}, preferInt8);
-    p.joiner = FindOnnxByAnyToken(files, {"joiner"}, preferInt8);
-    p.funasrEncoderAdaptor = FindOnnxByAnyToken(files, {"encoder_adaptor", "encoder-adaptor"}, preferInt8);
-    p.funasrLLM = FindOnnxByAnyToken(files, {"llm"}, preferInt8);
-    p.funasrEmbedding = FindOnnxByAnyToken(files, {"embedding"}, preferInt8);
+    p.encoder = FindOnnxByAnyToken(files, {"encoder"}, quantization);
+    p.decoder = FindOnnxByAnyToken(files, {"decoder"}, quantization);
+    p.joiner = FindOnnxByAnyToken(files, {"joiner"}, quantization);
+    p.funasrEncoderAdaptor = FindOnnxByAnyToken(files, {"encoder_adaptor", "encoder-adaptor"}, quantization);
+    p.funasrLLM = FindOnnxByAnyToken(files, {"llm"}, quantization);
+    p.funasrEmbedding = FindOnnxByAnyToken(files, {"embedding"}, quantization);
     {
         std::string vocabInSubdir;
         const std::string vocabName = "vocab.json";
@@ -271,7 +272,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
                 p.funasrTokenizerDir = vocabInSubdir.substr(0, lastSlash);
         }
     }
-    p.qwen3ConvFrontend = FindOnnxByAnyToken(files, {"conv_frontend"}, preferInt8);
+    p.qwen3ConvFrontend = FindOnnxByAnyToken(files, {"conv_frontend"}, quantization);
     {
         for (const auto& entry : files) {
             if (entry.nameLower != "tokenizer_config.json") continue;
@@ -284,19 +285,19 @@ static SttCandidatePaths GatherSttCandidatePaths(
             }
         }
     }
-    p.moonshinePreprocessor = FindOnnxByAnyToken(files, {"preprocess", "preprocessor"}, preferInt8);
-    p.moonshineEncoder = FindOnnxByAnyToken(files, {"encode", "encoder_model"}, preferInt8);
-    p.moonshineUncachedDecoder = FindOnnxByAnyToken(files, {"uncached_decode", "uncached"}, preferInt8);
+    p.moonshinePreprocessor = FindOnnxByAnyToken(files, {"preprocess", "preprocessor"}, quantization);
+    p.moonshineEncoder = FindOnnxByAnyToken(files, {"encode", "encoder_model"}, quantization);
+    p.moonshineUncachedDecoder = FindOnnxByAnyToken(files, {"uncached_decode", "uncached"}, quantization);
     p.moonshineCachedDecoder = FindOnnxByAnyTokenExcluding(
-        files, std::vector<std::string>{"cached_decode", "cached"}, std::vector<std::string>{"uncached"}, preferInt8);
-    p.moonshineMergedDecoder = FindOnnxByAnyToken(files, {"merged_decode", "merged_decoder", "decoder_model_merged", "merged"}, preferInt8);
+        files, std::vector<std::string>{"cached_decode", "cached"}, std::vector<std::string>{"uncached"}, quantization);
+    p.moonshineMergedDecoder = FindOnnxByAnyToken(files, {"merged_decode", "merged_decoder", "decoder_model_merged", "merged"}, quantization);
     static const std::vector<std::string> modelExcludes = {
         "encoder", "decoder", "joiner", "vocoder", "acoustic", "embedding", "llm",
         "encoder_adaptor", "encoder-adaptor", "encoder_model", "decoder_model",
         "merged_decoder", "decoder_model_merged", "preprocess", "encode", "uncached", "cached",
         "conv_frontend"
     };
-    p.paraformerModel = FindOnnxByAnyToken(files, {"model"}, preferInt8);
+    p.paraformerModel = FindOnnxByAnyToken(files, {"model"}, quantization);
     if (!p.paraformerModel.empty()) {
         std::string lower = ToLower(p.paraformerModel);
         if (lower.find("encoder_model") != std::string::npos ||
@@ -306,7 +307,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
     }
     if (p.paraformerModel.empty())
         p.paraformerModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
-    p.ctcModel = FindOnnxByAnyToken(files, {"model"}, preferInt8);
+    p.ctcModel = FindOnnxByAnyToken(files, {"model"}, quantization);
     if (!p.ctcModel.empty()) {
         std::string lower = ToLower(p.ctcModel);
         if (lower.find("encoder_model") != std::string::npos ||
@@ -324,7 +325,7 @@ static SttCandidatePaths GatherSttCandidatePaths(
         p.ctcModel.clear();
     p.tokens = FindFileEndingWith(files, "tokens.txt");
     p.bpeVocab = FindFileByName(files, "bpe.vocab");
-    p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, preferInt8) : p.encoder;
+    p.encoderForV2 = p.encoder.empty() ? FindOnnxByAnyToken(files, {"encoder", "encoder_model"}, quantization) : p.encoder;
 
     return p;
 }
@@ -747,7 +748,7 @@ static SttDetectResult DetectSttModelFromFiles(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType,
-    const std::optional<bool>& preferInt8,
+    const std::string& quantization,
     bool debug
 ) {
     SttDetectResult result;
@@ -796,7 +797,7 @@ static SttDetectResult DetectSttModelFromFiles(
 
     AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kFileListing);
 
-    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, preferInt8);
+    SttCandidatePaths candidate = GatherSttCandidatePaths(files, modelDir, quantization);
     SttPathHints hints = GetSttPathHints(modelDir);
     if (!hints.isLikelyVad) {
         const auto vadProbe = DetectVadModelFromFileList(files, modelDir, "auto");
@@ -965,6 +966,20 @@ static SttDetectResult DetectSttModelFromFiles(
     }
 
     LOGI("DetectSttModel: detection OK for %s", modelDir.c_str());
+
+    if ((result.quantization.empty() || result.quantization == "unknown")) {
+        std::string refModel = !result.paths.encoder.empty() ? result.paths.encoder :
+                               (!result.paths.whisperEncoder.empty() ? result.paths.whisperEncoder :
+                               (!result.paths.ctcModel.empty() ? result.paths.ctcModel :
+                               (!result.paths.paraformerModel.empty() ? result.paths.paraformerModel : "")));
+        if (!refModel.empty()) {
+            std::string fileQuant = DeriveQuantization(model_detect::BaseName(refModel));
+            if (fileQuant != "unknown") {
+                result.quantization = fileQuant;
+            }
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -999,7 +1014,7 @@ SttDetectResult DetectSttModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
     const std::string& modelType,
-    const std::optional<bool>& preferInt8,
+    const std::string& quantization,
     bool debug /* = false */
 ) {
     using namespace model_detect;
@@ -1016,17 +1031,17 @@ SttDetectResult DetectSttModel(
         return result;
     }
 
-    LOGI("DetectSttModel: has_dir=%d has_asset=%d modelType=%s preferInt8=%s",
+    LOGI("DetectSttModel: has_dir=%d has_asset=%d modelType=%s quantization=%s",
          static_cast<int>(has_dir),
          static_cast<int>(has_asset),
          requestedModelType.c_str(),
-         preferInt8.has_value() ? (preferInt8.value() ? "true" : "false") : "unset");
+         quantization.c_str());
 
     // Asset id only: name-only detection (no filesystem).
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        result = DetectSttModelFromFiles({}, syntheticDir, requestedModelType, preferInt8, debug);
+        result = DetectSttModelFromFiles({}, syntheticDir, requestedModelType, quantization, debug);
         FillSttDerivedCatalogMetadata(result, assetName);
         AppendCuratedSttLanguageRowsIfEmpty(result, assetName);
         LOGI("DetectSttModel: assetName-only path for %s", assetName.c_str());
@@ -1051,7 +1066,7 @@ SttDetectResult DetectSttModel(
         }
     }
 
-    result = DetectSttModelFromFiles(files, modelDir, requestedModelType, preferInt8, debug);
+    result = DetectSttModelFromFiles(files, modelDir, requestedModelType, quantization, debug);
 
     if (has_asset) {
         FillSttDerivedCatalogMetadata(result, *asset_name_opt);
@@ -1062,6 +1077,19 @@ SttDetectResult DetectSttModel(
         const std::string basename =
             (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
         AppendCuratedSttLanguageRowsIfEmpty(result, basename);
+    }
+
+    if ((result.quantization.empty() || result.quantization == "unknown")) {
+        std::string refModel = !result.paths.encoder.empty() ? result.paths.encoder :
+                               (!result.paths.whisperEncoder.empty() ? result.paths.whisperEncoder :
+                               (!result.paths.ctcModel.empty() ? result.paths.ctcModel :
+                               (!result.paths.paraformerModel.empty() ? result.paths.paraformerModel : "")));
+        if (!refModel.empty()) {
+            std::string fileQuant = DeriveQuantization(model_detect::BaseName(refModel));
+            if (fileQuant != "unknown") {
+                result.quantization = fileQuant;
+            }
+        }
     }
 
     if (!result.ok) {
@@ -1075,14 +1103,41 @@ SttDetectResult DetectSttModel(
     return result;
 }
 
+SttDetectResult DetectSttModel(
+    const std::optional<std::string>& model_dir_opt,
+    const std::optional<std::string>& asset_name_opt,
+    const std::string& modelType,
+    const std::optional<bool>& preferInt8,
+    bool debug /* = false */
+) {
+    std::string quant = "";
+    if (preferInt8.has_value()) {
+        quant = preferInt8.value() ? "int8" : "fp32";
+    }
+    return DetectSttModel(model_dir_opt, asset_name_opt, modelType, quant, debug);
+}
+
 // Test-only: used by host-side model_detect_test; not used in production (Android/iOS use DetectSttModel).
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType,
+    const std::string& quantization
+) {
+    return DetectSttModelFromFiles(files, modelDir, modelType, quantization, false);
+}
+
 SttDetectResult DetectSttModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType,
     const std::optional<bool>& preferInt8
 ) {
-    return DetectSttModelFromFiles(files, modelDir, modelType, preferInt8, false);
+    std::string quant = "";
+    if (preferInt8.has_value()) {
+        quant = preferInt8.value() ? "int8" : "fp32";
+    }
+    return DetectSttModelFromFileList(files, modelDir, modelType, quant);
 }
 
 } // namespace sherpaonnx

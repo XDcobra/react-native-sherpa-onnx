@@ -1,6 +1,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-separation.h"
+#include "sherpa-onnx-catalog-metadata.h"
 
 #include <algorithm>
 #include <optional>
@@ -67,7 +68,8 @@ bool HasSpleeterLayout(const std::string& vocals, const std::string& accompanime
 sherpaonnx::SeparationDetectResult DetectSeparationModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     sherpaonnx::SeparationDetectResult result;
 
@@ -111,10 +113,10 @@ sherpaonnx::SeparationDetectResult DetectSeparationModelFromFiles(
 
     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
-    const std::string vocalsOnnx = FindOnnxByToken(files, "vocals", std::nullopt);
+    const std::string vocalsOnnx = FindOnnxByToken(files, "vocals", quantization);
     const std::string accompanimentOnnx =
-        FindOnnxByToken(files, "accompaniment", std::nullopt);
-    const std::string uvrOnnx = FindOnnxByToken(files, "uvr", std::nullopt);
+        FindOnnxByToken(files, "accompaniment", quantization);
+    const std::string uvrOnnx = FindOnnxByToken(files, "uvr", quantization);
 
     if (HasSpleeterLayout(vocalsOnnx, accompanimentOnnx)) {
         result.detectedModels.push_back({"spleeter", modelDir});
@@ -174,6 +176,17 @@ sherpaonnx::SeparationDetectResult DetectSeparationModelFromFiles(
         return result;
     }
 
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadataFromBasename(
+        result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    std::string refModel = !result.paths.model.empty() ? result.paths.model : result.paths.vocals;
+    if ((result.quantization.empty() || result.quantization == "unknown") && !refModel.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(refModel));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -187,7 +200,8 @@ using namespace model_detect;
 SeparationDetectResult DetectSeparationModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     SeparationDetectResult result;
 
@@ -203,7 +217,10 @@ SeparationDetectResult DetectSeparationModel(
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        return DetectSeparationModelFromFiles({}, syntheticDir, requestedModelType);
+        result = DetectSeparationModelFromFiles({}, syntheticDir, requestedModelType, quantization);
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        return result;
     }
 
     const std::string& modelDir = *model_dir_opt;
@@ -219,20 +236,26 @@ SeparationDetectResult DetectSeparationModel(
     }
 
     const std::vector<FileEntry> files = ListFilesRecursive(modelDir, 4);
-    return DetectSeparationModelFromFiles(files, modelDir, requestedModelType);
+    result = DetectSeparationModelFromFiles(files, modelDir, requestedModelType, quantization);
+    if (has_asset && (result.quantization.empty() || result.quantization == "unknown")) {
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
+    }
+    return result;
 }
 
 SeparationDetectResult DetectSeparationModelFromFileList(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     SeparationDetectResult result;
     if (modelDir.empty()) {
         result.error = "Separation: model directory is empty";
         return result;
     }
-    return DetectSeparationModelFromFiles(files, modelDir, modelType);
+    return DetectSeparationModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 }  // namespace sherpaonnx

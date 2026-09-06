@@ -129,8 +129,19 @@ std::string DeriveQuantization(const std::string& id) {
     if (lower.find("int8") != std::string::npos && lower.find("quant") != std::string::npos) {
         return "int8-quantized";
     }
-    if (lower.find("int8") != std::string::npos) return "int8";
+    if (lower.find("uint8") != std::string::npos || model_detect::ContainsWord(lower, "u8")) {
+        return "uint8";
+    }
+    if (lower.find("int8") != std::string::npos || model_detect::ContainsWord(lower, "q8")) {
+        return "int8";
+    }
+    if (lower.find("int4") != std::string::npos || model_detect::ContainsWord(lower, "q4")) {
+        return "int4";
+    }
+    if (lower.find("bf16") != std::string::npos) return "bf16";
     if (lower.find("fp16") != std::string::npos) return "fp16";
+    if (lower.find("fp32") != std::string::npos) return "fp32";
+    if (lower.find("quant") != std::string::npos) return "quantized";
     return kQuantUnknown;
 }
 
