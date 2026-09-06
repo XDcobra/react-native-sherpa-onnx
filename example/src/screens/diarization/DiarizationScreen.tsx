@@ -131,7 +131,7 @@ export default function DiarizationScreen() {
   // Engine Lifecycle State
   const [engineInitBusy, setEngineInitBusy] = useState(false);
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [engineError, setEngineError] = useState<string | null>(null);
 
   // Advanced Tuning Parameters
   const [tuningExpanded, setTuningExpanded] = useState(false);
@@ -149,6 +149,7 @@ export default function DiarizationScreen() {
   const [hasDiarizedOnce, setHasDiarizedOnce] = useState(false);
   const [progress, setProgress] = useState(0);
   const [processingTimeMs, setProcessingTimeMs] = useState(0);
+  const [executionError, setExecutionError] = useState<string | null>(null);
 
   // Speaker Analytics & Timeline
   const [turns, setTurns] = useState<SpeakerTurn[]>([]);
@@ -222,7 +223,7 @@ export default function DiarizationScreen() {
 
   // Initialize Diarization Engine
   const initEngine = useCallback(async (): Promise<DiarizationEngine> => {
-    setError(null);
+    setEngineError(null);
     setEngineInitBusy(true);
     try {
       if (engineRef.current) {
@@ -312,7 +313,7 @@ export default function DiarizationScreen() {
       return engine;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      setEngineError(msg);
       appendEvent(`Engine init error: ${msg}`);
       throw e;
     } finally {
@@ -342,6 +343,7 @@ export default function DiarizationScreen() {
     } finally {
       engineRef.current = null;
       setEngineInfo(null);
+      setEngineError(null);
       setHasDiarizedOnce(false);
       appendEvent('Engine unloaded');
     }
@@ -352,7 +354,7 @@ export default function DiarizationScreen() {
     if (!offlineInputBuffer || diarizeBusy || reclusterBusy) return;
     setDiarizeBusy(true);
     setProgress(0);
-    setError(null);
+    setExecutionError(null);
     setTurns([]);
 
     const abortCtrl = new AbortController();
@@ -426,10 +428,12 @@ export default function DiarizationScreen() {
     } catch (e) {
       if (abortCtrl.signal.aborted) {
         appendEvent('Diarization cancelled by user');
-        setError('Diarization cancelled');
+        setExecutionError('Diarization cancelled');
       } else {
         const msg = e instanceof Error ? e.message : String(e);
-        setError(`Diarization failed: ${msg}`);
+        if (engineRef.current) {
+          setExecutionError(`Diarization failed: ${msg}`);
+        }
         appendEvent(`Diarization error: ${msg}`);
       }
     } finally {
@@ -453,7 +457,7 @@ export default function DiarizationScreen() {
   const reclusterEngine = useCallback(async () => {
     if (!engineRef.current || reclusterBusy || diarizeBusy) return;
     setReclusterBusy(true);
-    setError(null);
+    setExecutionError(null);
     const startedAt = Date.now();
     try {
       appendEvent(
@@ -490,7 +494,7 @@ export default function DiarizationScreen() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(`Recluster failed: ${msg}`);
+      setExecutionError(`Recluster failed: ${msg}`);
       appendEvent(`Recluster error: ${msg}`);
     } finally {
       setReclusterBusy(false);
@@ -594,7 +598,13 @@ export default function DiarizationScreen() {
             </View>
           </View>
 
-          <InitModeSelector value={initMode} onChange={setInitMode} />
+          <InitModeSelector
+            value={initMode}
+            onChange={(m) => {
+              setInitMode(m);
+              setEngineError(null);
+            }}
+          />
 
           {initMode === 'auto' ? (
             <View>
@@ -627,7 +637,10 @@ export default function DiarizationScreen() {
                   entries={segCatalog?.entries ?? []}
                   selectedId={selectedSegId}
                   initializedId={engineInfo?.segId ?? null}
-                  onSelect={setSelectedSegId}
+                  onSelect={(id) => {
+                    setSelectedSegId(id);
+                    setEngineError(null);
+                  }}
                   disabled={engineInitBusy || diarizeBusy}
                 />
               )}
@@ -661,7 +674,10 @@ export default function DiarizationScreen() {
                   entries={embCatalog?.entries ?? []}
                   selectedId={selectedEmbId}
                   initializedId={engineInfo?.embId ?? null}
-                  onSelect={setSelectedEmbId}
+                  onSelect={(id) => {
+                    setSelectedEmbId(id);
+                    setEngineError(null);
+                  }}
                   disabled={engineInitBusy || diarizeBusy}
                 />
               )}
@@ -671,14 +687,20 @@ export default function DiarizationScreen() {
               <FileSourceSlotPicker
                 label="Pyannote Segmentation Model (.onnx)"
                 value={customSegSource}
-                onChange={setCustomSegSource}
+                onChange={(src) => {
+                  setCustomSegSource(src);
+                  setEngineError(null);
+                }}
                 disabled={engineInitBusy || diarizeBusy}
                 required
               />
               <FileSourceSlotPicker
                 label="Speaker Embedding Model (.onnx)"
                 value={customEmbSource}
-                onChange={setCustomEmbSource}
+                onChange={(src) => {
+                  setCustomEmbSource(src);
+                  setEngineError(null);
+                }}
                 disabled={engineInitBusy || diarizeBusy}
                 required
               />
@@ -939,6 +961,12 @@ export default function DiarizationScreen() {
               </View>
             </View>
           )}
+
+          {engineError && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{engineError}</Text>
+            </View>
+          )}
         </View>
 
         {/* Module 2: Audio Ingress & Diarization Execution */}
@@ -962,6 +990,7 @@ export default function DiarizationScreen() {
             disabled={diarizeBusy || reclusterBusy}
             visible={true}
             onBufferReady={(info) => {
+              setExecutionError(null);
               setOfflineInputBuffer(info);
               const durText =
                 info.durationSeconds != null
@@ -970,6 +999,7 @@ export default function DiarizationScreen() {
               appendEvent(`Audio buffer ready: ${info.sourceLabel}${durText}`);
             }}
             onBufferReleased={() => {
+              setExecutionError(null);
               setOfflineInputBuffer(null);
               setTurns([]);
               appendEvent('Audio buffer released');
@@ -1049,9 +1079,9 @@ export default function DiarizationScreen() {
             </View>
           )}
 
-          {error && (
+          {executionError && (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorText}>{executionError}</Text>
             </View>
           )}
         </View>
