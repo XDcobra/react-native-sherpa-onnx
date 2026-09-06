@@ -2441,4 +2441,22 @@ export interface Spec extends TurboModule {
   removeListeners(count: number): void;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+let SherpaOnnxModule: Spec;
+try {
+  SherpaOnnxModule = TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+} catch {
+  SherpaOnnxModule = new Proxy({} as Spec, {
+    get(_target, prop) {
+      if (prop === 'then') return undefined;
+      return () => {
+        throw new Error(
+          `[SherpaOnnx] Native module method '${String(
+            prop
+          )}' called, but native module 'SherpaOnnx' is not available in this environment.`
+        );
+      };
+    },
+  });
+}
+
+export default SherpaOnnxModule;
