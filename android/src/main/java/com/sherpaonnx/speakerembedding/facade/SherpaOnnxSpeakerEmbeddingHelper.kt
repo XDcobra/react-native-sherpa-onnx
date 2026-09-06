@@ -14,6 +14,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
   fun shutdown() {
@@ -24,11 +25,12 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
     try {
       val result =
-        nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType ?: "auto")
+        nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject(DETECT_ERROR, "Speaker embedding model detection returned null")
         return

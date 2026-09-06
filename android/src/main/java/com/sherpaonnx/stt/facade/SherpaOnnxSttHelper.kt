@@ -28,8 +28,7 @@ internal class SherpaOnnxSttHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
-    preferInt8: Boolean,
-    hasPreferInt8: Boolean,
+    quantization: String?,
     debug: Boolean
   ) -> HashMap<String, Any>?,
   private val logTag: String
@@ -107,8 +106,7 @@ internal class SherpaOnnxSttHelper(
         modelDir,
         null,
         parsed.modelType ?: "auto",
-        parsed.preferInt8 ?: false,
-        parsed.preferInt8 != null,
+        parsed.quantization,
         parsed.debug ?: false
       )
 

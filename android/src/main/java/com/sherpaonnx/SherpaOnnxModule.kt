@@ -172,8 +172,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug ->
-      Companion.nativeDetectSttModel(modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug)
+    { modelDir, assetName, modelType, quantization, debug ->
+      Companion.nativeDetectSttModel(modelDir, assetName, modelType, quantization, debug)
     },
     NAME
   )
@@ -199,7 +199,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
   private val ttsHelper = SherpaOnnxTtsCoordinator(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType, quantization) },
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
@@ -207,15 +207,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType, quantization) }
   )
   private val separationHelper = SherpaOnnxSeparationHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType, quantization) }
   )
   private val speakerEmbeddingHelper = SherpaOnnxSpeakerEmbeddingHelper(
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val speakerIdentificationLivePipelineHelper =
@@ -226,26 +226,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   private val diarizationHelper = SherpaOnnxDiarizationHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectVadModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectVadModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val punctuationHelper = SherpaOnnxPunctuationHelper(
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val offlinePunctuationLivePipelineHelper =
@@ -947,7 +947,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
-    preferInt8: Boolean?,
+    quantization: String?,
     debug: Boolean?,
     promise: Promise
   ) {
@@ -956,8 +956,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         modelDir,
         assetName,
         modelType ?: "auto",
-        preferInt8 ?: false,
-        preferInt8 != null,
+        quantization,
         debug ?: false
       )
       if (result == null) {
@@ -4603,9 +4602,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
-    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, promise)
+    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   /**
@@ -4768,36 +4768,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
+    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectSeparationModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+    separationHelper.detectSeparationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectSpeakerEmbeddingModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
+    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectDiarizationModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, promise)
+    diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun initializeDiarization(
@@ -5132,10 +5136,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun detectAlignmentModel(
     modelDir: String,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = Companion.nativeDetectAlignmentModel(modelDir, modelType ?: "auto")
+      val result = Companion.nativeDetectAlignmentModel(modelDir, modelType ?: "auto", quantization)
       if (result == null) {
         android.util.Log.e(NAME, "DETECT_ERROR: Alignment model detection returned null")
         promise.reject("DETECT_ERROR", "Alignment model detection returned null")
@@ -5257,10 +5262,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun detectModel(
     modelDir: String,
     assetName: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = Companion.nativeDetectModel(modelDir, assetName)
+      val result = Companion.nativeDetectModel(modelDir, assetName, quantization)
       if (result == null) {
         promise.reject("DETECT_ERROR", "Unified model detection returned null")
         return
@@ -5282,6 +5288,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
         if (entry.hasKey("assetName") && !entry.isNull("assetName")) {
           item["assetName"] = entry.getString("assetName")
+        }
+        if (entry.hasKey("quantization") && !entry.isNull("quantization")) {
+          item["quantization"] = entry.getString("quantization")
         }
         nativeInputs.add(item)
       }
@@ -5360,18 +5369,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
+    vadHelper.detectVadModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectPunctuationModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, promise)
+    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun initializeOfflinePunctuation(
@@ -5762,8 +5773,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String?,
       assetName: String?,
       modelType: String,
-      preferInt8: Boolean,
-      hasPreferInt8: Boolean,
+      quantization: String?,
       debug: Boolean
     ): HashMap<String, Any>?
 
@@ -5775,9 +5785,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       assetName: String?,
       modelType: String?,
+      quantization: String? = null,
     ): HashMap<String, Any>? {
       SherpaOnnxNativeLoader.ensureLoaded()
-      return nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto")
+      return nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto", quantization)
     }
 
     /** Model detection for TTS: optional directory and/or asset name; returns HashMap (for Kotlin API config). */
@@ -5786,6 +5797,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       assetName: String?,
       modelType: String?,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for speech enhancement: optional directory and/or asset name. */
@@ -5793,7 +5805,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectEnhancementModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for source separation: Spleeter or UVR layout (offline only). */
@@ -5801,7 +5814,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectSeparationModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for speaker embedding: wespeaker / 3d-speaker / nemo (offline only). */
@@ -5809,7 +5823,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectSpeakerEmbeddingModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for diarization segmentation: pyannote / reverb (offline only). */
@@ -5817,31 +5832,35 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectDiarizationModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectVadModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectPunctuationModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
-    private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
+    private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String, quantization: String?): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectModel(
       modelDir: String,
-      assetName: String?
+      assetName: String?,
+      quantization: String?
     ): HashMap<String, Any?>?
 
     @JvmStatic

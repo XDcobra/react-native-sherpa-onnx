@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 /** Thin coordinator that wires TTS services behind module-facing facades. */
 internal class SherpaOnnxTtsCoordinator(
   context: ReactApplicationContext,
-  detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,
+  detectTtsModel: (modelDir: String, assetName: String?, modelType: String?, quantization: String?) -> HashMap<String, Any>?,
 ) {
   private val reactContext = context
   private val repository = TtsEngineRepository()
@@ -78,8 +78,8 @@ internal class SherpaOnnxTtsCoordinator(
   fun unloadTts(instanceId: String, promise: Promise) =
     lifecycleService.unloadTts(instanceId, promise)
 
-  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) =
-    lifecycleService.detectTtsModel(modelDir, assetName, modelType, promise)
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, quantization: String?, promise: Promise) =
+    lifecycleService.detectTtsModel(modelDir, assetName, modelType, quantization, promise)
 
   // Instance → active pipeline tracking (one pipeline per engine instance)
   private val instanceToPipeline = ConcurrentHashMap<String, String>()

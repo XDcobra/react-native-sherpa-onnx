@@ -23,6 +23,7 @@ internal class SherpaOnnxDiarizationHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?,
   ) -> HashMap<String, Any>?,
 ) {
   private val executor = Executors.newSingleThreadExecutor()
@@ -35,11 +36,12 @@ internal class SherpaOnnxDiarizationHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
     try {
       val result =
-        nativeDetectDiarizationModel(modelDir, assetName, modelType ?: "auto")
+        nativeDetectDiarizationModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject(
           DiarizationErrorCodes.DETECT_ERROR,

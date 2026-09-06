@@ -21,6 +21,7 @@ class SherpaOnnxPunctuationHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?
 ) {
   companion object {
@@ -53,10 +54,11 @@ class SherpaOnnxPunctuationHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = nativeDetectPunctuationModel(modelDir, assetName, modelType ?: "auto")
+      val result = nativeDetectPunctuationModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject("PUNCT_DETECT_ERROR", "Punctuation model detection returned null")
         return
@@ -220,7 +222,7 @@ class SherpaOnnxPunctuationHelper(
     }
 
     // Always resolve **offline CT** for this API (no native `auto` that prefers CNN).
-    val detect = nativeDetectPunctuationModel(modelDir, null, "ct_transformer")
+    val detect = nativeDetectPunctuationModel(modelDir, null, "ct_transformer", parsed.quantization)
     if (detect == null) {
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
       return
