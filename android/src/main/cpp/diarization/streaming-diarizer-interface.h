@@ -26,6 +26,11 @@ struct StreamingDiarizerConfig {
   float min_duration_on = 0.0f;
   float min_duration_off = 0.5f;
   int32_t median_window = 11;
+
+  // Streaming chunk & window overrides (< 0 means use metadata default)
+  int32_t chunk_len = -1;
+  int32_t right_context = -1;
+  int32_t fifo_len = -1;
 };
 
 struct StreamingDiarizerInfo {

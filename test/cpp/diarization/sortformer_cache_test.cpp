@@ -106,4 +106,25 @@ TEST(StreamingDiarizationWrapperTest, UninitializedCallsReturnErrorSafely) {
   wrapper.release();
 }
 
+TEST(StreamingDiarizationConfigTest, ConfigFieldsAndLowLatencyCalculations) {
+  StreamingDiarizerConfig cfg;
+  EXPECT_EQ(cfg.chunk_len, -1);
+  EXPECT_EQ(cfg.right_context, -1);
+  EXPECT_EQ(cfg.fifo_len, -1);
+
+  StreamingDiarizerInfo info;
+  EXPECT_EQ(info.chunk_len, 124);
+  EXPECT_EQ(info.right_context, 1);
+  EXPECT_EQ(info.FeedSamples(), 160000);
+  EXPECT_EQ(info.StrideSamples(), 158720);
+  EXPECT_NEAR(info.LatencySeconds(), 10.0f, 1e-4f);
+
+  // Test low latency preset (chunk_len = 6, right_context = 7)
+  info.chunk_len = 6;
+  info.right_context = 7;
+  EXPECT_EQ(info.FeedSamples(), 16640);
+  EXPECT_EQ(info.StrideSamples(), 7680);
+  EXPECT_NEAR(info.LatencySeconds(), 1.04f, 1e-4f);
+}
+
 } // namespace sherpaonnx::diarization

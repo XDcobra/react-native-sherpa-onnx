@@ -622,6 +622,9 @@ internal class SherpaOnnxDiarizationHelper(
     val minDurationOn = optDouble(options, "minDurationOn", 0.0).toFloat()
     val minDurationOff = optDouble(options, "minDurationOff", 0.5).toFloat()
     val medianWindow = optDouble(options, "medianWindow", 11.0).toInt().coerceAtLeast(1)
+    val chunkLen = if (options.hasKey("chunkLen") && !options.isNull("chunkLen")) options.getInt("chunkLen") else -1
+    val rightContext = if (options.hasKey("rightContext") && !options.isNull("rightContext")) options.getInt("rightContext") else -1
+    val fifoLen = if (options.hasKey("fifoLen") && !options.isNull("fifoLen")) options.getInt("fifoLen") else -1
 
     executor.execute {
       try {
@@ -639,6 +642,9 @@ internal class SherpaOnnxDiarizationHelper(
           minDurationOn,
           minDurationOff,
           medianWindow,
+          chunkLen,
+          rightContext,
+          fifoLen,
         )
         if (result == null) {
           promise.reject(
@@ -919,6 +925,9 @@ internal class SherpaOnnxDiarizationHelper(
       minDurationOn: Float,
       minDurationOff: Float,
       medianWindow: Int,
+      chunkLen: Int,
+      rightContext: Int,
+      fifoLen: Int,
     ): HashMap<String, Any>?
 
     @JvmStatic

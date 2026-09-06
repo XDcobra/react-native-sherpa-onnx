@@ -57,7 +57,10 @@ class StreamingDiarizationWrapper {
       float padOffset,
       float minDurationOn,
       float minDurationOff,
-      int32_t medianWindow);
+      int32_t medianWindow,
+      int32_t chunkLen = -1,
+      int32_t rightContext = -1,
+      int32_t fifoLen = -1);
 
   StreamingDiarizationFeedResult feed(const float* samples, size_t count);
   StreamingDiarizationFeedResult flush();
