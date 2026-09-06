@@ -5,7 +5,8 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
+import { normalizeQuantization } from '../types/modelDetect';
 import { isDetectionSource } from './types';
 import {
   releasePipelineAudioBuffer,
@@ -74,7 +75,9 @@ function createEnhancementPipelineHandle(
   };
 
   const completed =
-    createStreamingPipelineCompletionPromise(pipelineId).finally(detachIfNeeded);
+    createStreamingPipelineCompletionPromise(pipelineId).finally(
+      detachIfNeeded
+    );
 
   return {
     instanceId,
@@ -177,6 +180,7 @@ export async function detectEnhancementModel(
   options?: {
     modelType?: EnhancementInitializeOptions['modelType'];
     assetName?: string;
+    quantization?: QuantizationPreference;
   }
 ): Promise<EnhancementDetectResult> {
   const resolved = await resolveFileSourceForDetect(source);
@@ -188,7 +192,8 @@ export async function detectEnhancementModel(
   const raw = await SherpaOnnx.detectEnhancementModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -211,10 +216,7 @@ export async function detectEnhancementModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const isStreaming = raw.isStreaming === true;

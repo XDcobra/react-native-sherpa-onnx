@@ -22,6 +22,7 @@ import type { SegmentLinkMapRef } from '../segment/segment-link';
 import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { SpeechSegment } from '../segment/segment';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+import type { QuantizationPreference } from '../download/types';
 
 /** TTS-specific pipeline handle returned by live pipeline synthesis. */
 export interface TtsPipelineHandle extends StreamingPipelineHandle {
@@ -229,6 +230,11 @@ export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
    * Can be an asset path, file system path, or auto-detection path.
    */
   modelSource: FileSource;
+
+  /**
+   * Quantization preference ('int8', 'fp16', etc.).
+   */
+  quantization?: QuantizationPreference;
 
   /**
    * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`

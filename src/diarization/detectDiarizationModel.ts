@@ -4,7 +4,8 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
+import { normalizeQuantization } from '../types/modelDetect';
 import type { FileSource } from '../fileio/types';
 import { isDetectionSource } from './types';
 import type {
@@ -19,6 +20,7 @@ export async function detectDiarizationModel(
   options?: {
     modelType?: DiarizationModelKind | 'auto';
     assetName?: string;
+    quantization?: QuantizationPreference;
   }
 ): Promise<DiarizationDetectResult> {
   const resolved = await resolveFileSourceForDetect(source);
@@ -30,7 +32,8 @@ export async function detectDiarizationModel(
   const raw = await SherpaOnnx.detectDiarizationModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -53,10 +56,7 @@ export async function detectDiarizationModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const metadataFilePath =

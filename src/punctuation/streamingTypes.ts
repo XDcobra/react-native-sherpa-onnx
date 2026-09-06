@@ -7,6 +7,7 @@ import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { PunctuationModelType } from './detect';
 import type { TextInputNormalization } from './textInputNormalization';
+import type { QuantizationPreference } from '../download/types';
 
 export type OnlinePunctuationModelType = Extract<
   PunctuationModelType,
@@ -26,6 +27,7 @@ export type StreamingPunctuationAutoInitializeOptions =
     initMode?: 'auto';
     /** OnlinePunctuation layout (CNN-BiLSTM + bpe.vocab). */
     modelSource: FileSource;
+    quantization?: QuantizationPreference;
     modelType?: OnlinePunctuationModelType;
   };
 

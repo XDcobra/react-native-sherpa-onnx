@@ -1,9 +1,11 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
+import type { QuantizationPreference } from '../download/types';
 import type { AlignmentModelType } from './types';
 import {
   isDetectionSource,
+  normalizeQuantization,
   type DetectionSource,
   type DetectedModelEntry,
   type AlignmentDetectModelResult,
@@ -61,12 +63,16 @@ export type { AlignmentDetectModelResult } from '../types/modelDetect';
 
 export async function detectAlignmentModel(
   source: FileSource,
-  options?: { modelType?: AlignmentModelType }
+  options?: {
+    modelType?: AlignmentModelType;
+    quantization?: QuantizationPreference;
+  }
 ): Promise<AlignmentDetectModelResult> {
   const resolved = await resolveFileSourceForDetect(source);
   const raw = await SherpaOnnx.detectAlignmentModel(
     resolved.modelDir,
-    options?.modelType
+    options?.modelType,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -93,10 +99,7 @@ export async function detectAlignmentModel(
     modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   return {

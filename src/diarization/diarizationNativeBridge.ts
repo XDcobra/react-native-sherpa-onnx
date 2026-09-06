@@ -5,14 +5,17 @@
 import type { DiarizationInitializeOptions } from './types';
 import type { DiarizationInitBridgeOptions } from '../NativeSherpaOnnx';
 import type { FileSource } from '../fileio/types';
+import type { QuantizationPreference } from '../download/types';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { detectDiarizationModel } from './detectDiarizationModel';
 import { detectSpeakerEmbeddingModel } from '../speaker-embedding';
 
 async function resolveModelFilePath(
   source: FileSource,
+  quantization: QuantizationPreference | undefined,
   detectFn: (
-    src: FileSource
+    src: FileSource,
+    opts?: { quantization?: QuantizationPreference }
   ) => Promise<{ success: boolean; paths?: { model?: string } }>
 ): Promise<string> {
   const resolved = await resolveFileSourceForModelInit(source);
@@ -23,7 +26,7 @@ async function resolveModelFilePath(
     return resolved;
   }
   try {
-    const det = await detectFn(source);
+    const det = await detectFn(source, { quantization });
     if (det.success && det.paths?.model) {
       return det.paths.model;
     }
@@ -38,10 +41,12 @@ export async function buildDiarizationInitBridgeOptions(
 ): Promise<DiarizationInitBridgeOptions> {
   const segmentationModel = await resolveModelFilePath(
     options.segmentation.modelSource,
+    options.segmentation.quantization,
     detectDiarizationModel
   );
   const embeddingModel = await resolveModelFilePath(
     options.embedding.modelSource,
+    options.embedding.quantization,
     detectSpeakerEmbeddingModel
   );
 

@@ -2,6 +2,7 @@ import type { FileSource } from '../fileio/types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { SpeakerEmbeddingDetectModelResult } from '../types/modelDetect';
 import type { SpeakerEmbeddingCustomConfig } from './customConfig';
+import type { QuantizationPreference } from '../download/types';
 
 export {
   DETECTION_SOURCES,
@@ -31,6 +32,7 @@ export type SpeakerEmbeddingAutoInitializeOptions =
   SpeakerEmbeddingInitOptionsShared & {
     initMode?: 'auto';
     modelSource: FileSource;
+    quantization?: QuantizationPreference;
     modelType?: SpeakerEmbeddingModelType | 'auto';
   };
 

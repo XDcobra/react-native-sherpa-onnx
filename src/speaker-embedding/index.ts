@@ -5,7 +5,8 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
+import { normalizeQuantization } from '../types/modelDetect';
 import { isDetectionSource } from './types';
 import type {
   DetectedModelEntry,
@@ -46,6 +47,7 @@ export async function detectSpeakerEmbeddingModel(
   options?: {
     modelType?: SpeakerEmbeddingModelType | 'auto';
     assetName?: string;
+    quantization?: QuantizationPreference;
   }
 ): Promise<SpeakerEmbeddingDetectResult> {
   const resolved = await resolveFileSourceForDetect(source);
@@ -57,7 +59,8 @@ export async function detectSpeakerEmbeddingModel(
   const raw = await SherpaOnnx.detectSpeakerEmbeddingModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -80,10 +83,7 @@ export async function detectSpeakerEmbeddingModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
   const isStreaming = raw.isStreaming === true;

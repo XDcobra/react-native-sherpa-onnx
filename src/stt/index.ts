@@ -30,6 +30,7 @@ import type {
   SttTranscribeOptions,
   SttRuntimeConfig,
 } from './types';
+import type { QuantizationPreference } from '../download/types';
 import { validateSegmentationConfig } from '../segment/validation';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import {
@@ -49,6 +50,7 @@ import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
   isDetectionSource,
+  normalizeQuantization,
   type DetectionSource,
   type DetectedModelEntry,
   type SttDetectModelResult,
@@ -208,7 +210,7 @@ function normalizeOfflineBufferInput(
  * Uses the same native file-based detection as createSTT. Stateless; no instance required.
  *
  * @param source - FileSource describing where to find the model
- * @param options - Optional preferInt8/modelType plus optional assetName and debug flag
+ * @param options - Optional quantization/modelType plus optional assetName and debug flag
  * @returns Object with success, detectedModels, modelType, isStreaming, optional languages, quantization, error, and isHardwareSpecificUnsupported
  * @example
  * ```typescript
@@ -221,7 +223,7 @@ function normalizeOfflineBufferInput(
 export async function detectSttModel(
   source: FileSource,
   options?: {
-    preferInt8?: boolean;
+    quantization?: QuantizationPreference;
     modelType?: STTModelType;
     assetName?: string;
     debug?: boolean;
@@ -237,7 +239,7 @@ export async function detectSttModel(
     resolved.modelDir,
     assetName,
     options?.modelType ?? null,
-    options?.preferInt8,
+    options?.quantization ?? null,
     options?.debug
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
@@ -263,10 +265,7 @@ export async function detectSttModel(
     modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
 
   const isStreaming = raw.isStreaming === true;
   const paths = readNonEmptyDetectPathsMap(raw.paths);

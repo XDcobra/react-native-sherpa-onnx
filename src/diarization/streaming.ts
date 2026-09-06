@@ -73,6 +73,7 @@ export async function createStreamingDiarization(
   } else {
     const detected = await detectDiarizationModel(options.modelSource, {
       modelType: options.modelType ?? 'auto',
+      quantization: options.quantization,
     });
 
     if (!detected.isStreaming) {

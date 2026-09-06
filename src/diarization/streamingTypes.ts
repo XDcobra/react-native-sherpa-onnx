@@ -9,6 +9,7 @@ import type {
   StreamingPipelineStatus,
 } from '../audiobuffer/streamingPipelineTypes';
 import type { DiarizationCustomConfig } from './customConfig';
+import type { QuantizationPreference } from '../download/types';
 
 export type StreamingDiarizationConcreteModelType = 'sortformer';
 export type StreamingDiarizationModelType = 'sortformer' | 'auto';
@@ -56,6 +57,7 @@ export type StreamingDiarizationAutoInitializeOptions =
   StreamingDiarizationInitOptionsShared & {
     initMode?: 'auto';
     modelSource: FileSource;
+    quantization?: QuantizationPreference;
     modelType?: StreamingDiarizationModelType;
   };
 

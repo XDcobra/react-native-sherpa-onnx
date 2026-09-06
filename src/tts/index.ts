@@ -13,12 +13,14 @@ import {
 } from './types';
 import {
   isDetectionSource,
+  normalizeQuantization,
   type DetectionSource,
   type TtsDetectModelResult,
   type TtsLexiconLanguage,
   type DetectedModelEntry,
 } from '../types/modelDetect';
 import type { FileSource } from '../fileio/types';
+import type { QuantizationPreference } from '../download/types';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import {
   buildTtsInitBridgeOptions,
@@ -253,13 +255,14 @@ async function synthesizeLiveOverload(
  */
 export async function detectTtsModel(
   source: FileSource,
-  options?: { modelType?: TTSModelType }
+  options?: { modelType?: TTSModelType; quantization?: QuantizationPreference }
 ): Promise<TtsDetectModelResult> {
   const resolved = await resolveFileSourceForDetect(source);
   const raw = await SherpaOnnx.detectTtsModel(
     resolved.modelDir,
     resolved.assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -294,10 +297,7 @@ export async function detectTtsModel(
     modelKey,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const sizeTier =
     typeof raw.sizeTier === 'string' && raw.sizeTier.length > 0
       ? raw.sizeTier
