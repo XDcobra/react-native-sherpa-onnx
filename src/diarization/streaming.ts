@@ -102,6 +102,9 @@ export async function createStreamingDiarization(
       minDurationOn: options.minDurationOn ?? 0.0,
       minDurationOff: options.minDurationOff ?? 0.5,
       medianWindow: options.medianWindow ?? 11,
+      chunkLen: options.chunkLen,
+      rightContext: options.rightContext,
+      fifoLen: options.fifoLen,
     }
   );
 
