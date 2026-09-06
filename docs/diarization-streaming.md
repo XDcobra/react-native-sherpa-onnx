@@ -6,8 +6,8 @@
 
 On-device **true streaming** speaker diarization: continuously identifies "who spoke when"
 in real-time audio. Powered by **NeMo Sortformer** running natively on **ONNX Runtime (ORT)**
-with high-performance C++ DSP (Radix-2 FFT + sparse Mel filterbanks), bounded memory
-via NeMo smart cache compression, and **zero JS roundtrips**.
+with high-performance C++ DSP (Radix-2 FFT + sparse Mel filterbanks) and bounded memory
+via NeMo smart cache compression.
 
 | Role | Type | Notes |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ For **named speaker timelines** (mapping diarization clusters to enrolled identi
 
 ---
 
-## Streaming pipeline system (Zero JS Roundtrips)
+## Streaming pipeline system
 
 Calling `engine.startPipeline(audioIn, segmentOut)` registers a **native background worker thread** (`DiarizationStreamingPipelineWorker`):
 
@@ -37,21 +37,7 @@ Calling `engine.startPipeline(audioIn, segmentOut)` registers a **native backgro
 4. **Applies post-processing** (channel-wise median filtering + hysteresis thresholding) into time-aligned speaker turns.
 5. **Appends segments** directly into the native `LiveSegmentBuffer` (`seg_live_append_segment` on iOS, `outputEntry.appendSegment` on Android) with `kind: 'diarization'` and payload `{"source":"diarization","speaker":S}`.
 
-No intermediate audio samples or model output tensors cross the React Native JavaScript bridge during steady-state processing. Shared lifecycle semantics of **`stop` / `flush` / `reset` / `getStatus` / `completed`** are described in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
-
-### Observing committed speaker segments
-
-Committed speaker turns are emitted as segments on the output `LiveSegmentBuffer`. Subscribe to `onSegmentAppended` (or `streamEvents.segmentAppended`):
-
-```ts
-const segmentOut = await createEmptyLiveSegmentBuffer({
-  sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    const speaker = e.segment.payload?.speaker;
-    console.log(`[Speaker ${speaker}] ${e.segment.startSample} -> ${e.segment.endSample} (${e.segment.durationMs}ms)`);
-  },
-});
-```
+Shared lifecycle semantics of **`stop` / `flush` / `reset` / `getStatus` / `completed`** are described in **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
 
 ---
 
@@ -114,7 +100,7 @@ const segmentOut = await createEmptyLiveSegmentBuffer({
   },
 });
 
-// 4. Start the zero-JS native streaming pipeline
+// 4. Start the streaming pipeline
 const pipeline = await engine.startPipeline(audioIn, segmentOut, {
   chunkSize: 4096, // Drain step size from audioIn
 });
@@ -297,7 +283,7 @@ startPipeline(
 ): Promise<DiarizationPipelineHandle>;
 ```
 
-Starts a zero-JS native worker thread draining `audioIn` and appending speaker turns to `segmentOut`.
+Starts a native background worker thread draining `audioIn` and appending speaker turns to `segmentOut`.
 
 * **`audioIn`**: Live audio buffer (`live_*`). Must be in `recording` state.
 * **`segmentOut`**: Live segment buffer (`seg_live_*`).
@@ -474,6 +460,20 @@ import {
 - `payloadJson` contains `{"source":"diarization","speaker":S}` where `S` is an integer index ($0$ to $\text{maxSpeakers}-1$).
 - See [segmentbuffer — live / streaming](segmentbuffer-streaming.md).
 
+#### Observing committed speaker segments
+
+Committed speaker turns are emitted as segments on the output `LiveSegmentBuffer`. Subscribe to `onSegmentAppended` (or `streamEvents.segmentAppended`):
+
+```ts
+const segmentOut = await createEmptyLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => {
+    const speaker = e.segment.payload?.speaker;
+    console.log(`[Speaker ${speaker}] ${e.segment.startSample} -> ${e.segment.endSample} (${e.segment.durationMs}ms)`);
+  },
+});
+```
+
 ---
 
 ## Pipeline composition
@@ -498,7 +498,7 @@ import {
 flowchart LR
   Mic[Microphone / Ingest] --> LiveAudio[LiveAudioBuffer 16kHz]
   LiveAudio --> NativeWorker[DiarizationStreamingPipelineWorker]
-  subgraph NativeEngine [Zero-JS Native C++ Engine]
+  subgraph NativeEngine [Native C++ Streaming Engine]
     NativeWorker --> Fbank[SortformerFbank DSP]
     Fbank --> ORT[Sortformer ONNX Runtime]
     ORT --> PostProc[Post Processor]
@@ -545,7 +545,7 @@ import type {
 - **iOS**:
   - Worker thread runs in `DiarizationStreamingPipelineWorker.mm`.
   - Audio drained from `PaLiveEntry` cursor $\rightarrow$ C++ `StreamingDiarizationWrapper` $\rightarrow$ `seg_live_append_segment(...)`.
-  - Direct C++ memory access with zero bridge overhead.
+  - Direct C++ memory access.
 - **DSP & Inference**:
   - 100% portable C++ DSP (`SortformerFbank`): Radix-2 FFT with precomputed twiddle tables, periodic Hann window, and sparse Slaney Mel filterbank.
   - Zero dynamic heap allocation in steady-state streaming loops.
