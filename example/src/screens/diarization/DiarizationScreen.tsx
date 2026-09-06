@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
-  StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
+import { useNavigation, type NavigationProp } from '@react-navigation/native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
   createDiarization,
-  detectDiarizationModel,
   type DiarizationEngine,
 } from 'react-native-sherpa-onnx/diarization';
-import { detectSpeakerEmbeddingModel } from 'react-native-sherpa-onnx/speaker-identification';
 import {
   createEmptyOfflineSegmentBuffer,
   getOfflineSegmentBufferSegments,
@@ -24,295 +24,1381 @@ import {
   type DiarizationSegmentMeta,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  listDownloadedModels,
   ModelCategory,
+  onModelsListUpdated,
 } from 'react-native-sherpa-onnx/download';
-import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import type { RootStackParamList } from '../../types/navigation';
+import { DIARIZATION_AUDIO_FILES } from '../../audioConfig';
 import {
-  getAssetModelPath,
-  getFileModelPath,
-  toDetectSource,
-} from '../../modelConfig';
-import { toFileSource } from '../../utils/fileSourceFromUri';
+  OfflineAudioBufferWidget,
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
+import { ModelFolderGrid } from '../../components/modelInit/ModelFolderGrid';
+import {
+  InitModeSelector,
+  type ModelInitMode,
+} from '../../components/modelInit/InitModeSelector';
+import { FileSourceSlotPicker } from '../../components/modelInit/FileSourceSlotPicker';
+import {
+  loadDiarizationSegmentationModelCatalog,
+  getDiarizationSegmentationModelPathConfig,
+  type DiarizationSegmentationCatalogSnapshot,
+} from '../../utils/diarizationSegmentationModelCatalog';
+import {
+  loadSpeakerEmbeddingModelCatalog,
+  getSpeakerEmbeddingModelPathConfig,
+  type SpeakerEmbeddingCatalogSnapshot,
+} from '../../utils/speakerEmbeddingModelCatalog';
+import {
+  styles,
+  SPEAKER_COLORS,
+  SPEAKER_BG_COLORS,
+} from './DiarizationScreen.styles';
 
-const DEFAULT_SEG_FOLDER = 'sherpa-onnx-pyannote-segmentation-3-0';
-const DEFAULT_EMB_FOLDER =
-  '3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k';
+export type SpeakerTurn = {
+  id: string;
+  speaker: number;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  startSample: number;
+  endSample: number;
+};
+
+type EventLogItem = {
+  id: string;
+  time: string;
+  message: string;
+};
+
+type EngineInfo = {
+  sampleRate: number;
+  segId: string;
+  embId: string;
+  numClusters: number;
+  threshold: number;
+};
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 100);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms
+    .toString()
+    .padStart(2, '0')}`;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 1) {
+    return `${Math.round(seconds * 1000)}ms`;
+  }
+  return `${seconds.toFixed(2)}s`;
+}
+
+function getSpeakerColor(index: number): string {
+  return SPEAKER_COLORS[index % SPEAKER_COLORS.length] ?? '#2563EB';
+}
+
+function getSpeakerBgColor(index: number): string {
+  return SPEAKER_BG_COLORS[index % SPEAKER_BG_COLORS.length] ?? '#EFF6FF';
+}
 
 export default function DiarizationScreen() {
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+
+  // Engine & buffer references
   const engineRef = useRef<DiarizationEngine | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Pick an audio file to diarize.');
+  const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Model Catalogs & Selection
+  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
+  const [segCatalog, setSegCatalog] =
+    useState<DiarizationSegmentationCatalogSnapshot | null>(null);
+  const [embCatalog, setEmbCatalog] =
+    useState<SpeakerEmbeddingCatalogSnapshot | null>(null);
+  const [selectedSegId, setSelectedSegId] = useState<string | null>(null);
+  const [selectedEmbId, setSelectedEmbId] = useState<string | null>(null);
+  const [customSegSource, setCustomSegSource] = useState<
+    FileSource | undefined
+  >(undefined);
+  const [customEmbSource, setCustomEmbSource] = useState<
+    FileSource | undefined
+  >(undefined);
+
+  // Engine Lifecycle State
+  const [engineInitBusy, setEngineInitBusy] = useState(false);
+  const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Advanced Tuning Parameters
+  const [tuningExpanded, setTuningExpanded] = useState(false);
+  const [clusteringThreshold, setClusteringThreshold] = useState(0.5);
+  const [numClusters, setNumClusters] = useState(0); // 0 = automatic discovery
+  const [minDurationOn, setMinDurationOn] = useState(0.0);
+  const [minDurationOff, setMinDurationOff] = useState(0.5);
+  const [windowShiftRatio, setWindowShiftRatio] = useState(0.1);
+
+  // Audio Ingress & Diarization Execution
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
+  const [diarizeBusy, setDiarizeBusy] = useState(false);
+  const [reclusterBusy, setReclusterBusy] = useState(false);
+  const [hasDiarizedOnce, setHasDiarizedOnce] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [segments, setSegments] = useState<DiarizationSegmentMeta[]>([]);
-  const [audioPath, setAudioPath] = useState<string | null>(null);
-  const [segModelHint, setSegModelHint] = useState(DEFAULT_SEG_FOLDER);
-  const [embModelHint, setEmbModelHint] = useState(DEFAULT_EMB_FOLDER);
-  const [segSource, setSegSource] = useState<FileSource | null>(null);
-  const [embSource, setEmbSource] = useState<FileSource | null>(null);
+  const [processingTimeMs, setProcessingTimeMs] = useState(0);
+
+  // Speaker Analytics & Timeline
+  const [turns, setTurns] = useState<SpeakerTurn[]>([]);
+  const [speakerFilter, setSpeakerFilter] = useState<number | null>(null);
+  const [speakerAliases, setSpeakerAliases] = useState<Record<number, string>>(
+    {}
+  );
+
+  // Diagnostics & Event Log
+  const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
+  const [events, setEvents] = useState<EventLogItem[]>([]);
+
+  const appendEvent = useCallback((message: string) => {
+    const time = new Date().toLocaleTimeString();
+    setEvents((prev) => [
+      { id: `${Date.now()}_${Math.random()}`, time, message },
+      ...prev.slice(0, 49),
+    ]);
+  }, []);
+
+  // Reload model catalogs
+  const reloadCatalogs = useCallback(async () => {
+    try {
+      const [segSnap, embSnap] = await Promise.all([
+        loadDiarizationSegmentationModelCatalog(),
+        loadSpeakerEmbeddingModelCatalog(),
+      ]);
+      setSegCatalog(segSnap);
+      setSelectedSegId((curr) => {
+        if (curr && segSnap.entries.some((e) => e.id === curr)) return curr;
+        return segSnap.entries[0]?.id ?? null;
+      });
+
+      setEmbCatalog(embSnap);
+      setSelectedEmbId((curr) => {
+        if (curr && embSnap.entries.some((e) => e.id === curr)) return curr;
+        return embSnap.entries[0]?.id ?? null;
+      });
+    } catch (e) {
+      appendEvent(
+        `Catalogs load error: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }, [appendEvent]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [assets, dlSeg, dlEmb] = await Promise.all([
-          listAssetModels(),
-          listDownloadedModels(ModelCategory.Diarization).catch(() => []),
-          listDownloadedModels(ModelCategory.SpeakerEmbedding).catch(() => []),
-        ]);
+    reloadCatalogs().catch(() => {});
+  }, [reloadCatalogs]);
 
-        const segAsset = assets.find(
-          (m) =>
-            m.folder.includes('pyannote') ||
-            m.folder.includes('reverb') ||
-            m.folder.includes('segmentation')
-        );
-        const embAsset = assets.find(
-          (m) =>
-            m.folder.includes('eres2net') ||
-            m.folder.includes('wespeaker') ||
-            m.folder.includes('titanet') ||
-            m.folder.includes('3dspeaker')
-        );
-
-        const segFolder =
-          dlSeg[0]?.id ?? segAsset?.folder ?? DEFAULT_SEG_FOLDER;
-        const embFolder =
-          dlEmb[0]?.id ?? embAsset?.folder ?? DEFAULT_EMB_FOLDER;
-
-        const segFs = dlSeg.some((m) => m.id === segFolder)
-          ? getFileModelPath(segFolder, ModelCategory.Diarization)
-          : getAssetModelPath(segFolder);
-        const embFs = dlEmb.some((m) => m.id === embFolder)
-          ? getFileModelPath(embFolder, ModelCategory.SpeakerEmbedding)
-          : getAssetModelPath(embFolder);
-
-        if (!cancelled) {
-          setSegModelHint(segFolder);
-          setEmbModelHint(embFolder);
-          setSegSource(segFs);
-          setEmbSource(embFs);
-        }
-      } catch {
-        if (!cancelled) {
-          setSegSource(getAssetModelPath(DEFAULT_SEG_FOLDER));
-          setEmbSource(getAssetModelPath(DEFAULT_EMB_FOLDER));
-        }
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (
+        category === ModelCategory.Diarization ||
+        category === ModelCategory.SpeakerEmbedding
+      ) {
+        reloadCatalogs().catch(() => {});
       }
-    })();
+    });
+    return unsubscribe;
+  }, [reloadCatalogs]);
+
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      cancelled = true;
+      abortControllerRef.current?.abort();
       const eng = engineRef.current;
       engineRef.current = null;
-      eng?.destroy().catch(() => undefined);
+      eng?.destroy().catch(() => {});
     };
   }, []);
 
-  const pickAudio = useCallback(async () => {
+  // Initialize Diarization Engine
+  const initEngine = useCallback(async (): Promise<DiarizationEngine> => {
+    setError(null);
+    setEngineInitBusy(true);
     try {
-      const [result] = await DocumentPicker.pick({
-        type: DECODABLE_AUDIO_PICKER_TYPES,
-      });
-      if (result?.uri) {
-        setAudioPath(result.uri);
-        setStatus(`Selected: ${result.name ?? result.uri}`);
-        setSegments([]);
-      }
-    } catch (e) {
-      if (
-        (DocumentPicker as { isCancel?: (err: unknown) => boolean }).isCancel?.(
-          e
-        )
-      ) {
-        return;
-      }
-      setStatus(`Pick failed: ${String(e)}`);
-    }
-  }, []);
-
-  const runDiarize = useCallback(async () => {
-    if (!audioPath) {
-      setStatus('Pick an audio file first.');
-      return;
-    }
-    if (!segSource || !embSource) {
-      setStatus('Models not resolved yet.');
-      return;
-    }
-    setBusy(true);
-    setProgress(0);
-    setSegments([]);
-    let audioId: string | null = null;
-    let segOutId: string | null = null;
-    try {
-      setStatus('Loading models…');
-      const segDetectSrc = await toDetectSource(segSource);
-      const embDetectSrc = await toDetectSource(embSource);
-
-      const detect = await detectDiarizationModel(segDetectSrc);
-      if (!detect.success || !detect.paths?.model) {
-        throw new Error(detect.error ?? 'Segmentation model detect failed');
-      }
-
-      const embDetect = await detectSpeakerEmbeddingModel(embDetectSrc);
-      if (!embDetect.success || !embDetect.paths?.model) {
-        throw new Error(
-          embDetect.error ?? 'Speaker embedding model detect failed'
-        );
-      }
-
       if (engineRef.current) {
-        await engineRef.current.destroy();
+        await engineRef.current.destroy().catch(() => {});
         engineRef.current = null;
+        setEngineInfo(null);
+        setHasDiarizedOnce(false);
       }
+
+      let segSource: FileSource;
+      let embSource: FileSource;
+      let segLabel = '';
+      let embLabel = '';
+
+      if (initMode === 'auto') {
+        if (!segCatalog || !selectedSegId) {
+          throw new Error(
+            'No segmentation model selected. Please select or download a model.'
+          );
+        }
+        if (!embCatalog || !selectedEmbId) {
+          throw new Error(
+            'No speaker embedding model selected. Please select or download a model.'
+          );
+        }
+
+        segSource = getDiarizationSegmentationModelPathConfig(selectedSegId, {
+          padModelIds: segCatalog.padModelIds,
+          padModelsPath: segCatalog.padModelsPath,
+          bundledFolders: segCatalog.bundledFolders,
+          downloadedIds: new Set(segCatalog.downloadedIds),
+          downloadedPaths: segCatalog.downloadedPaths,
+        });
+        embSource = getSpeakerEmbeddingModelPathConfig(selectedEmbId, {
+          padModelIds: embCatalog.padModelIds,
+          padModelsPath: embCatalog.padModelsPath,
+          bundledFolders: embCatalog.bundledFolders,
+          downloadedIds: new Set(embCatalog.downloadedIds),
+          downloadedPaths: embCatalog.downloadedPaths,
+        });
+        segLabel = selectedSegId;
+        embLabel = selectedEmbId;
+      } else {
+        if (!customSegSource) {
+          throw new Error('Please select a custom segmentation model (.onnx).');
+        }
+        if (!customEmbSource) {
+          throw new Error(
+            'Please select a custom speaker embedding model (.onnx).'
+          );
+        }
+        segSource = customSegSource;
+        embSource = customEmbSource;
+        segLabel = 'Custom Seg';
+        embLabel = 'Custom Emb';
+      }
+
+      appendEvent(
+        `Initializing Diarization engine (${segLabel} + ${embLabel})...`
+      );
 
       const engine = await createDiarization({
         segmentation: {
-          modelSource: { kind: 'fs', path: detect.paths.model },
+          modelSource: segSource,
+          windowShiftRatio,
         },
         embedding: {
-          modelSource: { kind: 'fs', path: embDetect.paths.model },
+          modelSource: embSource,
         },
-        clustering: { threshold: 0.5 },
+        clustering: {
+          numClusters: numClusters > 0 ? numClusters : undefined,
+          threshold: clusteringThreshold,
+        },
+        minDurationOn,
+        minDurationOff,
       });
-      engineRef.current = engine;
 
-      setStatus('Decoding audio…');
-      const audio = await createOfflineAudioBufferFromFile(
-        toFileSource(audioPath)
+      engineRef.current = engine;
+      setEngineInfo({
+        sampleRate: 16000,
+        segId: segLabel,
+        embId: embLabel,
+        numClusters,
+        threshold: clusteringThreshold,
+      });
+      appendEvent('Diarization engine initialized successfully');
+      return engine;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      appendEvent(`Engine init error: ${msg}`);
+      throw e;
+    } finally {
+      setEngineInitBusy(false);
+    }
+  }, [
+    appendEvent,
+    clusteringThreshold,
+    customEmbSource,
+    customSegSource,
+    embCatalog,
+    initMode,
+    minDurationOff,
+    minDurationOn,
+    numClusters,
+    segCatalog,
+    selectedEmbId,
+    selectedSegId,
+    windowShiftRatio,
+  ]);
+
+  // Unload Engine
+  const unloadEngine = useCallback(async () => {
+    if (!engineRef.current) return;
+    try {
+      await engineRef.current.destroy().catch(() => {});
+    } finally {
+      engineRef.current = null;
+      setEngineInfo(null);
+      setHasDiarizedOnce(false);
+      appendEvent('Engine unloaded');
+    }
+  }, [appendEvent]);
+
+  // Run Diarization
+  const runDiarization = useCallback(async () => {
+    if (!offlineInputBuffer || diarizeBusy || reclusterBusy) return;
+    setDiarizeBusy(true);
+    setProgress(0);
+    setError(null);
+    setTurns([]);
+
+    const abortCtrl = new AbortController();
+    abortControllerRef.current = abortCtrl;
+    const startedAt = Date.now();
+
+    // Stop playback if audio is currently playing in widget
+    await offlineWidgetRef.current?.stopPlayback?.().catch(() => {});
+
+    let segOutId: string | null = null;
+    try {
+      let engine = engineRef.current;
+      if (!engine) {
+        engine = await initEngine();
+      }
+
+      appendEvent(
+        `Starting diarization on "${offlineInputBuffer.sourceLabel}"...`
       );
-      audioId = audio.bufferId;
 
       const segOut = await createEmptyOfflineSegmentBuffer({
-        sourceAudioBufferId: audio.bufferId,
+        sourceAudioBufferId: offlineInputBuffer.bufferId,
       });
       segOutId = segOut.bufferId;
 
-      setStatus('Diarizing…');
-      const result = await engine.diarize(audio.bufferId, segOut.bufferId, {
-        onProgress: (p) => setProgress(Math.round((p.fraction ?? 0) * 100)),
-      });
+      const res = await engine.diarize(
+        offlineInputBuffer.bufferId,
+        segOut.bufferId,
+        {
+          onProgress: (p) => {
+            setProgress(Math.round((p.fraction ?? 0) * 100));
+          },
+          signal: abortCtrl.signal,
+        }
+      );
 
+      const durMs = Date.now() - startedAt;
+      setProcessingTimeMs(durMs);
+      setProgress(100);
+
+      // Read segments from segOut
       const metas = await getOfflineSegmentBufferSegments(
         segOut.bufferId,
         0,
         4096
       );
-      setSegments(
-        metas.filter(
-          (m): m is DiarizationSegmentMeta => m.kind === 'diarization'
-        )
+      const diarMetas = metas.filter(
+        (m): m is DiarizationSegmentMeta => m.kind === 'diarization'
       );
-      setStatus(
-        `Done: ${result.numSpeakers} speakers, ${result.segmentCount} segments (${result.processingTimeMs} ms)`
+
+      const newTurns: SpeakerTurn[] = diarMetas.map((seg) => {
+        const speaker = seg.payload?.speaker ?? 0;
+        const startSec = seg.startSample / seg.sampleRate;
+        const endSec = seg.endSample / seg.sampleRate;
+        return {
+          id: seg.id,
+          speaker,
+          startSec,
+          endSec,
+          durationSec: endSec - startSec,
+          startSample: seg.startSample,
+          endSample: seg.endSample,
+        };
+      });
+
+      setTurns(newTurns);
+      setHasDiarizedOnce(true);
+      appendEvent(
+        `Diarization complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments`
       );
-      setProgress(100);
     } catch (e) {
-      setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      if (abortCtrl.signal.aborted) {
+        appendEvent('Diarization cancelled by user');
+        setError('Diarization cancelled');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(`Diarization failed: ${msg}`);
+        appendEvent(`Diarization error: ${msg}`);
+      }
     } finally {
-      if (audioId)
-        await releasePipelineAudioBuffer(audioId).catch(() => undefined);
-      if (segOutId)
-        await releasePipelineSegmentBuffer(segOutId).catch(() => undefined);
-      setBusy(false);
+      if (segOutId) {
+        await releasePipelineSegmentBuffer(segOutId).catch(() => {});
+      }
+      abortControllerRef.current = null;
+      setDiarizeBusy(false);
     }
-  }, [audioPath, embSource, segSource]);
+  }, [appendEvent, diarizeBusy, initEngine, offlineInputBuffer, reclusterBusy]);
+
+  // Cancel Diarization
+  const cancelDiarization = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      appendEvent('Cancelling diarization...');
+    }
+  }, [appendEvent]);
+
+  // Recluster (Instant without re-inference)
+  const reclusterEngine = useCallback(async () => {
+    if (!engineRef.current || reclusterBusy || diarizeBusy) return;
+    setReclusterBusy(true);
+    setError(null);
+    const startedAt = Date.now();
+    try {
+      appendEvent(
+        `Reclustering (threshold=${clusteringThreshold.toFixed(
+          2
+        )}, numClusters=${numClusters})...`
+      );
+      const res = await engineRef.current.recluster({
+        numClusters: numClusters > 0 ? numClusters : undefined,
+        threshold: clusteringThreshold,
+      });
+      const durMs = Date.now() - startedAt;
+      setProcessingTimeMs(durMs);
+
+      if (res.segments && res.segments.length > 0) {
+        const sampleRate = res.sampleRate || 16000;
+        const updatedTurns: SpeakerTurn[] = res.segments.map((s, idx) => ({
+          id: `recluster_${idx}`,
+          speaker: s.speaker,
+          startSec: s.start,
+          endSec: s.end,
+          durationSec: s.end - s.start,
+          startSample: Math.round(s.start * sampleRate),
+          endSample: Math.round(s.end * sampleRate),
+        }));
+        setTurns(updatedTurns);
+        appendEvent(
+          `Recluster complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments`
+        );
+      } else {
+        appendEvent(
+          `Recluster finished in ${durMs}ms (${res.numSpeakers} speakers)`
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Recluster failed: ${msg}`);
+      appendEvent(`Recluster error: ${msg}`);
+    } finally {
+      setReclusterBusy(false);
+    }
+  }, [
+    appendEvent,
+    clusteringThreshold,
+    diarizeBusy,
+    numClusters,
+    reclusterBusy,
+  ]);
+
+  // Speaker Analytics Computation
+  const {
+    totalSpeechTime,
+    speakerDurations,
+    speakerTurnCounts,
+    uniqueSpeakers,
+    dominantSpeaker,
+  } = useMemo(() => {
+    const durations: Record<number, number> = {};
+    const counts: Record<number, number> = {};
+    const spkSet = new Set<number>();
+
+    for (const t of turns) {
+      durations[t.speaker] = (durations[t.speaker] ?? 0) + t.durationSec;
+      counts[t.speaker] = (counts[t.speaker] ?? 0) + 1;
+      spkSet.add(t.speaker);
+    }
+
+    const totalSpeech = Object.values(durations).reduce((acc, d) => acc + d, 0);
+    const sortedSpeakers = Array.from(spkSet).sort((a, b) => a - b);
+
+    let dominant = -1;
+    let maxDur = 0;
+    for (const s of sortedSpeakers) {
+      const dur = durations[s] ?? 0;
+      if (dur > maxDur) {
+        maxDur = dur;
+        dominant = s;
+      }
+    }
+
+    return {
+      totalSpeechTime: totalSpeech,
+      speakerDurations: durations,
+      speakerTurnCounts: counts,
+      uniqueSpeakers: sortedSpeakers,
+      dominantSpeaker: dominant >= 0 ? dominant : null,
+    };
+  }, [turns]);
+
+  // Real-Time Factor (RTF)
+  const rtf = useMemo(() => {
+    const durSec = offlineInputBuffer?.durationSeconds ?? 0;
+    if (durSec <= 0 || processingTimeMs <= 0) return 0;
+    return processingTimeMs / 1000 / durSec;
+  }, [offlineInputBuffer, processingTimeMs]);
+
+  // Filtered turns
+  const filteredTurns = useMemo(() => {
+    if (speakerFilter === null) return turns;
+    return turns.filter((t) => t.speaker === speakerFilter);
+  }, [speakerFilter, turns]);
+
+  // Copy timeline to clipboard
+  const copyTimeline = useCallback(() => {
+    if (turns.length === 0) {
+      Alert.alert('No turns', 'There are no speaker turns to copy.');
+      return;
+    }
+    const text = turns
+      .map((t) => {
+        const alias = speakerAliases[t.speaker] ?? `Speaker ${t.speaker}`;
+        return `[${formatTime(t.startSec)} → ${formatTime(
+          t.endSec
+        )}] ${alias} (+${formatDuration(t.durationSec)})`;
+      })
+      .join('\n');
+    Clipboard.setString(text);
+    Alert.alert('Copied!', 'Timeline copied to clipboard.');
+  }, [speakerAliases, turns]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Speaker Diarization</Text>
-        <Text style={styles.hint}>
-          Segmentation: {segModelHint}
-          {'\n'}
-          Embedding: {embModelHint}
-        </Text>
-
-        <TouchableOpacity
-          style={styles.button}
-          onPress={pickAudio}
-          disabled={busy}
-        >
-          <Text style={styles.buttonText}>Pick audio</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, styles.primary]}
-          onPress={runDiarize}
-          disabled={busy || !audioPath}
-        >
-          <Text style={styles.buttonText}>{busy ? 'Running…' : 'Diarize'}</Text>
-        </TouchableOpacity>
-
-        {busy ? (
-          <View style={styles.progressRow}>
-            <ActivityIndicator />
-            <Text style={styles.progressText}>{progress}%</Text>
-          </View>
-        ) : null}
-
-        <Text style={styles.status}>{status}</Text>
-
-        {segments.length > 0 ? (
-          <View style={styles.table}>
-            <Text style={styles.tableHeader}># speaker time</Text>
-            {segments.map((s, i) => {
-              const start = (s.startSample / s.sampleRate).toFixed(2);
-              const end = (s.endSample / s.sampleRate).toFixed(2);
-              const speaker = s.payload?.speaker ?? '?';
-              return (
-                <Text key={s.id} style={styles.row}>
-                  {i}: speaker {speaker} {start}s – {end}s
-                </Text>
-              );
-            })}
-          </View>
-        ) : null}
-      </ScrollView>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
       <ScreenIntroModal screenId="Diarization" />
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Module 1: Model Selection & Advanced Tuning */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>1. Model Setup & Tuning</Text>
+              <Text style={styles.cardSubtitle}>
+                Pyannote / Reverb segmentation + WeSpeaker / 3D-Speaker
+                embeddings
+              </Text>
+            </View>
+          </View>
+
+          <InitModeSelector value={initMode} onChange={setInitMode} />
+
+          {initMode === 'auto' ? (
+            <View>
+              {/* 1a. Segmentation Model */}
+              <Text style={styles.sectionTitle}>
+                1a. Segmentation Model (Pyannote / Reverb)
+              </Text>
+              {segCatalog && segCatalog.entries.length === 0 ? (
+                <View style={styles.noModelsBanner}>
+                  <Text style={styles.noModelsText}>
+                    No segmentation models found on this device. Download a
+                    Pyannote segmentation model from the Download Showcase.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.downloadLinkButton}
+                    onPress={() => navigation.navigate('DownloadShowcase')}
+                  >
+                    <Ionicons
+                      name="download-outline"
+                      size={16}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.downloadLinkText}>
+                      Open Download Screen
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <ModelFolderGrid
+                  entries={segCatalog?.entries ?? []}
+                  selectedId={selectedSegId}
+                  initializedId={engineInfo?.segId ?? null}
+                  onSelect={setSelectedSegId}
+                  disabled={engineInitBusy || diarizeBusy}
+                />
+              )}
+
+              {/* 1b. Speaker Embedding Model */}
+              <Text style={styles.sectionTitle}>
+                1b. Speaker Embedding Model (WeSpeaker / 3D-Speaker)
+              </Text>
+              {embCatalog && embCatalog.entries.length === 0 ? (
+                <View style={styles.noModelsBanner}>
+                  <Text style={styles.noModelsText}>
+                    No speaker embedding models found on this device. Download a
+                    WeSpeaker or 3D-Speaker model from Download Showcase.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.downloadLinkButton}
+                    onPress={() => navigation.navigate('DownloadShowcase')}
+                  >
+                    <Ionicons
+                      name="download-outline"
+                      size={16}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.downloadLinkText}>
+                      Open Download Screen
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <ModelFolderGrid
+                  entries={embCatalog?.entries ?? []}
+                  selectedId={selectedEmbId}
+                  initializedId={engineInfo?.embId ?? null}
+                  onSelect={setSelectedEmbId}
+                  disabled={engineInitBusy || diarizeBusy}
+                />
+              )}
+            </View>
+          ) : (
+            <View style={styles.marginTop10}>
+              <FileSourceSlotPicker
+                label="Pyannote Segmentation Model (.onnx)"
+                value={customSegSource}
+                onChange={setCustomSegSource}
+                disabled={engineInitBusy || diarizeBusy}
+                required
+              />
+              <FileSourceSlotPicker
+                label="Speaker Embedding Model (.onnx)"
+                value={customEmbSource}
+                onChange={setCustomEmbSource}
+                disabled={engineInitBusy || diarizeBusy}
+                required
+              />
+            </View>
+          )}
+
+          {/* Collapsible Advanced Tuning */}
+          <TouchableOpacity
+            style={[styles.secondaryButton, styles.marginTop12]}
+            onPress={() => setTuningExpanded((v) => !v)}
+          >
+            <Ionicons
+              name={tuningExpanded ? 'chevron-up' : 'options-outline'}
+              size={18}
+              color="#374151"
+            />
+            <Text style={styles.secondaryButtonText}>
+              {tuningExpanded
+                ? 'Hide Diarization Tuning'
+                : 'Advanced Diarization Tuning'}
+            </Text>
+          </TouchableOpacity>
+
+          {tuningExpanded && (
+            <View style={styles.tuningSectionContent}>
+              {/* Clustering Threshold */}
+              <View style={styles.paramRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.paramLabel}>Clustering Threshold</Text>
+                  {numClusters > 0 && (
+                    <Text style={styles.cardSubtitle}>
+                      Ignored when cluster count is fixed
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setClusteringThreshold((v) =>
+                        Math.max(0.1, Math.round((v - 0.05) * 100) / 100)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {clusteringThreshold.toFixed(2)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setClusteringThreshold((v) =>
+                        Math.min(1.0, Math.round((v + 0.05) * 100) / 100)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Number of Clusters */}
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Fixed Number of Clusters</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() => setNumClusters((v) => Math.max(0, v - 1))}
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {numClusters === 0 ? 'Auto' : numClusters}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() => setNumClusters((v) => Math.min(8, v + 1))}
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Min Duration On */}
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Min Speech Turn Duration</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setMinDurationOn((v) =>
+                        Math.max(0.0, Math.round((v - 0.1) * 10) / 10)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {minDurationOn.toFixed(1)}s
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setMinDurationOn((v) =>
+                        Math.min(2.0, Math.round((v + 0.1) * 10) / 10)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Max Gap to Merge (Min Duration Off) */}
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Max Gap to Merge Turns</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setMinDurationOff((v) =>
+                        Math.max(0.0, Math.round((v - 0.1) * 10) / 10)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {minDurationOff.toFixed(1)}s
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setMinDurationOff((v) =>
+                        Math.min(2.0, Math.round((v + 0.1) * 10) / 10)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Window Shift Ratio */}
+              <View style={styles.paramRow}>
+                <Text style={styles.paramLabel}>Sliding Window Hop Ratio</Text>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setWindowShiftRatio((v) =>
+                        Math.max(0.05, Math.round((v - 0.05) * 100) / 100)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>
+                      {windowShiftRatio.toFixed(2)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() =>
+                      setWindowShiftRatio((v) =>
+                        Math.min(0.5, Math.round((v + 0.05) * 100) / 100)
+                      )
+                    }
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Engine Action Controls */}
+          <View style={styles.actionControlRow}>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                styles.flex1,
+                engineInitBusy && styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                initEngine().catch(() => {});
+              }}
+              disabled={engineInitBusy || diarizeBusy}
+            >
+              {engineInitBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons
+                  name="hardware-chip-outline"
+                  size={18}
+                  color="#FFFFFF"
+                />
+              )}
+              <Text style={styles.buttonText}>
+                {engineInfo ? 'Re-Initialize Engine' : 'Initialize Engine'}
+              </Text>
+            </TouchableOpacity>
+
+            {engineInfo && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  unloadEngine().catch(() => {});
+                }}
+                disabled={engineInitBusy || diarizeBusy}
+              >
+                <Ionicons
+                  name="close-circle-outline"
+                  size={18}
+                  color="#374151"
+                />
+                <Text style={styles.secondaryButtonText}>Unload</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Engine Metadata Badges */}
+          {engineInfo && (
+            <View style={styles.metaGrid}>
+              <View style={styles.metaBadge}>
+                <Text style={styles.metaBadgeLabel}>Sample Rate</Text>
+                <Text style={styles.metaBadgeValue}>
+                  {engineInfo.sampleRate} Hz
+                </Text>
+              </View>
+              <View style={styles.metaBadge}>
+                <Text style={styles.metaBadgeLabel}>Clustering Mode</Text>
+                <Text style={styles.metaBadgeValue}>
+                  {engineInfo.numClusters > 0
+                    ? `${engineInfo.numClusters} clusters (fixed)`
+                    : `Threshold ${engineInfo.threshold.toFixed(2)}`}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Module 2: Audio Ingress & Diarization Execution */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>
+                2. Audio Ingress & Diarization
+              </Text>
+              <Text style={styles.cardSubtitle}>
+                Select multi-speaker audio or pick custom file, then run
+                diarization
+              </Text>
+            </View>
+          </View>
+
+          <OfflineAudioBufferWidget
+            ref={offlineWidgetRef}
+            audioFiles={DIARIZATION_AUDIO_FILES}
+            decodeTargetSampleRateHz={engineInfo?.sampleRate ?? 16000}
+            disabled={diarizeBusy || reclusterBusy}
+            visible={true}
+            onBufferReady={(info) => {
+              setOfflineInputBuffer(info);
+              const durText =
+                info.durationSeconds != null
+                  ? ` (${info.durationSeconds.toFixed(2)}s)`
+                  : '';
+              appendEvent(`Audio buffer ready: ${info.sourceLabel}${durText}`);
+            }}
+            onBufferReleased={() => {
+              setOfflineInputBuffer(null);
+              setTurns([]);
+              appendEvent('Audio buffer released');
+            }}
+          />
+
+          {/* Diarization Execution Actions */}
+          <View style={styles.actionControlRow}>
+            {diarizeBusy ? (
+              <TouchableOpacity
+                style={[styles.dangerButton, styles.flex1]}
+                onPress={cancelDiarization}
+              >
+                <Ionicons
+                  name="stop-circle-outline"
+                  size={18}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.buttonText}>Cancel Diarization</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.flex1,
+                  !offlineInputBuffer && styles.buttonDisabled,
+                ]}
+                onPress={() => {
+                  runDiarization().catch(() => {});
+                }}
+                disabled={!offlineInputBuffer || reclusterBusy}
+              >
+                <Ionicons name="people-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.buttonText}>
+                  {offlineInputBuffer
+                    ? 'Run Diarization'
+                    : 'Select Audio First'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Instant Recluster Button */}
+            <TouchableOpacity
+              style={[
+                styles.accentButton,
+                (!hasDiarizedOnce || diarizeBusy || reclusterBusy) &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                reclusterEngine().catch(() => {});
+              }}
+              disabled={!hasDiarizedOnce || diarizeBusy || reclusterBusy}
+            >
+              {reclusterBusy ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="git-branch-outline" size={18} color="#FFFFFF" />
+              )}
+              <Text style={styles.buttonText}>Recluster (Instant)</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Diarization Progress Bar */}
+          {diarizeBusy && (
+            <View style={styles.progressContainer}>
+              <View style={styles.progressLabelRow}>
+                <Text style={styles.progressLabel}>
+                  Diarizing audio frames…
+                </Text>
+                <Text style={styles.progressPercent}>{progress}%</Text>
+              </View>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[styles.progressFill, { width: `${progress}%` }]}
+                />
+              </View>
+            </View>
+          )}
+
+          {error && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Module 3: Speaker Airtime & Timeline Analytics */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>
+                3. Speaker Airtime & Analytics
+              </Text>
+              <Text style={styles.cardSubtitle}>
+                Airtime distribution, turn counts, dominant speaker, and RTF
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.copyButtonRow}
+              onPress={copyTimeline}
+            >
+              <Ionicons name="copy-outline" size={16} color="#0F62FE" />
+              <Text style={styles.copyButtonText}>Copy Timeline</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Proportional Stacked Airtime Bar */}
+          <View style={styles.airtimeBar}>
+            {totalSpeechTime > 0 ? (
+              uniqueSpeakers.map((spk) => {
+                const dur = speakerDurations[spk] ?? 0;
+                const flex = Math.max(0.001, dur / totalSpeechTime);
+                return (
+                  <View
+                    key={spk}
+                    style={[
+                      styles.airtimeSegment,
+                      {
+                        flex,
+                        backgroundColor: getSpeakerColor(spk),
+                      },
+                    ]}
+                  />
+                );
+              })
+            ) : (
+              <View style={styles.airtimeEmptyBar} />
+            )}
+          </View>
+
+          {/* Active Speakers HUD & Aliases */}
+          {uniqueSpeakers.length > 0 ? (
+            <View style={styles.speakerGrid}>
+              {uniqueSpeakers.map((spk) => {
+                const dur = speakerDurations[spk] ?? 0;
+                const pct =
+                  totalSpeechTime > 0
+                    ? ((dur / totalSpeechTime) * 100).toFixed(1)
+                    : '0';
+                const count = speakerTurnCounts[spk] ?? 0;
+                return (
+                  <View
+                    key={spk}
+                    style={[
+                      styles.speakerCard,
+                      { backgroundColor: getSpeakerBgColor(spk) },
+                    ]}
+                  >
+                    <View style={styles.speakerCardTop}>
+                      <View
+                        style={[
+                          styles.speakerBadge,
+                          { backgroundColor: getSpeakerColor(spk) },
+                        ]}
+                      >
+                        <Text style={styles.speakerBadgeText}>{spk}</Text>
+                      </View>
+                      <Text style={styles.speakerStatValue}>{pct}%</Text>
+                    </View>
+
+                    <TextInput
+                      style={styles.speakerAliasInput}
+                      value={speakerAliases[spk] ?? `Speaker ${spk}`}
+                      onChangeText={(val) =>
+                        setSpeakerAliases((prev) => ({
+                          ...prev,
+                          [spk]: val,
+                        }))
+                      }
+                      placeholder={`Speaker ${spk}`}
+                      placeholderTextColor="#9CA3AF"
+                    />
+
+                    <View style={styles.speakerStatsRow}>
+                      <Text style={styles.speakerStatLabel}>Airtime</Text>
+                      <Text style={styles.speakerStatValue}>
+                        {formatDuration(dur)}
+                      </Text>
+                    </View>
+                    <View style={styles.speakerStatsRow}>
+                      <Text style={styles.speakerStatLabel}>Turns</Text>
+                      <Text style={styles.speakerStatValue}>{count}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={styles.emptyNotice}>
+              <Text style={styles.emptyNoticeText}>
+                No speaker clusters detected yet. Run diarization to identify
+                speakers.
+              </Text>
+            </View>
+          )}
+
+          {/* 4-Card Analytics Grid */}
+          <View style={styles.analyticsGrid}>
+            <View style={styles.statBox}>
+              <Text style={styles.statBoxLabel}>Total Speech</Text>
+              <Text style={styles.statBoxValue}>
+                {formatDuration(totalSpeechTime)}
+              </Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statBoxLabel}>Turns Count</Text>
+              <Text style={styles.statBoxValue}>{turns.length}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statBoxLabel}>Dominant Speaker</Text>
+              <Text style={styles.statBoxValue}>
+                {dominantSpeaker !== null
+                  ? speakerAliases[dominantSpeaker] ??
+                    `Speaker ${dominantSpeaker}`
+                  : '—'}
+              </Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statBoxLabel}>Processing / RTF</Text>
+              <Text style={styles.statBoxValue}>
+                {processingTimeMs > 0
+                  ? `${processingTimeMs}ms (${rtf.toFixed(2)}x)`
+                  : '—'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Chronological Turn Timeline with Filters */}
+          <Text style={styles.sectionTitle}>Turn Timeline</Text>
+          <View style={styles.timelineFilterRow}>
+            <TouchableOpacity
+              style={[
+                styles.toggleChip,
+                speakerFilter === null && styles.toggleChipActive,
+              ]}
+              onPress={() => setSpeakerFilter(null)}
+            >
+              <Text
+                style={[
+                  styles.toggleChipText,
+                  speakerFilter === null && styles.toggleChipTextActive,
+                ]}
+              >
+                All ({turns.length})
+              </Text>
+            </TouchableOpacity>
+
+            {uniqueSpeakers.map((spk) => (
+              <TouchableOpacity
+                key={spk}
+                style={[
+                  styles.toggleChip,
+                  speakerFilter === spk && {
+                    backgroundColor: getSpeakerColor(spk),
+                    borderColor: getSpeakerColor(spk),
+                  },
+                ]}
+                onPress={() =>
+                  setSpeakerFilter((curr) => (curr === spk ? null : spk))
+                }
+              >
+                <Text
+                  style={[
+                    styles.toggleChipText,
+                    speakerFilter === spk && styles.toggleChipTextActive,
+                  ]}
+                >
+                  {speakerAliases[spk] ?? `Speaker ${spk}`} (
+                  {speakerTurnCounts[spk] ?? 0})
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {filteredTurns.length > 0 ? (
+            <ScrollView
+              style={styles.timelineList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={true}
+            >
+              {filteredTurns.map((turn) => {
+                const spkColor = getSpeakerColor(turn.speaker);
+                const alias =
+                  speakerAliases[turn.speaker] ?? `Speaker ${turn.speaker}`;
+                return (
+                  <View
+                    key={turn.id}
+                    style={[styles.timelineItem, { borderLeftColor: spkColor }]}
+                  >
+                    <View
+                      style={[
+                        styles.timelineSpeakerTag,
+                        { backgroundColor: spkColor },
+                      ]}
+                    >
+                      <Text style={styles.timelineSpeakerTagText}>{alias}</Text>
+                    </View>
+
+                    <View style={styles.timelineTimeInfo}>
+                      <Text style={styles.timelineTimeRange}>
+                        {formatTime(turn.startSec)} → {formatTime(turn.endSec)}
+                      </Text>
+                      <Text style={styles.timelineSampleRange}>
+                        #{turn.startSample} - #{turn.endSample}
+                      </Text>
+                    </View>
+
+                    <View style={styles.timelineDurationBadge}>
+                      <Text style={styles.timelineDurationText}>
+                        +{formatDuration(turn.durationSec)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <View style={styles.emptyNotice}>
+              <Text style={styles.emptyNoticeText}>
+                {turns.length === 0
+                  ? 'No speaker turns available. Run diarization to analyze the audio.'
+                  : 'No turns match the selected speaker filter.'}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Module 4: Diagnostics & Event Log */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>4. Diagnostics & Log</Text>
+              <Text style={styles.cardSubtitle}>
+                State transitions, clustering timing, and audio metadata
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setDiagnosticsExpanded((v) => !v)}
+            >
+              <Ionicons
+                name={diagnosticsExpanded ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color="#374151"
+              />
+              <Text style={styles.secondaryButtonText}>
+                {diagnosticsExpanded ? 'Collapse' : 'Expand'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.statusBox}>
+            <Text style={styles.statusText}>
+              Engine: {engineInfo ? 'INITIALIZED' : 'IDLE'}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Seg Model: {engineInfo?.segId ?? 'None'}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Emb Model: {engineInfo?.embId ?? 'None'}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Clustering:{' '}
+              {numClusters > 0
+                ? `${numClusters} clusters (fixed)`
+                : `Threshold ${clusteringThreshold.toFixed(2)}`}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Audio:{' '}
+              {offlineInputBuffer
+                ? `${offlineInputBuffer.sourceLabel}${
+                    offlineInputBuffer.durationSeconds != null
+                      ? ` (${offlineInputBuffer.durationSeconds.toFixed(2)}s`
+                      : ''
+                  }${
+                    offlineInputBuffer.sampleRate != null
+                      ? `, ${offlineInputBuffer.sampleRate}Hz)`
+                      : offlineInputBuffer.durationSeconds != null
+                      ? ')'
+                      : ''
+                  }`
+                : 'None'}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Speakers Discovered: {uniqueSpeakers.length}
+            </Text>
+            <Text style={styles.statusDimText}>Turns: {turns.length}</Text>
+            {processingTimeMs > 0 && (
+              <Text style={styles.statusText}>
+                Last Diarization: {processingTimeMs}ms (RTF: {rtf.toFixed(2)}x)
+              </Text>
+            )}
+          </View>
+
+          {diagnosticsExpanded && (
+            <View>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.sectionTitle, styles.eventsHeaderLabel]}>
+                  Recent Events
+                </Text>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => setEvents([])}
+                >
+                  <Text style={styles.secondaryButtonText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.eventLogContainer}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={true}
+              >
+                {events.length > 0 ? (
+                  events.map((ev) => (
+                    <Text key={ev.id} style={styles.statusDimText}>
+                      [{ev.time}] {ev.message}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.emptyNoticeText}>
+                    No events logged yet.
+                  </Text>
+                )}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F2F7' },
-  content: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: '700', marginBottom: 8 },
-  hint: { fontSize: 13, color: '#8E8E93', marginBottom: 16, lineHeight: 18 },
-  button: {
-    backgroundColor: '#3A3A3C',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  primary: { backgroundColor: '#007AFF' },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginVertical: 8,
-  },
-  progressText: { fontSize: 14, color: '#3A3A3C' },
-  status: { marginTop: 12, fontSize: 14, color: '#3A3A3C', lineHeight: 20 },
-  table: {
-    marginTop: 16,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 12,
-  },
-  tableHeader: {
-    fontFamily: 'Courier',
-    fontSize: 12,
-    color: '#8E8E93',
-    marginBottom: 8,
-  },
-  row: { fontFamily: 'Courier', fontSize: 13, marginBottom: 4, color: '#000' },
-});
