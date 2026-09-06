@@ -260,6 +260,11 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
     pp_cfg.frame_duration = 0.08f;
     post_processor_ = std::make_unique<SortformerPostProcessor>(pp_cfg);
 
+    const int32_t feed_frames =
+        (info_.chunk_len + info_.right_context) * info_.subsampling;
+    mel_scratch_.reserve(static_cast<size_t>(feed_frames * info_.feature_dim));
+    chunk_preds_scratch_.reserve(static_cast<size_t>(info_.chunk_len * info_.max_speakers));
+
     Reset();
     return Status::Ok();
   } catch (const std::exception& e) {
@@ -567,12 +572,9 @@ Status SortformerStreamingModel::StreamingUpdate(const float* chunk_feat,
                            chunk_preds_src + static_cast<size_t>(keep * num_spk));
     out_chunk_len = keep;
 
-    // Extract chunk embeddings: frames [0 .. keep]
-    std::vector<float> chunk_embs(embs_data,
-                                  embs_data + static_cast<size_t>(keep * emb_dim));
-
-    // Append chunk embeddings to FIFO
-    fifo_.insert(fifo_.end(), chunk_embs.begin(), chunk_embs.end());
+    // Append chunk embeddings directly to FIFO
+    fifo_.insert(fifo_.end(), embs_data,
+                 embs_data + static_cast<size_t>(keep * emb_dim));
     fifo_len_curr_ += keep;
 
     // Update FIFO predictions
@@ -594,15 +596,15 @@ Status SortformerStreamingModel::StreamingUpdate(const float* chunk_feat,
                              std::max(0, valid_frames - info_.fifo_len) + old_fifo_len);
       pop_out_len = std::min(pop_out_len, fifo_len_curr_);
 
-      // Extract popped embeddings and predictions
-      std::vector<float> pop_embs(
-          fifo_.begin(), fifo_.begin() + static_cast<size_t>(pop_out_len * emb_dim));
-      std::vector<float> pop_preds(
-          fifo_preds_.begin(),
-          fifo_preds_.begin() + static_cast<size_t>(pop_out_len * num_spk));
+      // Update silence profile directly from popped region
+      UpdateSilenceProfile(fifo_.data(), fifo_preds_.data(), pop_out_len);
 
-      // Update silence profile
-      UpdateSilenceProfile(pop_embs.data(), pop_preds.data(), pop_out_len);
+      // Append popped frames directly to spkcache
+      spkcache_.insert(spkcache_.end(), fifo_.begin(),
+                       fifo_.begin() + static_cast<size_t>(pop_out_len * emb_dim));
+      spkcache_preds_.insert(spkcache_preds_.end(), fifo_preds_.begin(),
+                             fifo_preds_.begin() + static_cast<size_t>(pop_out_len * num_spk));
+      spkcache_len_curr_ += pop_out_len;
 
       // Remove popped frames from FIFO
       fifo_.erase(fifo_.begin(),
@@ -611,12 +613,6 @@ Status SortformerStreamingModel::StreamingUpdate(const float* chunk_feat,
           fifo_preds_.begin(),
           fifo_preds_.begin() + static_cast<size_t>(pop_out_len * num_spk));
       fifo_len_curr_ -= pop_out_len;
-
-      // Append popped frames to spkcache
-      spkcache_.insert(spkcache_.end(), pop_embs.begin(), pop_embs.end());
-      spkcache_preds_.insert(spkcache_preds_.end(), pop_preds.begin(),
-                             pop_preds.end());
-      spkcache_len_curr_ += pop_out_len;
 
       // Check spkcache overflow
       if (spkcache_len_curr_ > info_.spkcache_len) {
@@ -641,9 +637,8 @@ Status SortformerStreamingModel::ProcessWindow(
   const int32_t feed_size =
       (info_.chunk_len + info_.right_context) * info_.subsampling; // 1000 mel frames
 
-  std::vector<float> mel_feat;
   int32_t total_mel_frames = 0;
-  fbank_->ComputeMel(window, num_samples, mel_feat, total_mel_frames);
+  fbank_->ComputeMel(window, num_samples, mel_scratch_, total_mel_frames);
 
   if (total_mel_frames < feed_size) {
     return Status::Fail(kErrInvalidArgument,
@@ -651,19 +646,18 @@ Status SortformerStreamingModel::ProcessWindow(
   }
 
   // Sliced to feed_size
-  const float* chunk_feat = mel_feat.data();
+  const float* chunk_feat = mel_scratch_.data();
   const int32_t current_len = feed_size;
 
-  std::vector<float> chunk_preds;
   int32_t chunk_len = 0;
-  Status st = StreamingUpdate(chunk_feat, current_len, chunk_preds, chunk_len);
+  Status st = StreamingUpdate(chunk_feat, current_len, chunk_preds_scratch_, chunk_len);
   if (!st.ok) {
     return st;
   }
 
   // Post process (median filter + binarize)
   const int64_t max_sample_bound = sample_offset + info_.StrideSamples();
-  post_processor_->Process(chunk_preds.data(), chunk_len, info_.max_speakers,
+  post_processor_->Process(chunk_preds_scratch_.data(), chunk_len, info_.max_speakers,
                            sample_offset, max_sample_bound, out_segments);
 
   return Status::Ok();
@@ -688,22 +682,20 @@ Status SortformerStreamingModel::Flush(
   const int32_t feed_size =
       (info_.chunk_len + info_.right_context) * info_.subsampling;
 
-  std::vector<float> mel_feat;
   int32_t total_mel_frames = 0;
-  fbank_->ComputeMel(padded_audio.data(), feed_samples, mel_feat, total_mel_frames);
+  fbank_->ComputeMel(padded_audio.data(), feed_samples, mel_scratch_, total_mel_frames);
 
-  const float* chunk_feat = mel_feat.data();
+  const float* chunk_feat = mel_scratch_.data();
   const int32_t current_len = feed_size;
 
-  std::vector<float> chunk_preds;
   int32_t chunk_len = 0;
-  Status st = StreamingUpdate(chunk_feat, current_len, chunk_preds, chunk_len);
+  Status st = StreamingUpdate(chunk_feat, current_len, chunk_preds_scratch_, chunk_len);
   if (!st.ok) {
     return st;
   }
 
   const int64_t max_sample_bound = sample_offset + static_cast<int64_t>(num_samples);
-  post_processor_->Process(chunk_preds.data(), chunk_len, info_.max_speakers,
+  post_processor_->Process(chunk_preds_scratch_.data(), chunk_len, info_.max_speakers,
                            sample_offset, max_sample_bound, out_segments);
 
   return Status::Ok();

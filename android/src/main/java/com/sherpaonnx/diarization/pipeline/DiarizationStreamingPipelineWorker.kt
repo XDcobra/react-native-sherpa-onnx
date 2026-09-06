@@ -127,19 +127,25 @@ class DiarizationStreamingPipelineWorker(
   @Suppress("UNCHECKED_CAST")
   private fun handleSegments(result: HashMap<String, Any>) {
     val segments = result["segments"] as? ArrayList<HashMap<String, Any>> ?: return
+    val sampleRate = inputEntry.sampleRate
     for (seg in segments) {
       val start = (seg["start"] as? Number)?.toDouble() ?: continue
       val end = (seg["end"] as? Number)?.toDouble() ?: continue
       val speaker = (seg["speaker"] as? Number)?.toInt() ?: 0
 
+      val startSample = (start * sampleRate).toInt().coerceAtLeast(0)
+      val endSample = (end * sampleRate).toInt().coerceAtLeast(startSample)
+      val durationMs = if (sampleRate > 0) (((endSample - startSample) * 1000) / sampleRate) else 0
+
       outputEntry.appendSegment(
-        start = start,
-        end = end,
-        label = "diarization",
-        payload = mapOf(
-          "source" to "diarization",
-          "speaker" to speaker,
-        )
+        kind = "diarization",
+        sourceAudioBufferId = inputEntry.bufferId,
+        startSample = startSample,
+        endSample = endSample,
+        sampleRate = sampleRate,
+        durationMs = durationMs,
+        confidence = null,
+        payloadJson = """{"source":"diarization","speaker":$speaker}""",
       )
       segmentCount++
       unitsWritten++
@@ -175,14 +181,16 @@ class DiarizationStreamingPipelineWorker(
     lock.withLock { dataAvailable.signal() }
   }
 
+  override fun release() {
+    stop()
+  }
+
   override fun getStatus(): StreamingPipelineStatus {
     return StreamingPipelineStatus(
-      pipelineId = pipelineId,
       isRunning = isRunning,
       chunksProcessed = chunksProcessed,
       unitsRead = unitsRead,
       unitsWritten = unitsWritten,
-      queueDepth = queueDepth.get(),
       error = error,
     )
   }

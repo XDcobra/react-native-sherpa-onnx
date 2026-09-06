@@ -728,7 +728,9 @@ internal class SherpaOnnxDiarizationHelper(
       )
       workerRef = worker
 
-      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker)
+      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+      }
       val map = Arguments.createMap()
       map.putString("pipelineId", pipelineId)
       promise.resolve(map)
@@ -761,7 +763,8 @@ internal class SherpaOnnxDiarizationHelper(
 
     executor.execute {
       try {
-        val result = nativeFeedStreamingDiarization(instanceId, inEntry.samples)
+        val inputSamples = inEntry.readAllSamples()
+        val result = nativeFeedStreamingDiarization(instanceId, inputSamples)
         if (result == null) {
           promise.reject(DiarizationErrorCodes.DIARIZATION_ERROR, "Feed returned null")
           return@execute
@@ -823,6 +826,30 @@ internal class SherpaOnnxDiarizationHelper(
           e,
         )
       }
+    }
+  }
+
+  private fun emitPipelineCompletedEvent(completion: com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion) {
+    if (!context.hasActiveReactInstance()) return
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
+      // JS bridge might already be shutting down.
     }
   }
 

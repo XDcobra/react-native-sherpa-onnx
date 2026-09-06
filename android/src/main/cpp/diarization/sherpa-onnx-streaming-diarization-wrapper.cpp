@@ -108,6 +108,10 @@ StreamingDiarizationInitResult StreamingDiarizationWrapper::initialize(
   result.strideSamples = info.StrideSamples();
   result.latencySeconds = info.LatencySeconds();
 
+  audio_buffer_.clear();
+  audio_buffer_.reserve(
+      static_cast<size_t>(result.feedSamples + result.strideSamples + 16384));
+
   diarizer_ = std::move(model);
   return result;
 }

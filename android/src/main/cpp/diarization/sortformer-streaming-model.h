@@ -87,6 +87,10 @@ class SortformerStreamingModel : public IStreamingDiarizer {
   std::vector<float> mean_sil_emb_;
   int32_t n_sil_frames_ = 0;
 
+  // Reusable scratch buffers for zero-allocation inference
+  std::vector<float> mel_scratch_;
+  std::vector<float> chunk_preds_scratch_;
+
   // Internal helpers
   Status LoadMetadata(const std::string& model_path,
                       const std::string& metadata_path);

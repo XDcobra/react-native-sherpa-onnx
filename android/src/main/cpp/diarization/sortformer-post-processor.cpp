@@ -27,7 +27,14 @@ void SortformerPostProcessor::ApplyMedianFilter(const float* preds,
   }
 
   const int32_t half = window / 2;
-  std::vector<float> win_buf(static_cast<size_t>(window));
+  constexpr int32_t kMaxStackWindow = 64;
+  std::array<float, kMaxStackWindow> stack_buf{};
+  std::vector<float> heap_buf;
+  float* win_ptr = stack_buf.data();
+  if (window > kMaxStackWindow) {
+    heap_buf.resize(static_cast<size_t>(window));
+    win_ptr = heap_buf.data();
+  }
 
   for (int32_t spk = 0; spk < num_speakers; ++spk) {
     for (int32_t t = 0; t < num_frames; ++t) {
@@ -36,15 +43,14 @@ void SortformerPostProcessor::ApplyMedianFilter(const float* preds,
       int32_t count = end_t - start_t;
 
       for (int32_t i = 0; i < count; ++i) {
-        win_buf[static_cast<size_t>(i)] =
+        win_ptr[i] =
             preds[static_cast<size_t>((start_t + i) * num_speakers + spk)];
       }
 
       // Quick median via nth_element
-      auto mid_it = win_buf.begin() + count / 2;
-      std::nth_element(win_buf.begin(), mid_it, win_buf.begin() + count);
+      std::nth_element(win_ptr, win_ptr + count / 2, win_ptr + count);
 
-      out_filtered[static_cast<size_t>(t * num_speakers + spk)] = *mid_it;
+      out_filtered[static_cast<size_t>(t * num_speakers + spk)] = win_ptr[count / 2];
     }
   }
 }
