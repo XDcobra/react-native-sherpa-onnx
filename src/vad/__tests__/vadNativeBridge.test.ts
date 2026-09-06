@@ -17,6 +17,7 @@ describe('vadNativeBridge', () => {
       modelType: 'silero_vad',
       sampleRate: 16000,
       runtimeOptions: { sileroVad: { scoreThreshold: 0.5 } },
+      quantization: 'int8',
     });
     expect(bridge).toEqual({
       initMode: 'auto',
@@ -24,6 +25,7 @@ describe('vadNativeBridge', () => {
       modelType: 'silero_vad',
       sampleRate: 16000,
       threshold: 0.5,
+      quantization: 'int8',
     });
   });
 

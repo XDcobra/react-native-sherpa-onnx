@@ -186,30 +186,44 @@ describe('createDiarization', () => {
     expect(native.cancelDiarization).toBeDefined();
   });
 
-  it('resolves model directory FileSource to detected onnx model files', async () => {
+  it('resolves model directory FileSource to detected onnx model files with quantization', async () => {
     native.detectDiarizationModel.mockResolvedValue({
       success: true,
-      paths: { model: '/models/seg-dir/model.onnx' },
+      paths: { model: '/models/seg-dir/model.int8.onnx' },
     });
     native.detectSpeakerEmbeddingModel.mockResolvedValue({
       success: true,
-      paths: { model: '/models/emb-dir/3dspeaker.onnx' },
+      paths: { model: '/models/emb-dir/3dspeaker.fp16.onnx' },
     });
 
     await createDiarization({
       segmentation: {
         modelSource: { kind: 'fs', path: '/models/seg-dir' },
+        quantization: 'int8',
       },
       embedding: {
         modelSource: { kind: 'fs', path: '/models/emb-dir' },
+        quantization: 'fp16',
       },
     });
 
+    expect(native.detectDiarizationModel).toHaveBeenCalledWith(
+      '/models/diarization',
+      'sherpa-onnx-pyannote-segmentation-3-0',
+      null,
+      'int8'
+    );
+    expect(native.detectSpeakerEmbeddingModel).toHaveBeenCalledWith(
+      '/models/diarization',
+      'sherpa-onnx-pyannote-segmentation-3-0',
+      null,
+      'fp16'
+    );
     expect(native.initializeDiarization).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        segmentationModel: '/models/seg-dir/model.onnx',
-        embeddingModel: '/models/emb-dir/3dspeaker.onnx',
+        segmentationModel: '/models/seg-dir/model.int8.onnx',
+        embeddingModel: '/models/emb-dir/3dspeaker.fp16.onnx',
       })
     );
   });

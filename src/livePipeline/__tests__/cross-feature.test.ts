@@ -345,7 +345,7 @@ describe('Cross-Feature Live Overload Parity (X-1 to X-4)', () => {
       );
       expect(native.detachSegmentationEngine).toHaveBeenCalledWith(
         `eng_${name}`,
-        undefined
+        name === 'Enhancement' || name === 'Separation' ? true : undefined
       );
     }
   });

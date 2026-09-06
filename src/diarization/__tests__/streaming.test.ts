@@ -234,4 +234,40 @@ describe('createStreamingDiarization', () => {
     const flushed = await engine.flush();
     expect(flushed).toEqual([{ start: 1.5, end: 2.0, speaker: 1 }]);
   });
+
+  it('detects model and forwards quantization in auto mode', async () => {
+    (SherpaOnnx.detectDiarizationModel as jest.Mock).mockResolvedValue({
+      ok: true,
+      selectedKind: 2,
+      isStreaming: true,
+      paths: {
+        model: '/models/sortformer/model.int8.onnx',
+        metadata: '/models/sortformer/metadata.json',
+      },
+      quantization: 'int8',
+    });
+    (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      sampleRate: 16000,
+    });
+
+    await createStreamingDiarization({
+      modelSource: { kind: 'fs', path: '/models/sortformer' },
+      quantization: 'int8',
+    });
+
+    expect(SherpaOnnx.detectDiarizationModel).toHaveBeenCalledWith(
+      '/models/sortformer',
+      'sortformer-streaming',
+      'auto',
+      'int8'
+    );
+    expect(SherpaOnnx.initializeStreamingDiarization).toHaveBeenCalledWith(
+      expect.stringMatching(/^diar_stream_/),
+      expect.objectContaining({
+        model: '/models/sortformer/model.int8.onnx',
+        metadata: '/models/sortformer/metadata.json',
+      })
+    );
+  });
 });

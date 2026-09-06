@@ -44,7 +44,7 @@ describe('resolveAlignmentOnnxPath', () => {
     });
     expect(path).toBe('/models/alignment/model.onnx');
     expect(mockResolveInit).toHaveBeenCalledWith(fsPath('/models/alignment'));
-    expect(mockDetect).toHaveBeenCalledWith('/models/alignment', 'auto');
+    expect(mockDetect).toHaveBeenCalledWith('/models/alignment', 'auto', null);
     expect(mockResolveCustom).not.toHaveBeenCalled();
   });
 

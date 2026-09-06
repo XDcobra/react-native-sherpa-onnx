@@ -38,7 +38,7 @@ describe('sttNativeBridge', () => {
     const bridge = await buildSttInitBridgeOptions({
       modelSource: { kind: 'fs', path: '/models/whisper' },
       modelType: 'whisper',
-      preferInt8: true,
+      quantization: 'int8',
       debug: true,
       modelOptions: { whisper: { language: 'en', task: 'transcribe' } },
     });
@@ -46,7 +46,7 @@ describe('sttNativeBridge', () => {
       initMode: 'auto',
       modelDir: '/models/whisper',
       modelType: 'whisper',
-      preferInt8: true,
+      quantization: 'int8',
       debug: true,
       modelOptions: { whisper: { language: 'en', task: 'transcribe' } },
     });
