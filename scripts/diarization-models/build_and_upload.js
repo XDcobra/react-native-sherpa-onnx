@@ -418,33 +418,6 @@ function resolveToken() {
   return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 }
 
-function createRelease(repo, tag, token) {
-  const env = { ...process.env };
-  if (token && !env.GH_TOKEN) {
-    env.GH_TOKEN = token;
-  }
-  const title = tag === 'diarization-models' ? 'Diarization Models' : tag;
-  const notes = 'Pre-built speaker diarization model archives and metadata.';
-  console.log(
-    `[release] Tag '${tag}' not found in ${repo}. Creating release...`
-  );
-  runCommand(
-    'gh',
-    [
-      'release',
-      'create',
-      tag,
-      '--title',
-      title,
-      '--notes',
-      notes,
-      '--repo',
-      repo,
-    ],
-    { env }
-  );
-}
-
 async function getReleaseData(repo, tag, token) {
   if (typeof fetch !== 'function') {
     throw new Error('Node runtime does not provide fetch(); use Node 18+');
@@ -462,12 +435,7 @@ async function getReleaseData(repo, tag, token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  let response = await fetch(endpoint, { headers });
-  if (response.status === 404) {
-    createRelease(repo, tag, token);
-    response = await fetch(endpoint, { headers });
-  }
-
+  const response = await fetch(endpoint, { headers });
   if (!response.ok) {
     const body = (await response.text()).slice(0, 1000);
     throw new Error(
