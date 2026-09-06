@@ -65,6 +65,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val m = com.facebook.react.bridge.Arguments.createMap()
         m.putString("segmentBufferId", segmentBufferId)
         m.putString("segmentId", rec.id)
+        m.putString("kind", rec.kind)
         m.putInt("segmentIndex", segIdx)
         m.putInt("totalSegments", totalSeg)
         m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)

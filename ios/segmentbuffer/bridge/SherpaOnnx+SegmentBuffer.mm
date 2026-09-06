@@ -2161,6 +2161,7 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
         NSMutableDictionary *body = [NSMutableDictionary dictionary];
         body[@"segmentBufferId"] = [NSString stringWithUTF8String:segmentBufferId.c_str()] ?: @"";
         body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()] ?: @"";
+        body[@"kind"] = [NSString stringWithUTF8String:rec.kind.c_str()] ?: @"speech";
         body[@"segmentIndex"] = @(segIdx);
         body[@"totalSegments"] = @(totalSegments);
         body[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:rec.sourceAudioBufferId.c_str()] ?: @"";
@@ -2814,6 +2815,7 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       NSMutableDictionary *body = [NSMutableDictionary dictionary];
       body[@"segmentBufferId"] = [NSString stringWithUTF8String:segmentBufferId.c_str()];
       body[@"segmentId"] = [NSString stringWithUTF8String:rec.id.c_str()];
+      body[@"kind"] = [NSString stringWithUTF8String:rec.kind.c_str()] ?: @"speech";
       body[@"segmentIndex"] = @(segIdx);
       body[@"totalSegments"] = @(totalSegments);
       body[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:rec.sourceAudioBufferId.c_str()];

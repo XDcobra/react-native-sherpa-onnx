@@ -552,8 +552,17 @@ function ensureLiveSegmentEventSubscriptions(): void {
         if (!segmentBufferId) return;
         const cbs = segmentAppendedCallbacks.get(segmentBufferId);
         if (!cbs || cbs.size === 0) return;
+        let candidateKind = raw.kind;
+        if (!candidateKind && raw.payload && typeof raw.payload === 'object') {
+          const src = (raw.payload as Record<string, unknown>).source;
+          if (src === 'diarization') {
+            candidateKind = 'diarization';
+          } else if (src === 'alignment') {
+            candidateKind = 'alignment';
+          }
+        }
         const eventKind = assertValidSegmentKind(
-          raw.kind ?? 'speech',
+          candidateKind ?? 'speech',
           'event.kind'
         );
         const segmentIndexTrunc =
