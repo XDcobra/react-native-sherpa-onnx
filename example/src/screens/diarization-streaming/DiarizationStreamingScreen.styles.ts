@@ -499,4 +499,33 @@ export const styles = StyleSheet.create({
     marginTop: 6,
     maxHeight: 180,
   },
+  noModelsBanner: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    gap: 10,
+  },
+  noModelsText: {
+    fontSize: 13,
+    color: '#92400E',
+    lineHeight: 18,
+  },
+  downloadLinkButton: {
+    backgroundColor: '#D97706',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  downloadLinkText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });

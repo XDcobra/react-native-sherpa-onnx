@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Clipboard from '@react-native-clipboard/clipboard';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
@@ -19,6 +21,10 @@ import {
   type DiarizationPipelineHandle,
   type StreamingDiarizationEngine,
 } from 'react-native-sherpa-onnx/diarization';
+import {
+  ModelCategory,
+  onModelsListUpdated,
+} from 'react-native-sherpa-onnx/download';
 import {
   createEmptyLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
@@ -36,6 +42,7 @@ import {
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import type { StreamingPipelineStatus } from 'react-native-sherpa-onnx/audiobuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import type { RootStackParamList } from '../../types/navigation';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   InitModeSelector,
@@ -63,7 +70,6 @@ import {
   styles,
 } from './DiarizationStreamingScreen.styles';
 
-const DEFAULT_SORTFORMER_MODEL = 'diar_streaming_sortformer_4spk-v2.1';
 const CHUNK_SIZE_OPTIONS = [1024, 2048, 4096, 8192] as const;
 
 export type SpeakerTurn = {
@@ -97,11 +103,14 @@ function formatDuration(sec: number): string {
 }
 
 export default function DiarizationStreamingScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   // Model catalog & selection
   const [catalog, setCatalog] =
     useState<DiarizationStreamingCatalogSnapshot | null>(null);
-  const [selectedCatalogId, setSelectedCatalogId] = useState<string>(
-    DEFAULT_SORTFORMER_MODEL
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
+    null
   );
   const [initMode, setInitMode] = useState<ModelInitMode>('auto');
   const [customFormState, setCustomFormState] =
@@ -182,21 +191,29 @@ export default function DiarizationStreamingScreen() {
     try {
       const snap = await loadDiarizationStreamingModelCatalog();
       setCatalog(snap);
-      if (
-        snap.entries.length > 0 &&
-        !snap.entries.some((e) => e.id === selectedCatalogId)
-      ) {
-        setSelectedCatalogId(snap.entries[0]?.id ?? DEFAULT_SORTFORMER_MODEL);
-      }
+      setSelectedCatalogId((curr) => {
+        if (curr && snap.entries.some((e) => e.id === curr)) {
+          return curr;
+        }
+        return snap.entries[0]?.id ?? null;
+      });
     } catch (e) {
       appendEvent(
         `Catalog load error: ${e instanceof Error ? e.message : String(e)}`
       );
     }
-  }, [appendEvent, selectedCatalogId]);
+  }, [appendEvent]);
 
   useEffect(() => {
     reloadCatalog().catch(() => {});
+  }, [reloadCatalog]);
+
+  useEffect(() => {
+    const unsubscribe = onModelsListUpdated((category) => {
+      if (category !== ModelCategory.Diarization) return;
+      reloadCatalog().catch(() => {});
+    });
+    return unsubscribe;
   }, [reloadCatalog]);
 
   // Clean up on unmount
@@ -216,7 +233,7 @@ export default function DiarizationStreamingScreen() {
 
   // Fill custom config from selected catalog folder
   const handleFillCustomConfig = useCallback(async () => {
-    if (!catalog) return;
+    if (!catalog || !selectedCatalogId) return;
     setCustomFillLoading(true);
     setCustomFillHint(null);
     try {
@@ -225,6 +242,7 @@ export default function DiarizationStreamingScreen() {
         padModelsPath: catalog.padModelsPath,
         bundledFolders: catalog.bundledFolders,
         downloadedIds: new Set(catalog.downloadedIds),
+        downloadedPaths: catalog.downloadedPaths,
       });
       const res = await fillDiarizationStreamingCustomConfigFromModelFolder(
         source
@@ -254,7 +272,11 @@ export default function DiarizationStreamingScreen() {
 
       let engine: StreamingDiarizationEngine;
       if (initMode === 'auto') {
-        if (!catalog) throw new Error('Catalog is not loaded yet');
+        if (!catalog || !selectedCatalogId) {
+          throw new Error(
+            'No streaming diarization model selected. Download a model from Download Showcase or configure custom paths.'
+          );
+        }
         const source = getDiarizationStreamingModelPathConfig(
           selectedCatalogId,
           {
@@ -262,6 +284,7 @@ export default function DiarizationStreamingScreen() {
             padModelsPath: catalog.padModelsPath,
             bundledFolders: catalog.bundledFolders,
             downloadedIds: new Set(catalog.downloadedIds),
+            downloadedPaths: catalog.downloadedPaths,
           }
         );
 
@@ -681,7 +704,30 @@ export default function DiarizationStreamingScreen() {
                 selectedId={selectedCatalogId}
                 initializedId={engineInfo ? selectedCatalogId : null}
                 onSelect={setSelectedCatalogId}
+                emptyMessage="No streaming diarization models found."
               />
+              {catalog && catalog.entries.length === 0 ? (
+                <View style={styles.noModelsBanner}>
+                  <Text style={styles.noModelsText}>
+                    No streaming diarization models found on device. Download
+                    Sortformer from the Download Showcase or configure custom
+                    paths.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.downloadLinkButton}
+                    onPress={() => navigation.navigate('DownloadShowcase')}
+                  >
+                    <Ionicons
+                      name="cloud-download-outline"
+                      size={16}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.downloadLinkText}>
+                      Open Download Screen
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
           ) : (
             <DiarizationStreamingCustomInitForm
@@ -877,34 +923,46 @@ export default function DiarizationStreamingScreen() {
           ) : null}
 
           {/* Engine Action Button */}
-          <View style={styles.marginTop12}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                (engineInitBusy || streamState !== 'idle') &&
-                  styles.buttonDisabled,
-              ]}
-              onPress={initEngine}
-              disabled={engineInitBusy || streamState !== 'idle'}
-            >
-              {engineInitBusy ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <Ionicons
-                    name="hardware-chip-outline"
-                    size={18}
-                    color="#FFFFFF"
-                  />
-                  <Text style={styles.buttonText}>
-                    {engineInfo
-                      ? 'Re-Initialize Engine'
-                      : 'Initialize Diarization Engine'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          {(() => {
+            const hasAutoModels = (catalog?.entries.length ?? 0) > 0;
+            const isInitDisabled =
+              engineInitBusy ||
+              streamState !== 'idle' ||
+              (initMode === 'auto' && (!selectedCatalogId || !hasAutoModels)) ||
+              (initMode === 'custom' && !customFormState.fileSources.model);
+
+            return (
+              <View style={styles.marginTop12}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    isInitDisabled && styles.buttonDisabled,
+                  ]}
+                  onPress={initEngine}
+                  disabled={isInitDisabled}
+                >
+                  {engineInitBusy ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="hardware-chip-outline"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.buttonText}>
+                        {initMode === 'auto' && !hasAutoModels
+                          ? 'No Model Available'
+                          : engineInfo
+                          ? 'Re-Initialize Engine'
+                          : 'Initialize Diarization Engine'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
 
           {/* Engine Properties Card */}
           {engineInfo ? (

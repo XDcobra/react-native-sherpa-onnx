@@ -9,6 +9,7 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
 import {
+  getModelPath,
   listDownloadedModels,
   ModelCategory,
   type ModelMeta,
@@ -38,6 +39,7 @@ export type DiarizationStreamingCatalogSnapshot = {
   padModelsPath: string | null;
   bundledFolders: string[];
   downloadedIds: string[];
+  downloadedPaths: Record<string, string>;
 };
 
 export function isDiarizationStreamingFolder(
@@ -96,6 +98,7 @@ export function getDiarizationStreamingModelPathConfig(
     padModelsPath: string | null;
     bundledFolders: string[];
     downloadedIds: Set<string>;
+    downloadedPaths?: Record<string, string>;
   }
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
@@ -104,12 +107,18 @@ export function getDiarizationStreamingModelPathConfig(
       : getFileModelPath(modelId, ModelCategory.Diarization);
   }
   if (ctx.downloadedIds.has(modelId)) {
+    const exactPath = ctx.downloadedPaths?.[modelId];
+    if (exactPath) {
+      return { kind: 'fs', path: exactPath };
+    }
     return getFileModelPath(modelId, ModelCategory.Diarization);
   }
   if (ctx.bundledFolders.includes(modelId)) {
     return getAssetModelPath(modelId);
   }
-  return getAssetModelPath(modelId);
+  throw new Error(
+    `Streaming diarization model "${modelId}" is not available on this device. Please download it or provide custom model files.`
+  );
 }
 
 export async function loadDiarizationStreamingModelCatalog(): Promise<DiarizationStreamingCatalogSnapshot> {
@@ -146,6 +155,20 @@ export async function loadDiarizationStreamingModelCatalog(): Promise<Diarizatio
   );
 
   const downloadedIds = streamingDownloaded.map((model) => model.id);
+  const downloadedPaths: Record<string, string> = {};
+  for (const m of streamingDownloaded) {
+    try {
+      const resolved = await getModelPath(ModelCategory.Diarization, m.id, {
+        source: m.sourceId,
+      });
+      if (resolved) {
+        downloadedPaths[m.id] = resolved;
+      }
+    } catch {
+      // fallback to getFileModelPath if getModelPath fails
+    }
+  }
+
   const metaById = new Map(
     streamingDownloaded.map((model) => [model.id, model] as const)
   );
@@ -156,9 +179,6 @@ export async function loadDiarizationStreamingModelCatalog(): Promise<Diarizatio
       combinedIds.push(id);
     }
   };
-  for (const id of RECOMMENDED_DIARIZATION_STREAMING_IDS) {
-    pushId(id);
-  }
   for (const id of downloadedIds) {
     pushId(id);
   }
@@ -186,5 +206,6 @@ export async function loadDiarizationStreamingModelCatalog(): Promise<Diarizatio
     padModelsPath: resolvedPadPath,
     bundledFolders: bundledIds,
     downloadedIds,
+    downloadedPaths,
   };
 }
