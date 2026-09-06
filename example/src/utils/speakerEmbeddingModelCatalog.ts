@@ -1,7 +1,3 @@
-/**
- * Shared pyannote/reverb segmentation-pack discovery for speech_pyannote_segmentation.
- */
-
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
@@ -20,23 +16,24 @@ import {
   getFileModelPath,
   getModelDisplayName,
 } from '../modelConfig';
-import { RECOMMENDED_MODEL_IDS } from './recommendedModels';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
-const RECOMMENDED_DIARIZATION_SEG_IDS = [
-  'sherpa-onnx-pyannote-segmentation-3-0',
-  ...(RECOMMENDED_MODEL_IDS[ModelCategory.Diarization] ?? []),
+export const RECOMMENDED_SPEAKER_EMBEDDING_IDS = [
+  '3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k',
+  '3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k',
+  'wespeaker_en_voxceleb_CAM++',
+  'sherpa-onnx-wespeaker-voxceleb-resnet34',
 ];
 
-export type DiarizationSegmentationModelEntry = {
+export type SpeakerEmbeddingModelEntry = {
   id: string;
   label: string;
   recommended?: boolean;
 };
 
-export type DiarizationSegmentationCatalogSnapshot = {
-  entries: DiarizationSegmentationModelEntry[];
+export type SpeakerEmbeddingCatalogSnapshot = {
+  entries: SpeakerEmbeddingModelEntry[];
   padModelIds: string[];
   padModelsPath: string | null;
   bundledFolders: string[];
@@ -44,26 +41,21 @@ export type DiarizationSegmentationCatalogSnapshot = {
   downloadedPaths?: Record<string, string>;
 };
 
-/**
- * Same shape as Enhancement / Separation / VAD screen filters:
- * exact category hint first, then known pack-family tokens in the folder id.
- */
-export function isDiarizationSegmentationFolder(
+export function isSpeakerEmbeddingFolder(
   folder: string,
   hint?: string
 ): boolean {
-  const normalized = folder.toLowerCase();
-  if (normalized.includes('sortformer') || normalized.includes('streaming')) {
-    return false;
-  }
-  if (hint === 'diarization') {
+  if (hint === 'speaker-identification' || hint === 'speaker_embedding') {
     return true;
   }
+  const f = folder.toLowerCase();
   return (
-    normalized.includes('pyannote') ||
-    normalized.includes('reverb') ||
-    normalized.includes('segmentation') ||
-    normalized.includes('diarization')
+    f.includes('wespeaker') ||
+    f.includes('eres2net') ||
+    f.includes('cam++') ||
+    f.includes('3dspeaker') ||
+    f.includes('titanet') ||
+    f.includes('speaker-embedding')
   );
 }
 
@@ -76,15 +68,15 @@ function getModelLabel(model: ModelMeta): string {
 }
 
 function prioritizeEntries(
-  entries: DiarizationSegmentationModelEntry[],
+  entries: SpeakerEmbeddingModelEntry[],
   recommendedIds: string[] = []
-): DiarizationSegmentationModelEntry[] {
+): SpeakerEmbeddingModelEntry[] {
   const uniqueEntries = Array.from(
     new Map(entries.map((entry) => [entry.id, entry])).values()
   );
   const recommendedSet = new Set(recommendedIds);
-  const recommended: DiarizationSegmentationModelEntry[] = [];
-  const remaining: DiarizationSegmentationModelEntry[] = [];
+  const recommended: SpeakerEmbeddingModelEntry[] = [];
+  const remaining: SpeakerEmbeddingModelEntry[] = [];
 
   for (const entry of uniqueEntries) {
     if (recommendedSet.has(entry.id)) {
@@ -103,7 +95,7 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
-export function getDiarizationSegmentationModelPathConfig(
+export function getSpeakerEmbeddingModelPathConfig(
   modelId: string,
   ctx: {
     padModelIds: string[];
@@ -115,15 +107,19 @@ export function getDiarizationSegmentationModelPathConfig(
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath
-      ? getFileModelPath(modelId, ModelCategory.Diarization, ctx.padModelsPath)
-      : getFileModelPath(modelId, ModelCategory.Diarization);
+      ? getFileModelPath(
+          modelId,
+          ModelCategory.SpeakerEmbedding,
+          ctx.padModelsPath
+        )
+      : getFileModelPath(modelId, ModelCategory.SpeakerEmbedding);
   }
   if (ctx.downloadedIds.has(modelId)) {
     const exactPath = ctx.downloadedPaths?.[modelId];
     if (exactPath) {
       return { kind: 'fs', path: exactPath };
     }
-    return getFileModelPath(modelId, ModelCategory.Diarization);
+    return getFileModelPath(modelId, ModelCategory.SpeakerEmbedding);
   }
   if (ctx.bundledFolders.includes(modelId)) {
     return getAssetModelPath(modelId);
@@ -131,12 +127,10 @@ export function getDiarizationSegmentationModelPathConfig(
   return getAssetModelPath(modelId);
 }
 
-export async function loadDiarizationSegmentationModelCatalog(): Promise<DiarizationSegmentationCatalogSnapshot> {
+export async function loadSpeakerEmbeddingModelCatalog(): Promise<SpeakerEmbeddingCatalogSnapshot> {
   const assetModels = await listAssetModels().catch(() => []);
   const bundledIds = assetModels
-    .filter((model) =>
-      isDiarizationSegmentationFolder(model.folder, model.hint)
-    )
+    .filter((model) => isSpeakerEmbeddingFolder(model.folder, model.hint))
     .map((model) => model.folder);
 
   let resolvedPadPath: string | null = null;
@@ -147,9 +141,7 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
     const basePath = padPathFromNative ?? fallbackPath;
     const padModels = await listModelsAtPath(basePath);
     padIds = (padModels || [])
-      .filter((model) =>
-        isDiarizationSegmentationFolder(model.folder, model.hint)
-      )
+      .filter((model) => isSpeakerEmbeddingFolder(model.folder, model.hint))
       .map((model) => model.folder);
     if (padIds.length > 0) {
       resolvedPadPath = basePath;
@@ -159,18 +151,19 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
   }
 
   const downloaded = await listDownloadedModels(
-    ModelCategory.Diarization
+    ModelCategory.SpeakerEmbedding
   ).catch(() => []);
-  const segDownloaded = downloaded.filter((model) =>
-    isDiarizationSegmentationFolder(model.id)
-  );
-  const downloadedIds = segDownloaded.map((model) => model.id);
+  const downloadedIds = downloaded.map((model) => model.id);
   const downloadedPaths: Record<string, string> = {};
-  for (const m of segDownloaded) {
+  for (const m of downloaded) {
     try {
-      const resolved = await getModelPath(ModelCategory.Diarization, m.id, {
-        source: m.sourceId,
-      });
+      const resolved = await getModelPath(
+        ModelCategory.SpeakerEmbedding,
+        m.id,
+        {
+          source: m.sourceId,
+        }
+      );
       if (resolved) {
         downloadedPaths[m.id] = resolved;
       }
@@ -180,7 +173,7 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
   }
 
   const metaById = new Map(
-    segDownloaded.map((model) => [model.id, model] as const)
+    downloaded.map((model) => [model.id, model] as const)
   );
 
   const combinedIds: string[] = [];
@@ -207,7 +200,7 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
         label: meta ? getModelLabel(meta) : getModelDisplayName(id),
       };
     }),
-    RECOMMENDED_DIARIZATION_SEG_IDS
+    RECOMMENDED_SPEAKER_EMBEDDING_IDS
   );
 
   return {

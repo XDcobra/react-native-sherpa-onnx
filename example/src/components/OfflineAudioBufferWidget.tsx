@@ -67,6 +67,10 @@ import { widgetStyles as s } from './OfflineAudioBufferWidget.styles';
 export type OfflineAudioBufferInfo = {
   bufferId: string;
   sourceLabel: string;
+  totalSamples?: number;
+  sampleRate?: number;
+  channels?: number;
+  durationSeconds?: number;
 };
 
 export type OfflineAudioBufferWidgetHandle = {
@@ -351,9 +355,17 @@ export const OfflineAudioBufferWidget = forwardRef<
         }
 
         bufferRefStore.current = audioRef;
+        const durationSeconds =
+          audioRef.info.sampleRate > 0
+            ? audioRef.info.numSamples / audioRef.info.sampleRate
+            : 0;
         const info: OfflineAudioBufferInfo = {
           bufferId: audioRef.bufferId,
           sourceLabel: label,
+          totalSamples: audioRef.info.numSamples,
+          sampleRate: audioRef.info.sampleRate,
+          channels: audioRef.info.channelCount,
+          durationSeconds,
         };
         setBufferInfo(info);
         setDecodeProgress(null);
