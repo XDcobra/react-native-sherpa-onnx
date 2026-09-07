@@ -98,12 +98,14 @@ Full doc index: [docs/README.md](./docs/README.md).
 
 **How the wrapper helps (without changing sherpa-onnx physics):**
 
-| Approach | What it buys you |
-| --- | --- |
-| **mmap & file-backed buffers** | Long offline audio stays on disk; native code reads slices instead of copying whole files into RAM. [Offline audio buffer](./docs/audiobuffer-offline.md) |
-| **Live ring + optional spool** | Streaming sessions keep a bounded window in memory; optional spool persists growth without a single giant buffer. [Live audio buffer](./docs/audiobuffer-streaming.md) |
-| **Pipeline & feature recipes** | Explicit stage lifetimes, live overloads, and composite flows (e.g. enhancement → STT → punctuation) with native workers on **bounded** units. [SDK pipeline logic](#sdk-pipeline-logic) · [Feature pipelines](./docs/feature-pipelines.md) |
-| **Segmentation engine** | Offline-only models run segment-by-segment so peak RAM stays predictable; multi-hour files become practical on modest devices (small quality trade-off vs. one monolithic pass). [Segmentation engine](./docs/segmentation-engine.md) |
+| Approach / Capability | Generic / Raw Wrappers | What react-native-sherpa-onnx buys you |
+|---|---|---|
+| **Segmentation engine (Long-form audio)** | ❌ Crashes with OOM on files > 2–3 minutes; monolithic single-pass load | ✅ **Hour-long audio processing:** Offline models run segment-by-segment with a predictable memory ceiling; multi-hour podcasts and meetings run reliably even on modest devices (≤ 2 GB RAM). [Segmentation engine](./docs/segmentation-engine.md) |
+| **Zero-copy pipeline buffers (Bridge performance)** | ❌ Serializes huge base64 strings or Float32 arrays across JS bridge, causing UI thread lag | ✅ **Zero-copy native pipeline buffers:** Audio, text, and segment data stay in C++; only lightweight handle IDs cross the bridge. [Offline audio](./docs/audiobuffer-offline.md) · [Live audio](./docs/audiobuffer-streaming.md) |
+| **Pipeline & feature recipes (Native chaining)** | ❌ Audio must round-trip through JS and re-serialize between every model step | ✅ **Native-to-native composite chaining:** Explicit stage lifetimes and direct C++ pipelines (e.g. `Enhancement ➔ STT ➔ Punctuation ➔ Alignment`). [SDK pipeline logic](#sdk-pipeline-logic) · [Feature pipelines](./docs/feature-pipelines.md) |
+| **mmap & file-backed buffers (RAM footprint)** | ❌ Giant memory spikes (1.5–3× entire uncompressed audio file loaded into RAM heap) | ✅ **Kernel memory mapping (`mmap`):** Long offline audio stays on disk; native code reads exact slices on demand, keeping peak RAM flat. [Offline audio buffer](./docs/audiobuffer-offline.md) |
+| **Live ring + optional spool (Streaming & live overload)** | ❌ Unbounded memory growth during extended mic capture or live sessions | ✅ **Bounded ring buffers with disk spooling:** Streaming sessions keep a bounded window in memory; optional spool persists growth without giant memory buffers. [Live audio buffer](./docs/audiobuffer-streaming.md) |
+| **Model detection & quantization parity** | ❌ Manual file path juggling and hardcoded model parameters | ✅ **Automatic architecture detection** across 10 domains with universal quantization (`'int8'`, `'fp16'`, `'int4'`, etc.). [Model detection & init](./docs/model-detect.md) |
 
 **Still plan like a mobile app:** many top-tier bundles are offline-first or offline-only; several engines at once multiply memory cost. See [Memory and models](./docs/memory-and-models.md). When limits are hit, native `OFFLINE_OOM` points to streaming alternatives (where they exist) and the segmentation docs.
 
@@ -215,17 +217,6 @@ Prefer **streaming** when:
 - you need low time-to-first-result / low perceived latency
 - you want concurrent stage execution (e.g. STT -> text buffer -> TTS -> audio buffer)
 - the model family supports streaming and real-time output is required
-
-### What sets this SDK apart from raw wrappers
-
-| Capability | Generic / Raw Wrappers | `react-native-sherpa-onnx` |
-|---|---|---|
-| **Long-form audio (podcasts, meetings, lectures)** | ❌ Crashes with OOM on files > 2–3 minutes | ✅ **Hour-long audio processing** seamlessly via the native [Segmentation Engine](./docs/segmentation-engine.md) |
-| **Bridge performance & UI responsiveness** | ❌ Serializes huge base64 or Float32 arrays across JS bridge | ✅ **Zero-copy pipeline buffers** (`OfflineAudioBuffer`, `LiveAudioBuffer`); only lightweight IDs cross the bridge |
-| **Multi-stage model chaining** | ❌ Audio must round-trip through JS between every model step | ✅ **Native-to-native chaining** (e.g. `Enhancement ➔ STT ➔ Punctuation ➔ Alignment`) in C++ |
-| **RAM footprint on modest devices (≤ 2 GB RAM)** | ❌ Giant memory spikes (1.5–3× entire uncompressed audio file) | ✅ **Flat, bounded peak-RAM profile** via kernel memory mapping (`mmap`) & sliding chunks |
-| **Live streaming & live overload** | ❌ Unbounded memory growth during extended mic capture | ✅ **Bounded ring buffers with disk spooling** and true streaming handles (`start/flush/reset/stop`) |
-| **Model detection & quantization parity** | ❌ Manual file path juggling and hardcoded model parameters | ✅ **Automatic architecture detection** across 10 domains with universal quantization (`'int8'`, `'fp16'`, `'int4'`, etc.) |
 
 ## Supported Model Types
 
