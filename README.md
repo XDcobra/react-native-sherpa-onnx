@@ -33,9 +33,11 @@ npm install react-native-sherpa-onnx
 
 ## Feature Support
 
+Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to start](#how-to-start).
+
 ### Speech & media features
 
-- ✅ Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
+- ✅ Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md) · [Hotwords](./docs/hotwords.md)
 - ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
 - ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
@@ -47,21 +49,22 @@ npm install react-native-sherpa-onnx
 - ✅ Speaker diarization: [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md)
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
 
-### Pipeline & buffers
+### Pipeline & orchestration
 
-- ✅ Audio buffers: [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
-- ✅ Text buffers: [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
-- ✅ Segment buffers: [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
+- ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md)
+- ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md)
+- ✅ Native chaining & recipes: [Feature pipelines](./docs/feature-pipelines.md) · [Streaming pipeline lifecycle](./docs/streaming-pipelines-overview.md)
+- ✅ Long audio & OOM mitigation: [Segmentation engine](./docs/segmentation-engine.md)
 - ✅ Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
 - ✅ File and conversion I/O: [File I/O](./docs/fileio.md) · [Audio save / conversion](./docs/audio-conversion.md)
 
-### Playback & utilities
+### Playback, models & platform
 
-- ✅ Playback: [PCM Player](./docs/pcm-player.md)
-- ✅ Audio visualization: [Spectrum profiles (`levels` + timeline `frames`)](./docs/audio-visualization.md)
-- ✅ Runtime acceleration: [Execution providers](./docs/execution-providers.md)
-- ✅ Model configuration and detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
-- ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD (Android) & ODR (iOS)](./docs/model-delivery-pad-odr.md) — install-time, fast-follow, on-demand
+- ✅ Playback & visualization: [PCM Player](./docs/pcm-player.md) · [Audio visualization](./docs/audio-visualization.md)
+- ✅ Model setup & detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
+- ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
+- ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
+- ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
 
 ## How to start
 
@@ -403,66 +406,6 @@ The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-
 </table>
 
 Full guide: [Audio visualization](./docs/audio-visualization.md).
-
-## Documentation
-
-Full index: [docs/README.md](./docs/README.md). New to models? See [How to start](#how-to-start).
-
-### Getting started & planning
-
-- [How to start](#how-to-start) – model setup → detection → feature pipelines → feature doc
-- [Feature pipelines](./docs/feature-pipelines.md) – end-to-end recipes, chaining features
-- [Memory and models](./docs/memory-and-models.md) – OOM awareness, model sizing, concurrent engines, buffer planning
-- [Streaming pipelines overview](./docs/streaming-pipelines-overview.md) – shared live pipeline lifecycle (`stop` / `flush` / `completed`)
-- [Native diagnostics](./docs/native-diagnostics.md) – crash ring buffer, `SherpaNativeDiag`
-
-### Models & delivery
-
-- [Model setup](./docs/model-setup.md) – `FileSource`, bundled/PAD/downloaded paths, discovery APIs
-- [Model detection & init](./docs/model-detect.md) – preflight, `auto` vs `custom` init, validation
-- [Model languages](./docs/model-languages.md) – language pickers and `modelOptions` hints
-- [Ship model delivery (PAD & ODR)](./docs/model-delivery-pad-odr.md) – install-time, fast-follow, on-demand
-- [Download manager](./docs/download-manager.md) – runtime model downloads
-- [Extraction API](./docs/extraction.md) – `.tar.zst` / `.tar.bz2` ship archives
-- [File I/O](./docs/fileio.md) – `copyFile`, `saveText`, `shareFile`
-- [Hotwords](./docs/hotwords.md) – boosted phrases for supported STT models
-
-> For `listAssetModels()` vs `listModelsAtPath()` and combining bundled with PAD/file-based models, see [Model setup](./docs/model-setup.md).
-
-### Speech & media features
-
-- **Speech-to-Text (STT):** [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md)
-- **Text-to-Speech (TTS):** [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md) · [Android system engine](./docs/android-system-tts.md) *(Kotlin, opt-in)*
-- **Speech Enhancement:** [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- **Source separation:** [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-streaming.md)
-- **Punctuation:** [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
-- **VAD:** [Streaming](./docs/vad-streaming.md)
-- **Alignment / timestamps:** [Offline](./docs/alignment-offline.md) – `createAlignment`, `proportional` / `estimated` / `accurate`
-- **Speaker identification:** [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md) – enroll / identify / verify / label; live `labelLiveSegments`
-- **Speaker diarization:** [Offline](./docs/diarization-offline.md) · [Named timeline (SID)](./docs/diarization-named-timeline.md) · [Streaming](./docs/diarization-streaming.md) – offline pyannote + embedding, streaming Sortformer; no live overload
-
-### Segmentation
-
-- [Segmentation engine](./docs/segmentation-engine.md) – policies, `SegmentLink`, live overload; **OOM mitigation** on low-end devices when offline models cannot load full audio at once
-
-### Pipeline buffers
-
-- **Audio:** [Offline](./docs/audiobuffer-offline.md) · [Live / streaming](./docs/audiobuffer-streaming.md)
-- **Text:** [Offline](./docs/textbuffer-offline.md) · [Live / streaming](./docs/textbuffer-streaming.md)
-- **Segment:** [Offline](./docs/segmentbuffer-offline.md) · [Live / streaming](./docs/segmentbuffer-streaming.md)
-
-### Audio I/O & playback
-
-- [Pipeline audio session](./docs/audio-session.md) – mic + PCM route policy
-- [PCM player](./docs/pcm-player.md) – play pipeline buffer output
-- [Audio conversion](./docs/audio-conversion.md) – save / encode, duration probe
-- [Audio visualization](./docs/audio-visualization.md) – spectrum `levels` and timeline `frames`
-
-### Platform & build
-
-- [Execution providers](./docs/execution-providers.md) – CPU, NNAPI, XNNPACK, Core ML, QNN
-- [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
-- [Known issues](./docs/KNOWN_ISSUES.md) – SDK-facing notes (e.g. Pocket TTS cross-platform drift)
 
 ## Requirements
 
