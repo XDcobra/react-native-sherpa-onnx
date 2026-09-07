@@ -81,6 +81,9 @@ type EngineInfo = {
   numClusters: number;
   threshold: number;
   numThreads: number;
+  windowShiftRatio: number;
+  minDurationOn: number;
+  minDurationOff: number;
 };
 
 function formatTime(seconds: number): string {
@@ -135,13 +138,13 @@ export default function DiarizationScreen() {
   const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
   const [engineError, setEngineError] = useState<string | null>(null);
 
-  // Advanced Tuning Parameters
+  // Advanced Tuning Parameters (Showcase presets optimized for example audios & mobile CPU)
   const [tuningExpanded, setTuningExpanded] = useState(false);
   const [clusteringThreshold, setClusteringThreshold] = useState(0.5);
   const [numClusters, setNumClusters] = useState(4); // default 4 for initial 4-speaker sample audio
-  const [minDurationOn, setMinDurationOn] = useState(0.0);
-  const [minDurationOff, setMinDurationOff] = useState(0.5);
-  const [windowShiftRatio, setWindowShiftRatio] = useState(0.1);
+  const [minDurationOn, setMinDurationOn] = useState(0.3); // 0.3s filters spurious frame-glitches for clean turns
+  const [minDurationOff, setMinDurationOff] = useState(0.5); // 0.5s merges conversational pauses
+  const [windowShiftRatio, setWindowShiftRatio] = useState(0.25); // 0.25 (75% overlap) provides fast execution on mobile CPU
   const [numThreads, setNumThreads] = useState(2); // default 2 threads for fast inference
 
   // Audio Ingress & Diarization Execution
@@ -343,6 +346,9 @@ export default function DiarizationScreen() {
         numClusters,
         threshold: clusteringThreshold,
         numThreads,
+        windowShiftRatio,
+        minDurationOn,
+        minDurationOff,
       });
       appendEvent('Diarization engine initialized successfully');
       return engine;
@@ -403,7 +409,21 @@ export default function DiarizationScreen() {
     let segOutId: string | null = null;
     try {
       let engine = engineRef.current;
-      if (!engine) {
+      const needsReinit =
+        !engine ||
+        !engineInfo ||
+        engineInfo.numClusters !== numClusters ||
+        engineInfo.numThreads !== numThreads ||
+        engineInfo.threshold !== clusteringThreshold ||
+        engineInfo.windowShiftRatio !== windowShiftRatio ||
+        engineInfo.minDurationOn !== minDurationOn ||
+        engineInfo.minDurationOff !== minDurationOff;
+
+      if (needsReinit) {
+        if (engine) {
+          await engine.destroy().catch(() => {});
+          engineRef.current = null;
+        }
         engine = await initEngine();
       }
 
@@ -479,7 +499,20 @@ export default function DiarizationScreen() {
       abortControllerRef.current = null;
       setDiarizeBusy(false);
     }
-  }, [appendEvent, diarizeBusy, initEngine, offlineInputBuffer, reclusterBusy]);
+  }, [
+    appendEvent,
+    clusteringThreshold,
+    diarizeBusy,
+    engineInfo,
+    initEngine,
+    minDurationOff,
+    minDurationOn,
+    numClusters,
+    numThreads,
+    offlineInputBuffer,
+    reclusterBusy,
+    windowShiftRatio,
+  ]);
 
   // Cancel Diarization
   const cancelDiarization = useCallback(() => {
@@ -520,6 +553,15 @@ export default function DiarizationScreen() {
           endSample: Math.round(s.end * sampleRate),
         }));
         setTurns(updatedTurns);
+        setEngineInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                numClusters,
+                threshold: clusteringThreshold,
+              }
+            : prev
+        );
         appendEvent(
           `Recluster complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments`
         );
@@ -1448,7 +1490,8 @@ export default function DiarizationScreen() {
               Emb Model: {engineInfo?.embId ?? 'None'}
             </Text>
             <Text style={styles.statusDimText}>
-              Threads: {engineInfo?.numThreads ?? numThreads}
+              Threads: {engineInfo?.numThreads ?? numThreads} | Hop:{' '}
+              {engineInfo?.windowShiftRatio ?? windowShiftRatio}
             </Text>
             <Text style={styles.statusDimText}>
               Clustering:{' '}
