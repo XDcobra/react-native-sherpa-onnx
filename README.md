@@ -23,7 +23,7 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
-**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Speaker Diarization, SID, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices—not just high-end flagship smartphones.
+**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Speaker Diarization, SID, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
 
 ## Installation
 
@@ -150,17 +150,6 @@ The SDK is built around TurboModule entry points and native pipeline buffers. In
 
 For named end-to-end recipes across features, see [Feature pipelines](./docs/feature-pipelines.md).
 
-### What sets this SDK apart from raw wrappers
-
-| Capability | Generic / Raw Wrappers | `react-native-sherpa-onnx` |
-|---|---|---|
-| **Long-form audio (podcasts, meetings, lectures)** | ❌ Crashes with OOM on files > 2–3 minutes | ✅ **Hour-long audio processing** seamlessly via the native [Segmentation Engine](./docs/segmentation-engine.md) |
-| **Bridge performance & UI responsiveness** | ❌ Serializes huge base64 or Float32 arrays across JS bridge | ✅ **Zero-copy pipeline buffers** (`OfflineAudioBuffer`, `LiveAudioBuffer`); only lightweight IDs cross the bridge |
-| **Multi-stage model chaining** | ❌ Audio must round-trip through JS between every model step | ✅ **Native-to-native chaining** (e.g. `Enhancement ➔ STT ➔ Punctuation ➔ Alignment`) in C++ |
-| **RAM footprint on modest devices (≤ 2 GB RAM)** | ❌ Giant memory spikes (1.5–3× entire uncompressed audio file) | ✅ **Flat, bounded peak-RAM profile** via kernel memory mapping (`mmap`) & sliding chunks |
-| **Live streaming & live overload** | ❌ Unbounded memory growth during extended mic capture | ✅ **Bounded ring buffers with disk spooling** and true streaming handles (`start/flush/reset/stop`) |
-| **Model detection & quantization parity** | ❌ Manual file path juggling and hardcoded model parameters | ✅ **Automatic architecture detection** across 10 domains with universal quantization (`'int8'`, `'fp16'`, `'int4'`, etc.) |
-
 ### Offline pipeline (batch)
 
 Best when you already have complete input (file or full in-memory data) and want deterministic, one-shot output.
@@ -226,6 +215,17 @@ Prefer **streaming** when:
 - you need low time-to-first-result / low perceived latency
 - you want concurrent stage execution (e.g. STT -> text buffer -> TTS -> audio buffer)
 - the model family supports streaming and real-time output is required
+
+### What sets this SDK apart from raw wrappers
+
+| Capability | Generic / Raw Wrappers | `react-native-sherpa-onnx` |
+|---|---|---|
+| **Long-form audio (podcasts, meetings, lectures)** | ❌ Crashes with OOM on files > 2–3 minutes | ✅ **Hour-long audio processing** seamlessly via the native [Segmentation Engine](./docs/segmentation-engine.md) |
+| **Bridge performance & UI responsiveness** | ❌ Serializes huge base64 or Float32 arrays across JS bridge | ✅ **Zero-copy pipeline buffers** (`OfflineAudioBuffer`, `LiveAudioBuffer`); only lightweight IDs cross the bridge |
+| **Multi-stage model chaining** | ❌ Audio must round-trip through JS between every model step | ✅ **Native-to-native chaining** (e.g. `Enhancement ➔ STT ➔ Punctuation ➔ Alignment`) in C++ |
+| **RAM footprint on modest devices (≤ 2 GB RAM)** | ❌ Giant memory spikes (1.5–3× entire uncompressed audio file) | ✅ **Flat, bounded peak-RAM profile** via kernel memory mapping (`mmap`) & sliding chunks |
+| **Live streaming & live overload** | ❌ Unbounded memory growth during extended mic capture | ✅ **Bounded ring buffers with disk spooling** and true streaming handles (`start/flush/reset/stop`) |
+| **Model detection & quantization parity** | ❌ Manual file path juggling and hardcoded model parameters | ✅ **Automatic architecture detection** across 10 domains with universal quantization (`'int8'`, `'fp16'`, `'int4'`, etc.) |
 
 ## Supported Model Types
 
