@@ -40,11 +40,12 @@ object TtsModelDetect {
     modelDir: String,
     assetName: String? = null,
     modelType: String = "auto",
+    quantization: String? = null,
   ): TtsModelDetectResult {
     SherpaOnnxNativeLoader.ensureLoaded()
     @Suppress("UNCHECKED_CAST")
     val raw =
-      SherpaOnnxModule.detectTtsModelBlocking(modelDir, assetName, modelType)
+      SherpaOnnxModule.detectTtsModelBlocking(modelDir, assetName, modelType, quantization)
         as? HashMap<String, Any?>
     if (raw == null) {
       return TtsModelDetectResult(

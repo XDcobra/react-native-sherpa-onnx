@@ -22,7 +22,7 @@ import com.sherpaonnx.tts.core.TtsInitState
 internal class TtsInitializationService(
   private val context: ReactApplicationContext,
   private val repository: TtsEngineRepository,
-  private val detectTtsModel: (modelDir: String, assetName: String?, modelType: String?) -> HashMap<String, Any>?,
+  private val detectTtsModel: (modelDir: String, assetName: String?, modelType: String?, quantization: String?) -> HashMap<String, Any>?,
   private val mainHandler: Handler,
   private val ttsInitExecutor: java.util.concurrent.ExecutorService
 ) {
@@ -85,7 +85,7 @@ internal class TtsInitializationService(
     promise: Promise
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = detectTtsModel(modelDir, null, parsed.modelType)
+    val result = detectTtsModel(modelDir, null, parsed.modelType, parsed.quantization)
     if (result == null) {
       Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to detect TTS model: native call returned null")
       rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to detect TTS model: native call returned null")
@@ -270,7 +270,8 @@ internal class TtsInitializationService(
       parsed.ruleFars?.takeIf { it.isNotBlank() },
       parsed.maxNumSentences?.toInt()?.takeIf { it > 0 },
       parsed.silenceScale?.takeUnless { it.isNaN() },
-      parsed.provider?.takeIf { it.isNotBlank() }
+      parsed.provider?.takeIf { it.isNotBlank() },
+      parsed.quantization?.takeIf { it.isNotBlank() }
     )
 
     Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=kotlin-api modelType=$modelTypeStr, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
@@ -322,7 +323,7 @@ internal class TtsInitializationService(
       else -> lengthScale
     }
     try {
-      val result = detectTtsModel(state.modelDir, null, state.modelType)
+      val result = detectTtsModel(state.modelDir, null, state.modelType, state.quantization)
       if (result == null || result["success"] as? Boolean != true) {
         Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Failed to re-detect TTS model")
         promise.reject("TTS_UPDATE_ERROR", "Failed to re-detect TTS model")
