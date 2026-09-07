@@ -107,9 +107,14 @@ Full doc index: [docs/README.md](./docs/README.md).
 | **Live ring + optional spool (Streaming & live overload)** | ❌ Unbounded memory growth during extended mic capture or live sessions | ✅ **Bounded ring buffers with disk spooling:** Streaming sessions keep a bounded window in memory; optional spool persists growth without giant memory buffers. [Live audio buffer](./docs/audiobuffer-streaming.md) |
 | **Model detection & quantization parity** | ❌ Manual file path juggling and hardcoded model parameters | ✅ **Automatic architecture detection** across 10 domains with universal quantization (`'int8'`, `'fp16'`, `'int4'`, etc.). [Model detection & init](./docs/model-detect.md) |
 
-**Still plan like a mobile app:** many top-tier bundles are offline-first or offline-only; several engines at once multiply memory cost. See [Memory and models](./docs/memory-and-models.md). When limits are hit, native `OFFLINE_OOM` points to streaming alternatives (where they exist) and the segmentation docs.
+**Key rules of thumb for mobile speech AI:**
+- **Native heap accounting:** ONNX weights live in C++ memory and count against your OS process limit, not the JS heap.
+- **Activation tensors:** Peak RAM during inference is typically **1.2–1.5× the weight size** (especially on encoder-decoder models like Whisper or Kokoro).
+- **Quantization:** Prefer quantized models (`quantization: 'int8'`, auto-selected by default).
+- **Prompt cleanup:** Always call `engine.release()` when a job or session completes to reclaim native memory.
+- **Low-RAM devices (≤ 2 GB RAM):** Avoid loading heavy models (Whisper large, Kokoro, wav2vec2 alignment) concurrently.
 
-**Default mindset:** use buffers, segmentation, and pipeline APIs for large or chained work—treat “load everything into memory, run once” as the exception.
+→ Full memory planning guide & model size matrix: [docs/memory-and-models.md](./docs/memory-and-models.md)
 
 ## Installation
 
@@ -379,20 +384,6 @@ Speaker diarization determines who spoke when in multi-speaker audio recordings 
 APIs and guides: [Offline batch diarization](./docs/diarization-offline.md) · [Real-time streaming diarization](./docs/diarization-streaming.md) · [Named speaker timeline (Diarization × SID)](./docs/diarization-named-timeline.md).
 
 </details>
-
-## Memory and models
-
-Every active engine keeps its model weights resident in native memory for its entire lifetime. Plan ahead to avoid OOM crashes:
-
-- ONNX weights are mapped into native (C++) heap — they count against your process limit, not the JS heap.
-- Peak RAM during inference is typically **1.2–1.5× the model weight size** due to activation tensors.
-- **Prefer int8/quantized models** — the SDK selects them automatically when `modelType: 'auto'` (default).
-- Multiple concurrent engines (e.g. STT + TTS + enhancement) multiply the base memory cost.
-- **Release engines and buffers promptly** — call `engine.release()` after each job or session.
-- On devices with ≤ 2 GB RAM: avoid Whisper large, Kokoro, and alignment simultaneously.
-- **Offline-only models:** many high-quality sherpa-onnx bundles have **no streaming** counterpart. Large offline jobs (long audio, big buffers) spike peak memory → **OOM** on phones. The SDK **segmentation engine** lets you run the **same offline model** on **smaller chunks** so peak RAM stays bounded; quality may **trade off slightly** versus one giant offline pass. Details: [Memory and models — Segmentation & OOM](./docs/memory-and-models.md#segmentation-engine-offline-only-models-and-oom-mitigation), [Segmentation engine](./docs/segmentation-engine.md).
-
-→ Full planning guide: [docs/memory-and-models.md](./docs/memory-and-models.md)
 
 ## Audio visualization
 

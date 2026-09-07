@@ -1,6 +1,6 @@
 # Memory and models
 
-> For a short summary see the [Memory and models](#memory-and-models) section in the root README.
+> For a short summary see [Built for Low-End & Real-World Mobile Devices](../README.md#built-for-low-end--real-world-mobile-devices) in the root README.
 
 This guide helps you plan model selection, estimate peak RAM, and avoid OOM crashes before you ship.
 
