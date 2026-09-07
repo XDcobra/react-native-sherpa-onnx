@@ -11,6 +11,8 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Alignment (audio/text alignment) | No (no dedicated sherpa alignment config in Kotlin/C API) | No | Yes (`AlignmentEngine`) | Not as a dedicated live engine; **fake streaming possible manually** (chunk/segment-wise orchestration) |
 | Punctuation | Yes (`OfflinePunctuationConfig`) | Yes (`OnlinePunctuationConfig`) | Yes (`createOfflinePunctuation`) | Yes (`createStreamingPunctuation`) |
 | Source separation | Yes (`OfflineSourceSeparationConfig`) | No | Yes (`createSeparation`) | Yes, live overload on offline engine (`createSeparation().separate(Live, Live[], …)`) |
+| Speaker Embedding / Identification | Yes (`SpeakerEmbeddingExtractorConfig`) | No | Yes (`createSpeakerIdentification`) | Yes, live overload (`labelLiveSegments`) |
+| Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
 
 ## Short notes
 
@@ -19,3 +21,4 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 - **Alignment** exists in the SDK but not as a true streaming engine; ongoing/segmented processing is only orchestrated as fake streaming.
 - **Punctuation** is its own module (`src/punctuation/`) in the SDK and supports both offline and streaming models.
 - **Source separation** uses `createSeparation` for offline batch (`separate` into N offline buffers, optional offline segmentation) and live overload (`separate` into N live buffers with mandatory `continuous_frames` segmentation). There is no separate streaming separation factory.
+- **Speaker Diarization** offers offline batch clustering (`createDiarization` using Pyannote/Reverb + embedding) and true online streaming (`createStreamingDiarization` using NeMo Sortformer). Live overload was intentionally excluded.

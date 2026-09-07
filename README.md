@@ -356,7 +356,23 @@ Speaker identification uses **speaker-embedding** ONNX packs (WeSpeaker, 3D-Spea
 | **3D-Speaker** | `'3d-speaker'` | 3D-Speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | **NeMo** | `'nemo'` | NeMo speaker embedding extractor. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 
-APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md). Speaker **diarization** (anonymous clusters): [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md).
+APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md).
+
+</details>
+
+<details>
+<summary>Speaker Diarization models</summary>
+
+Speaker diarization determines who spoke when in multi-speaker audio recordings (anonymous cluster indices). Supports both offline batch clustering (Pyannote segmentation + speaker embedding) and real-time streaming (NeMo Sortformer). Detect via `detectDiarizationModel`.
+
+| Model Type | `modelType` Value | Runtime Path | Description | Download Links |
+| --- | --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` | Detection only | Detects Pyannote, Reverb, or Sortformer layout from files in the model folder. | n/a |
+| **Pyannote** | `'pyannote'` | Offline | Pyannote segmentation model (e.g. `sherpa-onnx-pyannote-segmentation-3-0`), paired with a speaker embedding model. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
+| **Reverb** | `'reverb'` | Offline | Reverb segmentation model for diarization. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
+| **Sortformer** | `'sortformer'` | Streaming | Real-time multi-speaker streaming diarization (e.g. `diar_streaming_sortformer_4spk-v2.1`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
+
+APIs and guides: [Offline batch diarization](./docs/diarization-offline.md) · [Real-time streaming diarization](./docs/diarization-streaming.md) · [Named speaker timeline (Diarization × SID)](./docs/diarization-named-timeline.md).
 
 </details>
 
