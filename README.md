@@ -87,7 +87,7 @@ Every feature needs **model files on disk** and a way to point the SDK at them. 
 Full doc index: [docs/README.md](./docs/README.md).
 
 
-## Built for on-device memory
+## Built for Low-End & Real-World Mobile Devices
 
 *Sherpa-onnx loads weights natively - this wrapper minimizes how much you need in RAM at once.*
 
