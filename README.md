@@ -31,6 +31,32 @@ A high-performance React Native TurboModule for on-device speech AI powered by [
 npm install react-native-sherpa-onnx
 ```
 
+### Android
+
+No additional setup required.
+
+Optional: if you want Qualcomm acceleration, see QNN setup in [Execution provider support](./docs/execution-providers.md).
+
+### iOS
+
+```sh
+cd your-app/ios
+bundle install
+bundle exec pod install
+```
+
+#### Model download (optional)
+
+If you use the [download manager](docs/download-manager.md) to fetch models at runtime, install the peer dependency:
+
+```sh
+npm install @dr.pogodin/react-native-fs
+```
+
+Downloads run **in the foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again.
+
+Setup, resume behavior, and optional `configureDownloadManager`: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android).
+
 ## Feature Support
 
 Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to start](#how-to-start).
@@ -118,38 +144,6 @@ Full doc index: [docs/README.md](./docs/README.md).
 - **Low-RAM devices (≤ 2 GB RAM):** Avoid loading heavy models (Whisper large, Kokoro, wav2vec2 alignment) concurrently.
 
 → Full memory planning guide & model size matrix: [docs/memory-and-models.md](./docs/memory-and-models.md)
-
-## Installation
-
-```sh
-npm install react-native-sherpa-onnx
-```
-
-### Android
-
-No additional setup required.
-
-Optional: if you want Qualcomm acceleration, see QNN setup in [Execution provider support](./docs/execution-providers.md).
-
-### iOS
-
-```sh
-cd your-app/ios
-bundle install
-bundle exec pod install
-```
-
-#### Model download (optional)
-
-If you use the [download manager](docs/download-manager.md) to fetch models at runtime, install the peer dependency:
-
-```sh
-npm install @dr.pogodin/react-native-fs
-```
-
-Downloads run **in the foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again.
-
-Setup, resume behavior, and optional `configureDownloadManager`: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android).
 
 ## SDK pipeline logic
 
