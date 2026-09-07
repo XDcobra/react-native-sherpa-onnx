@@ -72,6 +72,10 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
 - ✅ Speaker diarization: [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md)
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
+- ❌ Spoken language identification (SLID): *(Not yet implemented in SDK)*
+- ❌ Keyword spotting (KWS): *(Not yet implemented in SDK)*
+- ❌ Audio tagging / sound event detection: *(Not yet implemented in SDK)*
+- ❌ Diacritization: *(Not yet implemented in SDK)*
 
 ### Pipeline & orchestration
 

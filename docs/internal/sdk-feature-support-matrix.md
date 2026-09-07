@@ -13,6 +13,10 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Source separation | Yes (`OfflineSourceSeparationConfig`) | No | Yes (`createSeparation`) | Yes, live overload on offline engine (`createSeparation().separate(Live, Live[], …)`) |
 | Speaker Embedding / Identification | Yes (`SpeakerEmbeddingExtractorConfig`) | No | Yes (`createSpeakerIdentification`) | Yes, live overload (`labelLiveSegments`) |
 | Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
+| Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | No | No |
+| Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | No |
+| Audio Tagging | Yes (`AudioTaggingConfig`) | No | No | No |
+| Diacritization | Yes (`OfflineDiacritizationConfig`) | No | No | No |
 
 ## Short notes
 
