@@ -2,6 +2,7 @@ import type { FileSource } from '../fileio/types';
 import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
+import type { QuantizationPreference } from '../download/types';
 
 /**
  * Online (streaming) STT model types.
@@ -93,6 +94,8 @@ export interface StreamingSttAutoInitOptions
   initMode?: 'auto';
   /** Model source configuration. */
   modelSource: FileSource;
+  /** Quantization preference ('int8', 'fp16', etc.). */
+  quantization?: QuantizationPreference;
   /** Online model type. Use 'auto' to detect from model directory. */
   modelType: OnlineSTTModelType | 'auto';
 }

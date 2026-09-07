@@ -122,4 +122,28 @@ describe('detectDiarizationModel', () => {
     });
     expect(result.paths?.metadata).toBeUndefined();
   });
+
+  it('forwards quantization option to native detectDiarizationModel', async () => {
+    (SherpaOnnx.detectDiarizationModel as jest.Mock).mockResolvedValue({
+      success: true,
+      isStreaming: true,
+      modelType: 'sortformer',
+      detectedModels: [],
+      paths: { model: '/models/sortformer/model.int8.onnx' },
+      quantization: 'int8',
+    });
+
+    const result = await detectDiarizationModel(
+      { kind: 'fs', path: '/models/sortformer' },
+      { quantization: 'int8' }
+    );
+
+    expect(SherpaOnnx.detectDiarizationModel).toHaveBeenCalledWith(
+      '/models/diarization',
+      'sherpa-onnx-pyannote-segmentation-3-0',
+      null,
+      'int8'
+    );
+    expect(result.quantization).toBe('int8');
+  });
 });

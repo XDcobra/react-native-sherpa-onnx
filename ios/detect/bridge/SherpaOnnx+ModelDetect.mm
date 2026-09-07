@@ -32,6 +32,10 @@ std::vector<sherpaonnx::UnifiedModelDetectInput> InputsFromNSArray(NSArray *inpu
         sherpaonnx::UnifiedModelDetectInput input;
         input.model_dir = OptionalUtf8String(entry[@"modelDir"]);
         input.asset_name = OptionalUtf8String(entry[@"assetName"]);
+        auto q = OptionalUtf8String(entry[@"quantization"]);
+        if (q.has_value()) {
+            input.quantization = *q;
+        }
         out.push_back(std::move(input));
     }
     return out;
@@ -57,13 +61,16 @@ std::map<std::string, std::string> StringMapFromNSDictionary(NSDictionary *dict)
 
 - (void)detectModel:(NSString *)modelDir
           assetName:(NSString * _Nullable)assetName
+       quantization:(NSString * _Nullable)quantization
             resolve:(RCTPromiseResolveBlock)resolve
              reject:(RCTPromiseRejectBlock)reject
 {
     @try {
         auto modelDirOpt = OptionalUtf8String(modelDir);
         auto assetNameOpt = OptionalUtf8String(assetName);
-        auto result = sherpaonnx::DetectModel(modelDirOpt, assetNameOpt);
+        std::string quantStr =
+            (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
+        auto result = sherpaonnx::DetectModel(modelDirOpt, assetNameOpt, quantStr);
         resolve(sherpaonnx::detect::bridge::UnifiedDetectResultToDict(result));
     } @catch (NSException *exception) {
         reject(@"DETECT_ERROR",

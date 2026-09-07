@@ -7,7 +7,7 @@ import {
   assertDiarizationCustomConfig,
   resolveDiarizationCustomConfigPaths,
 } from './customConfig';
-import { detectDiarizationModel } from './index';
+import { detectDiarizationModel } from './detectDiarizationModel';
 import type {
   DiarizationPipelineHandle,
   StreamingDiarizationEngine,
@@ -73,6 +73,7 @@ export async function createStreamingDiarization(
   } else {
     const detected = await detectDiarizationModel(options.modelSource, {
       modelType: options.modelType ?? 'auto',
+      quantization: options.quantization,
     });
 
     if (!detected.isStreaming) {
@@ -102,6 +103,9 @@ export async function createStreamingDiarization(
       minDurationOn: options.minDurationOn ?? 0.0,
       minDurationOff: options.minDurationOff ?? 0.5,
       medianWindow: options.medianWindow ?? 11,
+      chunkLen: options.chunkLen,
+      rightContext: options.rightContext,
+      fifoLen: options.fifoLen,
     }
   );
 

@@ -96,15 +96,18 @@ std::string ModelTypeOrAuto(NSString *modelType) {
 - (void)detectSeparationModel:(NSString *)modelDir
                     assetName:(NSString * _Nullable)assetName
                     modelType:(NSString * _Nullable)modelType
+                 quantization:(NSString * _Nullable)quantization
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     auto modelDirOpt = OptionalUtf8String(modelDir);
     auto assetNameOpt = OptionalUtf8String(assetName);
+    std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
     std::string modelTypeStr = ModelTypeOrAuto(modelType);
 
-    auto result = sherpaonnx::DetectSeparationModel(modelDirOpt, assetNameOpt, modelTypeStr);
+    auto result = sherpaonnx::DetectSeparationModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
     resolve(SeparationDetectResultToDict(result));
   } @catch (NSException *exception) {
     reject(@"SEPARATION_DETECT_ERROR",

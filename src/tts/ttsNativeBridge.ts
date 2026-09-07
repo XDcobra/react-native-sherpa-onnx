@@ -190,6 +190,9 @@ export async function buildTtsInitBridgeOptions(
     initMode: 'auto',
     modelDir,
     modelType: options.modelType ?? 'auto',
+    ...(options.quantization !== undefined
+      ? { quantization: options.quantization }
+      : {}),
     ...(options.lexiconLanguageId !== undefined
       ? { lexiconLanguageId: options.lexiconLanguageId }
       : {}),

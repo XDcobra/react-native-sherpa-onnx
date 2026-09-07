@@ -15,6 +15,7 @@ import type { TextSegment } from '../segment/segment';
 import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { PunctuationPipelineHandle } from './streamingTypes';
 import type { TextInputNormalization } from './textInputNormalization';
+import type { QuantizationPreference } from '../download/types';
 
 /** v1: only `processingTimeMs` (native punctuate duration in milliseconds). */
 export type OfflinePunctuateResult = {
@@ -69,6 +70,7 @@ export type OfflinePunctuationAutoInitializeOptions =
     initMode?: 'auto';
     /** Directory-backed model source used for punctuation initialization. */
     modelSource: FileSource;
+    quantization?: QuantizationPreference;
     /**
      * `'auto'` resolves **offline CT only** (same as `ct_transformer` for native detect).
      * Does not select online/CNN layout.

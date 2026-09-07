@@ -18,8 +18,8 @@ internal class SherpaOnnxCommonTtsHelper(
 
   fun shutdown() = core.shutdown()
 
-  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) =
-    core.detectTtsModel(modelDir, assetName, modelType, promise)
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, quantization: String?, promise: Promise) =
+    core.detectTtsModel(modelDir, assetName, modelType, quantization, promise)
 
   fun getTtsSampleRate(instanceId: String, promise: Promise) =
     core.getTtsSampleRate(instanceId, promise)

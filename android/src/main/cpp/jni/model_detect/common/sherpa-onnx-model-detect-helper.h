@@ -22,11 +22,26 @@ std::vector<std::string> ListDirectories(const std::string& path);
 std::vector<FileEntry> ListFiles(const std::string& path);
 std::vector<FileEntry> ListFilesRecursive(const std::string& path, int maxDepth = 2);
 std::string ToLower(std::string value);
+std::string BaseName(const std::string& path);
 
 /** Find file in \p files whose name equals \p fileName (case-insensitive). Uses file tree only, no filesystem. */
 std::string FindFileByName(const std::vector<FileEntry>& files, const std::string& fileName);
 /** Find file in \p files whose name equals or ends with \p suffix (e.g. tokens.txt). Case-insensitive. */
 std::string FindFileEndingWith(const std::vector<FileEntry>& files, const std::string& suffix);
+
+bool MatchesQuantization(const std::string& nameLower, const std::string& quant);
+
+std::string ChooseBestModelFile(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& excludeTokens = {},
+    const std::string& preferQuant = ""
+);
+
+std::string FindOnnxByToken(
+    const std::vector<FileEntry>& files,
+    const std::string& token,
+    const std::string& preferQuant = ""
+);
 
 std::string FindOnnxByToken(
     const std::vector<FileEntry>& files,
@@ -37,10 +52,23 @@ std::string FindOnnxByToken(
 std::string FindOnnxByAnyToken(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& tokens,
+    const std::string& preferQuant = ""
+);
+
+std::string FindOnnxByAnyToken(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
     const std::optional<bool>& preferInt8
 );
 
 /** Like FindOnnxByAnyToken but skips any file whose nameLower contains any of \p excludeInName. */
+std::string FindOnnxByAnyTokenExcluding(
+    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& tokens,
+    const std::vector<std::string>& excludeInName,
+    const std::string& preferQuant = ""
+);
+
 std::string FindOnnxByAnyTokenExcluding(
     const std::vector<FileEntry>& files,
     const std::vector<std::string>& tokens,

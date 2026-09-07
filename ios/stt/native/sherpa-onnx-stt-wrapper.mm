@@ -159,7 +159,7 @@ SttWrapper::~SttWrapper() {
 
 SttInitializeResult SttWrapper::initialize(
     const std::string& modelDir,
-    const std::optional<bool>& preferInt8,
+    const std::string& quantization,
     const std::optional<std::string>& modelType,
     bool debug,
     const std::optional<std::string>& hotwordsFile,
@@ -200,7 +200,7 @@ SttInitializeResult SttWrapper::initialize(
             std::optional<std::string>(modelDir),
             std::nullopt,
             detectModelType,
-            preferInt8,
+            quantization,
             debug);
         if (!detect.ok) {
             result.error = detect.error;

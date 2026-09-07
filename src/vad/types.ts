@@ -10,6 +10,7 @@ import type {
 } from '../segmentbuffer/types';
 import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import type { QuantizationPreference } from '../download/types';
 
 export {
   DETECTION_SOURCES,
@@ -82,6 +83,7 @@ export type VADInitOptionsShared = {
 export type VADAutoInitializeOptions = VADInitOptionsShared & {
   initMode?: 'auto';
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
   modelType?: VADModelType | 'auto';
 };
 

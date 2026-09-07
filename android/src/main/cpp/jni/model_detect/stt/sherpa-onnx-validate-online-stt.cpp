@@ -97,6 +97,9 @@ OnlineSttValidationResult ValidateOnlineSttPaths(
     const std::string& contextLabel
 ) {
   OnlineSttValidationResult result;
+  if (kind == OnlineSttModelKind::kUnknown) {
+    return result;
+  }
   size_t count = 0;
   const auto* reqs = GetRequirements(kind, count);
   if (!reqs) {

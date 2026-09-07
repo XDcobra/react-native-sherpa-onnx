@@ -84,7 +84,7 @@ export async function mapDiarizationToNames(
         endSec,
         clusterId,
         name: clusterToName.has(clusterId)
-          ? (clusterToName.get(clusterId) ?? null)
+          ? clusterToName.get(clusterId) ?? null
           : null,
       });
     }

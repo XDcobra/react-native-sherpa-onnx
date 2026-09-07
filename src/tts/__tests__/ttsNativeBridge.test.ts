@@ -17,6 +17,7 @@ describe('ttsNativeBridge', () => {
       modelSource: { kind: 'fs', path: '/models/vits-piper-en' },
       modelType: 'vits',
       debug: true,
+      quantization: 'fp16',
       modelOptions: { vits: { noiseScale: 0.667 } },
     });
     expect(bridge).toEqual({
@@ -25,6 +26,7 @@ describe('ttsNativeBridge', () => {
       modelType: 'vits',
       debug: true,
       noiseScale: 0.667,
+      quantization: 'fp16',
     });
   });
 

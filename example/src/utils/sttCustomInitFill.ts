@@ -15,6 +15,7 @@ import {
   type SttCustomPathKey,
 } from 'react-native-sherpa-onnx/stt';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import type { QuantizationPreference } from 'react-native-sherpa-onnx/download';
 
 type CandidatePaths = {
   encoder: string;
@@ -73,7 +74,7 @@ async function listFilesRecursive(dir: string): Promise<string[]> {
 function findOnnxByTokens(
   files: string[],
   tokens: string[],
-  preferInt8: boolean
+  quantization?: QuantizationPreference
 ): string {
   const onnxFiles = files.filter((file) =>
     file.toLowerCase().endsWith('.onnx')
@@ -85,10 +86,28 @@ function findOnnxByTokens(
   if (matches.length === 0) {
     return '';
   }
-  if (preferInt8) {
+  const quant = quantization ?? 'int8';
+  if (quant === 'int8') {
     const int8Match = matches.find((file) => /int8/i.test(basename(file)));
     if (int8Match) {
       return int8Match;
+    }
+  } else if (quant === 'fp16') {
+    const fp16Match = matches.find((file) => /fp16/i.test(basename(file)));
+    if (fp16Match) {
+      return fp16Match;
+    }
+  } else if (quant === 'int4') {
+    const int4Match = matches.find((file) => /int4|q4/i.test(basename(file)));
+    if (int4Match) {
+      return int4Match;
+    }
+  } else if (quant === 'fp32') {
+    const fp32Match = matches.find(
+      (file) => !/int8|fp16|int4|q4|uint8|bf16/i.test(basename(file))
+    );
+    if (fp32Match) {
+      return fp32Match;
     }
   }
   const nonInt8 = matches.find((file) => !/int8/i.test(basename(file)));
@@ -114,60 +133,60 @@ function findDirByToken(files: string[], token: string): string {
 
 function buildCandidatePaths(
   files: string[],
-  preferInt8: boolean
+  quantization?: QuantizationPreference
 ): CandidatePaths {
   return {
-    encoder: findOnnxByTokens(files, ['encoder'], preferInt8),
-    decoder: findOnnxByTokens(files, ['decoder'], preferInt8),
-    joiner: findOnnxByTokens(files, ['joiner'], preferInt8),
-    paraformerModel: findOnnxByTokens(files, ['model'], preferInt8),
-    ctcModel: findOnnxByTokens(files, ['model', 'ctc'], preferInt8),
+    encoder: findOnnxByTokens(files, ['encoder'], quantization),
+    decoder: findOnnxByTokens(files, ['decoder'], quantization),
+    joiner: findOnnxByTokens(files, ['joiner'], quantization),
+    paraformerModel: findOnnxByTokens(files, ['model'], quantization),
+    ctcModel: findOnnxByTokens(files, ['model', 'ctc'], quantization),
     tokens: findFileEndingWith(files, 'tokens.txt'),
     funasrEncoderAdaptor: findOnnxByTokens(
       files,
       ['encoder_adaptor', 'encoder-adaptor'],
-      preferInt8
+      quantization
     ),
-    funasrLLM: findOnnxByTokens(files, ['llm'], preferInt8),
-    funasrEmbedding: findOnnxByTokens(files, ['embedding'], preferInt8),
+    funasrLLM: findOnnxByTokens(files, ['llm'], quantization),
+    funasrEmbedding: findOnnxByTokens(files, ['embedding'], quantization),
     funasrTokenizer: findDirByToken(files, 'tokenizer'),
     qwen3ConvFrontend: findOnnxByTokens(
       files,
       ['conv_frontend', 'conv-frontend'],
-      preferInt8
+      quantization
     ),
-    qwen3Encoder: findOnnxByTokens(files, ['encoder'], preferInt8),
-    qwen3Decoder: findOnnxByTokens(files, ['decoder'], preferInt8),
+    qwen3Encoder: findOnnxByTokens(files, ['encoder'], quantization),
+    qwen3Decoder: findOnnxByTokens(files, ['decoder'], quantization),
     qwen3Tokenizer: findDirByToken(files, 'tokenizer'),
     moonshinePreprocessor: findOnnxByTokens(
       files,
       ['preprocessor', 'preprocess'],
-      preferInt8
+      quantization
     ),
     moonshineEncoder: findOnnxByTokens(
       files,
       ['encode', 'encoder_model', 'encoder'],
-      preferInt8
+      quantization
     ),
     moonshineUncachedDecoder: findOnnxByTokens(
       files,
       ['uncached', 'decode'],
-      preferInt8
+      quantization
     ),
     moonshineCachedDecoder: findOnnxByTokens(
       files,
       ['cached', 'cache'],
-      preferInt8
+      quantization
     ),
     moonshineMergedDecoder: findOnnxByTokens(
       files,
       ['merged', 'decode'],
-      preferInt8
+      quantization
     ),
     encoderForV2: findOnnxByTokens(
       files,
       ['encoder', 'encoder_model'],
-      preferInt8
+      quantization
     ),
   };
 }
@@ -299,13 +318,13 @@ function isConcreteSttModelType(value: string): value is STTConcreteModelType {
 export async function fillSttCustomConfigFromModelFolder(
   modelSource: FileSource,
   options?: {
-    preferInt8?: boolean;
+    quantization?: QuantizationPreference;
     modelTypeOverride?: STTConcreteModelType;
   }
 ): Promise<FillSttCustomConfigResult> {
-  const preferInt8 = options?.preferInt8 ?? true;
+  const quantization = options?.quantization ?? 'int8';
   const detectResult = await detectSttModel(modelSource, {
-    preferInt8,
+    quantization,
     modelType: options?.modelTypeOverride,
   });
   if (!detectResult.success) {
@@ -327,7 +346,7 @@ export async function fillSttCustomConfigFromModelFolder(
   const modelType = rawType;
   const modelDir = await resolveFileSourceForModelInit(modelSource);
   const files = await listFilesRecursive(modelDir);
-  const candidate = buildCandidatePaths(files, preferInt8);
+  const candidate = buildCandidatePaths(files, quantization);
   const customConfig = mapCandidatesToCustomConfig(modelType, candidate);
 
   const missingKeys = requiredCustomModelPathFieldKeys(

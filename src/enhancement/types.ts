@@ -1,5 +1,6 @@
 import type { FileSource } from '../fileio/types';
 import type { EnhancementDetectModelResult } from '../types/modelDetect';
+import type { QuantizationPreference } from '../download/types';
 import type {
   OfflineAudioBufferIdSource,
   LiveAudioBufferIdSource,
@@ -42,6 +43,7 @@ export type EnhancementInitOptionsShared = {
 export type EnhancementAutoInitializeOptions = EnhancementInitOptionsShared & {
   initMode?: 'auto';
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
   modelType?: EnhancementModelType | 'auto';
 };
 

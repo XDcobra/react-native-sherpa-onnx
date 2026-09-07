@@ -1,9 +1,15 @@
 #include "pyannote-segmentation-model.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
+#include <vector>
+#include <sys/stat.h>
+#if !defined(_WIN32)
+#include <dirent.h>
+#endif
 
 #if !defined(__has_include)
 #error "Diarization requires a compiler with __has_include for ORT headers"
@@ -20,6 +26,55 @@
 
 namespace sherpaonnx::diarization {
 namespace {
+
+std::string ResolveSegmentationModelFile(const std::string& path) {
+  if (path.empty()) return path;
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    for (const char* name : {
+        "model.onnx",
+        "model.ort",
+        "model.int8.onnx",
+        "model.int8.ort",
+        "model.fp16.onnx",
+        "model.fp16.ort",
+        "model.int4.onnx",
+        "model.int4.ort",
+        "model.uint8.onnx",
+        "model.uint8.ort",
+        "model.bf16.onnx",
+        "model.bf16.ort",
+        "segmentation.onnx",
+        "segmentation.int8.onnx",
+        "segmentation.fp16.onnx"
+    }) {
+      std::string candidate = path + "/" + name;
+      if (stat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        return candidate;
+      }
+    }
+#if !defined(_WIN32)
+    DIR* dir = opendir(path.c_str());
+    if (dir) {
+      std::vector<std::string> onnxFiles;
+      while (auto* entry = readdir(dir)) {
+        if (entry->d_name[0] == '\0') continue;
+        std::string name = entry->d_name;
+        if ((name.size() > 5 && name.substr(name.size() - 5) == ".onnx") ||
+            (name.size() > 4 && name.substr(name.size() - 4) == ".ort")) {
+          onnxFiles.push_back(path + "/" + name);
+        }
+      }
+      closedir(dir);
+      if (!onnxFiles.empty()) {
+        std::sort(onnxFiles.begin(), onnxFiles.end());
+        return onnxFiles.front();
+      }
+    }
+#endif
+  }
+  return path;
+}
 
 Status RequirePositive(int32_t value, const char* name) {
   if (value <= 0) {
@@ -125,13 +180,16 @@ Status PyannoteSegmentationModel::Load(const PyannoteLoadOptions& options) {
         GraphOptimizationLevel::ORT_ENABLE_ALL);
     (void)options.provider;
 
+    const std::string model_file_path =
+        ResolveSegmentationModelFile(options.model_path);
+
 #if defined(_WIN32)
-    std::wstring wide(options.model_path.begin(), options.model_path.end());
+    std::wstring wide(model_file_path.begin(), model_file_path.end());
     impl->session = std::make_unique<Ort::Session>(
         impl->env, wide.c_str(), impl->session_options);
 #else
     impl->session = std::make_unique<Ort::Session>(
-        impl->env, options.model_path.c_str(), impl->session_options);
+        impl->env, model_file_path.c_str(), impl->session_options);
 #endif
 
     size_t num_inputs = impl->session->GetInputCount();

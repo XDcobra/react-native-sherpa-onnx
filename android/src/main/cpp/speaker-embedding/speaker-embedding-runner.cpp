@@ -3,11 +3,17 @@
 #include "speaker-embedding-registry-key.h"
 #include "sherpa-onnx/c-api/c-api.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+#include <sys/stat.h>
+#if !defined(_WIN32)
+#include <dirent.h>
+#endif
 
 #if defined(__ANDROID__)
 #include <android/log.h>
@@ -37,6 +43,52 @@ struct SharedExtractor {
 std::mutex g_registry_mutex;
 std::unordered_map<RegistryKey, std::weak_ptr<SharedExtractor>, RegistryKeyHash>
     g_registry;
+
+std::string ResolveEmbeddingModelFile(const std::string& path) {
+  if (path.empty()) return path;
+  struct stat st;
+  if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    for (const char* name : {
+        "model.onnx",
+        "model.ort",
+        "model.int8.onnx",
+        "model.int8.ort",
+        "model.fp16.onnx",
+        "model.fp16.ort",
+        "model.int4.onnx",
+        "model.int4.ort",
+        "model.uint8.onnx",
+        "model.uint8.ort",
+        "model.bf16.onnx",
+        "model.bf16.ort"
+    }) {
+      std::string candidate = path + "/" + name;
+      if (stat(candidate.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        return candidate;
+      }
+    }
+#if !defined(_WIN32)
+    DIR* dir = opendir(path.c_str());
+    if (dir) {
+      std::vector<std::string> onnxFiles;
+      while (auto* entry = readdir(dir)) {
+        if (entry->d_name[0] == '\0') continue;
+        std::string name = entry->d_name;
+        if ((name.size() > 5 && name.substr(name.size() - 5) == ".onnx") ||
+            (name.size() > 4 && name.substr(name.size() - 4) == ".ort")) {
+          onnxFiles.push_back(path + "/" + name);
+        }
+      }
+      closedir(dir);
+      if (!onnxFiles.empty()) {
+        std::sort(onnxFiles.begin(), onnxFiles.end());
+        return onnxFiles.front();
+      }
+    }
+#endif
+  }
+  return path;
+}
 
 bool EmbeddingHasNaN(const std::vector<float>& v) {
   for (float f : v) {
@@ -79,7 +131,10 @@ Status SpeakerEmbeddingRunner::Acquire(const EmbeddingRunnerOptions& options) {
     return Status::Fail(kErrInvalidArgument, "embedding model path is empty");
   }
 
-  const RegistryKey key = MakeRegistryKey(options);
+  EmbeddingRunnerOptions resolved_options = options;
+  resolved_options.model_path = ResolveEmbeddingModelFile(options.model_path);
+
+  const RegistryKey key = MakeRegistryKey(resolved_options);
 
   std::lock_guard<std::mutex> lock(g_registry_mutex);
   auto it = g_registry.find(key);

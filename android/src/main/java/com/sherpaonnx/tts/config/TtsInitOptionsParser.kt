@@ -22,6 +22,7 @@ internal object TtsInitOptionsParser {
     val provider: String?,
     val lexiconLanguageId: String?,
     val kokoroLang: String?,
+    val quantization: String?,
   )
 
   fun parse(options: ReadableMap): Parsed? {
@@ -44,6 +45,7 @@ internal object TtsInitOptionsParser {
       provider = optionalString(options, "provider"),
       lexiconLanguageId = optionalString(options, "lexiconLanguageId"),
       kokoroLang = optionalString(options, "kokoroLang"),
+      quantization = optionalString(options, "quantization"),
     )
   }
 

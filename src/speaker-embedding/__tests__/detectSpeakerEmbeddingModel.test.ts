@@ -65,4 +65,27 @@ describe('detectSpeakerEmbeddingModel', () => {
 
     expect(result.paths).toBeUndefined();
   });
+
+  it('forwards quantization option to native detectSpeakerEmbeddingModel', async () => {
+    (SherpaOnnx.detectSpeakerEmbeddingModel as jest.Mock).mockResolvedValue({
+      success: true,
+      modelType: 'wespeaker',
+      detectedModels: [],
+      paths: { model: '/models/speaker-embedding/model.int8.onnx' },
+      quantization: 'int8',
+    });
+
+    const result = await detectSpeakerEmbeddingModel(
+      { kind: 'fs', path: '/models/speaker-embedding' },
+      { quantization: 'int8' }
+    );
+
+    expect(SherpaOnnx.detectSpeakerEmbeddingModel).toHaveBeenCalledWith(
+      '/models/speaker-embedding',
+      'wespeaker_en_voxceleb_resnet34.onnx',
+      null,
+      'int8'
+    );
+    expect(result.quantization).toBe('int8');
+  });
 });

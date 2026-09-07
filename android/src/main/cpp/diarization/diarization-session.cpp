@@ -24,6 +24,7 @@ void DiarizationSession::Release() {
   embedding_matrix_ = {};
   last_cluster_labels_.clear();
   last_segments_.clear();
+  last_speaker_map_.clear();
   last_num_samples_ = 0;
   working_sample_rate_ = 0;
   initialized_ = false;
@@ -222,11 +223,17 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
     Int8Matrix trimmed =
         TrimLabelsForNumSamples(chunk_labels_[0], n, meta);
     last_segments_ = ComputeResult(trimmed, timeline_config_);
-    result.segments = last_segments_;
-    result.num_speakers = 0;
-    for (const auto& s : result.segments) {
-      result.num_speakers = std::max(result.num_speakers, s.speaker + 1);
+    last_speaker_map_.clear();
+    int32_t next_id = 0;
+    for (auto& s : last_segments_) {
+      auto it = last_speaker_map_.find(s.speaker);
+      if (it == last_speaker_map_.end()) {
+        last_speaker_map_[s.speaker] = next_id++;
+      }
+      s.speaker = last_speaker_map_[s.speaker];
     }
+    result.segments = last_segments_;
+    result.num_speakers = next_id;
     result.sample_rate = target_sr;
     if (options.include_overlap) {
       result.speakers_per_frame = ComputeSpeakersPerFrame(chunk_labels_, meta);
@@ -330,8 +337,18 @@ ProcessResult DiarizationSession::FinishFromCache(
       FinalizeLabels(speaker_count, speakers_per_frame_);
   last_segments_ = ComputeResult(final_labels, timeline_config_);
 
+  last_speaker_map_.clear();
+  int32_t next_id = 0;
+  for (auto& s : last_segments_) {
+    auto it = last_speaker_map_.find(s.speaker);
+    if (it == last_speaker_map_.end()) {
+      last_speaker_map_[s.speaker] = next_id++;
+    }
+    s.speaker = last_speaker_map_[s.speaker];
+  }
+
   result.segments = last_segments_;
-  result.num_speakers = num_clusters;
+  result.num_speakers = next_id;
   if (options.include_overlap) {
     result.speakers_per_frame = speakers_per_frame_;
   }
@@ -400,8 +417,16 @@ std::vector<ClusterEmbedding> DiarizationSession::getClusterEmbeddings()
     if (counts[static_cast<size_t>(c)] <= 0) {
       continue;
     }
+    int32_t spk_id = c;
+    if (!last_speaker_map_.empty()) {
+      auto it = last_speaker_map_.find(c);
+      if (it == last_speaker_map_.end()) {
+        continue;
+      }
+      spk_id = it->second;
+    }
     ClusterEmbedding ce;
-    ce.speaker = c;
+    ce.speaker = spk_id;
     ce.embedding.resize(static_cast<size_t>(dim));
     const float inv = 1.f / static_cast<float>(counts[static_cast<size_t>(c)]);
     for (int32_t d = 0; d < dim; ++d) {
@@ -410,6 +435,10 @@ std::vector<ClusterEmbedding> DiarizationSession::getClusterEmbeddings()
     }
     out.push_back(std::move(ce));
   }
+  std::sort(out.begin(), out.end(),
+            [](const ClusterEmbedding& a, const ClusterEmbedding& b) {
+              return a.speaker < b.speaker;
+            });
   return out;
 }
 

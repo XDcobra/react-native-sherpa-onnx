@@ -61,6 +61,9 @@ export async function buildOfflinePunctuationInitBridgeOptions(
     initMode: 'auto',
     modelDir,
     modelType: autoOptions.modelType ?? 'auto',
+    ...(autoOptions.quantization !== undefined
+      ? { quantization: autoOptions.quantization }
+      : {}),
     ...sharedFields,
   };
 }
@@ -91,6 +94,9 @@ export async function buildStreamingPunctuationInitBridgeOptions(
     initMode: 'auto',
     modelDir,
     modelType: autoOptions.modelType ?? 'auto',
+    ...(autoOptions.quantization !== undefined
+      ? { quantization: autoOptions.quantization }
+      : {}),
     ...sharedFields,
   };
 }

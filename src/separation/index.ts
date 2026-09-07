@@ -11,9 +11,10 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
 import {
   isDetectionSource,
+  normalizeQuantization,
   type DetectedModelEntry,
   type DetectionSource,
 } from '../types/modelDetect';
@@ -88,7 +89,9 @@ function createSeparationPipelineHandle(
   };
 
   const completed =
-    createStreamingPipelineCompletionPromise(pipelineId).finally(detachIfNeeded);
+    createStreamingPipelineCompletionPromise(pipelineId).finally(
+      detachIfNeeded
+    );
 
   return {
     instanceId,
@@ -211,6 +214,7 @@ export async function detectSeparationModel(
   options?: {
     modelType?: SeparationModelType | 'auto';
     assetName?: string;
+    quantization?: QuantizationPreference;
   }
 ): Promise<SeparationDetectResult> {
   const resolved = await resolveFileSourceForDetect(source);
@@ -222,7 +226,8 @@ export async function detectSeparationModel(
   const raw = await SherpaOnnx.detectSeparationModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -245,10 +250,7 @@ export async function detectSeparationModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const vocals = readNonEmptyPath(raw.paths?.vocals);
   const accompaniment = readNonEmptyPath(raw.paths?.accompaniment);
   const model = readNonEmptyPath(raw.paths?.model);

@@ -13,6 +13,7 @@ namespace sherpaonnx {
 struct UnifiedModelDetectInput {
     std::optional<std::string> model_dir;
     std::optional<std::string> asset_name;
+    std::string quantization;
 };
 
 struct UnifiedModelDetectResult {
@@ -37,7 +38,8 @@ struct UnifiedModelDetectResult {
  */
 UnifiedModelDetectResult DetectModel(
     const std::optional<std::string>& model_dir,
-    const std::optional<std::string>& asset_name);
+    const std::optional<std::string>& asset_name,
+    const std::string& quantization = "");
 
 std::vector<UnifiedModelDetectResult> DetectModelsBatch(
     const std::vector<UnifiedModelDetectInput>& inputs);

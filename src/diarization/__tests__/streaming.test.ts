@@ -116,6 +116,42 @@ describe('createStreamingDiarization', () => {
     );
   });
 
+  it('forwards custom latency configuration (chunkLen, rightContext, fifoLen)', async () => {
+    (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      sampleRate: 16000,
+      maxSpeakers: 4,
+      feedSamples: 16640,
+      strideSamples: 7680,
+      latencySeconds: 1.04,
+    });
+
+    const engine = await createStreamingDiarization({
+      initMode: 'custom',
+      modelType: 'sortformer',
+      customConfig: {
+        model: { kind: 'fs', path: '/tmp/model.onnx' },
+      },
+      chunkLen: 6,
+      rightContext: 7,
+      fifoLen: 188,
+    });
+
+    expect(engine.feedSamples).toBe(16640);
+    expect(engine.strideSamples).toBe(7680);
+    expect(engine.latencySeconds).toBe(1.04);
+
+    expect(SherpaOnnx.initializeStreamingDiarization).toHaveBeenCalledWith(
+      expect.stringMatching(/^diar_stream_/),
+      expect.objectContaining({
+        model: '/tmp/model.onnx',
+        chunkLen: 6,
+        rightContext: 7,
+        fifoLen: 188,
+      })
+    );
+  });
+
   it('starts streaming pipeline with zero-JS cursor-to-segment loop', async () => {
     (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
       success: true,
@@ -197,5 +233,41 @@ describe('createStreamingDiarization', () => {
 
     const flushed = await engine.flush();
     expect(flushed).toEqual([{ start: 1.5, end: 2.0, speaker: 1 }]);
+  });
+
+  it('detects model and forwards quantization in auto mode', async () => {
+    (SherpaOnnx.detectDiarizationModel as jest.Mock).mockResolvedValue({
+      ok: true,
+      selectedKind: 2,
+      isStreaming: true,
+      paths: {
+        model: '/models/sortformer/model.int8.onnx',
+        metadata: '/models/sortformer/metadata.json',
+      },
+      quantization: 'int8',
+    });
+    (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      sampleRate: 16000,
+    });
+
+    await createStreamingDiarization({
+      modelSource: { kind: 'fs', path: '/models/sortformer' },
+      quantization: 'int8',
+    });
+
+    expect(SherpaOnnx.detectDiarizationModel).toHaveBeenCalledWith(
+      '/models/sortformer',
+      'sortformer-streaming',
+      'auto',
+      'int8'
+    );
+    expect(SherpaOnnx.initializeStreamingDiarization).toHaveBeenCalledWith(
+      expect.stringMatching(/^diar_stream_/),
+      expect.objectContaining({
+        model: '/models/sortformer/model.int8.onnx',
+        metadata: '/models/sortformer/metadata.json',
+      })
+    );
   });
 });

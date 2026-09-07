@@ -6,7 +6,8 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
+import { normalizeQuantization } from '../types/modelDetect';
 import {
   createOfflineAudioBufferFromSamples,
   getOfflineAudioBufferSamplesSlice,
@@ -176,6 +177,7 @@ export async function detectVadModel(
   options?: {
     modelType?: VADInitializeOptions['modelType'];
     assetName?: string;
+    quantization?: QuantizationPreference;
   }
 ): Promise<VADDetectResult> {
   const resolved = await resolveFileSourceForDetect(source);
@@ -187,7 +189,8 @@ export async function detectVadModel(
   const raw = await SherpaOnnx.detectVadModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -210,10 +213,7 @@ export async function detectVadModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const modelPath =
     raw.paths != null &&
     typeof raw.paths === 'object' &&

@@ -1,5 +1,6 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-enhancement-catalog-metadata.h"
 #include "sherpa-onnx-enhancement-online-guard.h"
 #include "sherpa-onnx-validate-enhancement.h"
@@ -68,7 +69,8 @@ std::vector<sherpaonnx::EnhancementModelKind> GetKindsFromDirNameEnhancement(
 sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     sherpaonnx::EnhancementDetectResult result;
 
@@ -112,10 +114,26 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
 
     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
-    const std::string gtcrnModel =
-        FindOnnxByAnyToken(files, {"gtcrn"}, std::nullopt);
-    const std::string dpdfnetModel =
-        FindOnnxByAnyToken(files, {"dpdfnet"}, std::nullopt);
+    std::string gtcrnModel =
+        FindOnnxByAnyToken(files, {"gtcrn"}, quantization);
+    std::string dpdfnetModel =
+        FindOnnxByAnyToken(files, {"dpdfnet"}, quantization);
+
+    std::string genericModel =
+        FindOnnxByAnyToken(files, {"model"}, quantization);
+    if (genericModel.empty()) {
+        std::vector<std::string> onnxCandidates;
+        for (const auto& f : files) {
+            bool isOnnx = (f.nameLower.size() > 5 && f.nameLower.substr(f.nameLower.size() - 5) == ".onnx") ||
+                          (f.nameLower.size() > 4 && f.nameLower.substr(f.nameLower.size() - 4) == ".ort");
+            if (isOnnx && (quantization.empty() || quantization == "auto" || MatchesQuantization(f.nameLower, quantization))) {
+                onnxCandidates.push_back(f.path);
+            }
+        }
+        if (onnxCandidates.size() == 1) {
+            genericModel = onnxCandidates[0];
+        }
+    }
 
     if (!gtcrnModel.empty()) {
         result.detectedModels.push_back({"gtcrn", modelDir});
@@ -131,13 +149,15 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         bool selectedFromDir = false;
         if (!nameKinds.empty()) {
             for (const auto kind : nameKinds) {
-                if (kind == sherpaonnx::EnhancementModelKind::kGtcrn && !gtcrnModel.empty()) {
+                if (kind == sherpaonnx::EnhancementModelKind::kGtcrn && (!gtcrnModel.empty() || !genericModel.empty())) {
                     selected = kind;
+                    if (gtcrnModel.empty()) gtcrnModel = genericModel;
                     selectedFromDir = true;
                     break;
                 }
-                if (kind == sherpaonnx::EnhancementModelKind::kDpdfNet && !dpdfnetModel.empty()) {
+                if (kind == sherpaonnx::EnhancementModelKind::kDpdfNet && (!dpdfnetModel.empty() || !genericModel.empty())) {
                     selected = kind;
+                    if (dpdfnetModel.empty()) dpdfnetModel = genericModel;
                     selectedFromDir = true;
                     break;
                 }
@@ -151,12 +171,21 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         } else if (!dpdfnetModel.empty()) {
             selected = sherpaonnx::EnhancementModelKind::kDpdfNet;
             AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
+        } else if (!genericModel.empty()) {
+            selected = sherpaonnx::EnhancementModelKind::kGtcrn;
+            gtcrnModel = genericModel;
+            AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
         }
     } else {
         selected = ParseEnhancementModelType(requestedModelType);
         if (selected == sherpaonnx::EnhancementModelKind::kUnknown) {
             result.error = "Enhancement: unknown model type: " + requestedModelType;
             return result;
+        }
+        if (selected == sherpaonnx::EnhancementModelKind::kGtcrn && gtcrnModel.empty()) {
+            gtcrnModel = genericModel;
+        } else if (selected == sherpaonnx::EnhancementModelKind::kDpdfNet && dpdfnetModel.empty()) {
+            dpdfnetModel = genericModel;
         }
         AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
     }
@@ -204,6 +233,13 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         }
     }
 
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -217,7 +253,8 @@ using namespace model_detect;
 EnhancementDetectResult DetectEnhancementModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     EnhancementDetectResult result;
 
@@ -233,7 +270,7 @@ EnhancementDetectResult DetectEnhancementModel(
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        result = DetectEnhancementModelFromFiles({}, syntheticDir, requestedModelType);
+        result = DetectEnhancementModelFromFiles({}, syntheticDir, requestedModelType, quantization);
         FillEnhancementDerivedCatalogMetadata(result, assetName);
         return result;
     }
@@ -252,7 +289,7 @@ EnhancementDetectResult DetectEnhancementModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    result = DetectEnhancementModelFromFiles(files, modelDir, requestedModelType);
+    result = DetectEnhancementModelFromFiles(files, modelDir, requestedModelType, quantization);
     if (has_asset) {
         FillEnhancementDerivedCatalogMetadata(result, *asset_name_opt);
     } else {
@@ -265,14 +302,15 @@ EnhancementDetectResult DetectEnhancementModel(
 EnhancementDetectResult DetectEnhancementModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     EnhancementDetectResult result;
     if (modelDir.empty()) {
         result.error = "Enhancement: model directory is empty";
         return result;
     }
-    return DetectEnhancementModelFromFiles(files, modelDir, modelType);
+    return DetectEnhancementModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 } // namespace sherpaonnx

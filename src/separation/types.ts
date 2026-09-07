@@ -4,6 +4,7 @@ import type {
   OfflineAudioBufferIdSource,
 } from '../audiobuffer/types';
 import type { SeparationDetectModelResult } from '../types/modelDetect';
+import type { QuantizationPreference } from '../download/types';
 import type { SpleeterCustomConfig, UvrCustomConfig } from './customConfig';
 import type {
   ErrorRecoveryStrategy,
@@ -36,6 +37,7 @@ export type SeparationInitOptionsShared = {
 export type SeparationAutoInitializeOptions = SeparationInitOptionsShared & {
   initMode?: 'auto';
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
   modelType?: SeparationModelType | 'auto';
 };
 

@@ -173,6 +173,29 @@ tasks.register("downloadSherpaModels", Exec) {
 
 preBuild.dependsOn(tasks.named("downloadSherpaModels"))
 
+tasks.register("syncModelsFromIos") {
+    description = "Copy models from iOS sherpa_models into Android assets if not already present"
+    doLast {
+        def iosModelsDir = file("${rootDir}/../ios/sherpa_models/models")
+        def androidModelsDir = file("${projectDir}/src/main/assets/models")
+        if (iosModelsDir.exists() && iosModelsDir.isDirectory()) {
+            iosModelsDir.listFiles().each { f ->
+                if (f.isDirectory() && !f.name.startsWith(".") && f.name != "README.md") {
+                    def target = new File(androidModelsDir, f.name)
+                    if (!target.exists()) {
+                        println "[SherpaOnnx] Syncing model from iOS sherpa_models to Android assets: ${f.name}"
+                        copy {
+                            from f
+                            into target
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+preBuild.dependsOn(tasks.named("syncModelsFromIos"))
+
 // Play Asset Delivery (PAD) local testing: build AAB, then use bundletool to build APKs with
 // --local-testing and install so getAssetPackPath("sherpa_models") works.
 // Bundletool: in PATH, or set -Pbundletool=C:\path\to\bundletool (Windows) / -Pbundletool=/path/to/bundletool (Unix).

@@ -31,7 +31,11 @@ export async function resolveAlignmentOnnxPath(
       'ALIGNMENT_MODEL_MISSING: Provide modelSource for accurate alignment.'
     );
   }
-  const det = await SherpaOnnx.detectAlignmentModel(modelDir, 'auto');
+  const det = await SherpaOnnx.detectAlignmentModel(
+    modelDir,
+    'auto',
+    model.quantization ?? null
+  );
   const onnxPath =
     typeof det.paths?.model === 'string' ? det.paths.model.trim() : '';
   if (!det.success || !onnxPath) {

@@ -36,14 +36,18 @@ export const DiarizationErrorCode = {
   BUFFER_NOT_FOUND: 'DIARIZATION_BUFFER_NOT_FOUND',
 } as const;
 
+import type { QuantizationPreference } from '../download/types';
+
 export interface DiarizationSegmentationOptions {
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
   /** Hop as fraction of window; 0 or omitted → 0.1 */
   windowShiftRatio?: number;
 }
 
 export interface DiarizationEmbeddingOptions {
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
 }
 
 export interface DiarizationClusteringOptions {
@@ -77,6 +81,7 @@ export interface DiarizeResult {
   sampleRate: number;
   processingTimeMs: number;
   speakersPerFrame?: number[];
+  segments?: Array<{ start: number; end: number; speaker: number }>;
 }
 
 export interface DiarizationReclusterOptions {

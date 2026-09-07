@@ -159,3 +159,29 @@ TEST(DiarizationTimeline, SpeechUnionLabelsMarksSpeechFrames) {
   EXPECT_GT(segs[0].end, segs[0].start);
   EXPECT_GT(segs[1].end, segs[1].start);
 }
+
+TEST(DiarizationTimeline, RemapDiscontinuousSpeakersToContiguous) {
+  std::vector<DiarizationSegment> segs = {
+      {0.0f, 1.0f, 3},
+      {1.2f, 2.0f, 7},
+      {2.2f, 3.0f, 3},
+      {3.5f, 4.0f, 11},
+  };
+
+  std::unordered_map<int32_t, int32_t> speaker_map;
+  int32_t next_id = 0;
+  for (auto& s : segs) {
+    auto it = speaker_map.find(s.speaker);
+    if (it == speaker_map.end()) {
+      speaker_map[s.speaker] = next_id++;
+    }
+    s.speaker = speaker_map[s.speaker];
+  }
+
+  EXPECT_EQ(next_id, 3);
+  EXPECT_EQ(segs[0].speaker, 0);
+  EXPECT_EQ(segs[1].speaker, 1);
+  EXPECT_EQ(segs[2].speaker, 0);
+  EXPECT_EQ(segs[3].speaker, 2);
+}
+

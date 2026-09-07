@@ -17,6 +17,9 @@ jest.mock('react-native', () => ({
   NativeEventEmitter: jest.fn().mockImplementation(() => ({
     addListener: mockAddListener,
   })),
+  NativeModules: {
+    SherpaOnnx: {},
+  },
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';

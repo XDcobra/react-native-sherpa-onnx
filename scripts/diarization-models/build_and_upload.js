@@ -181,7 +181,6 @@ async function readSources(csvPath) {
   }
 
   const header = rows[0].map(normalizeCell);
-  const baseHeader = ['id', 'onnx_url', 'license', 'license_type', 'commercial_use'];
   const hasMetadataCol = header.length >= 6 && header[5] === 'metadata';
 
   if (
@@ -193,7 +192,9 @@ async function readSources(csvPath) {
     header[4] !== 'commercial_use'
   ) {
     throw new Error(
-      `Invalid CSV header. Expected at least id;onnx_url;license;license_type;commercial_use (got ${header.join(';')})`
+      `Invalid CSV header. Expected at least id;onnx_url;license;license_type;commercial_use (got ${header.join(
+        ';'
+      )})`
     );
   }
 
@@ -207,7 +208,9 @@ async function readSources(csvPath) {
 
     if (row.length > (hasMetadataCol ? 6 : 5)) {
       throw new Error(
-        `Line ${lineNumber}: too many columns (expected ${hasMetadataCol ? 6 : 5})`
+        `Line ${lineNumber}: too many columns (expected ${
+          hasMetadataCol ? 6 : 5
+        })`
       );
     }
 
@@ -354,7 +357,9 @@ async function handleMetadataFile(source, targetPath) {
       source.metadataSource.startsWith('https://') ||
       source.metadataSource.startsWith('file://')
     ) {
-      console.log(`[download] ${source.modelId}: metadata.json from ${source.metadataSource}`);
+      console.log(
+        `[download] ${source.modelId}: metadata.json from ${source.metadataSource}`
+      );
       await downloadFile(source.metadataSource, targetPath);
       return;
     }
@@ -372,9 +377,15 @@ async function handleMetadataFile(source, targetPath) {
   }
 
   // 2. Check default conventional path <csvDir>/metadata/<modelId>.json
-  const defaultMetaPath = path.join(source.csvDir, 'metadata', `${source.modelId}.json`);
+  const defaultMetaPath = path.join(
+    source.csvDir,
+    'metadata',
+    `${source.modelId}.json`
+  );
   if (fs.existsSync(defaultMetaPath)) {
-    console.log(`[copy] ${source.modelId}: metadata.json from ${defaultMetaPath}`);
+    console.log(
+      `[copy] ${source.modelId}: metadata.json from ${defaultMetaPath}`
+    );
     await fsp.copyFile(defaultMetaPath, targetPath);
   }
 }

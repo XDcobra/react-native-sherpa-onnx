@@ -202,17 +202,20 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
 - (void)detectVadModel:(NSString *)modelDir
              assetName:(NSString * _Nullable)assetName
              modelType:(NSString * _Nullable)modelType
+          quantization:(NSString * _Nullable)quantization
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     auto modelDirOpt = OptionalUtf8String(modelDir);
     auto assetNameOpt = OptionalUtf8String(assetName);
+    const std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
     const std::string modelTypeStr =
         (modelType != nil && [modelType length] > 0) ? [modelType UTF8String] : "auto";
 
     sherpaonnx::VadDetectResult result =
-        sherpaonnx::DetectVadModel(modelDirOpt, assetNameOpt, modelTypeStr);
+        sherpaonnx::DetectVadModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
 
     NSMutableDictionary *resultDict = [NSMutableDictionary dictionary];
     resultDict[@"success"] = @(result.ok);

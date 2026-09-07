@@ -2,6 +2,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-speaker-embedding-online-guard.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
+#include "sherpa-onnx-catalog-metadata.h"
 
 #include <algorithm>
 #include <optional>
@@ -79,7 +80,8 @@ std::vector<sherpaonnx::SpeakerEmbeddingModelKind> GetKindsFromDirNameSpeakerEmb
 sherpaonnx::SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     sherpaonnx::SpeakerEmbeddingDetectResult result;
 
@@ -127,12 +129,28 @@ sherpaonnx::SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFiles(
 
     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
-    const std::string wespeakerModel =
-        FindOnnxByAnyToken(files, {"wespeaker"}, std::nullopt);
-    const std::string threeDSpeakerModel =
-        FindOnnxByAnyToken(files, {"3dspeaker", "3d-speaker"}, std::nullopt);
-    const std::string nemoModel =
-        FindOnnxByAnyToken(files, {"nemo", "titanet", "speakernet"}, std::nullopt);
+    std::string wespeakerModel =
+        FindOnnxByAnyToken(files, {"wespeaker"}, quantization);
+    std::string threeDSpeakerModel =
+        FindOnnxByAnyToken(files, {"3dspeaker", "3d-speaker"}, quantization);
+    std::string nemoModel =
+        FindOnnxByAnyToken(files, {"nemo", "titanet", "speakernet"}, quantization);
+
+    std::string genericModel =
+        FindOnnxByAnyToken(files, {"model"}, quantization);
+    if (genericModel.empty()) {
+        std::vector<std::string> onnxCandidates;
+        for (const auto& f : files) {
+            bool isOnnx = (f.nameLower.size() > 5 && f.nameLower.substr(f.nameLower.size() - 5) == ".onnx") ||
+                          (f.nameLower.size() > 4 && f.nameLower.substr(f.nameLower.size() - 4) == ".ort");
+            if (isOnnx && (quantization.empty() || quantization == "auto" || MatchesQuantization(f.nameLower, quantization))) {
+                onnxCandidates.push_back(f.path);
+            }
+        }
+        if (onnxCandidates.size() == 1) {
+            genericModel = onnxCandidates[0];
+        }
+    }
 
     if (!wespeakerModel.empty()) {
         result.detectedModels.push_back({"wespeaker", modelDir});
@@ -153,19 +171,22 @@ sherpaonnx::SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFiles(
         if (!nameKinds.empty()) {
             for (const auto kind : nameKinds) {
                 if (kind == sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker &&
-                    !wespeakerModel.empty()) {
+                    (!wespeakerModel.empty() || !genericModel.empty())) {
                     selected = kind;
+                    if (wespeakerModel.empty()) wespeakerModel = genericModel;
                     selectedFromDir = true;
                     break;
                 }
                 if (kind == sherpaonnx::SpeakerEmbeddingModelKind::k3dSpeaker &&
-                    !threeDSpeakerModel.empty()) {
+                    (!threeDSpeakerModel.empty() || !genericModel.empty())) {
                     selected = kind;
+                    if (threeDSpeakerModel.empty()) threeDSpeakerModel = genericModel;
                     selectedFromDir = true;
                     break;
                 }
-                if (kind == sherpaonnx::SpeakerEmbeddingModelKind::kNemo && !nemoModel.empty()) {
+                if (kind == sherpaonnx::SpeakerEmbeddingModelKind::kNemo && (!nemoModel.empty() || !genericModel.empty())) {
                     selected = kind;
+                    if (nemoModel.empty()) nemoModel = genericModel;
                     selectedFromDir = true;
                     break;
                 }
@@ -186,12 +207,25 @@ sherpaonnx::SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFiles(
             selected = sherpaonnx::SpeakerEmbeddingModelKind::kNemo;
             AppendUniqueDetectionSource(
                 result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
+        } else if (!genericModel.empty()) {
+            // Default generic single model to 3d-speaker if no name kind is matched
+            selected = sherpaonnx::SpeakerEmbeddingModelKind::k3dSpeaker;
+            threeDSpeakerModel = genericModel;
+            AppendUniqueDetectionSource(
+                result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
         }
     } else {
         selected = ParseSpeakerEmbeddingModelType(requestedModelType);
         if (selected == sherpaonnx::SpeakerEmbeddingModelKind::kUnknown) {
             result.error = "SpeakerEmbedding: unknown model type: " + requestedModelType;
             return result;
+        }
+        if (selected == sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker && wespeakerModel.empty()) {
+            wespeakerModel = genericModel;
+        } else if (selected == sherpaonnx::SpeakerEmbeddingModelKind::k3dSpeaker && threeDSpeakerModel.empty()) {
+            threeDSpeakerModel = genericModel;
+        } else if (selected == sherpaonnx::SpeakerEmbeddingModelKind::kNemo && nemoModel.empty()) {
+            nemoModel = genericModel;
         }
         AppendUniqueDetectionSource(
             result.detectionSources, sherpaonnx::DetectionSource::kExplicitModelType);
@@ -238,6 +272,16 @@ sherpaonnx::SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFiles(
         return result;
     }
 
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadataFromBasename(
+        result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -251,7 +295,8 @@ using namespace model_detect;
 SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     SpeakerEmbeddingDetectResult result;
 
@@ -267,7 +312,10 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        return DetectSpeakerEmbeddingModelFromFiles({}, syntheticDir, requestedModelType);
+        result = DetectSpeakerEmbeddingModelFromFiles({}, syntheticDir, requestedModelType, quantization);
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        return result;
     }
 
     const std::string& modelDir = *model_dir_opt;
@@ -284,20 +332,26 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    return DetectSpeakerEmbeddingModelFromFiles(files, modelDir, requestedModelType);
+    result = DetectSpeakerEmbeddingModelFromFiles(files, modelDir, requestedModelType, quantization);
+    if (has_asset && (result.quantization.empty() || result.quantization == "unknown")) {
+        std::string ignoredSizeTier;
+        FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
+    }
+    return result;
 }
 
 SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     SpeakerEmbeddingDetectResult result;
     if (modelDir.empty()) {
         result.error = "SpeakerEmbedding: model directory is empty";
         return result;
     }
-    return DetectSpeakerEmbeddingModelFromFiles(files, modelDir, modelType);
+    return DetectSpeakerEmbeddingModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 } // namespace sherpaonnx

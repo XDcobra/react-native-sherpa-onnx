@@ -15,7 +15,24 @@ export enum ModelCategory {
 }
 
 export type TtsModelType = TTSModelType | 'unknown';
-export type Quantization = 'fp16' | 'int8' | 'int8-quantized' | 'unknown';
+export type QuantizationPreference =
+  | 'auto'
+  | 'int8'
+  | 'fp16'
+  | 'int4'
+  | 'uint8'
+  | 'fp32'
+  | 'bf16';
+
+export type Quantization =
+  | 'int8'
+  | 'int8-quantized'
+  | 'fp16'
+  | 'int4'
+  | 'uint8'
+  | 'fp32'
+  | 'bf16'
+  | 'unknown';
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
 
 export type ModelMeta = {

@@ -13,6 +13,7 @@ import {
 import {
   ModelCategory,
   type Quantization,
+  type QuantizationPreference,
   type SizeTier,
 } from '../download/types';
 import type { DetectedModelEntry, DetectionSource } from '../types/modelDetect';
@@ -27,9 +28,14 @@ import {
 export type DetectModelNameInput = {
   assetName: string;
   modelDir?: string;
+  quantization?: QuantizationPreference;
 };
 
 export type DetectModelInput = FileSource | DetectModelNameInput;
+
+export type DetectModelOptions = {
+  quantization?: QuantizationPreference;
+};
 
 export type DetectModelMatchedResult = {
   matched: true;
@@ -55,10 +61,13 @@ export type DetectModelsBatchOptions = {
   concurrency?: number;
   /** Include `paths` in each matched result (default false). Single `detectModel` always includes paths when present. */
   includePaths?: boolean;
+  /** Default quantization preference applied to batch entries that don't specify one. */
+  quantization?: QuantizationPreference;
 };
 
 type ResolvedDetectModelInput = ResolvedDetectInput & {
   modelKey: string;
+  quantization?: QuantizationPreference;
 };
 
 const DEFAULT_BATCH_CONCURRENCY = 8;
@@ -105,6 +114,7 @@ async function resolveDetectModelInput(
       modelDir,
       assetName: assetName.length > 0 ? assetName : null,
       modelKey: assetName,
+      quantization: input.quantization,
     };
   }
 
@@ -126,7 +136,15 @@ export function isQnnModelName(name: string): boolean {
 }
 
 function normalizeQuantization(raw: string | undefined): Quantization {
-  if (raw === 'fp16' || raw === 'int8' || raw === 'int8-quantized') {
+  if (
+    raw === 'fp16' ||
+    raw === 'int8' ||
+    raw === 'int8-quantized' ||
+    raw === 'int4' ||
+    raw === 'uint8' ||
+    raw === 'fp32' ||
+    raw === 'bf16'
+  ) {
     return raw;
   }
   return 'unknown';
@@ -254,10 +272,12 @@ function mapNativeDetectResult(
 function toNativeDetectInput(resolved: ResolvedDetectModelInput): {
   modelDir: string;
   assetName: string | null;
+  quantization?: string | null;
 } {
   return {
     modelDir: resolved.modelDir,
     assetName: resolved.assetName,
+    quantization: resolved.quantization ?? null,
   };
 }
 
@@ -265,16 +285,19 @@ function toNativeDetectInput(resolved: ResolvedDetectModelInput): {
  * Detect model category and type via native unified detection (single bridge call).
  */
 export async function detectModel(
-  input: DetectModelInput
+  input: DetectModelInput,
+  options?: DetectModelOptions
 ): Promise<DetectModelResult> {
   const resolved = await resolveDetectModelInput(input);
+  const quant = options?.quantization ?? resolved.quantization;
   if (!resolved.assetName && resolved.modelDir.trim().length === 0) {
     return { matched: false };
   }
 
   const raw = await SherpaOnnx.detectModel(
     resolved.modelDir,
-    resolved.assetName
+    resolved.assetName,
+    quant ?? null
   );
   return mapNativeDetectResult(resolved, raw, true);
 }
@@ -291,7 +314,13 @@ export async function detectModelsBatch(
   const concurrency = options?.concurrency ?? DEFAULT_BATCH_CONCURRENCY;
   const includePaths = options?.includePaths === true;
   const resolvedList = await Promise.all(
-    inputs.map((input) => resolveDetectModelInput(input))
+    inputs.map(async (input) => {
+      const resolved = await resolveDetectModelInput(input);
+      if (!resolved.quantization && options?.quantization) {
+        resolved.quantization = options.quantization;
+      }
+      return resolved;
+    })
   );
 
   const runChunk = async (

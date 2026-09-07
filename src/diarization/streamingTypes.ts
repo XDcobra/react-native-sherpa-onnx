@@ -9,6 +9,7 @@ import type {
   StreamingPipelineStatus,
 } from '../audiobuffer/streamingPipelineTypes';
 import type { DiarizationCustomConfig } from './customConfig';
+import type { QuantizationPreference } from '../download/types';
 
 export type StreamingDiarizationConcreteModelType = 'sortformer';
 export type StreamingDiarizationModelType = 'sortformer' | 'auto';
@@ -32,12 +33,31 @@ export interface StreamingDiarizationInitOptionsShared {
   minDurationOff?: number;
   /** Filter window size for median filter across time (default 11) */
   medianWindow?: number;
+
+  /**
+   * Number of model frames per processing chunk (e.g. 6 for low latency ~1.04s, 124 for default ~10.0s).
+   * Each frame represents 80ms of audio.
+   * Default: derived from model metadata (124).
+   */
+  chunkLen?: number;
+  /**
+   * Lookahead context frames appended after each chunk (e.g. 7 for low latency, 1 for default).
+   * Each frame represents 80ms of audio.
+   * Default: derived from model metadata (1).
+   */
+  rightContext?: number;
+  /**
+   * Maximum FIFO queue frames before frames are pushed to the speaker cache (e.g. 188, 124).
+   * Default: derived from model metadata (124).
+   */
+  fifoLen?: number;
 }
 
 export type StreamingDiarizationAutoInitializeOptions =
   StreamingDiarizationInitOptionsShared & {
     initMode?: 'auto';
     modelSource: FileSource;
+    quantization?: QuantizationPreference;
     modelType?: StreamingDiarizationModelType;
   };
 

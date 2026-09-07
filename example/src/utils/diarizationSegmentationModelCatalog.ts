@@ -9,6 +9,7 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
 import {
+  getModelPath,
   listDownloadedModels,
   ModelCategory,
   type ModelMeta,
@@ -40,6 +41,7 @@ export type DiarizationSegmentationCatalogSnapshot = {
   padModelsPath: string | null;
   bundledFolders: string[];
   downloadedIds: string[];
+  downloadedPaths?: Record<string, string>;
 };
 
 /**
@@ -48,15 +50,19 @@ export type DiarizationSegmentationCatalogSnapshot = {
  */
 export function isDiarizationSegmentationFolder(
   folder: string,
-  hint: string
+  hint?: string
 ): boolean {
+  const normalized = folder.toLowerCase();
+  if (normalized.includes('sortformer') || normalized.includes('streaming')) {
+    return false;
+  }
   if (hint === 'diarization') {
     return true;
   }
-  const normalized = folder.toLowerCase();
   return (
     normalized.includes('pyannote') ||
     normalized.includes('reverb') ||
+    normalized.includes('segmentation') ||
     normalized.includes('diarization')
   );
 }
@@ -104,6 +110,7 @@ export function getDiarizationSegmentationModelPathConfig(
     padModelsPath: string | null;
     bundledFolders: string[];
     downloadedIds: Set<string>;
+    downloadedPaths?: Record<string, string>;
   }
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
@@ -112,6 +119,10 @@ export function getDiarizationSegmentationModelPathConfig(
       : getFileModelPath(modelId, ModelCategory.Diarization);
   }
   if (ctx.downloadedIds.has(modelId)) {
+    const exactPath = ctx.downloadedPaths?.[modelId];
+    if (exactPath) {
+      return { kind: 'fs', path: exactPath };
+    }
     return getFileModelPath(modelId, ModelCategory.Diarization);
   }
   if (ctx.bundledFolders.includes(modelId)) {
@@ -121,7 +132,7 @@ export function getDiarizationSegmentationModelPathConfig(
 }
 
 export async function loadDiarizationSegmentationModelCatalog(): Promise<DiarizationSegmentationCatalogSnapshot> {
-  const assetModels = await listAssetModels();
+  const assetModels = await listAssetModels().catch(() => []);
   const bundledIds = assetModels
     .filter((model) =>
       isDiarizationSegmentationFolder(model.folder, model.hint)
@@ -147,10 +158,29 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
     padIds = [];
   }
 
-  const downloaded = await listDownloadedModels(ModelCategory.Diarization);
-  const downloadedIds = downloaded.map((model) => model.id);
+  const downloaded = await listDownloadedModels(
+    ModelCategory.Diarization
+  ).catch(() => []);
+  const segDownloaded = downloaded.filter((model) =>
+    isDiarizationSegmentationFolder(model.id)
+  );
+  const downloadedIds = segDownloaded.map((model) => model.id);
+  const downloadedPaths: Record<string, string> = {};
+  for (const m of segDownloaded) {
+    try {
+      const resolved = await getModelPath(ModelCategory.Diarization, m.id, {
+        source: m.sourceId,
+      });
+      if (resolved) {
+        downloadedPaths[m.id] = resolved;
+      }
+    } catch {
+      // fallback
+    }
+  }
+
   const metaById = new Map(
-    downloaded.map((model) => [model.id, model] as const)
+    segDownloaded.map((model) => [model.id, model] as const)
   );
 
   const combinedIds: string[] = [];
@@ -159,13 +189,13 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
       combinedIds.push(id);
     }
   };
+  for (const id of downloadedIds) {
+    pushId(id);
+  }
   for (const id of padIds) {
     pushId(id);
   }
   for (const id of bundledIds) {
-    pushId(id);
-  }
-  for (const id of downloadedIds) {
     pushId(id);
   }
 
@@ -186,5 +216,6 @@ export async function loadDiarizationSegmentationModelCatalog(): Promise<Diariza
     padModelsPath: resolvedPadPath,
     bundledFolders: bundledIds,
     downloadedIds,
+    downloadedPaths,
   };
 }

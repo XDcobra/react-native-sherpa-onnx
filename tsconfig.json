@@ -1,5 +1,5 @@
 {
-  "exclude": ["sherpa-onnx/**", "node_modules/**", "lib/**", "third_party/**", "test/cpp/**", "test/fixtures/**"],
+  "exclude": ["sherpa-onnx/**", "node_modules/**", "lib/**", "third_party/**", "test/cpp/**", "test/fixtures/**", "build/**", "build-test/**"],
   "compilerOptions": {
     "rootDir": ".",
     "baseUrl": ".",

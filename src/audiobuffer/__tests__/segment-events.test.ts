@@ -45,6 +45,9 @@ jest.mock('react-native', () => {
     TurboModuleRegistry: {
       getEnforcing: () => mockNative,
     },
+    NativeModules: {
+      SherpaOnnx: mockNative,
+    },
     __mockNative: mockNative,
     __emitEvent: emitEvent,
     __resetEvents: resetEvents,

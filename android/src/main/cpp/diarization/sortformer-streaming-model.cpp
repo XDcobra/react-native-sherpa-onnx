@@ -237,6 +237,17 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
       return meta_st;
     }
 
+    // Apply config overrides if provided
+    if (config_.chunk_len > 0) {
+      info_.chunk_len = config_.chunk_len;
+    }
+    if (config_.right_context >= 0) {
+      info_.right_context = config_.right_context;
+    }
+    if (config_.fifo_len > 0) {
+      info_.fifo_len = config_.fifo_len;
+    }
+
     // Configure Fbank
     SortformerFbankConfig fbank_cfg;
     fbank_cfg.sample_rate = info_.sample_rate;

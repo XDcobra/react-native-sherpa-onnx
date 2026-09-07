@@ -256,9 +256,40 @@ const engine = await createStreamingDiarization({
 | `minDurationOn` | `number` | `0.0` | Minimum duration in seconds of a speaker turn to retain |
 | `minDurationOff` | `number` | `0.5` | Maximum gap in seconds between consecutive turns of the same speaker to merge |
 | `medianWindow` | `number` | `11` | Window size for temporal median filtering of frame predictions |
+| `chunkLen` | `number` | From metadata (`124`) | Number of 80ms model frames per chunk (e.g. `6` for low latency ~1.04s, `124` for default ~10.0s) |
+| `rightContext` | `number` | From metadata (`1`) | Lookahead context frames appended after each chunk (e.g. `7` for low latency, `1` for default) |
+| `fifoLen` | `number` | From metadata (`124`) | Maximum FIFO queue frames before frames push into the speaker cache |
 | `numThreads` | `number` | `1` | Number of threads for ONNX Runtime inference |
 | `provider` | `string` | `'cpu'` | ONNX Runtime execution provider |
 | `debug` | `boolean` | `false` | Enable verbose native logging |
+
+---
+
+### Streaming latency profiles & real-time feedback
+
+NeMo Sortformer natively supports dynamic sequence lengths. Applications can configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency and accuracy according to their use case:
+
+| Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Recommended Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Low Latency** *(Recommended for Live Mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
+| **Ultra-Low Latency** | `3` | `1` | `188` | **0.32s** | **0.24s** (~4 updates/sec) | Ultra-fast speaker change detection |
+| **High Latency (Default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
+
+```ts
+// Example: Initialize with Low Latency for real-time live microphone streaming
+const engine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/sortformer-folder' },
+  chunkLen: 6,
+  rightContext: 7,
+  fifoLen: 188,
+});
+
+console.log('Low-latency properties:', {
+  feedSamples: engine.feedSamples,       // 16640 (~1.04s window)
+  strideSamples: engine.strideSamples,   // 7680 (updates every 0.48s!)
+  latencySeconds: engine.latencySeconds, // 1.04s
+});
+```
 
 ---
 

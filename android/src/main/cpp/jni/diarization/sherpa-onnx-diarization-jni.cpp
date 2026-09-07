@@ -601,16 +601,20 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
     jfloat padOffset,
     jfloat minDurationOn,
     jfloat minDurationOff,
-    jint medianWindow
+    jint medianWindow,
+    jint chunkLen,
+    jint rightContext,
+    jint fifoLen
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   const std::string modelPathStr = CopyRequiredJstring(env, modelPath);
   const std::string metadataPathStr = metadataPath ? CopyRequiredJstring(env, metadataPath) : "";
   const auto providerOpt = CopyOptionalJstring(env, provider);
 
-  LOGI("nativeInitializeStreamingDiarization: id=%s model=%s meta=%s threads=%d",
+  LOGI("nativeInitializeStreamingDiarization: id=%s model=%s meta=%s threads=%d chunkLen=%d rightContext=%d fifoLen=%d",
        instanceIdStr.c_str(), modelPathStr.c_str(), metadataPathStr.c_str(),
-       static_cast<int>(numThreads));
+       static_cast<int>(numThreads), static_cast<int>(chunkLen),
+       static_cast<int>(rightContext), static_cast<int>(fifoLen));
 
   auto wrapper = std::make_shared<sherpaonnx::StreamingDiarizationWrapper>();
   auto result = wrapper->initialize(
@@ -625,7 +629,10 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
       padOffset,
       minDurationOn,
       minDurationOff,
-      medianWindow);
+      medianWindow,
+      chunkLen,
+      rightContext,
+      fifoLen);
 
   if (result.success) {
     std::lock_guard<std::mutex> lock(g_streaming_diarization_mutex);

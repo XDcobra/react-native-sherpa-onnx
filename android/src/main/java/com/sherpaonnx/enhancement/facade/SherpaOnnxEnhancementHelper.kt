@@ -38,6 +38,7 @@ internal class SherpaOnnxEnhancementHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
   private val instances = ConcurrentHashMap<String, EnhancementInstance>()
@@ -75,10 +76,11 @@ internal class SherpaOnnxEnhancementHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
     try {
-      val result = nativeDetectEnhancementModel(modelDir, assetName, modelType ?: "auto")
+      val result = nativeDetectEnhancementModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject(EnhancementErrorCodes.DETECT_ERROR, "Enhancement model detection returned null")
         return
@@ -173,7 +175,7 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType)
+    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType, parsed.quantization)
     if (result == null || result["success"] as? Boolean != true) {
       val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
       promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, reason)
@@ -434,7 +436,7 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType)
+    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType, parsed.quantization)
     if (result == null || result["success"] as? Boolean != true) {
       val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
       promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, reason)

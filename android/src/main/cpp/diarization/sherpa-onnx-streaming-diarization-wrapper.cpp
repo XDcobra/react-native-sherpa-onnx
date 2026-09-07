@@ -64,7 +64,10 @@ StreamingDiarizationInitResult StreamingDiarizationWrapper::initialize(
     float padOffset,
     float minDurationOn,
     float minDurationOff,
-    int32_t medianWindow) {
+    int32_t medianWindow,
+    int32_t chunkLen,
+    int32_t rightContext,
+    int32_t fifoLen) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   StreamingDiarizationInitResult result;
@@ -88,6 +91,9 @@ StreamingDiarizationInitResult StreamingDiarizationWrapper::initialize(
   config.min_duration_on = minDurationOn;
   config.min_duration_off = minDurationOff;
   config.median_window = medianWindow;
+  config.chunk_len = chunkLen;
+  config.right_context = rightContext;
+  config.fifo_len = fifoLen;
 
   auto model = std::make_unique<sherpaonnx::diarization::SortformerStreamingModel>();
   auto st = model->Initialize(config);

@@ -21,17 +21,20 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 - (void)detectDiarizationModel:(NSString *)modelDir
                      assetName:(NSString * _Nullable)assetName
                      modelType:(NSString * _Nullable)modelType
+                  quantization:(NSString * _Nullable)quantization
                        resolve:(RCTPromiseResolveBlock)resolve
                         reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     auto modelDirOpt = OptionalUtf8String(modelDir);
     auto assetNameOpt = OptionalUtf8String(assetName);
+    std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
     std::string modelTypeStr =
         sherpaonnx::diarization::bridge::ModelTypeOrAuto(modelType);
 
     auto result =
-        sherpaonnx::DetectDiarizationModel(modelDirOpt, assetNameOpt, modelTypeStr);
+        sherpaonnx::DetectDiarizationModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
     resolve(sherpaonnx::diarization::bridge::DiarizationDetectResultToDict(result));
   } @catch (NSException *exception) {
     reject(@"DIARIZATION_DETECT_ERROR",

@@ -25,6 +25,8 @@ import type { TextSegment } from '../segment/segment';
  * Supported STT model types.
  * Must match ParseSttModelType() in android/.../sherpa-onnx-model-detect-stt.cpp.
  */
+import type { QuantizationPreference } from '../download/types';
+
 export type STTModelType =
   | 'transducer'
   | 'nemo_transducer'
@@ -71,7 +73,7 @@ export interface STTInitializeOptionsBase {
 export interface STTAutoInitializeOptions extends STTInitializeOptionsBase {
   initMode?: 'auto';
   modelSource: FileSource;
-  preferInt8?: boolean;
+  quantization?: QuantizationPreference;
   modelType?: STTModelType;
 }
 

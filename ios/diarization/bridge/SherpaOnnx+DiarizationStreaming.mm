@@ -78,6 +78,9 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
   float minDurationOn = options[@"minDurationOn"] ? [options[@"minDurationOn"] floatValue] : 0.0f;
   float minDurationOff = options[@"minDurationOff"] ? [options[@"minDurationOff"] floatValue] : 0.5f;
   int medianWindow = options[@"medianWindow"] ? [options[@"medianWindow"] intValue] : 11;
+  int chunkLen = options[@"chunkLen"] ? [options[@"chunkLen"] intValue] : -1;
+  int rightContext = options[@"rightContext"] ? [options[@"rightContext"] intValue] : -1;
+  int fifoLen = options[@"fifoLen"] ? [options[@"fifoLen"] intValue] : -1;
 
   dispatch_async(StreamingDiarizationSerialQueue(), ^{
     std::string instId = [instanceId UTF8String];
@@ -95,7 +98,10 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
         padOffset,
         minDurationOn,
         minDurationOff,
-        medianWindow);
+        medianWindow,
+        chunkLen,
+        rightContext,
+        fifoLen);
 
     if (!res.success) {
       NSString *err = [NSString stringWithUTF8String:res.error.c_str()];

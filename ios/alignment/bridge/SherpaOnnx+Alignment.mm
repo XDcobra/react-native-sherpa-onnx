@@ -211,16 +211,19 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
 @implementation SherpaOnnx (Alignment)
 
 - (void)detectAlignmentModel:(NSString *)modelDir
-                  modelType:(NSString *)modelType
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
+                   modelType:(NSString *)modelType
+                quantization:(NSString *)quantization
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     std::string modelDirStr = (modelDir != nil) ? [modelDir UTF8String] : "";
     std::string modelTypeStr =
         (modelType != nil && [modelType length] > 0) ? [modelType UTF8String]
                                                       : "auto";
-    auto result = sherpaonnx::DetectAlignmentModel(modelDirStr, modelTypeStr);
+    std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
+    auto result = sherpaonnx::DetectAlignmentModel(modelDirStr, modelTypeStr, quantStr);
     resolve(alignmentDetectResultToDict(result));
   } @catch (NSException *exception) {
     reject(@"DETECT_ERROR",

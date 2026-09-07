@@ -14,7 +14,7 @@ export type SttInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (encoder, tokens, …); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
-  preferInt8?: boolean;
+  quantization?: string;
   modelType?: string;
   debug?: boolean;
   hotwordsFile?: string;
@@ -35,6 +35,7 @@ export type OnlineSttInitBridgeOptions = {
   initMode?: string;
   modelDir?: string;
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   enableEndpoint?: boolean;
   decodingMethod?: string;
@@ -65,6 +66,7 @@ export type TtsInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (ttsModel, tokens, …); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   debug?: boolean;
@@ -87,6 +89,7 @@ export type VadInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   sampleRate?: number;
   threshold?: number;
@@ -106,6 +109,7 @@ export type EnhancementInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -118,6 +122,7 @@ export type SeparationInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (spleeter: vocals/accompaniment; uvr: model). */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -130,6 +135,7 @@ export type SpeakerEmbeddingInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`). */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -140,6 +146,7 @@ export type SpeakerEmbeddingInitBridgeOptions = {
 export type DiarizationInitBridgeOptions = {
   segmentationModel: string;
   embeddingModel: string;
+  quantization?: string;
   windowShiftRatio?: number;
   numClusters?: number;
   threshold?: number;
@@ -184,6 +191,7 @@ export type PunctuationInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map; NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -263,7 +271,7 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to extracted model directory, or empty string for asset-name-only detection.
    * @param assetName - Release asset stem / folder basename (e.g. sherpa-onnx-whisper-tiny); null/empty when scanning modelDir only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param quantization - Optional: string quantization preference (e.g. 'int8', 'fp16', 'int4', 'fp32', 'auto')
    * @param debug - Optional: enable verbose native logging
    * @returns Object with unified detect fields plus STT-specific `isHardwareSpecificUnsupported`.
    */
@@ -271,7 +279,7 @@ export interface Spec extends TurboModule {
     modelDir: string,
     assetName: string | null,
     modelType?: string | null,
-    preferInt8?: boolean,
+    quantization?: string | null,
     debug?: boolean
   ): Promise<{
     success: boolean;
@@ -1261,7 +1269,8 @@ export interface Spec extends TurboModule {
   detectTtsModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -1400,7 +1409,8 @@ export interface Spec extends TurboModule {
 
   detectAlignmentModel(
     modelDir: string,
-    modelType?: string
+    modelType?: string,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1505,7 +1515,8 @@ export interface Spec extends TurboModule {
   detectEnhancementModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1527,7 +1538,8 @@ export interface Spec extends TurboModule {
   detectSeparationModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1550,7 +1562,8 @@ export interface Spec extends TurboModule {
   detectSpeakerEmbeddingModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1572,7 +1585,8 @@ export interface Spec extends TurboModule {
   detectDiarizationModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1814,7 +1828,8 @@ export interface Spec extends TurboModule {
   detectVadModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1836,7 +1851,8 @@ export interface Spec extends TurboModule {
   detectPunctuationModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1859,7 +1875,8 @@ export interface Spec extends TurboModule {
    */
   detectModel(
     modelDir: string,
-    assetName: string | null
+    assetName: string | null,
+    quantization?: string | null
   ): Promise<UnifiedDetectNativeResult>;
 
   /** Batch unified detection; one native round-trip for all inputs. */
@@ -1867,6 +1884,7 @@ export interface Spec extends TurboModule {
     inputs: ReadonlyArray<{
       modelDir?: string;
       assetName?: string | null;
+      quantization?: string | null;
     }>
   ): Promise<UnifiedDetectNativeResult[]>;
 
@@ -2423,4 +2441,22 @@ export interface Spec extends TurboModule {
   removeListeners(count: number): void;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+let SherpaOnnxModule: Spec;
+try {
+  SherpaOnnxModule = TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+} catch {
+  SherpaOnnxModule = new Proxy({} as Spec, {
+    get(_target, prop) {
+      if (prop === 'then') return undefined;
+      return () => {
+        throw new Error(
+          `[SherpaOnnx] Native module method '${String(
+            prop
+          )}' called, but native module 'SherpaOnnx' is not available in this environment.`
+        );
+      };
+    },
+  });
+}
+
+export default SherpaOnnxModule;

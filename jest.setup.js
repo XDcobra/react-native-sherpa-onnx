@@ -40,3 +40,27 @@ jest.mock('./src/vad/engine', () => ({
     );
   }),
 }));
+
+jest.mock('./src/NativeSherpaOnnx', () => {
+  return {
+    __esModule: true,
+    default: {
+      detectModel: jest.fn(),
+      detectModelsBatch: jest.fn(),
+      detectSttModel: jest.fn(),
+      detectTtsModel: jest.fn(),
+      detectVadModel: jest.fn(),
+      detectDiarizationModel: jest.fn(),
+      detectSpeakerEmbeddingModel: jest.fn(),
+      detectEnhancementModel: jest.fn(),
+      detectSeparationModel: jest.fn(),
+      detectAlignmentModel: jest.fn(),
+      detectPunctuationModel: jest.fn(),
+      resolveAppBaseDir: jest.fn(async () => '/app/base'),
+      resolveBundledAssetPath: jest.fn(async (p) => `/bundle/${p}`),
+      copyFile: jest.fn(),
+      addListener: jest.fn(),
+      removeListeners: jest.fn(),
+    },
+  };
+});
