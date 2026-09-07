@@ -170,9 +170,14 @@ async function finishDiarizeResult(params: {
     diarizeOptions.onProgress(progress);
   }
 
+  const numSpeakers =
+    Array.isArray(nativeResult.segments) && nativeResult.segments.length > 0
+      ? new Set(nativeResult.segments.map((s) => s.speaker)).size
+      : (nativeResult.numSpeakers ?? 0);
+
   return {
     status: 'complete',
-    numSpeakers: nativeResult.numSpeakers ?? 0,
+    numSpeakers,
     segmentCount: count,
     sampleRate: sr,
     processingTimeMs: Date.now() - startedAtMs,

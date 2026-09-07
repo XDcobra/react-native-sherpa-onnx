@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sherpaonnx::diarization {
@@ -104,6 +105,7 @@ class DiarizationSession {
   FloatMatrix embedding_matrix_;
   std::vector<int32_t> last_cluster_labels_;
   std::vector<DiarizationSegment> last_segments_;
+  std::unordered_map<int32_t, int32_t> last_speaker_map_;
   int32_t last_num_samples_ = 0;
   int32_t working_sample_rate_ = 0;
 };

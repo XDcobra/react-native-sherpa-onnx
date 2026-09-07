@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   ScrollView,
   Text,
   TextInput,
@@ -79,6 +80,7 @@ type EngineInfo = {
   embId: string;
   numClusters: number;
   threshold: number;
+  numThreads: number;
 };
 
 function formatTime(seconds: number): string {
@@ -136,10 +138,11 @@ export default function DiarizationScreen() {
   // Advanced Tuning Parameters
   const [tuningExpanded, setTuningExpanded] = useState(false);
   const [clusteringThreshold, setClusteringThreshold] = useState(0.5);
-  const [numClusters, setNumClusters] = useState(0); // 0 = automatic discovery
+  const [numClusters, setNumClusters] = useState(4); // default 4 for initial 4-speaker sample audio
   const [minDurationOn, setMinDurationOn] = useState(0.0);
   const [minDurationOff, setMinDurationOff] = useState(0.5);
   const [windowShiftRatio, setWindowShiftRatio] = useState(0.1);
+  const [numThreads, setNumThreads] = useState(2); // default 2 threads for fast inference
 
   // Audio Ingress & Diarization Execution
   const [offlineInputBuffer, setOfflineInputBuffer] =
@@ -150,6 +153,36 @@ export default function DiarizationScreen() {
   const [progress, setProgress] = useState(0);
   const [processingTimeMs, setProcessingTimeMs] = useState(0);
   const [executionError, setExecutionError] = useState<string | null>(null);
+
+  // Indeterminate progress animation for offline oneshot
+  const indeterminateAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (diarizeBusy && progress === 0) {
+      indeterminateAnim.setValue(0);
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(indeterminateAnim, {
+            toValue: 1,
+            duration: 1200,
+            useNativeDriver: false,
+          }),
+          Animated.timing(indeterminateAnim, {
+            toValue: 0,
+            duration: 1200,
+            useNativeDriver: false,
+          }),
+        ])
+      );
+      animation.start();
+      return () => animation.stop();
+    }
+  }, [diarizeBusy, progress, indeterminateAnim]);
+
+  const indeterminateLeft = indeterminateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '65%'],
+  });
 
   // Speaker Analytics & Timeline
   const [turns, setTurns] = useState<SpeakerTurn[]>([]);
@@ -299,6 +332,7 @@ export default function DiarizationScreen() {
         },
         minDurationOn,
         minDurationOff,
+        numThreads,
       });
 
       engineRef.current = engine;
@@ -308,6 +342,7 @@ export default function DiarizationScreen() {
         embId: embLabel,
         numClusters,
         threshold: clusteringThreshold,
+        numThreads,
       });
       appendEvent('Diarization engine initialized successfully');
       return engine;
@@ -329,6 +364,7 @@ export default function DiarizationScreen() {
     minDurationOff,
     minDurationOn,
     numClusters,
+    numThreads,
     segCatalog,
     selectedEmbId,
     selectedSegId,
@@ -588,15 +624,10 @@ export default function DiarizationScreen() {
       >
         {/* Module 1: Model Selection & Advanced Tuning */}
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View>
-              <Text style={styles.cardTitle}>1. Model Setup & Tuning</Text>
-              <Text style={styles.cardSubtitle}>
-                Pyannote / Reverb segmentation + WeSpeaker / 3D-Speaker
-                embeddings
-              </Text>
-            </View>
-          </View>
+          <Text style={styles.cardTitle}>1. Model Setup & Tuning</Text>
+          <Text style={styles.cardSubtitle}>
+            Pyannote / Reverb segmentation + WeSpeaker / 3D-Speaker embeddings
+          </Text>
 
           <InitModeSelector
             value={initMode}
@@ -894,6 +925,35 @@ export default function DiarizationScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {/* Number of Threads */}
+              <View style={styles.paramRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.paramLabel}>Inference Threads</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Parallel CPU threads for model forward passes
+                  </Text>
+                </View>
+                <View style={styles.paramControls}>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() => setNumThreads((v) => Math.max(1, v - 1))}
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <View style={styles.paramValueBadge}>
+                    <Text style={styles.paramValueText}>{numThreads}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.paramStepButton}
+                    onPress={() => setNumThreads((v) => Math.min(8, v + 1))}
+                    disabled={diarizeBusy}
+                  >
+                    <Text style={styles.paramStepButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           )}
 
@@ -971,17 +1031,10 @@ export default function DiarizationScreen() {
 
         {/* Module 2: Audio Ingress & Diarization Execution */}
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View>
-              <Text style={styles.cardTitle}>
-                2. Audio Ingress & Diarization
-              </Text>
-              <Text style={styles.cardSubtitle}>
-                Select multi-speaker audio or pick custom file, then run
-                diarization
-              </Text>
-            </View>
-          </View>
+          <Text style={styles.cardTitle}>2. Audio Ingress & Diarization</Text>
+          <Text style={styles.cardSubtitle}>
+            Select multi-speaker audio or pick custom file, then run diarization
+          </Text>
 
           <OfflineAudioBufferWidget
             ref={offlineWidgetRef}
@@ -997,6 +1050,15 @@ export default function DiarizationScreen() {
                   ? ` (${info.durationSeconds.toFixed(2)}s)`
                   : '';
               appendEvent(`Audio buffer ready: ${info.sourceLabel}${durText}`);
+
+              // Auto-set cluster count for example audio
+              if (info.sourceLabel.includes('4 Speakers')) {
+                setNumClusters(4);
+              } else if (info.sourceLabel.includes('2 Speakers')) {
+                setNumClusters(2);
+              } else {
+                setNumClusters(0);
+              }
             }}
             onBufferReleased={() => {
               setExecutionError(null);
@@ -1065,17 +1127,45 @@ export default function DiarizationScreen() {
           {/* Diarization Progress Bar */}
           {diarizeBusy && (
             <View style={styles.progressContainer}>
-              <View style={styles.progressLabelRow}>
-                <Text style={styles.progressLabel}>
-                  Diarizing audio frames…
-                </Text>
-                <Text style={styles.progressPercent}>{progress}%</Text>
-              </View>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[styles.progressFill, { width: `${progress}%` }]}
-                />
-              </View>
+              {progress > 0 ? (
+                <>
+                  <View style={styles.progressLabelRow}>
+                    <Text style={styles.progressLabel}>
+                      Diarizing audio frames…
+                    </Text>
+                    <Text style={styles.progressPercent}>{progress}%</Text>
+                  </View>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[styles.progressFill, { width: `${progress}%` }]}
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.progressLabelRow}>
+                    <View style={styles.progressLabelWrap}>
+                      <ActivityIndicator
+                        size="small"
+                        color="#0F62FE"
+                        style={styles.progressSpinner}
+                      />
+                      <Text style={styles.progressLabel}>
+                        Diarizing audio (segmentation & clustering)…
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.progressTrack}>
+                    <Animated.View
+                      style={[
+                        styles.progressFill,
+                        styles.progressFillIndeterminate,
+                        { left: indeterminateLeft },
+                      ]}
+                    />
+                  </View>
+                </>
+              )}
             </View>
           )}
 
@@ -1089,14 +1179,9 @@ export default function DiarizationScreen() {
         {/* Module 3: Speaker Airtime & Timeline Analytics */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <View>
-              <Text style={styles.cardTitle}>
-                3. Speaker Airtime & Analytics
-              </Text>
-              <Text style={styles.cardSubtitle}>
-                Airtime distribution, turn counts, dominant speaker, and RTF
-              </Text>
-            </View>
+            <Text style={styles.cardTitle}>
+              3. Speaker Airtime & Analytics
+            </Text>
             <TouchableOpacity
               style={styles.copyButtonRow}
               onPress={copyTimeline}
@@ -1105,6 +1190,9 @@ export default function DiarizationScreen() {
               <Text style={styles.copyButtonText}>Copy Timeline</Text>
             </TouchableOpacity>
           </View>
+          <Text style={styles.cardSubtitle}>
+            Airtime distribution, turn counts, dominant speaker, and RTF
+          </Text>
 
           {/* Proportional Stacked Airtime Bar */}
           <View style={styles.airtimeBar}>
@@ -1243,7 +1331,7 @@ export default function DiarizationScreen() {
                   speakerFilter === null && styles.toggleChipTextActive,
                 ]}
               >
-                All ({turns.length})
+                All Turns ({turns.length})
               </Text>
             </TouchableOpacity>
 
@@ -1330,12 +1418,7 @@ export default function DiarizationScreen() {
         {/* Module 4: Diagnostics & Event Log */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <View>
-              <Text style={styles.cardTitle}>4. Diagnostics & Log</Text>
-              <Text style={styles.cardSubtitle}>
-                State transitions, clustering timing, and audio metadata
-              </Text>
-            </View>
+            <Text style={styles.cardTitle}>4. Diagnostics & Log</Text>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => setDiagnosticsExpanded((v) => !v)}
@@ -1350,6 +1433,9 @@ export default function DiarizationScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+          <Text style={styles.cardSubtitle}>
+            State transitions, clustering timing, and audio metadata
+          </Text>
 
           <View style={styles.statusBox}>
             <Text style={styles.statusText}>
@@ -1360,6 +1446,9 @@ export default function DiarizationScreen() {
             </Text>
             <Text style={styles.statusDimText}>
               Emb Model: {engineInfo?.embId ?? 'None'}
+            </Text>
+            <Text style={styles.statusDimText}>
+              Threads: {engineInfo?.numThreads ?? numThreads}
             </Text>
             <Text style={styles.statusDimText}>
               Clustering:{' '}

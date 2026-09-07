@@ -51,12 +51,14 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 6,
   },
   cardTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: '#111827',
+    flexShrink: 1,
+    marginRight: 8,
   },
   cardSubtitle: {
     fontSize: 13,
@@ -243,7 +245,16 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
+  },
+  progressLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  progressSpinner: {
+    marginRight: 2,
   },
   progressLabel: {
     fontSize: 13,
@@ -261,10 +272,18 @@ export const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
     borderRadius: 4,
     overflow: 'hidden',
+    position: 'relative',
   },
   progressFill: {
     height: '100%',
     backgroundColor: '#0F62FE',
+    borderRadius: 4,
+  },
+  progressFillIndeterminate: {
+    width: '35%',
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
     borderRadius: 4,
   },
   // Speakers HUD & Aliases
@@ -487,6 +506,12 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
   copyButtonText: {
     color: '#0F62FE',
