@@ -53,8 +53,6 @@ If you use the [download manager](docs/download-manager.md) to fetch models at r
 npm install @dr.pogodin/react-native-fs
 ```
 
-Downloads run **in the foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again.
-
 Setup, resume behavior, and optional `configureDownloadManager`: [Download manager – Setup (iOS & Android)](docs/download-manager.md#setup-ios--android).
 
 ## Feature Support
