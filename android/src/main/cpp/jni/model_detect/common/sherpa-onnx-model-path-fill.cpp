@@ -134,6 +134,14 @@ void FillAlignmentModelPathsFromStringMap(
     SetPathFromMap(paths, "model", out.model);
 }
 
+void FillLanguageIdModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    LanguageIdModelPaths& out
+) {
+    SetPathFromMap(paths, "encoder", out.encoder);
+    SetPathFromMap(paths, "decoder", out.decoder);
+}
+
 void FillOnlineSttModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     OnlineSttModelPaths& out
@@ -267,6 +275,14 @@ std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     const AlignmentModelPaths& paths) {
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
+    return out;
+}
+
+std::map<std::string, std::string> LanguageIdModelPathsToStringMap(
+    const LanguageIdModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "encoder", paths.encoder);
+    PutPathIfNonEmpty(out, "decoder", paths.decoder);
     return out;
 }
 

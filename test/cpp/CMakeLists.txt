@@ -51,6 +51,8 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/diarization/sherpa-onnx-model-detect-diarization.cpp"
   "${MODEL_DETECT_DIR}/diarization/sherpa-onnx-validate-diarization.cpp"
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"
+  "${MODEL_DETECT_DIR}/slid/sherpa-onnx-model-detect-slid.cpp"
+  "${MODEL_DETECT_DIR}/slid/sherpa-onnx-validate-slid.cpp"
 )
 
 add_executable(model_detect_test
@@ -74,6 +76,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/punctuation"
   "${MODEL_DETECT_DIR}/vad"
   "${MODEL_DETECT_DIR}/alignment"
+  "${MODEL_DETECT_DIR}/slid"
   "${JNI_DIR}"
   "${MODEL_DETECT_TEST_DIR}"
 )
