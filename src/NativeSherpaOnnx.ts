@@ -157,6 +157,23 @@ export type DiarizationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeLanguageId(instanceId, options)`. */
+export type LanguageIdInitBridgeOptions = {
+  encoder: string;
+  decoder: string;
+  tailPaddings?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `identifyLanguageOffline`. */
+export type LanguageIdProcessNativeResult = {
+  lang: string;
+  audioDuration: number;
+  elapsedMs: number;
+};
+
 /** Native result from `diarizeOffline` / `reclusterDiarization`. */
 export type DiarizationProcessNativeResult = {
   success: boolean;
@@ -1625,6 +1642,35 @@ export interface Spec extends TurboModule {
       decoder?: string;
     };
   }>;
+
+  /**
+   * Initialize Spoken Language Identification (SLID) engine instance.
+   * @param instanceId - Unique ID for this engine instance
+   * @param options - Whisper model paths and runtime settings
+   */
+  initializeLanguageId(
+    instanceId: string,
+    options: LanguageIdInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  /**
+   * Run offline spoken language identification on an offline audio buffer.
+   * Monolithic single-pass (<= 30s).
+   * @param instanceId - SLID engine instance ID
+   * @param audioBufferId - Handle to offline audio buffer (off_...)
+   */
+  identifyLanguageOffline(
+    instanceId: string,
+    audioBufferId: string
+  ): Promise<LanguageIdProcessNativeResult>;
+
+  /**
+   * Release SLID engine instance resources.
+   */
+  unloadLanguageId(instanceId: string): Promise<void>;
 
   initializeDiarization(
     instanceId: string,
