@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
@@ -34,6 +35,7 @@ import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
+import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
@@ -230,6 +232,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType, quantization)
     }
   )
+  private val languageIdHelper = SherpaOnnxLanguageIdHelper()
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -424,6 +427,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.shutdown()
     speakerEmbeddingHelper.shutdown()
     diarizationHelper.shutdown()
+    languageIdHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -4890,6 +4894,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Log.e(NAME, "detectLanguageIdModel failed", e)
       promise.reject("DETECT_ERROR", "Language ID model detection failed: ${e.message}", e)
     }
+  }
+
+  override fun initializeLanguageId(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    languageIdHelper.initializeLanguageId(instanceId, options, promise)
+  }
+
+  override fun identifyLanguageOffline(
+    instanceId: String,
+    audioBufferId: String,
+    promise: Promise
+  ) {
+    languageIdHelper.identifyLanguageOffline(instanceId, audioBufferId, promise)
+  }
+
+  override fun unloadLanguageId(
+    instanceId: String,
+    promise: Promise
+  ) {
+    languageIdHelper.unloadLanguageId(instanceId, promise)
   }
 
   override fun initializeDiarization(
