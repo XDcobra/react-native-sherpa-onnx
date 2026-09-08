@@ -28,6 +28,7 @@
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
+#include "sherpa-onnx-slid-detect-wrapper.h"
 #include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-unified-detect-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
@@ -482,6 +483,33 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
   sherpaonnx::AlignmentDetectResult result =
       sherpaonnx::DetectAlignmentModel(model_dir, model_type, quantization);
   return sherpaonnx::AlignmentDetectResultToJava(env, result);
+}
+
+// Language ID: Whisper multilingual model detection. Returns HashMap with detect fields.
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectLanguageIdModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type,
+    jstring j_quantization) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
+
+  sherpaonnx::LanguageIdDetectResult result =
+      sherpaonnx::DetectLanguageIdModel(model_dir, asset_name, model_type, quantization);
+  return sherpaonnx::LanguageIdDetectResultToJava(env, result);
 }
 
 }  // extern "C"

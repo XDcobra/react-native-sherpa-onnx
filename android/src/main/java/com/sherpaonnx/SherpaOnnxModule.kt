@@ -4804,6 +4804,94 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
+  override fun detectLanguageIdModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectLanguageIdModel(
+        modelDir.takeIf { it.isNotBlank() },
+        assetName?.takeIf { it.isNotBlank() },
+        modelType ?: "auto",
+        quantization
+      )
+      if (result == null) {
+        android.util.Log.e(NAME, "DETECT_ERROR: Language ID model detection returned null")
+        promise.reject("DETECT_ERROR", "Language ID model detection returned null")
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+      val paths = result["paths"] as? HashMap<*, *>
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      resultMap.putBoolean("isStreaming", false)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (detectionSources != null) {
+        val sourcesArray = Arguments.createArray()
+        for (src in detectionSources) {
+          if (src is String) sourcesArray.pushString(src)
+        }
+        resultMap.putArray("detectionSources", sourcesArray)
+      }
+      val languages = result["languages"] as? ArrayList<*>
+      if (languages != null) {
+        val langArray = Arguments.createArray()
+        for (lang in languages) {
+          if (lang is HashMap<*, *>) {
+            val langMap = Arguments.createMap()
+            langMap.putString("id", lang["id"] as? String ?: "")
+            langMap.putString("iso6391Hint", lang["iso6391Hint"] as? String ?: "")
+            langArray.pushMap(langMap)
+          }
+        }
+        resultMap.putArray("languages", langArray)
+      }
+      val quant = result["quantization"] as? String
+      if (!quant.isNullOrBlank()) {
+        resultMap.putString("quantization", quant)
+      }
+      if (paths != null) {
+        val pathsMap = Arguments.createMap()
+        val encoder = paths["encoder"] as? String
+        val decoder = paths["decoder"] as? String
+        if (!encoder.isNullOrBlank()) pathsMap.putString("encoder", encoder)
+        if (!decoder.isNullOrBlank()) pathsMap.putString("decoder", decoder)
+        resultMap.putMap("paths", pathsMap)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      Log.e(NAME, "detectLanguageIdModel failed", e)
+      promise.reject("DETECT_ERROR", "Language ID model detection failed: ${e.message}", e)
+    }
+  }
+
   override fun initializeDiarization(
     instanceId: String,
     options: ReadableMap,
@@ -5830,6 +5918,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for diarization segmentation: pyannote / reverb (offline only). */
     @JvmStatic
     private external fun nativeDetectDiarizationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
+      quantization: String?
+    ): HashMap<String, Any>?
+
+    /** Model detection for Spoken Language Identification (SLID): Whisper multilingual. */
+    @JvmStatic
+    private external fun nativeDetectLanguageIdModel(
       modelDir: String?,
       assetName: String?,
       modelType: String,
