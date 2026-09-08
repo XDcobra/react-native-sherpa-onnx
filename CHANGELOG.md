@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.4](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.3...v0.4.4) (2026-09-08)
+
+
+### Bug Fixes
+
+* **android:** skip explicit Kotlin plugin when AGP registers the kotlin extension ([eb0b074](https://github.com/XDcobra/react-native-sherpa-onnx/commit/eb0b0741a26ca3045f5aebafd5cb192435547695))
+* **review:** apply PR review feedback - listener leak, type safety, lastEntryPath, buffer overflow ([b7107d9](https://github.com/XDcobra/react-native-sherpa-onnx/commit/b7107d9c6b3cb202a8e2dd59eba7708bc1dc0b72))
+* **stt:** normalize Qwen3 hotwords handling and improve sample reading in SherpaOnnxSttHelper ([25f4151](https://github.com/XDcobra/react-native-sherpa-onnx/commit/25f41510a2565186315ef5411a364e0066d9e882))
+* **stt:** simplify path validation and sample check in SherpaOnnxSttHelper ([4c49ddd](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4c49ddd0d249e74050a27cd553579c6975f20e0f))
+* **tts-language:** implement language derivation from TTS asset IDs and add utility functions for language code mapping ([9b279b4](https://github.com/XDcobra/react-native-sherpa-onnx/commit/9b279b4a3fad6b260e71775058ed0b4a145cc63e))
+
+
+### Features
+
+* **cohere-lang:** add support for Cohere Transcribe 14-language bundle and related functions ([e3ff768](https://github.com/XDcobra/react-native-sherpa-onnx/commit/e3ff768cd8dde6bbc93ddfcfea83ee4935004db8))
+* **download:** add model download and post-processing module ([3d99bf2](https://github.com/XDcobra/react-native-sherpa-onnx/commit/3d99bf22ca08d3dfb83936dc477a9948809eb2f9))
+* **example:** add download showcase screen ([0df1e92](https://github.com/XDcobra/react-native-sherpa-onnx/commit/0df1e929a0d882b024350c5234a945c629f90a1b))
+* **example:** implement model deletion functionality in download showcase screen ([956d789](https://github.com/XDcobra/react-native-sherpa-onnx/commit/956d789bfac3907c53255fe3a4224e80b07f52f1))
+* **extraction:** support resumable extraction progress and operation ids ([50725ab](https://github.com/XDcobra/react-native-sherpa-onnx/commit/50725abeb5a874d42620cdcf59104413aaba0c6f))
+* **js:** update Cohere Transcribe model options and integrate into STT framework ([a60ef14](https://github.com/XDcobra/react-native-sherpa-onnx/commit/a60ef14fce4df105b26b75707685d57dfb7d1a56))
+* **stt:** add Dolphin ASR language-region tags for informational use and update documentation ([1ba5f3f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/1ba5f3fd365a60a36dca867b5691d7d6dcb1dc85))
+* **stt:** add Qwen3 ASR language support for informational use and update related documentation ([4ae093f](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4ae093f6e8ca52fa22249929ff07963bf99cfbbe))
+* **stt:** add support for Cohere Transcribe model in ASR, including encoder/decoder paths and detection capabilities ([4c34852](https://github.com/XDcobra/react-native-sherpa-onnx/commit/4c348523f854ddf8733f55a353f69e0aa7f7ffc4))
+* **stt:** enhance support for Cohere Transcribe model by adding options, detection capabilities, and integration into the STT framework ([c1e0976](https://github.com/XDcobra/react-native-sherpa-onnx/commit/c1e097693775ea08616c2bc31497d182da92803e))
+* **stt:** integrate Qwen3-ASR hotword support and enhance Cohere Transcribe model configuration in STT framework ([03f7e88](https://github.com/XDcobra/react-native-sherpa-onnx/commit/03f7e881a1f0972af540b8ab2cea3485b49f773e))
+* **voicelab:** add app representation in readme ([812994d](https://github.com/XDcobra/react-native-sherpa-onnx/commit/812994dc186a9ad6be72103304d1f89d7f4268c2))
+
 ## [0.4.3](https://github.com/XDcobra/react-native-sherpa-onnx/compare/v0.4.2...v0.4.3) (2026-05-07)
 
 
