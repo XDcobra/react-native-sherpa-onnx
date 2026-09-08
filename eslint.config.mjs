@@ -27,7 +27,13 @@ export default defineConfig([
     // Ignore node_modules anywhere (staged_files from lefthook can include deps)
     ignores: [
       '**/node_modules/**',
+      'eslint.config.mjs',
       'lib/',
+      'build/',
+      'build-test/',
+      'android/build/',
+      'example/android/build/',
+      'example/android/app/build/',
       'third_party/',
       'sherpa-onnx/',
       'test/cpp/',

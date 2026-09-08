@@ -804,10 +804,9 @@ function PyannotePolicyFields({
       <Text style={[s.noteText, { marginBottom: 6 }]}>
         Choose a pyannote/reverb pack; detect sets{' '}
         <Text style={{ fontWeight: '600' }}>policy.modelPath</Text>{' '}
-        (FileSource). Offline <Text style={{ fontWeight: '600' }}>
-          segmentOfflineBuffer
-        </Text>{' '}
-        only — live attach is rejected.
+        (FileSource). Offline{' '}
+        <Text style={{ fontWeight: '600' }}>segmentOfflineBuffer</Text> only —
+        live attach is rejected.
       </Text>
 
       {loadingCatalog ? (

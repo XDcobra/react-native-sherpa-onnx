@@ -86,14 +86,16 @@ export default function SegmentationShowcaseScreen() {
     number | null
   >(null);
 
-  const [textSegConfig, setTextSegConfig] = useState<SegmentationControlConfig>({
-    mode: 'auto',
-    policy: {
-      evaluator: 'text_synthetic_auto',
-      maxLengthChars: 100,
-      sentenceBoundary: true,
-    },
-  });
+  const [textSegConfig, setTextSegConfig] = useState<SegmentationControlConfig>(
+    {
+      mode: 'auto',
+      policy: {
+        evaluator: 'text_synthetic_auto',
+        maxLengthChars: 100,
+        sentenceBoundary: true,
+      },
+    }
+  );
   const [audioSegConfig, setAudioSegConfig] =
     useState<SegmentationControlConfig>({
       mode: 'auto',
