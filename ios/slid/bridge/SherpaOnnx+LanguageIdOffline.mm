@@ -101,6 +101,8 @@ dispatch_queue_t LanguageIdSerialQueue() {
 
 - (void)identifyLanguageOffline:(NSString *)instanceId
                   audioBufferId:(NSString *)audioBufferId
+                    startSample:(NSNumber *)startSample
+                      endSample:(NSNumber *)endSample
                         resolve:(RCTPromiseResolveBlock)resolve
                          reject:(RCTPromiseRejectBlock)reject
 {
@@ -113,8 +115,24 @@ dispatch_queue_t LanguageIdSerialQueue() {
     return;
   }
 
+  const bool hasStart = startSample != nil;
+  const bool hasEnd = endSample != nil;
+  if (hasStart != hasEnd) {
+    reject(@"LANGUAGE_ID_INVALID_ARGUMENT",
+           @"startSample and endSample must both be provided or both omitted",
+           nil);
+    return;
+  }
+
   const std::string instanceIdStr = [instanceId UTF8String];
   const std::string audioInId = [audioBufferId UTF8String];
+
+  if (audioInId.find("off_") != 0) {
+    reject(@"LANGUAGE_ID_INVALID_ARGUMENT",
+           [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioBufferId],
+           nil);
+    return;
+  }
 
   auto state = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
   if (!state || state->handle == nullptr) {
@@ -124,22 +142,61 @@ dispatch_queue_t LanguageIdSerialQueue() {
     return;
   }
 
+  int inSampleRate = 0;
+  int inNumSamples = 0;
+  std::string errCode;
+  std::string errMsg;
+  if (!pa_get_offline_metadata(audioInId, &inSampleRate, &inNumSamples, &errCode, &errMsg)) {
+    reject(@"LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioBufferId],
+           nil);
+    return;
+  }
+  if (inSampleRate <= 0 || inNumSamples <= 0) {
+    reject(@"LANGUAGE_ID_AUDIO_BUFFER_EMPTY",
+           [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+           nil);
+    return;
+  }
+
   dispatch_async(LanguageIdSerialQueue(), ^{
     @try {
       std::vector<float> samples;
-      int sampleRate = 0;
-      if (!pa_read_offline_samples(audioInId, &samples, &sampleRate)) {
-        reject(@"LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND",
-               [NSString stringWithFormat:@"Offline audio buffer not found or unreadable: %@", audioBufferId],
-               nil);
-        return;
-      }
+      int sampleRate = inSampleRate;
 
-      if (samples.empty()) {
-        reject(@"LANGUAGE_ID_AUDIO_BUFFER_EMPTY",
-               [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
-               nil);
-        return;
+      if (!hasStart) {
+        if (!pa_read_offline_samples(audioInId, &samples, &sampleRate) || samples.empty()) {
+          reject(@"LANGUAGE_ID_AUDIO_BUFFER_EMPTY",
+                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
+                 nil);
+          return;
+        }
+      } else {
+        const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
+        const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
+        const int end = std::min(endRaw, inNumSamples);
+        const int frameCount = std::max(0, end - start);
+        if (frameCount == 0) {
+          resolve(@{
+            @"lang": @"",
+            @"audioDuration": @(0.0),
+            @"elapsedMs": @(0.0),
+          });
+          return;
+        }
+        std::string sliceErrCode;
+        std::string sliceErrMsg;
+        if (!pa_get_offline_samples_slice(
+                audioInId, start, frameCount, &samples, &sliceErrCode, &sliceErrMsg)) {
+          NSString *code = sliceErrCode.empty()
+              ? @"LANGUAGE_ID_IDENTIFY_FAILED"
+              : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+          NSString *msg = sliceErrMsg.empty()
+              ? @"Failed to read offline audio slice"
+              : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+          reject(code, msg, nil);
+          return;
+        }
       }
 
       const auto t0 = std::chrono::steady_clock::now();

@@ -1657,14 +1657,18 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Run offline spoken language identification on an offline audio buffer.
-   * Monolithic single-pass (<= 30s).
+   * Run offline spoken language identification on an offline audio buffer (or sample slice).
+   * Monolithic single-pass (<= 30s recommended per slice).
    * @param instanceId - SLID engine instance ID
    * @param audioBufferId - Handle to offline audio buffer (off_...)
+   * @param startSample - Optional start sample index (inclusive)
+   * @param endSample - Optional end sample index (exclusive)
    */
   identifyLanguageOffline(
     instanceId: string,
-    audioBufferId: string
+    audioBufferId: string,
+    startSample?: number | null,
+    endSample?: number | null
   ): Promise<LanguageIdProcessNativeResult>;
 
   /**

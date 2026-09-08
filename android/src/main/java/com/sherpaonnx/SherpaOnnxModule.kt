@@ -4907,9 +4907,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun identifyLanguageOffline(
     instanceId: String,
     audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise
   ) {
-    languageIdHelper.identifyLanguageOffline(instanceId, audioBufferId, promise)
+    languageIdHelper.identifyLanguageOffline(instanceId, audioBufferId, startSample, endSample, promise)
   }
 
   override fun unloadLanguageId(

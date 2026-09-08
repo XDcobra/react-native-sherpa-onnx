@@ -105,6 +105,8 @@ internal class SherpaOnnxLanguageIdHelper {
   fun identifyLanguageOffline(
     instanceId: String,
     audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise
   ) {
     val slid = instances[instanceId]
@@ -130,12 +132,39 @@ internal class SherpaOnnxLanguageIdHelper {
       return
     }
 
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        LanguageIdErrorCodes.INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted"
+      )
+      return
+    }
+
     executor.execute {
       var stream: OfflineStream? = null
       try {
         val t0 = SystemClock.uptimeMillis()
-        val samples = audioEntry.readAllSamples()
         val sampleRate = audioEntry.sampleRate
+        val samples: FloatArray
+        if (!hasStart) {
+          samples = audioEntry.readAllSamples()
+        } else {
+          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
+          val end = endRaw.coerceAtMost(audioEntry.numSamples)
+          val frameCount = (end - start).coerceAtLeast(0)
+          if (frameCount == 0) {
+            val result = Arguments.createMap()
+            result.putString("lang", "")
+            result.putDouble("audioDuration", 0.0)
+            result.putDouble("elapsedMs", 0.0)
+            promise.resolve(result)
+            return@execute
+          }
+          samples = audioEntry.readSlice(start, frameCount)
+        }
         val audioDuration = if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
 
         stream = slid.createStream()
