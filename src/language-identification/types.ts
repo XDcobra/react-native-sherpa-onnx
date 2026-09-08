@@ -2,6 +2,9 @@ import type { FileSource } from '../fileio/types';
 import type { QuantizationPreference } from '../download/types';
 import type { LanguageIdDetectModelResult } from '../types/modelDetect';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { SegmentationPolicy } from '../segment/engine-types';
+import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import type { LanguageIdCustomConfig } from './customConfig';
 
 export {
@@ -12,6 +15,8 @@ export {
   type LanguageIdDetectModelResult,
   type ModelDetectResultBase,
 } from '../types/modelDetect';
+
+export type { OrchestrationProgress };
 
 export type LanguageIdModelType = 'whisper';
 
@@ -27,6 +32,15 @@ export type LanguageIdDetectOptions = {
   modelType?: LanguageIdModelType | 'auto';
   assetName?: string;
   quantization?: QuantizationPreference;
+};
+
+export const DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY: SegmentationPolicy = {
+  evaluator: 'speech_energy_silence',
+  silenceThresholdMs: 500,
+  energyThresholdDb: -40,
+  minSegmentMs: 1500,
+  maxSegmentMs: 25000,
+  hangoverMs: 300,
 };
 
 export const LanguageIdErrorCode = {
@@ -70,6 +84,99 @@ export interface LanguageIdentificationResult {
   elapsedMs: number;
 }
 
+/** A single language switch event along a speech timeline. */
+export interface LanguageSwitchEntry {
+  /** Timestamp in seconds where the new language began. */
+  timestamp: number;
+  /** Previous language code (or null if first segment). */
+  from: string | null;
+  /** New language code. */
+  to: string;
+  /** Index of the segment where the transition occurred. */
+  segmentIndex: number;
+}
+
+/** One detected speech segment with language information. */
+export interface LanguageIdSegmentEntry {
+  segmentIndex: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  lang: string;
+}
+
+/** Event fired whenever speech transitions from one language to another. */
+export interface LanguageChangedEvent {
+  previousLang: string | null;
+  currentLang: string;
+  timestamp: number;
+  segmentIndex: number;
+}
+
+/** Event fired after each speech segment is evaluated. */
+export interface LanguageIdSegmentEvent {
+  segmentIndex: number;
+  totalSegments?: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  lang: string;
+}
+
+/** Detailed result for long-form offline audio with code-switching analysis. */
+export interface SegmentedLanguageIdentificationResult {
+  /** Dominant language across all speech (duration-weighted). */
+  dominantLanguage: string;
+  /** Duration-weighted distribution of languages (fractions summing to 1.0, e.g. { en: 0.65, de: 0.35 }). */
+  distribution: Record<string, number>;
+  /** Chronological list of language switches detected across the audio. */
+  switches: LanguageSwitchEntry[];
+  /** Detailed segment-by-segment language timeline. */
+  segments: LanguageIdSegmentEntry[];
+  totalSegments: number;
+  processingTimeMs: number;
+}
+
+export interface LanguageIdentificationOptions {
+  /** Segmentation policy for long-form audio. If omitted or 'off', runs oneshot (<= 30s). */
+  segmentation?: {
+    mode?: 'off' | 'auto';
+    policy?: SegmentationPolicy;
+  };
+  /** Progress callback during multi-segment processing. */
+  onProgress?: (progress: OrchestrationProgress) => void;
+  /** Fired for every evaluated speech segment. */
+  onSegment?: (event: LanguageIdSegmentEvent) => void;
+  /** Fired specifically when a language switch is detected between segments. */
+  onLanguageChanged?: (event: LanguageChangedEvent) => void;
+  /** Optional target OfflineSegmentBuffer to populate with LanguageIdSpeechSegmentPayload. */
+  targetSegmentBuffer?: OfflineSegmentBufferIdSource;
+}
+
+/** Fired after a speech span is evaluated and staged during `labelOfflineSegments`. */
+export interface LanguageIdLabeledSegmentEvent {
+  segmentIndex: number;
+  totalSegments: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  lang: string;
+}
+
+/** Options for `labelOfflineSegments`. */
+export interface LanguageIdLabelOptions {
+  onProgress?: (progress: OrchestrationProgress) => void;
+  onLabeled?: (event: LanguageIdLabeledSegmentEvent) => void;
+}
+
+/** Result from `labelOfflineSegments`. */
+export interface LabelOfflineSegmentsResult {
+  labeledCount: number;
+  dominantLanguage: string;
+  distribution: Record<string, number>;
+  switches: LanguageSwitchEntry[];
+}
+
 export interface LanguageIdentificationEngine {
   readonly instanceId: string;
 
@@ -78,8 +185,43 @@ export interface LanguageIdentificationEngine {
    * Evaluates audio buffer directly in a single pass.
    */
   identify(
-    audio: OfflineAudioBufferIdSource
+    audio: OfflineAudioBufferIdSource,
+    options?: LanguageIdentificationOptions & {
+      segmentation?: { mode?: 'off' };
+    }
   ): Promise<LanguageIdentificationResult>;
+
+  /**
+   * Mode 2: Offline Segmented (Long-form Audio & Code-Switching)
+   * Slices long audio via segmentation policy, evaluates each speech span,
+   * compiles code-switching timeline and duration-weighted distribution.
+   */
+  identify(
+    audio: OfflineAudioBufferIdSource,
+    options: LanguageIdentificationOptions & {
+      segmentation: { mode: 'auto'; policy?: SegmentationPolicy };
+    }
+  ): Promise<SegmentedLanguageIdentificationResult>;
+
+  /**
+   * General signature for identify.
+   */
+  identify(
+    audio: OfflineAudioBufferIdSource,
+    options?: LanguageIdentificationOptions
+  ): Promise<
+    LanguageIdentificationResult | SegmentedLanguageIdentificationResult
+  >;
+
+  /**
+   * Label existing speech segments in an OfflineSegmentBuffer with LanguageIdSpeechSegmentPayload.
+   */
+  labelOfflineSegments(
+    audioIn: OfflineAudioBufferIdSource,
+    segmentsIn: OfflineSegmentBufferIdSource,
+    segmentsOut: OfflineSegmentBufferIdSource,
+    options?: LanguageIdLabelOptions
+  ): Promise<LabelOfflineSegmentsResult>;
 
   /** Release native resources. */
   destroy(): Promise<void>;

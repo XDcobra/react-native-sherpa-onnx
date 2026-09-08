@@ -27,7 +27,8 @@ export type SpeechSegmentPayloadSource =
   | 'stt'
   | 'tts'
   | 'sid'
-  | 'pyannote';
+  | 'pyannote'
+  | 'languageId';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
