@@ -26,7 +26,8 @@ export type CustomModelPathCategory =
   | ModelCategory.SpeakerEmbedding
   | ModelCategory.Diarization
   | ModelCategory.Punctuation
-  | ModelCategory.Alignment;
+  | ModelCategory.Alignment
+  | ModelCategory.LanguageId;
 
 export type CustomModelPathValidationResult = {
   ok: boolean;

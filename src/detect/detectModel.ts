@@ -82,6 +82,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   speakerEmbedding: ModelCategory.SpeakerEmbedding,
   diarization: ModelCategory.Diarization,
   alignment: ModelCategory.Alignment,
+  languageId: ModelCategory.LanguageId,
 };
 
 function isDetectModelNameInput(

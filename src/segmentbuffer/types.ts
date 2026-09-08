@@ -60,12 +60,21 @@ export interface PyannoteSpeechSegmentPayload {
   source: 'pyannote';
 }
 
+export interface LanguageIdSpeechSegmentPayload {
+  source: 'languageId';
+  /** Detected ISO language code, e.g. 'en', 'de', 'zh'. */
+  lang: string;
+  /** Optional model confidence / margin if available. */
+  confidence?: number;
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
   | TtsSpeechSegmentPayload
   | SidSpeechSegmentPayload
-  | PyannoteSpeechSegmentPayload;
+  | PyannoteSpeechSegmentPayload
+  | LanguageIdSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;

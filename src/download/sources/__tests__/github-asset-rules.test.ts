@@ -62,3 +62,67 @@ describe('github-asset-rules — Enhancement contrast', () => {
     ).toBe(false);
   });
 });
+
+describe('github-asset-rules — Language Identification', () => {
+  it('accepts multilingual Whisper archives from asr-models', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-tiny.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-base.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-large-v3.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
+
+  it('rejects English-only or non-multilingual whisper models and non-whisper models', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-tiny.en.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-small.en.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-whisper-medium-aishell.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.LanguageId,
+        'whisper-tiny.onnx',
+        'onnx'
+      )
+    ).toBe(false);
+  });
+});
