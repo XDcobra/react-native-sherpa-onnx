@@ -180,6 +180,7 @@ export default function DiarizationScreen() {
       animation.start();
       return () => animation.stop();
     }
+    return undefined;
   }, [diarizeBusy, progress, indeterminateAnim]);
 
   const indeterminateLeft = indeterminateAnim.interpolate({
@@ -425,6 +426,10 @@ export default function DiarizationScreen() {
           engineRef.current = null;
         }
         engine = await initEngine();
+      }
+
+      if (!engine) {
+        throw new Error('Diarization engine initialization failed');
       }
 
       appendEvent(
@@ -1221,9 +1226,7 @@ export default function DiarizationScreen() {
         {/* Module 3: Speaker Airtime & Timeline Analytics */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>
-              3. Speaker Airtime & Analytics
-            </Text>
+            <Text style={styles.cardTitle}>3. Speaker Airtime & Analytics</Text>
             <TouchableOpacity
               style={styles.copyButtonRow}
               onPress={copyTimeline}
