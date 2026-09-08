@@ -196,7 +196,9 @@ describe('createLanguageIdentification', () => {
 
       expect(SherpaOnnx.identifyLanguageOffline).toHaveBeenCalledWith(
         engine.instanceId,
-        'off_11111111-1111-1111-1111-111111111111'
+        'off_11111111-1111-1111-1111-111111111111',
+        null,
+        null
       );
       expect(res).toEqual({
         lang: 'de',
@@ -224,7 +226,9 @@ describe('createLanguageIdentification', () => {
 
       expect(SherpaOnnx.identifyLanguageOffline).toHaveBeenCalledWith(
         engine.instanceId,
-        'off_22222222-2222-2222-2222-222222222222'
+        'off_22222222-2222-2222-2222-222222222222',
+        null,
+        null
       );
       expect(res.lang).toBe('en');
     });
