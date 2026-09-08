@@ -66,6 +66,10 @@ export const TEST_AUDIO_FILES = {
   JA_1: 'test_wavs/ja.wav',
   KO_1: 'test_wavs/ko.wav',
   YUE_1: 'test_wavs/yue.wav',
+
+  // Multi-speaker test files (dedicated to Diarization and Speaker Identification)
+  FOUR_SPEAKERS_ZH: 'test_wavs/0-four-speakers-zh.wav',
+  TWO_SPEAKERS_EN_1: 'test_wavs/1-two-speakers-en.wav',
 } as const;
 
 export type AudioFileId =
@@ -187,3 +191,23 @@ export function getAudioFilesForModel(modelId: string): AudioFileInfo[] {
   // Default: return Chinese files (for other models)
   return AUDIO_FILES.filter((file) => file.language === 'zh');
 }
+
+/**
+ * Dedicated multi-speaker audio recordings for Diarization and Speaker Identification.
+ * Kept isolated from single-speaker features (STT, TTS, Enhancement, Offline Pipeline)
+ * so they are not accidentally presented for single-speaker tasks.
+ */
+export const DIARIZATION_AUDIO_FILES: AudioFileInfo[] = [
+  {
+    id: TEST_AUDIO_FILES.FOUR_SPEAKERS_ZH,
+    name: '4 Speakers (Chinese Meeting)',
+    description: '4-speaker conversation (56.9s) from sherpa-onnx',
+    language: 'zh',
+  },
+  {
+    id: TEST_AUDIO_FILES.TWO_SPEAKERS_EN_1,
+    name: '2 Speakers (English Dialogue)',
+    description: '2-speaker dialogue (16.0s) from sherpa-onnx',
+    language: 'en',
+  },
+];

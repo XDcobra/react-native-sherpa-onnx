@@ -1,4 +1,24 @@
 import type { PublicLanguageHint } from '../model-languages';
+import type { Quantization, QuantizationPreference } from '../download/types';
+
+export type { Quantization, QuantizationPreference };
+
+export function normalizeQuantization(raw: unknown): Quantization | undefined {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return undefined;
+  const lower = raw.trim().toLowerCase();
+  if (
+    lower === 'int8' ||
+    lower === 'int8-quantized' ||
+    lower === 'fp16' ||
+    lower === 'int4' ||
+    lower === 'uint8' ||
+    lower === 'fp32' ||
+    lower === 'bf16'
+  ) {
+    return lower as Quantization;
+  }
+  return 'unknown';
+}
 
 // ─── Detection source (shared across all feature detectors) ──────────────
 
@@ -49,8 +69,8 @@ export interface ModelDetectResultBase {
   isStreaming: boolean;
   /** Normalized primary hints (`iso6391Hint`); from native heuristics + SDK fallback. */
   languages?: PublicLanguageHint[];
-  /** fp16, int8, int8-quantized, unknown — from name heuristics. */
-  quantization?: string;
+  /** fp16, int8, int8-quantized, int4, uint8, fp32, bf16, unknown — from name heuristics or file detection. */
+  quantization?: Quantization;
   /** Trace of how native detection chose the model kind. */
   detectionSources?: readonly DetectionSource[];
 }
@@ -100,6 +120,16 @@ export interface SpeakerEmbeddingDetectModelResult
   /** Resolved embedding extractor ONNX path from detection. */
   paths?: {
     model?: string;
+  };
+}
+
+// ─── Diarization extension ─────────────────────────────────────────────
+
+export interface DiarizationDetectModelResult extends ModelDetectResultBase {
+  /** Resolved segmentation ONNX path and optional metadata JSON from detection. */
+  paths?: {
+    model?: string;
+    metadata?: string;
   };
 }
 

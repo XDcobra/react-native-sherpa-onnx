@@ -1,3 +1,4 @@
+import SherpaOnnx from '../NativeSherpaOnnx';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
@@ -17,7 +18,7 @@ import type {
   OfflineSegmentBufferIdSource,
   SegmentMeta,
 } from '../segmentbuffer/types';
-import { acquireSpeakerEmbeddingEngine } from '../speaker-embedding/engineCache';
+import { createSpeakerEmbeddingEngine } from '../speaker-embedding/engine';
 import { createSpeakerEmbeddingManager } from '../speaker-embedding/manager';
 import {
   buildSpeakerEmbeddingInitBridgeOptions,
@@ -92,6 +93,38 @@ function resolveThreshold(
 
 function cloneEmbeddings(embeddings: Float32Array[]): Float32Array[] {
   return embeddings.map((embedding) => new Float32Array(embedding));
+}
+
+function unflattenEmbeddings(flat: number[], dim: number): Float32Array[] {
+  if (!(dim > 0)) {
+    throw new Error('unflattenEmbeddings requires dim > 0');
+  }
+  if (!Array.isArray(flat) || flat.length === 0 || flat.length % dim !== 0) {
+    throw new Error(
+      `SID_ENROLL_INVALID_RESULT: embeddings length ${
+        Array.isArray(flat) ? flat.length : -1
+      } must be a positive multiple of dim ${dim}`
+    );
+  }
+  const count = flat.length / dim;
+  const out: Float32Array[] = [];
+  for (let i = 0; i < count; i++) {
+    const embedding = new Float32Array(dim);
+    const offset = i * dim;
+    for (let j = 0; j < dim; j++) {
+      const value = flat[offset + j]!;
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(
+          `SID_ENROLL_INVALID_RESULT: embeddings[${
+            offset + j
+          }] must be a finite number`
+        );
+      }
+      embedding[j] = value;
+    }
+    out.push(embedding);
+  }
+  return out;
 }
 
 function embeddingsToNumberArrays(embeddings: Float32Array[]): number[][] {
@@ -260,8 +293,8 @@ function resolvePerSpanSpeakerNames(
 
 /**
  * Create a Speaker Identification engine on the shared embedding extractor +
- * named-speaker manager. The extractor is ref-counted so future diarization
- * can share the same model weights via `acquireSpeakerEmbeddingEngine`.
+ * named-speaker manager. Extractor ONNX weights are shared process-wide with
+ * diarization via the C++ `SpeakerEmbeddingRunner` registry.
  */
 export async function createSpeakerIdentification(
   options: SpeakerIdentificationOptions
@@ -269,7 +302,7 @@ export async function createSpeakerIdentification(
   const bridgeOptions = await buildSpeakerEmbeddingInitBridgeOptions(options);
   const modelKey =
     speakerEmbeddingEngineCacheKeyFromBridgeOptions(bridgeOptions);
-  const engine = await acquireSpeakerEmbeddingEngine(options);
+  const engine = await createSpeakerEmbeddingEngine(options);
   const manager = await createSpeakerEmbeddingManager(engine.dim);
 
   /** JS mirror of vectors passed to `manager.add` (native cannot read embeddings back). */
@@ -316,17 +349,26 @@ export async function createSpeakerIdentification(
       if (buffers.length === 0) {
         throw new Error('enroll() requires at least one audio buffer');
       }
-      const embeddings: Float32Array[] = [];
-      for (const buffer of buffers) {
-        embeddings.push(await engine.extractFromOfflineAudio(buffer));
-      }
-      const ok = await manager.add(trimmed, embeddings);
-      if (!ok) {
+      const audioBufferIds = buffers.map((buffer) =>
+        resolvePipelineAudioBufferId(buffer)
+      );
+      const result = await SherpaOnnx.enrollSpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        trimmed,
+        audioBufferIds,
+        null,
+        null
+      );
+      if (!result.ok) {
         throw new Error(
           `Failed to enroll speaker '${trimmed}' (name may already exist)`
         );
       }
-      rememberEnrollment(trimmed, embeddings);
+      rememberEnrollment(
+        trimmed,
+        unflattenEmbeddings(result.embeddings ?? [], engine.dim)
+      );
     },
     async enrollOfflineSegments(
       nameOrNames: string | string[],
@@ -336,7 +378,7 @@ export async function createSpeakerIdentification(
     ): Promise<void> {
       guard();
       assertSegmentOptions(segmentOptions);
-      resolvePipelineAudioBufferId(audioIn);
+      const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
@@ -365,31 +407,45 @@ export async function createSpeakerIdentification(
       const progressSession = createSpeakerIdentificationProgressSession(
         segmentOptions?.onProgress
       );
-      const byName = new Map<string, Float32Array[]>();
+      const byName = new Map<
+        string,
+        { startSamples: number[]; endSamples: number[] }
+      >();
       for (let i = 0; i < spans.length; i++) {
         const span = spans[i]!;
         const speakerName = trimmedPerSpan[i]!;
         progressSession.emitStep(i, spans.length, spanDurationMs(span));
-        const embedding = await engine.extractFromOfflineAudio(audioIn, {
-          startSample: span.startSample,
-          endSample: span.endSample,
-        });
         const bucket = byName.get(speakerName);
         if (bucket) {
-          bucket.push(embedding);
+          bucket.startSamples.push(span.startSample);
+          bucket.endSamples.push(span.endSample);
         } else {
-          byName.set(speakerName, [embedding]);
+          byName.set(speakerName, {
+            startSamples: [span.startSample],
+            endSamples: [span.endSample],
+          });
         }
       }
 
-      for (const [speakerName, embeddings] of byName) {
-        const ok = await manager.add(speakerName, embeddings);
-        if (!ok) {
+      for (const [speakerName, ranges] of byName) {
+        const audioBufferIds = ranges.startSamples.map(() => audioBufferId);
+        const result = await SherpaOnnx.enrollSpeakerOffline(
+          engine.instanceId,
+          manager.managerId,
+          speakerName,
+          audioBufferIds,
+          ranges.startSamples,
+          ranges.endSamples
+        );
+        if (!result.ok) {
           throw new Error(
             `Failed to enroll speaker '${speakerName}' (name may already exist)`
           );
         }
-        rememberEnrollment(speakerName, embeddings);
+        rememberEnrollment(
+          speakerName,
+          unflattenEmbeddings(result.embeddings ?? [], engine.dim)
+        );
       }
     },
     async identify(
@@ -397,13 +453,36 @@ export async function createSpeakerIdentification(
       thresholdOptions?: SpeakerIdentificationThresholdOptions
     ): Promise<IdentifyResult> {
       guard();
-      const embedding = await engine.extractFromOfflineAudio(audio);
+      const result = await SherpaOnnx.identifySpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        resolvePipelineAudioBufferId(audio),
+        resolveThreshold(thresholdOptions),
+        null,
+        null
+      );
+      const trimmed = result.name.trim();
+      return { name: trimmed.length > 0 ? trimmed : null };
+    },
+    async search(
+      embedding: Float32Array,
+      thresholdOptions?: SpeakerIdentificationThresholdOptions
+    ): Promise<string | null> {
+      guard();
+      if (!(embedding instanceof Float32Array) || embedding.length === 0) {
+        throw new Error('search() requires a non-empty Float32Array embedding');
+      }
+      if (embedding.length !== manager.dim) {
+        throw new Error(
+          `search() embedding length ${embedding.length} does not match manager dim ${manager.dim}`
+        );
+      }
       const name = await manager.search(
         embedding,
         resolveThreshold(thresholdOptions)
       );
-      const trimmed = name.trim();
-      return { name: trimmed.length > 0 ? trimmed : null };
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      return trimmed.length > 0 ? trimmed : null;
     },
     async labelOfflineSegments(
       audioIn: OfflineAudioBufferIdSource,
@@ -445,12 +524,15 @@ export async function createSpeakerIdentification(
           const durationMs = spanDurationMs(span);
           progressSession.emitStep(i, spans.length, durationMs);
 
-          const embedding = await engine.extractFromOfflineAudio(audioIn, {
-            startSample: span.startSample,
-            endSample: span.endSample,
-          });
-          const rawName = await manager.search(embedding, threshold);
-          const trimmed = rawName.trim();
+          const result = await SherpaOnnx.identifySpeakerOffline(
+            engine.instanceId,
+            manager.managerId,
+            audioBufferId,
+            threshold,
+            span.startSample,
+            span.endSample
+          );
+          const trimmed = result.name.trim();
           const speakerName = trimmed.length > 0 ? trimmed : null;
           if (speakerName == null) {
             unknownCount += 1;
@@ -519,12 +601,16 @@ export async function createSpeakerIdentification(
       thresholdOptions?: SpeakerIdentificationThresholdOptions
     ): Promise<boolean> {
       guard();
-      const embedding = await engine.extractFromOfflineAudio(audio);
-      return manager.verify(
+      const result = await SherpaOnnx.verifySpeakerOffline(
+        engine.instanceId,
+        manager.managerId,
+        resolvePipelineAudioBufferId(audio),
         name,
-        embedding,
-        resolveThreshold(thresholdOptions)
+        resolveThreshold(thresholdOptions),
+        null,
+        null
       );
+      return result.ok;
     },
     async verifyOfflineSegments(
       nameOrNames: string | string[],
@@ -534,7 +620,7 @@ export async function createSpeakerIdentification(
     ): Promise<VerifyOfflineSegmentsResult> {
       guard();
       assertVerifyOptions(verifyOptions);
-      resolvePipelineAudioBufferId(audioIn);
+      const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const threshold = resolveThreshold(verifyOptions);
       const spans = collectSpeechSpans(
@@ -564,15 +650,16 @@ export async function createSpeakerIdentification(
         const expectedName = expectedPerSpan[i]!;
         const durationMs = spanDurationMs(span);
         progressSession.emitStep(i, spans.length, durationMs);
-        const embedding = await engine.extractFromOfflineAudio(audioIn, {
-          startSample: span.startSample,
-          endSample: span.endSample,
-        });
-        const matched = await manager.verify(
+        const result = await SherpaOnnx.verifySpeakerOffline(
+          engine.instanceId,
+          manager.managerId,
+          audioBufferId,
           expectedName,
-          embedding,
-          threshold
+          threshold,
+          span.startSample,
+          span.endSample
         );
+        const matched = result.ok;
         matches.push(matched);
         if (matched) {
           matchCount += 1;

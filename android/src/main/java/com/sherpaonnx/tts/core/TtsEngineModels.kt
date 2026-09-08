@@ -16,7 +16,8 @@ internal data class TtsInitState(
   val ruleFars: String?,
   val maxNumSentences: Int?,
   val silenceScale: Double?,
-  val provider: String?
+  val provider: String?,
+  val quantization: String? = null
 )
 
 /**

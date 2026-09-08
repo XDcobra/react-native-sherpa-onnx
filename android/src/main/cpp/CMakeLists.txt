@@ -119,8 +119,28 @@ set(SOURCES
     jni/model_detect/speaker/sherpa-onnx-validate-speaker-embedding.cpp
     jni/model_detect/speaker/sherpa-onnx-speaker-embedding-online-guard.cpp
     jni/model_detect/speaker/sherpa-onnx-speaker-embedding-detect-wrapper.cpp
+    jni/model_detect/diarization/sherpa-onnx-model-detect-diarization.cpp
+    jni/model_detect/diarization/sherpa-onnx-validate-diarization.cpp
+    jni/model_detect/diarization/sherpa-onnx-diarization-detect-wrapper.cpp
     separation/sherpa-onnx-separation-wrapper.cpp
     jni/separation/sherpa-onnx-separation-jni.cpp
+    diarization/powerset.cpp
+    diarization/pyannote-segmentation-model.cpp
+    diarization/speaker-timeline.cpp
+    diarization/agglomerative-clustering.cpp
+    diarization/diarization-session.cpp
+    diarization/pyannote-segmentation-session.cpp
+    diarization/sherpa-onnx-diarization-wrapper.cpp
+    diarization/sortformer-fbank.cpp
+    diarization/sortformer-post-processor.cpp
+    diarization/sortformer-streaming-model.cpp
+    diarization/sherpa-onnx-streaming-diarization-wrapper.cpp
+    jni/diarization/sherpa-onnx-diarization-jni.cpp
+    jni/segment/sherpa-onnx-pyannote-segmentation-jni.cpp
+    speaker-embedding/speaker-embedding-runner.cpp
+    speaker-embedding/speaker-embedding-manager.cpp
+    speaker-embedding/sherpa-onnx-speaker-embedding-wrapper.cpp
+    jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-catalog-metadata.cpp
     jni/model_detect/punctuation/sherpa-onnx-punctuation-online-guard.cpp
     jni/model_detect/punctuation/sherpa-onnx-model-detect-punctuation.cpp
@@ -245,7 +265,11 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/separation
+    ${CMAKE_CURRENT_SOURCE_DIR}/diarization
+    ${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding
     ${ORT_INCLUDE_DIR}
+    # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
+    ${ORT_INCLUDE_DIR}/onnxruntime/core/session
     ${CMAKE_CURRENT_SOURCE_DIR}/jni
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/module
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/archive
@@ -255,6 +279,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/enhancement
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/separation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/speaker
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/diarization
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment

@@ -24,6 +24,7 @@ sealed class CommittedSegmentRef {
     val segmentId: String,
     val segmentIndex: Int,
     val payloadJson: String?,
+    val confidence: Double? = null,
   ) : CommittedSegmentRef()
 
   data class Text(
@@ -253,6 +254,7 @@ internal abstract class OfflineLivePipelineWorker(
             segmentId = next.segmentId,
             segmentIndex = next.segmentIndex,
             payloadJson = record.payloadJson,
+            confidence = record.confidence,
           ),
           unitsRead = (record.endSample - record.startSample).coerceAtLeast(0).toLong(),
         )

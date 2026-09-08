@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ElementRef,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -259,7 +266,7 @@ export default function SpeakerIdentificationScreen() {
   const cleanupLockRef = useRef(false);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const liveRunEpochRef = useRef(0);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ElementRef<typeof ScrollView>>(null);
   const enrollmentTransferYRef = useRef(0);
   const jsonBufferSectionYRef = useRef(0);
 
@@ -305,10 +312,7 @@ export default function SpeakerIdentificationScreen() {
     const total = Math.floor(clamped);
     const mm = Math.floor(total / 60);
     const ss = total % 60;
-    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(
-      2,
-      '0'
-    )}`;
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
   }, []);
 
   const showActionError = (
@@ -1482,8 +1486,8 @@ export default function SpeakerIdentificationScreen() {
         opts?.titled
           ? screenStyles.card
           : opts?.tight
-            ? screenStyles.inlineProgressTight
-            : screenStyles.inlineProgress
+          ? screenStyles.inlineProgressTight
+          : screenStyles.inlineProgress
       }
     >
       {opts?.titled ? (
@@ -1516,8 +1520,8 @@ export default function SpeakerIdentificationScreen() {
     (liveRunState === 'stopping'
       ? 'Stopping…'
       : liveRunState === 'running'
-        ? 'Live labeling…'
-        : null);
+      ? 'Live labeling…'
+      : null);
 
   const showSharedActionProgress =
     !!actionProgress &&
@@ -1949,8 +1953,8 @@ export default function SpeakerIdentificationScreen() {
               />
               {segBatchConfig.mode !== 'off' ? (
                 <Text style={screenStyles.sectionHint}>
-                  One name averages all speech spans; comma-separated names assign
-                  one speaker per span.
+                  One name averages all speech spans; comma-separated names
+                  assign one speaker per span.
                 </Text>
               ) : null}
               <TouchableOpacity
@@ -1994,8 +1998,8 @@ export default function SpeakerIdentificationScreen() {
                 offDisabledMessage="Live SID overload requires mandatory speech segmentation."
               />
               <Text style={screenStyles.sectionHint}>
-                Live commits on silence or maxSegmentMs. Continuous speech with a
-                high max (e.g. 120s default) can yield long labels; lower
+                Live commits on silence or maxSegmentMs. Continuous speech with
+                a high max (e.g. 120s default) can yield long labels; lower
                 maxSegmentMs to force shorter utterances.
               </Text>
 
@@ -2151,21 +2155,21 @@ export default function SpeakerIdentificationScreen() {
                   <Text style={screenStyles.primaryButtonText}>Stop</Text>
                 </TouchableOpacity>
               )}
-              {liveBusy && liveProgressLabel
-                ? renderProgressBlock(
-                    {
-                      label: liveProgressLabel,
-                      percent: null,
-                    },
-                    { tight: true }
-                  )
-                : liveStatus && !liveBusy ? (
-                    <Text
-                      style={[screenStyles.bodyText, screenStyles.statusAfterRun]}
-                    >
-                      {liveStatus}
-                    </Text>
-                  ) : null}
+              {liveBusy && liveProgressLabel ? (
+                renderProgressBlock(
+                  {
+                    label: liveProgressLabel,
+                    percent: null,
+                  },
+                  { tight: true }
+                )
+              ) : liveStatus && !liveBusy ? (
+                <Text
+                  style={[screenStyles.bodyText, screenStyles.statusAfterRun]}
+                >
+                  {liveStatus}
+                </Text>
+              ) : null}
 
               {liveLabelEvents.length > 0 ? (
                 <View
@@ -2255,9 +2259,7 @@ export default function SpeakerIdentificationScreen() {
                 const startTime = formatSecondsToMMSS(
                   e.startSample / e.sampleRate
                 );
-                const endTime = formatSecondsToMMSS(
-                  e.endSample / e.sampleRate
-                );
+                const endTime = formatSecondsToMMSS(e.endSample / e.sampleRate);
                 return (
                   <View key={e.segmentIndex} style={screenStyles.liveLabelRow}>
                     <Text
@@ -2476,10 +2478,7 @@ export default function SpeakerIdentificationScreen() {
                       handleImportFromEditor().catch(() => {});
                     }}
                     disabled={
-                      !engineReady ||
-                      !enrollmentJson.trim() ||
-                      busy ||
-                      liveBusy
+                      !engineReady || !enrollmentJson.trim() || busy || liveBusy
                     }
                   >
                     {busyAction === 'importEditor' ? (
@@ -2507,7 +2506,9 @@ export default function SpeakerIdentificationScreen() {
               hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
             >
               <View style={screenStyles.collapseHeaderTitleWrap}>
-                <Text style={screenStyles.collapseHeaderTitle}>JSON buffer</Text>
+                <Text style={screenStyles.collapseHeaderTitle}>
+                  JSON buffer
+                </Text>
                 {!jsonBufferExpanded && enrollmentJson.trim() ? (
                   <Text style={screenStyles.collapseHeaderMeta}>
                     {enrollmentJson.length} chars

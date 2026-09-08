@@ -38,7 +38,7 @@ import {
 const engine = await createSTT({
   modelSource: { kind: 'fs', path: '/absolute/path/to/stt-model-dir' },
   modelType: 'whisper', // or 'transducer', 'paraformer', … — see STTInitializeOptions / STT_MODEL_TYPES
-  preferInt8: true,
+  quantization: 'int8',
   numThreads: 4,
   provider: 'cpu',
   debug: false,
@@ -111,11 +111,11 @@ const modelPath = { kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whi
 const det = await detectSttModel({ kind: 'app', base: 'apkAsset', path: 'models/sherpa-onnx-whisper-tiny-en' });
 if (!det.success) throw new Error(det.error ?? 'STT detection failed');
 
-// Loads the offline recognizer; tune threads / int8 / provider per device.
+// Loads the offline recognizer; tune threads / quantization / provider per device.
 const engine = await createSTT({
   modelSource: modelPath,
   modelType: (det.modelType as any) ?? 'auto',
-  preferInt8: true,
+  quantization: 'int8',
   numThreads: 2,
 });
 
@@ -167,7 +167,7 @@ For cross-feature catalog scans use unified detection: [model-detect.md](model-d
 ```ts
 function detectSttModel(
   source: FileSource,
-  options?: { preferInt8?: boolean; modelType?: STTModelType; assetName?: string; debug?: boolean }
+  options?: { quantization?: QuantizationPreference; modelType?: STTModelType; assetName?: string; debug?: boolean }
 ): Promise<SttDetectModelResult>;
 ```
 

@@ -45,3 +45,7 @@ export {
   SpeechVadSegmentationCustomInitForm,
   type SpeechVadSegmentationCustomInitFormState,
 } from './SpeechVadSegmentationCustomInitForm';
+export {
+  DiarizationStreamingCustomInitForm,
+  type DiarizationStreamingCustomInitFormState,
+} from './DiarizationStreamingCustomInitForm';

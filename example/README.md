@@ -28,6 +28,24 @@ bundle install
 yarn ios
 ```
 
+## Bundling models & test assets (offline / without download manager)
+
+If you do not want to download models at runtime via the **Download Manager Showcase**, you can bundle model folders and test assets directly into the application before building.
+
+### Folder locations
+
+| Asset type | Android location | iOS location |
+| --- | --- | --- |
+| **Models** | `android/app/src/main/assets/models/<model-id>/` | `ios/sherpa_models/models/<model-id>/` |
+| **Test audio WAVs** | `android/app/src/main/assets/test_wavs/` | `ios/sherpa_models/test_wavs/` |
+| **Codec samples** | `android/app/src/main/assets/test_codec/` | `ios/sherpa_models/test_codec/` |
+
+> **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
+> - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
+> - **Android Build (`Gradle`):** The `syncModelsFromIos` task automatically detects and copies any models placed in `ios/sherpa_models/models/` into the Android assets directory before compilation.
+>
+> Placing a model in either location (or both) makes it discoverable via `listAssetModels()` and immediately usable offline across all feature screens.
+
 ## Download manager showcase
 
 
@@ -228,4 +246,16 @@ This screen streams mixed audio from a file or microphone into live input buffer
 
 This screen enrolls named speakers from offline audio, then identify / verify / label speech segments. Toggle **Offline batch** vs **Live overload** (same embedding weights). Auto or custom model init (`ModelCategory.SpeakerEmbedding`). Offline segmentation can be Off (whole-buffer) or Auto (`segmentOfflineBuffer` → `enrollOfflineSegments` / `labelOfflineSegments`). Live labeling requires mandatory speech segmentation (`speech_energy_silence` / `speech_vad_model`) over file ingest or mic. Includes export/import of the enrollment JSON bundle. See [docs/speaker-identification-offline.md](../docs/speaker-identification-offline.md) and [docs/speaker-identification-live.md](../docs/speaker-identification-live.md).
 
-## Speaker diarization (coming soon)
+## Speaker diarization (offline)
+
+| ![Diarization offline 1](../docs/images/example/diarization_offline_1.png) | ![Diarization offline 2](../docs/images/example/diarization_offline_2.png) | ![Diarization offline 3](../docs/images/example/diarization_offline_3.png) |
+| --- | --- | --- |
+
+This screen evaluates multi-speaker audio recordings with offline diarization engines (Pyannote segmentation or Reverb models). It ingests full audio into offline buffers, runs speaker clustering, and extracts timestamps and speaker labels into an offline segment buffer (`kind: 'diarization'`). It also demonstrates integration with Speaker Identification (SID) via `mapDiarizationToNames` to resolve anonymous speaker clusters into enrolled names. See [docs/diarization-offline.md](../docs/diarization-offline.md) and [docs/diarization-named-timeline.md](../docs/diarization-named-timeline.md).
+
+## Speaker diarization (streaming)
+
+| ![Diarization streaming 1](../docs/images/example/diarization_streaming_1.png) | ![Diarization streaming 2](../docs/images/example/diarization_streaming_2.png) | ![Diarization streaming 3](../docs/images/example/diarization_streaming_3.png) |
+| --- | --- | --- |
+
+This screen demonstrates true real-time streaming speaker diarization powered by Sortformer ONNX models. It streams live audio from a microphone or test audio files directly into the native streaming engine, outputting speaker segments to a `LiveSegmentBuffer` in real time. Features include an active speaker HUD with customizable speaker aliases, meeting analytics (speaking percentages, talk times, turn counts), runtime parameter tuning (onset/offset thresholds, min durations), and full pipeline lifecycle controls (start, flush, reset, stop). See [docs/diarization-streaming.md](../docs/diarization-streaming.md).

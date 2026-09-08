@@ -5,6 +5,7 @@ export type SegmentationEvaluator =
   | 'text_punctuation_assisted'
   | 'speech_energy_silence'
   | 'speech_vad_model'
+  | 'speech_pyannote_segmentation'
   | 'continuous_frames';
 
 export type SpeechVadModelAuto = {
@@ -47,12 +48,28 @@ export type SpeechVadSegmentationPolicy = SegmentationPolicyCommon & {
   vadMinSilenceMs?: number;
 } & SpeechVadModelConfig;
 
+export type SpeechPyannoteSegmentationPolicy = SegmentationPolicyCommon & {
+  evaluator: 'speech_pyannote_segmentation';
+  /** Pyannote / reverb pack directory or `model.onnx` path. */
+  modelPath: FileSource;
+  /** Window hop as a fraction of window size (default `0.1`). */
+  windowShiftRatio?: number;
+  /** Drop spans shorter than this (seconds, default `0.3`). */
+  minDurationOn?: number;
+  /** Merge same-run gaps up to this (seconds, default `0.5`). */
+  minDurationOff?: number;
+};
+
 export type NonSpeechVadSegmentationPolicy = SegmentationPolicyCommon & {
-  evaluator: Exclude<SegmentationEvaluator, 'speech_vad_model'>;
+  evaluator: Exclude<
+    SegmentationEvaluator,
+    'speech_vad_model' | 'speech_pyannote_segmentation'
+  >;
 };
 
 export type SegmentationPolicy =
   | SpeechVadSegmentationPolicy
+  | SpeechPyannoteSegmentationPolicy
   | NonSpeechVadSegmentationPolicy;
 
 export interface SegmentationConfig {

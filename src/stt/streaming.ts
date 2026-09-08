@@ -77,7 +77,7 @@ export async function createStreamingSTT(
       resolvedPath,
       null,
       undefined,
-      undefined,
+      options.quantization ?? null,
       undefined
     );
     if (!detectResult.success) {

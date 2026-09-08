@@ -13,7 +13,7 @@ import com.sherpaonnx.tts.core.dispatchSampleRate
 internal class TtsLifecycleService(
   private val repository: TtsEngineRepository,
   private val ttsInitExecutor: java.util.concurrent.ExecutorService,
-  private val nativeDetectTtsModel: (String, String?, String?) -> HashMap<String, Any>?,
+  private val nativeDetectTtsModel: (String, String?, String?, String?) -> HashMap<String, Any>?,
 ) {
   /**
    * Shuts down the TTS init executor and releases all engine instances.
@@ -90,9 +90,9 @@ internal class TtsLifecycleService(
    * Detect TTS model type and structure without initializing the engine.
    * Mirrors [SherpaOnnxModule.detectTtsModel] for delegation from facades.
    */
-  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, promise: Promise) {
+  fun detectTtsModel(modelDir: String, assetName: String?, modelType: String?, quantization: String?, promise: Promise) {
     try {
-      val result = nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto")
+      val result = nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         Log.e("SherpaOnnx", "DETECT_ERROR: TTS model detection returned null")
         promise.reject("DETECT_ERROR", "TTS model detection returned null")

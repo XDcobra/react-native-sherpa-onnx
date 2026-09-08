@@ -1,5 +1,6 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-ort-guard-utils.h"
 #include "sherpa-onnx-vad-catalog-metadata.h"
 #include "sherpa-onnx-validate-vad.h"
@@ -77,7 +78,8 @@ sherpaonnx::VadModelKind InferKindFromModelName(const std::string& modelPath) {
 sherpaonnx::VadDetectResult DetectVadModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     sherpaonnx::VadDetectResult result;
     const std::string requestedModelType = modelType.empty() ? "auto" : modelType;
@@ -132,13 +134,20 @@ sherpaonnx::VadDetectResult DetectVadModelFromFiles(
     std::vector<std::string> onnxCandidates;
     onnxCandidates.reserve(files.size());
     for (const auto& file : files) {
-        if (file.nameLower.size() >= 5 &&
-            file.nameLower.compare(file.nameLower.size() - 5, 5, ".onnx") == 0) {
-            onnxCandidates.push_back(file.path);
+        bool isOnnx = (file.nameLower.size() > 5 && file.nameLower.substr(file.nameLower.size() - 5) == ".onnx") ||
+                      (file.nameLower.size() > 4 && file.nameLower.substr(file.nameLower.size() - 4) == ".ort");
+        if (isOnnx) {
+            if (quantization.empty() || quantization == "auto" || MatchesQuantization(file.nameLower, quantization)) {
+                onnxCandidates.push_back(file.path);
+            }
         }
     }
     if (onnxCandidates.empty()) {
-        result.error = "VAD: no .onnx model file found in " + modelDir;
+        if (!quantization.empty() && quantization != "auto") {
+            result.error = "VAD: requested quantization '" + quantization + "' not found in " + modelDir;
+        } else {
+            result.error = "VAD: no .onnx model file found in " + modelDir;
+        }
         return result;
     }
 
@@ -230,6 +239,13 @@ sherpaonnx::VadDetectResult DetectVadModelFromFiles(
         return result;
     }
 
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -243,7 +259,8 @@ using namespace model_detect;
 VadDetectResult DetectVadModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     VadDetectResult result;
     const bool has_dir = model_dir_opt && !model_dir_opt->empty();
@@ -257,7 +274,7 @@ VadDetectResult DetectVadModel(
 
     if (!has_dir && has_asset) {
         const std::string syntheticDir = std::string("m/") + *asset_name_opt;
-        auto detected = DetectVadModelFromFiles({}, syntheticDir, requestedModelType);
+        auto detected = DetectVadModelFromFiles({}, syntheticDir, requestedModelType, quantization);
         FillVadDerivedCatalogMetadata(detected, *asset_name_opt);
         return detected;
     }
@@ -269,7 +286,7 @@ VadDetectResult DetectVadModel(
     }
 
     const std::vector<FileEntry> files = ListFilesRecursive(modelDir, 4);
-    auto detected = DetectVadModelFromFiles(files, modelDir, requestedModelType);
+    auto detected = DetectVadModelFromFiles(files, modelDir, requestedModelType, quantization);
     if (has_asset) {
         FillVadDerivedCatalogMetadata(detected, *asset_name_opt);
     } else {
@@ -281,14 +298,15 @@ VadDetectResult DetectVadModel(
 VadDetectResult DetectVadModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     VadDetectResult result;
     if (modelDir.empty()) {
         result.error = "VAD: model directory is empty";
         return result;
     }
-    auto detected = DetectVadModelFromFiles(files, modelDir, modelType);
+    auto detected = DetectVadModelFromFiles(files, modelDir, modelType, quantization);
     FillVadDerivedCatalogMetadataUsingModelDirBasename(detected, modelDir);
     return detected;
 }

@@ -1,0 +1,33 @@
+# Diarization core unit tests (powerset / clustering / timeline).
+# Triggered on PR or manually. No ORT / sherpa C-API required.
+
+name: Test – Diarization core
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-diarization-core
+  cancel-in-progress: true
+
+jobs:
+  diarization-core:
+    name: Diarization core (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target diarization_core_test
+
+      - name: Run diarization core tests
+        working-directory: ${{ github.workspace }}
+        run: ./test/cpp/build/diarization_core_test

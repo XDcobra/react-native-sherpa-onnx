@@ -1,6 +1,6 @@
 # Memory and models
 
-> For a short summary see the [Memory and models](#memory-and-models) section in the root README.
+> For a short summary see [Built for Low-End & Real-World Mobile Devices](../README.md#built-for-low-end--real-world-mobile-devices) in the root README.
 
 This guide helps you plan model selection, estimate peak RAM, and avoid OOM crashes before you ship.
 
@@ -51,9 +51,9 @@ There is no single answer—it depends on the model family, quantization, and ho
 | Alignment (wav2vec2) | ~350 MB | — | — |
 | Punctuation | ~50–100 MB | — | — |
 
-> **Important:** these are weight-file sizes. Peak RSS during inference may be 1.2–1.5× higher due to activation tensors, especially for encoder-decoder models (Whisper, Matcha, Kokoro). Int8/quantized models reduce weight size by ~50–70 % and the SDK prefers them when `preferInt8: true` (the default for `auto`).
+> **Important:** these are weight-file sizes. Peak RSS during inference may be 1.2–1.5× higher due to activation tensors, especially for encoder-decoder models (Whisper, Matcha, Kokoro). Int8/quantized models reduce weight size by ~50–70 % and the SDK supports them via `quantization: 'int8'` (or `'fp16'`, `'int4'`, etc.).
 
-**Recommendation:** prefer quantized (int8) models. Enable this globally via `modelType: 'auto'` with the default `preferInt8` flag, or set `preferInt8: true` explicitly in `STTInitializeOptions` / `TTSInitializeOptions`.
+**Recommendation:** prefer quantized (int8) models. Select this via `quantization: 'int8'` in `STTInitializeOptions` / `TTSInitializeOptions` / other feature options.
 
 ---
 

@@ -190,7 +190,17 @@ const FEATURES: HomeFeature[] = [
     description: 'Identify who spoke when in audio',
     icon: 'people',
     screen: 'Diarization',
-    implemented: false,
+    implemented: true,
+  },
+  {
+    id: 'diarization_streaming',
+    sectionTitle: 'Speakers & Separation',
+    title: 'Speaker Diarization (Streaming)',
+    description:
+      'Identify who spoke when in real-time audio streams (NeMo Sortformer)',
+    icon: 'people-circle-outline',
+    screen: 'DiarizationStreaming',
+    implemented: true,
   },
   {
     id: 'speaker_identification',

@@ -26,7 +26,8 @@ static void AppendUniqueDetectionSource(std::vector<sherpaonnx::DetectionSource>
 sherpaonnx::AlignmentDetectResult DetectAlignmentModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     sherpaonnx::AlignmentDetectResult result;
 
@@ -39,7 +40,7 @@ sherpaonnx::AlignmentDetectResult DetectAlignmentModelFromFiles(
     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
 
     const std::string wav2vec2Model =
-        FindOnnxByAnyToken(files, {"wav2vec2", "model"}, std::nullopt);
+        FindOnnxByAnyToken(files, {"wav2vec2", "model"}, quantization);
 
     if (!wav2vec2Model.empty()) {
         result.detectedModels.push_back({"wav2vec2", modelDir});
@@ -89,7 +90,8 @@ using namespace model_detect;
 
 AlignmentDetectResult DetectAlignmentModel(
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     AlignmentDetectResult result;
 
@@ -105,11 +107,17 @@ AlignmentDetectResult DetectAlignmentModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    result = DetectAlignmentModelFromFiles(files, modelDir, modelType);
+    result = DetectAlignmentModelFromFiles(files, modelDir, modelType, quantization);
 
     // Fill catalog heuristics from directory basename (languages + quantization; alignment has no sizeTier)
     std::string ignoredSizeTier;
     FillDerivedCatalogMetadataFromBasename(result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = DeriveQuantization(BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
 
     return result;
 }
@@ -118,14 +126,24 @@ AlignmentDetectResult DetectAlignmentModel(
 AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     AlignmentDetectResult result;
     if (modelDir.empty()) {
         result.error = "Alignment: model directory is empty";
         return result;
     }
-    return DetectAlignmentModelFromFiles(files, modelDir, modelType);
+    result = DetectAlignmentModelFromFiles(files, modelDir, modelType, quantization);
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadataFromBasename(result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
+        std::string fileQuant = DeriveQuantization(BaseName(result.paths.model));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+    return result;
 }
 
 } // namespace sherpaonnx

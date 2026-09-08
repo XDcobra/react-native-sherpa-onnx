@@ -6,44 +6,31 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingManager
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
-import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.speakerembedding.config.SpeakerEmbeddingInitOptionsParser
-import com.sherpaonnx.speakerembedding.core.SpeakerEmbeddingExtractorInstance
-import com.sherpaonnx.speakerembedding.core.SpeakerEmbeddingManagerInstance
-import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxSpeakerEmbeddingHelper(
   private val nativeDetectSpeakerEmbeddingModel: (
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
-  private val extractors =
-    ConcurrentHashMap<String, SpeakerEmbeddingExtractorInstance>()
-  private val managers =
-    ConcurrentHashMap<String, SpeakerEmbeddingManagerInstance>()
-
   fun shutdown() {
-    extractors.values.forEach { it.release() }
-    extractors.clear()
-    managers.values.forEach { it.release() }
-    managers.clear()
+    nativeShutdownAll()
   }
 
   fun detectSpeakerEmbeddingModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
     try {
       val result =
-        nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType ?: "auto")
+        nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject(DETECT_ERROR, "Speaker embedding model detection returned null")
         return
@@ -111,26 +98,19 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       return
     }
     val pathStrings = parsed.modelPaths.orEmpty()
-    ModelPathValidationNative.validate(
-      "speakerEmbedding",
-      modelTypeStr,
-      pathStrings,
-    )?.let { errorMsg ->
-      promise.reject(INIT_ERROR, errorMsg)
-      return
-    }
-    val modelPath = pathStrings["model"].orEmpty()
-    if (modelPath.isBlank()) {
+    if (pathStrings["model"].isNullOrBlank()) {
       promise.reject(INIT_ERROR, "custom init requires modelPaths.model")
       return
     }
-    finishInitializeExtractor(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      modelPath = modelPath,
-      parsed = parsed,
-      promise = promise,
+    val result = nativeInitializeExtractorCustom(
+      instanceId,
+      modelTypeStr,
+      HashMap(pathStrings),
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveInitResult(result, promise)
   }
 
   private fun initializeExtractorAuto(
@@ -139,76 +119,48 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = nativeDetectSpeakerEmbeddingModel(modelDir, null, parsed.modelType)
-    if (result == null || result["success"] as? Boolean != true) {
-      val reason = result?.get("error") as? String
-        ?: "Failed to detect speaker embedding model"
-      promise.reject(INIT_ERROR, reason)
+    if (modelDir.isBlank()) {
+      promise.reject(INIT_ERROR, "modelDir is required for initMode auto")
       return
     }
-    val modelTypeStr = (result["modelType"] as? String)?.trim().orEmpty()
-    if (modelTypeStr.isEmpty() || modelTypeStr == "unknown") {
-      promise.reject(INIT_ERROR, "Speaker embedding detect did not return a modelType")
-      return
-    }
-    @Suppress("UNCHECKED_CAST")
-    val paths = result["paths"] as? HashMap<String, Any?>
-    val modelPath = (paths?.get("model") as? String)?.trim().orEmpty()
-    if (modelPath.isEmpty()) {
-      promise.reject(INIT_ERROR, "Speaker embedding detect did not return paths.model")
-      return
-    }
-    finishInitializeExtractor(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      modelPath = modelPath,
-      parsed = parsed,
-      promise = promise,
+    val result = nativeInitializeExtractorAuto(
+      instanceId,
+      modelDir,
+      parsed.modelType,
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveInitResult(result, promise)
   }
 
-  private fun finishInitializeExtractor(
-    instanceId: String,
-    modelTypeStr: String,
-    modelPath: String,
-    parsed: SpeakerEmbeddingInitOptionsParser.Parsed,
-    promise: Promise,
-  ) {
-    val config = SpeakerEmbeddingExtractorConfig(
-      model = modelPath,
-      numThreads = parsed.numThreads.toInt().coerceAtLeast(1),
-      debug = parsed.debug,
-      provider = parsed.provider?.takeIf { it.isNotBlank() } ?: "cpu",
-    )
-    val inst = extractors.getOrPut(instanceId) { SpeakerEmbeddingExtractorInstance() }
-    inst.release()
-    val extractor = SpeakerEmbeddingExtractor(assetManager = null, config = config)
-    val dim = extractor.dim()
-    if (dim <= 0) {
-      extractor.release()
-      promise.reject(INIT_ERROR, "Speaker embedding extractor returned invalid dim=$dim")
+  private fun resolveInitResult(result: HashMap<String, Any>?, promise: Promise) {
+    if (result == null) {
+      promise.reject(INIT_ERROR, "Speaker embedding initialize returned null")
       return
     }
-    inst.extractor = extractor
-    inst.dim = dim
-
+    val success = result["success"] as? Boolean == true
+    if (!success) {
+      val code = (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: INIT_ERROR
+      val error = (result["error"] as? String)?.takeIf { it.isNotBlank() }
+        ?: "Failed to initialize speaker embedding extractor"
+      promise.reject(code, error)
+      return
+    }
     val out = Arguments.createMap()
     out.putBoolean("success", true)
-    out.putInt("dim", dim)
-    out.putString("modelType", modelTypeStr)
+    out.putInt("dim", (result["dim"] as? Number)?.toInt() ?: 0)
+    out.putString("modelType", (result["modelType"] as? String) ?: "unknown")
     promise.resolve(out)
   }
 
   fun computeSpeakerEmbeddingOffline(
     instanceId: String,
     audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise,
   ) {
-    val extractor = extractors[instanceId]?.extractor
-    if (extractor == null) {
-      promise.reject(COMPUTE_ERROR, "Speaker embedding extractor not found: $instanceId")
-      return
-    }
     if (!audioBufferId.startsWith("off_")) {
       promise.reject(
         BUFFER_KIND_MISMATCH,
@@ -225,35 +177,418 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
       return
     }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
     try {
-      val inputSamples = audioInEntry.readAllSamples()
-      val stream = extractor.createStream()
-      try {
-        stream.acceptWaveform(inputSamples, audioInEntry.sampleRate)
-        stream.inputFinished()
-        if (!extractor.isReady(stream)) {
-          promise.reject(COMPUTE_ERROR, "Speaker embedding extractor is not ready")
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          val out = Arguments.createMap()
+          out.putArray("embedding", Arguments.createArray())
+          promise.resolve(out)
           return
         }
-        val embedding = extractor.compute(stream)
-        val arr = Arguments.createArray()
-        for (v in embedding) {
-          arr.pushDouble(v.toDouble())
-        }
-        val out = Arguments.createMap()
-        out.putArray("embedding", arr)
-        promise.resolve(out)
-      } finally {
-        stream.release()
+        inputSamples = audioInEntry.readSlice(start, frameCount)
       }
+
+      val result = nativeComputeEmbedding(
+        instanceId,
+        inputSamples,
+        audioInEntry.sampleRate,
+      )
+      if (result == null || result["success"] as? Boolean != true) {
+        val code =
+          (result?.get("errorCode") as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
+        val error =
+          (result?.get("error") as? String)?.takeIf { it.isNotBlank() }
+            ?: "Speaker embedding compute failed"
+        promise.reject(code, error)
+        return
+      }
+      val embedding = result["embedding"] as? FloatArray ?: floatArrayOf()
+      val arr = Arguments.createArray()
+      for (v in embedding) {
+        arr.pushDouble(v.toDouble())
+      }
+      val out = Arguments.createMap()
+      out.putArray("embedding", arr)
+      promise.resolve(out)
     } catch (e: Exception) {
       Log.e(TAG, "Speaker embedding compute failed", e)
       promise.reject(COMPUTE_ERROR, "Speaker embedding compute failed: ${e.message}", e)
     }
   }
 
+  fun identifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise,
+  ) {
+    if (!audioBufferId.startsWith("off_")) {
+      promise.reject(
+        BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*) , got: $audioBufferId",
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+    if (audioInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioBufferId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
+      return
+    }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
+    try {
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          val out = Arguments.createMap()
+          out.putString("name", "")
+          promise.resolve(out)
+          return
+        }
+        inputSamples = audioInEntry.readSlice(start, frameCount)
+      }
+
+      val embedding =
+        computeEmbeddingFromSamples(
+          instanceId,
+          inputSamples,
+          audioInEntry.sampleRate,
+        )
+      val name = searchSpeaker(managerId, embedding, threshold.toFloat())
+      val out = Arguments.createMap()
+      out.putString("name", name)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      Log.e(TAG, "Speaker identify offline failed", e)
+      val message = e.message.orEmpty()
+      val code =
+        when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+      val detail =
+        when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker identify offline failed"
+        }
+      promise.reject(code, detail, e)
+    }
+  }
+
+  fun verifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    name: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise,
+  ) {
+    if (!audioBufferId.startsWith("off_")) {
+      promise.reject(
+        BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*) , got: $audioBufferId",
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+    if (audioInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioBufferId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
+      return
+    }
+
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
+    try {
+      val inputSamples: FloatArray
+      if (!hasStart) {
+        inputSamples = audioInEntry.readAllSamples()
+      } else {
+        val start =
+          kotlin.math
+            .floor(startSample!!)
+            .toInt()
+            .coerceAtLeast(0)
+        val endRaw =
+          kotlin.math
+            .floor(endSample!!)
+            .toInt()
+            .coerceAtLeast(start)
+        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+        val frameCount = (end - start).coerceAtLeast(0)
+        if (frameCount == 0) {
+          promise.resolve(okMap(false))
+          return
+        }
+        inputSamples = audioInEntry.readSlice(start, frameCount)
+      }
+
+      val embedding =
+        computeEmbeddingFromSamples(
+          instanceId,
+          inputSamples,
+          audioInEntry.sampleRate,
+        )
+      val ok = verifySpeaker(managerId, name, embedding, threshold.toFloat())
+      promise.resolve(okMap(ok))
+    } catch (e: Exception) {
+      Log.e(TAG, "Speaker verify offline failed", e)
+      val message = e.message.orEmpty()
+      val code =
+        when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+      val detail =
+        when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker verify offline failed"
+        }
+      promise.reject(code, detail, e)
+    }
+  }
+
+  fun enrollSpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    name: String,
+    audioBufferIds: ReadableArray,
+    startSamples: ReadableArray?,
+    endSamples: ReadableArray?,
+    promise: Promise,
+  ) {
+    if (instanceId.isBlank()) {
+      promise.reject(COMPUTE_ERROR, "instanceId is required")
+      return
+    }
+    if (managerId.isBlank()) {
+      promise.reject(MANAGER_ERROR, "managerId is required")
+      return
+    }
+    if (name.isBlank()) {
+      promise.reject(MANAGER_ERROR, "name is required")
+      return
+    }
+    val countIds = audioBufferIds.size()
+    if (countIds <= 0) {
+      promise.reject(INVALID_ARGUMENT, "audioBufferIds must contain at least one buffer id")
+      return
+    }
+
+    val hasStarts = startSamples != null
+    val hasEnds = endSamples != null
+    if (hasStarts != hasEnds) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "startSamples and endSamples must both be provided or both omitted",
+      )
+      return
+    }
+    if (hasStarts) {
+      if (startSamples!!.size() != countIds || endSamples!!.size() != countIds) {
+        promise.reject(
+          INVALID_ARGUMENT,
+          "startSamples and endSamples must match audioBufferIds length",
+        )
+        return
+      }
+    }
+
+    try {
+      val embeddings = ArrayList<FloatArray>()
+      for (i in 0 until countIds) {
+        val audioBufferId = audioBufferIds.getString(i)
+        if (audioBufferId.isNullOrBlank()) {
+          promise.reject(INVALID_ARGUMENT, "audioBufferIds[$i] is required")
+          return
+        }
+        if (!audioBufferId.startsWith("off_")) {
+          promise.reject(
+            BUFFER_KIND_MISMATCH,
+            "Expected offline audio buffer (off_*) , got: $audioBufferId",
+          )
+          return
+        }
+        val audioInEntry = PipelineAudioRegistry.getOffline(audioBufferId)
+        if (audioInEntry == null) {
+          promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioBufferId")
+          return
+        }
+        if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+          promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioBufferId")
+          return
+        }
+
+        val inputSamples: FloatArray
+        if (!hasStarts) {
+          inputSamples = audioInEntry.readAllSamples()
+        } else {
+          val startIsNull = startSamples!!.isNull(i)
+          val endIsNull = endSamples!!.isNull(i)
+          if (startIsNull != endIsNull) {
+            promise.reject(
+              INVALID_ARGUMENT,
+              "startSamples[$i] and endSamples[$i] must both be provided or both null",
+            )
+            return
+          }
+          if (startIsNull) {
+            inputSamples = audioInEntry.readAllSamples()
+          } else {
+            val start =
+              kotlin.math
+                .floor(startSamples.getDouble(i))
+                .toInt()
+                .coerceAtLeast(0)
+            val endRaw =
+              kotlin.math
+                .floor(endSamples.getDouble(i))
+                .toInt()
+                .coerceAtLeast(start)
+            val end = endRaw.coerceAtMost(audioInEntry.numSamples)
+            val frameCount = (end - start).coerceAtLeast(0)
+            if (frameCount == 0) {
+              continue
+            }
+            inputSamples = audioInEntry.readSlice(start, frameCount)
+          }
+        }
+        if (inputSamples.isEmpty()) {
+          continue
+        }
+        embeddings.add(
+          computeEmbeddingFromSamples(
+            instanceId,
+            inputSamples,
+            audioInEntry.sampleRate,
+          ),
+        )
+      }
+
+      if (embeddings.isEmpty()) {
+        val out = Arguments.createMap()
+        out.putBoolean("ok", false)
+        out.putArray("embeddings", Arguments.createArray())
+        promise.resolve(out)
+        return
+      }
+
+      val dim = embeddings[0].size
+      val flat = FloatArray(dim * embeddings.size)
+      var offset = 0
+      for (emb in embeddings) {
+        if (emb.size != dim) {
+          promise.reject(COMPUTE_ERROR, "Speaker embedding dimension mismatch during enroll")
+          return
+        }
+        System.arraycopy(emb, 0, flat, offset, dim)
+        offset += dim
+      }
+
+      val addResult = nativeManagerAdd(managerId, name, flat, embeddings.size)
+      val ok = addResult?.get("ok") as? Boolean == true
+      val embArr = Arguments.createArray()
+      for (v in flat) {
+        embArr.pushDouble(v.toDouble())
+      }
+      val out = Arguments.createMap()
+      out.putBoolean("ok", ok)
+      out.putArray("embeddings", embArr)
+      promise.resolve(out)
+    } catch (e: Exception) {
+      Log.e(TAG, "Speaker enroll offline failed", e)
+      val message = e.message.orEmpty()
+      val code =
+        when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+      val detail =
+        when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker enroll offline failed"
+        }
+      promise.reject(code, detail, e)
+    }
+  }
+
   fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
-    extractors.remove(instanceId)?.release()
+    nativeUnloadExtractor(instanceId)
     promise.resolve(null)
   }
 
@@ -272,9 +607,14 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       return
     }
     try {
-      val inst = managers.getOrPut(managerId) { SpeakerEmbeddingManagerInstance() }
-      inst.release()
-      inst.manager = SpeakerEmbeddingManager(dimInt)
+      val result = nativeCreateManager(managerId, dimInt)
+      if (result == null || result["success"] as? Boolean != true) {
+        val error =
+          (result?.get("error") as? String)?.takeIf { it.isNotBlank() }
+            ?: "Failed to create speaker embedding manager"
+        promise.reject(MANAGER_ERROR, error)
+        return
+      }
       val out = Arguments.createMap()
       out.putBoolean("success", true)
       promise.resolve(out)
@@ -295,36 +635,15 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     count: Double,
     promise: Promise,
   ) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
-    val dim = manager.dim
     val countInt = count.toInt()
     if (countInt <= 0) {
       promise.reject(MANAGER_ERROR, "count must be > 0")
       return
     }
-    if (embeddings.size() != countInt * dim) {
-      promise.reject(
-        MANAGER_ERROR,
-        "embeddings length ${embeddings.size()} does not match count*dim=${countInt * dim}",
-      )
-      return
-    }
     try {
-      val list = Array(countInt) { i ->
-        FloatArray(dim) { j ->
-          embeddings.getDouble(i * dim + j).toFloat()
-        }
-      }
-      val ok = if (countInt == 1) {
-        manager.add(name, list[0])
-      } else {
-        manager.add(name, list)
-      }
-      promise.resolve(okMap(ok))
+      val flat = FloatArray(embeddings.size()) { i -> embeddings.getDouble(i).toFloat() }
+      val result = nativeManagerAdd(managerId, name, flat, countInt)
+      promise.resolve(okMap(result?.get("ok") as? Boolean == true))
     } catch (e: Exception) {
       Log.e(TAG, "speakerEmbeddingManagerAdd failed", e)
       promise.reject(MANAGER_ERROR, "add failed: ${e.message}", e)
@@ -336,13 +655,9 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     name: String,
     promise: Promise,
   ) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
-      promise.resolve(okMap(manager.remove(name)))
+      val result = nativeManagerRemove(managerId, name)
+      promise.resolve(okMap(result?.get("ok") as? Boolean == true))
     } catch (e: Exception) {
       promise.reject(MANAGER_ERROR, "remove failed: ${e.message}", e)
     }
@@ -354,16 +669,11 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     threshold: Double,
     promise: Promise,
   ) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
-      val emb = readableArrayToFloatArray(embedding, manager.dim)
-      val name = manager.search(emb, threshold.toFloat())
+      val emb = FloatArray(embedding.size()) { i -> embedding.getDouble(i).toFloat() }
+      val result = nativeManagerSearch(managerId, emb, threshold.toFloat())
       val out = Arguments.createMap()
-      out.putString("name", name ?: "")
+      out.putString("name", (result?.get("name") as? String).orEmpty())
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject(MANAGER_ERROR, "search failed: ${e.message}", e)
@@ -377,14 +687,10 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     threshold: Double,
     promise: Promise,
   ) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
-      val emb = readableArrayToFloatArray(embedding, manager.dim)
-      promise.resolve(okMap(manager.verify(name, emb, threshold.toFloat())))
+      val emb = FloatArray(embedding.size()) { i -> embedding.getDouble(i).toFloat() }
+      val result = nativeManagerVerify(managerId, name, emb, threshold.toFloat())
+      promise.resolve(okMap(result?.get("ok") as? Boolean == true))
     } catch (e: Exception) {
       promise.reject(MANAGER_ERROR, "verify failed: ${e.message}", e)
     }
@@ -395,40 +701,29 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     name: String,
     promise: Promise,
   ) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
-      promise.resolve(okMap(manager.contains(name)))
+      val result = nativeManagerContains(managerId, name)
+      promise.resolve(okMap(result?.get("ok") as? Boolean == true))
     } catch (e: Exception) {
       promise.reject(MANAGER_ERROR, "contains failed: ${e.message}", e)
     }
   }
 
   fun speakerEmbeddingManagerNumSpeakers(managerId: String, promise: Promise) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
-      promise.resolve(manager.numSpeakers())
+      promise.resolve(nativeManagerNumSpeakers(managerId))
     } catch (e: Exception) {
       promise.reject(MANAGER_ERROR, "numSpeakers failed: ${e.message}", e)
     }
   }
 
   fun speakerEmbeddingManagerAllSpeakerNames(managerId: String, promise: Promise) {
-    val manager = managers[managerId]?.manager
-    if (manager == null) {
-      promise.reject(MANAGER_ERROR, "Speaker embedding manager not found: $managerId")
-      return
-    }
     try {
+      val result = nativeManagerAllSpeakerNames(managerId)
+      @Suppress("UNCHECKED_CAST")
+      val namesList = result?.get("names") as? ArrayList<String> ?: arrayListOf()
       val names = Arguments.createArray()
-      for (n in manager.allSpeakerNames()) {
+      for (n in namesList) {
         names.pushString(n)
       }
       val out = Arguments.createMap()
@@ -440,17 +735,57 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
   }
 
   fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
-    managers.remove(managerId)?.release()
+    nativeDestroyManager(managerId)
     promise.resolve(null)
   }
 
-  private fun readableArrayToFloatArray(arr: ReadableArray, dim: Int): FloatArray {
-    if (arr.size() != dim) {
-      throw IllegalArgumentException(
-        "embedding length ${arr.size()} does not match manager dim $dim",
-      )
+  /**
+   * Synchronous compute for offline-live workers (worker thread; not Promise/TM).
+   */
+  fun computeEmbeddingFromSamples(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ): FloatArray {
+    val result = nativeComputeEmbedding(instanceId, samples, sampleRate)
+      ?: throw IllegalStateException("Speaker embedding compute returned null")
+    if (result["success"] as? Boolean != true) {
+      val code =
+        (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
+      val error =
+        (result["error"] as? String)?.takeIf { it.isNotBlank() }
+          ?: "Speaker embedding compute failed"
+      throw IllegalStateException("$code: $error")
     }
-    return FloatArray(dim) { i -> arr.getDouble(i).toFloat() }
+    val embedding = result["embedding"] as? FloatArray
+      ?: throw IllegalStateException("Speaker embedding compute missing embedding")
+    return embedding
+  }
+
+  /**
+   * Synchronous search for offline-live workers (worker thread; not Promise/TM).
+   * Returns empty string when no match.
+   */
+  fun searchSpeaker(
+    managerId: String,
+    embedding: FloatArray,
+    threshold: Float,
+  ): String {
+    val result = nativeManagerSearch(managerId, embedding, threshold)
+    return (result?.get("name") as? String).orEmpty()
+  }
+
+  /**
+   * Synchronous verify for combined offline verify (worker / Helper; not Promise/TM).
+   */
+  fun verifySpeaker(
+    managerId: String,
+    name: String,
+    embedding: FloatArray,
+    threshold: Float,
+  ): Boolean {
+    val result = nativeManagerVerify(managerId, name, embedding, threshold)
+    return result?.get("ok") as? Boolean == true
   }
 
   private fun okMap(ok: Boolean): WritableMap {
@@ -525,6 +860,92 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     private const val BUFFER_KIND_MISMATCH = "SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH"
     private const val BUFFER_NOT_FOUND = "SPEAKER_EMBEDDING_BUFFER_NOT_FOUND"
     private const val BUFFER_EMPTY = "SPEAKER_EMBEDDING_BUFFER_EMPTY"
+    private const val INVALID_ARGUMENT = "SPEAKER_EMBEDDING_INVALID_ARGUMENT"
     private val SUPPORTED_TYPES = setOf("wespeaker", "3d-speaker", "nemo")
+
+    @JvmStatic
+    private external fun nativeInitializeExtractorAuto(
+      instanceId: String,
+      modelDir: String,
+      modelType: String,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeInitializeExtractorCustom(
+      instanceId: String,
+      modelType: String,
+      modelPaths: HashMap<String, String>,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeEmbedding(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeUnloadExtractor(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeCreateManager(
+      managerId: String,
+      dim: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerAdd(
+      managerId: String,
+      name: String,
+      embeddings: FloatArray,
+      count: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerRemove(
+      managerId: String,
+      name: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerSearch(
+      managerId: String,
+      embedding: FloatArray,
+      threshold: Float,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerVerify(
+      managerId: String,
+      name: String,
+      embedding: FloatArray,
+      threshold: Float,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerContains(
+      managerId: String,
+      name: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerNumSpeakers(managerId: String): Int
+
+    @JvmStatic
+    private external fun nativeManagerAllSpeakerNames(
+      managerId: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDestroyManager(managerId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

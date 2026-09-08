@@ -21,17 +21,20 @@ std::optional<std::string> OptionalUtf8String(NSString *value) {
 - (void)detectSpeakerEmbeddingModel:(NSString *)modelDir
                           assetName:(NSString * _Nullable)assetName
                           modelType:(NSString * _Nullable)modelType
+                       quantization:(NSString * _Nullable)quantization
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject
 {
   @try {
     auto modelDirOpt = OptionalUtf8String(modelDir);
     auto assetNameOpt = OptionalUtf8String(assetName);
+    std::string quantStr =
+        (quantization != nil && [quantization length] > 0) ? [quantization UTF8String] : "";
     std::string modelTypeStr =
         sherpaonnx::speaker_embedding::bridge::ModelTypeOrAuto(modelType);
 
     auto result =
-        sherpaonnx::DetectSpeakerEmbeddingModel(modelDirOpt, assetNameOpt, modelTypeStr);
+        sherpaonnx::DetectSpeakerEmbeddingModel(modelDirOpt, assetNameOpt, modelTypeStr, quantStr);
     resolve(sherpaonnx::speaker_embedding::bridge::SpeakerEmbeddingDetectResultToDict(result));
   } @catch (NSException *exception) {
     reject(@"SPEAKER_EMBEDDING_DETECT_ERROR",

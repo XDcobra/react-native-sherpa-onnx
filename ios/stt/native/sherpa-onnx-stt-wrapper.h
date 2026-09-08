@@ -114,7 +114,7 @@ public:
 
     SttInitializeResult initialize(
         const std::string& modelDir,
-        const std::optional<bool>& preferInt8 = std::nullopt,
+        const std::string& quantization = "",
         const std::optional<std::string>& modelType = std::nullopt,
         bool debug = false,
         const std::optional<std::string>& hotwordsFile = std::nullopt,

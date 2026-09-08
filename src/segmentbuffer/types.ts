@@ -12,7 +12,7 @@ export type PipelineSegmentBufferKind =
 export type OfflineSegmentBufferState = 'immutable';
 export type LiveSegmentBufferState = 'recording' | 'finished';
 
-export type SegmentKind = 'speech' | 'alignment';
+export type SegmentKind = 'speech' | 'alignment' | 'diarization';
 
 export type AlignmentTimingMode =
   | 'proportional'
@@ -22,7 +22,12 @@ export type AlignmentTimingMode =
 
 export type AlignmentGranularity = 'sentence' | 'word' | 'character';
 
-export type SpeechSegmentPayloadSource = 'vad' | 'stt' | 'tts' | 'sid';
+export type SpeechSegmentPayloadSource =
+  | 'vad'
+  | 'stt'
+  | 'tts'
+  | 'sid'
+  | 'pyannote';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -51,11 +56,16 @@ export interface SidSpeechSegmentPayload {
   speakerName: string | null;
 }
 
+export interface PyannoteSpeechSegmentPayload {
+  source: 'pyannote';
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
   | TtsSpeechSegmentPayload
-  | SidSpeechSegmentPayload;
+  | SidSpeechSegmentPayload
+  | PyannoteSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;
@@ -66,6 +76,12 @@ export interface AlignmentSegmentPayload {
   tokenMetadata?: Record<string, unknown>;
   wordMetadata?: Record<string, unknown>;
   languageHints?: string[];
+}
+
+export interface DiarizationSegmentPayload {
+  source: 'diarization';
+  /** Anonymous cluster id from the diarizer (0-based). */
+  speaker: number;
 }
 
 export type SegmentBufferSpoolingMode = 'off' | 'auto' | 'on';
@@ -109,6 +125,11 @@ export interface AlignmentSegmentMeta extends SegmentMetaBase {
   payload?: AlignmentSegmentPayload;
 }
 
+export interface DiarizationSegmentMeta extends SegmentMetaBase {
+  kind: 'diarization';
+  payload?: DiarizationSegmentPayload;
+}
+
 interface SegmentInputBase {
   kind?: SegmentKind;
   sourceAudioBufferId: PipelineAudioBufferIdSource;
@@ -129,8 +150,19 @@ export interface AlignmentSegmentInput extends SegmentInputBase {
   payload: AlignmentSegmentPayload;
 }
 
-export type SegmentInput = SpeechSegmentInput | AlignmentSegmentInput;
-export type SegmentMeta = SpeechSegmentMeta | AlignmentSegmentMeta;
+export interface DiarizationSegmentInput extends SegmentInputBase {
+  kind: 'diarization';
+  payload: DiarizationSegmentPayload;
+}
+
+export type SegmentInput =
+  | SpeechSegmentInput
+  | AlignmentSegmentInput
+  | DiarizationSegmentInput;
+export type SegmentMeta =
+  | SpeechSegmentMeta
+  | AlignmentSegmentMeta
+  | DiarizationSegmentMeta;
 
 export interface OfflineSegmentBufferInfo {
   bufferId: string;
@@ -239,7 +271,15 @@ export interface LiveAlignmentSegmentAppendedEvent
 
 export type LiveSegmentBufferSegmentAppendedEvent =
   | LiveSpeechSegmentAppendedEvent
-  | LiveAlignmentSegmentAppendedEvent;
+  | LiveAlignmentSegmentAppendedEvent
+  | LiveDiarizationSegmentAppendedEvent;
+
+/** Fired when a new diarization segment is appended to a live segment buffer. */
+export interface LiveDiarizationSegmentAppendedEvent
+  extends LiveSegmentBufferSegmentAppendedEventBase {
+  kind: 'diarization';
+  payload?: DiarizationSegmentPayload;
+}
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */
 export interface LiveSegmentBufferErrorEvent {

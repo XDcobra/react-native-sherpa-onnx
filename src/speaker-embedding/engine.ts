@@ -1,11 +1,5 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import {
-  createOfflineAudioBufferFromSamples,
-  getOfflineAudioBufferSamplesSlice,
-  getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
-  resolvePipelineAudioBufferId,
-} from '../audiobuffer';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import { buildSpeakerEmbeddingInitBridgeOptions } from './speakerEmbeddingNativeBridge';
 import type {
@@ -26,7 +20,8 @@ function embeddingArrayToFloat32(values: number[]): Float32Array {
 
 /**
  * Create a standalone speaker-embedding extractor engine (no enrollment manager).
- * Prefer {@link acquireSpeakerEmbeddingEngine} when SID and diarization may share weights.
+ * ONNX weights are shared process-wide with other SID/diarization acquires via
+ * the C++ `SpeakerEmbeddingRunner` registry (same model/provider/threads/debug).
  */
 export async function createSpeakerEmbeddingEngine(
   options: SpeakerEmbeddingInitializeOptions
@@ -88,27 +83,13 @@ export async function createSpeakerEmbeddingEngine(
 
       const start = Math.max(0, Math.floor(range.startSample));
       const end = Math.max(start, Math.floor(range.endSample));
-      const frameCount = end - start;
-      const info = await getPipelineAudioBufferInfo(bufferId);
-      const samples =
-        frameCount > 0
-          ? getOfflineAudioBufferSamplesSlice(audio, start, frameCount)
-          : new Float32Array(0);
-      const temp = createOfflineAudioBufferFromSamples(
-        samples,
-        info.sampleRate,
-        info.channelCount,
-        { targetSampleRateHz: 0 }
+      const result = await SherpaOnnx.computeSpeakerEmbeddingOffline(
+        instanceId,
+        bufferId,
+        start,
+        end
       );
-      try {
-        const result = await SherpaOnnx.computeSpeakerEmbeddingOffline(
-          instanceId,
-          temp.bufferId
-        );
-        return embeddingArrayToFloat32(result.embedding ?? []);
-      } finally {
-        await releasePipelineAudioBuffer(temp.bufferId);
-      }
+      return embeddingArrayToFloat32(result.embedding ?? []);
     },
     async destroy(): Promise<void> {
       if (destroyed) return;

@@ -26,7 +26,7 @@ class LiveSegmentEntry(
   )
 
   companion object {
-    private val ALLOWED_KINDS = setOf("speech", "alignment")
+    private val ALLOWED_KINDS = setOf("speech", "alignment", "diarization")
   }
 
   enum class State { RECORDING, FINISHED }
@@ -88,12 +88,13 @@ class LiveSegmentEntry(
     annotationReason: String? = null,
     annotationSource: String? = null,
     annotationCreatedAtMs: Long? = null,
+    forceEmitAppendedEvent: Boolean = false,
   ): Pair<String, Int> {
     val normalizedKind = kind.trim().ifEmpty { "speech" }
     if (!ALLOWED_KINDS.contains(normalizedKind)) {
       throw SegmentPipelineException(
         SegmentErrorCodes.INVALID_ARGUMENT,
-        "kind must be one of speech or alignment; received $kind"
+        "kind must be one of speech, alignment, or diarization; received $kind"
       )
     }
     if (sampleRate <= 0) {
@@ -171,9 +172,13 @@ class LiveSegmentEntry(
       )
     }
 
-    if (emitSegmentAppendedEvents) {
+    if (emitSegmentAppendedEvents || forceEmitAppendedEvent) {
       val now = System.currentTimeMillis()
-      if (segmentEventMinIntervalMs <= 0L || now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs) {
+      if (
+        forceEmitAppendedEvent ||
+        segmentEventMinIntervalMs <= 0L ||
+        now - lastSegmentEventEmitAtMs >= segmentEventMinIntervalMs
+      ) {
         lastSegmentEventEmitAtMs = now
         try {
           SegmentBufferEventBridge.emitSegmentAppended?.invoke(

@@ -32,6 +32,7 @@
  */
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-tts-catalog-metadata.h"
 #include "model_language_catalog.h"
 #include "sherpa-onnx-validate-tts.h"
@@ -163,7 +164,8 @@ static const char* TtsModelKindTag(TtsModelKind k) {
 static TtsDetectResult DetectTtsModelFromFiles(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     using namespace model_detect;
 
@@ -213,18 +215,18 @@ static TtsDetectResult DetectTtsModelFromFiles(
          (int)dataDirPath.empty());
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
-    std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, std::nullopt);
-    std::string vocoder = FindOnnxByAnyToken(files, {"vocoder", "vocos"}, std::nullopt);
-    std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, std::nullopt);
-    std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, std::nullopt);
-    std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, std::nullopt);
-    std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, std::nullopt);
-    std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, std::nullopt);
+    std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, quantization);
+    std::string vocoder = FindOnnxByAnyToken(files, {"vocoder", "vocos"}, quantization);
+    std::string encoder = FindOnnxByAnyToken(files, {"encoder"}, quantization);
+    std::string decoder = FindOnnxByAnyToken(files, {"decoder"}, quantization);
+    std::string lmFlow = FindOnnxByAnyToken(files, {"lm_flow", "lm-flow"}, quantization);
+    std::string lmMain = FindOnnxByAnyToken(files, {"lm_main", "lm-main"}, quantization);
+    std::string textConditioner = FindOnnxByAnyToken(files, {"text_conditioner", "text-conditioner"}, quantization);
     std::string vocabJsonFile = FindFileByName(files, "vocab.json");
     std::string tokenScoresJsonFile = FindFileByName(files, "token_scores.json");
-    std::string durationPredictor = FindOnnxByAnyToken(files, {"duration_predictor", "duration-predictor"}, std::nullopt);
-    std::string textEncoderSupertonic = FindOnnxByAnyToken(files, {"text_encoder", "text-encoder"}, std::nullopt);
-    std::string vectorEstimator = FindOnnxByAnyToken(files, {"vector_estimator", "vector-estimator"}, std::nullopt);
+    std::string durationPredictor = FindOnnxByAnyToken(files, {"duration_predictor", "duration-predictor"}, quantization);
+    std::string textEncoderSupertonic = FindOnnxByAnyToken(files, {"text_encoder", "text-encoder"}, quantization);
+    std::string vectorEstimator = FindOnnxByAnyToken(files, {"vector_estimator", "vector-estimator"}, quantization);
     std::string ttsJsonFile = FindFileByName(files, "tts.json");
     std::string unicodeIndexerFile = FindFileByName(files, "unicode_indexer.bin");
     std::string voiceStyleFile = FindFileByName(files, "voice.bin");
@@ -236,9 +238,9 @@ static TtsDetectResult DetectTtsModelFromFiles(
         "text_encoder", "text-encoder",
         "vector_estimator", "vector-estimator"
     };
-    std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, std::nullopt);
+    std::string ttsModel = FindOnnxByAnyToken(files, {"model"}, quantization);
     if (ttsModel.empty()) {
-        ttsModel = FindLargestOnnxExcludingTokens(files, modelExcludes);
+        ttsModel = ChooseBestModelFile(files, modelExcludes, quantization);
     }
 
     // VITS requires both model.onnx-like file and tokens.txt
@@ -377,7 +379,8 @@ static TtsDetectResult DetectTtsModelFromFiles(
 TtsDetectResult DetectTtsModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType) {
+    const std::string& modelType,
+    const std::string& quantization) {
     using namespace model_detect;
 
     TtsDetectResult result;
@@ -391,14 +394,14 @@ TtsDetectResult DetectTtsModel(
         return result;
     }
 
-    LOGI("DetectTtsModel: has_dir=%d has_asset=%d modelType=%s",
-         static_cast<int>(has_dir), static_cast<int>(has_asset), modelType.c_str());
+    LOGI("DetectTtsModel: has_dir=%d has_asset=%d modelType=%s quantization=%s",
+         static_cast<int>(has_dir), static_cast<int>(has_asset), modelType.c_str(), quantization.c_str());
 
     // Asset id only: name-only detection (no filesystem).
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        result = DetectTtsModelFromFileList({}, syntheticDir, modelType);
+        result = DetectTtsModelFromFileList({}, syntheticDir, modelType, quantization);
         FillTtsDerivedCatalogMetadata(result, assetName);
         AppendCuratedTtsLanguageRowsIfEmpty(result, assetName);
         LOGI("DetectTtsModel: assetName-only path for %s", assetName.c_str());
@@ -419,7 +422,7 @@ TtsDetectResult DetectTtsModel(
         LOGI("  file: %s (size=%llu)", f.path.c_str(), (unsigned long long)f.size);
     }
 
-    result = DetectTtsModelFromFiles(files, modelDir, modelType);
+    result = DetectTtsModelFromFiles(files, modelDir, modelType, quantization);
 
     if (has_asset) {
         FillTtsDerivedCatalogMetadata(result, *asset_name_opt);
@@ -430,6 +433,18 @@ TtsDetectResult DetectTtsModel(
         const std::string basename =
             (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
         AppendCuratedTtsLanguageRowsIfEmpty(result, basename);
+    }
+
+    if ((result.quantization.empty() || result.quantization == "unknown")) {
+        std::string refModel = !result.paths.ttsModel.empty() ? result.paths.ttsModel :
+                               (!result.paths.acousticModel.empty() ? result.paths.acousticModel :
+                               (!result.paths.encoder.empty() ? result.paths.encoder : ""));
+        if (!refModel.empty()) {
+            std::string fileQuant = DeriveQuantization(model_detect::BaseName(refModel));
+            if (fileQuant != "unknown") {
+                result.quantization = fileQuant;
+            }
+        }
     }
 
     if (!result.ok) {
@@ -451,14 +466,15 @@ TtsDetectResult DetectTtsModel(
 TtsDetectResult DetectTtsModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     TtsDetectResult result;
     if (modelDir.empty()) {
         result.error = "TTS: Model directory is empty";
         return result;
     }
-    return DetectTtsModelFromFiles(files, modelDir, modelType);
+    return DetectTtsModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 } // namespace sherpaonnx

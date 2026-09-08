@@ -79,6 +79,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream sepCsv(dir + "/source-separation-models-expected.csv");
     std::ifstream speakerStruct(dir + "/speaker-recongition-models-structure.txt");
     std::ifstream speakerCsv(dir + "/speaker-recongition-models-expected.csv");
+    std::ifstream diarizationStruct(dir + "/speaker-segmentation-models-structure.txt");
+    std::ifstream diarizationCsv(dir + "/speaker-segmentation-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -93,6 +95,10 @@ TEST(ModelDetectTest, FixturesExist) {
         << "Missing: " << dir << "/speaker-recongition-models-structure.txt";
     ASSERT_TRUE(speakerCsv.is_open())
         << "Missing: " << dir << "/speaker-recongition-models-expected.csv";
+    ASSERT_TRUE(diarizationStruct.is_open())
+        << "Missing: " << dir << "/speaker-segmentation-models-structure.txt";
+    ASSERT_TRUE(diarizationCsv.is_open())
+        << "Missing: " << dir << "/speaker-segmentation-models-expected.csv";
 }
 
 /**
@@ -415,6 +421,96 @@ TEST(ModelDetectTest, DetectSpeakerEmbeddingFromFileListMatchesExpected) {
             << model_detect_test::SpeakerEmbeddingKindToString(result.selectedKind)
             << " (" << static_cast<int>(result.selectedKind) << ")";
     }
+}
+
+TEST(ModelDetectTest, DetectDiarizationFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/speaker-segmentation-models-structure.txt";
+    std::string csvPath = dir + "/speaker-segmentation-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        if (expectedType == "unsupported") {
+            auto files =
+                model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+            auto result = sherpaonnx::DetectDiarizationModelFromFileList(
+                files, block.modelDir, "auto");
+            EXPECT_FALSE(result.ok)
+                << "Asset " << block.assetName << ": unsupported must not report ok=true.";
+            EXPECT_EQ(static_cast<int>(result.selectedKind),
+                      static_cast<int>(sherpaonnx::DiarizationModelKind::kUnknown))
+                << "Asset " << block.assetName;
+            continue;
+        }
+
+        sherpaonnx::DiarizationModelKind expectedKind =
+            model_detect_test::DiarizationKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::DiarizationModelKind::kUnknown)
+            continue;
+
+        auto files =
+            model_detect_test::BuildFileEntriesFromPathLines(block.modelDir, block.pathLines);
+        auto result =
+            sherpaonnx::DetectDiarizationModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_FALSE(result.isStreaming) << "Asset " << block.assetName;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType << " (" << static_cast<int>(expectedKind)
+            << ") but got "
+            << model_detect_test::DiarizationKindToString(result.selectedKind)
+            << " (" << static_cast<int>(result.selectedKind) << ")";
+        EXPECT_FALSE(result.paths.model.empty()) << "Asset " << block.assetName;
+        EXPECT_NE(result.paths.model.find("model.onnx"), std::string::npos)
+            << "Asset " << block.assetName
+            << ": prefer model.onnx over int8, got " << result.paths.model;
+    }
+}
+
+TEST(ModelDetectTest, DetectDiarizationSortformerWithMetadata) {
+    const std::string modelDir = "m/diar_streaming_sortformer_4spk-v2.1";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        modelDir, {
+            modelDir + "/model.onnx",
+            modelDir + "/metadata.json",
+            modelDir + "/LICENSE",
+        });
+
+    auto result = sherpaonnx::DetectDiarizationModelFromFileList(files, modelDir, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::DiarizationModelKind::kSortformer);
+    EXPECT_EQ(result.paths.model, modelDir + "/model.onnx");
+    EXPECT_EQ(result.paths.metadata, modelDir + "/metadata.json");
+}
+
+TEST(ModelDetectTest, DetectDiarizationSortformerWithoutMetadata) {
+    const std::string modelDir = "m/diar_streaming_sortformer_4spk-v2.1";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        modelDir, {
+            modelDir + "/model.onnx",
+            modelDir + "/LICENSE",
+        });
+
+    auto result = sherpaonnx::DetectDiarizationModelFromFileList(files, modelDir, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::DiarizationModelKind::kSortformer);
+    EXPECT_EQ(result.paths.model, modelDir + "/model.onnx");
+    EXPECT_TRUE(result.paths.metadata.empty());
 }
 
 TEST(ModelDetectTest, DetectPunctuationFromFileListMatchesExpected) {
@@ -1462,12 +1558,41 @@ TEST(UnifiedModelDetectTest, NameOnlyUvrAssetMatchesSeparationCategory) {
 
 TEST(UnifiedModelDetectTest, BatchPreservesOrderAndLength) {
     std::vector<sherpaonnx::UnifiedModelDetectInput> inputs = {
-        {std::nullopt, std::optional<std::string>("vits-piper-en")},
-        {std::nullopt, std::optional<std::string>("not-a-real-model-name-xyz")},
+        {std::nullopt, std::optional<std::string>("vits-piper-en"), ""},
+        {std::nullopt, std::optional<std::string>("not-a-real-model-name-xyz"), ""},
     };
     auto results = sherpaonnx::DetectModelsBatch(inputs);
     ASSERT_EQ(results.size(), 2u);
     EXPECT_TRUE(results[0].matched);
     EXPECT_EQ(results[0].category, "tts");
     EXPECT_FALSE(results[1].matched);
+}
+
+TEST(UnifiedModelDetectTest, QuantizationSelectionInFileList) {
+    std::vector<sherpaonnx::model_detect::FileEntry> files = {
+        {"/models/whisper/tiny-encoder.onnx", "tiny-encoder.onnx", "tiny-encoder.onnx", 1000},
+        {"/models/whisper/tiny-encoder.int8.onnx", "tiny-encoder.int8.onnx", "tiny-encoder.int8.onnx", 500},
+        {"/models/whisper/tiny-decoder.onnx", "tiny-decoder.onnx", "tiny-decoder.onnx", 2000},
+        {"/models/whisper/tiny-decoder.int8.onnx", "tiny-decoder.int8.onnx", "tiny-decoder.int8.onnx", 1000},
+        {"/models/whisper/tiny-tokens.txt", "tiny-tokens.txt", "tiny-tokens.txt", 100},
+    };
+
+    auto resInt8 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("int8"));
+    EXPECT_TRUE(resInt8.ok);
+    EXPECT_EQ(resInt8.quantization, "int8");
+    EXPECT_EQ(resInt8.paths.whisperEncoder, "/models/whisper/tiny-encoder.int8.onnx");
+    EXPECT_EQ(resInt8.paths.whisperDecoder, "/models/whisper/tiny-decoder.int8.onnx");
+
+    auto resFp32 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("fp32"));
+    EXPECT_TRUE(resFp32.ok);
+    EXPECT_EQ(resFp32.paths.whisperEncoder, "/models/whisper/tiny-encoder.onnx");
+    EXPECT_EQ(resFp32.paths.whisperDecoder, "/models/whisper/tiny-decoder.onnx");
+
+    // Test missing quantization preference error
+    auto resFp16 = sherpaonnx::DetectSttModelFromFileList(
+        files, "/models/whisper", "whisper", std::string("fp16"));
+    EXPECT_FALSE(resFp16.ok);
+    EXPECT_NE(resFp16.error, "");
 }

@@ -2,6 +2,9 @@
 #define SHERPA_ONNX_SPEAKER_EMBEDDING_WRAPPER_H
 
 #include "sherpa-onnx-model-detect.h"
+#include "speaker-embedding-manager.h"
+#include "speaker-embedding-runner.h"
+#include "speaker-embedding-types.h"
 
 #include <cstdint>
 #include <memory>
@@ -14,36 +17,41 @@ namespace sherpaonnx {
 struct SpeakerEmbeddingInitializeResult {
   bool success = false;
   std::string error;
+  std::string errorCode;
   std::string modelType;
   int32_t dim = 0;
   std::vector<DetectedModel> detectedModels;
 };
 
+/**
+ * PIMPL facade: detect/init + compute via shared SpeakerEmbeddingRunner
+ * registry. Compiled on Android and iOS (no jni.h).
+ */
 class SpeakerEmbeddingExtractorWrapper {
  public:
   SpeakerEmbeddingExtractorWrapper();
   ~SpeakerEmbeddingExtractorWrapper();
 
   SpeakerEmbeddingInitializeResult initialize(
-      const std::string &modelDir,
-      const std::string &modelType = "auto",
+      const std::string& modelDir, const std::string& modelType = "auto",
       int32_t numThreads = 1,
-      const std::optional<std::string> &provider = std::nullopt,
+      const std::optional<std::string>& provider = std::nullopt,
       bool debug = false);
 
   SpeakerEmbeddingInitializeResult initializeCustom(
-      const std::string &modelType,
-      const SpeakerEmbeddingModelPaths &paths,
+      const std::string& modelType, const SpeakerEmbeddingModelPaths& paths,
       int32_t numThreads = 1,
-      const std::optional<std::string> &provider = std::nullopt,
+      const std::optional<std::string>& provider = std::nullopt,
       bool debug = false);
 
-  std::vector<float> computeFromSamples(
-      const std::vector<float> &samples,
-      int32_t sampleRate);
+  /** Returns empty vector on failure; check lastError() / lastErrorCode(). */
+  std::vector<float> computeFromSamples(const std::vector<float>& samples,
+                                        int32_t sampleRate);
 
   int32_t dim() const;
   bool isInitialized() const;
+  std::string lastError() const;
+  std::string lastErrorCode() const;
   void release();
 
  private:
@@ -51,23 +59,22 @@ class SpeakerEmbeddingExtractorWrapper {
   std::unique_ptr<Impl> pImpl;
 };
 
+/**
+ * Thin PIMPL around SpeakerEmbeddingManagerCore for bridge compatibility.
+ */
 class SpeakerEmbeddingManagerWrapper {
  public:
   SpeakerEmbeddingManagerWrapper();
   ~SpeakerEmbeddingManagerWrapper();
 
   bool create(int32_t dim);
-  bool add(
-      const std::string &name,
-      const std::vector<float> &flattened,
-      int32_t count);
-  bool remove(const std::string &name);
-  std::string search(const std::vector<float> &embedding, float threshold);
-  bool verify(
-      const std::string &name,
-      const std::vector<float> &embedding,
-      float threshold);
-  bool contains(const std::string &name);
+  bool add(const std::string& name, const std::vector<float>& flattened,
+           int32_t count);
+  bool remove(const std::string& name);
+  std::string search(const std::vector<float>& embedding, float threshold);
+  bool verify(const std::string& name, const std::vector<float>& embedding,
+              float threshold);
+  bool contains(const std::string& name);
   int32_t numSpeakers() const;
   std::vector<std::string> allSpeakers() const;
   int32_t dim() const;

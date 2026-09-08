@@ -9,6 +9,8 @@
 # TTS: --config sherpa_tts_model_release_streams.json
 # Speech enhancement: --config sherpa_speech_enhancement_model_release_streams.json
 # Source separation: --config sherpa_separation_model_release_streams.json
+# Speaker embedding: --config sherpa_speaker_embedding_model_release_streams.json
+# Speaker diarization: --config sherpa_diarization_model_release_streams.json
 # (paths relative to this dir or repo root, or absolute).
 #
 # --print-git-paths prints newline-separated paths to git-add (deduped), then exits.

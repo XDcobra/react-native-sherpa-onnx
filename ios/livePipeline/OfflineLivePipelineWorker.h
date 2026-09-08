@@ -24,6 +24,8 @@ struct CommittedSegmentSpeech {
   std::string segmentId;
   int segmentIndex = 0;
   std::string payloadJson;
+  bool hasConfidence = false;
+  double confidence = 0.0;
 };
 
 struct CommittedSegmentText {

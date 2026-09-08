@@ -5,9 +5,10 @@ import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
 } from '../model-languages';
-import { ModelCategory } from '../download/types';
+import { ModelCategory, type QuantizationPreference } from '../download/types';
 import {
   isDetectionSource,
+  normalizeQuantization,
   type DetectedModelEntry,
   type DetectionSource,
   type PunctuationDetectModelResult,
@@ -26,7 +27,11 @@ export type OnlinePunctuationModelType = Extract<
  */
 export async function detectPunctuationModel(
   source: FileSource,
-  options?: { modelType?: PunctuationModelType; assetName?: string }
+  options?: {
+    modelType?: PunctuationModelType;
+    assetName?: string;
+    quantization?: QuantizationPreference;
+  }
 ): Promise<PunctuationDetectModelResult> {
   const resolved = await resolveFileSourceForDetect(source);
   const optionAssetName = options?.assetName?.trim();
@@ -37,7 +42,8 @@ export async function detectPunctuationModel(
   const raw = await SherpaOnnx.detectPunctuationModel(
     resolved.modelDir,
     assetName,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
   const err = typeof raw.error === 'string' ? raw.error.trim() : '';
   const detectedModels: DetectedModelEntry[] = (raw.detectedModels ?? []).map(
@@ -60,10 +66,7 @@ export async function detectPunctuationModel(
     modelType: raw.modelType,
     rawRows: readPublicLanguageRows(raw.languages),
   });
-  const quantization =
-    typeof raw.quantization === 'string' && raw.quantization.length > 0
-      ? raw.quantization
-      : undefined;
+  const quantization = normalizeQuantization(raw.quantization);
   const paths = raw.paths;
   const isStreaming = raw.isStreaming === true;
   return {

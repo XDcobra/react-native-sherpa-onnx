@@ -1,0 +1,4 @@
+asset_name,license_type,commercial_use,confidence,detection_source,license_file
+sherpa-onnx-pyannote-segmentation-3-0.tar.bz2,mit,yes,high,archive_license_file,sherpa-onnx-pyannote-segmentation-3-0/LICENSE
+sherpa-onnx-reverb-diarization-v1.tar.bz2,custom-non-commercial,no,medium,archive_license_file,sherpa-onnx-reverb-diarization-v1/LICENSE
+sherpa-onnx-reverb-diarization-v2.tar.bz2,custom-non-commercial,no,medium,archive_license_file,sherpa-onnx-reverb-diarization-v2/LICENSE

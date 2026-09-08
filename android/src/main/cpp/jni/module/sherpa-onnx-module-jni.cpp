@@ -24,6 +24,7 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include "sherpa-onnx-separation-detect-wrapper.h"
 #include "sherpa-onnx-speaker-embedding-detect-wrapper.h"
+#include "sherpa-onnx-diarization-detect-wrapper.h"
 #include "sherpa-onnx-punctuation-wrapper.h"
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
@@ -245,8 +246,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
     jstring j_model_dir,
     jstring j_asset_name,
     jstring j_model_type,
-    jboolean j_prefer_int8,
-    jboolean j_has_prefer_int8,
+    jstring j_quantization,
     jboolean j_debug) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
@@ -256,15 +256,17 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSttModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
-  std::optional<bool> prefer_int8;
-  if (j_has_prefer_int8) prefer_int8 = (j_prefer_int8 == JNI_TRUE);
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   SHERPA_DIAG("stt.detect", "start");
   sherpaonnx::SttDetectResult result = sherpaonnx::DetectSttModel(
       model_dir,
       asset_name,
       model_type,
-      prefer_int8,
+      quantization,
       (j_debug == JNI_TRUE));
   SHERPA_DIAG("stt.detect", "end");
   return sherpaonnx::SttDetectResultToJava(env, result);
@@ -277,7 +279,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -286,8 +289,12 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectTtsModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
-  sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, asset_name, model_type);
+  sherpaonnx::TtsDetectResult result = sherpaonnx::DetectTtsModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::TtsDetectResultToJava(env, result);
 }
 
@@ -298,7 +305,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -307,9 +315,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectEnhancementModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::EnhancementDetectResult result =
-      sherpaonnx::DetectEnhancementModel(model_dir, asset_name, model_type);
+      sherpaonnx::DetectEnhancementModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::EnhancementDetectResultToJava(env, result);
 }
 
@@ -320,7 +332,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSeparationModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -329,9 +342,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSeparationModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::SeparationDetectResult result =
-      sherpaonnx::DetectSeparationModel(model_dir, asset_name, model_type);
+      sherpaonnx::DetectSeparationModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::SeparationDetectResultToJava(env, result);
 }
 
@@ -342,7 +359,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSpeakerEmbeddingModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -351,10 +369,41 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectSpeakerEmbeddingModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::SpeakerEmbeddingDetectResult result =
-      sherpaonnx::DetectSpeakerEmbeddingModel(model_dir, asset_name, model_type);
+      sherpaonnx::DetectSpeakerEmbeddingModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::SpeakerEmbeddingDetectResultToJava(env, result);
+}
+
+// Speaker diarization segmentation: pyannote / reverb (offline only).
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectDiarizationModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type,
+    jstring j_quantization) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
+
+  sherpaonnx::DiarizationDetectResult result =
+      sherpaonnx::DetectDiarizationModel(model_dir, asset_name, model_type, quantization);
+  return sherpaonnx::DiarizationDetectResultToJava(env, result);
 }
 
 // Punctuation: CT-transformer (offline) or CNN-BiLSTM (online) layout. Returns HashMap with detect fields.
@@ -364,7 +413,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectPunctuationModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -373,9 +423,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectPunctuationModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::PunctuationDetectResult result =
-      sherpaonnx::DetectPunctuationModel(model_dir, asset_name, model_type);
+      sherpaonnx::DetectPunctuationModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::PunctuationDetectResultToJava(env, result);
 }
 
@@ -386,7 +440,8 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectVadModel(
     jobject /* this */,
     jstring j_model_dir,
     jstring j_asset_name,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::optional<std::string> model_dir;
   std::optional<std::string> asset_name;
   std::string model_type;
@@ -395,9 +450,13 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectVadModel(
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::VadDetectResult result =
-      sherpaonnx::DetectVadModel(model_dir, asset_name, model_type);
+      sherpaonnx::DetectVadModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::VadDetectResultToJava(env, result);
 }
 
@@ -407,16 +466,21 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectAlignmentModel(
     JNIEnv* env,
     jobject /* this */,
     jstring j_model_dir,
-    jstring j_model_type) {
+    jstring j_model_type,
+    jstring j_quantization) {
   std::string model_dir;
   std::string model_type;
   if (!CopyRequiredJstring(env, j_model_dir, model_dir) ||
       !CopyModelTypeJstring(env, j_model_type, model_type)) {
     return nullptr;
   }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
 
   sherpaonnx::AlignmentDetectResult result =
-      sherpaonnx::DetectAlignmentModel(model_dir, model_type);
+      sherpaonnx::DetectAlignmentModel(model_dir, model_type, quantization);
   return sherpaonnx::AlignmentDetectResultToJava(env, result);
 }
 
@@ -430,11 +494,16 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModel(
     JNIEnv* env,
     jobject /* this */,
     jstring j_model_dir,
-    jstring j_asset_name) {
+    jstring j_asset_name,
+    jstring j_quantization) {
   auto model_dir = OptionalJstring(env, j_model_dir);
   auto asset_name = OptionalJstring(env, j_asset_name);
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
   sherpaonnx::UnifiedModelDetectResult result =
-      sherpaonnx::DetectModel(model_dir, asset_name);
+      sherpaonnx::DetectModel(model_dir, asset_name, quantization);
   return sherpaonnx::UnifiedDetectResultToJava(env, result);
 }
 
@@ -479,6 +548,9 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectModelsBatch(
     sherpaonnx::UnifiedModelDetectInput input;
     input.model_dir = HashMapGetString(env, entry, mapGet, "modelDir");
     input.asset_name = HashMapGetString(env, entry, mapGet, "assetName");
+    if (auto q = HashMapGetString(env, entry, mapGet, "quantization")) {
+      input.quantization = *q;
+    }
     inputs.push_back(std::move(input));
     env->DeleteLocalRef(entry);
   }

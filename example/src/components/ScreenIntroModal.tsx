@@ -83,11 +83,15 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   SegmentationShowcase: {
     title: 'Segmentation playground',
-    body: 'This screen is an integrator playground for text and audio segmentation. Use configurable policies to set segment boundaries (text: sentence, length limits; audio: silence, energy thresholds). Try both modes to understand segmentation trade-offs on real inputs.',
+    body: 'Integrator playground for offline text and audio segmentation via shared SegmentationPolicyControls. Text: synthetic or punctuation-assisted. Audio: energy, VAD, or pyannote packs (catalog + detect → policy.modelPath). Runs segmentOfflineBuffer and lists segments with reason badges.',
   },
   Diarization: {
-    title: 'Speaker diarization preview',
-    body: 'This placeholder screen shows where speaker diarization will land later. It is intended to help you think about speaker separation in multi-speaker pipelines and outputs.',
+    title: 'Speaker diarization demo',
+    body: 'Offline batch diarization: load a pyannote/reverb segmentation model plus a speaker-embedding model, pick audio, and get anonymous speaker clusters with timestamps. Re-cluster and match centroids to enrolled SID names when you need real labels.',
+  },
+  DiarizationStreaming: {
+    title: 'Streaming speaker diarization',
+    body: 'Real-time speaker diarization powered by NeMo Sortformer: streams continuous audio through a native C++ worker pipeline directly into LiveSegmentBuffer (zero JS roundtrips). Detects up to 4 concurrent speakers, visualizes active speaking states, tracks conversation talk-time analytics, and maintains a chronological speaker turn timeline. Supports live microphone capture, custom audio files, and multi-speaker meeting presets.',
   },
   Enhancement: {
     title: 'Speech enhancement demo',

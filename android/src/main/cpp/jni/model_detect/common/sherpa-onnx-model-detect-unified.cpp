@@ -103,6 +103,15 @@ const char* SpeakerEmbeddingModelKindToString(SpeakerEmbeddingModelKind k) {
     }
 }
 
+const char* DiarizationModelKindToString(DiarizationModelKind k) {
+    switch (k) {
+        case DiarizationModelKind::kPyannote: return "pyannote";
+        case DiarizationModelKind::kReverb: return "reverb";
+        case DiarizationModelKind::kSortformer: return "sortformer";
+        default: return "unknown";
+    }
+}
+
 const char* AlignmentModelKindToString(AlignmentModelKind k) {
     switch (k) {
         case AlignmentModelKind::kWav2Vec2: return "wav2vec2";
@@ -174,7 +183,8 @@ UnifiedModelDetectResult MakeHit(
 
 UnifiedModelDetectResult DetectModelInternal(
     const std::optional<std::string>& model_dir,
-    const std::optional<std::string>& asset_name) {
+    const std::optional<std::string>& asset_name,
+    const std::string& quantization = "") {
     UnifiedModelDetectResult miss;
     if (!HasDetectInput(model_dir, asset_name)) {
         return miss;
@@ -182,7 +192,7 @@ UnifiedModelDetectResult DetectModelInternal(
 
     const std::string modelType = kModelTypeAuto;
 
-    TtsDetectResult tts = DetectTtsModel(model_dir, asset_name, modelType);
+    TtsDetectResult tts = DetectTtsModel(model_dir, asset_name, modelType, quantization);
     const std::string ttsType = TtsModelKindToString(tts.selectedKind);
     if (IsCatalogDetectHit(tts.ok, ttsType, tts.detectionSources)) {
         return MakeHit(
@@ -200,7 +210,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
 
     SttDetectResult stt = DetectSttModel(
-        model_dir, asset_name, modelType, std::nullopt, false);
+        model_dir, asset_name, modelType, quantization, false);
     const std::string sttType = SttModelKindToString(stt.selectedKind);
     if (IsCatalogDetectHit(stt.ok, sttType, stt.detectionSources)) {
         return MakeHit(
@@ -217,7 +227,7 @@ UnifiedModelDetectResult DetectModelInternal(
             stt.error);
     }
 
-    VadDetectResult vad = DetectVadModel(model_dir, asset_name, modelType);
+    VadDetectResult vad = DetectVadModel(model_dir, asset_name, modelType, quantization);
     const std::string vadType = VadModelKindToString(vad.selectedKind);
     if (IsCatalogDetectHit(vad.ok, vadType, vad.detectionSources)) {
         return MakeHit(
@@ -235,7 +245,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
 
     PunctuationDetectResult punctuation =
-        DetectPunctuationModel(model_dir, asset_name, modelType);
+        DetectPunctuationModel(model_dir, asset_name, modelType, quantization);
     const std::string punctuationType =
         PunctuationModelKindToString(punctuation.selectedKind);
     if (IsCatalogDetectHit(
@@ -255,7 +265,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
 
     EnhancementDetectResult enhancement =
-        DetectEnhancementModel(model_dir, asset_name, modelType);
+        DetectEnhancementModel(model_dir, asset_name, modelType, quantization);
     const std::string enhancementType =
         EnhancementModelKindToString(enhancement.selectedKind);
     if (IsCatalogDetectHit(
@@ -275,7 +285,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
 
     SeparationDetectResult separation =
-        DetectSeparationModel(model_dir, asset_name, modelType);
+        DetectSeparationModel(model_dir, asset_name, modelType, quantization);
     const std::string separationType =
         SeparationModelKindToString(separation.selectedKind);
     if (IsCatalogDetectHit(
@@ -295,7 +305,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
 
     SpeakerEmbeddingDetectResult speakerEmbedding =
-        DetectSpeakerEmbeddingModel(model_dir, asset_name, modelType);
+        DetectSpeakerEmbeddingModel(model_dir, asset_name, modelType, quantization);
     const std::string speakerEmbeddingType =
         SpeakerEmbeddingModelKindToString(speakerEmbedding.selectedKind);
     if (IsCatalogDetectHit(
@@ -316,6 +326,26 @@ UnifiedModelDetectResult DetectModelInternal(
             speakerEmbedding.error);
     }
 
+    DiarizationDetectResult diarization =
+        DetectDiarizationModel(model_dir, asset_name, modelType, quantization);
+    const std::string diarizationType =
+        DiarizationModelKindToString(diarization.selectedKind);
+    if (IsCatalogDetectHit(
+            diarization.ok, diarizationType, diarization.detectionSources)) {
+        return MakeHit(
+            "diarization",
+            diarizationType,
+            diarization.derivedLanguages,
+            diarization.quantization,
+            "",
+            diarization.isStreaming,
+            false,
+            diarization.detectedModels,
+            diarization.detectionSources,
+            DiarizationModelPathsToStringMap(diarization.paths),
+            diarization.error);
+    }
+
     std::string alignmentKey;
     if (model_dir.has_value() && !model_dir->empty()) {
         alignmentKey = *model_dir;
@@ -324,7 +354,7 @@ UnifiedModelDetectResult DetectModelInternal(
     }
     if (!alignmentKey.empty()) {
         AlignmentDetectResult alignment =
-            DetectAlignmentModel(alignmentKey, modelType);
+            DetectAlignmentModel(alignmentKey, modelType, quantization);
         const std::string alignmentType =
             AlignmentModelKindToString(alignment.selectedKind);
         if (IsCatalogDetectHit(
@@ -351,8 +381,9 @@ UnifiedModelDetectResult DetectModelInternal(
 
 UnifiedModelDetectResult DetectModel(
     const std::optional<std::string>& model_dir,
-    const std::optional<std::string>& asset_name) {
-    return DetectModelInternal(model_dir, asset_name);
+    const std::optional<std::string>& asset_name,
+    const std::string& quantization) {
+    return DetectModelInternal(model_dir, asset_name, quantization);
 }
 
 std::vector<UnifiedModelDetectResult> DetectModelsBatch(
@@ -360,7 +391,7 @@ std::vector<UnifiedModelDetectResult> DetectModelsBatch(
     std::vector<UnifiedModelDetectResult> results;
     results.reserve(inputs.size());
     for (const auto& input : inputs) {
-        results.push_back(DetectModelInternal(input.model_dir, input.asset_name));
+        results.push_back(DetectModelInternal(input.model_dir, input.asset_name, input.quantization));
     }
     return results;
 }

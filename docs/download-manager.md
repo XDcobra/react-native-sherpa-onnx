@@ -221,6 +221,8 @@ registerSource(customMirror);
 | Android | No extra download permissions beyond network     |
 | iOS     | Downloads run in-process while the app is active |
 
+Downloads run in the **foreground** while your app process is active. If the user leaves the app or the OS stops the process, the transfer pauses; partial files and `.download-state-*.json` on disk allow **resume with HTTP Range** when the user returns and starts the download again. No separate background-downloader package is required.
+
 ### Configure download manager (optional)
 
 ```ts

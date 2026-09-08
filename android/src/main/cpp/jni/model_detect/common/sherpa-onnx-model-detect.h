@@ -126,6 +126,14 @@ enum class SpeakerEmbeddingModelKind {
     kNemo
 };
 
+/** Speaker diarization packs (pyannote / ReVerb offline; sortformer streaming). */
+enum class DiarizationModelKind {
+    kUnknown,
+    kPyannote,
+    kReverb,
+    kSortformer
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -284,6 +292,13 @@ struct SpeakerEmbeddingModelPaths {
     std::string model;
 };
 
+struct DiarizationModelPaths {
+    /** Segmentation / Diarization ONNX (prefer model.onnx over model.int8.onnx). */
+    std::string model;
+    /** Optional model metadata JSON (e.g. metadata.json for streaming Sortformer). */
+    std::string metadata;
+};
+
 struct PunctuationModelPaths {
     /** OfflinePunctuationModelConfig.ct_transformer */
     std::string ct_transformer;
@@ -378,6 +393,19 @@ struct SpeakerEmbeddingDetectResult {
     std::string quantization;
 };
 
+struct DiarizationDetectResult {
+    bool ok = false;
+    /** Always false: upstream OfflineSpeakerDiarization is offline-only. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    DiarizationModelKind selectedKind = DiarizationModelKind::kUnknown;
+    DiarizationModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+};
+
 struct PunctuationDetectResult {
     bool ok = false;
     /** True when the CNN-BiLSTM (online) layout is selected and the ORT online-compatibility
@@ -433,7 +461,15 @@ SttDetectResult DetectSttModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
     const std::string& modelType = "auto",
-    const std::optional<bool>& preferInt8 = std::nullopt,
+    const std::string& quantization = "",
+    bool debug = false
+);
+
+SttDetectResult DetectSttModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType,
+    const std::optional<bool>& preferInt8,
     bool debug = false
 );
 
@@ -445,7 +481,14 @@ SttDetectResult DetectSttModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",
-    const std::optional<bool>& preferInt8 = std::nullopt
+    const std::string& quantization = ""
+);
+
+SttDetectResult DetectSttModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType,
+    const std::optional<bool>& preferInt8
 );
 
 /**
@@ -457,7 +500,8 @@ SttDetectResult DetectSttModelFromFileList(
 TtsDetectResult DetectTtsModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto");
+    const std::string& modelType = "auto",
+    const std::string& quantization = "");
 
 /** Test-only: Like DetectTtsModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). Not used in
@@ -473,7 +517,8 @@ TtsDetectResult DetectTtsModel(
 TtsDetectResult DetectTtsModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /**
@@ -485,7 +530,8 @@ TtsDetectResult DetectTtsModelFromFileList(
 EnhancementDetectResult DetectEnhancementModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /**
@@ -495,7 +541,8 @@ EnhancementDetectResult DetectEnhancementModel(
 SeparationDetectResult DetectSeparationModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /**
@@ -505,13 +552,26 @@ SeparationDetectResult DetectSeparationModel(
 SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/**
+ * Speaker diarization segmentation model detection. Pass at least one of `model_dir` or `asset_name`.
+ * Offline-only (model.onnx / model.int8.onnx; kinds pyannote / reverb from pack name).
+ */
+DiarizationDetectResult DetectDiarizationModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 VadDetectResult DetectVadModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /**
@@ -522,12 +582,14 @@ VadDetectResult DetectVadModel(
 PunctuationDetectResult DetectPunctuationModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 AlignmentDetectResult DetectAlignmentModel(
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
@@ -535,21 +597,32 @@ AlignmentDetectResult DetectAlignmentModel(
 EnhancementDetectResult DetectEnhancementModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectSeparationModel but takes a pre-built file list; no filesystem access. */
 SeparationDetectResult DetectSeparationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectSpeakerEmbeddingModel but takes a pre-built file list; no filesystem access. */
 SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: Like DetectDiarizationModel but takes a pre-built file list; no filesystem access. */
+DiarizationDetectResult DetectDiarizationModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectVadModel but takes a pre-built file list; no filesystem access.
@@ -557,14 +630,16 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModelFromFileList(
 VadDetectResult DetectVadModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectPunctuationModel but takes a pre-built file list; no filesystem access. */
 PunctuationDetectResult DetectPunctuationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
@@ -572,7 +647,8 @@ PunctuationDetectResult DetectPunctuationModelFromFileList(
 AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType = "auto"
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
 );
 
 } // namespace sherpaonnx

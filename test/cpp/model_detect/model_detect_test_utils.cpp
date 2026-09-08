@@ -263,6 +263,27 @@ std::string SpeakerEmbeddingKindToString(SpeakerEmbeddingModelKind kind) {
     }
 }
 
+DiarizationModelKind DiarizationKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "pyannote") return DiarizationModelKind::kPyannote;
+    if (t == "reverb") return DiarizationModelKind::kReverb;
+    if (t == "sortformer") return DiarizationModelKind::kSortformer;
+    return DiarizationModelKind::kUnknown;
+}
+
+std::string DiarizationKindToString(DiarizationModelKind kind) {
+    switch (kind) {
+        case DiarizationModelKind::kPyannote:
+            return "pyannote";
+        case DiarizationModelKind::kReverb:
+            return "reverb";
+        case DiarizationModelKind::kSortformer:
+            return "sortformer";
+        default:
+            return "unknown";
+    }
+}
+
 VadModelKind VadKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "silero_vad") return VadModelKind::kSileroVad;

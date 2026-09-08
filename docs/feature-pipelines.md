@@ -267,7 +267,7 @@ Related docs:
 - [speaker-identification-offline.md](speaker-identification-offline.md)
 - [segmentbuffer-offline.md](segmentbuffer-offline.md)
 - [audiobuffer-offline.md](audiobuffer-offline.md)
-- [diarization.md](diarization.md)
+- [diarization-offline.md](diarization-offline.md)
 
 ## Speaker identification live patterns
 

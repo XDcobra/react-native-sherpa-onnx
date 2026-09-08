@@ -29,7 +29,7 @@ function appendSharedInitBridgeFields(
   }
 ): Omit<
   SttInitBridgeOptions,
-  'initMode' | 'modelDir' | 'modelPaths' | 'modelType' | 'preferInt8'
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType' | 'quantization'
 > {
   return {
     ...(options.debug !== undefined ? { debug: options.debug } : {}),
@@ -103,8 +103,8 @@ export async function buildSttInitBridgeOptions(
   return {
     initMode: 'auto',
     modelDir,
-    ...(autoOptions.preferInt8 !== undefined
-      ? { preferInt8: autoOptions.preferInt8 }
+    ...(autoOptions.quantization !== undefined
+      ? { quantization: autoOptions.quantization }
       : {}),
     ...(autoOptions.modelType !== undefined
       ? { modelType: autoOptions.modelType }

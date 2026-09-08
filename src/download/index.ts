@@ -20,6 +20,7 @@ export {
   type ProgressPhase,
   isActiveExtractionPhase,
   type Quantization,
+  type QuantizationPreference,
   type SizeTier,
   type TtsModelType,
 } from './types';

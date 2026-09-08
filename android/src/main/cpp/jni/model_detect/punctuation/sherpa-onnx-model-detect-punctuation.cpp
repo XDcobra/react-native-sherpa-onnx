@@ -1,5 +1,6 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
+#include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-punctuation-catalog-metadata.h"
 #include "sherpa-onnx-punctuation-online-guard.h"
 #include "sherpa-onnx-validate-punctuation.h"
@@ -44,12 +45,36 @@ void AppendUniqueSource(std::vector<sherpaonnx::DetectionSource>& out, sherpaonn
 /**
  * If both bpe.vocab+onnx and tokens.json+onnx match, **online (bpe) wins** (see plan).
  */
-std::string FindPrimaryOnnxForPunc(const std::vector<FileEntry>& files) {
+std::string FindPrimaryOnnxForPunc(const std::vector<FileEntry>& files, const std::string& quantization = "") {
+    if (!quantization.empty() && quantization != "auto") {
+        std::string target1 = "model." + ToLower(quantization) + ".onnx";
+        std::string p1 = FindFileByName(files, target1);
+        if (!p1.empty()) return p1;
+        std::string target2 = "model." + ToLower(quantization) + ".ort";
+        std::string p2 = FindFileByName(files, target2);
+        if (!p2.empty()) return p2;
+
+        std::string tokenMatch = FindOnnxByAnyToken(files, {"model", "punct", "bilstm"}, quantization);
+        if (!tokenMatch.empty()) return tokenMatch;
+
+        for (const auto& entry : files) {
+            bool isOnnx = (entry.nameLower.size() > 5 && entry.nameLower.substr(entry.nameLower.size() - 5) == ".onnx") ||
+                          (entry.nameLower.size() > 4 && entry.nameLower.substr(entry.nameLower.size() - 4) == ".ort");
+            if (isOnnx && MatchesQuantization(entry.nameLower, quantization)) {
+                return entry.path;
+            }
+        }
+        return "";
+    }
     std::string a = FindFileByName(files, "model.int8.onnx");
     if (!a.empty()) {
         return a;
     }
-    return FindFileByName(files, "model.onnx");
+    a = FindFileByName(files, "model.onnx");
+    if (!a.empty()) {
+        return a;
+    }
+    return FindOnnxByAnyToken(files, {"model", "punct"}, std::string(""));
 }
 
 std::vector<sherpaonnx::PunctuationModelKind> InferKindsNameOnlyFromDir(
@@ -71,7 +96,8 @@ std::vector<sherpaonnx::PunctuationModelKind> InferKindsNameOnlyFromDir(
 sherpaonnx::PunctuationDetectResult DetectPunctuationModelFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization = ""
 ) {
     using DS = sherpaonnx::DetectionSource;
     using PK = sherpaonnx::PunctuationModelKind;
@@ -121,7 +147,7 @@ sherpaonnx::PunctuationDetectResult DetectPunctuationModelFromFiles(
 
     const std::string bpe = FindFileByName(files, "bpe.vocab");
     const std::string tokens = FindFileByName(files, "tokens.json");
-    const std::string onnx = FindPrimaryOnnxForPunc(files);
+    const std::string onnx = FindPrimaryOnnxForPunc(files, quantization);
 
     // Online wins if bpe + onnx; else CT if tokens + onnx and no bpe (if bpe exists, we already take online).
     const bool canOnline = !bpe.empty() && !onnx.empty();
@@ -212,6 +238,13 @@ sherpaonnx::PunctuationDetectResult DetectPunctuationModelFromFiles(
             }
         }
     }
+    if ((result.quantization.empty() || result.quantization == "unknown") && !onnx.empty()) {
+        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(onnx));
+        if (fileQuant != "unknown") {
+            result.quantization = fileQuant;
+        }
+    }
+
     result.ok = true;
     return result;
 }
@@ -225,7 +258,8 @@ using namespace model_detect;
 PunctuationDetectResult DetectPunctuationModel(
     const std::optional<std::string>& model_dir_opt,
     const std::optional<std::string>& asset_name_opt,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     PunctuationDetectResult result;
     result.isStreaming = false;
@@ -241,7 +275,7 @@ PunctuationDetectResult DetectPunctuationModel(
     if (!has_dir && has_asset) {
         const std::string& assetName = *asset_name_opt;
         const std::string syntheticDir = std::string("m/") + assetName;
-        result = DetectPunctuationModelFromFiles({}, syntheticDir, modelType);
+        result = DetectPunctuationModelFromFiles({}, syntheticDir, modelType, quantization);
         FillPunctuationDerivedCatalogMetadata(result, assetName);
         return result;
     }
@@ -257,7 +291,7 @@ PunctuationDetectResult DetectPunctuationModel(
     }
 
     const std::vector<model_detect::FileEntry> files = ListFilesRecursive(modelDir, 4);
-    result = DetectPunctuationModelFromFiles(files, modelDir, modelType);
+    result = DetectPunctuationModelFromFiles(files, modelDir, modelType, quantization);
     if (has_asset) {
         FillPunctuationDerivedCatalogMetadata(result, *asset_name_opt);
     } else {
@@ -269,7 +303,8 @@ PunctuationDetectResult DetectPunctuationModel(
 PunctuationDetectResult DetectPunctuationModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
-    const std::string& modelType
+    const std::string& modelType,
+    const std::string& quantization
 ) {
     PunctuationDetectResult result;
     result.isStreaming = false;
@@ -277,7 +312,7 @@ PunctuationDetectResult DetectPunctuationModelFromFileList(
         result.error = "Punctuation: model directory is empty";
         return result;
     }
-    return DetectPunctuationModelFromFiles(files, modelDir, modelType);
+    return DetectPunctuationModelFromFiles(files, modelDir, modelType, quantization);
 }
 
 }  // namespace sherpaonnx

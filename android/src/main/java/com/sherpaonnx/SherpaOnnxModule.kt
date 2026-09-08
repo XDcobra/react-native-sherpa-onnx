@@ -29,6 +29,8 @@ import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
+import com.sherpaonnx.speakeridentification.facade.SherpaOnnxSpeakerIdentificationLivePipelineHelper
+import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
@@ -63,6 +65,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val m = com.facebook.react.bridge.Arguments.createMap()
         m.putString("segmentBufferId", segmentBufferId)
         m.putString("segmentId", rec.id)
+        m.putString("kind", rec.kind)
         m.putInt("segmentIndex", segIdx)
         m.putInt("totalSegments", totalSeg)
         m.putString("sourceAudioBufferId", rec.sourceAudioBufferId)
@@ -169,8 +172,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val assetHelper = SherpaOnnxAssetHelper(reactApplicationContext, NAME)
   private val sttHelper = SherpaOnnxSttHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug ->
-      Companion.nativeDetectSttModel(modelDir, assetName, modelType, preferInt8, hasPreferInt8, debug)
+    { modelDir, assetName, modelType, quantization, debug ->
+      Companion.nativeDetectSttModel(modelDir, assetName, modelType, quantization, debug)
     },
     NAME
   )
@@ -196,7 +199,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
   private val ttsHelper = SherpaOnnxTtsCoordinator(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType) },
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectTtsModel(modelDir, assetName, modelType, quantization) },
   )
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
@@ -204,33 +207,45 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType) }
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectEnhancementModel(modelDir, assetName, modelType, quantization) }
   )
   private val separationHelper = SherpaOnnxSeparationHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType) }
+    { modelDir, assetName, modelType, quantization -> Companion.nativeDetectSeparationModel(modelDir, assetName, modelType, quantization) }
   )
   private val speakerEmbeddingHelper = SherpaOnnxSpeakerEmbeddingHelper(
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectSpeakerEmbeddingModel(modelDir, assetName, modelType, quantization)
+    }
+  )
+  private val speakerIdentificationLivePipelineHelper =
+    SherpaOnnxSpeakerIdentificationLivePipelineHelper(
+      reactApplicationContext,
+      speakerEmbeddingHelper,
+      NAME,
+    )
+  private val diarizationHelper = SherpaOnnxDiarizationHelper(
+    reactApplicationContext,
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectVadModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectVadModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val punctuationHelper = SherpaOnnxPunctuationHelper(
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
-    { modelDir, assetName, modelType ->
-      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType)
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType, quantization)
     }
   )
   private val offlinePunctuationLivePipelineHelper =
@@ -408,6 +423,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
     speakerEmbeddingHelper.shutdown()
+    diarizationHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -931,7 +947,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
-    preferInt8: Boolean?,
+    quantization: String?,
     debug: Boolean?,
     promise: Promise
   ) {
@@ -940,8 +956,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         modelDir,
         assetName,
         modelType ?: "auto",
-        preferInt8 ?: false,
-        preferInt8 != null,
+        quantization,
         debug ?: false
       )
       if (result == null) {
@@ -4159,7 +4174,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (normalizedKind != "speech" && normalizedKind != "alignment") {
         promise.reject(
           com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-          "kind must be one of speech or alignment"
+          "kind must be one of speech, alignment, or diarization"
         )
         return
       }
@@ -4587,9 +4602,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
-    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, promise)
+    commonTtsHelper.detectTtsModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   /**
@@ -4752,27 +4768,129 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, promise)
+    enhancementHelper.detectEnhancementModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectSeparationModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    separationHelper.detectSeparationModel(modelDir, assetName, modelType, promise)
+    separationHelper.detectSeparationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectSpeakerEmbeddingModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, promise)
+    speakerEmbeddingHelper.detectSpeakerEmbeddingModel(modelDir, assetName, modelType, quantization, promise)
+  }
+
+  override fun detectDiarizationModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise
+  ) {
+    diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, quantization, promise)
+  }
+
+  override fun initializeDiarization(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    diarizationHelper.initializeDiarization(instanceId, options, promise)
+  }
+
+  override fun diarizeOffline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentsOutBufferId: String,
+    includeOverlap: Boolean?,
+    promise: Promise
+  ) {
+    diarizationHelper.diarizeOffline(
+      instanceId,
+      audioInBufferId,
+      segmentsOutBufferId,
+      includeOverlap == true,
+      promise,
+    )
+  }
+
+  override fun reclusterDiarization(
+    instanceId: String,
+    numClusters: Double,
+    threshold: Double,
+    promise: Promise
+  ) {
+    diarizationHelper.reclusterDiarization(instanceId, numClusters, threshold, promise)
+  }
+
+  override fun getDiarizationClusterEmbeddings(instanceId: String, promise: Promise) {
+    diarizationHelper.getDiarizationClusterEmbeddings(instanceId, promise)
+  }
+
+  override fun cancelDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.cancelDiarization(instanceId, promise)
+  }
+
+  override fun unloadDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.unloadDiarization(instanceId, promise)
+  }
+
+  override fun initializeStreamingDiarization(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    diarizationHelper.initializeStreamingDiarization(instanceId, options, promise)
+  }
+
+  override fun startStreamingDiarizationPipeline(
+    instanceId: String,
+    audioInBufferId: String,
+    segmentsOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    diarizationHelper.startStreamingDiarizationPipeline(
+      instanceId,
+      audioInBufferId,
+      segmentsOutBufferId,
+      options,
+      promise,
+    )
+  }
+
+  override fun feedStreamingDiarization(
+    instanceId: String,
+    audioInBufferId: String,
+    promise: Promise,
+  ) {
+    diarizationHelper.feedStreamingDiarization(instanceId, audioInBufferId, promise)
+  }
+
+  override fun flushStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.flushStreamingDiarization(instanceId, promise)
+  }
+
+  override fun resetStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.resetStreamingDiarization(instanceId, promise)
+  }
+
+  override fun releaseStreamingDiarization(instanceId: String, promise: Promise) {
+    diarizationHelper.releaseStreamingDiarization(instanceId, promise)
   }
 
   override fun initializeSpeakerEmbeddingExtractor(
@@ -4786,9 +4904,97 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun computeSpeakerEmbeddingOffline(
     instanceId: String,
     audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise
   ) {
-    speakerEmbeddingHelper.computeSpeakerEmbeddingOffline(instanceId, audioBufferId, promise)
+    speakerEmbeddingHelper.computeSpeakerEmbeddingOffline(
+      instanceId,
+      audioBufferId,
+      startSample,
+      endSample,
+      promise,
+    )
+  }
+
+  override fun identifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.identifySpeakerOffline(
+      instanceId,
+      managerId,
+      audioBufferId,
+      threshold,
+      startSample,
+      endSample,
+      promise,
+    )
+  }
+
+  override fun verifySpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    audioBufferId: String,
+    name: String,
+    threshold: Double,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.verifySpeakerOffline(
+      instanceId,
+      managerId,
+      audioBufferId,
+      name,
+      threshold,
+      startSample,
+      endSample,
+      promise,
+    )
+  }
+
+  override fun enrollSpeakerOffline(
+    instanceId: String,
+    managerId: String,
+    name: String,
+    audioBufferIds: ReadableArray,
+    startSamples: ReadableArray?,
+    endSamples: ReadableArray?,
+    promise: Promise,
+  ) {
+    speakerEmbeddingHelper.enrollSpeakerOffline(
+      instanceId,
+      managerId,
+      name,
+      audioBufferIds,
+      startSamples,
+      endSamples,
+      promise,
+    )
+  }
+
+  override fun startSpeakerIdentificationOfflineLivePipeline(
+    instanceId: String,
+    managerId: String,
+    audioInLiveBufferId: String,
+    segmentsOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    speakerIdentificationLivePipelineHelper.startSpeakerIdentificationOfflineLivePipeline(
+      instanceId = instanceId,
+      managerId = managerId,
+      audioInLiveBufferId = audioInLiveBufferId,
+      segmentsOutLiveBufferId = segmentsOutLiveBufferId,
+      options = options,
+      promise = promise,
+    )
   }
 
   override fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
@@ -4930,10 +5136,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun detectAlignmentModel(
     modelDir: String,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = Companion.nativeDetectAlignmentModel(modelDir, modelType ?: "auto")
+      val result = Companion.nativeDetectAlignmentModel(modelDir, modelType ?: "auto", quantization)
       if (result == null) {
         android.util.Log.e(NAME, "DETECT_ERROR: Alignment model detection returned null")
         promise.reject("DETECT_ERROR", "Alignment model detection returned null")
@@ -5055,10 +5262,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun detectModel(
     modelDir: String,
     assetName: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = Companion.nativeDetectModel(modelDir, assetName)
+      val result = Companion.nativeDetectModel(modelDir, assetName, quantization)
       if (result == null) {
         promise.reject("DETECT_ERROR", "Unified model detection returned null")
         return
@@ -5080,6 +5288,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
         if (entry.hasKey("assetName") && !entry.isNull("assetName")) {
           item["assetName"] = entry.getString("assetName")
+        }
+        if (entry.hasKey("quantization") && !entry.isNull("quantization")) {
+          item["quantization"] = entry.getString("quantization")
         }
         nativeInputs.add(item)
       }
@@ -5158,18 +5369,20 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    vadHelper.detectVadModel(modelDir, assetName, modelType, promise)
+    vadHelper.detectVadModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun detectPunctuationModel(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
-    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, promise)
+    punctuationHelper.detectPunctuationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
   override fun initializeOfflinePunctuation(
@@ -5560,8 +5773,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String?,
       assetName: String?,
       modelType: String,
-      preferInt8: Boolean,
-      hasPreferInt8: Boolean,
+      quantization: String?,
       debug: Boolean
     ): HashMap<String, Any>?
 
@@ -5573,9 +5785,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       assetName: String?,
       modelType: String?,
+      quantization: String? = null,
     ): HashMap<String, Any>? {
       SherpaOnnxNativeLoader.ensureLoaded()
-      return nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto")
+      return nativeDetectTtsModel(modelDir, assetName, modelType ?: "auto", quantization)
     }
 
     /** Model detection for TTS: optional directory and/or asset name; returns HashMap (for Kotlin API config). */
@@ -5584,6 +5797,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelDir: String,
       assetName: String?,
       modelType: String?,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for speech enhancement: optional directory and/or asset name. */
@@ -5591,7 +5805,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectEnhancementModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for source separation: Spleeter or UVR layout (offline only). */
@@ -5599,7 +5814,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectSeparationModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for speaker embedding: wespeaker / 3d-speaker / nemo (offline only). */
@@ -5607,31 +5823,44 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     private external fun nativeDetectSpeakerEmbeddingModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
+    ): HashMap<String, Any>?
+
+    /** Model detection for diarization segmentation: pyannote / reverb (offline only). */
+    @JvmStatic
+    private external fun nativeDetectDiarizationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectVadModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectPunctuationModel(
       modelDir: String?,
       assetName: String?,
-      modelType: String
+      modelType: String,
+      quantization: String?
     ): HashMap<String, Any>?
 
     /** Model detection for subtitles/alignment: returns HashMap with success, error, detectedModels, modelType, paths. */
     @JvmStatic
-    private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String): HashMap<String, Any>?
+    private external fun nativeDetectAlignmentModel(modelDir: String, modelType: String, quantization: String?): HashMap<String, Any>?
 
     @JvmStatic
     private external fun nativeDetectModel(
       modelDir: String,
-      assetName: String?
+      assetName: String?,
+      quantization: String?
     ): HashMap<String, Any?>?
 
     @JvmStatic

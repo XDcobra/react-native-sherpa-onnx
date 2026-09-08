@@ -18,6 +18,7 @@ import {
   ensureBuiltinSourcesRegistered,
   getDefaultSourceForCategory,
   getSource,
+  listSources,
 } from './sources/registry';
 import {
   ModelCategory,
@@ -297,7 +298,32 @@ export async function getModelById(
   options?: SourceSelector
 ): Promise<ModelMeta | null> {
   const models = await listModels(category, options);
-  return models.find((model) => model.id === id) ?? null;
+  const found = models.find((model) => model.id === id);
+  if (found) {
+    return found;
+  }
+
+  if (!options?.source || options.source === 'default') {
+    ensureBuiltinSourcesRegistered();
+    const defaultSourceId = getDefaultSourceForCategory(category);
+    const providers = listSources();
+    for (const provider of providers) {
+      if (provider.id === defaultSourceId) {
+        continue;
+      }
+      if (!provider.supportsCategory(category)) {
+        continue;
+      }
+
+      const altModels = await listModels(category, { source: provider.id });
+      const altFound = altModels.find((model) => model.id === id);
+      if (altFound) {
+        return altFound;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function clearMemoryCacheForCategory(category: ModelCategory): void {

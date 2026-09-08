@@ -1,0 +1,17 @@
+{
+  "id": "diar_streaming_sortformer_4spk-v2.1",
+  "name": "Streaming Sortformer 4-Speaker v2.1",
+  "model_type": "sortformer",
+  "architecture": "streaming_sortformer_4spk",
+  "version": "2.1",
+  "streaming": true,
+  "sample_rate": 16000,
+  "feature_dim": 128,
+  "max_speakers": 4,
+  "chunk_len": 124,
+  "fifo_len": 124,
+  "spkcache_len": 188,
+  "right_context": 1,
+  "license": "nvidia-open-model-license",
+  "attribution": "Licensed by NVIDIA Corporation under the NVIDIA Open Model License"
+}

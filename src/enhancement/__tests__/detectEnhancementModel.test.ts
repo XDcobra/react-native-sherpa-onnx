@@ -14,6 +14,7 @@ jest.mock('../../detect/resolveModelInput', () => ({
 
 jest.mock('../../model-languages', () => ({
   publicLanguageHintsFromNative: jest.fn(() => []),
+  readPublicLanguageRows: jest.fn(() => []),
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
@@ -57,5 +58,29 @@ describe('detectEnhancementModel', () => {
     });
 
     expect(result.paths).toBeUndefined();
+  });
+
+  it('forwards quantization option to native detectEnhancementModel', async () => {
+    (SherpaOnnx.detectEnhancementModel as jest.Mock).mockResolvedValue({
+      success: true,
+      isStreaming: true,
+      modelType: 'gtcrn',
+      detectedModels: [],
+      paths: { model: '/models/enhancement/gtcrn.int8.onnx' },
+      quantization: 'int8',
+    });
+
+    const result = await detectEnhancementModel(
+      { kind: 'fs', path: '/models/enhancement' },
+      { quantization: 'int8' }
+    );
+
+    expect(SherpaOnnx.detectEnhancementModel).toHaveBeenCalledWith(
+      '/models/enhancement',
+      'sherpa-onnx-speech-enhancement-gtcrn',
+      null,
+      'int8'
+    );
+    expect(result.quantization).toBe('int8');
   });
 });

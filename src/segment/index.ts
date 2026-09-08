@@ -64,6 +64,10 @@ import {
   resolveSpeechVadModelForPolicy,
   speechVadPolicyToModelConfig,
 } from './resolveSpeechVadModelForPolicy';
+import {
+  isSpeechPyannoteSegmentationPolicy,
+  resolveSpeechPyannoteModelForPolicy,
+} from './resolveSpeechPyannoteModelForPolicy';
 import { toSegmentReason, toSegmentSource } from './utils';
 
 const getNative = (): Spec =>
@@ -153,9 +157,15 @@ async function segmentationPolicyForNative(
     out.modelType = resolved.modelType;
     delete out.initMode;
     delete out.customConfig;
+  } else if (isSpeechPyannoteSegmentationPolicy(policy)) {
+    const resolved = await resolveSpeechPyannoteModelForPolicy(
+      policy.modelPath
+    );
+    out.modelPath = resolved.modelPath;
+    out.modelType = resolved.modelType;
   } else if ('modelPath' in policy && policy.modelPath != null) {
     throw new Error(
-      'SEGMENT_INVALID_ARGUMENT: policy.modelPath is only valid for speech_vad_model'
+      'SEGMENT_INVALID_ARGUMENT: policy.modelPath is only valid for speech_vad_model or speech_pyannote_segmentation'
     );
   }
   return out as Object;
@@ -658,6 +668,11 @@ export async function attachSegmentationEngine(
   }
 
   const policy = config.policy ?? resolveDefaultPolicy(domain);
+  if (isSpeechPyannoteSegmentationPolicy(policy)) {
+    throw new Error(
+      'SEGMENTATION_POLICY_INVALID: speech_pyannote_segmentation is offline-only'
+    );
+  }
   const nativePolicy = await segmentationPolicyForNative(policy);
   const attached = await getNative().attachSegmentationEngine(
     bufferId,
@@ -1195,6 +1210,7 @@ export type {
   SegmentationEvaluator,
   SegmentationPolicy,
   NonSpeechVadSegmentationPolicy,
+  SpeechPyannoteSegmentationPolicy,
   SpeechVadModelAuto,
   SpeechVadModelConfig,
   SpeechVadModelCustom,
@@ -1207,6 +1223,10 @@ export {
   speechVadPolicyToModelConfig,
 } from './resolveSpeechVadModelForPolicy';
 export type { VADConcreteModelType } from './resolveSpeechVadModelForPolicy';
+export {
+  isSpeechPyannoteSegmentationPolicy,
+  resolveSpeechPyannoteModelForPolicy,
+} from './resolveSpeechPyannoteModelForPolicy';
 
 export type { SegmentationMode } from './runtime-state';
 

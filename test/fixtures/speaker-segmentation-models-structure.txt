@@ -1,0 +1,43 @@
+# Asset: sherpa-onnx-pyannote-segmentation-3-0.tar.bz2
+# updated_at: 2024-10-08T12:54:10Z
+sherpa-onnx-pyannote-segmentation-3-0/
+sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx
+sherpa-onnx-pyannote-segmentation-3-0/LICENSE
+sherpa-onnx-pyannote-segmentation-3-0/vad-onnx.py
+sherpa-onnx-pyannote-segmentation-3-0/speaker-diarization-torch.py
+sherpa-onnx-pyannote-segmentation-3-0/vad-torch.py
+sherpa-onnx-pyannote-segmentation-3-0/run.sh
+sherpa-onnx-pyannote-segmentation-3-0/README.md
+sherpa-onnx-pyannote-segmentation-3-0/speaker-diarization-onnx.py
+sherpa-onnx-pyannote-segmentation-3-0/model.onnx
+sherpa-onnx-pyannote-segmentation-3-0/show-onnx.py
+sherpa-onnx-pyannote-segmentation-3-0/export-onnx.py
+# Asset: sherpa-onnx-reverb-diarization-v1.tar.bz2
+# updated_at: 2024-12-15T06:16:52Z
+sherpa-onnx-reverb-diarization-v1/
+sherpa-onnx-reverb-diarization-v1/model.int8.onnx
+sherpa-onnx-reverb-diarization-v1/LICENSE
+sherpa-onnx-reverb-diarization-v1/vad-onnx.py
+sherpa-onnx-reverb-diarization-v1/speaker-diarization-torch.py
+sherpa-onnx-reverb-diarization-v1/vad-torch.py
+sherpa-onnx-reverb-diarization-v1/run.sh
+sherpa-onnx-reverb-diarization-v1/README.md
+sherpa-onnx-reverb-diarization-v1/speaker-diarization-onnx.py
+sherpa-onnx-reverb-diarization-v1/model.onnx
+sherpa-onnx-reverb-diarization-v1/show-onnx.py
+sherpa-onnx-reverb-diarization-v1/export-onnx.py
+# Asset: sherpa-onnx-reverb-diarization-v2.tar.bz2
+# updated_at: 2024-12-15T06:50:59Z
+sherpa-onnx-reverb-diarization-v2/
+sherpa-onnx-reverb-diarization-v2/model.int8.onnx
+sherpa-onnx-reverb-diarization-v2/LICENSE
+sherpa-onnx-reverb-diarization-v2/vad-onnx.py
+sherpa-onnx-reverb-diarization-v2/speaker-diarization-torch.py
+sherpa-onnx-reverb-diarization-v2/vad-torch.py
+sherpa-onnx-reverb-diarization-v2/run.sh
+sherpa-onnx-reverb-diarization-v2/README.md
+sherpa-onnx-reverb-diarization-v2/speaker-diarization-onnx.py
+sherpa-onnx-reverb-diarization-v2/sym_shape_infer_temp.onnx
+sherpa-onnx-reverb-diarization-v2/model.onnx
+sherpa-onnx-reverb-diarization-v2/show-onnx.py
+sherpa-onnx-reverb-diarization-v2/export-onnx.py

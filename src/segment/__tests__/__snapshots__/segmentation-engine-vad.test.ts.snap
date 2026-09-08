@@ -1,0 +1,23 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`segmentation engine VAD (speech_vad_model) exposes SegmentationEngineInfo snapshot for VAD-attached engine 1`] = `
+{
+  "attachedBufferId": "live_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "domain": "speech",
+  "engineId": "eng_vad_mock_01",
+  "lastSegmentId": "speech_seg_vad_2",
+  "policy": {
+    "evaluator": "speech_vad_model",
+    "modelPath": {
+      "kind": "fs",
+      "path": "/models/vad/silero_vad.onnx",
+    },
+    "vadMinSilenceMs": 300,
+    "vadMinSpeechMs": 120,
+    "vadThreshold": 0.48,
+  },
+  "segmentBufferId": "seg_live_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  "state": "active",
+  "totalSegmentsCommitted": 2,
+}
+`;

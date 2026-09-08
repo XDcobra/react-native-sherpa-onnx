@@ -14,7 +14,7 @@ export type SttInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (encoder, tokens, …); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
-  preferInt8?: boolean;
+  quantization?: string;
   modelType?: string;
   debug?: boolean;
   hotwordsFile?: string;
@@ -35,6 +35,7 @@ export type OnlineSttInitBridgeOptions = {
   initMode?: string;
   modelDir?: string;
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   enableEndpoint?: boolean;
   decodingMethod?: string;
@@ -65,6 +66,7 @@ export type TtsInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (ttsModel, tokens, …); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   debug?: boolean;
@@ -87,6 +89,7 @@ export type VadInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   sampleRate?: number;
   threshold?: number;
@@ -106,6 +109,7 @@ export type EnhancementInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`); NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -118,6 +122,7 @@ export type SeparationInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (spleeter: vocals/accompaniment; uvr: model). */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -130,10 +135,44 @@ export type SpeakerEmbeddingInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map (`model`). */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
   debug?: boolean;
+};
+
+/** `initializeDiarization(instanceId, options)`. */
+export type DiarizationInitBridgeOptions = {
+  segmentationModel: string;
+  embeddingModel: string;
+  quantization?: string;
+  windowShiftRatio?: number;
+  numClusters?: number;
+  threshold?: number;
+  minDurationOn?: number;
+  minDurationOff?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `diarizeOffline` / `reclusterDiarization`. */
+export type DiarizationProcessNativeResult = {
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+  /**
+   * Timeline in seconds. Returned by `reclusterDiarization`.
+   * Product `diarizeOffline` writes `segmentsOut` natively and may omit this
+   * (prefer `segmentCount`).
+   */
+  segments?: Array<{ start: number; end: number; speaker: number }>;
+  /** Number of segments written to `segmentsOut` (product `diarizeOffline`). */
+  segmentCount?: number;
+  numSpeakers: number;
+  sampleRate: number;
+  speakersPerFrame?: number[];
 };
 
 /** Native result from `initializeSeparation`. */
@@ -152,6 +191,7 @@ export type PunctuationInitBridgeOptions = {
   modelDir?: string;
   /** Resolved path map; NSDictionary / ReadableMap at native boundary. */
   modelPaths?: Object;
+  quantization?: string;
   modelType: string;
   numThreads?: number;
   provider?: string;
@@ -231,7 +271,7 @@ export interface Spec extends TurboModule {
    * @param modelDir - Absolute path to extracted model directory, or empty string for asset-name-only detection.
    * @param assetName - Release asset stem / folder basename (e.g. sherpa-onnx-whisper-tiny); null/empty when scanning modelDir only.
    * @param modelType - Optional: explicit type or 'auto' (default)
-   * @param preferInt8 - Optional: true = prefer int8, false = prefer regular, undefined = try int8 first
+   * @param quantization - Optional: string quantization preference (e.g. 'int8', 'fp16', 'int4', 'fp32', 'auto')
    * @param debug - Optional: enable verbose native logging
    * @returns Object with unified detect fields plus STT-specific `isHardwareSpecificUnsupported`.
    */
@@ -239,7 +279,7 @@ export interface Spec extends TurboModule {
     modelDir: string,
     assetName: string | null,
     modelType?: string | null,
-    preferInt8?: boolean,
+    quantization?: string | null,
     debug?: boolean
   ): Promise<{
     success: boolean;
@@ -948,7 +988,7 @@ export interface Spec extends TurboModule {
 
   appendLiveSegment(
     liveBufferId: string,
-    kind: 'speech' | 'alignment',
+    kind: 'speech' | 'alignment' | 'diarization',
     sourceAudioBufferId: string,
     startSample: number,
     endSample: number,
@@ -963,6 +1003,7 @@ export interface Spec extends TurboModule {
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
      * - kind='alignment': strict alignment payload contract
+     * - kind='diarization': payload.source='diarization', speaker (number)
      */
     payload?: Object
   ): Promise<{ segmentId: string; segmentIndex: number }>;
@@ -1228,7 +1269,8 @@ export interface Spec extends TurboModule {
   detectTtsModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     /** Present when success is false (or native included a message). */
@@ -1367,7 +1409,8 @@ export interface Spec extends TurboModule {
 
   detectAlignmentModel(
     modelDir: string,
-    modelType?: string
+    modelType?: string,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1472,7 +1515,8 @@ export interface Spec extends TurboModule {
   detectEnhancementModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1494,7 +1538,8 @@ export interface Spec extends TurboModule {
   detectSeparationModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     error?: string;
@@ -1517,7 +1562,8 @@ export interface Spec extends TurboModule {
   detectSpeakerEmbeddingModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1532,6 +1578,103 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Speaker diarization segmentation model detection: pyannote / reverb.
+   * Offline only — prefers model.onnx over model.int8.onnx.
+   */
+  detectDiarizationModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+      metadata?: string;
+    };
+  }>;
+
+  initializeDiarization(
+    instanceId: string,
+    options: DiarizationInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    sampleRate?: number;
+  }>;
+
+  diarizeOffline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentsOutBufferId: string,
+    includeOverlap?: boolean
+  ): Promise<DiarizationProcessNativeResult>;
+
+  reclusterDiarization(
+    instanceId: string,
+    numClusters: number,
+    threshold: number
+  ): Promise<DiarizationProcessNativeResult>;
+
+  getDiarizationClusterEmbeddings(
+    instanceId: string
+  ): Promise<Array<{ speaker: number; embedding: number[] }>>;
+
+  cancelDiarization(instanceId: string): Promise<void>;
+
+  unloadDiarization(instanceId: string): Promise<void>;
+
+  initializeStreamingDiarization(
+    instanceId: string,
+    options: Object
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    sampleRate?: number;
+    maxSpeakers?: number;
+    feedSamples?: number;
+    strideSamples?: number;
+    latencySeconds?: number;
+  }>;
+
+  startStreamingDiarizationPipeline(
+    instanceId: string,
+    audioInBufferId: string,
+    segmentsOutBufferId: string,
+    options?: Object
+  ): Promise<{ pipelineId: string }>;
+
+  feedStreamingDiarization(
+    instanceId: string,
+    audioInBufferId: string
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    segments?: Array<{ start: number; end: number; speaker: number }>;
+  }>;
+
+  flushStreamingDiarization(instanceId: string): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    segments?: Array<{ start: number; end: number; speaker: number }>;
+  }>;
+
+  resetStreamingDiarization(instanceId: string): Promise<void>;
+
+  releaseStreamingDiarization(instanceId: string): Promise<void>;
+
   initializeSpeakerEmbeddingExtractor(
     instanceId: string,
     options: SpeakerEmbeddingInitBridgeOptions
@@ -1544,8 +1687,67 @@ export interface Spec extends TurboModule {
 
   computeSpeakerEmbeddingOffline(
     instanceId: string,
-    audioBufferId: string
+    audioBufferId: string,
+    startSample?: number | null,
+    endSample?: number | null
   ): Promise<{ embedding: number[] }>;
+
+  /**
+   * Compute embedding from an offline buffer (optional range) and search the
+   * manager in one native call. Empty `name` means no match above threshold.
+   */
+  identifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ name: string }>;
+
+  /**
+   * Compute embedding from an offline buffer (optional range) and verify against
+   * a named enrollment in one native call.
+   */
+  verifySpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    audioBufferId: string,
+    name: string,
+    threshold: number,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<{ ok: boolean }>;
+
+  /**
+   * Compute embeddings from one or more offline buffers (optional per-item ranges)
+   * and `manager.add` in one native call. Returns flattened embeddings (`dim * count`)
+   * for the JS enrollment mirror only — not for a second add roundtrip.
+   */
+  enrollSpeakerOffline(
+    instanceId: string,
+    managerId: string,
+    name: string,
+    audioBufferIds: string[],
+    startSamples?: Array<number | null> | null,
+    endSamples?: Array<number | null> | null
+  ): Promise<{ ok: boolean; embeddings: number[] }>;
+
+  /**
+   * Start a live-offline Speaker Identification pipeline.
+   * Labels committed speech spans into a live segment buffer (payload.source = sid).
+   */
+  startSpeakerIdentificationOfflineLivePipeline(
+    instanceId: string,
+    managerId: string,
+    audioInLiveBufferId: string,
+    segmentsOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      threshold: number;
+    }
+  ): Promise<{ pipelineId: string }>;
 
   unloadSpeakerEmbeddingExtractor(instanceId: string): Promise<void>;
 
@@ -1626,7 +1828,8 @@ export interface Spec extends TurboModule {
   detectVadModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1648,7 +1851,8 @@ export interface Spec extends TurboModule {
   detectPunctuationModel(
     modelDir: string,
     assetName: string | null,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<{
     success: boolean;
     isStreaming?: boolean;
@@ -1671,7 +1875,8 @@ export interface Spec extends TurboModule {
    */
   detectModel(
     modelDir: string,
-    assetName: string | null
+    assetName: string | null,
+    quantization?: string | null
   ): Promise<UnifiedDetectNativeResult>;
 
   /** Batch unified detection; one native round-trip for all inputs. */
@@ -1679,6 +1884,7 @@ export interface Spec extends TurboModule {
     inputs: ReadonlyArray<{
       modelDir?: string;
       assetName?: string | null;
+      quantization?: string | null;
     }>
   ): Promise<UnifiedDetectNativeResult[]>;
 
@@ -2235,4 +2441,22 @@ export interface Spec extends TurboModule {
   removeListeners(count: number): void;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+let SherpaOnnxModule: Spec;
+try {
+  SherpaOnnxModule = TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
+} catch {
+  SherpaOnnxModule = new Proxy({} as Spec, {
+    get(_target, prop) {
+      if (prop === 'then') return undefined;
+      return () => {
+        throw new Error(
+          `[SherpaOnnx] Native module method '${String(
+            prop
+          )}' called, but native module 'SherpaOnnx' is not available in this environment.`
+        );
+      };
+    },
+  });
+}
+
+export default SherpaOnnxModule;

@@ -1,0 +1,2 @@
+id;onnx_url;license;license_type;commercial_use;metadata
+diar_streaming_sortformer_4spk-v2.1;https://huggingface.co/Scrybl/diar_streaming_sortformer_4spk-v2.1/resolve/main/diar_streaming_sortformer_4spk-v2.1.onnx;https://huggingface.co/nvidia/NV-KERMT-70M-v2/raw/main/LICENSE;nvidia-open-model-license;yes;metadata/diar_streaming_sortformer_4spk-v2.1.json

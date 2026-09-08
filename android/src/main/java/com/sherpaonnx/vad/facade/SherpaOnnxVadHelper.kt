@@ -25,7 +25,8 @@ class SherpaOnnxVadHelper(
   private val nativeDetectVadModel: (
     modelDir: String?,
     assetName: String?,
-    modelType: String
+    modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?
 ) {
   private val instances = ConcurrentHashMap<String, VadInstanceConfig>()
@@ -67,10 +68,11 @@ class SherpaOnnxVadHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise
   ) {
     try {
-      val result = nativeDetectVadModel(modelDir, assetName, modelType ?: "auto")
+      val result = nativeDetectVadModel(modelDir, assetName, modelType ?: "auto", quantization)
       if (result == null) {
         promise.reject(VadErrorCodes.INTERNAL_ERROR, "VAD model detection returned null")
         return
@@ -195,7 +197,7 @@ class SherpaOnnxVadHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val detect = nativeDetectVadModel(modelDir, null, parsed.modelType)
+    val detect = nativeDetectVadModel(modelDir, null, parsed.modelType, parsed.quantization)
     val ok = detect?.get("success") as? Boolean ?: false
     if (!ok) {
       val reason = detect?.get("error") as? String ?: "Failed to detect VAD model"

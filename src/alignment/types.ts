@@ -1,4 +1,5 @@
 import type { FileSource } from '../fileio/types';
+import type { QuantizationPreference } from '../download/types';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
@@ -18,6 +19,7 @@ export type AlignmentConcreteModelType = 'wav2vec2';
 export type AlignmentAccurateModelAuto = {
   initMode?: 'auto';
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
 };
 
 export type AlignmentAccurateModelCustom = {

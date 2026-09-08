@@ -653,6 +653,12 @@ export default function VADScreen() {
                     kind: 'alignment',
                     ...(event.payload ? { payload: event.payload } : {}),
                   }
+                : event.kind === 'diarization'
+                ? {
+                    ...base,
+                    kind: 'diarization',
+                    ...(event.payload ? { payload: event.payload } : {}),
+                  }
                 : {
                     ...base,
                     kind: 'speech',

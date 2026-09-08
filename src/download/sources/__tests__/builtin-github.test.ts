@@ -32,6 +32,17 @@ jest.mock('../../../detect', () => {
             isStreaming: false,
           };
         }
+        if (input.assetName.includes('sortformer')) {
+          return {
+            matched: true,
+            category: 'diarization',
+            modelType: 'sortformer',
+            languages: [],
+            quantization: 'unknown',
+            sizeTier: 'unknown',
+            isStreaming: true,
+          };
+        }
         return { matched: false };
       })
     ),
@@ -49,7 +60,7 @@ describe('builtin github providers', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
-    jest.resetAllMocks();
+    jest.clearAllMocks();
   });
 
   it('maps GitHub release assets to source models', async () => {
@@ -134,8 +145,77 @@ describe('builtin github providers', () => {
     expect(
       githubXdcobraProvider.supportsCategory(ModelCategory.Alignment)
     ).toBe(true);
+    expect(
+      githubXdcobraProvider.supportsCategory(ModelCategory.Diarization)
+    ).toBe(true);
     expect(githubXdcobraProvider.supportsCategory(ModelCategory.Tts)).toBe(
       false
+    );
+  });
+
+  it('lists diarization models from XDcobra release tag and fetches checksums', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          assets: [
+            {
+              name: 'diar_streaming_sortformer_4spk-v2.1.tar.bz2',
+              size: 789,
+              browser_download_url:
+                'https://example.invalid/diar_streaming_sortformer_4spk-v2.1.tar.bz2',
+              digest:
+                'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          'diar_streaming_sortformer_4spk-v2.1.tar.bz2 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n',
+      });
+
+    global.fetch = fetchMock as typeof fetch;
+
+    const ctx = buildSourceFetchContext(
+      githubXdcobraProvider.id,
+      githubXdcobraProvider
+    );
+
+    const models = await githubXdcobraProvider.listModels(
+      ModelCategory.Diarization,
+      ctx
+    );
+    const checksums = await githubXdcobraProvider.getChecksums?.(
+      ModelCategory.Diarization,
+      ctx
+    );
+
+    expect(models).toHaveLength(1);
+    const sortformer = models[0];
+    expect(sortformer?.id).toBe('diar_streaming_sortformer_4spk-v2.1');
+    expect(sortformer?.layout.kind).toBe('archive');
+    expect(sortformer?.modelType).toBe('sortformer');
+    expect(sortformer?.isStreaming).toBe(true);
+    expect(sortformer?.assets[0]?.relativePath).toBe(
+      'diar_streaming_sortformer_4spk-v2.1.tar.bz2'
+    );
+
+    expect(checksums?.get('diar_streaming_sortformer_4spk-v2.1.tar.bz2')).toBe(
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/releases/tags/diarization-models'),
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '/releases/download/diarization-models/checksum.txt'
+      ),
+      expect.any(Object)
     );
   });
 });

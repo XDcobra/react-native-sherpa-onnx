@@ -49,6 +49,9 @@ export async function buildEnhancementInitBridgeOptions(
     initMode: 'auto',
     modelDir,
     modelType: autoOptions.modelType ?? 'auto',
+    ...(autoOptions.quantization !== undefined
+      ? { quantization: autoOptions.quantization }
+      : {}),
     ...sharedFields,
   };
 }

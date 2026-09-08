@@ -32,6 +32,8 @@ import type {
   SpeechSegmentPayload,
   SpeechSegmentMeta,
   AlignmentSegmentMeta,
+  DiarizationSegmentPayload,
+  DiarizationSegmentMeta,
   SegmentBufferSpoolingMode,
 } from './types';
 
@@ -40,7 +42,11 @@ const getNative = (): Spec =>
 
 const SEGMENT_BUFFER_ID_PATTERN =
   /^(seg_off|seg_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const SEGMENT_KIND_VALUES = new Set<SegmentKind>(['speech', 'alignment']);
+const SEGMENT_KIND_VALUES = new Set<SegmentKind>([
+  'speech',
+  'alignment',
+  'diarization',
+]);
 const ALIGNMENT_TIMING_MODE_VALUES = new Set<AlignmentTimingMode>([
   'proportional',
   'estimated',
@@ -66,6 +72,7 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'stt',
   'tts',
   'sid',
+  'pyannote',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
@@ -75,6 +82,7 @@ const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
   tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
   sid: new Set(['source', 'speakerName']),
+  pyannote: new Set(['source']),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -96,7 +104,7 @@ function assertValidSegmentKind(
   throw new Error(
     `${
       PipelineSegmentErrorCode.INVALID_ARGUMENT
-    }: ${sourceName} must be one of "speech" or "alignment"; received "${String(
+    }: ${sourceName} must be one of "speech", "alignment", or "diarization"; received "${String(
       value
     )}".`
   );
@@ -204,7 +212,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -282,8 +290,7 @@ function assertSpeechPayload(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.isFinalChunk must be a boolean when provided.`
       );
     }
-  } else {
-    // sid
+  } else if (typedSource === 'sid') {
     if (!Object.prototype.hasOwnProperty.call(obj, 'speakerName')) {
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speakerName is required for speech source "sid" (string or null).`
@@ -295,12 +302,16 @@ function assertSpeechPayload(
       );
     }
   }
+  // pyannote: source-only payload
   return obj as unknown as SpeechSegmentPayload;
 }
 
 function assertValidSegmentInput(segment: SegmentInput): {
   kind: SegmentKind;
-  payload?: SpeechSegmentPayload | AlignmentSegmentPayload;
+  payload?:
+    | SpeechSegmentPayload
+    | AlignmentSegmentPayload
+    | DiarizationSegmentPayload;
 } {
   const kind = assertValidSegmentKind(segment.kind ?? 'speech', 'segment.kind');
   if (kind === 'alignment') {
@@ -309,12 +320,44 @@ function assertValidSegmentInput(segment: SegmentInput): {
       payload: assertAlignmentPayload(segment.payload, 'segment.payload'),
     };
   }
+  if (kind === 'diarization') {
+    return {
+      kind,
+      payload: assertDiarizationPayload(segment.payload, 'segment.payload'),
+    };
+  }
   return {
     kind,
     payload:
       segment.payload === undefined
         ? undefined
         : assertSpeechPayload(segment.payload, 'segment.payload'),
+  };
+}
+
+function assertDiarizationPayload(
+  value: unknown,
+  sourceName: string
+): DiarizationSegmentPayload {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName} must be an object for kind "diarization".`
+    );
+  }
+  const obj = value as Record<string, unknown>;
+  if (obj.source !== 'diarization') {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be "diarization".`
+    );
+  }
+  if (typeof obj.speaker !== 'number' || !Number.isFinite(obj.speaker)) {
+    throw new Error(
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speaker must be a finite number.`
+    );
+  }
+  return {
+    source: 'diarization',
+    speaker: Math.trunc(obj.speaker),
   };
 }
 
@@ -509,8 +552,17 @@ function ensureLiveSegmentEventSubscriptions(): void {
         if (!segmentBufferId) return;
         const cbs = segmentAppendedCallbacks.get(segmentBufferId);
         if (!cbs || cbs.size === 0) return;
+        let candidateKind = raw.kind;
+        if (!candidateKind && raw.payload && typeof raw.payload === 'object') {
+          const src = (raw.payload as Record<string, unknown>).source;
+          if (src === 'diarization') {
+            candidateKind = 'diarization';
+          } else if (src === 'alignment') {
+            candidateKind = 'alignment';
+          }
+        }
         const eventKind = assertValidSegmentKind(
-          raw.kind ?? 'speech',
+          candidateKind ?? 'speech',
           'event.kind'
         );
         const segmentIndexTrunc =
@@ -551,6 +603,19 @@ function ensureLiveSegmentEventSubscriptions(): void {
                 ...(raw.payload !== undefined
                   ? {
                       payload: assertAlignmentPayload(
+                        raw.payload,
+                        'event.payload'
+                      ),
+                    }
+                  : {}),
+              }
+            : eventKind === 'diarization'
+            ? {
+                ...eventBase,
+                kind: 'diarization',
+                ...(raw.payload !== undefined
+                  ? {
+                      payload: assertDiarizationPayload(
                         raw.payload,
                         'event.payload'
                       ),
@@ -635,6 +700,21 @@ function registerLiveSegmentBufferCallbacks(
       }
     }
   };
+}
+
+/**
+ * Subscribe to live segment-buffer events without creating a new buffer.
+ * Used by SID live `onLabeled` (native worker → segmentAppended → JS).
+ */
+export function subscribeLiveSegmentBufferEvents(
+  liveBufferId: LiveSegmentBufferIdSource,
+  callbacks: {
+    onSegmentAppended?: (event: LiveSegmentBufferSegmentAppendedEvent) => void;
+    onError?: (event: LiveSegmentBufferErrorEvent) => void;
+  }
+): () => void {
+  const id = resolveLiveSegmentBufferId(liveBufferId);
+  return registerLiveSegmentBufferCallbacks(id, callbacks);
 }
 
 export async function createLiveSegmentBuffer(
@@ -829,6 +909,16 @@ export async function getOfflineSegmentBufferSegments(
         ...(payload !== undefined ? { payload } : {}),
       } as AlignmentSegmentMeta;
     }
+    if (kind === 'diarization') {
+      const payload =
+        segment.payload != null
+          ? assertDiarizationPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as DiarizationSegmentMeta;
+    }
     const payload =
       segment.payload != null
         ? assertSpeechPayload(segment.payload, 'segment.payload')
@@ -887,6 +977,16 @@ export async function getLiveSegmentBufferSegments(
         ...(payload !== undefined ? { payload } : {}),
       } as AlignmentSegmentMeta;
     }
+    if (kind === 'diarization') {
+      const payload =
+        segment.payload != null
+          ? assertDiarizationPayload(segment.payload, 'segment.payload')
+          : undefined;
+      return {
+        ...base,
+        ...(payload !== undefined ? { payload } : {}),
+      } as DiarizationSegmentMeta;
+    }
     const payload =
       segment.payload != null
         ? assertSpeechPayload(segment.payload, 'segment.payload')
@@ -916,9 +1016,14 @@ export type {
   AlignmentTimingMode,
   AlignmentGranularity,
   AlignmentSegmentPayload,
+  DiarizationSegmentMeta,
+  DiarizationSegmentPayload,
+  DiarizationSegmentInput,
   SpeechSegmentPayload,
   SpeechSegmentPayloadSource,
   SidSpeechSegmentPayload,
+  PyannoteSpeechSegmentPayload,
+  VadSpeechSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,
   SegmentMeta,

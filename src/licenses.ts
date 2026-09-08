@@ -20,6 +20,10 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     'model_licenses/speech-enhancement-models-license-status.csv';
   const speakerEmbeddingPath =
     'model_licenses/speaker-recongition-models-license-status.csv';
+  const diarizationPath =
+    'model_licenses/speaker-segmentation-models-license-status.csv';
+  const diarizationModelsPath =
+    'model_licenses/diarization-models-license-status.csv';
 
   const results = await Promise.allSettled([
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
@@ -29,6 +33,8 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(alignmentPath),
     SherpaOnnx.readAssetFileAsUtf8(speechEnhancementPath),
     SherpaOnnx.readAssetFileAsUtf8(speakerEmbeddingPath),
+    SherpaOnnx.readAssetFileAsUtf8(diarizationPath),
+    SherpaOnnx.readAssetFileAsUtf8(diarizationModelsPath),
   ]);
 
   const [
@@ -39,6 +45,8 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     alignmentResult,
     enhancementResult,
     speakerEmbeddingResult,
+    diarizationResult,
+    diarizationModelsResult,
   ] = results;
 
   const licenses: ModelLicense[] = [];
@@ -96,6 +104,22 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load speaker embedding model licenses: ${speakerEmbeddingResult.reason}`
+    );
+  }
+
+  if (diarizationResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(diarizationResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load speaker segmentation model licenses: ${diarizationResult.reason}`
+    );
+  }
+
+  if (diarizationModelsResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(diarizationModelsResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load diarization model licenses: ${diarizationModelsResult.reason}`
     );
   }
 

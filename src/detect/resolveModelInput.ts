@@ -44,7 +44,23 @@ function deriveAssetName(raw: string | undefined | null): string | null {
     .replace(/\.tar\.bz2$/i, '')
     .replace(/\.tar\.gz$/i, '')
     .replace(/\.tgz$/i, '')
-    .replace(/\.zip$/i, '');
+    .replace(/\.zip$/i, '')
+    .replace(/\.onnx$/i, '')
+    .replace(/\.ort$/i, '');
+}
+
+function isDirectModelFilePath(path: string): boolean {
+  const lower = path.trim().toLowerCase();
+  return lower.endsWith('.onnx') || lower.endsWith('.ort');
+}
+
+function getDirectoryOfPath(filePath: string): string {
+  const normalized = filePath.trim().replace(/\\/g, '/');
+  const lastSlash = normalized.lastIndexOf('/');
+  if (lastSlash <= 0) {
+    return normalized.startsWith('/') ? '/' : '.';
+  }
+  return normalized.slice(0, lastSlash);
 }
 
 function deriveAssetNameFromUri(uri: string): string | null {
@@ -388,6 +404,12 @@ async function resolveConcreteFileSourceForDetect(
 ): Promise<ResolvedDetectInput> {
   switch (source.kind) {
     case 'fs': {
+      if (isDirectModelFilePath(source.path)) {
+        return {
+          modelDir: getDirectoryOfPath(source.path),
+          assetName: deriveAssetName(source.path),
+        };
+      }
       const modelDir = await resolveActualModelDir(source.path);
       return { modelDir, assetName: deriveAssetName(source.path) };
     }
@@ -407,6 +429,12 @@ async function resolveConcreteFileSourceForDetect(
         const resolvedAssetPath = await resolveBundledRelativePath(
           safeRelativePath
         );
+        if (isDirectModelFilePath(resolvedAssetPath)) {
+          return {
+            modelDir: getDirectoryOfPath(resolvedAssetPath),
+            assetName: deriveAssetName(source.path),
+          };
+        }
         const modelDir = await resolveActualModelDir(resolvedAssetPath);
         return { modelDir, assetName: deriveAssetName(source.path) };
       }
@@ -420,11 +448,23 @@ async function resolveConcreteFileSourceForDetect(
         const resolvedAssetPath = await resolveBundledRelativePath(
           safeRelativePath
         );
+        if (isDirectModelFilePath(resolvedAssetPath)) {
+          return {
+            modelDir: getDirectoryOfPath(resolvedAssetPath),
+            assetName: deriveAssetName(source.path),
+          };
+        }
         const modelDir = await resolveActualModelDir(resolvedAssetPath);
         return { modelDir, assetName: deriveAssetName(source.path) };
       }
       const baseDir = await SherpaOnnx.resolveAppBaseDir(source.base);
       const fullPath = joinBaseAndRelativePath(baseDir, safeRelativePath);
+      if (isDirectModelFilePath(fullPath)) {
+        return {
+          modelDir: getDirectoryOfPath(fullPath),
+          assetName: deriveAssetName(source.path),
+        };
+      }
       const modelDir = await resolveActualModelDir(fullPath);
       return { modelDir, assetName: deriveAssetName(source.path) };
     }
@@ -448,6 +488,12 @@ async function resolveConcreteFileSourceForDetect(
         );
       }
       const fullPath = joinBaseAndRelativePath(packPath, safeRelativePath);
+      if (isDirectModelFilePath(fullPath)) {
+        return {
+          modelDir: getDirectoryOfPath(fullPath),
+          assetName: deriveAssetName(source.path),
+        };
+      }
       const modelDir = await resolveActualModelDir(fullPath);
       return { modelDir, assetName: deriveAssetName(source.path) };
     }
@@ -529,6 +575,11 @@ export async function resolveFileSourceForModelInit(
       FileIOErrorCode.UNSUPPORTED_ON_PLATFORM,
       `Model initialization does not support source kind '${source.kind}'. Use a directory-backed source such as 'fs', 'app', or 'pad'.`
     );
+  }
+
+  // If source is a direct file path (e.g. fs: '/path/to/model.onnx'), resolve to the file itself
+  if (source.kind === 'fs' && isDirectModelFilePath(source.path)) {
+    return source.path.trim();
   }
 
   const resolved = await resolveFileSourceForDetect(source);

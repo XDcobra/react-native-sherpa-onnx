@@ -50,7 +50,13 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diagnostic/NativeDiagnosticIOS.mm",
     # Shared separation inference core. JNI bridge excluded below.
     "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.cpp",
-    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h"
+    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h",
+    # Shared diarization core (decomposed pyannote + clustering; embedding via speaker-embedding/).
+    "android/src/main/cpp/diarization/*.cpp",
+    "android/src/main/cpp/diarization/*.h",
+    # Shared speaker-embedding core (C-API runner + manager + SID facade).
+    "android/src/main/cpp/speaker-embedding/*.cpp",
+    "android/src/main/cpp/speaker-embedding/*.h"
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -66,7 +72,9 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/audio/audio_encode_jni.cpp",
     "android/src/main/cpp/jni/diagnostic/NativeDiagnosticAndroid.cpp",
     "android/src/main/cpp/jni/diagnostic/native_diagnostic_jni.cpp",
-    "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp"
+    "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp",
+    "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp",
+    "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -78,7 +86,24 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
     "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
     "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h",
-    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h"
+    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h",
+    "android/src/main/cpp/diarization/sherpa-onnx-diarization-wrapper.h",
+    "android/src/main/cpp/diarization/sherpa-onnx-streaming-diarization-wrapper.h",
+    "android/src/main/cpp/diarization/sortformer-fbank.h",
+    "android/src/main/cpp/diarization/sortformer-post-processor.h",
+    "android/src/main/cpp/diarization/sortformer-streaming-model.h",
+    "android/src/main/cpp/diarization/streaming-diarizer-interface.h",
+    "android/src/main/cpp/diarization/diarization-types.h",
+    "android/src/main/cpp/diarization/powerset.h",
+    "android/src/main/cpp/diarization/pyannote-segmentation-model.h",
+    "android/src/main/cpp/diarization/speaker-timeline.h",
+    "android/src/main/cpp/diarization/agglomerative-clustering.h",
+    "android/src/main/cpp/diarization/diarization-session.h",
+    "android/src/main/cpp/speaker-embedding/speaker-embedding-types.h",
+    "android/src/main/cpp/speaker-embedding/speaker-embedding-registry-key.h",
+    "android/src/main/cpp/speaker-embedding/speaker-embedding-runner.h",
+    "android/src/main/cpp/speaker-embedding/speaker-embedding-manager.h",
+    "android/src/main/cpp/speaker-embedding/sherpa-onnx-speaker-embedding-wrapper.h"
   ]
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
@@ -147,7 +172,11 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/enhancement\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/separation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/speaker\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/diarization\"",
     "\"#{pod_root}/android/src/main/cpp/separation\"",
+    "\"#{pod_root}/android/src/main/cpp/diarization\"",
+    "\"#{pod_root}/android/src/main/cpp/speaker-embedding\"",
+    "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
@@ -161,7 +190,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/enhancement\"",
     "\"#{pod_root}/ios/separation\"",
     "\"#{pod_root}/ios/speaker-embedding\"",
-    "\"#{pod_root}/ios/speaker-embedding/native\"",
+    "\"#{pod_root}/ios/diarization\"",
     "\"#{pod_root}/ios/punctuation\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""

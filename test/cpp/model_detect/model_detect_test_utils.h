@@ -21,6 +21,7 @@ enum class TtsModelKind;
 enum class EnhancementModelKind;
 enum class SeparationModelKind;
 enum class SpeakerEmbeddingModelKind;
+enum class DiarizationModelKind;
 enum class PunctuationModelKind;
 enum class VadModelKind;
 }
@@ -61,10 +62,12 @@ std::string TtsKindToString(sherpaonnx::TtsModelKind kind);
 sherpaonnx::EnhancementModelKind EnhancementKindFromString(const std::string& modelType);
 sherpaonnx::SeparationModelKind SeparationKindFromString(const std::string& modelType);
 sherpaonnx::SpeakerEmbeddingModelKind SpeakerEmbeddingKindFromString(const std::string& modelType);
+sherpaonnx::DiarizationModelKind DiarizationKindFromString(const std::string& modelType);
 
 std::string EnhancementKindToString(sherpaonnx::EnhancementModelKind kind);
 std::string SeparationKindToString(sherpaonnx::SeparationModelKind kind);
 std::string SpeakerEmbeddingKindToString(sherpaonnx::SpeakerEmbeddingModelKind kind);
+std::string DiarizationKindToString(sherpaonnx::DiarizationModelKind kind);
 
 sherpaonnx::VadModelKind VadKindFromString(const std::string& modelType);
 

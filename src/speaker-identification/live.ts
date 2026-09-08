@@ -1,10 +1,5 @@
-import {
-  createOfflineAudioBufferFromSamples,
-  getLiveAudioBufferSamplesSlice,
-  getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
-  resolvePipelineAudioBufferId,
-} from '../audiobuffer';
+import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import type {
   LiveAudioBufferIdSource,
   LiveAudioBufferRef,
@@ -15,34 +10,34 @@ import type {
   StreamingPipelineStatus,
 } from '../audiobuffer/streamingPipelineTypes';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
+import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   attachSegmentationEngine,
   detachSegmentationEngine,
   getSegmentationEngineInfo,
 } from '../segment';
 import {
-  appendLiveSegment,
   finalizeLiveSegmentBuffer,
-  getLiveSegmentBufferSegmentCount,
-  getLiveSegmentBufferSegments,
   resolveLiveSegmentBufferId,
+  subscribeLiveSegmentBufferEvents,
 } from '../segmentbuffer';
 import type {
   LiveSegmentBufferIdSource,
   LiveSegmentBufferRef,
-  SegmentMeta,
+  LiveSegmentBufferSegmentAppendedEvent,
+  SidSpeechSegmentPayload,
 } from '../segmentbuffer/types';
 import type {
   SpeakerEmbeddingEngine,
   SpeakerEmbeddingManager,
 } from '../speaker-embedding/types';
 import type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
-import type { SpeakerIdentificationLiveLabelOptions } from './types';
+import type {
+  SidLiveLabeledSegmentEvent,
+  SpeakerIdentificationLiveLabelOptions,
+} from './types';
 
 const DEFAULT_THRESHOLD = 0.5;
-const POLL_INTERVAL_MS = 50;
-
-let sidLivePipelineCounter = 0;
 
 function resolveThreshold(
   options?: SpeakerIdentificationLiveLabelOptions
@@ -93,55 +88,96 @@ export function isLiveSegmentSource(
   return false;
 }
 
-function spanDurationMs(span: SegmentMeta): number {
+function mapAppendedEventToLabeled(
+  event: LiveSegmentBufferSegmentAppendedEvent
+): SidLiveLabeledSegmentEvent | null {
+  if (event.kind !== 'speech') return null;
+  const payload = event.payload as SidSpeechSegmentPayload | undefined;
+  if (payload?.source !== 'sid') return null;
+
+  const labeled: SidLiveLabeledSegmentEvent = {
+    segmentIndex: event.segmentIndex,
+    startSample: event.startSample,
+    endSample: event.endSample,
+    sampleRate: event.sampleRate,
+    durationMs: event.durationMs,
+    speakerName: payload.speakerName,
+  };
   if (
-    typeof span.durationMs === 'number' &&
-    Number.isFinite(span.durationMs) &&
-    span.durationMs > 0
+    typeof event.confidence === 'number' &&
+    Number.isFinite(event.confidence)
   ) {
-    return span.durationMs;
+    labeled.confidence = event.confidence;
   }
-  const sampleRate = span.sampleRate;
-  if (sampleRate > 0) {
-    return Math.round(
-      ((span.endSample - span.startSample) * 1000) / sampleRate
+  return labeled;
+}
+
+function createSidPipelineHandle(
+  instanceId: string,
+  pipelineId: string,
+  attachedEngineId: string,
+  segmentsOutId: string,
+  onLabeled?: (event: SidLiveLabeledSegmentEvent) => void
+): SpeakerIdentificationPipelineHandle {
+  let unsubEvents: (() => void) | null = null;
+  if (onLabeled) {
+    unsubEvents = subscribeLiveSegmentBufferEvents(segmentsOutId, {
+      onSegmentAppended: (event) => {
+        const labeled = mapAppendedEventToLabeled(event);
+        if (labeled) onLabeled(labeled);
+      },
+    });
+  }
+
+  let cleanedUp = false;
+  const cleanup = async (flushFinal: boolean): Promise<void> => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    unsubEvents?.();
+    unsubEvents = null;
+    await detachSegmentationEngine(attachedEngineId, { flushFinal }).catch(
+      () => undefined
     );
-  }
-  return 0;
-}
+    await finalizeLiveSegmentBuffer(segmentsOutId).catch(() => undefined);
+  };
 
-function isNonEmptySpeechSpan(seg: SegmentMeta): boolean {
-  return (
-    seg.kind === 'speech' &&
-    Number.isFinite(seg.startSample) &&
-    Number.isFinite(seg.endSample) &&
-    seg.endSample > seg.startSample
+  const rawCompleted = createStreamingPipelineCompletionPromise(pipelineId);
+  const completed: Promise<StreamingPipelineCompletion> = rawCompleted.then(
+    async (completion) => {
+      await cleanup(completion.reason !== 'error');
+      return completion;
+    },
+    async (err) => {
+      await cleanup(false);
+      throw err;
+    }
   );
-}
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return {
+    instanceId,
+    pipelineId,
+    completed,
+    async stop(): Promise<void> {
+      await SherpaOnnx.stopStreamingPipeline(pipelineId);
+      await completed.catch(() => undefined);
+    },
+    async flush(): Promise<void> {
+      await SherpaOnnx.flushStreamingPipeline(pipelineId);
+    },
+    async reset(): Promise<void> {
+      await SherpaOnnx.resetStreamingPipeline(pipelineId);
+    },
+    async getStatus(): Promise<StreamingPipelineStatus> {
+      return SherpaOnnx.getStreamingPipelineStatus(pipelineId);
+    },
+  };
 }
-
-type PipelineState = {
-  isRunning: boolean;
-  chunksProcessed: number;
-  unitsRead: number;
-  unitsWritten: number;
-  error: string | null;
-  cursor: number;
-  segmentIndex: number;
-  stopRequested: boolean;
-  inputFinishedSeen: boolean;
-  finalizedOut: boolean;
-  detached: boolean;
-};
 
 /**
  * Live overload for SID: attach speech segmentation to `audioIn`, label each
- * committed utterance into `segmentsOut`, return a pipeline handle.
+ * committed utterance into `segmentsOut` via a native OfflineLivePipelineWorker.
  *
- * Maintainer note: JS orchestration — see docs/internal/live-overload.md §11.
+ * Maintainer note: native drain — see docs/internal/live-overload.md §11.
  */
 export async function labelLiveSegments(
   embeddingEngine: SpeakerEmbeddingEngine,
@@ -171,7 +207,6 @@ export async function labelLiveSegments(
   );
   const segmentsOutId = resolveLiveSegmentBufferId(segmentsOut);
   const threshold = resolveThreshold(options);
-  const pipelineId = `sid_live_${++sidLivePipelineCounter}`;
 
   const attached = await attachSegmentationEngine(
     audioIn as PipelineAudioBufferIdSource,
@@ -188,8 +223,8 @@ export async function labelLiveSegments(
     throw err;
   }
 
-  const internalSegBufId = engineInfo.segmentBufferId;
-  if (!internalSegBufId) {
+  const segmentLiveBufferId = engineInfo.segmentBufferId;
+  if (!segmentLiveBufferId) {
     await detachSegmentationEngine(attached.engineId, {
       flushFinal: false,
     }).catch(() => undefined);
@@ -198,258 +233,33 @@ export async function labelLiveSegments(
     );
   }
 
-  const state: PipelineState = {
-    isRunning: true,
-    chunksProcessed: 0,
-    unitsRead: 0,
-    unitsWritten: 0,
-    error: null,
-    cursor: 0,
-    segmentIndex: 0,
-    stopRequested: false,
-    inputFinishedSeen: false,
-    finalizedOut: false,
-    detached: false,
-  };
-
-  let settleCompletion: ((value: StreamingPipelineCompletion) => void) | null =
-    null;
-  let rejectCompletion: ((reason?: unknown) => void) | null = null;
-  let settled = false;
-
-  const completed = new Promise<StreamingPipelineCompletion>(
-    (resolve, reject) => {
-      settleCompletion = resolve;
-      rejectCompletion = reject;
-    }
-  );
-
-  const toCompletion = (
-    reason: StreamingPipelineCompletion['reason']
-  ): StreamingPipelineCompletion => ({
-    pipelineId,
-    reason,
-    chunksProcessed: state.chunksProcessed,
-    unitsRead: state.unitsRead,
-    unitsWritten: state.unitsWritten,
-    error: state.error,
-  });
-
-  const settle = (reason: StreamingPipelineCompletion['reason']): void => {
-    if (settled) return;
-    settled = true;
-    state.isRunning = false;
-    const completion = toCompletion(reason);
-    if (reason === 'error') {
-      const error = Object.assign(
-        new Error(
-          state.error ??
-            `Speaker identification live pipeline ${pipelineId} failed`
-        ),
+  let pipelineId: string;
+  try {
+    const result =
+      await SherpaOnnx.startSpeakerIdentificationOfflineLivePipeline(
+        embeddingEngine.instanceId,
+        manager.managerId,
+        audioInId,
+        segmentsOutId,
         {
-          code: 'STREAMING_PIPELINE_ERROR',
-          completion,
+          attachedSegmentationEngineId: attached.engineId,
+          segmentLiveBufferId,
+          threshold,
         }
       );
-      rejectCompletion?.(error);
-    } else {
-      settleCompletion?.(completion);
-    }
-  };
+    pipelineId = result.pipelineId;
+  } catch (err) {
+    await detachSegmentationEngine(attached.engineId, {
+      flushFinal: false,
+    }).catch(() => undefined);
+    throw err;
+  }
 
-  const detachIfNeeded = async (flushFinal: boolean): Promise<void> => {
-    if (state.detached) return;
-    state.detached = true;
-    await detachSegmentationEngine(attached.engineId, { flushFinal }).catch(
-      () => undefined
-    );
-  };
-
-  const finalizeOutIfNeeded = async (): Promise<void> => {
-    if (state.finalizedOut) return;
-    state.finalizedOut = true;
-    await finalizeLiveSegmentBuffer(segmentsOutId).catch(() => undefined);
-  };
-
-  const labelSpan = async (span: SegmentMeta): Promise<void> => {
-    const startSample = Math.max(0, Math.floor(span.startSample));
-    const endSample = Math.max(startSample, Math.floor(span.endSample));
-    const frameCount = endSample - startSample;
-    const sampleRate = span.sampleRate;
-    const durationMs = spanDurationMs(span);
-
-    const audioInfo = await getPipelineAudioBufferInfo(audioInId);
-    const channelCount =
-      'channelCount' in audioInfo && typeof audioInfo.channelCount === 'number'
-        ? audioInfo.channelCount
-        : 1;
-
-    const samples =
-      frameCount > 0
-        ? getLiveAudioBufferSamplesSlice(audioInId, startSample, frameCount)
-        : new Float32Array(0);
-
-    state.unitsRead += frameCount;
-
-    const temp = createOfflineAudioBufferFromSamples(
-      samples,
-      sampleRate > 0
-        ? sampleRate
-        : 'sampleRate' in audioInfo
-        ? audioInfo.sampleRate
-        : 16000,
-      channelCount,
-      { targetSampleRateHz: 0 }
-    );
-
-    let speakerName: string | null = null;
-    try {
-      const embedding = await embeddingEngine.extractFromOfflineAudio(temp);
-      const rawName = await manager.search(embedding, threshold);
-      const trimmed = rawName.trim();
-      speakerName = trimmed.length > 0 ? trimmed : null;
-    } finally {
-      await releasePipelineAudioBuffer(temp.bufferId).catch(() => undefined);
-    }
-
-    await appendLiveSegment(segmentsOutId, {
-      kind: 'speech',
-      sourceAudioBufferId: audioInId,
-      startSample,
-      endSample,
-      sampleRate,
-      durationMs,
-      ...(span.confidence != null ? { confidence: span.confidence } : {}),
-      payload: { source: 'sid', speakerName },
-    });
-
-    state.unitsWritten += 1;
-    state.chunksProcessed += 1;
-
-    const event = {
-      segmentIndex: state.segmentIndex,
-      startSample,
-      endSample,
-      sampleRate,
-      durationMs,
-      speakerName,
-      ...(span.confidence != null ? { confidence: span.confidence } : {}),
-    };
-    state.segmentIndex += 1;
-    options.onLabeled?.(event);
-  };
-
-  let drainChain: Promise<void> = Promise.resolve();
-
-  const drainNewSpans = (): Promise<void> => {
-    const run = async (): Promise<void> => {
-      const total = await getLiveSegmentBufferSegmentCount(internalSegBufId);
-      if (total <= state.cursor) {
-        return;
-      }
-      const batch = await getLiveSegmentBufferSegments(
-        internalSegBufId,
-        state.cursor,
-        total - state.cursor
-      );
-      state.cursor += batch.length;
-
-      for (const span of batch) {
-        if (!isNonEmptySpeechSpan(span)) {
-          continue;
-        }
-        await labelSpan(span);
-      }
-    };
-
-    drainChain = drainChain.then(run, run);
-    return drainChain;
-  };
-
-  let loopActive = true;
-
-  const runLoop = async (): Promise<void> => {
-    try {
-      while (loopActive && !state.stopRequested) {
-        await drainNewSpans();
-
-        const info = await getPipelineAudioBufferInfo(audioInId);
-        if (
-          info.kind === 'livePcmBuffer' &&
-          info.state === 'finished' &&
-          !state.inputFinishedSeen
-        ) {
-          state.inputFinishedSeen = true;
-          // Input finalized: flush final segmentation, drain tail, complete.
-          await detachIfNeeded(true);
-          await drainNewSpans();
-          await finalizeOutIfNeeded();
-          settle('completed');
-          return;
-        }
-
-        if (state.stopRequested) {
-          break;
-        }
-        await sleep(POLL_INTERVAL_MS);
-      }
-
-      if (state.stopRequested) {
-        await detachIfNeeded(true);
-        await drainNewSpans();
-        await finalizeOutIfNeeded();
-        settle('stopped');
-      }
-    } catch (err) {
-      state.error = err instanceof Error ? err.message : String(err);
-      await detachIfNeeded(false).catch(() => undefined);
-      await finalizeOutIfNeeded().catch(() => undefined);
-      settle('error');
-    } finally {
-      loopActive = false;
-    }
-  };
-
-  // Kick off the poll loop without awaiting (handle returns immediately).
-  Promise.resolve()
-    .then(() => runLoop())
-    .catch(() => undefined);
-
-  const handle: SpeakerIdentificationPipelineHandle = {
-    instanceId: embeddingEngine.instanceId,
+  return createSidPipelineHandle(
+    embeddingEngine.instanceId,
     pipelineId,
-    completed,
-    async stop(): Promise<void> {
-      if (settled) return;
-      state.stopRequested = true;
-      // Wait until the loop settles completed.
-      await completed.catch(() => undefined);
-    },
-    async flush(): Promise<void> {
-      if (settled || !state.isRunning) return;
-      // Drain already-committed spans; tail utterance emits on stop/finalize.
-      await drainNewSpans();
-    },
-    async reset(): Promise<void> {
-      // Soft no-op for JS counters only; native segmentation reset is not exposed.
-      // Matches OfflineLivePipelineWorker.reset() intentional no-op.
-      if (settled || !state.isRunning) return;
-      state.chunksProcessed = 0;
-      state.unitsRead = 0;
-      state.unitsWritten = 0;
-      state.error = null;
-    },
-    async getStatus(): Promise<StreamingPipelineStatus> {
-      return {
-        pipelineId,
-        isRunning: state.isRunning,
-        chunksProcessed: state.chunksProcessed,
-        unitsRead: state.unitsRead,
-        unitsWritten: state.unitsWritten,
-        error: state.error,
-      };
-    },
-  };
-
-  return handle;
+    attached.engineId,
+    segmentsOutId,
+    options.onLabeled
+  );
 }

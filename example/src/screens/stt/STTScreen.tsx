@@ -329,7 +329,7 @@ export default function STTScreen() {
     try {
       const modelPath = resolveModelPath(modelFolder);
       const fillResult = await fillSttCustomConfigFromModelFolder(modelPath, {
-        preferInt8: true,
+        quantization: 'int8',
         modelTypeOverride: customInitForm.modelType,
       });
       setCustomInitForm({

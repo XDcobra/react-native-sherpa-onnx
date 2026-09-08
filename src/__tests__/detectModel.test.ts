@@ -66,7 +66,11 @@ describe('detectModel', () => {
         detectedModels: [{ type: 'vits', modelDir: '/models/vits' }],
       })
     );
-    expect(mockSherpa.detectModel).toHaveBeenCalledWith('', 'vits-piper-en');
+    expect(mockSherpa.detectModel).toHaveBeenCalledWith(
+      '',
+      'vits-piper-en',
+      null
+    );
   });
 
   it('returns matched false when native reports no hit', async () => {
@@ -99,7 +103,8 @@ describe('detectModel', () => {
     );
     expect(mockSherpa.detectModel).toHaveBeenCalledWith(
       '',
-      'UVR-MDX-NET-Inst_1.onnx'
+      'UVR-MDX-NET-Inst_1.onnx',
+      null
     );
   });
 
@@ -162,8 +167,8 @@ describe('detectModelsBatch', () => {
     expect(results[0]).not.toHaveProperty('paths');
     expect(results[1]).toEqual({ matched: false });
     expect(mockSherpa.detectModelsBatch).toHaveBeenCalledWith([
-      { modelDir: '', assetName: 'vits-en' },
-      { modelDir: '', assetName: 'missing' },
+      { modelDir: '', assetName: 'vits-en', quantization: null },
+      { modelDir: '', assetName: 'missing', quantization: null },
     ]);
   });
 
@@ -190,6 +195,63 @@ describe('detectModelsBatch', () => {
         paths: { ttsModel: '/x.onnx', tokens: '/x/tokens.txt' },
       })
     );
+  });
+
+  it('forwards quantization option in detectModel and detectModelsBatch', async () => {
+    mockSherpa.detectModel.mockResolvedValue({
+      matched: true,
+      success: true,
+      category: 'stt',
+      modelType: 'whisper',
+      detectedModels: [],
+      detectionSources: ['fileListing'],
+      paths: {
+        whisperEncoder: '/m/enc.int8.onnx',
+        whisperDecoder: '/m/dec.int8.onnx',
+      },
+      languages: [],
+      quantization: 'int8',
+      sizeTier: 'small',
+      isStreaming: false,
+    });
+
+    await detectModel({
+      assetName: '',
+      modelDir: '/models/whisper',
+      quantization: 'int8',
+    });
+    expect(mockSherpa.detectModel).toHaveBeenCalledWith(
+      '/models/whisper',
+      null,
+      'int8'
+    );
+
+    mockSherpa.detectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        success: true,
+        category: 'stt',
+        modelType: 'whisper',
+        detectedModels: [],
+        detectionSources: ['fileListing'],
+        paths: {},
+        languages: [],
+        quantization: 'fp16',
+        sizeTier: 'small',
+        isStreaming: false,
+      },
+    ]);
+
+    await detectModelsBatch([
+      { assetName: '', modelDir: '/models/whisper', quantization: 'fp16' },
+    ]);
+    expect(mockSherpa.detectModelsBatch).toHaveBeenCalledWith([
+      {
+        modelDir: '/models/whisper',
+        assetName: null,
+        quantization: 'fp16',
+      },
+    ]);
   });
 });
 

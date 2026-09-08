@@ -28,6 +28,7 @@ internal class SherpaOnnxSeparationHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
   private val activeLivePipelineByInstance = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -59,6 +60,7 @@ internal class SherpaOnnxSeparationHelper(
     modelDir: String,
     assetName: String?,
     modelType: String?,
+    quantization: String?,
     promise: Promise,
   ) {
     try {
@@ -66,6 +68,7 @@ internal class SherpaOnnxSeparationHelper(
         modelDir.ifBlank { null },
         assetName,
         modelType ?: "auto",
+        quantization,
       )
       if (result == null) {
         promise.reject(

@@ -1,0 +1,33 @@
+# Speaker-embedding core unit tests (registry key; no sherpa C-API).
+# Triggered on PR or manually.
+
+name: Test – Speaker embedding core
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-speaker-embedding-core
+  cancel-in-progress: true
+
+jobs:
+  speaker-embedding-core:
+    name: Speaker embedding core (C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target speaker_embedding_core_test
+
+      - name: Run speaker embedding core tests
+        working-directory: ${{ github.workspace }}
+        run: ./test/cpp/build/speaker_embedding_core_test

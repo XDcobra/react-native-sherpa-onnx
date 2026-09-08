@@ -24,6 +24,7 @@ describe('punctuationNativeBridge', () => {
       modelType: 'ct_transformer',
       numThreads: 2,
       debug: false,
+      quantization: 'int8',
     });
     expect(bridge).toEqual({
       initMode: 'auto',
@@ -31,6 +32,7 @@ describe('punctuationNativeBridge', () => {
       modelType: 'ct_transformer',
       numThreads: 2,
       debug: false,
+      quantization: 'int8',
     });
   });
 

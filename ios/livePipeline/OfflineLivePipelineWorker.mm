@@ -239,6 +239,8 @@ bool OfflineLivePipelineWorker::drainNextSegment(DrainedSegment *out) {
         record.id,
         startIndex,
         record.payloadJson,
+        record.hasConfidence,
+        record.confidence,
       };
       out->unitsRead = std::max(0, record.endSample - record.startSample);
       return true;

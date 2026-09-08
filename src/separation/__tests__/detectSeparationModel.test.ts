@@ -72,6 +72,7 @@ describe('detectSeparationModel', () => {
     expect(SherpaOnnx.detectSeparationModel).toHaveBeenCalledWith(
       '/data/models/separation/spleeter',
       'sherpa-onnx-spleeter-2stems',
+      null,
       null
     );
   });
@@ -90,6 +91,7 @@ describe('detectSeparationModel', () => {
     expect(SherpaOnnx.detectSeparationModel).toHaveBeenCalledWith(
       '/models/separation/spleeter',
       'UVR-MDX-NET-Inst_1.onnx',
+      null,
       null
     );
   });
@@ -113,5 +115,28 @@ describe('detectSeparationModel', () => {
     expect(result.paths).toEqual({
       model: '/models/UVR-MDX-NET-Inst_1.onnx',
     });
+  });
+
+  it('forwards quantization option to native detectSeparationModel', async () => {
+    (SherpaOnnx.detectSeparationModel as jest.Mock).mockResolvedValue({
+      success: true,
+      modelType: 'spleeter',
+      detectedModels: [],
+      paths: { model: '/models/separation/spleeter/model.int8.onnx' },
+      quantization: 'int8',
+    });
+
+    const result = await detectSeparationModel(
+      { kind: 'fs', path: '/models/separation/spleeter' },
+      { quantization: 'int8' }
+    );
+
+    expect(SherpaOnnx.detectSeparationModel).toHaveBeenCalledWith(
+      '/models/separation/spleeter',
+      'sherpa-onnx-spleeter-2stems',
+      null,
+      'int8'
+    );
+    expect(result.quantization).toBe('int8');
   });
 });

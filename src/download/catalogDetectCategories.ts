@@ -9,6 +9,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.Enhancement,
   ModelCategory.Separation,
   ModelCategory.SpeakerEmbedding,
+  ModelCategory.Diarization,
   ModelCategory.Alignment,
 ]);
 
@@ -21,6 +22,7 @@ export type CatalogDetectCategory =
   | ModelCategory.Enhancement
   | ModelCategory.Separation
   | ModelCategory.SpeakerEmbedding
+  | ModelCategory.Diarization
   | ModelCategory.Alignment;
 
 export function categoryUsesCatalogDetect(

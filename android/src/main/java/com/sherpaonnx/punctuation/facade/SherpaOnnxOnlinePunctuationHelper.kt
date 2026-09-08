@@ -29,6 +29,7 @@ class SherpaOnnxOnlinePunctuationHelper(
     modelDir: String?,
     assetName: String?,
     modelType: String,
+    quantization: String?
   ) -> HashMap<String, Any>?
 ) {
   companion object {
@@ -151,7 +152,7 @@ class SherpaOnnxOnlinePunctuationHelper(
       )
       return
     }
-    val detect = nativeDetectPunctuationModel(modelDir, null, "cnn_bilstm")
+    val detect = nativeDetectPunctuationModel(modelDir, null, "cnn_bilstm", parsed.quantization)
     if (detect == null) {
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
       return
