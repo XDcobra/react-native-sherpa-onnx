@@ -1602,6 +1602,30 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Spoken language identification (SLID) model detection: Whisper multilingual.
+   * Offline only.
+   */
+  detectLanguageIdModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      encoder?: string;
+      decoder?: string;
+    };
+  }>;
+
   initializeDiarization(
     instanceId: string,
     options: DiarizationInitBridgeOptions

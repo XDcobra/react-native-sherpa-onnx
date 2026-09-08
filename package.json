@@ -80,6 +80,11 @@
       "types": "./lib/typescript/src/separation/index.d.ts",
       "default": "./lib/module/separation/index.js"
     },
+    "./language-identification": {
+      "source": "./src/language-identification/index.ts",
+      "types": "./lib/typescript/src/language-identification/index.d.ts",
+      "default": "./lib/module/language-identification/index.js"
+    },
     "./detect": {
       "source": "./src/detect/index.ts",
       "types": "./lib/typescript/src/detect/index.d.ts",
