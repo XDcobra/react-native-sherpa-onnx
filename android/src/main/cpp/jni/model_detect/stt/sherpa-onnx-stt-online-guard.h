@@ -55,6 +55,17 @@ OnlineGuardResult GuardTransducerOnlineCompatibility(
     const std::string& modelDir
 );
 
+/**
+ * Like GuardTransducerOnlineCompatibility, but only accepts Icefall
+ * encoder metadata model_type == "zipformer2". Rejects NeMo and other
+ * Icefall transducer families (conformer / ebranchformer / lstm / zipformer v1).
+ * Used by KWS detect (online KeywordSpotter packs).
+ */
+OnlineGuardResult GuardZipformer2TransducerOnlineCompatibility(
+    const SttModelPaths& paths,
+    const std::string& modelDir
+);
+
 OnlineGuardResult GuardParaformerOnlineCompatibility(
     const SttModelPaths& paths,
     const std::string& modelDir

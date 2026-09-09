@@ -336,9 +336,108 @@ OnlineGuardResult GuardTransducerOnlineCompatibility(
     return GuardIcefallTransducer(paths.encoder, paths.decoder, paths.joiner);
 }
 
+OnlineGuardResult GuardZipformer2TransducerOnlineCompatibility(
+    const SttModelPaths& paths,
+    const std::string& /*modelDir*/
+) {
+    OnlineGuardResult out;
+    out.passed = false;
+
+    if (paths.encoder.empty()) {
+        out.error = "zipformer2 transducer: encoder path is empty";
+        return out;
+    }
+    if (paths.decoder.empty()) {
+        out.error = "zipformer2 transducer: decoder path is empty";
+        return out;
+    }
+    if (paths.joiner.empty()) {
+        out.error = "zipformer2 transducer: joiner path is empty";
+        return out;
+    }
+    if (!FileExists(paths.encoder)) {
+        out.error = "zipformer2 transducer: encoder file not found: " + paths.encoder;
+        return out;
+    }
+    if (!FileExists(paths.decoder)) {
+        out.error = "zipformer2 transducer: decoder file not found: " + paths.decoder;
+        return out;
+    }
+    if (!FileExists(paths.joiner)) {
+        out.error = "zipformer2 transducer: joiner file not found: " + paths.joiner;
+        return out;
+    }
+
+    try {
+        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "kws_zipformer2_probe");
+        Ort::SessionOptions opts;
+        Ort::Session decoderProbe = CreateOrtSession(env, paths.decoder, opts);
+        if (decoderProbe.GetOutputCount() > 1) {
+            out.error =
+                "zipformer2 transducer: NeMo-style decoder (multiple outputs) is not supported for KWS";
+            return out;
+        }
+
+        Ort::Session encoderSession = CreateOrtSession(env, paths.encoder, opts);
+        Ort::ModelMetadata encoderMeta = encoderSession.GetModelMetadata();
+        Ort::AllocatorWithDefaultOptions alloc;
+
+        std::string modelType;
+        if (!ReadRequiredMetadataString(
+                encoderMeta, alloc, "model_type", &modelType, &out.error)) {
+            return out;
+        }
+        if (modelType != "zipformer2") {
+            out.error =
+                "zipformer2 transducer: encoder model_type must be 'zipformer2', got '" +
+                modelType + "'";
+            return out;
+        }
+
+        out = GuardZipformer2Encoder(encoderMeta, alloc);
+        if (!out.passed) {
+            return out;
+        }
+
+        Ort::Session decoderSession = CreateOrtSession(env, paths.decoder, opts);
+        Ort::ModelMetadata decoderMeta = decoderSession.GetModelMetadata();
+        int32_t vocabSize = 0;
+        int32_t contextSize = 0;
+        if (!ReadRequiredMetadataInt32(
+                decoderMeta, alloc, "vocab_size", &vocabSize, &out.error) ||
+            !ReadRequiredMetadataInt32(
+                decoderMeta, alloc, "context_size", &contextSize, &out.error)) {
+            out.passed = false;
+            return out;
+        }
+        if (vocabSize <= 0 || contextSize <= 0) {
+            out.passed = false;
+            out.error = "zipformer2 transducer decoder: vocab_size/context_size must be > 0";
+            return out;
+        }
+
+        Ort::Session joinerSession = CreateOrtSession(env, paths.joiner, opts);
+        (void)joinerSession;
+    } catch (const std::exception& e) {
+        out.passed = false;
+        out.error = std::string("zipformer2 transducer guard exception: ") + e.what();
+        return out;
+    }
+
+    out.passed = true;
+    return out;
+}
+
 #else  // !SHERPA_ONNX_STT_GUARD_HAS_ORT
 
 OnlineGuardResult GuardTransducerOnlineCompatibility(
+    const SttModelPaths& /*paths*/,
+    const std::string& /*modelDir*/
+) {
+    return OnlineGuardResult{true, ""};
+}
+
+OnlineGuardResult GuardZipformer2TransducerOnlineCompatibility(
     const SttModelPaths& /*paths*/,
     const std::string& /*modelDir*/
 ) {
