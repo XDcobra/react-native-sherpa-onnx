@@ -7,9 +7,19 @@ export {
 } from './createKeywordSpotting';
 export { buildKeywordSpottingInitBridgeOptions } from './kwsNativeBridge';
 export type { KeywordSpottingDetectedPaths } from './kwsNativeBridge';
+export {
+  assertKwsCustomConfig,
+  resolveKwsCustomConfigPaths,
+  KwsErrorCode,
+} from './customConfig';
+export type { KwsCustomConfig, KwsCustomPathKey } from './customConfig';
 export type {
   KeywordDetection,
+  KeywordSpottingAutoInitializeOptions,
+  KeywordSpottingCustomInitializeOptions,
   KeywordSpottingEngine,
   KeywordSpottingInitOptions,
+  KeywordSpottingInitOptionsShared,
   KeywordSpottingPipelineOptions,
+  KwsConcreteModelType,
 } from './types';

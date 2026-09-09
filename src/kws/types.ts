@@ -3,11 +3,13 @@ import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTy
 import type { QuantizationPreference } from '../download/types';
 import type { FileSource } from '../fileio/types';
 import type { LiveTextBufferIdSource } from '../textbuffer/types';
+import type { KwsCustomConfig } from './customConfig';
 
-/** Options for `createKeywordSpotting` / `createStreamingKWS`. */
-export interface KeywordSpottingInitOptions {
-  /** Directory-backed KWS model source. */
-  modelSource: FileSource;
+/** Concrete KWS pack family (online zipformer2 transducer). */
+export type KwsConcreteModelType = 'transducer';
+
+/** Shared tuning / runtime fields for auto and custom init. */
+export type KeywordSpottingInitOptionsShared = {
   /**
    * Optional absolute keyword-file path. Tokens must match the pack `tokens.txt`.
    * Applied on each `spot` via `createStream` (not KeywordSpotter construction —
@@ -29,9 +31,33 @@ export interface KeywordSpottingInitOptions {
   provider?: string;
   /** Enable native model debug logging. */
   debug?: boolean;
-  /** Quantization preference used while detecting model files. */
-  quantization?: QuantizationPreference;
-}
+};
+
+/** Auto mode: scan a model directory for encoder/decoder/joiner/tokens/keywords. */
+export type KeywordSpottingAutoInitializeOptions =
+  KeywordSpottingInitOptionsShared & {
+    initMode?: 'auto';
+    /** Directory-backed KWS model source. */
+    modelSource: FileSource;
+    /** Quantization preference used while detecting model files. */
+    quantization?: QuantizationPreference;
+  };
+
+/** Custom mode: supply explicit FileSources for each required pack path. */
+export type KeywordSpottingCustomInitializeOptions =
+  KeywordSpottingInitOptionsShared & {
+    initMode: 'custom';
+    modelType: KwsConcreteModelType;
+    customConfig: KwsCustomConfig;
+  };
+
+/**
+ * Configuration for KWS initialization. Discriminated by `initMode`:
+ * auto mode scans a model directory; custom mode supplies explicit paths.
+ */
+export type KeywordSpottingInitOptions =
+  | KeywordSpottingAutoInitializeOptions
+  | KeywordSpottingCustomInitializeOptions;
 
 /** One keyword hit emitted by `spot` / `onKeyword` (also committed to LiveTextBuffer). */
 export interface KeywordDetection {

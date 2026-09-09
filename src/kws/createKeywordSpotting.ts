@@ -7,8 +7,10 @@ import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { resolvePipelineTextBufferId } from '../textbuffer';
 import { subscribeLiveTextBufferEvents } from '../textbuffer';
 import type { LiveTextBufferSegmentEvent } from '../textbuffer/types';
+import { resolveKwsCustomConfigPaths } from './customConfig';
 import { detectKwsModel } from './detectKwsModel';
 import { buildKeywordSpottingInitBridgeOptions } from './kwsNativeBridge';
+import type { KeywordSpottingDetectedPaths } from './kwsNativeBridge';
 import type {
   KeywordDetection,
   KeywordSpottingEngine,
@@ -104,12 +106,16 @@ function mapSegmentToKeywordDetection(
   };
 }
 
-export async function createKeywordSpotting(
+async function resolveInitPaths(
   options: KeywordSpottingInitOptions
-): Promise<KeywordSpottingEngine> {
-  if (options == null || typeof options !== 'object' || !options.modelSource) {
+): Promise<KeywordSpottingDetectedPaths> {
+  if (options.initMode === 'custom') {
+    return resolveKwsCustomConfigPaths(options.modelType, options.customConfig);
+  }
+
+  if (!options.modelSource) {
     throw new Error(
-      'Keyword spotting initialization requires a modelSource option'
+      'Keyword spotting initialization requires a modelSource option (or initMode: "custom")'
     );
   }
 
@@ -135,14 +141,26 @@ export async function createKeywordSpotting(
       `Keyword spotting model detection returned no paths for ${modelDir}`
     );
   }
+  return detected.paths;
+}
 
+export async function createKeywordSpotting(
+  options: KeywordSpottingInitOptions
+): Promise<KeywordSpottingEngine> {
+  if (options == null || typeof options !== 'object') {
+    throw new Error(
+      'Keyword spotting initialization requires an options object'
+    );
+  }
+
+  const detectedPaths = await resolveInitPaths(options);
   const bridgeOptions = buildKeywordSpottingInitBridgeOptions(
-    detected.paths,
+    detectedPaths,
     options
   );
   const keywordsPathOverride = await loadKeywordsPathOverride(
     options.keywordsPath,
-    detected.paths.keywords
+    detectedPaths.keywords
   );
   const instanceId = `keyword_spotting_${++keywordSpottingInstanceCounter}`;
   const result = await SherpaOnnx.initializeKeywordSpotting(

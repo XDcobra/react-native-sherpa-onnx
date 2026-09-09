@@ -11,7 +11,16 @@ export type KeywordSpottingDetectedPaths = {
 
 export function buildKeywordSpottingInitBridgeOptions(
   detectedPaths: KeywordSpottingDetectedPaths,
-  options: KeywordSpottingInitOptions
+  options: Pick<
+    KeywordSpottingInitOptions,
+    | 'keywordsScore'
+    | 'keywordsThreshold'
+    | 'numTrailingBlanks'
+    | 'maxActivePaths'
+    | 'numThreads'
+    | 'provider'
+    | 'debug'
+  >
 ): KeywordSpottingInitBridgeOptions {
   // Pack keywords.txt for KeywordSpotter construction. Optional keywordsPath
   // is applied on spot via createStream (safe OOV reject) — see KNOWN_ISSUES.

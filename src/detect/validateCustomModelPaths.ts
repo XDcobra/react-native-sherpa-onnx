@@ -27,7 +27,8 @@ export type CustomModelPathCategory =
   | ModelCategory.Diarization
   | ModelCategory.Punctuation
   | ModelCategory.Alignment
-  | ModelCategory.LanguageId;
+  | ModelCategory.LanguageId
+  | ModelCategory.Kws;
 
 export type CustomModelPathValidationResult = {
   ok: boolean;

@@ -38,6 +38,10 @@ jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
   ),
 }));
 
+jest.mock('../customConfig', () => ({
+  resolveKwsCustomConfigPaths: jest.fn(),
+}));
+
 import { readFile } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
@@ -45,6 +49,7 @@ import {
   createKeywordSpotting,
   createStreamingKWS,
 } from '../createKeywordSpotting';
+import { resolveKwsCustomConfigPaths } from '../customConfig';
 import { detectKwsModel } from '../detectKwsModel';
 
 describe('createKeywordSpotting', () => {
@@ -56,6 +61,7 @@ describe('createKeywordSpotting', () => {
   const readFileMock = readFile as unknown as jest.Mock;
   const resolveModel = resolveFileSourceForModelInit as jest.Mock;
   const detect = detectKwsModel as jest.Mock;
+  const resolveCustom = resolveKwsCustomConfigPaths as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -72,6 +78,13 @@ describe('createKeywordSpotting', () => {
         tokens: '/models/kws/tokens.txt',
         keywords: '/models/kws/keywords.txt',
       },
+    });
+    resolveCustom.mockResolvedValue({
+      encoder: '/custom/encoder.onnx',
+      decoder: '/custom/decoder.onnx',
+      joiner: '/custom/joiner.onnx',
+      tokens: '/custom/tokens.txt',
+      keywords: '/custom/keywords.txt',
     });
     native.initializeKeywordSpotting.mockResolvedValue({ success: true });
     native.unloadKeywordSpotting.mockResolvedValue(undefined);
@@ -94,6 +107,7 @@ describe('createKeywordSpotting', () => {
       { kind: 'fs', path: '/models/kws' },
       { quantization: undefined }
     );
+    expect(resolveCustom).not.toHaveBeenCalled();
     expect(native.initializeKeywordSpotting).toHaveBeenCalledWith(
       engine.instanceId,
       {
@@ -114,6 +128,37 @@ describe('createKeywordSpotting', () => {
     expect(native.unloadKeywordSpotting).toHaveBeenCalledTimes(1);
     expect(native.unloadKeywordSpotting).toHaveBeenCalledWith(
       engine.instanceId
+    );
+  });
+
+  it('initializes from customConfig without folder detect', async () => {
+    const fsPath = (path: string) => ({ kind: 'fs' as const, path });
+    const engine = await createKeywordSpotting({
+      initMode: 'custom',
+      modelType: 'transducer',
+      customConfig: {
+        encoder: fsPath('/custom/encoder.onnx'),
+        decoder: fsPath('/custom/decoder.onnx'),
+        joiner: fsPath('/custom/joiner.onnx'),
+        tokens: fsPath('/custom/tokens.txt'),
+        keywords: fsPath('/custom/keywords.txt'),
+      },
+    });
+
+    expect(resolveModel).not.toHaveBeenCalled();
+    expect(detect).not.toHaveBeenCalled();
+    expect(resolveCustom).toHaveBeenCalledWith(
+      'transducer',
+      expect.objectContaining({
+        encoder: fsPath('/custom/encoder.onnx'),
+      })
+    );
+    expect(native.initializeKeywordSpotting).toHaveBeenCalledWith(
+      engine.instanceId,
+      expect.objectContaining({
+        encoder: '/custom/encoder.onnx',
+        keywords: '/custom/keywords.txt',
+      })
     );
   });
 
