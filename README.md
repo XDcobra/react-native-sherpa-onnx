@@ -18,8 +18,8 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 </div>
 
-> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**  
-> This project started as a side hobby project. After seeing the value it provides and that many people already use it, I decided to rebuild it with a more professional foundation. Because of that, I had to redesign the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK with significantly better performance and speed, plus a cleaner, more consistent, and easier public API.
+> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**
+> This project started as a side hobby. In practice I kept hitting the same wall: sherpa-onnx (and other React Native speech libraries) struggle with **long audio on real mobile devices**—OOM crashes, UI stalls, and brittle one-shot pipelines. Fixing that properly meant redesigning the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK built for low-end and mid-range phones, with significantly better performance and a cleaner, more consistent public API.
 
 A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
@@ -72,7 +72,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
 - ✅ Speaker diarization: [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md)
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
-- ❌ Spoken language identification (SLID): *(Not yet implemented in SDK)*
+- ✅ Spoken language identification (SLID): [Guide](./docs/language-identification.md) *(Whisper multilingual — reuses STT Whisper packs)*
 - ❌ Keyword spotting (KWS): *(Not yet implemented in SDK)*
 - ❌ Audio tagging / sound event detection: *(Not yet implemented in SDK)*
 - ❌ Diacritization: *(Not yet implemented in SDK)*
@@ -381,6 +381,19 @@ Speaker diarization determines who spoke when in multi-speaker audio recordings 
 | **Sortformer** | `'sortformer'` | Streaming | Real-time multi-speaker streaming diarization (e.g. `diar_streaming_sortformer_4spk-v2.1`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
 
 APIs and guides: [Offline batch diarization](./docs/diarization-offline.md) · [Real-time streaming diarization](./docs/diarization-streaming.md) · [Named speaker timeline (Diarization × SID)](./docs/diarization-named-timeline.md).
+
+</details>
+
+<details>
+<summary>Spoken Language Identification (SLID) models</summary>
+
+SLID reuses **multilingual Whisper** STT packs (encoder + decoder). Detect via `detectLanguageIdModel`; public API is `createLanguageIdentification`. Do not use aishell fine-tunes or English-only Whisper variants.
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Whisper (multilingual)** | `'whisper'` | Same layout as STT Whisper; metadata requires multilingual Whisper. Prefer tiny/base for mobile. | [Whisper models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html) |
+
+API: [Spoken language identification](./docs/language-identification.md) (oneshot, segmented code-switching, live overload).
 
 </details>
 
