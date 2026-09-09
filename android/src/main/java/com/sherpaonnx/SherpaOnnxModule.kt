@@ -4921,6 +4921,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     languageIdHelper.unloadLanguageId(instanceId, promise)
   }
 
+  override fun labelLanguageIdOfflineSegments(
+    instanceId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    promise: Promise
+  ) {
+    languageIdHelper.labelLanguageIdOfflineSegments(
+      instanceId,
+      audioInId,
+      segmentsInId,
+      segmentsOutId,
+      promise
+    )
+  }
+
   override fun initializeDiarization(
     instanceId: String,
     options: ReadableMap,
@@ -5093,6 +5109,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       startSamples,
       endSamples,
       promise,
+    )
+  }
+
+  override fun labelSpeakerIdentificationOfflineSegments(
+    instanceId: String,
+    managerId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.labelSpeakerIdentificationOfflineSegments(
+      instanceId,
+      managerId,
+      audioInId,
+      segmentsInId,
+      segmentsOutId,
+      threshold,
+      promise
     )
   }
 

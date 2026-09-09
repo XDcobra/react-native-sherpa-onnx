@@ -2,6 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../core/SpeakerEmbeddingBridgeState.h"
 #include "../core/SpeakerEmbeddingBridgeUtils.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"
@@ -19,6 +20,15 @@
 #include <vector>
 
 namespace {
+
+dispatch_queue_t SpeakerEmbeddingSerialQueue() {
+  static dispatch_queue_t queue;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    queue = dispatch_queue_create("com.sherpaonnx.speakerembedding", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
 
 std::optional<std::string> OptionalUtf8String(NSString *value) {
   if (value == nil || [value length] == 0) {
@@ -798,6 +808,232 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
            [NSString stringWithFormat:@"Speaker enroll offline failed: %@", exception.reason],
            nil);
   }
+}
+
+- (void)labelSpeakerIdentificationOfflineSegments:(NSString *)instanceId
+                                        managerId:(NSString *)managerId
+                                        audioInId:(NSString *)audioInId
+                                     segmentsInId:(NSString *)segmentsInId
+                                    segmentsOutId:(NSString *)segmentsOutId
+                                        threshold:(double)threshold
+                                          resolve:(RCTPromiseResolveBlock)resolve
+                                           reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR", @"instanceId is required", nil);
+    return;
+  }
+  if (managerId == nil || [managerId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR", @"managerId is required", nil);
+    return;
+  }
+  if (audioInId == nil || [audioInId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR", @"audioInId is required", nil);
+    return;
+  }
+  if (segmentsInId == nil || [segmentsInId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT", @"segmentsInId is required", nil);
+    return;
+  }
+  if (segmentsOutId == nil || [segmentsOutId length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT", @"segmentsOutId is required", nil);
+    return;
+  }
+
+  const std::string instanceIdStr = [instanceId UTF8String];
+  const std::string managerIdStr = [managerId UTF8String];
+  const std::string audioInIdStr = [audioInId UTF8String];
+  const std::string segmentsInIdStr = [segmentsInId UTF8String];
+  const std::string segmentsOutIdStr = [segmentsOutId UTF8String];
+
+  if (audioInIdStr.find("off_") != 0) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH",
+           [NSString stringWithFormat:@"Expected offline audio buffer (off_*), got: %@", audioInId],
+           nil);
+    return;
+  }
+  if (segmentsInIdStr.find("seg_off_") != 0) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
+           [NSString stringWithFormat:@"Expected offline segment buffer (seg_off_*) for segmentsIn, got: %@", segmentsInId],
+           nil);
+    return;
+  }
+  if (segmentsOutIdStr.find("seg_off_") != 0) {
+    reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
+           [NSString stringWithFormat:@"Expected offline segment buffer (seg_off_*) for segmentsOut, got: %@", segmentsOutId],
+           nil);
+    return;
+  }
+
+  auto extractor =
+      sherpaonnx::speaker_embedding::bridge::LookupExtractor(instanceIdStr);
+  if (!extractor || !extractor->isInitialized()) {
+    reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+           [NSString stringWithFormat:@"Speaker embedding extractor not found: %@", instanceId],
+           nil);
+    return;
+  }
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
+           [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
+           nil);
+    return;
+  }
+
+  int inSampleRate = 0;
+  int inNumSamples = 0;
+  std::string errCode;
+  std::string errMsg;
+  if (!pa_get_offline_metadata(audioInIdStr, &inSampleRate, &inNumSamples, &errCode, &errMsg)) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", audioInId],
+           nil);
+    return;
+  }
+  if (inSampleRate <= 0 || inNumSamples <= 0) {
+    reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+           [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInId],
+           nil);
+    return;
+  }
+
+  std::vector<SegRecord> inputSegments;
+  {
+    std::lock_guard<std::mutex> lock(g_seg_mutex);
+    auto itIn = g_seg_offline.find(segmentsInIdStr);
+    if (itIn == g_seg_offline.end() || !itIn->second) {
+      reject(@"SPEAKER_EMBEDDING_BUFFER_NOT_FOUND",
+             [NSString stringWithFormat:@"Offline segment buffer not found: %@", segmentsInId],
+             nil);
+      return;
+    }
+    inputSegments = itIn->second->segments;
+
+    auto itOut = g_seg_offline.find(segmentsOutIdStr);
+    if (itOut == g_seg_offline.end() || !itOut->second) {
+      reject(@"SPEAKER_EMBEDDING_BUFFER_NOT_FOUND",
+             [NSString stringWithFormat:@"Offline segment buffer not found: %@", segmentsOutId],
+             nil);
+      return;
+    }
+    if (!itOut->second->segments.empty()) {
+      reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
+             [NSString stringWithFormat:@"segmentsOut must be an empty offline segment buffer: %@", segmentsOutId],
+             nil);
+      return;
+    }
+  }
+
+  dispatch_async(SpeakerEmbeddingSerialQueue(), ^{
+    @try {
+      std::vector<SegRecord> speechSpans;
+      speechSpans.reserve(inputSegments.size());
+      for (const auto &seg : inputSegments) {
+        if (seg.kind == "speech" && seg.endSample > seg.startSample) {
+          speechSpans.push_back(seg);
+        }
+      }
+
+      if (speechSpans.empty()) {
+        {
+          std::lock_guard<std::mutex> lock(g_seg_mutex);
+          auto itOut = g_seg_offline.find(segmentsOutIdStr);
+          if (itOut != g_seg_offline.end() && itOut->second) {
+            itOut->second->segments.clear();
+          }
+        }
+        resolve(@{
+          @"labeledCount": @0,
+          @"unknownCount": @0,
+        });
+        return;
+      }
+
+      std::vector<SegRecord> records;
+      records.reserve(speechSpans.size());
+      int labeledCount = 0;
+      int unknownCount = 0;
+
+      for (const auto &span : speechSpans) {
+        const int start = std::max(0, span.startSample);
+        const int end = std::min(span.endSample, inNumSamples);
+        const int frameCount = std::max(0, end - start);
+
+        std::vector<float> inputSamples;
+        std::string sliceErrCode;
+        std::string sliceErrMsg;
+        if (frameCount > 0) {
+          if (!pa_get_offline_samples_slice(
+                  audioInIdStr, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
+            NSString *code = sliceErrCode.empty()
+                ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+                : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+            NSString *msg = sliceErrMsg.empty()
+                ? @"Failed to read offline audio slice"
+                : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+            reject(code, msg, nil);
+            return;
+          }
+        }
+
+        std::string speakerName = "";
+        if (!inputSamples.empty()) {
+          std::vector<float> embedding =
+              extractor->computeFromSamples(inputSamples, inSampleRate);
+          if (!embedding.empty()) {
+            std::string name = manager->search(embedding, static_cast<float>(threshold));
+            if (!name.empty()) {
+              speakerName = name;
+              labeledCount++;
+            } else {
+              unknownCount++;
+            }
+          } else {
+            unknownCount++;
+          }
+        } else {
+          unknownCount++;
+        }
+
+        const int durationMs = span.durationMs > 0
+            ? span.durationMs
+            : ((inSampleRate > 0) ? ((span.endSample - span.startSample) * 1000) / inSampleRate : 0);
+
+        SegRecord r = span;
+        if (!speakerName.empty()) {
+          NSString *nsSpeaker = [NSString stringWithUTF8String:speakerName.c_str()];
+          NSString *escaped = [nsSpeaker stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+          r.payloadJson = std::string("{\"source\":\"sid\",\"speakerName\":\"") + [escaped UTF8String] + "\"}";
+        } else {
+          r.payloadJson = "{\"source\":\"sid\"}";
+        }
+        records.push_back(std::move(r));
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(g_seg_mutex);
+        auto itOut = g_seg_offline.find(segmentsOutIdStr);
+        if (itOut == g_seg_offline.end() || !itOut->second) {
+          reject(@"SPEAKER_EMBEDDING_BUFFER_NOT_FOUND",
+                 [NSString stringWithFormat:@"Offline segment buffer not found: %@", segmentsOutId],
+                 nil);
+          return;
+        }
+        itOut->second->segments = std::move(records);
+      }
+
+      resolve(@{
+        @"labeledCount": @(labeledCount),
+        @"unknownCount": @(unknownCount),
+      });
+    } @catch (NSException *exception) {
+      reject(@"SPEAKER_EMBEDDING_COMPUTE_ERROR",
+             [NSString stringWithFormat:@"Speaker identification labeling failed: %@", exception.reason],
+             nil);
+    }
+  });
 }
 
 - (void)unloadSpeakerEmbeddingExtractor:(NSString *)instanceId

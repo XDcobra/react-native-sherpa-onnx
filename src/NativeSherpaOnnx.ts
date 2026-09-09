@@ -174,6 +174,38 @@ export type LanguageIdProcessNativeResult = {
   elapsedMs: number;
 };
 
+/** A single language switch event returned by native batch/segment processing. */
+export type LanguageIdNativeSwitchEntry = {
+  timestamp: number;
+  from: string | null;
+  to: string;
+  segmentIndex: number;
+};
+
+/** One detected speech segment with language information returned by native. */
+export type LanguageIdNativeSegmentEntry = {
+  segmentIndex: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  lang: string;
+};
+
+/** Native result from `labelLanguageIdOfflineSegments`. */
+export type LanguageIdLabelNativeResult = {
+  labeledCount: number;
+  dominantLanguage: string;
+  distribution: Object;
+  switches: LanguageIdNativeSwitchEntry[];
+  segments: LanguageIdNativeSegmentEntry[];
+};
+
+/** Native result from `labelSpeakerIdentificationOfflineSegments`. */
+export type SpeakerIdLabelNativeResult = {
+  labeledCount: number;
+  unknownCount: number;
+};
+
 /** Native result from `diarizeOffline` / `reclusterDiarization`. */
 export type DiarizationProcessNativeResult = {
   success: boolean;
@@ -1676,6 +1708,18 @@ export interface Spec extends TurboModule {
    */
   unloadLanguageId(instanceId: string): Promise<void>;
 
+  /**
+   * Fast-path native buffer-to-buffer language labeling.
+   * Reads speech spans from `segmentsInId`, slices `audioInId`, predicts languages,
+   * directly writes LanguageIdSpeechSegmentPayload into `segmentsOutId`, and returns summary stats.
+   */
+  labelLanguageIdOfflineSegments(
+    instanceId: string,
+    audioInId: string,
+    segmentsInId: string,
+    segmentsOutId: string
+  ): Promise<LanguageIdLabelNativeResult>;
+
   initializeDiarization(
     instanceId: string,
     options: DiarizationInitBridgeOptions
@@ -1806,6 +1850,21 @@ export interface Spec extends TurboModule {
     startSamples?: Array<number | null> | null,
     endSamples?: Array<number | null> | null
   ): Promise<{ ok: boolean; embeddings: number[] }>;
+
+  /**
+   * Fast-path native buffer-to-buffer speaker labeling.
+   * Reads speech spans from `segmentsInId`, slices `audioInId`, computes embeddings,
+   * searches `managerId`, directly writes SidSpeechSegmentPayload into `segmentsOutId`,
+   * and returns counts.
+   */
+  labelSpeakerIdentificationOfflineSegments(
+    instanceId: string,
+    managerId: string,
+    audioInId: string,
+    segmentsInId: string,
+    segmentsOutId: string,
+    threshold: number
+  ): Promise<SpeakerIdLabelNativeResult>;
 
   /**
    * Start a live-offline Speaker Identification pipeline.

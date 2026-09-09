@@ -7,7 +7,11 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.speakerembedding.config.SpeakerEmbeddingInitOptionsParser
+import java.util.concurrent.Executors
 
 internal class SherpaOnnxSpeakerEmbeddingHelper(
   private val nativeDetectSpeakerEmbeddingModel: (
@@ -17,7 +21,10 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
+  private val executor = Executors.newSingleThreadExecutor()
+
   fun shutdown() {
+    executor.shutdownNow()
     nativeShutdownAll()
   }
 
@@ -739,6 +746,171 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     promise.resolve(null)
   }
 
+  fun labelSpeakerIdentificationOfflineSegments(
+    instanceId: String,
+    managerId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    threshold: Double,
+    promise: Promise,
+  ) {
+    if (instanceId.isBlank()) {
+      promise.reject(COMPUTE_ERROR, "instanceId is required")
+      return
+    }
+    if (managerId.isBlank()) {
+      promise.reject(MANAGER_ERROR, "managerId is required")
+      return
+    }
+
+    if (!audioInId.startsWith("off_")) {
+      promise.reject(
+        BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*), got: $audioInId"
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioInId)
+    if (audioInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline audio buffer not found: $audioInId")
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(BUFFER_EMPTY, "Input offline audio buffer is empty: $audioInId")
+      return
+    }
+
+    if (!segmentsInId.startsWith("seg_off_")) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "Expected offline segment buffer (seg_off_*) for segmentsIn, got: $segmentsInId"
+      )
+      return
+    }
+    val segmentsInEntry = SegmentPipelineRegistry.getOffline(segmentsInId)
+    if (segmentsInEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline segment buffer not found: $segmentsInId")
+      return
+    }
+
+    if (!segmentsOutId.startsWith("seg_off_")) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "Expected offline segment buffer (seg_off_*) for segmentsOut, got: $segmentsOutId"
+      )
+      return
+    }
+    val segmentsOutEntry = SegmentPipelineRegistry.getOffline(segmentsOutId)
+    if (segmentsOutEntry == null) {
+      promise.reject(BUFFER_NOT_FOUND, "Offline segment buffer not found: $segmentsOutId")
+      return
+    }
+    if (segmentsOutEntry.snapshotSegments().isNotEmpty()) {
+      promise.reject(
+        INVALID_ARGUMENT,
+        "segmentsOut must be an empty offline segment buffer: $segmentsOutId"
+      )
+      return
+    }
+
+    executor.execute {
+      try {
+        val sampleRate = audioInEntry.sampleRate
+        val allSegments = segmentsInEntry.snapshotSegments()
+        val speechSpans = allSegments.filter { it.kind == "speech" && it.endSample > it.startSample }
+
+        if (speechSpans.isEmpty()) {
+          segmentsOutEntry.populate(emptyList())
+          val emptyResult = Arguments.createMap()
+          emptyResult.putInt("labeledCount", 0)
+          emptyResult.putInt("unknownCount", 0)
+          promise.resolve(emptyResult)
+          return@execute
+        }
+
+        val records = ArrayList<SegmentRecord>(speechSpans.size)
+        var labeledCount = 0
+        var unknownCount = 0
+
+        for (span in speechSpans) {
+          val start = span.startSample.coerceAtLeast(0)
+          val end = span.endSample.coerceAtMost(audioInEntry.numSamples)
+          val frameCount = (end - start).coerceAtLeast(0)
+          val samples = if (frameCount > 0) audioInEntry.readSlice(start, frameCount) else FloatArray(0)
+
+          val speakerName: String?
+          if (samples.isNotEmpty()) {
+            val embedding = computeEmbeddingFromSamples(instanceId, samples, sampleRate)
+            val name = searchSpeaker(managerId, embedding, threshold.toFloat()).trim()
+            if (name.isNotEmpty()) {
+              speakerName = name
+              labeledCount++
+            } else {
+              speakerName = null
+              unknownCount++
+            }
+          } else {
+            speakerName = null
+            unknownCount++
+          }
+
+          val durationMs = if (span.durationMs > 0) span.durationMs else {
+            if (sampleRate > 0) ((span.endSample - span.startSample) * 1000) / sampleRate else 0
+          }
+
+          val payloadJson = if (speakerName != null) {
+            val escaped = speakerName.replace("\"", "\\\"")
+            """{"source":"sid","speakerName":"$escaped"}"""
+          } else {
+            """{"source":"sid"}"""
+          }
+
+          records.add(
+            SegmentRecord(
+              id = span.id,
+              kind = "speech",
+              sourceAudioBufferId = audioInId,
+              startSample = span.startSample,
+              endSample = span.endSample,
+              sampleRate = span.sampleRate,
+              durationMs = durationMs,
+              confidence = span.confidence,
+              payloadJson = payloadJson
+            )
+          )
+        }
+
+        segmentsOutEntry.populate(records)
+        val result = Arguments.createMap()
+        result.putInt("labeledCount", labeledCount)
+        result.putInt("unknownCount", unknownCount)
+        promise.resolve(result)
+      } catch (e: OutOfMemoryError) {
+        Log.e(TAG, "OOM during speaker identification labeling", e)
+        promise.reject(
+          OFFLINE_OOM,
+          OfflineOomError.message("speaker-identification"),
+          e
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "Speaker identification labeling failed", e)
+        val message = e.message.orEmpty()
+        val code = when {
+          message.startsWith("SPEAKER_EMBEDDING_") ->
+            message.substringBefore(':').trim().ifBlank { COMPUTE_ERROR }
+          else -> COMPUTE_ERROR
+        }
+        val detail = when {
+          message.contains(':') -> message.substringAfter(':').trim()
+          message.isNotBlank() -> message
+          else -> "Speaker identification labeling failed"
+        }
+        promise.reject(code, detail, e)
+      }
+    }
+  }
+
   /**
    * Synchronous compute for offline-live workers (worker thread; not Promise/TM).
    */
@@ -861,6 +1033,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     private const val BUFFER_NOT_FOUND = "SPEAKER_EMBEDDING_BUFFER_NOT_FOUND"
     private const val BUFFER_EMPTY = "SPEAKER_EMBEDDING_BUFFER_EMPTY"
     private const val INVALID_ARGUMENT = "SPEAKER_EMBEDDING_INVALID_ARGUMENT"
+    private const val OFFLINE_OOM = "OFFLINE_OOM"
     private val SUPPORTED_TYPES = setOf("wespeaker", "3d-speaker", "nemo")
 
     @JvmStatic

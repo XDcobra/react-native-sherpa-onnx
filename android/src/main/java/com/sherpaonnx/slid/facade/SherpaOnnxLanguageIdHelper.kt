@@ -11,6 +11,8 @@ import com.k2fsa.sherpa.onnx.SpokenLanguageIdentificationConfig
 import com.k2fsa.sherpa.onnx.SpokenLanguageIdentificationWhisperConfig
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
+import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.slid.core.LanguageIdErrorCodes
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -196,6 +198,217 @@ internal class SherpaOnnxLanguageIdHelper {
         try {
           stream?.release()
         } catch (_: Exception) {}
+      }
+    }
+  }
+
+  fun labelLanguageIdOfflineSegments(
+    instanceId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    promise: Promise
+  ) {
+    if (instanceId.isBlank()) {
+      promise.reject(LanguageIdErrorCodes.INIT_ERROR, "instanceId is required")
+      return
+    }
+    val slid = instances[instanceId]
+    if (slid == null) {
+      promise.reject(LanguageIdErrorCodes.NOT_INITIALIZED, "SLID instance not found: $instanceId")
+      return
+    }
+
+    if (audioInId.isBlank() || !audioInId.startsWith("off_")) {
+      promise.reject(
+        LanguageIdErrorCodes.INVALID_ARGUMENT,
+        "Expected offline audio buffer (off_*), got: $audioInId"
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(audioInId)
+    if (audioInEntry == null) {
+      promise.reject(
+        LanguageIdErrorCodes.BUFFER_NOT_FOUND,
+        "Offline audio buffer not found: $audioInId"
+      )
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(
+        LanguageIdErrorCodes.BUFFER_EMPTY,
+        "Offline audio buffer is empty: $audioInId"
+      )
+      return
+    }
+
+    if (segmentsInId.isBlank() || !segmentsInId.startsWith("seg_off_")) {
+      promise.reject(
+        LanguageIdErrorCodes.INVALID_ARGUMENT,
+        "Expected offline segment buffer (seg_off_*) for segmentsIn, got: $segmentsInId"
+      )
+      return
+    }
+    val segmentsInEntry = SegmentPipelineRegistry.getOffline(segmentsInId)
+    if (segmentsInEntry == null) {
+      promise.reject(
+        LanguageIdErrorCodes.BUFFER_NOT_FOUND,
+        "Offline segment buffer not found: $segmentsInId"
+      )
+      return
+    }
+
+    if (segmentsOutId.isBlank() || !segmentsOutId.startsWith("seg_off_")) {
+      promise.reject(
+        LanguageIdErrorCodes.INVALID_ARGUMENT,
+        "Expected offline segment buffer (seg_off_*) for segmentsOut, got: $segmentsOutId"
+      )
+      return
+    }
+    val segmentsOutEntry = SegmentPipelineRegistry.getOffline(segmentsOutId)
+    if (segmentsOutEntry == null) {
+      promise.reject(
+        LanguageIdErrorCodes.BUFFER_NOT_FOUND,
+        "Offline segment buffer not found: $segmentsOutId"
+      )
+      return
+    }
+    if (segmentsOutEntry.snapshotSegments().isNotEmpty()) {
+      promise.reject(
+        LanguageIdErrorCodes.INVALID_ARGUMENT,
+        "segmentsOut must be an empty offline segment buffer: $segmentsOutId"
+      )
+      return
+    }
+
+    executor.execute {
+      try {
+        val sampleRate = audioInEntry.sampleRate
+        val allSegments = segmentsInEntry.snapshotSegments()
+        val speechSpans = allSegments.filter { it.kind == "speech" && it.endSample > it.startSample }
+
+        if (speechSpans.isEmpty()) {
+          segmentsOutEntry.populate(emptyList())
+          val emptyResult = Arguments.createMap()
+          emptyResult.putInt("labeledCount", 0)
+          emptyResult.putString("dominantLanguage", "")
+          emptyResult.putMap("distribution", Arguments.createMap())
+          emptyResult.putArray("switches", Arguments.createArray())
+          emptyResult.putArray("segments", Arguments.createArray())
+          promise.resolve(emptyResult)
+          return@execute
+        }
+
+        val records = ArrayList<SegmentRecord>(speechSpans.size)
+        val segmentsArray = Arguments.createArray()
+        val switchesArray = Arguments.createArray()
+        val durationByLang = HashMap<String, Double>()
+        var totalSpeechDurationMs = 0.0
+        var previousLang: String? = null
+
+        for (i in speechSpans.indices) {
+          val span = speechSpans[i]
+          val frameCount = (span.endSample - span.startSample).coerceAtLeast(0)
+          val samples = audioInEntry.readSlice(span.startSample, frameCount)
+
+          var stream: OfflineStream? = null
+          val lang: String
+          try {
+            stream = slid.createStream()
+            stream.acceptWaveform(samples, sampleRate)
+            lang = slid.compute(stream).trim()
+          } finally {
+            try {
+              stream?.release()
+            } catch (_: Exception) {}
+          }
+
+          val durationMs = if (span.durationMs > 0) span.durationMs else {
+            if (sampleRate > 0) ((span.endSample - span.startSample) * 1000) / sampleRate else 0
+          }
+          val startTime = if (sampleRate > 0) span.startSample.toDouble() / sampleRate.toDouble() else 0.0
+          val endTime = if (sampleRate > 0) span.endSample.toDouble() / sampleRate.toDouble() else 0.0
+
+          records.add(
+            SegmentRecord(
+              id = span.id,
+              kind = "speech",
+              sourceAudioBufferId = audioInId,
+              startSample = span.startSample,
+              endSample = span.endSample,
+              sampleRate = span.sampleRate,
+              durationMs = durationMs,
+              confidence = span.confidence,
+              payloadJson = "{\"source\":\"languageId\",\"lang\":\"$lang\"}"
+            )
+          )
+
+          val segMap = Arguments.createMap()
+          segMap.putInt("segmentIndex", i)
+          segMap.putDouble("startTime", startTime)
+          segMap.putDouble("endTime", endTime)
+          segMap.putInt("durationMs", durationMs)
+          segMap.putString("lang", lang)
+          segmentsArray.pushMap(segMap)
+
+          if (lang.isNotEmpty()) {
+            val dur = durationMs.toDouble()
+            durationByLang[lang] = (durationByLang[lang] ?: 0.0) + dur
+            totalSpeechDurationMs += dur
+
+            if (previousLang == null || lang != previousLang) {
+              val switchMap = Arguments.createMap()
+              switchMap.putDouble("timestamp", startTime)
+              if (previousLang == null) {
+                switchMap.putNull("from")
+              } else {
+                switchMap.putString("from", previousLang)
+              }
+              switchMap.putString("to", lang)
+              switchMap.putInt("segmentIndex", i)
+              switchesArray.pushMap(switchMap)
+              previousLang = lang
+            }
+          }
+        }
+
+        segmentsOutEntry.populate(records)
+
+        var dominantLanguage = ""
+        var maxDuration = -1.0
+        val distMap = Arguments.createMap()
+        if (totalSpeechDurationMs > 0) {
+          for ((l, dur) in durationByLang) {
+            if (dur > maxDuration) {
+              maxDuration = dur
+              dominantLanguage = l
+            }
+            val fraction = Math.round((dur / totalSpeechDurationMs) * 10000.0) / 10000.0
+            distMap.putDouble(l, fraction)
+          }
+        }
+
+        val result = Arguments.createMap()
+        result.putInt("labeledCount", records.size)
+        result.putString("dominantLanguage", dominantLanguage)
+        result.putMap("distribution", distMap)
+        result.putArray("switches", switchesArray)
+        result.putArray("segments", segmentsArray)
+        promise.resolve(result)
+      } catch (e: OutOfMemoryError) {
+        Log.e(LanguageIdErrorCodes.TAG, "OOM during language identification labeling", e)
+        promise.reject(
+          LanguageIdErrorCodes.OFFLINE_OOM,
+          OfflineOomError.message("spoken-language-identification"),
+          e
+        )
+      } catch (e: Exception) {
+        Log.e(LanguageIdErrorCodes.TAG, "Language identification labeling failed", e)
+        promise.reject(
+          LanguageIdErrorCodes.IDENTIFY_FAILED,
+          "Language identification labeling failed: ${e.message}",
+          e
+        )
       }
     }
   }
