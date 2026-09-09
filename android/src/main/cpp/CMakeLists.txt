@@ -157,6 +157,7 @@ set(SOURCES
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
     jni/model_detect/kws/sherpa-onnx-model-detect-kws.cpp
+    jni/model_detect/kws/sherpa-onnx-validate-kws.cpp
     jni/model_detect/kws/sherpa-onnx-kws-detect-wrapper.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp

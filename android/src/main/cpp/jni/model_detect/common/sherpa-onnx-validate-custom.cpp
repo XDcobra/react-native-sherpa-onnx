@@ -4,6 +4,7 @@
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-alignment.h"
 #include "sherpa-onnx-validate-slid.h"
+#include "sherpa-onnx-validate-kws.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
@@ -79,6 +80,11 @@ AlignmentModelKind ParseAlignmentModelTypeLocal(const std::string& modelType) {
 LanguageIdModelKind ParseLanguageIdModelTypeLocal(const std::string& modelType) {
     if (modelType == "whisper") return LanguageIdModelKind::kWhisper;
     return LanguageIdModelKind::kUnknown;
+}
+
+KwsModelKind ParseKwsModelTypeLocal(const std::string& modelType) {
+    if (modelType == "transducer") return KwsModelKind::kTransducer;
+    return KwsModelKind::kUnknown;
 }
 
 SeparationModelKind ParseSeparationModelTypeLocal(const std::string& modelType) {
@@ -283,6 +289,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "kws") {
+        const KwsModelKind kind = ParseKwsModelTypeLocal(modelType);
+        if (kind == KwsModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom KWS model type: " + modelType
+            );
+        }
+        KwsModelPaths kwsPaths;
+        FillKwsModelPathsFromStringMap(paths, kwsPaths);
+        const auto vr = ValidateKwsPaths(kind, kwsPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     return FromValidation(
         false,
         {},
@@ -351,6 +372,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const LanguageIdModelKind kind = ParseLanguageIdModelTypeLocal(modelType);
         if (kind == LanguageIdModelKind::kUnknown) return {};
         return FromSpecs(GetLanguageIdPathRequirements(kind));
+    }
+    if (cat == "kws") {
+        const KwsModelKind kind = ParseKwsModelTypeLocal(modelType);
+        if (kind == KwsModelKind::kUnknown) return {};
+        return FromSpecs(GetKwsPathRequirements(kind));
     }
 
     return {};

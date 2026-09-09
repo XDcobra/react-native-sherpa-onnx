@@ -4968,7 +4968,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       val out = Arguments.createMap()
       out.putBoolean("success", result["success"] as? Boolean ?: false)
-      out.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: true)
+      out.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
       (result["error"] as? String)?.takeIf { it.isNotBlank() }?.let { out.putString("error", it) }
       (result["modelType"] as? String)?.let { out.putString("modelType", it) }
       (result["quantization"] as? String)?.takeIf { it.isNotBlank() }?.let {

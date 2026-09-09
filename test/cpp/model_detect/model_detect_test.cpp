@@ -38,6 +38,7 @@
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-validate-slid.h"
+#include "sherpa-onnx-validate-kws.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -144,10 +145,44 @@ TEST(ModelDetectValidation, KwsMissingKeywordsRejected) {
     const auto result =
         sherpaonnx::DetectKwsModelFromFileList(files, root, "auto", "");
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error.find("keywords.txt"), std::string::npos);
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_NE(result.error.find("keywords"), std::string::npos);
 }
 
-TEST(ModelDetectValidation, KwsNestedKeywordsAccepted) {
+TEST(ModelDetectValidation, ValidateKwsPathsDirectOk) {
+    sherpaonnx::KwsModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.joiner = "/m/joiner.onnx";
+    paths.tokens = "/m/tokens.txt";
+    paths.keywords = "/m/keywords.txt";
+    auto v = sherpaonnx::ValidateKwsPaths(
+        sherpaonnx::KwsModelKind::kTransducer, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateKwsPathsDirectMissingKeywords) {
+    sherpaonnx::KwsModelPaths paths;
+    paths.encoder = "/m/encoder.onnx";
+    paths.decoder = "/m/decoder.onnx";
+    paths.joiner = "/m/joiner.onnx";
+    paths.tokens = "/m/tokens.txt";
+    auto v = sherpaonnx::ValidateKwsPaths(
+        sherpaonnx::KwsModelKind::kTransducer, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+    EXPECT_NE(v.error.find("keywords"), std::string::npos);
+}
+
+TEST(ModelDetectValidation, ValidateKwsPathsUnknownKindPassesThrough) {
+    sherpaonnx::KwsModelPaths paths;
+    auto v = sherpaonnx::ValidateKwsPaths(
+        sherpaonnx::KwsModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, KwsNestedKeywordsAcceptedWithKwsName) {
     const std::string root = "/tmp/kws-model";
     const auto files = model_detect_test::BuildFileEntriesFromPathLines(
         root,
@@ -156,7 +191,22 @@ TEST(ModelDetectValidation, KwsNestedKeywordsAccepted) {
     const auto result =
         sherpaonnx::DetectKwsModelFromFileList(files, root, "auto", "");
     EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
     EXPECT_EQ(result.paths.keywords, "test_wavs/keywords.txt");
+}
+
+TEST(ModelDetectValidation, KwsNestedKeywordsRejectedWithoutKwsName) {
+    // ASR-style transducer pack must not be claimed as KWS via incidental nested keywords.
+    const std::string root = "/tmp/streaming-zipformer-en-20M";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root,
+        {"encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt",
+         "test_wavs/keywords.txt"});
+    const auto result =
+        sherpaonnx::DetectKwsModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_NE(result.error.find("nested keywords.txt"), std::string::npos);
 }
 
 /**

@@ -2,6 +2,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-stt-online-guard.h"
 #include "sherpa-onnx-catalog-metadata.h"
+#include "sherpa-onnx-validate-kws.h"
 
 #include <algorithm>
 #include <optional>
@@ -33,6 +34,21 @@ bool LooksLikeKwsName(const std::string& value) {
            lower.find("keyword") != std::string::npos;
 }
 
+/** True when keywords.txt is not at the model-dir root (e.g. test_wavs/keywords.txt). */
+bool IsNestedKeywordsPath(const std::string& keywordsPath, const std::string& modelDir) {
+    std::string rel = keywordsPath;
+    if (!modelDir.empty() && keywordsPath.size() >= modelDir.size() &&
+        keywordsPath.compare(0, modelDir.size(), modelDir) == 0) {
+        size_t i = modelDir.size();
+        if (i < keywordsPath.size() &&
+            (keywordsPath[i] == '/' || keywordsPath[i] == '\\')) {
+            ++i;
+        }
+        rel = keywordsPath.substr(i);
+    }
+    return rel.find('/') != std::string::npos || rel.find('\\') != std::string::npos;
+}
+
 sherpaonnx::KwsDetectResult DetectFromFiles(
     const std::vector<FileEntry>& files,
     const std::string& modelDir,
@@ -53,6 +69,7 @@ sherpaonnx::KwsDetectResult DetectFromFiles(
         }
         result.selectedKind = sherpaonnx::KwsModelKind::kTransducer;
         result.detectedModels.push_back({"transducer", modelDir});
+        result.isStreaming = true;
         AppendUnique(
             result.detectionSources,
             requested == "auto" ? sherpaonnx::DetectionSource::kDirName
@@ -80,29 +97,39 @@ sherpaonnx::KwsDetectResult DetectFromFiles(
     result.paths.decoder = FindOnnxByAnyToken(files, {"decoder"}, quantization);
     result.paths.joiner = FindOnnxByAnyToken(files, {"joiner"}, quantization);
     result.paths.tokens = FindFileByName(files, "tokens.txt");
-    // Intentionally recursive: the zh-en release keeps this under test_wavs/.
     result.paths.keywords = FindFileByName(files, "keywords.txt");
-
-    if (result.paths.encoder.empty() || result.paths.decoder.empty() ||
-        result.paths.joiner.empty() || result.paths.tokens.empty() ||
-        result.paths.keywords.empty()) {
-        result.error =
-            "KWS: requires encoder, decoder, joiner ONNX files, tokens.txt, and keywords.txt";
-        return result;
-    }
 
     result.selectedKind = sherpaonnx::KwsModelKind::kTransducer;
     result.detectedModels.push_back({"transducer", modelDir});
+
+    const auto validation =
+        sherpaonnx::ValidateKwsPaths(result.selectedKind, result.paths, modelDir);
+    if (!validation.ok) {
+        result.error = validation.error;
+        return result;
+    }
+
+    // Nested keywords (e.g. test_wavs/keywords.txt in the zh-en release) are only
+    // accepted when the pack name itself looks like KWS — otherwise an ASR
+    // transducer with incidental nested keywords.txt would claim KWS before STT.
+    if (IsNestedKeywordsPath(result.paths.keywords, modelDir) &&
+        !LooksLikeKwsName(modelDir)) {
+        result.error =
+            "KWS: nested keywords.txt requires a KWS-like model directory/asset name "
+            "(e.g. containing 'kws'); root-level keywords.txt is required otherwise";
+        result.paths.keywords.clear();
+        return result;
+    }
 
     sherpaonnx::SttModelPaths guardPaths;
     guardPaths.encoder = result.paths.encoder;
     guardPaths.decoder = result.paths.decoder;
     guardPaths.joiner = result.paths.joiner;
     guardPaths.tokens = result.paths.tokens;
-    const auto guard = sherpaonnx::stt::online_guard::RunOnlineCompatibilityGuard(
-        sherpaonnx::SttModelKind::kTransducer, guardPaths, modelDir);
+    const auto guard =
+        sherpaonnx::stt::online_guard::GuardZipformer2TransducerOnlineCompatibility(
+            guardPaths, modelDir);
     if (!guard.passed) {
-        result.isStreaming = false;
         result.error = "KWS: online Zipformer2 transducer guard failed: " + guard.error;
         return result;
     }
@@ -117,6 +144,7 @@ sherpaonnx::KwsDetectResult DetectFromFiles(
             result.quantization = fileQuant;
         }
     }
+    result.isStreaming = true;
     result.ok = true;
     return result;
 }

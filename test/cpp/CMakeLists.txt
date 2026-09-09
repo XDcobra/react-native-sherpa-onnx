@@ -54,6 +54,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/slid/sherpa-onnx-model-detect-slid.cpp"
   "${MODEL_DETECT_DIR}/slid/sherpa-onnx-validate-slid.cpp"
   "${MODEL_DETECT_DIR}/kws/sherpa-onnx-model-detect-kws.cpp"
+  "${MODEL_DETECT_DIR}/kws/sherpa-onnx-validate-kws.cpp"
 )
 
 add_executable(model_detect_test

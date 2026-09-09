@@ -477,8 +477,8 @@ struct LanguageIdDetectResult {
 
 struct KwsDetectResult {
     bool ok = false;
-    /** KWS is online-only in upstream sherpa-onnx. */
-    bool isStreaming = true;
+    /** True only after successful layout+zipformer2 guard, or name-only kind inference. */
+    bool isStreaming = false;
     std::string error;
     std::vector<DetectedModel> detectedModels;
     KwsModelKind selectedKind = KwsModelKind::kUnknown;
