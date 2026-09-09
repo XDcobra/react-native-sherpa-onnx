@@ -3333,6 +3333,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         spoolingTemporary = spoolingTemporary,
         spoolingThresholdBytes = spoolingThresholdBytes,
       )
+      // Match iOS: native commitSegment (STT/SLID/workers) must notify JS.
+      entry.addCommitListener { segment ->
+        emitLiveTextSegment(
+          liveBufferId = entry.bufferId,
+          segment = segment,
+          totalSegments = entry.segmentCount,
+        )
+      }
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -3344,6 +3352,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createLiveTextBufferFromOffline(offlineBufferId: String, promise: Promise) {
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLiveFromOffline(offlineBufferId)
+      entry.addCommitListener { segment ->
+        emitLiveTextSegment(
+          liveBufferId = entry.bufferId,
+          segment = segment,
+          totalSegments = entry.segmentCount,
+        )
+      }
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -3677,19 +3692,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         source = "append",
         meta = metaMap,
       )
-
-      emitLiveTextSegment(
-        liveBufferId = liveBufferId,
-        segment = com.sherpaonnx.text.pipeline.TextSegment(
-          text = text,
-          tokens = tokenArray,
-          timestamps = timestampArray,
-          source = "append",
-          segmentIndex = segmentIndex,
-          meta = metaMap,
-        ),
-        totalSegments = entry.segmentCount,
-      )
+      // Event emission is handled by the createLiveTextBuffer commit listener
+      // (parity with iOS appendLiveTextSegment).
 
       val out = Arguments.createMap()
       out.putInt("segmentIndex", segmentIndex)

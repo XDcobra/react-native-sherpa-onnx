@@ -1403,6 +1403,16 @@ export default function LanguageIdentificationScreen() {
               <Text style={styles.bodyText}>{liveStatus}</Text>
             ) : null}
 
+            {liveRunState === 'idle' &&
+            liveStatus != null &&
+            liveLog.length === 0 &&
+            !liveCurrentLang ? (
+              <Text style={styles.sectionHint}>
+                No language segments were committed. Speech spans shorter than ~
+                1.5s are skipped; try a longer clip or speak longer turns.
+              </Text>
+            ) : null}
+
             {liveLog.length > 0 ? (
               <View
                 style={{
