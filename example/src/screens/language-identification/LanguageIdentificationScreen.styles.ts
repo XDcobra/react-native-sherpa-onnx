@@ -50,6 +50,61 @@ export const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 8,
   },
+  apiTable: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  apiTableHeaderRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  apiTableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  apiTableRowLast: {
+    borderBottomWidth: 0,
+  },
+  apiTableCellMode: {
+    width: 56,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+  },
+  apiTableCellBody: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  apiTableHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  apiTableModeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  apiTableLabelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  apiTableCodeText: {
+    fontSize: 11,
+    color: '#4B5563',
+    fontFamily: 'Menlo',
+  },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,

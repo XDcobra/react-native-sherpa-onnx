@@ -37,7 +37,6 @@ import {
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
-  createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
@@ -120,7 +119,11 @@ const LANG_AUDIO_FILES = AUDIO_FILES.filter(
 const ZH_EN_META =
   LANG_AUDIO_FILES.find((file) => file.id === TEST_AUDIO_FILES.ZH_EN_1) ?? null;
 
-const LANG_FAVORITE_AUDIO_IDS = ZH_EN_META
+const EN_1_META =
+  LANG_AUDIO_FILES.find((file) => file.id === TEST_AUDIO_FILES.EN_1) ?? null;
+
+/** Live overload always uses Auto segmentation → pin ZH↔EN code-switch clip. */
+const LIVE_FAVORITE_AUDIO_IDS = ZH_EN_META
   ? ([TEST_AUDIO_FILES.ZH_EN_1] as const)
   : undefined;
 
@@ -231,9 +234,15 @@ export default function LanguageIdentificationScreen() {
   const [segLiveConfig, setSegLiveConfig] =
     useState<SegmentationControlConfig>(LIVE_SEG_DEFAULT);
 
+  const batchFavoriteAudioFileIds = useMemo(() => {
+    if (segBatchConfig.mode === 'auto') {
+      return ZH_EN_META ? ([TEST_AUDIO_FILES.ZH_EN_1] as const) : undefined;
+    }
+    return EN_1_META ? ([TEST_AUDIO_FILES.EN_1] as const) : undefined;
+  }, [segBatchConfig.mode]);
+
   const [preparedInputBuffer, setPreparedInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
-  const [populateOfflineSegments, setPopulateOfflineSegments] = useState(false);
   const [identifyProgress, setIdentifyProgress] = useState<{
     label: string;
     percent: number | null;
@@ -586,20 +595,12 @@ export default function LanguageIdentificationScreen() {
     setSegmentedResult(null);
     setIdentifyProgress({ label: 'Identifying…', percent: null });
 
-    let offlineSegOutId: string | null = null;
     try {
       const segOption = buildSegmentationOption(segBatchConfig);
       const useAuto =
         segOption != null &&
         segOption.mode === 'auto' &&
         segOption.policy != null;
-
-      if (populateOfflineSegments && useAuto) {
-        const segOut = await createEmptyOfflineSegmentBuffer({
-          sourceAudioBufferId: preparedInputBuffer.bufferId,
-        });
-        offlineSegOutId = segOut.bufferId;
-      }
 
       if (!useAuto) {
         const result = await engine.identify(preparedInputBuffer.bufferId);
@@ -613,7 +614,6 @@ export default function LanguageIdentificationScreen() {
           mode: 'auto',
           policy: segOption!.policy,
         },
-        targetSegmentBuffer: offlineSegOutId ?? undefined,
         onProgress: (progress) => {
           const percent =
             progress.totalSegments > 0
@@ -645,12 +645,9 @@ export default function LanguageIdentificationScreen() {
       setError(normalizeErrorMessage(identifyErr));
       setIdentifyProgress(null);
     } finally {
-      if (offlineSegOutId) {
-        await releasePipelineSegmentBuffer(offlineSegOutId).catch(() => {});
-      }
       setIdentifying(false);
     }
-  }, [populateOfflineSegments, preparedInputBuffer, segBatchConfig]);
+  }, [preparedInputBuffer, segBatchConfig]);
 
   const resolveLiveFileSource = useCallback((): FileSource => {
     if (liveFileSourceType === 'own') {
@@ -1112,17 +1109,40 @@ export default function LanguageIdentificationScreen() {
           <Text style={styles.cardTitle}>Segmentation</Text>
           {processingMode === 'batch' ? (
             <>
-              <Text style={styles.sectionHint}>
-                Off → Mode 1 oneshot{' '}
-                <Text style={{ fontFamily: 'Menlo' }}>identify(audio)</Text>.
-                Auto → Mode 2 segmented{' '}
-                <Text style={{ fontFamily: 'Menlo' }}>
-                  identify(audio, {'{'} segmentation: {'{'} mode:
-                  &apos;auto&apos;
-                  {'}'} {'}'})
-                </Text>
-                .
-              </Text>
+              <View style={styles.apiTable}>
+                <View style={styles.apiTableHeaderRow}>
+                  <View style={styles.apiTableCellMode}>
+                    <Text style={styles.apiTableHeaderText}>UI</Text>
+                  </View>
+                  <View style={styles.apiTableCellBody}>
+                    <Text style={styles.apiTableHeaderText}>API</Text>
+                  </View>
+                </View>
+                <View style={styles.apiTableRow}>
+                  <View style={styles.apiTableCellMode}>
+                    <Text style={styles.apiTableModeText}>Off</Text>
+                  </View>
+                  <View style={styles.apiTableCellBody}>
+                    <Text style={styles.apiTableLabelText}>
+                      Mode 1 · oneshot
+                    </Text>
+                    <Text style={styles.apiTableCodeText}>identify(audio)</Text>
+                  </View>
+                </View>
+                <View style={[styles.apiTableRow, styles.apiTableRowLast]}>
+                  <View style={styles.apiTableCellMode}>
+                    <Text style={styles.apiTableModeText}>Auto</Text>
+                  </View>
+                  <View style={styles.apiTableCellBody}>
+                    <Text style={styles.apiTableLabelText}>
+                      Mode 2 · segmented
+                    </Text>
+                    <Text style={styles.apiTableCodeText}>
+                      {"identify(audio, { segmentation: { mode: 'auto' } })"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
               <SegmentationPolicyControls
                 variant="speech-offline"
                 value={segBatchConfig}
@@ -1156,11 +1176,6 @@ export default function LanguageIdentificationScreen() {
         {processingMode === 'batch' ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Input (offline)</Text>
-            <Text style={styles.sectionHint}>
-              Prefer the ★ ZH↔EN meeting clip with segmentation Auto for
-              code-switching (distribution + switches). Short EN/ZH/JA/KO clips
-              suit oneshot.
-            </Text>
             {showZhEnOneshotWarn ? (
               <View style={styles.warnBox}>
                 <Text style={styles.warnText}>
@@ -1174,7 +1189,7 @@ export default function LanguageIdentificationScreen() {
             <OfflineAudioBufferWidget
               ref={offlineWidgetRef}
               audioFiles={LANG_AUDIO_FILES}
-              favoriteAudioFileIds={LANG_FAVORITE_AUDIO_IDS}
+              favoriteAudioFileIds={batchFavoriteAudioFileIds}
               visible={engineReady}
               disabled={!engineReady || identifying || liveBusy}
               onBufferReady={(info) => {
@@ -1190,27 +1205,6 @@ export default function LanguageIdentificationScreen() {
                 setIdentifyProgress(null);
               }}
             />
-
-            <View style={styles.toggleRow}>
-              <Text style={styles.bodyText}>
-                Also populate targetSegmentBuffer
-              </Text>
-              <Switch
-                value={populateOfflineSegments}
-                onValueChange={setPopulateOfflineSegments}
-                disabled={
-                  !engineReady ||
-                  identifying ||
-                  liveBusy ||
-                  segBatchConfig.mode === 'off'
-                }
-              />
-            </View>
-            {populateOfflineSegments && segBatchConfig.mode === 'off' ? (
-              <Text style={styles.sectionHint}>
-                targetSegmentBuffer applies only in Auto (segmented) mode.
-              </Text>
-            ) : null}
 
             {identifyProgress ? (
               <View style={styles.progressBox}>
@@ -1324,7 +1318,7 @@ export default function LanguageIdentificationScreen() {
                 {liveFileSourceType === 'example' ? (
                   <ExampleAudioFileList
                     audioFiles={LANG_AUDIO_FILES}
-                    favoriteAudioFileIds={LANG_FAVORITE_AUDIO_IDS}
+                    favoriteAudioFileIds={LIVE_FAVORITE_AUDIO_IDS}
                     selectedId={selectedExampleAudioId}
                     onSelect={(audioFile) => {
                       setSelectedExampleAudioId(audioFile.id);

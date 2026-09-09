@@ -1046,11 +1046,15 @@ export interface Spec extends TurboModule {
     confidence?: number,
     /**
      * Strict payload contract (validated in JS/native):
-     * - kind='speech': payload.source must be one of 'vad' | 'stt' | 'tts' | 'sid'
+     * - kind='speech': payload.source must be one of
+     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'manual'
      *   - source='vad' -> allowed keys: source, engine, decision, score
      *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
+     *   - source='pyannote' -> allowed keys: source
+     *   - source='languageId' -> allowed keys: source, lang, confidence?
+     *   - source='manual' -> allowed keys: source
      * - kind='alignment': strict alignment payload contract
      * - kind='diarization': payload.source='diarization', speaker (number)
      */

@@ -4098,7 +4098,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4107,10 +4107,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "pyannote" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "languageId" -> setOf("source", "lang", "confidence", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
       )
     }
 
@@ -4164,7 +4166,47 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      "stt", "tts" -> Unit
+      "languageId" -> {
+        if (!payload.hasKey("lang") || payload.isNull("lang")) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang is required for source=languageId (non-empty string)"
+          )
+        }
+        val lang = try {
+          payload.getString("lang")?.trim().orEmpty()
+        } catch (_: Exception) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang must be a non-empty string"
+          )
+        }
+        if (lang.isEmpty()) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang is required for source=languageId (non-empty string)"
+          )
+        }
+        if (payload.hasKey("confidence") && !payload.isNull("confidence")) {
+          try {
+            val confidence = payload.getDouble("confidence")
+            if (!confidence.isFinite()) {
+              throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+                com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+                "speech payload.confidence must be a finite number when provided"
+              )
+            }
+          } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+            throw e
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.confidence must be a finite number when provided"
+            )
+          }
+        }
+      }
+      "stt", "tts", "pyannote", "manual" -> Unit
     }
   }
 
