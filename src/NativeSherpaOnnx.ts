@@ -1720,6 +1720,21 @@ export interface Spec extends TurboModule {
     segmentsOutId: string
   ): Promise<LanguageIdLabelNativeResult>;
 
+  /**
+   * Start a live-offline Spoken Language Identification pipeline.
+   * Commits ISO language codes into a live text buffer; optionally labels a live segment buffer.
+   */
+  startLanguageIdOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      targetSegmentLiveBufferId?: string | null;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   initializeDiarization(
     instanceId: string,
     options: DiarizationInitBridgeOptions

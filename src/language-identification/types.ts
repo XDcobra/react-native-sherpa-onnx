@@ -1,11 +1,20 @@
 import type { FileSource } from '../fileio/types';
 import type { QuantizationPreference } from '../download/types';
 import type { LanguageIdDetectModelResult } from '../types/modelDetect';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
-import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
+import type {
+  LiveSegmentBufferIdSource,
+  OfflineSegmentBufferIdSource,
+} from '../segmentbuffer/types';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
 import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import type { LanguageIdCustomConfig } from './customConfig';
+import type { LanguageIdentificationPipelineHandle } from './streamingTypes';
 
 export {
   DETECTION_SOURCES,
@@ -162,6 +171,20 @@ export interface LanguageIdLabelOptions {
   onLanguageChanged?: (event: LanguageChangedEvent) => void;
 }
 
+/**
+ * Options for Mode 3 live overload:
+ * `identify(liveAudio, liveText, options)`.
+ */
+export interface LanguageIdentificationLivePipelineOptions
+  extends LiveOfflinePipelineBaseOptions {
+  /** Fired for every evaluated speech segment. */
+  onSegment?: (event: LanguageIdSegmentEvent) => void;
+  /** Fired when the spoken language switches between segments. */
+  onLanguageChanged?: (event: LanguageChangedEvent) => void;
+  /** Optional live segment buffer to annotate with LanguageIdSpeechSegmentPayload. */
+  targetSegmentBuffer?: LiveSegmentBufferIdSource;
+}
+
 /** Result from `labelOfflineSegments`. */
 export interface LabelOfflineSegmentsResult {
   labeledCount: number;
@@ -197,7 +220,18 @@ export interface LanguageIdentificationEngine {
   ): Promise<SegmentedLanguageIdentificationResult>;
 
   /**
-   * General signature for identify.
+   * Mode 3: Live Overload (Real-time Streaming)
+   * Connects LiveAudioBuffer to LiveTextBuffer via segmentation engine worker,
+   * commits detected language tags to text buffer, and emits onSegment/onLanguageChanged.
+   */
+  identify(
+    audioIn: LiveAudioBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options: LanguageIdentificationLivePipelineOptions
+  ): Promise<LanguageIdentificationPipelineHandle>;
+
+  /**
+   * General signature for identify (offline).
    */
   identify(
     audio: OfflineAudioBufferIdSource,
