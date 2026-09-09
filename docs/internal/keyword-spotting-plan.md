@@ -253,6 +253,9 @@ export interface KeywordSpottingEngine {
 
 ```ts
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+// LiveTextBuffer spooling defaults to on/auto (same as STT). Keep that if you need
+// fullIfSpooled / offline transfer of hit history. For wake-word callbacks only:
+// createLiveTextBuffer({ spooling: { mode: 'off' } }).
 const textOut = await createLiveTextBuffer();
 const pipeline = await kws.spot(live, textOut, { onKeyword: (e) => console.log(e.keyword) });
 await startMicToLiveAudioBuffer(live);
@@ -392,7 +395,7 @@ Do **not** invent a SLID-style shortcut of “licenses come from ASR” — KWS 
 | **Phase 1: Foundation, Detect, Collect & Licenses** | • Add `ModelCategory.Kws`<br>• C++ `sherpa-onnx-model-detect-kws.cpp` (+ JNI/ObjC wiring)<br>• TS `detectKwsModel`<br>• Unit tests for detect (encoder/decoder/joiner + zipformer2 + keywords.txt)<br>• **Collect stream for `kws-models`** (manifest + workflow + `sherpa_kws_model_release_streams.json`)<br>• **License CSV** Android + iOS + `getModelLicenses()`<br>• Update support matrix: KWS = online yes / SDK offline **No** / SDK live **real streaming** | Detection + structure fixtures + license status for all `kws-models` release assets |
 | **Phase 2: Native engine + init/unload** | • Android `SherpaOnnxKwsHelper` (Kotlin `KeywordSpotter`)<br>• iOS C-API wrapper + bridge<br>• TS `createKeywordSpotting` + `destroy`<br>• Port tuning options from forks<br>• Smoke: create/destroy without pipeline | Engine lifecycle ready for pipeline attach |
 | **Phase 3: Real streaming pipeline** ✅ | • `KwsStreamingPipelineWorker` Android + iOS<br>• `spot(LiveAudio, LiveText, options)` → `StreamingPipelineHandle`<br>• Mic path via `startMicToLiveAudioBuffer`<br>• File path via `ingestFileToLiveAudioBuffer` (same API)<br>• `onKeyword` / text-buffer `onSegment`<br>• Auto-reset after hit | Continuous wake-word (mic + wav) with buffer-first API — **landed** (device C-API smoke + Jest; full RN ingest smoke / showcase → Phase 5) |
-| **Phase 4: Keywords UX & docs** | • Document keywords.txt + text2token<br>• Optional reload keywords without full destroy where upstream allows<br>• `docs/kws-streaming.md` only<br>• README checklist + model catalog notes<br>• Note: live→offline transfer is for audio retention, not offline KWS | App-facing docs matching STT streaming quality |
+| **Phase 4: Keywords UX & docs** | • Document keywords.txt + text2token<br>• Optional reload keywords without full destroy where upstream allows<br>• `docs/kws-streaming.md` only<br>• README checklist + model catalog notes<br>• Note: live→offline transfer is for audio retention, not offline KWS<br>• Note: `textOut` LiveTextBuffer keeps normal spooling defaults; document `spooling: { mode: 'off' }` when only `onKeyword` / segments are needed | App-facing docs matching STT streaming quality |
 | **Phase 5: Showcase & verification** | • Example screen: load KWS pack, edit/select keywords, mic + file-ingest spot<br>• Compare behavior vs skillmaker docs (threshold / trailing blanks)<br>• Android-first logcat validation; iOS follow-up<br>• Regression: unload during active pipeline | Verified feature + interactive demo |
 
 **Non-goals for MVP:** Public batch/offline `spot(OfflineAudioBuffer)`; OpenWakeWord backend; exposing low-level JS stream primitives as primary API; mandatory VAD segmentation in front of KWS; claiming STT zipformer packs “just work” as KWS without detect validation.
