@@ -8,7 +8,11 @@ import type { LiveTextBufferIdSource } from '../textbuffer/types';
 export interface KeywordSpottingInitOptions {
   /** Directory-backed KWS model source. */
   modelSource: FileSource;
-  /** Optional absolute keyword-file path replacing the detected keywords.txt. */
+  /**
+   * Optional absolute keyword-file path replacing the detected pack `keywords.txt`.
+   * File body uses sherpa KWS line format (space-separated tokens, optional
+   * `:score` / `#threshold` / `@label`). See docs/kws-streaming.md.
+   */
   keywordsPath?: string;
   /** Keyword boosting score. Defaults to 1.5. */
   keywordsScore?: number;
@@ -51,7 +55,12 @@ export interface KeywordDetection {
 export interface KeywordSpottingPipelineOptions {
   /** Samples per drain from the live audio ring. Native default is 1600 (~100ms @ 16 kHz). */
   chunkSize?: number;
-  /** Optional per-session keywords override (sherpa createStream(keywords)). */
+  /**
+   * Optional per-session keywords override (sherpa `createStream(keywords)`).
+   * Same textual format as a `keywords.txt` body (one or more lines). Omit or
+   * empty to use the keywords file from engine init. Changing phrases mid-session:
+   * `pipeline.stop()` then `spot(..., { keywords })` again — no engine destroy.
+   */
   keywords?: string;
   /**
    * Fired for each keyword hit (also committed to the live text buffer as
