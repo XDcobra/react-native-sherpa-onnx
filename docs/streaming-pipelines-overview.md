@@ -8,7 +8,7 @@ Two different engines can return the same **pipeline handle** surface (`stop` / 
 
 | Kind | What it is | Doc signal |
 | --- | --- | --- |
-| **True streaming** | Streaming-capable model + native online worker (`createStreamingSTT`, `createStreamingEnhancement`, `createStreamingVAD`, …) | Feature `*-streaming.md` |
+| **True streaming** | Streaming-capable model + native online worker (`createStreamingSTT`, `createStreamingEnhancement`, `createStreamingVAD`, `createKeywordSpotting`, …) | Feature `*-streaming.md` |
 | **Live overload** | **Offline** weights on **live** buffers; mandatory **segmentation** commits chunks for batch inference (“fake” streaming) | Feature `*-live.md` when the guide is **only** live overload — e.g. [speaker-identification-live.md](speaker-identification-live.md), [separation-live.md](separation-live.md), [language-identification-live.md](language-identification-live.md), [tts-live.md](tts-live.md) |
 
 Offline guides stay batch-only and **link out** to the dedicated live-overload doc (SID / Separation / SLID pattern). Do not bury live-overload API detail inside offline docs.
@@ -45,6 +45,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | Topic | Doc |
 | --- | --- |
 | STT streaming + `SttPipelineHandle` | [stt-streaming.md](stt-streaming.md) |
+| KWS streaming + `StreamingPipelineHandle` | [kws-streaming.md](kws-streaming.md) |
 | TTS live overload + `TtsPipelineHandle` | [tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption](tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption) and [tts-live.md](tts-live.md) |
 | Enhancement streaming + `EnhancementPipelineHandle` | [enhancement-streaming.md](enhancement-streaming.md) |
 | Separation live overload + `SeparationPipelineHandle` | [separation-live.md](separation-live.md) |

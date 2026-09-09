@@ -50,6 +50,16 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Keyword Spotting (KWS)
+
+| Guide | Description |
+|-------|-------------|
+| [kws-streaming.md](./kws-streaming.md) | Streaming keyword spotting / wake-word — `createKeywordSpotting`, `keywords.txt`, live buffers |
+
+> Offline/batch KWS is not available. `kws-streaming.md` is the sole KWS surface.
+
+---
+
 ## Speech Enhancement
 
 | Guide | Description |
