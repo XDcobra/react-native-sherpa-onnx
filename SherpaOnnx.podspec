@@ -200,6 +200,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/kws\"",
     "\"#{pod_root}/ios/kws/bridge\"",
     "\"#{pod_root}/ios/kws/native\"",
+    "\"#{pod_root}/ios/kws/pipeline\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]
