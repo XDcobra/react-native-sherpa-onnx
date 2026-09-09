@@ -151,14 +151,16 @@ dependencies {
     }
 }
 
-// Play Asset Delivery (PAD): models live in the :sherpa_models asset-pack only (not in main app assets).
-// - assetPacks = [":sherpa_models"] makes the pack part of the app; include ':sherpa_models' in settings.gradle.
-// - At runtime, the pack path is returned by getAssetPackPath("sherpa_models") so the app can list and load models.
-// - Download models into the pack folder before build so the asset pack has content (local + CI).
+// Play Asset Delivery (PAD) + local debug:
+// - Download writes into the :sherpa_models asset-pack (source for PAD / installDebugWithPad).
+// - syncPackModelsToAppAssets mirrors those folders into app/src/main/assets/models so plain
+//   yarn android / installDebug can discover them via listAssetModels() without PAD or adb.
+// - assetPacks = [":sherpa_models"]; include ':sherpa_models' in settings.gradle.
 def sherpaModelsOutputDir = file("${rootDir}/sherpa_models/src/main/assets/models")
 def sherpaModelsCacheDir = file("${rootDir}/../.model-cache")
 def sherpaModelsScript = file("${rootDir}/../scripts/download-models.js")
 def sherpaModelsConfig = file("${rootDir}/../scripts/model-download-config.json")
+def androidAppModelsDir = file("${projectDir}/src/main/assets/models")
 
 tasks.register("downloadSherpaModels", Exec) {
     description = "Download SherpaOnnx models into the sherpa_models asset-pack"
@@ -171,17 +173,36 @@ tasks.register("downloadSherpaModels", Exec) {
         "--config", sherpaModelsConfig.absolutePath
 }
 
-preBuild.dependsOn(tasks.named("downloadSherpaModels"))
+tasks.register("syncPackModelsToAppAssets") {
+    description = "Mirror PAD pack models into main app assets for plain yarn android"
+    dependsOn(tasks.named("downloadSherpaModels"))
+    doLast {
+        if (sherpaModelsOutputDir.exists() && sherpaModelsOutputDir.isDirectory()) {
+            sherpaModelsOutputDir.listFiles().each { f ->
+                if (f.isDirectory() && !f.name.startsWith(".") && f.name != "README.md") {
+                    def target = new File(androidAppModelsDir, f.name)
+                    if (!target.exists()) {
+                        println "[SherpaOnnx] Syncing pack model to Android assets: ${f.name}"
+                        copy {
+                            from f
+                            into target
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+preBuild.dependsOn(tasks.named("syncPackModelsToAppAssets"))
 
 tasks.register("syncModelsFromIos") {
     description = "Copy models from iOS sherpa_models into Android assets if not already present"
     doLast {
         def iosModelsDir = file("${rootDir}/../ios/sherpa_models/models")
-        def androidModelsDir = file("${projectDir}/src/main/assets/models")
         if (iosModelsDir.exists() && iosModelsDir.isDirectory()) {
             iosModelsDir.listFiles().each { f ->
                 if (f.isDirectory() && !f.name.startsWith(".") && f.name != "README.md") {
-                    def target = new File(androidModelsDir, f.name)
+                    def target = new File(androidAppModelsDir, f.name)
                     if (!target.exists()) {
                         println "[SherpaOnnx] Syncing model from iOS sherpa_models to Android assets: ${f.name}"
                         copy {

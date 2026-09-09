@@ -26,7 +26,7 @@ function logKwsPipelineStart(args: {
   if (typeof __DEV__ === 'undefined' || !__DEV__) {
     return;
   }
-  console.warn('[SherpaOnnx:kws] spot started', {
+  console.log('[SherpaOnnx:kws] spot started', {
     pipelineId: args.pipelineId,
     chunkSize:
       args.chunkSize === undefined ? '(native default)' : args.chunkSize,
@@ -211,7 +211,7 @@ export async function createKeywordSpotting(
         },
         async flush(): Promise<void> {
           if (typeof __DEV__ !== 'undefined' && __DEV__) {
-            console.warn('[SherpaOnnx:kws] flush', {
+            console.log('[SherpaOnnx:kws] flush', {
               pipelineId: started.pipelineId,
             });
           }

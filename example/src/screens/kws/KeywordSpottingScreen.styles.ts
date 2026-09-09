@@ -88,11 +88,18 @@ export const styles = StyleSheet.create({
   dangerText: {
     color: '#DC2626',
   },
-  keywordsInput: {
-    minHeight: 120,
+  keywordsScroll: {
+    maxHeight: 160,
     borderWidth: 1,
     borderColor: '#D1D1D6',
     borderRadius: 8,
+    backgroundColor: '#FAFAFA',
+  },
+  keywordsScrollContent: {
+    flexGrow: 1,
+  },
+  keywordsInput: {
+    minHeight: 120,
     padding: 10,
     fontSize: 13,
     fontFamily: 'Menlo',
@@ -241,6 +248,26 @@ export const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#FAFAFA',
     padding: 8,
+  },
+  initResultBox: {
+    marginTop: 4,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#E3F2FD',
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+    gap: 4,
+  },
+  initResultLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1565C0',
+  },
+  initResultText: {
+    fontSize: 12,
+    fontFamily: 'Menlo',
+    color: '#0D47A1',
+    lineHeight: 17,
   },
   eventRow: {
     fontSize: 12,

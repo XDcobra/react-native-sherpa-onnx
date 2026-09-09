@@ -42,7 +42,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 > - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
-> - **Android Build (`Gradle`):** The `syncModelsFromIos` task automatically detects and copies any models placed in `ios/sherpa_models/models/` into the Android assets directory before compilation.
+> - **Android Build (`Gradle`):** `downloadSherpaModels` fills the PAD pack; `syncPackModelsToAppAssets` mirrors those folders into `android/app/src/main/assets/models/` so plain `yarn android` can discover them via `listAssetModels()` without PAD or adb. `syncModelsFromIos` also copies any models from `ios/sherpa_models/models/` into Android assets. Optional: `yarn android:pad` exercises the PAD path (`getAssetPackPath`).
 >
 > Placing a model in either location (or both) makes it discoverable via `listAssetModels()` and immediately usable offline across all feature screens.
 

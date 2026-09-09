@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   ScrollView,
   Text,
   TextInput,
@@ -64,6 +65,7 @@ import {
   emptyKwsCustomInitFormState,
   fillKwsCustomConfigFromModelFolder,
 } from '../../utils/kwsCustomInitFill';
+import { getModelDisplayName } from '../../modelConfig';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
   fileSourceFromBundledPath,
@@ -74,6 +76,15 @@ import { colorForKeyword, styles } from './KeywordSpottingScreen.styles';
 
 const SAMPLE_RATE = 16000;
 const CHUNK_SIZE_OPTIONS = [800, 1600, 3200, 6400] as const;
+
+function keywordsEditorWidth(text: string): number {
+  const longest = text
+    .split('\n')
+    .reduce((max, line) => Math.max(max, line.length), 0);
+  const viewport = Dimensions.get('window').width - 64;
+  // Menlo 13 ≈ 8px/char; keep at least full card width for empty/short text.
+  return Math.max(viewport, longest * 8 + 24);
+}
 
 type SourceMode = 'mic' | 'file';
 type StreamState = 'idle' | 'running' | 'stopping';
@@ -139,6 +150,7 @@ export default function KeywordSpottingScreen() {
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [status, setStatus] = useState('Pick a KWS pack, then Init engine.');
   const [error, setError] = useState<string | null>(null);
+  const [initResult, setInitResult] = useState<string | null>(null);
 
   const [lastHit, setLastHit] = useState<HitRecord | null>(null);
   const [hits, setHits] = useState<HitRecord[]>([]);
@@ -152,7 +164,6 @@ export default function KeywordSpottingScreen() {
   const liveTextRef = useRef<LiveTextBufferRef | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
   const cleanupLockRef = useRef(false);
-  const hudResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const appendEvent = useCallback((message: string) => {
     setEvents((prev) =>
@@ -301,6 +312,7 @@ export default function KeywordSpottingScreen() {
     const eng = engineRef.current;
     engineRef.current = null;
     setEngineReady(false);
+    setInitResult(null);
     try {
       await eng?.destroy();
     } catch {
@@ -310,13 +322,13 @@ export default function KeywordSpottingScreen() {
 
   useEffect(() => {
     return () => {
-      if (hudResetTimer.current) clearTimeout(hudResetTimer.current);
       destroyEngine().catch(() => {});
     };
   }, [destroyEngine]);
 
   const initEngine = useCallback(async () => {
     setError(null);
+    setInitResult(null);
     setEngineBusy(true);
     try {
       await destroyEngine();
@@ -345,14 +357,28 @@ export default function KeywordSpottingScreen() {
       });
       engineRef.current = engine;
       setEngineReady(true);
+      const modelLabel = selectedCatalogId
+        ? getModelDisplayName(selectedCatalogId)
+        : initMode === 'custom'
+          ? 'custom'
+          : 'KWS model';
+      const detectedType = det.modelType ?? 'transducer';
+      const quantNote = det.quantization ? ` · ${det.quantization}` : '';
       const kwNote = keywordsPath
         ? 'keywordsPath=textarea cache file'
         : 'keywordsPath=pack keywords.txt (textarea empty)';
-      setStatus(`Engine ready (${engine.instanceId}). ${kwNote}`);
-      appendEvent(`Init OK — ${kwNote}`);
+      const summary =
+        `Initialized (${initMode}): ${modelLabel}\n` +
+        `Detected: ${detectedType} · streaming=${String(det.isStreaming)}${quantNote}\n` +
+        `instance: ${engine.instanceId}\n` +
+        kwNote;
+      setInitResult(summary);
+      setStatus(`Engine ready (${engine.instanceId})`);
+      appendEvent(`Init OK — ${modelLabel}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
+      setInitResult(null);
       setStatus('Init failed');
       appendEvent(`Init failed: ${msg}`);
     } finally {
@@ -361,11 +387,13 @@ export default function KeywordSpottingScreen() {
   }, [
     appendEvent,
     destroyEngine,
+    initMode,
     keywordsScore,
     keywordsThreshold,
     maxActivePaths,
     numTrailingBlanks,
     resolveModelSource,
+    selectedCatalogId,
     writeKeywordsTempFile,
   ]);
 
@@ -380,12 +408,6 @@ export default function KeywordSpottingScreen() {
             ? ` start=${event.startTime.toFixed(2)}s`
             : '')
       );
-      if (hudResetTimer.current) clearTimeout(hudResetTimer.current);
-      hudResetTimer.current = setTimeout(() => {
-        setLastHit((curr: HitRecord | null) =>
-          curr?.atMs === record.atMs ? null : curr
-        );
-      }, 1800);
     },
     [appendEvent]
   );
@@ -591,6 +613,8 @@ export default function KeywordSpottingScreen() {
     [catalog]
   );
 
+  const keywordsWidth = keywordsEditorWidth(keywordsText);
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScreenIntroModal screenId="KeywordSpotting" />
@@ -598,6 +622,7 @@ export default function KeywordSpottingScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
       >
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
@@ -730,6 +755,12 @@ export default function KeywordSpottingScreen() {
               {engineReady ? 'Rebuild engine' : 'Init engine'}
             </Text>
           </TouchableOpacity>
+          {initResult ? (
+            <View style={styles.initResultBox}>
+              <Text style={styles.initResultLabel}>Result:</Text>
+              <Text style={styles.initResultText}>{initResult}</Text>
+            </View>
+          ) : null}
           <Text style={styles.hint}>
             Mid-run keyword edits: Stop → edit textarea → Rebuild engine → Spot
             again.
@@ -737,51 +768,9 @@ export default function KeywordSpottingScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>2. Keywords</Text>
-          <Text style={styles.cardSubtitle}>
-            Textarea is the init source of truth (`keywords.txt` body). Empty →
-            pack keywords.txt. File pick only loads into the textarea.
-          </Text>
-          <TextInput
-            style={styles.keywordsInput}
-            value={keywordsText}
-            onChangeText={setKeywordsText}
-            multiline
-            autoCorrect={false}
-            autoCapitalize="none"
-            placeholder={
-              '▁HE Y ▁S I RI :1.5 #0.25\n# empty = use pack keywords.txt'
-            }
-            editable={!busy}
-          />
-          <View style={styles.rowActions}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                loadKeywordsFile().catch(() => {});
-              }}
-              disabled={busy}
-            >
-              <Ionicons name="document-outline" size={16} color="#007AFF" />
-              <Text style={styles.secondaryButtonText}>Load keywords.txt</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => setKeywordsText('')}
-              disabled={busy}
-            >
-              <Ionicons name="close-circle-outline" size={16} color="#007AFF" />
-              <Text style={styles.secondaryButtonText}>
-                Clear (pack default)
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>3. Audio input</Text>
+          <Text style={styles.cardTitle}>2. Audio input</Text>
           <View style={lpStyles.sourceToggle}>
-            {(['mic', 'file'] as const).map((mode) => (
+            {(['file', 'mic'] as const).map((mode) => (
               <TouchableOpacity
                 key={mode}
                 style={[
@@ -885,6 +874,56 @@ export default function KeywordSpottingScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>3. Keywords</Text>
+          <Text style={styles.cardSubtitle}>
+            Textarea is the init source of truth (`keywords.txt` body). Empty →
+            pack keywords.txt. File pick only loads into the textarea.
+          </Text>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            style={styles.keywordsScroll}
+            contentContainerStyle={styles.keywordsScrollContent}
+          >
+            <TextInput
+              style={[styles.keywordsInput, { width: keywordsWidth }]}
+              value={keywordsText}
+              onChangeText={setKeywordsText}
+              multiline
+              scrollEnabled
+              autoCorrect={false}
+              autoCapitalize="none"
+              placeholder={
+                '▁HE Y ▁S I RI :1.5 #0.25\n# empty = use pack keywords.txt'
+              }
+              editable={!busy}
+            />
+          </ScrollView>
+          <View style={styles.rowActions}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                loadKeywordsFile().catch(() => {});
+              }}
+              disabled={busy}
+            >
+              <Ionicons name="document-outline" size={16} color="#007AFF" />
+              <Text style={styles.secondaryButtonText}>Load keywords.txt</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setKeywordsText('')}
+              disabled={busy}
+            >
+              <Ionicons name="close-circle-outline" size={16} color="#007AFF" />
+              <Text style={styles.secondaryButtonText}>
+                Clear (pack default)
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1001,7 +1040,11 @@ export default function KeywordSpottingScreen() {
           </ScrollView>
 
           <Text style={styles.paramLabel}>Event log</Text>
-          <ScrollView style={styles.eventLog}>
+          <ScrollView
+            style={styles.eventLog}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+          >
             {events.length === 0 ? (
               <Text style={styles.hint}>
                 Events will show init / hits / errors.

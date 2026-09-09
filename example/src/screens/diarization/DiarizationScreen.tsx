@@ -1455,7 +1455,7 @@ export default function DiarizationScreen() {
                 {turns.length === 0
                   ? 'No speaker turns available. Run diarization to analyze the audio.'
                   : 'No turns match the selected speaker filter.'}
-              </Text>
+        </Text>
             </View>
           )}
         </View>
@@ -1562,7 +1562,7 @@ export default function DiarizationScreen() {
               </ScrollView>
             </View>
           )}
-        </View>
+      </View>
       </ScrollView>
     </SafeAreaView>
   );

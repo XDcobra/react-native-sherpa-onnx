@@ -213,36 +213,110 @@ export const DIARIZATION_AUDIO_FILES: AudioFileInfo[] = [
 ];
 
 /**
- * Keyword Spotting example clips. Selecting an entry prefills the Keywords
- * textarea with `keywordsBody` (keywords.txt format). Replace / extend when
- * dedicated wake-word WAVs are dropped into test_wavs/.
+ * Keyword Spotting example clips — same shared `AUDIO_FILES` as other features
+ * (en / zh / zh-en only). Selecting an entry prefills the Keywords textarea with
+ * a `keywords.txt` body tokenized for the default bilingual pack
+ * `sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20` (`phone+ppinyin` via
+ * `sherpa-onnx-cli text2token` + pack `en.phone` lexicon).
+ *
+ * ja / ko / yue clips are omitted here: that pack cannot spot those languages.
  */
 export type KwsExampleAudio = AudioFileInfo & {
+  /** Ground-truth / SenseVoice transcript used to pick demo phrases */
+  transcript: string;
   /** keywords.txt body shown in the textarea when this example is selected */
   keywordsBody: string;
 };
 
+const KWS_SHARED_AUDIO_BY_ID = new Map(
+  AUDIO_FILES.filter((f) => f.language === 'en' || f.language === 'zh').map(
+    (f) => [f.id, f]
+  )
+);
+
+function kwsExample(
+  id: AudioFileId,
+  transcript: string,
+  keywordsBody: string
+): KwsExampleAudio {
+  const base = KWS_SHARED_AUDIO_BY_ID.get(id);
+  if (!base) {
+    throw new Error(`KWS example audio missing from AUDIO_FILES: ${id}`);
+  }
+  return {
+    ...base,
+    description: `${base.description} — says: ${transcript}`,
+    transcript,
+    keywordsBody,
+  };
+}
+
 export const KWS_AUDIO_FILES: KwsExampleAudio[] = [
-  // Placeholder until dedicated KWS wake clips + matching keywordsBodies are supplied.
-  // Using EN samples so the list UI is exercisable; phrases must match the pack's token inventory.
-  {
-    id: TEST_AUDIO_FILES.EN_1,
-    name: 'KWS EN sample 1 (placeholder)',
-    description:
-      'Placeholder clip — replace with a wake-word recording for your pack',
-    language: 'en',
-    keywordsBody: [
-      '▁HE LL O ▁WORLD :1.5 #0.35',
-      '▁HI ▁GO O G LE :1.0 #0.25',
-      '▁HE Y ▁S I RI',
-    ].join('\n'),
-  },
-  {
-    id: TEST_AUDIO_FILES.EN_2,
-    name: 'KWS EN sample 2 (placeholder)',
-    description:
-      'Placeholder clip — edit keywordsBody to match your KWS pack tokens',
-    language: 'en',
-    keywordsBody: '▁HE Y ▁S I RI :1.5 #0.25',
-  },
+  kwsExample(
+    TEST_AUDIO_FILES.EN_1,
+    'After early nightfall, the yellow lamps would light up here and there the squalid quarter of the brothels.',
+    [
+      'L AY1 T AH1 P :2.0 #0.25 @LIGHT_UP',
+      'Y EH1 L OW0 L AE1 M P S :1.5 #0.25 @YELLOW_LAMPS',
+      'N AY1 T F AO2 L :1.5 #0.25 @NIGHTFALL',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.EN_2,
+    'God, as a direct consequence of the sin which man thus punished, had given her a lovely child … to be finally a blessed soul in heaven.',
+    [
+      'L AH1 V L IY0 CH AY1 L D :2.0 #0.25 @LOVELY_CHILD',
+      'B L EH1 S T S OW1 L :1.5 #0.25 @BLESSED_SOUL',
+      'HH EH1 V AH0 N :1.5 #0.25 @HEAVEN',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.EN_3,
+    'Yet these thoughts affected Hester Prynne less with hope than apprehension.',
+    [
+      'HH OW1 P :2.0 #0.25 @HOPE',
+      'AE2 P R IH0 HH EH1 N SH AH0 N :1.5 #0.25 @APPREHENSION',
+      'TH AO1 T S :1.5 #0.25 @THOUGHTS',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.ZH_1,
+    '对我做了介绍啊，那么我想说的是呢，大家如果对我的研究感兴趣呢嗯。',
+    [
+      'j iè sh ào :2.0 #0.25 @介绍',
+      'y án j iū :1.5 #0.25 @研究',
+      'g ǎn x ìng q ù :1.5 #0.25 @感兴趣',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.ZH_2,
+    '重点呢想谈三个问题。首先呢就是这一轮全球金融动荡的表现。',
+    [
+      'zh òng d iǎn :2.0 #0.25 @重点',
+      'q uán q iú :1.5 #0.25 @全球',
+      'j īn r óng :1.5 #0.25 @金融',
+      'd òng d àng :1.5 #0.25 @动荡',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.ZH_3,
+    '深入的分析这一次全球金融动荡背后的根源。',
+    [
+      'sh ēn r ù :2.0 #0.25 @深入',
+      'f ēn x ī :1.5 #0.25 @分析',
+      'g ēn y uán :1.5 #0.25 @根源',
+    ].join('\n')
+  ),
+  kwsExample(
+    TEST_AUDIO_FILES.ZH_EN_1,
+    'yesterday was 星期一，today is Tuesday。明天是星期三。',
+    [
+      'Y EH1 S T ER0 D EY2 :2.0 #0.25 @YESTERDAY',
+      'T AH0 D EY1 :1.5 #0.25 @TODAY',
+      'T UW1 Z D IY0 :1.5 #0.25 @TUESDAY',
+      'x īng q ī y ī :1.5 #0.25 @星期一',
+      'x īng q ī s ān :2.0 #0.25 @星期三',
+      'm íng t iān :1.5 #0.25 @明天',
+    ].join('\n')
+  ),
 ];
