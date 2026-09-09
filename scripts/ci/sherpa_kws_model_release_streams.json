@@ -1,0 +1,13 @@
+{
+  "repo": "k2-fsa/sherpa-onnx",
+  "streams": [
+    {
+      "id": "kws-models",
+      "release_tag": "kws-models",
+      "tree_cache_dir": "tree-cache/kws-models",
+      "structure_file": "test/fixtures/kws-models-structure.txt",
+      "expected_csv": "test/fixtures/kws-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/kws-models-license-status.csv"
+    }
+  ]
+}
