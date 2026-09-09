@@ -176,16 +176,91 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
 }
 
+/** Internal LiveText meta keys consumed by emitLocalTextSegmentEvent — not public. */
+const RESERVED_SEGMENT_META_KEYS = new Set([
+  '__segmentReason',
+  '__segmentSource',
+  '__segmentCreatedAtMs',
+  '__segmentId',
+  '__segmentLang',
+]);
+
+function asJsonScalar(
+  value: unknown
+): string | number | boolean | null | undefined {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+/**
+ * Bridge boundary: project native event `meta` into a plain object.
+ *
+ * Contract: JSON scalars, optional `extra: Record<string, string>` (TTS).
+ * Do not spread or retain host maps past this function.
+ */
+function projectNativeSegmentMeta(
+  meta: unknown
+): Record<string, unknown> | undefined {
+  if (!isRecord(meta)) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(meta)) {
+    const value = meta[key];
+    const scalar = asJsonScalar(value);
+    if (scalar !== undefined) {
+      out[key] = scalar;
+      continue;
+    }
+    if (key === 'extra' && isRecord(value)) {
+      const extra: Record<string, string> = {};
+      for (const extraKey of Object.keys(value)) {
+        if (typeof value[extraKey] === 'string') {
+          extra[extraKey] = value[extraKey];
+        }
+      }
+      if (Object.keys(extra).length > 0) {
+        out.extra = extra;
+      }
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function toPublicTextMeta(
   meta: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
   if (!meta) return undefined;
-  const out = { ...meta };
-  delete out.__segmentReason;
-  delete out.__segmentSource;
-  delete out.__segmentCreatedAtMs;
-  delete out.__segmentId;
-  delete out.__segmentLang;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(meta)) {
+    if (RESERVED_SEGMENT_META_KEYS.has(key)) continue;
+    const scalar = asJsonScalar(meta[key]);
+    if (scalar !== undefined) {
+      out[key] = scalar;
+      continue;
+    }
+    if (key === 'extra' && isRecord(meta[key])) {
+      const extra: Record<string, string> = {};
+      for (const extraKey of Object.keys(
+        meta[key] as Record<string, unknown>
+      )) {
+        const v = (meta[key] as Record<string, unknown>)[extraKey];
+        if (typeof v === 'string') {
+          extra[extraKey] = v;
+        }
+      }
+      if (Object.keys(extra).length > 0) {
+        out.extra = extra;
+      }
+    }
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -227,9 +302,8 @@ function emitLocalTextSegmentEvent(
   segment: LiveTextSegment,
   totalSegments: number
 ): void {
-  const rawMeta = isRecord(segment.meta)
-    ? (segment.meta as Record<string, unknown>)
-    : undefined;
+  // Project meta at the boundary so reserved/public meta stay plain objects.
+  const rawMeta = projectNativeSegmentMeta(segment.meta);
   const previousEnd = textLastSegmentEndOffsetByBuffer.get(liveBufferId) ?? 0;
   const utf16Length = segment.text.length;
   const source = toSegmentSource(
@@ -243,6 +317,7 @@ function emitLocalTextSegmentEvent(
   const createdAtMsRaw = rawMeta?.__segmentCreatedAtMs;
   const segmentIdRaw = rawMeta?.__segmentId;
   const langRaw = rawMeta?.__segmentLang;
+  const publicMeta = toPublicTextMeta(rawMeta);
 
   const textSegment: TextSegment = {
     segmentId:
@@ -262,14 +337,16 @@ function emitLocalTextSegmentEvent(
     text: segment.text,
     ...(segment.textTruncated === true ? { textTruncated: true } : {}),
     utf16Length,
-    ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
+    ...(Array.isArray(segment.tokens)
+      ? { tokens: segment.tokens.slice() }
+      : {}),
     ...(Array.isArray(segment.timestamps)
-      ? { timestamps: segment.timestamps }
+      ? { timestamps: segment.timestamps.slice() }
       : {}),
     ...(typeof langRaw === 'string' && langRaw.length > 0
       ? { lang: langRaw }
       : {}),
-    ...(toPublicTextMeta(rawMeta) ? { meta: toPublicTextMeta(rawMeta) } : {}),
+    ...(publicMeta ? { meta: publicMeta } : {}),
   };
 
   dispatchLiveTextSegmentEvent(liveBufferId, textSegment, totalSegments);
@@ -297,14 +374,18 @@ function parseNativeLiveTextSegment(raw: unknown): LiveTextSegment | undefined {
       ? raw.source
       : 'unknown';
 
+  const meta = projectNativeSegmentMeta(raw.meta);
+
   return {
     text: raw.text,
     ...(raw.textTruncated === true ? { textTruncated: true } : {}),
     source,
     segmentIndex: Math.trunc(raw.segmentIndex),
-    ...(tokens && tokens.length > 0 ? { tokens } : {}),
-    ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
-    ...(isRecord(raw.meta) ? { meta: raw.meta } : {}),
+    ...(tokens && tokens.length > 0 ? { tokens: tokens.slice() } : {}),
+    ...(timestamps && timestamps.length > 0
+      ? { timestamps: timestamps.slice() }
+      : {}),
+    ...(meta ? { meta } : {}),
   };
 }
 

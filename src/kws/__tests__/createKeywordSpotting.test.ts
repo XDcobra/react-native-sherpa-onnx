@@ -3,7 +3,16 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   default: {
     initializeKeywordSpotting: jest.fn(),
     unloadKeywordSpotting: jest.fn(),
+    startKeywordSpottingPipeline: jest.fn(),
+    getStreamingPipelineStatus: jest.fn(),
+    stopStreamingPipeline: jest.fn(),
+    flushStreamingPipeline: jest.fn(),
+    resetStreamingPipeline: jest.fn(),
   },
+}));
+
+jest.mock('@dr.pogodin/react-native-fs', () => ({
+  readFile: jest.fn(),
 }));
 
 jest.mock('../../detect/resolveModelInput', () => ({
@@ -14,6 +23,22 @@ jest.mock('../detectKwsModel', () => ({
   detectKwsModel: jest.fn(),
 }));
 
+jest.mock('../../audiobuffer', () => ({
+  resolvePipelineAudioBufferId: jest.fn(() => 'audio_1'),
+}));
+
+jest.mock('../../textbuffer', () => ({
+  resolvePipelineTextBufferId: jest.fn(() => 'text_1'),
+  subscribeLiveTextBufferEvents: jest.fn(() => () => {}),
+}));
+
+jest.mock('../../audiobuffer/streamingPipelineCompletion', () => ({
+  createStreamingPipelineCompletionPromise: jest.fn(() =>
+    Promise.resolve({ pipelineId: 'pipe_1', reason: 'stopped' })
+  ),
+}));
+
+import { readFile } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
 import {
@@ -26,7 +51,9 @@ describe('createKeywordSpotting', () => {
   const native = SherpaOnnx as unknown as {
     initializeKeywordSpotting: jest.Mock;
     unloadKeywordSpotting: jest.Mock;
+    startKeywordSpottingPipeline: jest.Mock;
   };
+  const readFileMock = readFile as unknown as jest.Mock;
   const resolveModel = resolveFileSourceForModelInit as jest.Mock;
   const detect = detectKwsModel as jest.Mock;
 
@@ -48,6 +75,10 @@ describe('createKeywordSpotting', () => {
     });
     native.initializeKeywordSpotting.mockResolvedValue({ success: true });
     native.unloadKeywordSpotting.mockResolvedValue(undefined);
+    native.startKeywordSpottingPipeline.mockResolvedValue({
+      pipelineId: 'pipe_1',
+    });
+    readFileMock.mockResolvedValue('Y EH1 S T ER0 D EY2 @YESTERDAY\n');
   });
 
   it('detects paths, initializes defaults, and destroys idempotently', async () => {
@@ -86,7 +117,7 @@ describe('createKeywordSpotting', () => {
     );
   });
 
-  it('applies keyword path and tuning overrides', async () => {
+  it('keeps pack keywords on init and applies keywordsPath via createStream', async () => {
     const engine = await createStreamingKWS({
       modelSource: { kind: 'fs', path: '/models/kws' },
       keywordsPath: '/custom/keywords.txt',
@@ -100,10 +131,12 @@ describe('createKeywordSpotting', () => {
       quantization: 'int8',
     });
 
+    expect(readFileMock).toHaveBeenCalledWith('/custom/keywords.txt', 'utf8');
+    // Pack keywords.txt only — never custom path (upstream EXIT on OOV).
     expect(native.initializeKeywordSpotting).toHaveBeenCalledWith(
       engine.instanceId,
       expect.objectContaining({
-        keywords: '/custom/keywords.txt',
+        keywords: '/models/kws/keywords.txt',
         keywordsScore: 2.5,
         keywordsThreshold: 0.1,
         numTrailingBlanks: 3,
@@ -112,6 +145,20 @@ describe('createKeywordSpotting', () => {
         provider: 'cpu',
         debug: true,
       })
+    );
+
+    await engine.spot(
+      { bufferId: 'audio_1' } as never,
+      {
+        bufferId: 'text_1',
+      } as never
+    );
+    expect(native.startKeywordSpottingPipeline).toHaveBeenCalledWith(
+      engine.instanceId,
+      'audio_1',
+      'text_1',
+      undefined,
+      'Y EH1 S T ER0 D EY2 @YESTERDAY'
     );
   });
 

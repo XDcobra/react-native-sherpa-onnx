@@ -13,13 +13,14 @@ export function buildKeywordSpottingInitBridgeOptions(
   detectedPaths: KeywordSpottingDetectedPaths,
   options: KeywordSpottingInitOptions
 ): KeywordSpottingInitBridgeOptions {
-  const keywords = options.keywordsPath?.trim() || detectedPaths.keywords;
+  // Pack keywords.txt for KeywordSpotter construction. Optional keywordsPath
+  // is applied on spot via createStream (safe OOV reject) — see KNOWN_ISSUES.
   const required = {
     encoder: detectedPaths.encoder?.trim(),
     decoder: detectedPaths.decoder?.trim(),
     joiner: detectedPaths.joiner?.trim(),
     tokens: detectedPaths.tokens?.trim(),
-    keywords: keywords?.trim(),
+    keywords: detectedPaths.keywords?.trim(),
   };
   const missing = Object.entries(required)
     .filter(([, value]) => !value)

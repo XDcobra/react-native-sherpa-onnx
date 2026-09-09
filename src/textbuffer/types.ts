@@ -113,6 +113,9 @@ export interface LiveTextSegment {
    * Opaque metadata dictionary attached to this segment.
    * Pipeline workers interpret feature-specific keys and fall back to pipeline defaults.
    *
+   * Native → JS projects meta to JSON scalars (+ optional `extra` string map).
+   * Nested host maps are not retained across the event boundary.
+   *
    * TTS worker keys: { sid?: number; speed?: number; extra?: Record<string, string> }
    */
   meta?: Record<string, unknown>;

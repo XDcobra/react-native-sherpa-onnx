@@ -9,9 +9,10 @@ export interface KeywordSpottingInitOptions {
   /** Directory-backed KWS model source. */
   modelSource: FileSource;
   /**
-   * Optional absolute keyword-file path replacing the detected pack `keywords.txt`.
-   * File body uses sherpa KWS line format (space-separated tokens, optional
-   * `:score` / `#threshold` / `@label`). See docs/kws-streaming.md.
+   * Optional absolute keyword-file path. Tokens must match the pack `tokens.txt`.
+   * Applied on each `spot` via `createStream` (not KeywordSpotter construction —
+   * that path can abort the process on OOV). Prefer `spot({ keywords })` for
+   * per-session overrides. See docs/kws-streaming.md and KNOWN_ISSUES.
    */
   keywordsPath?: string;
   /** Keyword boosting score. Defaults to 1.5. */

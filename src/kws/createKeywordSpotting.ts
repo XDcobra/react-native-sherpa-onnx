@@ -1,3 +1,4 @@
+import { readFile } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
@@ -14,6 +15,42 @@ import type {
   KeywordSpottingInitOptions,
   KeywordSpottingPipelineOptions,
 } from './types';
+
+/**
+ * Read optional init keywordsPath for createStream override.
+ * Do not pass this path into KeywordSpotterConfig.keywordsFile — upstream
+ * InitKeywords aborts the process on encode failure. createStream rejects
+ * instead (see docs/KNOWN_ISSUES.md).
+ */
+async function loadKeywordsPathOverride(
+  keywordsPath: string | undefined,
+  packKeywordsPath: string | undefined
+): Promise<string | undefined> {
+  const path = keywordsPath?.trim();
+  if (!path) {
+    return undefined;
+  }
+  const pack = packKeywordsPath?.trim();
+  if (pack && path === pack) {
+    return undefined;
+  }
+  try {
+    const body = (await readFile(path, 'utf8')).trim();
+    if (!body) {
+      throw new Error(`keywordsPath is empty: ${path}`);
+    }
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[SherpaOnnx:kws] keywordsPath deferred to createStream', {
+        keywordsPath: path,
+        chars: body.length,
+      });
+    }
+    return body;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Failed to read keywordsPath (${path}): ${msg}`);
+  }
+}
 
 let keywordSpottingInstanceCounter = 0;
 
@@ -103,6 +140,10 @@ export async function createKeywordSpotting(
     detected.paths,
     options
   );
+  const keywordsPathOverride = await loadKeywordsPathOverride(
+    options.keywordsPath,
+    detected.paths.keywords
+  );
   const instanceId = `keyword_spotting_${++keywordSpottingInstanceCounter}`;
   const result = await SherpaOnnx.initializeKeywordSpotting(
     instanceId,
@@ -154,12 +195,14 @@ export async function createKeywordSpotting(
       const audioInLiveBufferId = resolvePipelineAudioBufferId(audioIn);
       const textOutLiveBufferId = resolvePipelineTextBufferId(textOut);
 
+      const sessionKeywords =
+        pipelineOptions?.keywords?.trim() || keywordsPathOverride;
       const started = await SherpaOnnx.startKeywordSpottingPipeline(
         instanceId,
         audioInLiveBufferId,
         textOutLiveBufferId,
         pipelineOptions?.chunkSize,
-        pipelineOptions?.keywords
+        sessionKeywords
       );
       logKwsPipelineStart({
         pipelineId: started.pipelineId,
@@ -232,6 +275,13 @@ export async function createKeywordSpotting(
       if (destroyed) return;
       destroyed = true;
 
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('[SherpaOnnx:kws] destroy begin', {
+          instanceId,
+          activePipelineId,
+        });
+      }
+
       if (activePipelineId) {
         try {
           await SherpaOnnx.stopStreamingPipeline(activePipelineId);
@@ -242,6 +292,10 @@ export async function createKeywordSpotting(
       }
 
       await SherpaOnnx.unloadKeywordSpotting(instanceId);
+
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('[SherpaOnnx:kws] destroy done', { instanceId });
+      }
     },
   };
 
