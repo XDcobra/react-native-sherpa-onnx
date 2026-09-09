@@ -61,10 +61,25 @@ object StreamingPipelineRegistry {
         error = status.error,
       )
 
+      android.util.Log.i(
+        "SherpaOnnx:slid-dbg",
+        "lifecycle.registry.beforeCompleteCallback pipelineId=${worker.pipelineId} reason=$reason " +
+          "isRunning=${worker.isRunning} thread=${Thread.currentThread().name}",
+      )
       try {
         completionCallbacks.remove(worker.pipelineId)?.invoke(completion)
       } finally {
+        android.util.Log.i(
+          "SherpaOnnx:slid-dbg",
+          "lifecycle.registry.beforeRelease pipelineId=${worker.pipelineId} " +
+            "thread=${Thread.currentThread().name}",
+        )
         remove(worker.pipelineId)
+        android.util.Log.i(
+          "SherpaOnnx:slid-dbg",
+          "lifecycle.registry.afterRelease pipelineId=${worker.pipelineId} " +
+            "thread=${Thread.currentThread().name}",
+        )
       }
     }
   }
@@ -73,6 +88,11 @@ object StreamingPipelineRegistry {
 
   fun stop(pipelineId: String) {
     val worker = pipelines[pipelineId] ?: return
+    android.util.Log.i(
+      "SherpaOnnx:slid-dbg",
+      "lifecycle.registry.stop pipelineId=$pipelineId isRunning=${worker.isRunning} " +
+        "thread=${Thread.currentThread().name}",
+    )
     stopRequested.add(pipelineId)
     worker.stop()
   }
