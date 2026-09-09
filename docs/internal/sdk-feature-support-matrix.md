@@ -14,7 +14,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Speaker Embedding / Identification | Yes (`SpeakerEmbeddingExtractorConfig`) | No | Yes (`createSpeakerIdentification`) | Yes, live overload (`labelLiveSegments`) |
 | Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
 | Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | Yes (`createLanguageIdentification`) | Yes, **live overload** (`identify(liveAudio, liveText, …)` — offline Whisper per speech span) |
-| Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | No (Phase 1: detect + `kws-models` collect/licenses landed; streaming engine TBD) |
+| Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | Partial (Phase 2: `createKeywordSpotting` native engine init/destroy landed; live pipeline/`spot` TBD) |
 | Audio Tagging | Yes (`AudioTaggingConfig`) | No | No | No |
 | Diacritization | Yes (`OfflineDiacritizationConfig`) | No | No | No |
 
@@ -27,4 +27,4 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 - **Source separation** uses `createSeparation` for offline batch (`separate` into N offline buffers, optional offline segmentation) and live overload (`separate` into N live buffers with mandatory `continuous_frames` segmentation). There is no separate streaming separation factory.
 - **Speaker Diarization** offers offline batch clustering (`createDiarization` using Pyannote/Reverb + embedding) and true online streaming (`createStreamingDiarization` using NeMo Sortformer). Live overload was intentionally excluded.
 - **Spoken Language Identification (SLID)** uses Whisper multilingual offline weights only. The SDK exposes oneshot, segmented long-form (code-switching), and live overload via speech segmentation + per-span offline identify. There is no true streaming SLID model in sherpa-onnx.
-- **Keyword Spotting (KWS)** Phase 1 lands model detect (`ModelCategory.Kws`), the dedicated `kws-models` collect/license stream, and unified detect before STT (packs with `keywords.txt` are not claimed as ASR). There is still no public `createKeywordSpotting` / streaming engine API.
+- **Keyword Spotting (KWS)** Phase 2 adds public `createKeywordSpotting` (alias `createStreamingKWS`) and native Android/iOS engine initialization and teardown. Model detect, dedicated `kws-models` collect/licenses, and unified detect-before-STT remain in place. The live audio pipeline, `spot(...)`, and keyword events are still TBD.
