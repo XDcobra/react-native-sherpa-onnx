@@ -13,9 +13,11 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -23,6 +25,34 @@ std::unordered_map<std::string, std::unique_ptr<sherpaonnx::KwsWrapper>>
     g_kws_instances;
 std::unordered_map<std::string, std::string> g_kws_instance_to_pipeline;
 std::mutex g_kws_mutex;
+
+std::string NormalizeCreateStreamKeywords(const std::string &raw) {
+  if (raw.empty()) {
+    return "";
+  }
+  std::vector<std::string> lines;
+  std::istringstream is(raw);
+  std::string line;
+  while (std::getline(is, line)) {
+    const auto start = line.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+      continue;
+    }
+    const auto end = line.find_last_not_of(" \t\r\n");
+    lines.push_back(line.substr(start, end - start + 1));
+  }
+  if (lines.empty()) {
+    return "";
+  }
+  std::ostringstream joined;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (i > 0) {
+      joined << '/';
+    }
+    joined << lines[i];
+  }
+  return joined.str();
+}
 
 bool ReadRequiredPath(
     NSString *value,
@@ -266,16 +296,19 @@ sherpaonnx::KwsWrapper *GetKwsInstance(NSString *instanceId) {
     safeChunkSize = [chunkSize intValue];
   }
 
-  const std::string keywordsOverride =
-      keywords != nil ? std::string([keywords UTF8String]) : "";
+  const std::string keywordsOverride = NormalizeCreateStreamKeywords(
+      keywords != nil ? std::string([keywords UTF8String]) : "");
   const std::string streamId =
       std::string("kws_pipeline_stream_") +
       std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count());
 
   if (!wrapper->createStream(streamId, keywordsOverride)) {
-    reject(@"STREAMING_PIPELINE_ERROR",
-           @"Failed to create keyword spotting pipeline stream", nil);
+    reject(
+        @"STREAMING_PIPELINE_ERROR",
+        @"Keyword stream creation failed: keywords could not be encoded against this model's tokens.txt. "
+         "Omit keywords to use the engine keywords file, or pass only in-vocabulary tokens.",
+        nil);
     return;
   }
 

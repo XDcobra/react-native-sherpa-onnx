@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cctype>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 std::string TrimCopy(const std::string &s) {
@@ -83,14 +84,14 @@ void KwsStreamingPipelineWorker::runLoop() {
 
       while (wrapper_->isReady(streamId_)) {
         wrapper_->decode(streamId_);
+        // One getResult per decode; commit+reset on hit (same as Android / upstream).
+        maybeCommitHit(wrapper_->getResult(streamId_));
       }
 
       {
         std::lock_guard<std::mutex> sLock(statusMtx_);
         chunksProcessed_++;
       }
-
-      maybeCommitHit(wrapper_->getResult(streamId_));
     }
   } catch (const std::exception &e) {
     std::lock_guard<std::mutex> sLock(statusMtx_);
@@ -174,12 +175,27 @@ void KwsStreamingPipelineWorker::maybeCommitHit(
 
 void KwsStreamingPipelineWorker::autoFlushAndCommit(bool endOfAudio) {
   if (endOfAudio && wrapper_) {
+    // Match sherpa-onnx python KWS examples: trailing silence before inputFinished.
+    const int sampleRate = wrapper_->getSampleRate();
+    const int padSamples =
+        std::max(1, static_cast<int>(sampleRate * 0.66f));
+    std::vector<float> tail(static_cast<size_t>(padSamples), 0.f);
+    wrapper_->acceptWaveform(
+        streamId_, sampleRate, tail.data(), tail.size());
+    {
+      std::lock_guard<std::mutex> sLock(statusMtx_);
+      unitsRead_ += padSamples;
+    }
+    NSLog(@"[SherpaOnnx:kws] tailPad pipelineId=%@ samples=%d sr=%d",
+          NsUtf8(pipelineId),
+          padSamples,
+          sampleRate);
     wrapper_->inputFinished(streamId_);
   }
   while (wrapper_->isReady(streamId_)) {
     wrapper_->decode(streamId_);
+    maybeCommitHit(wrapper_->getResult(streamId_));
   }
-  maybeCommitHit(wrapper_->getResult(streamId_));
 }
 
 void KwsStreamingPipelineWorker::processCommands() {
