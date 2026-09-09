@@ -62,9 +62,9 @@ const pipeline = await slid.identify(audioIn, textOut, {
     console.log(e.previousLang, '→', e.currentLang, '@', e.timestamp),
 });
 
-const mic = await startMicToLiveAudioBuffer(audioIn);
+await startMicToLiveAudioBuffer(audioIn);
 // … speak …
-await stopMicToLiveAudioBuffer(mic);
+await stopMicToLiveAudioBuffer();
 await finalizeLiveAudioBuffer(audioIn);
 await pipeline.completed; // reason: 'completed'
 

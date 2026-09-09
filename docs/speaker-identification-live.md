@@ -74,9 +74,9 @@ const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
   },
 });
 
-const mic = await startMicToLiveAudioBuffer(audioIn);
+await startMicToLiveAudioBuffer(audioIn);
 // … speak …
-await stopMicToLiveAudioBuffer(mic);
+await stopMicToLiveAudioBuffer();
 await finalizeLiveAudioBuffer(audioIn);
 await pipeline.completed;
 

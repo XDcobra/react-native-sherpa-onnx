@@ -1,6 +1,7 @@
 # Spoken Language Identification (SLID) — Architecture & Implementation Plan
 
-> **Status:** Draft / Planning  
+> **Status:** Done  
+
 > **Audience:** SDK Maintainers  
 > **Category:** Speech & Media Features (`ModelCategory.LanguageId` / `slid`)  
 > **Target Branch:** `refactor/refactor-before-release-1-0`
