@@ -52,7 +52,7 @@ class KwsStreamingPipelineWorker : public StreamingPipelineWorker {
   std::string streamId_;
   std::shared_ptr<PaLiveEntry> inputEntry_;
   std::shared_ptr<TxtLiveEntry> outputEntry_;
-  int chunkSize_ = 6400;
+  int chunkSize_ = 1600;
 
   std::thread workerThread_;
   std::mutex mtx_;

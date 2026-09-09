@@ -261,7 +261,7 @@ sherpaonnx::KwsWrapper *GetKwsInstance(NSString *instanceId) {
     return;
   }
 
-  int safeChunkSize = 6400;
+  int safeChunkSize = 1600;
   if (chunkSize != nil && [chunkSize intValue] > 0) {
     safeChunkSize = [chunkSize intValue];
   }
