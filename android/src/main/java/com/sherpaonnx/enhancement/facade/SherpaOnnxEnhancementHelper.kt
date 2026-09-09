@@ -25,6 +25,8 @@ import com.sherpaonnx.enhancement.core.EnhancementResultMapper
 import com.sherpaonnx.enhancement.core.OnlineEnhancementInstance
 import com.sherpaonnx.enhancement.pipeline.EnhancementPipelineWorker
 import com.sherpaonnx.enhancement.pipeline.EnhancementOfflineLivePipelineWorker
+import com.sherpaonnx.lifecycle.ActivePipelineStop
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
@@ -44,28 +46,31 @@ internal class SherpaOnnxEnhancementHelper(
   private val instances = ConcurrentHashMap<String, EnhancementInstance>()
   private val onlineInstances = ConcurrentHashMap<String, OnlineEnhancementInstance>()
   private val activeLivePipelineByInstance = ConcurrentHashMap<String, String>()
-
-  private fun awaitPipelineStopped(pipelineId: String, timeoutMs: Long = 120_000L) {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
-      if (StreamingPipelineRegistry.get(pipelineId) == null) {
-        return
-      }
-      try {
-        Thread.sleep(50)
-      } catch (_: InterruptedException) {
-        return
-      }
-    }
-  }
+  private val activeOnlinePipelineByInstance = ConcurrentHashMap<String, String>()
 
   private fun stopActiveLivePipeline(instanceId: String) {
-    val pipelineId = activeLivePipelineByInstance.remove(instanceId) ?: return
-    StreamingPipelineRegistry.stop(pipelineId)
-    awaitPipelineStopped(pipelineId)
+    ActivePipelineStop.stopForInstance(
+      instanceId = instanceId,
+      activeByInstance = activeLivePipelineByInstance,
+      removeFromRegistry = false,
+    )
+  }
+
+  private fun stopActiveOnlinePipeline(instanceId: String) {
+    ActivePipelineStop.stopForInstance(
+      instanceId = instanceId,
+      activeByInstance = activeOnlinePipelineByInstance,
+      removeFromRegistry = true,
+    )
   }
 
   fun shutdown() {
+    for (id in activeLivePipelineByInstance.keys.toList()) {
+      stopActiveLivePipeline(id)
+    }
+    for (id in activeOnlinePipelineByInstance.keys.toList()) {
+      stopActiveOnlinePipeline(id)
+    }
     instances.values.forEach { it.release() }
     instances.clear()
     onlineInstances.values.forEach { it.release() }
@@ -312,7 +317,19 @@ internal class SherpaOnnxEnhancementHelper(
 
     try {
       val inputSamples = audioInEntry.readAllSamples()
-      val audio = denoiser.run(inputSamples, audioInEntry.sampleRate)
+      val gateKey = NativeInstanceGate.keyFor(denoiser)
+      if (!NativeInstanceGate.beginUse(gateKey)) {
+        promise.reject(
+          EnhancementErrorCodes.ENHANCEMENT_ERROR,
+          "Enhancement instance released: $instanceId",
+        )
+        return
+      }
+      val audio = try {
+        denoiser.run(inputSamples, audioInEntry.sampleRate)
+      } finally {
+        NativeInstanceGate.endUse(gateKey)
+      }
       if (!audioOutEntry.tryAdoptSamples(audio.samples)) {
         promise.reject(
           EnhancementErrorCodes.ENHANCEMENT_OUTPUT_NOT_EMPTY,
@@ -552,10 +569,13 @@ internal class SherpaOnnxEnhancementHelper(
     }
 
     try {
+      stopActiveOnlinePipeline(instanceId)
       val worker = EnhancementPipelineWorker(denoiser, inputEntry, outputEntry)
-      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) {
-        completion -> emitPipelineCompletedEvent(completion)
+      val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        activeOnlinePipelineByInstance.remove(instanceId, completion.pipelineId)
+        emitPipelineCompletedEvent(completion)
       }
+      activeOnlinePipelineByInstance[instanceId] = pipelineId
 
       val out = Arguments.createMap()
       out.putString("pipelineId", pipelineId)
@@ -570,6 +590,7 @@ internal class SherpaOnnxEnhancementHelper(
   }
 
   fun unloadOnline(instanceId: String, promise: Promise) {
+    stopActiveOnlinePipeline(instanceId)
     onlineInstances.remove(instanceId)?.release()
     promise.resolve(null)
   }

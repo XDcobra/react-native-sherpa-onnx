@@ -23,6 +23,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   forwardRef,
@@ -87,6 +88,12 @@ type Props = {
    */
   audioFiles: AudioFileInfo[];
   /**
+   * Optional example ids to pin as favorites (★). Favorites render first in the
+   * list, in the order given here. When omitted/empty, `audioFiles` order is
+   * unchanged.
+   */
+  favoriteAudioFileIds?: readonly string[];
+  /**
    * Called once a buffer is ready. The parent stores the info and uses it for
    * the primary action (transcribe / run / …).
    */
@@ -122,6 +129,96 @@ type Props = {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Favorites first (in `favoriteAudioFileIds` order), then the rest as given. */
+export function orderAudioFilesWithFavorites(
+  audioFiles: AudioFileInfo[],
+  favoriteAudioFileIds?: readonly string[] | null
+): AudioFileInfo[] {
+  if (!favoriteAudioFileIds || favoriteAudioFileIds.length === 0) {
+    return audioFiles;
+  }
+  const favSet = new Set(favoriteAudioFileIds);
+  const favorites: AudioFileInfo[] = [];
+  for (const id of favoriteAudioFileIds) {
+    const found = audioFiles.find((file) => file.id === id);
+    if (found) {
+      favorites.push(found);
+    }
+  }
+  const rest = audioFiles.filter((file) => !favSet.has(file.id));
+  return [...favorites, ...rest];
+}
+
+export type ExampleAudioFileListProps = {
+  audioFiles: AudioFileInfo[];
+  favoriteAudioFileIds?: readonly string[];
+  /** Highlight the currently selected row (live pickers). */
+  selectedId?: string | null;
+  onSelect: (file: AudioFileInfo) => void;
+  disabled?: boolean;
+};
+
+/** Shared example-audio list used by OfflineAudioBufferWidget and live pickers. */
+export function ExampleAudioFileList({
+  audioFiles,
+  favoriteAudioFileIds,
+  selectedId = null,
+  onSelect,
+  disabled = false,
+}: ExampleAudioFileListProps) {
+  const ordered = useMemo(
+    () => orderAudioFilesWithFavorites(audioFiles, favoriteAudioFileIds),
+    [audioFiles, favoriteAudioFileIds]
+  );
+  const favoriteSet = useMemo(
+    () => new Set(favoriteAudioFileIds ?? []),
+    [favoriteAudioFileIds]
+  );
+
+  if (ordered.length === 0) {
+    return (
+      <Text style={{ color: '#666', marginBottom: 8 }}>
+        No example audio available for this model.
+      </Text>
+    );
+  }
+
+  return (
+    <View style={s.audioFilesContainer}>
+      {ordered.map((audioFile) => {
+        const isFavorite = favoriteSet.has(audioFile.id);
+        const isSelected = selectedId != null && selectedId === audioFile.id;
+        return (
+          <TouchableOpacity
+            key={audioFile.id}
+            style={[
+              s.audioFileButton,
+              isFavorite && s.audioFileButtonFavorite,
+              isSelected && s.audioFileButtonActive,
+              disabled && s.buttonDisabled,
+            ]}
+            onPress={() => onSelect(audioFile)}
+            disabled={disabled}
+          >
+            <Text
+              style={[
+                s.audioFileButtonText,
+                (isFavorite || isSelected) && s.audioFileButtonTextActive,
+              ]}
+            >
+              {isFavorite ? (
+                <Text style={s.audioFileFavoriteMark}>★ </Text>
+              ) : null}
+              {audioFile.name}
+            </Text>
+            <Text style={s.audioFileDescription}>{audioFile.description}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
 
 function toFileSource(pathOrUri: string, displayName?: string) {
   const trimmed = pathOrUri.trim();
@@ -166,6 +263,7 @@ export const OfflineAudioBufferWidget = forwardRef<
 >(function OfflineAudioBufferWidget(
   {
     audioFiles,
+    favoriteAudioFileIds,
     onBufferReady,
     onBufferReleased,
     disabled = false,
@@ -619,27 +717,12 @@ export const OfflineAudioBufferWidget = forwardRef<
     return (
       <View>
         <Text style={s.subsectionTitle}>Select Audio File:</Text>
-        {audioFiles.length === 0 ? (
-          <Text style={{ color: '#666', marginBottom: 8 }}>
-            No example audio available for this model.
-          </Text>
-        ) : (
-          <View style={s.audioFilesContainer}>
-            {audioFiles.map((audioFile) => (
-              <TouchableOpacity
-                key={audioFile.id}
-                style={[s.audioFileButton, busy && s.buttonDisabled]}
-                onPress={() => handleExamplePick(audioFile)}
-                disabled={busy}
-              >
-                <Text style={s.audioFileButtonText}>{audioFile.name}</Text>
-                <Text style={s.audioFileDescription}>
-                  {audioFile.description}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+        <ExampleAudioFileList
+          audioFiles={audioFiles}
+          favoriteAudioFileIds={favoriteAudioFileIds}
+          onSelect={handleExamplePick}
+          disabled={busy}
+        />
         {errorMsg ? (
           <View style={s.errorContainer}>
             <Text style={s.errorText}>{errorMsg}</Text>

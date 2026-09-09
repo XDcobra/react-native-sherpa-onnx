@@ -166,10 +166,7 @@ export type LiveAudioIngressSource =
   | 'file_ingest';
 
 /** Native pipeline worker that appended PCM into a live output buffer. */
-export type LiveAudioPipelineWriter =
-  | 'enhancement'
-  | 'tts'
-  | 'separation';
+export type LiveAudioPipelineWriter = 'enhancement' | 'tts' | 'separation';
 
 export type LiveAudioAppendKind = 'ingress' | 'pipeline' | 'mixed';
 

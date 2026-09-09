@@ -172,3 +172,13 @@ export interface PunctuationDetectModelResult extends ModelDetectResultBase {
     bpe_vocab?: string;
   };
 }
+
+// ─── Spoken language identification (SLID) extension ───────────────────
+
+export interface LanguageIdDetectModelResult extends ModelDetectResultBase {
+  /** Resolved model files (encoder + decoder ONNX). */
+  paths?: {
+    encoder?: string;
+    decoder?: string;
+  };
+}

@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, timestamp/alignment generation, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -237,7 +237,7 @@ This screen initializes offline separation engines (Spleeter or UVR) with auto o
 | ![Separation live overload 1](../docs/images/example/separation_streaming_1.png) | ![Separation live overload 2](../docs/images/example/separation_streaming_2.png) | ![Separation live overload 3](../docs/images/example/separation_streaming_3.png) |
 | --- | --- | --- |
 
-This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation-streaming.md](../docs/separation-streaming.md), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
+This screen streams mixed audio from a file or microphone into live input buffers, runs separation via live overload into N live stem output buffers, and shows phased progress (decode → separation). Segmentation uses mandatory `continuous_frames` policy (configurable checkpoint interval). It validates stop/restart lifecycle, finalize/flush ordering, and stem playback from live buffers. See [docs/separation-live.md](../docs/separation-live.md), [docs/segmentation-engine.md](../docs/segmentation-engine.md), and [docs/memory-and-models.md](../docs/memory-and-models.md).
 
 ## Speaker identification
 
@@ -245,6 +245,20 @@ This screen streams mixed audio from a file or microphone into live input buffer
 | --- | --- | --- |
 
 This screen enrolls named speakers from offline audio, then identify / verify / label speech segments. Toggle **Offline batch** vs **Live overload** (same embedding weights). Auto or custom model init (`ModelCategory.SpeakerEmbedding`). Offline segmentation can be Off (whole-buffer) or Auto (`segmentOfflineBuffer` → `enrollOfflineSegments` / `labelOfflineSegments`). Live labeling requires mandatory speech segmentation (`speech_energy_silence` / `speech_vad_model`) over file ingest or mic. Includes export/import of the enrollment JSON bundle. See [docs/speaker-identification-offline.md](../docs/speaker-identification-offline.md) and [docs/speaker-identification-live.md](../docs/speaker-identification-live.md).
+
+## Spoken language identification (offline)
+
+| ![Language identification offline 1](../docs/images/example/language_identification_offline_1.png) | ![Language identification offline 2](../docs/images/example/language_identification_offline_2.png) | ![Language identification offline 3](../docs/images/example/language_identification_offline_3.png) |
+| --- | --- | --- |
+
+Home → **Language identification (SLID)** → **Offline batch**. Initializes multilingual Whisper (`createLanguageIdentification` / `ModelCategory.LanguageId`, reusing STT Whisper packs). Segmentation **Off** = oneshot `identify(audio)` (★ English Sample 1); **Auto** = segmented code-switching with distribution bars, switch timeline, and per-segment list (★ ZH↔EN meeting / `2-zh-en.wav`). See [docs/language-identification-offline.md](../docs/language-identification-offline.md).
+
+## Spoken language identification (live overload)
+
+| ![Language identification live 1](../docs/images/example/language_identification_live_1.png) | ![Language identification live 2](../docs/images/example/language_identification_live_2.png) | ![Language identification live 3](../docs/images/example/language_identification_live_3.png) |
+| --- | --- | --- |
+
+Same screen, toggle **Live overload**. `identify(liveAudio, liveText, { segmentation })` with mandatory speech segmentation (seeded `minSegmentMs: 1500`). File (★ ZH↔EN) or mic ingest; current-language chip + `onLanguageChanged` event log. See [docs/language-identification-live.md](../docs/language-identification-live.md) and [docs/streaming-pipelines-overview.md](../docs/streaming-pipelines-overview.md).
 
 ## Speaker diarization (offline)
 

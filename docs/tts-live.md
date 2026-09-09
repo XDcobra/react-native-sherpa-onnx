@@ -1,4 +1,4 @@
-# Streaming TTS
+# TTS (live overload)
 
 Native sample-level incremental streaming TTS (online decoding) is **not supported** by the underlying `sherpa-onnx` engine.
 

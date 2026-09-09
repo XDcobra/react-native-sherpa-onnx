@@ -134,6 +134,12 @@ enum class DiarizationModelKind {
     kSortformer
 };
 
+/** Spoken language identification (Whisper multilingual). */
+enum class LanguageIdModelKind {
+    kUnknown,
+    kWhisper
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -312,6 +318,11 @@ struct AlignmentModelPaths {
     std::string model;
 };
 
+struct LanguageIdModelPaths {
+    std::string encoder;
+    std::string decoder;
+};
+
 struct VadModelPaths {
     std::string model;
 };
@@ -432,6 +443,21 @@ struct AlignmentDetectResult {
     /** Heuristic languages from folder name; currently empty for alignment. */
     std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
+    std::string quantization;
+};
+
+struct LanguageIdDetectResult {
+    bool ok = false;
+    /** Always false: upstream SpokenLanguageIdentification is offline-only. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    LanguageIdModelKind selectedKind = LanguageIdModelKind::kUnknown;
+    LanguageIdModelPaths paths;
+    /** Ordered trace of detection mechanisms (see DetectionSource). */
+    std::vector<DetectionSource> detectionSources;
+    /** Heuristic / catalog languages (Whisper multilingual ~99 languages). */
+    std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
 };
 
@@ -592,6 +618,13 @@ AlignmentDetectResult DetectAlignmentModel(
     const std::string& quantization = ""
 );
 
+LanguageIdDetectResult DetectLanguageIdModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
@@ -645,6 +678,14 @@ PunctuationDetectResult DetectPunctuationModelFromFileList(
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 AlignmentDetectResult DetectAlignmentModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: Like DetectLanguageIdModel but takes a pre-built file list; no filesystem access. */
+LanguageIdDetectResult DetectLanguageIdModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",

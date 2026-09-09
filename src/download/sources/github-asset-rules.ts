@@ -47,6 +47,14 @@ export function isAssetSupportedForCategory(
       );
     case ModelCategory.Alignment:
       return ext === 'tar.bz2';
+    case ModelCategory.LanguageId:
+      return (
+        ext === 'tar.bz2' &&
+        lower.includes('whisper') &&
+        !lower.includes('.en.') &&
+        !lower.endsWith('.en.tar.bz2') &&
+        !lower.includes('aishell')
+      );
     default:
       return false;
   }

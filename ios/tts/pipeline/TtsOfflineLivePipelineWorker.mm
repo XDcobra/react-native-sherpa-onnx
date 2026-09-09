@@ -7,7 +7,7 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
   std::string attachedSegmentationEngineId,
   std::shared_ptr<TxtLiveEntry> textInput,
   std::shared_ptr<PaLiveEntry> audioOutput,
-  sherpaonnx::TtsWrapper *wrapper,
+  std::shared_ptr<sherpaonnx::TtsWrapper> wrapper,
   int32_t defaultSid,
   float defaultSpeed,
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
@@ -21,7 +21,7 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
       textInput
     ),
     audioOutput_(std::move(audioOutput)),
-    wrapper_(wrapper),
+    wrapper_(std::move(wrapper)),
     defaultSid_(defaultSid),
     defaultSpeed_(defaultSpeed),
     voiceClone_(std::move(voiceClone)),

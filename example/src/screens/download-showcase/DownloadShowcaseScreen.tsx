@@ -46,6 +46,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.SpeakerEmbedding]: 'Speaker embedding',
   [ModelCategory.Qnn]: 'QNN',
   [ModelCategory.Alignment]: 'Alignment',
+  [ModelCategory.LanguageId]: 'Language identification (SLID)',
 };
 
 const ALL_CATEGORIES = Object.values(ModelCategory);

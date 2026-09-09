@@ -9,6 +9,7 @@ import com.k2fsa.sherpa.onnx.OfflinePunctuation
 import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig
 import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig
 import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.punctuation.config.PunctuationInitOptionsParser
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
@@ -29,25 +30,39 @@ class SherpaOnnxPunctuationHelper(
 
     fun processOfflineIfExists(instanceId: String, text: String): String? {
       val engine = offlineEngines[instanceId] ?: return null
-      val normalized =
-        PunctuationTextInputNormalization.normalize(text, null)
-      return engine.addPunctuation(normalized)
+      val gateKey = NativeInstanceGate.keyFor(engine)
+      if (!NativeInstanceGate.beginUse(gateKey)) return null
+      return try {
+        val normalized =
+          PunctuationTextInputNormalization.normalize(text, null)
+        engine.addPunctuation(normalized)
+      } finally {
+        NativeInstanceGate.endUse(gateKey)
+      }
     }
 
     fun hasOfflineInstance(instanceId: String): Boolean {
       return offlineEngines.containsKey(instanceId)
     }
+
+    private fun releasePunctuationSafely(eng: OfflinePunctuation?) {
+      if (eng == null) return
+      NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(eng)) {
+        try {
+          eng.release()
+        } catch (_: Exception) {
+          // best-effort
+        }
+      }
+    }
   }
 
   fun shutdown() {
-    for (e in offlineEngines.values) {
-      try {
-        e.release()
-      } catch (_: Exception) {
-        // best-effort
-      }
-    }
+    val engines = offlineEngines.values.toList()
     offlineEngines.clear()
+    for (e in engines) {
+      releasePunctuationSafely(e)
+    }
   }
 
   fun detectPunctuationModel(
@@ -290,7 +305,7 @@ class SherpaOnnxPunctuationHelper(
     )
     val config = OfflinePunctuationConfig(model = modelConfig)
     val eng = OfflinePunctuation(assetManager = null, config = config)
-    offlineEngines[instanceId]?.release()
+    releasePunctuationSafely(offlineEngines[instanceId])
     offlineEngines[instanceId] = eng
 
     val out = Arguments.createMap()
@@ -386,6 +401,14 @@ class SherpaOnnxPunctuationHelper(
       return
     }
     val t0 = SystemClock.elapsedRealtime()
+    val gateKey = NativeInstanceGate.keyFor(eng)
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      promise.reject(
+        PunctuationErrorCodes.NOT_FOUND,
+        "Offline punctuation instance released: $instanceId"
+      )
+      return
+    }
     val outText: String
     try {
       outText = eng.addPunctuation(plain)
@@ -397,6 +420,8 @@ class SherpaOnnxPunctuationHelper(
         e
       )
       return
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
     val t1 = SystemClock.elapsedRealtime()
     val ms = (t1 - t0).toDouble()
@@ -459,6 +484,14 @@ class SherpaOnnxPunctuationHelper(
     val normalizedPlain =
       PunctuationTextInputNormalization.normalize(plain, textInputNormalization)
     val t0 = SystemClock.elapsedRealtime()
+    val gateKey = NativeInstanceGate.keyFor(eng)
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      promise.reject(
+        PunctuationErrorCodes.NOT_FOUND,
+        "Offline punctuation instance released: $instanceId"
+      )
+      return
+    }
     val outText: String
     try {
       outText = eng.addPunctuation(normalizedPlain)
@@ -470,6 +503,8 @@ class SherpaOnnxPunctuationHelper(
         e
       )
       return
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
     val t1 = SystemClock.elapsedRealtime()
     val ms = (t1 - t0).toDouble()
@@ -497,13 +532,7 @@ class SherpaOnnxPunctuationHelper(
     promise: Promise
   ) {
     val eng = offlineEngines.remove(instanceId)
-    if (eng != null) {
-      try {
-        eng.release()
-      } catch (_: Exception) {
-        // best-effort
-      }
-    }
+    releasePunctuationSafely(eng)
     promise.resolve(null)
   }
 }

@@ -3,6 +3,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-alignment.h"
+#include "sherpa-onnx-validate-slid.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
@@ -73,6 +74,11 @@ PunctuationModelKind ParsePunctuationModelTypeLocal(const std::string& modelType
 AlignmentModelKind ParseAlignmentModelTypeLocal(const std::string& modelType) {
     if (modelType == "wav2vec2") return AlignmentModelKind::kWav2Vec2;
     return AlignmentModelKind::kUnknown;
+}
+
+LanguageIdModelKind ParseLanguageIdModelTypeLocal(const std::string& modelType) {
+    if (modelType == "whisper") return LanguageIdModelKind::kWhisper;
+    return LanguageIdModelKind::kUnknown;
 }
 
 SeparationModelKind ParseSeparationModelTypeLocal(const std::string& modelType) {
@@ -262,6 +268,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "languageid" || cat == "language_id" || cat == "slid") {
+        const LanguageIdModelKind kind = ParseLanguageIdModelTypeLocal(modelType);
+        if (kind == LanguageIdModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom language identification model type: " + modelType
+            );
+        }
+        LanguageIdModelPaths slidPaths;
+        FillLanguageIdModelPathsFromStringMap(paths, slidPaths);
+        const auto vr = ValidateLanguageIdPaths(kind, slidPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     return FromValidation(
         false,
         {},
@@ -325,6 +346,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const AlignmentModelKind kind = ParseAlignmentModelTypeLocal(modelType);
         if (kind == AlignmentModelKind::kUnknown) return {};
         return FromSpecs(GetAlignmentPathRequirements(kind));
+    }
+    if (cat == "languageid" || cat == "language_id" || cat == "slid") {
+        const LanguageIdModelKind kind = ParseLanguageIdModelTypeLocal(modelType);
+        if (kind == LanguageIdModelKind::kUnknown) return {};
+        return FromSpecs(GetLanguageIdPathRequirements(kind));
     }
 
     return {};

@@ -1,6 +1,7 @@
 package com.sherpaonnx.punctuation.pipeline
 
 import com.k2fsa.sherpa.onnx.OfflinePunctuation
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
@@ -20,13 +21,21 @@ internal class PunctuationOfflineLivePipelineWorker(
   textInput = textInput,
 ) {
 
+  private val gateKey = NativeInstanceGate.keyFor(punctuator)
+
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val text = segment as? CommittedSegmentRef.Text ?: return
     if (text.text.isBlank()) return
 
-    val normalized =
-      PunctuationTextInputNormalization.normalize(text.text, textInputNormalization)
-    val punctuated = punctuator.addPunctuation(normalized)
+    if (!NativeInstanceGate.beginUse(gateKey)) return
+
+    val punctuated = try {
+      val normalized =
+        PunctuationTextInputNormalization.normalize(text.text, textInputNormalization)
+      punctuator.addPunctuation(normalized)
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
     textOutputEntry.commitSegment(
       text = punctuated,
       source = "segmentation_engine",

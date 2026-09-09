@@ -2,6 +2,7 @@ package com.sherpaonnx.enhancement.pipeline
 
 import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
 import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 
@@ -17,6 +18,8 @@ internal class EnhancementOfflineLivePipelineWorker(
   audioInput = audioInputRef,
   textInput = null,
 ) {
+  private val gateKey = NativeInstanceGate.keyFor(enhancer)
+
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val speech = segment as? CommittedSegmentRef.Speech
       ?: error("Expected speech segment in enhancement live overload")
@@ -34,7 +37,12 @@ internal class EnhancementOfflineLivePipelineWorker(
     )
     if (pcm.isEmpty()) return
 
-    val denoised = enhancer.run(pcm, speech.sampleRate)
+    if (!NativeInstanceGate.beginUse(gateKey)) return
+    val denoised = try {
+      enhancer.run(pcm, speech.sampleRate)
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
     if (denoised.samples.isNotEmpty()) {
       val result = audioOutputEntry.tryAppendSamples(
         samples = denoised.samples,

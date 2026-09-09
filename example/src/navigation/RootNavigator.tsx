@@ -17,6 +17,7 @@ import SegmentationShowcaseScreen from '../screens/segmentation-showcase/Segment
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import DiarizationStreamingScreen from '../screens/diarization-streaming/DiarizationStreamingScreen';
 import SpeakerIdentificationScreen from '../screens/speaker-identification/SpeakerIdentificationScreen';
+import LanguageIdentificationScreen from '../screens/language-identification/LanguageIdentificationScreen';
 import EnhancementScreen from '../screens/enhancement/EnhancementScreen';
 import EnhancementStreamingScreen from '../screens/enhancement-streaming/EnhancementStreamingScreen';
 import SeparationScreen from '../screens/separation/SeparationScreen';
@@ -150,6 +151,13 @@ export default function RootNavigator() {
         component={SpeakerIdentificationScreen}
         options={{
           title: 'Speaker Identification',
+        }}
+      />
+      <Stack.Screen
+        name="LanguageIdentification"
+        component={LanguageIdentificationScreen}
+        options={{
+          title: 'Language Identification',
         }}
       />
       <Stack.Screen

@@ -15,12 +15,15 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.lifecycle.ActivePipelineStop
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.separation.config.SeparationInitOptionsParser
 import com.sherpaonnx.separation.core.SeparationErrorCodes
 import com.sherpaonnx.separation.pipeline.SeparationOfflineLivePipelineWorker
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxSeparationHelper(
   private val context: ReactApplicationContext,
@@ -31,29 +34,47 @@ internal class SherpaOnnxSeparationHelper(
     quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
-  private val activeLivePipelineByInstance = java.util.concurrent.ConcurrentHashMap<String, String>()
+  private val activeLivePipelineByInstance = ConcurrentHashMap<String, String>()
+  private val activeInstanceIds = ConcurrentHashMap.newKeySet<String>()
 
-  private fun awaitPipelineStopped(pipelineId: String, timeoutMs: Long = 120_000L) {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
-      if (StreamingPipelineRegistry.get(pipelineId) == null) {
-        return
-      }
-      try {
-        Thread.sleep(50)
-      } catch (_: InterruptedException) {
-        return
-      }
+  private fun separationGateKey(instanceId: String): String = "sep:$instanceId"
+
+  private fun stopActiveLivePipeline(instanceId: String) {
+    ActivePipelineStop.stopForInstance(
+      instanceId = instanceId,
+      activeByInstance = activeLivePipelineByInstance,
+      removeFromRegistry = false,
+    )
+  }
+
+  private fun processSeparationGated(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ): Array<FloatArray>? {
+    val gateKey = separationGateKey(instanceId)
+    if (!NativeInstanceGate.beginUse(gateKey)) return null
+    return try {
+      nativeProcessSeparation(instanceId, samples, sampleRate)
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
   }
 
-  private fun stopActiveLivePipeline(instanceId: String) {
-    val pipelineId = activeLivePipelineByInstance.remove(instanceId) ?: return
-    StreamingPipelineRegistry.stop(pipelineId)
-    awaitPipelineStopped(pipelineId)
-  }
   fun shutdown() {
-    // Native instances are released per instanceId via unloadSeparation.
+    for (id in activeLivePipelineByInstance.keys.toList()) {
+      stopActiveLivePipeline(id)
+    }
+    val ids = activeInstanceIds.toList()
+    activeInstanceIds.clear()
+    for (id in ids) {
+      NativeInstanceGate.releaseWhenIdle(separationGateKey(id)) {
+        try {
+          nativeReleaseSeparation(id)
+        } catch (_: Exception) {
+        }
+      }
+    }
   }
 
   fun detectSeparationModel(
@@ -179,6 +200,7 @@ internal class SherpaOnnxSeparationHelper(
         SeparationErrorCodes.TAG,
         "initializeSeparation ok: instanceId=$instanceId sampleRate=$sampleRate numStems=$numStems",
       )
+      activeInstanceIds.add(instanceId)
       promise.resolve(initResultToWritable(result))
     } catch (e: Exception) {
       Log.e(SeparationErrorCodes.TAG, "Failed to initialize separation", e)
@@ -294,7 +316,7 @@ internal class SherpaOnnxSeparationHelper(
         SeparationErrorCodes.TAG,
         "separateOfflineAudioBuffers: readAllSamples size=${inputSamples.size}",
       )
-      val stems = nativeProcessSeparation(
+      val stems = processSeparationGated(
         instanceId,
         inputSamples,
         audioInEntry.sampleRate,
@@ -398,7 +420,10 @@ internal class SherpaOnnxSeparationHelper(
       return
     }
     stopActiveLivePipeline(instanceId)
-    nativeReleaseSeparation(instanceId)
+    activeInstanceIds.remove(instanceId)
+    NativeInstanceGate.releaseWhenIdle(separationGateKey(instanceId)) {
+      nativeReleaseSeparation(instanceId)
+    }
     promise.resolve(null)
   }
 
@@ -494,7 +519,7 @@ internal class SherpaOnnxSeparationHelper(
           liveSegmentEntry = segmentEntry,
         ),
         processSeparation = { samples, sampleRate ->
-          nativeProcessSeparation(instanceId, samples, sampleRate)
+          processSeparationGated(instanceId, samples, sampleRate)
         },
         audioOutputEntries = liveAudioOuts,
       )

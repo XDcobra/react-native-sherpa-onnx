@@ -220,7 +220,7 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
   }
   NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
   if (source.length == 0) {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual";
     return false;
   }
   NSSet<NSString *> *allowed = nil;
@@ -232,10 +232,14 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
     allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"sid"]) {
     allowed = [NSSet setWithArray:@[@"source", @"speakerName", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
+  } else if ([source isEqualToString:@"pyannote"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
+  } else if ([source isEqualToString:@"languageId"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"lang", @"confidence", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"manual"]) {
     allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, manual";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual";
     return false;
   }
 
@@ -269,6 +273,24 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
     if (!(speakerName == [NSNull null] || [speakerName isKindOfClass:[NSString class]])) {
       if (errorMessage) *errorMessage = @"speech payload.speakerName must be a string or null";
       return false;
+    }
+  }
+  if ([source isEqualToString:@"languageId"]) {
+    id langValue = payload[@"lang"];
+    if (![langValue isKindOfClass:[NSString class]] || [(NSString *)langValue length] == 0) {
+      if (errorMessage) *errorMessage = @"speech payload.lang is required for source=languageId (non-empty string)";
+      return false;
+    }
+    if (payload[@"confidence"] != nil && payload[@"confidence"] != [NSNull null]) {
+      if (![payload[@"confidence"] isKindOfClass:[NSNumber class]]) {
+        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
+        return false;
+      }
+      double confidence = [(NSNumber *)payload[@"confidence"] doubleValue];
+      if (!std::isfinite(confidence)) {
+        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
+        return false;
+      }
     }
   }
   return true;

@@ -15,6 +15,7 @@ export type RootStackParamList = {
   Diarization: undefined;
   DiarizationStreaming: undefined;
   SpeakerIdentification: undefined;
+  LanguageIdentification: undefined;
   Enhancement: undefined;
   EnhancementStreaming: undefined;
   Separation: undefined;
@@ -39,6 +40,7 @@ export type FeatureId =
   | 'diarization'
   | 'diarization_streaming'
   | 'speaker_identification'
+  | 'language_identification'
   | 'enhancement'
   | 'enhancement_streaming'
   | 'separation'

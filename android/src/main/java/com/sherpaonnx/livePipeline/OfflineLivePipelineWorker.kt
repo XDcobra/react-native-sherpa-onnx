@@ -110,7 +110,17 @@ internal abstract class OfflineLivePipelineWorker(
       } catch (e: Exception) {
         error = e.message ?: "OfflineLivePipelineWorker failed"
       } finally {
-        running.set(false)
+        // Complete any commands that arrived after runLoop drained the queue but
+        // before running flipped false — otherwise flush()/reset() hang forever.
+        synchronized(cmdLock) {
+          while (commandQueue.isNotEmpty()) {
+            when (val cmd = commandQueue.removeFirst()) {
+              is PipelineCommand.Flush -> cmd.completion.complete(Unit)
+              is PipelineCommand.Reset -> cmd.completion.complete(Unit)
+            }
+          }
+          running.set(false)
+        }
       }
     }
   }
@@ -123,8 +133,22 @@ internal abstract class OfflineLivePipelineWorker(
   override fun flush(): CompletableFuture<Unit> {
     val future = CompletableFuture<Unit>()
     synchronized(cmdLock) {
+      // Mic stop: finalize often finishes the worker before JS calls flush().
+      // Queuing after runLoop exit would hang the CompletableFuture forever.
+      if (!running.get()) {
+        android.util.Log.i(
+          "SherpaOnnx:slid-dbg",
+          "lifecycle.worker.flush.shortCircuit pipelineId=$pipelineId reason=not_running",
+        )
+        future.complete(Unit)
+        return future
+      }
       commandQueue.addLast(PipelineCommand.Flush(future))
     }
+    android.util.Log.i(
+      "SherpaOnnx:slid-dbg",
+      "lifecycle.worker.flush.queued pipelineId=$pipelineId",
+    )
     workerThreadLock.withLock { dataAvailable.signalAll() }
     return future
   }
@@ -132,6 +156,10 @@ internal abstract class OfflineLivePipelineWorker(
   override fun reset(): CompletableFuture<Unit> {
     val future = CompletableFuture<Unit>()
     synchronized(cmdLock) {
+      if (!running.get()) {
+        future.complete(Unit)
+        return future
+      }
       commandQueue.addLast(PipelineCommand.Reset(future))
     }
     workerThreadLock.withLock { dataAvailable.signalAll() }
@@ -147,6 +175,12 @@ internal abstract class OfflineLivePipelineWorker(
   )
 
   override fun release() {
+    android.util.Log.i(
+      "SherpaOnnx:slid-dbg",
+      "lifecycle.worker.release.enter pipelineId=$pipelineId " +
+        "alive=${workerThread?.isAlive} running=${running.get()} " +
+        "thread=${Thread.currentThread().name}",
+    )
     stop()
     detachCommitListeners()
     releaseCursors()
@@ -155,11 +189,28 @@ internal abstract class OfflineLivePipelineWorker(
     workerThread?.let { thread ->
       if (thread !== Thread.currentThread()) {
         try {
+          val t0 = android.os.SystemClock.uptimeMillis()
           thread.join(2_000)
+          val stillAlive = thread.isAlive
+          android.util.Log.i(
+            "SherpaOnnx:slid-dbg",
+            "lifecycle.worker.release.join pipelineId=$pipelineId stillAlive=$stillAlive " +
+              "waitedMs=${android.os.SystemClock.uptimeMillis() - t0}",
+          )
+          if (stillAlive) {
+            android.util.Log.w(
+              "SherpaOnnx:slid-dbg",
+              "JOIN_TIMEOUT pipelineId=$pipelineId worker still alive after 2000ms",
+            )
+          }
         } catch (_: InterruptedException) {
         }
       }
     }
+    android.util.Log.i(
+      "SherpaOnnx:slid-dbg",
+      "lifecycle.worker.release.leave pipelineId=$pipelineId",
+    )
   }
 
   private fun flushSegmentationEngineIfActive() {

@@ -37,6 +37,7 @@ class VadPipelineWorker(
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
   private var cursorId: Int = -1
   private val pendingCommands = LinkedBlockingQueue<Cmd>()
+  private val cmdLock = Any()
   private val queueDepth = AtomicInteger(0)
 
   @Volatile private var chunksProcessed = 0L
@@ -100,11 +101,21 @@ class VadPipelineWorker(
       error = e.message ?: "Unknown VAD pipeline error"
       emitEvent("pipeline.error", mapOf("error" to error))
     } finally {
-      isRunning = false
       if (cursorId >= 0) inputEntry.releaseCursor(cursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      drainCommands()
+      // Drain leftovers under the same lock as flush/reset enqueue, then clear running.
+      synchronized(cmdLock) {
+        while (true) {
+          val cmd = pendingCommands.poll() ?: break
+          queueDepth.updateAndGet { (it - 1).coerceAtLeast(0) }
+          when (cmd) {
+            is Cmd.Flush -> cmd.done.complete(Unit)
+            is Cmd.Reset -> cmd.done.complete(Unit)
+          }
+        }
+        isRunning = false
+      }
       executor.shutdown()
     }
   }
@@ -238,20 +249,6 @@ class VadPipelineWorker(
     }
   }
 
-  private fun drainCommands() {
-    while (true) {
-      val cmd = pendingCommands.poll() ?: return
-      when (cmd) {
-        is Cmd.Flush -> cmd.done.completeExceptionally(
-          IllegalStateException("Pipeline stopped before flush completed")
-        )
-        is Cmd.Reset -> cmd.done.completeExceptionally(
-          IllegalStateException("Pipeline stopped before reset completed")
-        )
-      }
-    }
-  }
-
   private fun samplesToMs(samples: Long): Long {
     if (config.sampleRate <= 0) return 0L
     return (samples * 1000L) / config.sampleRate.toLong()
@@ -268,27 +265,29 @@ class VadPipelineWorker(
   }
 
   override fun flush(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val f = CompletableFuture<Unit>()
-    queueDepth.incrementAndGet()
-    pendingCommands.put(Cmd.Flush(f))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        f.complete(Unit)
+        return f
+      }
+      queueDepth.incrementAndGet()
+      pendingCommands.put(Cmd.Flush(f))
+    }
     lock.withLock { dataAvailable.signal() }
     return f
   }
 
   override fun reset(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val f = CompletableFuture<Unit>()
-    queueDepth.incrementAndGet()
-    pendingCommands.put(Cmd.Reset(f))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        f.complete(Unit)
+        return f
+      }
+      queueDepth.incrementAndGet()
+      pendingCommands.put(Cmd.Reset(f))
+    }
     lock.withLock { dataAvailable.signal() }
     return f
   }

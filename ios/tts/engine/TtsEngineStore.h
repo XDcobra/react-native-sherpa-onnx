@@ -49,7 +49,7 @@ struct BatchPcmSink {
 };
 
 struct TtsInstanceState {
-    std::unique_ptr<sherpaonnx::TtsWrapper> wrapper;
+    std::shared_ptr<sherpaonnx::TtsWrapper> wrapper;
     __strong NSString *modelDir = nil;
     __strong NSString *modelType = nil;
     int32_t numThreads = 2;

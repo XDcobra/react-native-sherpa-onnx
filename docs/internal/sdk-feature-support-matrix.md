@@ -13,7 +13,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Source separation | Yes (`OfflineSourceSeparationConfig`) | No | Yes (`createSeparation`) | Yes, live overload on offline engine (`createSeparation().separate(Live, Live[], …)`) |
 | Speaker Embedding / Identification | Yes (`SpeakerEmbeddingExtractorConfig`) | No | Yes (`createSpeakerIdentification`) | Yes, live overload (`labelLiveSegments`) |
 | Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
-| Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | No | No |
+| Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | Yes (`createLanguageIdentification`) | Yes, **live overload** (`identify(liveAudio, liveText, …)` — offline Whisper per speech span) |
 | Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | No |
 | Audio Tagging | Yes (`AudioTaggingConfig`) | No | No | No |
 | Diacritization | Yes (`OfflineDiacritizationConfig`) | No | No | No |
@@ -26,3 +26,4 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 - **Punctuation** is its own module (`src/punctuation/`) in the SDK and supports both offline and streaming models.
 - **Source separation** uses `createSeparation` for offline batch (`separate` into N offline buffers, optional offline segmentation) and live overload (`separate` into N live buffers with mandatory `continuous_frames` segmentation). There is no separate streaming separation factory.
 - **Speaker Diarization** offers offline batch clustering (`createDiarization` using Pyannote/Reverb + embedding) and true online streaming (`createStreamingDiarization` using NeMo Sortformer). Live overload was intentionally excluded.
+- **Spoken Language Identification (SLID)** uses Whisper multilingual offline weights only. The SDK exposes oneshot, segmented long-form (code-switching), and live overload via speech segmentation + per-span offline identify. There is no true streaming SLID model in sherpa-onnx.

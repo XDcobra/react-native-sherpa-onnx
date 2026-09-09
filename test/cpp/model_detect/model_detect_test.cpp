@@ -37,6 +37,7 @@
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
+#include "sherpa-onnx-validate-slid.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -1180,6 +1181,85 @@ TEST(ModelDetectValidation, SpeakerEmbeddingFileListWespeakerOk) {
     EXPECT_FALSE(result.isStreaming);
     EXPECT_EQ(static_cast<int>(result.selectedKind),
               static_cast<int>(sherpaonnx::SpeakerEmbeddingModelKind::kWespeaker));
+}
+
+TEST(ModelDetectValidation, ValidateLanguageIdPathsDirectOk) {
+    sherpaonnx::LanguageIdModelPaths paths;
+    paths.encoder = "/m/tiny-encoder.onnx";
+    paths.decoder = "/m/tiny-decoder.onnx";
+    auto v = sherpaonnx::ValidateLanguageIdPaths(
+        sherpaonnx::LanguageIdModelKind::kWhisper, paths, "/m");
+    EXPECT_TRUE(v.ok);
+    EXPECT_TRUE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateLanguageIdPathsDirectMissingDecoder) {
+    sherpaonnx::LanguageIdModelPaths paths;
+    paths.encoder = "/m/tiny-encoder.onnx";
+    auto v = sherpaonnx::ValidateLanguageIdPaths(
+        sherpaonnx::LanguageIdModelKind::kWhisper, paths, "/m");
+    EXPECT_FALSE(v.ok);
+    EXPECT_FALSE(v.missingRequired.empty());
+}
+
+TEST(ModelDetectValidation, ValidateLanguageIdPathsUnknownKindPassesThrough) {
+    sherpaonnx::LanguageIdModelPaths paths;
+    auto v = sherpaonnx::ValidateLanguageIdPaths(
+        sherpaonnx::LanguageIdModelKind::kUnknown, paths, "/m");
+    EXPECT_TRUE(v.ok) << "Unknown kind should not fail validation";
+}
+
+TEST(ModelDetectValidation, LanguageIdMissingOnnxRejected) {
+    const std::string dir = "test-models/language-id-empty";
+    std::vector<FE> files = {
+        MakeEntry(dir, "readme.txt"),
+    };
+    auto result = sherpaonnx::DetectLanguageIdModelFromFileList(files, dir, "auto");
+    EXPECT_FALSE(result.ok) << "Should fail when no encoder/decoder onnx is present";
+    EXPECT_FALSE(result.isStreaming);
+}
+
+TEST(ModelDetectValidation, LanguageIdNameOnlyWhisperIsHeuristic) {
+    const std::string syntheticDir = "m/sherpa-onnx-whisper-tiny";
+    auto result =
+        sherpaonnx::DetectLanguageIdModelFromFileList({}, syntheticDir, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::LanguageIdModelKind::kWhisper));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
+}
+
+TEST(ModelDetectValidation, LanguageIdFileListWhisperOk) {
+    const std::string dir = "test-models/sherpa-onnx-whisper-tiny";
+    std::vector<FE> files = {
+        MakeEntry(dir, "tiny-encoder.onnx"),
+        MakeEntry(dir, "tiny-decoder.onnx"),
+    };
+    auto result = sherpaonnx::DetectLanguageIdModelFromFileList(files, dir, "auto");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::LanguageIdModelKind::kWhisper));
+    EXPECT_EQ(result.paths.encoder, "test-models/sherpa-onnx-whisper-tiny/tiny-encoder.onnx");
+    EXPECT_EQ(result.paths.decoder, "test-models/sherpa-onnx-whisper-tiny/tiny-decoder.onnx");
+    EXPECT_FALSE(result.derivedLanguages.empty());
+}
+
+TEST(ModelDetectValidation, LanguageIdQuantizationSelection) {
+    const std::string dir = "test-models/sherpa-onnx-whisper-tiny";
+    std::vector<FE> files = {
+        MakeEntry(dir, "tiny-encoder.onnx"),
+        MakeEntry(dir, "tiny-decoder.onnx"),
+        MakeEntry(dir, "tiny-encoder.int8.onnx"),
+        MakeEntry(dir, "tiny-decoder.int8.onnx"),
+    };
+    auto resInt8 = sherpaonnx::DetectLanguageIdModelFromFileList(files, dir, "auto", "int8");
+    EXPECT_TRUE(resInt8.ok) << resInt8.error;
+    EXPECT_EQ(resInt8.paths.encoder, "test-models/sherpa-onnx-whisper-tiny/tiny-encoder.int8.onnx");
+    EXPECT_EQ(resInt8.paths.decoder, "test-models/sherpa-onnx-whisper-tiny/tiny-decoder.int8.onnx");
+    EXPECT_EQ(resInt8.quantization, "int8");
 }
 
 TEST(ModelDetectValidation, ValidateVadPathsDirectOk) {

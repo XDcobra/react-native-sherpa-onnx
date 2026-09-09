@@ -15,6 +15,7 @@ import com.sherpaonnx.tts.config.TtsOfflineConfigBuilder
 import com.sherpaonnx.tts.core.TtsEngineInstance
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.TtsInitState
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 
 /**
  * Single-thread executor for TTS init so the RN bridge thread is not blocked (avoids Inspector/dev WebSocket races in debug builds).
@@ -333,7 +334,14 @@ internal class TtsInitializationService(
       val modelTypeStr = result["modelType"] as? String ?: state.modelType
       val detectedModels = result["detectedModels"] as? ArrayList<*>
 
-      inst.tts?.release()
+      inst.tts?.let { old ->
+        NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(old)) {
+          try {
+            old.release()
+          } catch (_: Exception) {
+          }
+        }
+      }
       inst.tts = null
       val config = TtsOfflineConfigBuilder.buildTtsConfig(
         paths, modelTypeStr, state.numThreads, state.debug,

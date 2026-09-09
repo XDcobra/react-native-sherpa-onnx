@@ -1,15 +1,46 @@
 package com.sherpaonnx.audio.pipeline
 
+import android.os.Handler
+import android.os.Looper
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 private const val PIPELINE_COMPLETION_POLL_MS = 20L
 
+/**
+ * Tracks live [StreamingPipelineWorker] instances and notifies completion.
+ *
+ * Completion callbacks (and registry [remove]) are posted onto the main/UI looper.
+ * Callers typically build RN `WritableMap` / HybridData and emit JS events; doing that on
+ * ForkJoinPool races DestructorThread and aborts with
+ * `JNI DETECTED ERROR … jobject is an invalid local reference` in `DeleteGlobalRef`.
+ */
 object StreamingPipelineRegistry {
   private val pipelines = ConcurrentHashMap<String, StreamingPipelineWorker>()
   private val completionCallbacks =
     ConcurrentHashMap<String, (StreamingPipelineCompletion) -> Unit>()
   private val stopRequested = ConcurrentHashMap.newKeySet<String>()
+  // Lazy: JVM unit tests replace [completionPoster] and must not touch Looper at class init.
+  private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+  private val defaultCompletionPoster: (() -> Unit) -> Unit = { block ->
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      block()
+    } else {
+      mainHandler.post(block)
+    }
+  }
+
+  /**
+   * Where completion callbacks + release run. Production uses the main looper.
+   * Unit tests may replace this (no Robolectric) to assert marshaling without JNI.
+   */
+  @Volatile
+  internal var completionPoster: (() -> Unit) -> Unit = defaultCompletionPoster
+
+  internal fun resetCompletionPosterForTests() {
+    completionPoster = defaultCompletionPoster
+  }
 
   fun registerAndStart(
     worker: StreamingPipelineWorker,
@@ -61,10 +92,13 @@ object StreamingPipelineRegistry {
         error = status.error,
       )
 
-      try {
-        completionCallbacks.remove(worker.pipelineId)?.invoke(completion)
-      } finally {
-        remove(worker.pipelineId)
+      val callback = completionCallbacks.remove(worker.pipelineId)
+      completionPoster {
+        try {
+          callback?.invoke(completion)
+        } finally {
+          remove(worker.pipelineId)
+        }
       }
     }
   }

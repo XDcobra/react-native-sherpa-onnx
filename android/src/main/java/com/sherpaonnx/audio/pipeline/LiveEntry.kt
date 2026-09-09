@@ -550,6 +550,40 @@ class LiveEntry(
     }
   }
 
+  /**
+   * Debug-only ring/spool index snapshot for crash investigation.
+   * Does not change read behavior.
+   */
+  data class DebugIndexSnapshot(
+    val bufferId: String,
+    val state: State,
+    val written: Long,
+    val capacity: Int,
+    val oldestInRing: Long,
+    val used: Int,
+    val hasSpool: Boolean,
+  ) {
+    override fun toString(): String =
+      "bufferId=$bufferId state=$state written=$written capacity=$capacity " +
+        "oldestInRing=$oldestInRing used=$used hasSpool=$hasSpool"
+  }
+
+  fun debugIndexSnapshot(): DebugIndexSnapshot {
+    val written = totalSamplesWritten
+    val capacity = windowCapacity
+    val oldestInRing = if (written > capacity) written - capacity else 0L
+    val used = minOf(written, capacity.toLong()).toInt()
+    return DebugIndexSnapshot(
+      bufferId = bufferId,
+      state = state,
+      written = written,
+      capacity = capacity,
+      oldestInRing = oldestInRing,
+      used = used,
+      hasSpool = spoolWriter != null,
+    )
+  }
+
   /** Path to the spool WAV file, if persistence is active and the file exists. */
   val spoolFilePath: String? get() = spoolWriter?.filePath
 

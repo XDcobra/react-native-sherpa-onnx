@@ -7,6 +7,7 @@ import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -22,6 +23,8 @@ class EnhancementPipelineWorker(
 ) : StreamingPipelineWorker {
 
   override val pipelineId: String = UUID.randomUUID().toString()
+
+  private val gateKey = NativeInstanceGate.keyFor(denoiser)
 
   @Volatile
   override var isRunning: Boolean = false
@@ -46,6 +49,7 @@ class EnhancementPipelineWorker(
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
 
   private val commandQueue = LinkedBlockingQueue<PipelineCommand>()
+  private val cmdLock = Any()
 
   private sealed class PipelineCommand {
     class Flush(val completion: CompletableFuture<Unit>) : PipelineCommand()
@@ -74,22 +78,28 @@ class EnhancementPipelineWorker(
         val chunk = inputEntry.drainCursor(cursorId, chunkSize)
         if (chunk.isEmpty()) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
-            val flushed = denoiser.flush()
-            if (flushed.samples.isNotEmpty()) {
-              when (
-                outputEntry.tryAppendSamples(
-                  flushed.samples,
-                  sampleRate,
-                  LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
-                )
-              ) {
-                LiveEntry.AppendResult.APPENDED -> {
-                  unitsWritten += flushed.samples.size
+            if (NativeInstanceGate.beginUse(gateKey)) {
+              try {
+                val flushed = denoiser.flush()
+                if (flushed.samples.isNotEmpty()) {
+                  when (
+                    outputEntry.tryAppendSamples(
+                      flushed.samples,
+                      sampleRate,
+                      LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
+                    )
+                  ) {
+                    LiveEntry.AppendResult.APPENDED -> {
+                      unitsWritten += flushed.samples.size
+                    }
+                    LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                      isRunning = false
+                      break
+                    }
+                  }
                 }
-                LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-                  isRunning = false
-                  break
-                }
+              } finally {
+                NativeInstanceGate.endUse(gateKey)
               }
             }
             break
@@ -100,7 +110,15 @@ class EnhancementPipelineWorker(
           continue
         }
 
-        val denoised = denoiser.run(chunk, sampleRate)
+        if (!NativeInstanceGate.beginUse(gateKey)) {
+          isRunning = false
+          break
+        }
+        val denoised = try {
+          denoiser.run(chunk, sampleRate)
+        } finally {
+          NativeInstanceGate.endUse(gateKey)
+        }
         when (
           outputEntry.tryAppendSamples(
             denoised.samples,
@@ -123,11 +141,19 @@ class EnhancementPipelineWorker(
     } catch (e: Exception) {
       error = e.message ?: "Unknown error in enhancement pipeline"
     } finally {
-      isRunning = false
       inputEntry.releaseCursor(cursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      drainRemainingCommands()
+      synchronized(cmdLock) {
+        while (true) {
+          val cmd = commandQueue.poll() ?: break
+          when (cmd) {
+            is PipelineCommand.Flush -> cmd.completion.complete(Unit)
+            is PipelineCommand.Reset -> cmd.completion.complete(Unit)
+          }
+        }
+        isRunning = false
+      }
       executor.shutdown()
     }
   }
@@ -138,24 +164,34 @@ class EnhancementPipelineWorker(
       when (cmd) {
         is PipelineCommand.Flush -> {
           try {
-            val flushed = denoiser.flush()
-            if (flushed.samples.isNotEmpty()) {
-              when (
-                outputEntry.tryAppendSamples(
-                  flushed.samples,
-                  denoiser.sampleRate,
-                  LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
-                )
-              ) {
-                LiveEntry.AppendResult.APPENDED -> {
-                  unitsWritten += flushed.samples.size
-                }
-                LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-                  isRunning = false
+            if (!NativeInstanceGate.beginUse(gateKey)) {
+              cmd.completion.completeExceptionally(
+                IllegalStateException("Online enhancement instance released"),
+              )
+              continue
+            }
+            try {
+              val flushed = denoiser.flush()
+              if (flushed.samples.isNotEmpty()) {
+                when (
+                  outputEntry.tryAppendSamples(
+                    flushed.samples,
+                    denoiser.sampleRate,
+                    LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
+                  )
+                ) {
+                  LiveEntry.AppendResult.APPENDED -> {
+                    unitsWritten += flushed.samples.size
+                  }
+                  LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+                    isRunning = false
+                  }
                 }
               }
+              cmd.completion.complete(Unit)
+            } finally {
+              NativeInstanceGate.endUse(gateKey)
             }
-            cmd.completion.complete(Unit)
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)
           }
@@ -163,27 +199,22 @@ class EnhancementPipelineWorker(
 
         is PipelineCommand.Reset -> {
           try {
-            denoiser.reset()
-            cmd.completion.complete(Unit)
+            if (!NativeInstanceGate.beginUse(gateKey)) {
+              cmd.completion.completeExceptionally(
+                IllegalStateException("Online enhancement instance released"),
+              )
+              continue
+            }
+            try {
+              denoiser.reset()
+              cmd.completion.complete(Unit)
+            } finally {
+              NativeInstanceGate.endUse(gateKey)
+            }
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)
           }
         }
-      }
-    }
-  }
-
-  private fun drainRemainingCommands() {
-    while (true) {
-      val cmd = commandQueue.poll() ?: return
-      when (cmd) {
-        is PipelineCommand.Flush -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before flush could complete"),
-        )
-
-        is PipelineCommand.Reset -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before reset could complete"),
-        )
       }
     }
   }
@@ -199,25 +230,27 @@ class EnhancementPipelineWorker(
   }
 
   override fun flush(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val future = CompletableFuture<Unit>()
-    commandQueue.put(PipelineCommand.Flush(future))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      commandQueue.put(PipelineCommand.Flush(future))
+    }
     lock.withLock { dataAvailable.signal() }
     return future
   }
 
   override fun reset(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val future = CompletableFuture<Unit>()
-    commandQueue.put(PipelineCommand.Reset(future))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      commandQueue.put(PipelineCommand.Reset(future))
+    }
     lock.withLock { dataAvailable.signal() }
     return future
   }

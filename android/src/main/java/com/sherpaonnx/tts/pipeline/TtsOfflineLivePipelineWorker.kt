@@ -5,6 +5,7 @@ import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.tts.core.TtsEngineInstance
 
@@ -49,27 +50,33 @@ internal class TtsOfflineLivePipelineWorker(
     val effectiveSpeed = (text.meta?.get("speed") as? Number)?.toFloat() ?: defaultSpeed
 
     val tts = ttsInstance.tts ?: return
+    val gateKey = NativeInstanceGate.keyFor(tts)
+    if (!NativeInstanceGate.beginUse(gateKey)) return
 
-    val audio = if (voiceClone != null) {
-      val config = com.k2fsa.sherpa.onnx.GenerationConfig(
-        sid = effectiveSid,
-        speed = effectiveSpeed,
-        referenceAudio = voiceClone.referenceAudio,
-        referenceSampleRate = voiceClone.referenceSampleRate,
-        referenceText = voiceClone.referenceText,
-        silenceScale = voiceClone.silenceScale,
-        numSteps = voiceClone.numSteps,
-      )
-      tts.generateWithConfig(text.text, config)
-    } else if (!defaultLang.isNullOrBlank()) {
-      val config = com.k2fsa.sherpa.onnx.GenerationConfig(
-        sid = effectiveSid,
-        speed = effectiveSpeed,
-        extra = mapOf("lang" to defaultLang),
-      )
-      tts.generateWithConfig(text.text, config)
-    } else {
-      tts.generate(text.text, effectiveSid, effectiveSpeed)
+    val audio = try {
+      if (voiceClone != null) {
+        val config = com.k2fsa.sherpa.onnx.GenerationConfig(
+          sid = effectiveSid,
+          speed = effectiveSpeed,
+          referenceAudio = voiceClone.referenceAudio,
+          referenceSampleRate = voiceClone.referenceSampleRate,
+          referenceText = voiceClone.referenceText,
+          silenceScale = voiceClone.silenceScale,
+          numSteps = voiceClone.numSteps,
+        )
+        tts.generateWithConfig(text.text, config)
+      } else if (!defaultLang.isNullOrBlank()) {
+        val config = com.k2fsa.sherpa.onnx.GenerationConfig(
+          sid = effectiveSid,
+          speed = effectiveSpeed,
+          extra = mapOf("lang" to defaultLang),
+        )
+        tts.generateWithConfig(text.text, config)
+      } else {
+        tts.generate(text.text, effectiveSid, effectiveSpeed)
+      }
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
 
     if (audio.samples.isNotEmpty()) {

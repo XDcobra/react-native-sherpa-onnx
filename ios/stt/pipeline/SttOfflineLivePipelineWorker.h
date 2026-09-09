@@ -3,6 +3,8 @@
 #include "../../livePipeline/OfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-stt-wrapper.h"
 
+#include <memory>
+
 class SttOfflineLivePipelineWorker : public OfflineLivePipelineWorker {
 public:
   SttOfflineLivePipelineWorker(
@@ -11,7 +13,7 @@ public:
     std::shared_ptr<PaLiveEntry> audioInput,
     std::string audioSegmentInputBufferId,
     std::shared_ptr<TxtLiveEntry> textOutput,
-    sherpaonnx::SttWrapper *wrapper
+    std::shared_ptr<sherpaonnx::SttWrapper> wrapper
   );
 
 protected:
@@ -20,5 +22,5 @@ protected:
 private:
   std::shared_ptr<PaLiveEntry> audioInput_;
   std::shared_ptr<TxtLiveEntry> textOutput_;
-  sherpaonnx::SttWrapper *wrapper_ = nullptr;
+  std::shared_ptr<sherpaonnx::SttWrapper> wrapper_;
 };

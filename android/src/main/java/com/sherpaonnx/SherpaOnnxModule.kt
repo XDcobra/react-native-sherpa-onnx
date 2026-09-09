@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.Promise
@@ -34,6 +35,8 @@ import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
+import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdHelper
+import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdLivePipelineHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
@@ -230,6 +233,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectDiarizationModel(modelDir, assetName, modelType, quantization)
     }
   )
+  private val languageIdHelper = SherpaOnnxLanguageIdHelper()
+  private val languageIdLivePipelineHelper =
+    SherpaOnnxLanguageIdLivePipelineHelper(
+      reactApplicationContext,
+      languageIdHelper,
+      NAME,
+    )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -424,6 +434,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.shutdown()
     speakerEmbeddingHelper.shutdown()
     diarizationHelper.shutdown()
+    languageIdHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -3322,6 +3333,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         spoolingTemporary = spoolingTemporary,
         spoolingThresholdBytes = spoolingThresholdBytes,
       )
+      // Match iOS: native commitSegment (STT/SLID/workers) must notify JS.
+      entry.addCommitListener { segment ->
+        emitLiveTextSegment(
+          liveBufferId = entry.bufferId,
+          segment = segment,
+          totalSegments = entry.segmentCount,
+        )
+      }
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -3333,6 +3352,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun createLiveTextBufferFromOffline(offlineBufferId: String, promise: Promise) {
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.createLiveFromOffline(offlineBufferId)
+      entry.addCommitListener { segment ->
+        emitLiveTextSegment(
+          liveBufferId = entry.bufferId,
+          segment = segment,
+          totalSegments = entry.segmentCount,
+        )
+      }
       promise.resolve(entry.toWritableMap())
     } catch (e: com.sherpaonnx.text.pipeline.TextPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -3666,19 +3692,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         source = "append",
         meta = metaMap,
       )
-
-      emitLiveTextSegment(
-        liveBufferId = liveBufferId,
-        segment = com.sherpaonnx.text.pipeline.TextSegment(
-          text = text,
-          tokens = tokenArray,
-          timestamps = timestampArray,
-          source = "append",
-          segmentIndex = segmentIndex,
-          meta = metaMap,
-        ),
-        totalSegments = entry.segmentCount,
-      )
+      // Event emission is handled by the createLiveTextBuffer commit listener
+      // (parity with iOS appendLiveTextSegment).
 
       val out = Arguments.createMap()
       out.putInt("segmentIndex", segmentIndex)
@@ -4087,7 +4102,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4096,10 +4111,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "stt" -> setOf("source", "transcript", "tokenCount", "isFinal", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "tts" -> setOf("source", "text", "chunkIndex", "isFinalChunk", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "pyannote" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "languageId" -> setOf("source", "lang", "confidence", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
       )
     }
 
@@ -4153,7 +4170,47 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      "stt", "tts" -> Unit
+      "languageId" -> {
+        if (!payload.hasKey("lang") || payload.isNull("lang")) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang is required for source=languageId (non-empty string)"
+          )
+        }
+        val lang = try {
+          payload.getString("lang")?.trim().orEmpty()
+        } catch (_: Exception) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang must be a non-empty string"
+          )
+        }
+        if (lang.isEmpty()) {
+          throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+            com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+            "speech payload.lang is required for source=languageId (non-empty string)"
+          )
+        }
+        if (payload.hasKey("confidence") && !payload.isNull("confidence")) {
+          try {
+            val confidence = payload.getDouble("confidence")
+            if (!confidence.isFinite()) {
+              throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+                com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+                "speech payload.confidence must be a finite number when provided"
+              )
+            }
+          } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+            throw e
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.confidence must be a finite number when provided"
+            )
+          }
+        }
+      }
+      "stt", "tts", "pyannote", "manual" -> Unit
     }
   }
 
@@ -4804,6 +4861,151 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     diarizationHelper.detectDiarizationModel(modelDir, assetName, modelType, quantization, promise)
   }
 
+  override fun detectLanguageIdModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectLanguageIdModel(
+        modelDir.takeIf { it.isNotBlank() },
+        assetName?.takeIf { it.isNotBlank() },
+        modelType ?: "auto",
+        quantization
+      )
+      if (result == null) {
+        android.util.Log.e(NAME, "DETECT_ERROR: Language ID model detection returned null")
+        promise.reject("DETECT_ERROR", "Language ID model detection returned null")
+        return
+      }
+      val success = result["success"] as? Boolean ?: false
+      val detectedModels = result["detectedModels"] as? ArrayList<*>
+        ?: arrayListOf<HashMap<String, String>>()
+      val modelTypeStr = result["modelType"] as? String
+      val paths = result["paths"] as? HashMap<*, *>
+
+      val resultMap = Arguments.createMap()
+      resultMap.putBoolean("success", success)
+      resultMap.putBoolean("isStreaming", false)
+      val modelsArray = Arguments.createArray()
+      for (model in detectedModels) {
+        val modelMap = model as? HashMap<*, *>
+        if (modelMap != null) {
+          val entry = Arguments.createMap()
+          entry.putString("type", modelMap["type"] as? String ?: "")
+          entry.putString("modelDir", modelMap["modelDir"] as? String ?: "")
+          modelsArray.pushMap(entry)
+        }
+      }
+      resultMap.putArray("detectedModels", modelsArray)
+      if (modelTypeStr != null) {
+        resultMap.putString("modelType", modelTypeStr)
+      }
+      val detectionSources = result["detectionSources"] as? ArrayList<*>
+      if (detectionSources != null) {
+        val sourcesArray = Arguments.createArray()
+        for (src in detectionSources) {
+          if (src is String) sourcesArray.pushString(src)
+        }
+        resultMap.putArray("detectionSources", sourcesArray)
+      }
+      val languages = result["languages"] as? ArrayList<*>
+      if (languages != null) {
+        val langArray = Arguments.createArray()
+        for (lang in languages) {
+          if (lang is HashMap<*, *>) {
+            val langMap = Arguments.createMap()
+            langMap.putString("id", lang["id"] as? String ?: "")
+            langMap.putString("iso6391Hint", lang["iso6391Hint"] as? String ?: "")
+            langArray.pushMap(langMap)
+          }
+        }
+        resultMap.putArray("languages", langArray)
+      }
+      val quant = result["quantization"] as? String
+      if (!quant.isNullOrBlank()) {
+        resultMap.putString("quantization", quant)
+      }
+      if (paths != null) {
+        val pathsMap = Arguments.createMap()
+        val encoder = paths["encoder"] as? String
+        val decoder = paths["decoder"] as? String
+        if (!encoder.isNullOrBlank()) pathsMap.putString("encoder", encoder)
+        if (!decoder.isNullOrBlank()) pathsMap.putString("decoder", decoder)
+        resultMap.putMap("paths", pathsMap)
+      }
+      if (!success) {
+        val error = result["error"] as? String
+        if (!error.isNullOrBlank()) {
+          resultMap.putString("error", error)
+        }
+      }
+      promise.resolve(resultMap)
+    } catch (e: Exception) {
+      Log.e(NAME, "detectLanguageIdModel failed", e)
+      promise.reject("DETECT_ERROR", "Language ID model detection failed: ${e.message}", e)
+    }
+  }
+
+  override fun initializeLanguageId(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    languageIdHelper.initializeLanguageId(instanceId, options, promise)
+  }
+
+  override fun identifyLanguageOffline(
+    instanceId: String,
+    audioBufferId: String,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise
+  ) {
+    languageIdHelper.identifyLanguageOffline(instanceId, audioBufferId, startSample, endSample, promise)
+  }
+
+  override fun unloadLanguageId(
+    instanceId: String,
+    promise: Promise
+  ) {
+    languageIdHelper.unloadLanguageId(instanceId, promise)
+  }
+
+  override fun labelLanguageIdOfflineSegments(
+    instanceId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    promise: Promise
+  ) {
+    languageIdHelper.labelLanguageIdOfflineSegments(
+      instanceId,
+      audioInId,
+      segmentsInId,
+      segmentsOutId,
+      promise
+    )
+  }
+
+  override fun startLanguageIdOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    languageIdLivePipelineHelper.startLanguageIdOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      textOutLiveBufferId,
+      options,
+      promise
+    )
+  }
+
   override fun initializeDiarization(
     instanceId: String,
     options: ReadableMap,
@@ -4976,6 +5178,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       startSamples,
       endSamples,
       promise,
+    )
+  }
+
+  override fun labelSpeakerIdentificationOfflineSegments(
+    instanceId: String,
+    managerId: String,
+    audioInId: String,
+    segmentsInId: String,
+    segmentsOutId: String,
+    threshold: Double,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.labelSpeakerIdentificationOfflineSegments(
+      instanceId,
+      managerId,
+      audioInId,
+      segmentsInId,
+      segmentsOutId,
+      threshold,
+      promise
     )
   }
 
@@ -5830,6 +6052,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for diarization segmentation: pyannote / reverb (offline only). */
     @JvmStatic
     private external fun nativeDetectDiarizationModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
+      quantization: String?
+    ): HashMap<String, Any>?
+
+    /** Model detection for Spoken Language Identification (SLID): Whisper multilingual. */
+    @JvmStatic
+    private external fun nativeDetectLanguageIdModel(
       modelDir: String?,
       assetName: String?,
       modelType: String,

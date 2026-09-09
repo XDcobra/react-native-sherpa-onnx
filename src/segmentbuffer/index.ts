@@ -73,6 +73,7 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'tts',
   'sid',
   'pyannote',
+  'languageId',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
@@ -83,6 +84,7 @@ const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
   sid: new Set(['source', 'speakerName']),
   pyannote: new Set(['source']),
+  languageId: new Set(['source', 'lang', 'confidence']),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -212,7 +214,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -299,6 +301,24 @@ function assertSpeechPayload(
     if (obj.speakerName !== null && typeof obj.speakerName !== 'string') {
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.speakerName must be a string or null.`
+      );
+    }
+  } else if (typedSource === 'languageId') {
+    if (
+      !Object.prototype.hasOwnProperty.call(obj, 'lang') ||
+      typeof obj.lang !== 'string' ||
+      !obj.lang.trim()
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.lang is required for speech source "languageId" (non-empty string).`
+      );
+    }
+    if (
+      obj.confidence !== undefined &&
+      (typeof obj.confidence !== 'number' || !Number.isFinite(obj.confidence))
+    ) {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.confidence must be a finite number when provided.`
       );
     }
   }

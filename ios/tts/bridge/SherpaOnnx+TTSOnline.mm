@@ -205,7 +205,7 @@ static std::mutex g_tts_pipeline_mutex;
           attachedEngineKey,
           textInputEntry,
           outputEntry,
-          inst->wrapper.get(),
+          inst->wrapper,
           defaultSid,
           defaultSpeed,
           std::move(voiceClone),

@@ -192,6 +192,10 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/speaker-embedding\"",
     "\"#{pod_root}/ios/diarization\"",
     "\"#{pod_root}/ios/punctuation\"",
+    "\"#{pod_root}/ios/slid\"",
+    "\"#{pod_root}/ios/slid/core\"",
+    "\"#{pod_root}/ios/slid/bridge\"",
+    "\"#{pod_root}/ios/slid/pipeline\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

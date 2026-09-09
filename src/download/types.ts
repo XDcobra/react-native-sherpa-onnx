@@ -12,6 +12,7 @@ export enum ModelCategory {
   SpeakerEmbedding = 'speakerEmbedding',
   Qnn = 'qnn',
   Alignment = 'alignment',
+  LanguageId = 'languageId',
 }
 
 export type TtsModelType = TTSModelType | 'unknown';

@@ -38,6 +38,7 @@ internal class PunctuationPipelineWorker(
   private val lock = ReentrantLock()
   private val dataAvailable = lock.newCondition()
   private val commandQueue = LinkedBlockingQueue<PipelineCommand>()
+  private val cmdLock = Any()
 
   /**
    * Once the live input is [LiveTextEntry.State.FINISHED], the worker must not
@@ -85,10 +86,18 @@ internal class PunctuationPipelineWorker(
     } catch (e: Exception) {
       error = e.message ?: "Unknown error in punctuation pipeline"
     } finally {
-      isRunning = false
       if (textCursorId >= 0) inputEntry.releaseSegmentCursor(textCursorId)
       if (appendListenerToken >= 0) inputEntry.removeAppendListener(appendListenerToken)
-      drainRemainingCommands()
+      synchronized(cmdLock) {
+        while (true) {
+          val cmd = commandQueue.poll() ?: break
+          when (cmd) {
+            is PipelineCommand.Flush -> cmd.completion.complete(Unit)
+            is PipelineCommand.Reset -> cmd.completion.complete(Unit)
+          }
+        }
+        isRunning = false
+      }
       executor.shutdown()
     }
   }
@@ -149,20 +158,6 @@ internal class PunctuationPipelineWorker(
     }
   }
 
-  private fun drainRemainingCommands() {
-    while (true) {
-      val cmd = commandQueue.poll() ?: return
-      when (cmd) {
-        is PipelineCommand.Flush -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before flush could complete")
-        )
-        is PipelineCommand.Reset -> cmd.completion.completeExceptionally(
-          IllegalStateException("Pipeline stopped before reset could complete")
-        )
-      }
-    }
-  }
-
   override fun stop() {
     if (!isRunning) return
     isRunning = false
@@ -174,25 +169,27 @@ internal class PunctuationPipelineWorker(
   }
 
   override fun flush(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val future = CompletableFuture<Unit>()
-    commandQueue.put(PipelineCommand.Flush(future))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      commandQueue.put(PipelineCommand.Flush(future))
+    }
     lock.withLock { dataAvailable.signal() }
     return future
   }
 
   override fun reset(): CompletableFuture<Unit> {
-    if (!isRunning) {
-      return CompletableFuture<Unit>().also {
-        it.completeExceptionally(IllegalStateException("Pipeline is not running"))
-      }
-    }
     val future = CompletableFuture<Unit>()
-    commandQueue.put(PipelineCommand.Reset(future))
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      commandQueue.put(PipelineCommand.Reset(future))
+    }
     lock.withLock { dataAvailable.signal() }
     return future
   }

@@ -24,7 +24,8 @@ const SECTION_ORDER = [
   'Speech Enhancement',
   'Voice Activity',
   'Punctuation',
-  'Speakers & Separation',
+  'Speakers',
+  'Source Separation',
 ] as const;
 
 const FEATURES: HomeFeature[] = [
@@ -185,7 +186,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'diarization',
-    sectionTitle: 'Speakers & Separation',
+    sectionTitle: 'Speakers',
     title: 'Speaker Diarization',
     description: 'Identify who spoke when in audio',
     icon: 'people',
@@ -194,7 +195,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'diarization_streaming',
-    sectionTitle: 'Speakers & Separation',
+    sectionTitle: 'Speakers',
     title: 'Speaker Diarization (Streaming)',
     description:
       'Identify who spoke when in real-time audio streams (NeMo Sortformer)',
@@ -204,7 +205,7 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'speaker_identification',
-    sectionTitle: 'Speakers & Separation',
+    sectionTitle: 'Speakers',
     title: 'Speaker Identification',
     description: 'Enroll / identify / label — offline batch + live overload',
     icon: 'person',
@@ -212,8 +213,18 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'language_identification',
+    sectionTitle: 'Speakers',
+    title: 'Language identification (SLID)',
+    description:
+      'Whisper multilingual — oneshot, segmented code-switching, live overload',
+    icon: 'language',
+    screen: 'LanguageIdentification',
+    implemented: true,
+  },
+  {
     id: 'separation',
-    sectionTitle: 'Speakers & Separation',
+    sectionTitle: 'Source Separation',
     title: 'Source Separation',
     description: 'Offline batch + live overload (vocals / accompaniment)',
     icon: 'musical-notes',

@@ -30,6 +30,10 @@ export {
   type SpeakerIdentificationCustomInitFormState,
 } from './SpeakerIdentificationCustomInitForm';
 export {
+  LanguageIdentificationCustomInitForm,
+  type LanguageIdentificationCustomInitFormState,
+} from './LanguageIdentificationCustomInitForm';
+export {
   PunctuationOfflineCustomInitForm,
   type PunctuationOfflineCustomInitFormState,
 } from './PunctuationOfflineCustomInitForm';

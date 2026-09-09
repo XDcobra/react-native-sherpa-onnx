@@ -91,8 +91,6 @@ void VadPipelineWorker::runLoop() {
     emit("pipeline.error", {}, {{"error", "Unknown VAD pipeline error"}});
   }
 
-  running.store(false);
-
   if (cursorId_ >= 0) {
     inputEntry_->releaseCursor(cursorId_);
     cursorId_ = -1;
@@ -102,7 +100,19 @@ void VadPipelineWorker::runLoop() {
     appendListenerToken_ = -1;
   }
 
-  drainRemainingCommands();
+  // Drain leftovers under the same lock as flush/reset enqueue, then clear running.
+  {
+    std::lock_guard<std::mutex> lock(cmdMutex_);
+    while (!commandQueue_.empty()) {
+      auto &cmd = commandQueue_.front();
+      try {
+        cmd.completion.set_value();
+      } catch (...) {
+      }
+      commandQueue_.pop_front();
+    }
+    running.store(false);
+  }
 }
 
 void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
@@ -238,11 +248,7 @@ void VadPipelineWorker::drainRemainingCommands() {
   while (!commandQueue_.empty()) {
     auto &cmd = commandQueue_.front();
     try {
-      cmd.completion.set_exception(
-        std::make_exception_ptr(
-          std::runtime_error("Pipeline stopped before command could complete")
-        )
-      );
+      cmd.completion.set_value();
     } catch (...) {
     }
     commandQueue_.pop_front();
@@ -260,17 +266,18 @@ void VadPipelineWorker::stop() {
 }
 
 std::future<void> VadPipelineWorker::flush() {
-  if (!running.load()) {
-    std::promise<void> p;
-    p.set_exception(std::make_exception_ptr(std::runtime_error("Pipeline is not running")));
-    return p.get_future();
-  }
-
   PipelineCommand cmd;
   cmd.type = PipelineCommand::Flush;
   auto future = cmd.completion.get_future();
   {
     std::lock_guard<std::mutex> lock(cmdMutex_);
+    if (!running.load()) {
+      try {
+        cmd.completion.set_value();
+      } catch (...) {
+      }
+      return future;
+    }
     commandQueue_.push_back(std::move(cmd));
   }
   queueDepth_.fetch_add(1);
@@ -279,17 +286,18 @@ std::future<void> VadPipelineWorker::flush() {
 }
 
 std::future<void> VadPipelineWorker::reset() {
-  if (!running.load()) {
-    std::promise<void> p;
-    p.set_exception(std::make_exception_ptr(std::runtime_error("Pipeline is not running")));
-    return p.get_future();
-  }
-
   PipelineCommand cmd;
   cmd.type = PipelineCommand::Reset;
   auto future = cmd.completion.get_future();
   {
     std::lock_guard<std::mutex> lock(cmdMutex_);
+    if (!running.load()) {
+      try {
+        cmd.completion.set_value();
+      } catch (...) {
+      }
+      return future;
+    }
     commandQueue_.push_back(std::move(cmd));
   }
   queueDepth_.fetch_add(1);

@@ -109,6 +109,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Speaker identification demo',
     body: 'Enroll named speakers from offline audio, then identify, verify, or label speech segments. Switch to live overload to label a mic or file stream with the same embedding model (mandatory speech segmentation). Export/import enrollment JSON for cross-session restore.',
   },
+  LanguageIdentification: {
+    title: 'Spoken language identification (SLID)',
+    body: 'Developer showcase for createLanguageIdentification. Offline batch: Segmentation Off = Mode 1 oneshot identify(audio); Auto = Mode 2 segmented identify with distribution + switches (code-switching). Live overload = Mode 3 identify(liveAudio, liveText) with onLanguageChanged. Reuses multilingual Whisper STT packs (ModelCategory.LanguageId). Prefer Auto + 2-zh-en.wav for switch timelines — oneshot truncates ~30s.',
+  },
   Settings: {
     title: 'Runtime capability dashboard',
     body: 'This screen is for checking execution-provider support and other runtime capabilities. It helps you verify what the current build and device can actually use.',

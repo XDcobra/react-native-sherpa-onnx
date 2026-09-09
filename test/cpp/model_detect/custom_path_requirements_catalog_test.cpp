@@ -272,6 +272,10 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         {"cnn_bilstm", true, std::nullopt},
         {"bpe_vocab", true, std::nullopt},
     });
+    ExpectRequirementsMatch("languageid", "whisper", {
+        {"encoder", true, std::nullopt},
+        {"decoder", true, std::nullopt},
+    });
 }
 
 TEST(CustomPathRequirementsCatalog, UnknownModelTypesReturnEmpty) {

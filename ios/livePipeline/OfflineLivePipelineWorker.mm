@@ -55,7 +55,19 @@ void OfflineLivePipelineWorker::start() {
       std::lock_guard<std::mutex> statusLock(statusMtx_);
       error_ = "OfflineLivePipelineWorker failed";
     }
-    running.store(false);
+    // Complete commands queued after runLoop drained but before running=false.
+    {
+      std::lock_guard<std::mutex> cmdLock(cmdMtx_);
+      while (!commandQueue_.empty()) {
+        PipelineCommand cmd = std::move(commandQueue_.front());
+        commandQueue_.pop_front();
+        try {
+          cmd.completion.set_value();
+        } catch (...) {
+        }
+      }
+      running.store(false);
+    }
   });
 }
 
@@ -72,6 +84,13 @@ std::future<void> OfflineLivePipelineWorker::flush() {
   auto future = cmd.completion.get_future();
   {
     std::lock_guard<std::mutex> cmdLock(cmdMtx_);
+    if (!running.load()) {
+      try {
+        cmd.completion.set_value();
+      } catch (...) {
+      }
+      return future;
+    }
     commandQueue_.push_back(std::move(cmd));
   }
   waitCv_.notify_all();
@@ -84,6 +103,13 @@ std::future<void> OfflineLivePipelineWorker::reset() {
   auto future = cmd.completion.get_future();
   {
     std::lock_guard<std::mutex> cmdLock(cmdMtx_);
+    if (!running.load()) {
+      try {
+        cmd.completion.set_value();
+      } catch (...) {
+      }
+      return future;
+    }
     commandQueue_.push_back(std::move(cmd));
   }
   waitCv_.notify_all();

@@ -55,6 +55,13 @@ std::future<void> DiarizationStreamingPipelineWorker::flush() {
   auto fut = cmd->done.get_future();
   {
     std::lock_guard<std::mutex> lock(cmdMutex_);
+    if (!running.load()) {
+      try {
+        cmd->done.set_value();
+      } catch (...) {
+      }
+      return fut;
+    }
     cmdQueue_.push_back(std::move(cmd));
   }
   cv_.notify_one();
@@ -67,6 +74,13 @@ std::future<void> DiarizationStreamingPipelineWorker::reset() {
   auto fut = cmd->done.get_future();
   {
     std::lock_guard<std::mutex> lock(cmdMutex_);
+    if (!running.load()) {
+      try {
+        cmd->done.set_value();
+      } catch (...) {
+      }
+      return fut;
+    }
     cmdQueue_.push_back(std::move(cmd));
   }
   cv_.notify_one();
@@ -136,8 +150,6 @@ void DiarizationStreamingPipelineWorker::runLoop() {
     emit("pipeline.error", {}, {{"error", "Unknown diarization pipeline error"}});
   }
 
-  running.store(false);
-
   if (cursorId_ >= 0) {
     inputEntry_->releaseCursor(cursorId_);
     cursorId_ = -1;
@@ -147,7 +159,18 @@ void DiarizationStreamingPipelineWorker::runLoop() {
     appendListenerToken_ = -1;
   }
 
-  drainRemainingCommands();
+  {
+    std::lock_guard<std::mutex> lock(cmdMutex_);
+    while (!cmdQueue_.empty()) {
+      auto cmd = std::move(cmdQueue_.front());
+      cmdQueue_.pop_front();
+      try {
+        cmd->done.set_value();
+      } catch (...) {
+      }
+    }
+    running.store(false);
+  }
 }
 
 void DiarizationStreamingPipelineWorker::processChunk(const std::vector<float> &chunk) {

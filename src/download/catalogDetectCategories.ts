@@ -11,6 +11,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.SpeakerEmbedding,
   ModelCategory.Diarization,
   ModelCategory.Alignment,
+  ModelCategory.LanguageId,
 ]);
 
 export type CatalogDetectCategory =
@@ -23,7 +24,8 @@ export type CatalogDetectCategory =
   | ModelCategory.Separation
   | ModelCategory.SpeakerEmbedding
   | ModelCategory.Diarization
-  | ModelCategory.Alignment;
+  | ModelCategory.Alignment
+  | ModelCategory.LanguageId;
 
 export function categoryUsesCatalogDetect(
   category: ModelCategory

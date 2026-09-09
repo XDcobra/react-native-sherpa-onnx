@@ -49,7 +49,7 @@ static NSString *const kSttOfflineOomMessage =
 
 // ==================== Instance State ====================
 struct SttInstanceState {
-    std::unique_ptr<sherpaonnx::SttWrapper> wrapper;
+    std::shared_ptr<sherpaonnx::SttWrapper> wrapper;
 };
 
 static std::unordered_map<std::string, std::unique_ptr<SttInstanceState>> g_stt_instances;
@@ -150,7 +150,7 @@ static void FillSttModelPathsFromDict(
         }
         SttInstanceState *inst = g_stt_instances[instanceIdStr].get();
         if (inst->wrapper == nullptr) {
-            inst->wrapper = std::make_unique<sherpaonnx::SttWrapper>();
+            inst->wrapper = std::make_shared<sherpaonnx::SttWrapper>();
         }
 
         std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";
@@ -512,7 +512,7 @@ static void FillSttModelPathsFromDict(
     std::string attachedEngineIdStr = [attachedSegmentationEngineId UTF8String];
     std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
-    sherpaonnx::SttWrapper *wrapper = nullptr;
+    std::shared_ptr<sherpaonnx::SttWrapper> wrapper;
     {
         std::lock_guard<std::mutex> lock(g_stt_mutex);
         auto it = g_stt_instances.find(instanceIdStr);
@@ -520,7 +520,7 @@ static void FillSttModelPathsFromDict(
             reject(kSttErrInstanceNotFound, @"STT not initialized. Call initializeStt first.", nil);
             return;
         }
-        wrapper = it->second->wrapper.get();
+        wrapper = it->second->wrapper;
     }
 
     auto inputEntry = pa_get_live_entry(audioInIdStr);
@@ -573,7 +573,7 @@ static void FillSttModelPathsFromDict(
             inputEntry,
             segmentBufferIdStr,
             textOutputEntry,
-            wrapper
+            std::move(wrapper)
         );
 
         {
@@ -605,13 +605,18 @@ static void FillSttModelPathsFromDict(
     }
     std::string instanceIdStr = [instanceId UTF8String];
     @try {
-        std::lock_guard<std::mutex> lock(g_stt_mutex);
-        auto it = g_stt_instances.find(instanceIdStr);
-        if (it != g_stt_instances.end()) {
-            it->second->wrapper->release();
-            it->second->wrapper.reset();
-            g_stt_instances.erase(it);
+        // Drop map ownership only; SttWrapper dtor/release runs when last shared_ptr
+        // (e.g. live worker) is released — avoids UAF during in-flight compute.
+        std::unique_ptr<SttInstanceState> removed;
+        {
+            std::lock_guard<std::mutex> lock(g_stt_mutex);
+            auto it = g_stt_instances.find(instanceIdStr);
+            if (it != g_stt_instances.end()) {
+                removed = std::move(it->second);
+                g_stt_instances.erase(it);
+            }
         }
+        removed.reset();
         RCTLogInfo(@"STT instance %@ released", instanceId);
         resolve(nil);
     } @catch (NSException *exception) {

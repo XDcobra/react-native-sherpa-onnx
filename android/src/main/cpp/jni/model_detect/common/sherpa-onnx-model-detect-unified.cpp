@@ -119,6 +119,13 @@ const char* AlignmentModelKindToString(AlignmentModelKind k) {
     }
 }
 
+const char* LanguageIdModelKindToString(LanguageIdModelKind k) {
+    switch (k) {
+        case LanguageIdModelKind::kWhisper: return "whisper";
+        default: return "unknown";
+    }
+}
+
 void CopyDetectionSources(
     UnifiedModelDetectResult& out,
     const std::vector<DetectionSource>& sources) {
@@ -372,6 +379,26 @@ UnifiedModelDetectResult DetectModelInternal(
                 AlignmentModelPathsToStringMap(alignment.paths),
                 alignment.error);
         }
+    }
+
+    LanguageIdDetectResult languageId =
+        DetectLanguageIdModel(model_dir, asset_name, modelType, quantization);
+    const std::string languageIdType =
+        LanguageIdModelKindToString(languageId.selectedKind);
+    if (IsCatalogDetectHit(
+            languageId.ok, languageIdType, languageId.detectionSources)) {
+        return MakeHit(
+            "languageId",
+            languageIdType,
+            languageId.derivedLanguages,
+            languageId.quantization,
+            "",
+            false,
+            false,
+            languageId.detectedModels,
+            languageId.detectionSources,
+            LanguageIdModelPathsToStringMap(languageId.paths),
+            languageId.error);
     }
 
     return miss;

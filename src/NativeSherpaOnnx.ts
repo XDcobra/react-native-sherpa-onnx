@@ -157,6 +157,55 @@ export type DiarizationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeLanguageId(instanceId, options)`. */
+export type LanguageIdInitBridgeOptions = {
+  encoder: string;
+  decoder: string;
+  tailPaddings?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `identifyLanguageOffline`. */
+export type LanguageIdProcessNativeResult = {
+  lang: string;
+  audioDuration: number;
+  elapsedMs: number;
+};
+
+/** A single language switch event returned by native batch/segment processing. */
+export type LanguageIdNativeSwitchEntry = {
+  timestamp: number;
+  from: string | null;
+  to: string;
+  segmentIndex: number;
+};
+
+/** One detected speech segment with language information returned by native. */
+export type LanguageIdNativeSegmentEntry = {
+  segmentIndex: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  lang: string;
+};
+
+/** Native result from `labelLanguageIdOfflineSegments`. */
+export type LanguageIdLabelNativeResult = {
+  labeledCount: number;
+  dominantLanguage: string;
+  distribution: Object;
+  switches: LanguageIdNativeSwitchEntry[];
+  segments: LanguageIdNativeSegmentEntry[];
+};
+
+/** Native result from `labelSpeakerIdentificationOfflineSegments`. */
+export type SpeakerIdLabelNativeResult = {
+  labeledCount: number;
+  unknownCount: number;
+};
+
 /** Native result from `diarizeOffline` / `reclusterDiarization`. */
 export type DiarizationProcessNativeResult = {
   success: boolean;
@@ -997,11 +1046,15 @@ export interface Spec extends TurboModule {
     confidence?: number,
     /**
      * Strict payload contract (validated in JS/native):
-     * - kind='speech': payload.source must be one of 'vad' | 'stt' | 'tts' | 'sid'
+     * - kind='speech': payload.source must be one of
+     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'manual'
      *   - source='vad' -> allowed keys: source, engine, decision, score
      *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
+     *   - source='pyannote' -> allowed keys: source
+     *   - source='languageId' -> allowed keys: source, lang, confidence?
+     *   - source='manual' -> allowed keys: source
      * - kind='alignment': strict alignment payload contract
      * - kind='diarization': payload.source='diarization', speaker (number)
      */
@@ -1602,6 +1655,90 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /**
+   * Spoken language identification (SLID) model detection: Whisper multilingual.
+   * Offline only.
+   */
+  detectLanguageIdModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      encoder?: string;
+      decoder?: string;
+    };
+  }>;
+
+  /**
+   * Initialize Spoken Language Identification (SLID) engine instance.
+   * @param instanceId - Unique ID for this engine instance
+   * @param options - Whisper model paths and runtime settings
+   */
+  initializeLanguageId(
+    instanceId: string,
+    options: LanguageIdInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  /**
+   * Run offline spoken language identification on an offline audio buffer (or sample slice).
+   * Monolithic single-pass (<= 30s recommended per slice).
+   * @param instanceId - SLID engine instance ID
+   * @param audioBufferId - Handle to offline audio buffer (off_...)
+   * @param startSample - Optional start sample index (inclusive)
+   * @param endSample - Optional end sample index (exclusive)
+   */
+  identifyLanguageOffline(
+    instanceId: string,
+    audioBufferId: string,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<LanguageIdProcessNativeResult>;
+
+  /**
+   * Release SLID engine instance resources.
+   */
+  unloadLanguageId(instanceId: string): Promise<void>;
+
+  /**
+   * Fast-path native buffer-to-buffer language labeling.
+   * Reads speech spans from `segmentsInId`, slices `audioInId`, predicts languages,
+   * directly writes LanguageIdSpeechSegmentPayload into `segmentsOutId`, and returns summary stats.
+   */
+  labelLanguageIdOfflineSegments(
+    instanceId: string,
+    audioInId: string,
+    segmentsInId: string,
+    segmentsOutId: string
+  ): Promise<LanguageIdLabelNativeResult>;
+
+  /**
+   * Start a live-offline Spoken Language Identification pipeline.
+   * Commits ISO language codes into a live text buffer; optionally labels a live segment buffer.
+   */
+  startLanguageIdOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      targetSegmentLiveBufferId?: string | null;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   initializeDiarization(
     instanceId: string,
     options: DiarizationInitBridgeOptions
@@ -1732,6 +1869,21 @@ export interface Spec extends TurboModule {
     startSamples?: Array<number | null> | null,
     endSamples?: Array<number | null> | null
   ): Promise<{ ok: boolean; embeddings: number[] }>;
+
+  /**
+   * Fast-path native buffer-to-buffer speaker labeling.
+   * Reads speech spans from `segmentsInId`, slices `audioInId`, computes embeddings,
+   * searches `managerId`, directly writes SidSpeechSegmentPayload into `segmentsOutId`,
+   * and returns counts.
+   */
+  labelSpeakerIdentificationOfflineSegments(
+    instanceId: string,
+    managerId: string,
+    audioInId: string,
+    segmentsInId: string,
+    segmentsOutId: string,
+    threshold: number
+  ): Promise<SpeakerIdLabelNativeResult>;
 
   /**
    * Start a live-offline Speaker Identification pipeline.

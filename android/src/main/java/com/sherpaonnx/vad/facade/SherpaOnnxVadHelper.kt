@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.lifecycle.ActivePipelineStop
 import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.detect.ModelPathValidationNative
@@ -60,8 +61,17 @@ class SherpaOnnxVadHelper(
   }
 
   private fun stopAndRemovePipelineForInstance(instanceId: String): String? {
-    val pipelineId = instancePipeline[instanceId] ?: return null
-    return stopAndRemovePipelineInternal(pipelineId)
+    val pipelineId = ActivePipelineStop.stopForInstance(
+      instanceId = instanceId,
+      activeByInstance = instancePipeline,
+      removeFromRegistry = true,
+    ) ?: return null
+    try {
+      workers[pipelineId]?.stop()
+    } catch (_: Exception) {
+    }
+    workers.remove(pipelineId)
+    return pipelineId
   }
 
   fun detectVadModel(
