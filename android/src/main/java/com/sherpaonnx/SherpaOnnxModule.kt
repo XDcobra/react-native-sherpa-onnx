@@ -35,6 +35,7 @@ import com.sherpaonnx.diarization.facade.SherpaOnnxDiarizationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelineHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
+import com.sherpaonnx.kws.facade.SherpaOnnxKwsHelper
 import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdHelper
 import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdLivePipelineHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
@@ -181,6 +182,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
+  private val kwsHelper = SherpaOnnxKwsHelper()
   private val offlineSttLivePipelineHelper = SherpaOnnxOfflineSttLivePipelineHelper(
     reactApplicationContext,
     sttHelper,
@@ -429,6 +431,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = null
     liveTextPartialLastEmitAtMs.clear()
     onlineSttHelper.shutdown()
+    kwsHelper.shutdown()
     commonTtsHelper.shutdown()
     alignmentHelper.shutdown()
     enhancementHelper.shutdown()
@@ -5011,6 +5014,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Log.e(NAME, "detectKwsModel failed", e)
       promise.reject("DETECT_ERROR", "KWS model detection failed: ${e.message}", e)
     }
+  }
+
+  override fun initializeKeywordSpotting(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    kwsHelper.initializeKeywordSpotting(instanceId, options, promise)
+  }
+
+  override fun unloadKeywordSpotting(instanceId: String, promise: Promise) {
+    kwsHelper.unloadKeywordSpotting(instanceId, promise)
   }
 
   override fun initializeLanguageId(

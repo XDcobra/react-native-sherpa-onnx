@@ -167,6 +167,22 @@ export type LanguageIdInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeKeywordSpotting(instanceId, options)` — KWS engine lifecycle. */
+export type KeywordSpottingInitBridgeOptions = {
+  encoder: string;
+  decoder: string;
+  joiner: string;
+  tokens: string;
+  keywords: string;
+  keywordsScore?: number;
+  keywordsThreshold?: number;
+  numTrailingBlanks?: number;
+  maxActivePaths?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native result from `identifyLanguageOffline`. */
 export type LanguageIdProcessNativeResult = {
   lang: string;
@@ -1702,6 +1718,15 @@ export interface Spec extends TurboModule {
       keywords?: string;
     };
   }>;
+
+  /** Initialize a native keyword spotter. Streaming execution lands separately. */
+  initializeKeywordSpotting(
+    instanceId: string,
+    options: KeywordSpottingInitBridgeOptions
+  ): Promise<{ success: boolean; error?: string }>;
+
+  /** Release a native keyword spotter. Idempotent when the id is absent. */
+  unloadKeywordSpotting(instanceId: string): Promise<void>;
 
   /**
    * Initialize Spoken Language Identification (SLID) engine instance.
