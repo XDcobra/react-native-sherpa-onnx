@@ -6,7 +6,7 @@
 
 On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**.
 
-For **live overload** (same offline weights on live buffers — not a true streaming model), see [Source separation (live overload)](separation-streaming.md). Shared pipeline-handle lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+For **live overload** (same offline weights on live buffers — not a true streaming model), see [Source separation (live overload)](separation-live.md). Shared pipeline-handle lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 | Role | Type | Notes |
 | --- | --- | --- |
@@ -152,7 +152,7 @@ separate(
 
 **Constraints:** `audioOuts.length` must equal **`getNumStems()`** (typically `2`); all outputs must be empty `off_*` buffers.
 
-Live overload signature (`Live` → `SeparationPipelineHandle`): [separation-streaming.md](separation-streaming.md).
+Live overload signature (`Live` → `SeparationPipelineHandle`): [separation-live.md](separation-live.md).
 
 ```ts
 const mixed = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/mix.wav' });
@@ -396,7 +396,7 @@ import {
 - **`SeparationDetectResult`:** shared detection base (`success`, `error`, `detectedModels`, `modelType`, optional `paths`, `languages`, …)
 - **`SeparationResult`:** offline `separate()` return — `status`, `totalSegments`, `completedSegments`, `skippedSegments`, optional `failedSegment`, `processingTimeMs`
 
-Live pipeline types (`SeparationLivePipelineOptions`, `SeparationPipelineHandle`): [separation-streaming.md](separation-streaming.md#types-and-constants).
+Live pipeline types (`SeparationLivePipelineOptions`, `SeparationPipelineHandle`): [separation-live.md](separation-live.md#types-and-constants).
 
 ---
 
@@ -417,13 +417,13 @@ Typical **promise rejection `code`** strings from the native layer. Message text
 | `OFFLINE_OOM` | Not enough memory for offline separation (JVM `OutOfMemoryError`, catchable C++ `std::bad_alloc` during process, or related native alloc failure). Prefer `segmentation.mode: 'auto'` for long inputs, or process shorter clips. See [segmentation-engine.md](./segmentation-engine.md). OS low-memory kills / hard native aborts may still terminate the process without this code — see [memory-and-models.md](./memory-and-models.md). |
 | `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, unsupported offline segmentation mode). |
 
-Live-overload-specific codes (`LIVE_OFFLINE_SEGMENTATION_REQUIRED`, …): [separation-streaming.md](separation-streaming.md#error-codes).
+Live-overload-specific codes (`LIVE_OFFLINE_SEGMENTATION_REQUIRED`, …): [separation-live.md](separation-live.md#error-codes).
 
 ---
 
 ## See also
 
-- [Source separation (live overload)](separation-streaming.md)
+- [Source separation (live overload)](separation-live.md)
 - [Speech enhancement (offline)](enhancement-offline.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)

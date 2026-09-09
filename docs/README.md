@@ -37,7 +37,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [tts-offline.md](./tts-offline.md) | Offline (batch) speech generation |
-| [tts-streaming.md](./tts-streaming.md) | Live TTS entry point — links live overload (`TtsPipelineHandle`) |
+| [tts-live.md](./tts-live.md) | Live TTS entry point — links live overload (`TtsPipelineHandle`) |
 | [android-system-tts.md](./android-system-tts.md) | Android system `TextToSpeechService` engine (Kotlin-only, opt-in) |
 
 ---
@@ -64,7 +64,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | Guide | Description |
 |-------|-------------|
 | [separation-offline.md](./separation-offline.md) | Offline (batch) separation — Spleeter/UVR, Android & iOS |
-| [separation-streaming.md](./separation-streaming.md) | **Live overload** (offline Spleeter/UVR on live buffers; not a streaming model) |
+| [separation-live.md](./separation-live.md) | **Live overload** (offline Spleeter/UVR on live buffers; not a streaming model) |
 
 ---
 
@@ -96,7 +96,8 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [diarization-offline.md](./diarization-offline.md) | Offline batch diarization — create / diarize / recluster / cluster embeddings |
 | [diarization-named-timeline.md](./diarization-named-timeline.md) | SID × diarization — enroll names, diarize meeting, named who-spoke-when timeline |
 | [diarization-streaming.md](./diarization-streaming.md) | Streaming plans (Sortformer); live overload intentionally out of scope |
-| [language-identification.md](./language-identification.md) | Spoken language ID (SLID) — Whisper multilingual oneshot, segmented code-switching, live overload |
+| [language-identification-offline.md](./language-identification-offline.md) | Spoken language ID (SLID) — Whisper multilingual oneshot + segmented code-switching |
+| [language-identification-live.md](./language-identification-live.md) | Live overload — `identify(liveAudio, liveText)` (not a streaming SLID model) |
 
 ---
 

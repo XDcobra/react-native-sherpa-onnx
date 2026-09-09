@@ -62,17 +62,17 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 ### Speech & media features
 
 - ✅ Speech-to-Text (STT): [Offline](./docs/stt-offline.md) · [Streaming](./docs/stt-streaming.md) · [Hotwords](./docs/hotwords.md)
-- ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Streaming](./docs/tts-streaming.md)
+- ✅ Text-to-Speech (TTS): [Offline](./docs/tts-offline.md) · [Live overload](./docs/tts-live.md)
 - ✅ Android system TTS engine: [Register as device-wide engine](./docs/android-system-tts.md) *(Android only, Kotlin, opt-in)*
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
-- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-streaming.md)
+- ✅ Source separation: [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-live.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
 - ✅ Speaker diarization: [Offline](./docs/diarization-offline.md) · [Streaming](./docs/diarization-streaming.md)
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
-- ✅ Spoken language identification (SLID): [Guide](./docs/language-identification.md) *(Whisper multilingual — reuses STT Whisper packs)*
+- ✅ Spoken language identification (SLID): [Offline](./docs/language-identification-offline.md) · [Live overload](./docs/language-identification-live.md)
 - ❌ Keyword spotting (KWS): *(Not yet implemented in SDK)*
 - ❌ Audio tagging / sound event detection: *(Not yet implemented in SDK)*
 - ❌ Diacritization: *(Not yet implemented in SDK)*
@@ -348,7 +348,7 @@ Source separation splits mixed audio into stems (e.g. vocals / accompaniment).
 | **Spleeter** | `'spleeter'` | Two-stem pack (`vocals` + `accompaniment` ONNX). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
 | **UVR** | `'uvr'` | Single-model UVR-style separator. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models) |
 
-APIs and initialization: [offline batch](./docs/separation-offline.md), [live overload](./docs/separation-streaming.md).
+APIs and initialization: [offline batch](./docs/separation-offline.md), [live overload](./docs/separation-live.md).
 
 </details>
 
@@ -387,13 +387,13 @@ APIs and guides: [Offline batch diarization](./docs/diarization-offline.md) · [
 <details>
 <summary>Spoken Language Identification (SLID) models</summary>
 
-SLID reuses **multilingual Whisper** STT packs (encoder + decoder). Detect via `detectLanguageIdModel`; public API is `createLanguageIdentification`. Do not use aishell fine-tunes or English-only Whisper variants.
+SLID uses **Whisper** only (`encoder` + `decoder`). You can reuse the **same Whisper model packs as STT** — no separate SLID download — as long as the pack is **multilingual** (`is_multilingual == 1`). English-only Whisper variants and aishell fine-tunes are **not** supported. Detect via `detectLanguageIdModel`; public API is `createLanguageIdentification`. Prefer tiny/base for mobile.
 
 | Model Type | `modelType` Value | Description | Download Links |
 | --- | --- | --- | --- |
-| **Whisper (multilingual)** | `'whisper'` | Same layout as STT Whisper; metadata requires multilingual Whisper. Prefer tiny/base for mobile. | [Whisper models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html) |
+| **Whisper (multilingual)** | `'whisper'` | Same layout as STT Whisper packs above; metadata must be multilingual Whisper. | [Whisper models](https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/index.html) |
 
-API: [Spoken language identification](./docs/language-identification.md) (oneshot, segmented code-switching, live overload).
+APIs and initialization: [Offline](./docs/language-identification-offline.md) · [Live overload](./docs/language-identification-live.md).
 
 </details>
 
@@ -445,7 +445,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, speaker identification (offline + live overload), and speaker diarization (offline)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
