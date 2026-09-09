@@ -156,6 +156,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'keyword_spotting',
+    sectionTitle: 'Voice Activity',
+    title: 'Keyword Spotting (KWS)',
+    description:
+      'Developer lab for streaming wake-word: keywords.txt / textarea, mic + file ingest, hit HUD',
+    icon: 'radio-outline',
+    screen: 'KeywordSpotting',
+    implemented: true,
+  },
+  {
     id: 'segmentation_showcase',
     sectionTitle: 'Pipelines & Demos',
     title: 'Segmentation Showcase',

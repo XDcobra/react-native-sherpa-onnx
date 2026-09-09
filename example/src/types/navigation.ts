@@ -11,6 +11,7 @@ export type RootStackParamList = {
   GenerateTimestamp: undefined;
   DownloadShowcase: undefined;
   VAD: undefined;
+  KeywordSpotting: undefined;
   SegmentationShowcase: undefined;
   Diarization: undefined;
   DiarizationStreaming: undefined;
@@ -36,6 +37,7 @@ export type FeatureId =
   | 'generate_timestamp'
   | 'download_showcase'
   | 'vad'
+  | 'keyword_spotting'
   | 'segmentation_showcase'
   | 'diarization'
   | 'diarization_streaming'

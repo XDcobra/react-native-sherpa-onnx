@@ -81,6 +81,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Voice activity detection showcase',
     body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
   },
+  KeywordSpotting: {
+    title: 'Streaming keyword spotting (developer lab)',
+    body: 'Real streaming KWS via createKeywordSpotting → spot(LiveAudio, LiveText). Dedicated kws-models packs only (not STT zipformer). Keywords textarea is the init source of truth: non-empty body is written to a cache keywords.txt and passed as keywordsPath; empty falls back to the pack keywords.txt. Example audio prefills the textarea; custom audio does not. Mid-run phrase edits require Stop → Rebuild engine. Hits use onKeyword / meta.source=kws_stream. textOut uses spooling off here (wake callbacks); production apps keep LiveTextBuffer spooling on/auto when they need hit history.',
+  },
   SegmentationShowcase: {
     title: 'Segmentation playground',
     body: 'Integrator playground for offline text and audio segmentation via shared SegmentationPolicyControls. Text: synthetic or punctuation-assisted. Audio: energy, VAD, or pyannote packs (catalog + detect → policy.modelPath). Runs segmentOfflineBuffer and lists segments with reason badges.',

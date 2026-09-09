@@ -53,3 +53,8 @@ export {
   DiarizationStreamingCustomInitForm,
   type DiarizationStreamingCustomInitFormState,
 } from './DiarizationStreamingCustomInitForm';
+export {
+  KwsCustomInitForm,
+  type KwsCustomInitFormState,
+  type KwsCustomPathKey,
+} from './KwsCustomInitForm';
