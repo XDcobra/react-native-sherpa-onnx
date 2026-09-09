@@ -1,6 +1,7 @@
 package com.sherpaonnx.tts.core
 
 import com.k2fsa.sherpa.onnx.OfflineTts
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -68,10 +69,21 @@ internal class TtsEngineInstance(
   val isPocket: Boolean get() = ttsInitState?.modelType == "pocket"
 
   fun releaseEngines() {
+    val eng = synchronized(lock) { tts }
+    if (eng != null) {
+      NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(eng)) {
+        try {
+          eng.release()
+        } catch (_: Exception) {
+          // best-effort
+        }
+      }
+    }
     synchronized(lock) {
-      tts?.release()
-      tts = null
-      ttsInitState = null
+      if (tts === eng) {
+        tts = null
+        ttsInitState = null
+      }
     }
     synchronized(sinkLock) {
       sink.clear()

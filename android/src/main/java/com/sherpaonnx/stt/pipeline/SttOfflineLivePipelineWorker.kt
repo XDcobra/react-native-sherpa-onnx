@@ -2,6 +2,7 @@ package com.sherpaonnx.stt.pipeline
 
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineStream
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.text.pipeline.LiveTextEntry
@@ -19,13 +20,18 @@ internal class SttOfflineLivePipelineWorker(
   textInput = null,
 ) {
 
+  private val gateKey = NativeInstanceGate.keyFor(recognizer)
+
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val speech = segment as? CommittedSegmentRef.Speech ?: return
     val frameCount = (speech.endSample - speech.startSample).coerceAtLeast(0)
     if (frameCount == 0) return
 
-    val stream: OfflineStream = recognizer.createStream()
+    if (!NativeInstanceGate.beginUse(gateKey)) return
+
+    var stream: OfflineStream? = null
     try {
+      stream = recognizer.createStream()
       val samples = audioInputRef.liveAudioEntry.getSamplesSlice(
         startFrame = speech.startSample,
         frameCount = frameCount,
@@ -43,7 +49,11 @@ internal class SttOfflineLivePipelineWorker(
       )
       addUnitsWritten(result.text.length.toLong())
     } finally {
-      stream.release()
+      try {
+        stream?.release()
+      } catch (_: Exception) {
+      }
+      NativeInstanceGate.endUse(gateKey)
     }
   }
 }

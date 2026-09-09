@@ -8,9 +8,11 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.speakerembedding.config.SpeakerEmbeddingInitOptionsParser
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 internal class SherpaOnnxSpeakerEmbeddingHelper(
@@ -22,9 +24,22 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
   ) -> HashMap<String, Any>?,
 ) {
   private val executor = Executors.newSingleThreadExecutor()
+  private val activeExtractorIds = ConcurrentHashMap.newKeySet<String>()
+
+  private fun extractorGateKey(instanceId: String): String = "speaker-emb:$instanceId"
 
   fun shutdown() {
     executor.shutdownNow()
+    val ids = activeExtractorIds.toList()
+    activeExtractorIds.clear()
+    for (id in ids) {
+      NativeInstanceGate.releaseWhenIdle(extractorGateKey(id)) {
+        try {
+          nativeUnloadExtractor(id)
+        } catch (_: Exception) {
+        }
+      }
+    }
     nativeShutdownAll()
   }
 
@@ -117,7 +132,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       parsed.provider,
       parsed.debug,
     )
-    resolveInitResult(result, promise)
+    resolveInitResult(instanceId, result, promise)
   }
 
   private fun initializeExtractorAuto(
@@ -138,10 +153,14 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       parsed.provider,
       parsed.debug,
     )
-    resolveInitResult(result, promise)
+    resolveInitResult(instanceId, result, promise)
   }
 
-  private fun resolveInitResult(result: HashMap<String, Any>?, promise: Promise) {
+  private fun resolveInitResult(
+    instanceId: String,
+    result: HashMap<String, Any>?,
+    promise: Promise,
+  ) {
     if (result == null) {
       promise.reject(INIT_ERROR, "Speaker embedding initialize returned null")
       return
@@ -154,6 +173,7 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       promise.reject(code, error)
       return
     }
+    activeExtractorIds.add(instanceId)
     val out = Arguments.createMap()
     out.putBoolean("success", true)
     out.putInt("dim", (result["dim"] as? Number)?.toInt() ?: 0)
@@ -221,21 +241,11 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
         inputSamples = audioInEntry.readSlice(start, frameCount)
       }
 
-      val result = nativeComputeEmbedding(
+      val embedding = computeEmbeddingFromSamples(
         instanceId,
         inputSamples,
         audioInEntry.sampleRate,
       )
-      if (result == null || result["success"] as? Boolean != true) {
-        val code =
-          (result?.get("errorCode") as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
-        val error =
-          (result?.get("error") as? String)?.takeIf { it.isNotBlank() }
-            ?: "Speaker embedding compute failed"
-        promise.reject(code, error)
-        return
-      }
-      val embedding = result["embedding"] as? FloatArray ?: floatArrayOf()
       val arr = Arguments.createArray()
       for (v in embedding) {
         arr.pushDouble(v.toDouble())
@@ -595,7 +605,10 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
   }
 
   fun unloadSpeakerEmbeddingExtractor(instanceId: String, promise: Promise) {
-    nativeUnloadExtractor(instanceId)
+    activeExtractorIds.remove(instanceId)
+    NativeInstanceGate.releaseWhenIdle(extractorGateKey(instanceId)) {
+      nativeUnloadExtractor(instanceId)
+    }
     promise.resolve(null)
   }
 
@@ -919,19 +932,27 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     samples: FloatArray,
     sampleRate: Int,
   ): FloatArray {
-    val result = nativeComputeEmbedding(instanceId, samples, sampleRate)
-      ?: throw IllegalStateException("Speaker embedding compute returned null")
-    if (result["success"] as? Boolean != true) {
-      val code =
-        (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
-      val error =
-        (result["error"] as? String)?.takeIf { it.isNotBlank() }
-          ?: "Speaker embedding compute failed"
-      throw IllegalStateException("$code: $error")
+    val gateKey = extractorGateKey(instanceId)
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("$COMPUTE_ERROR: Speaker embedding extractor released: $instanceId")
     }
-    val embedding = result["embedding"] as? FloatArray
-      ?: throw IllegalStateException("Speaker embedding compute missing embedding")
-    return embedding
+    try {
+      val result = nativeComputeEmbedding(instanceId, samples, sampleRate)
+        ?: throw IllegalStateException("Speaker embedding compute returned null")
+      if (result["success"] as? Boolean != true) {
+        val code =
+          (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
+        val error =
+          (result["error"] as? String)?.takeIf { it.isNotBlank() }
+            ?: "Speaker embedding compute failed"
+        throw IllegalStateException("$code: $error")
+      }
+      val embedding = result["embedding"] as? FloatArray
+        ?: throw IllegalStateException("Speaker embedding compute missing embedding")
+      return embedding
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
   }
 
   /**

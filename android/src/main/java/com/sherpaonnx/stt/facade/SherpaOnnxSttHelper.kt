@@ -11,6 +11,7 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.stt.config.SttInitOptionsParser
 import com.sherpaonnx.stt.core.OfflineSttRecognizerConfigFactory
 import com.sherpaonnx.detect.ModelPathValidationNative
@@ -240,7 +241,7 @@ internal class SherpaOnnxSttHelper(
     }
 
     val inst = instances.getOrPut(instanceId) { SttEngineInstance() }
-    inst.recognizer?.release()
+    releaseRecognizerSafely(inst.recognizer)
     inst.recognizer = null
     val config = configFactory.buildRecognizerConfig(
       pathStrings,
@@ -321,8 +322,14 @@ internal class SherpaOnnxSttHelper(
         return
       }
       val samples = entry.readAllSamples()
-      val stream: OfflineStream = rec.createStream()
+      val gateKey = NativeInstanceGate.keyFor(rec)
+      if (!NativeInstanceGate.beginUse(gateKey)) {
+        promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT instance released: $instanceId")
+        return
+      }
+      var stream: OfflineStream? = null
       try {
+        stream = rec.createStream()
         if (inst.currentSttModelType == "qwen3_asr") {
           val hw = inst.qwen3HotwordsForStream
           if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
@@ -341,7 +348,11 @@ internal class SherpaOnnxSttHelper(
         )
         promise.resolve(null)
       } finally {
-        stream.release()
+        try {
+          stream?.release()
+        } catch (_: Exception) {
+        }
+        NativeInstanceGate.endUse(gateKey)
       }
     } catch (e: OutOfMemoryError) {
       Log.e(logTag, "transcribe OOM", e)
@@ -444,7 +455,7 @@ internal class SherpaOnnxSttHelper(
     try {
       val inst = instances.remove(instanceId)
       if (inst != null) {
-        inst.recognizer?.release()
+        releaseRecognizerSafely(inst.recognizer)
         inst.recognizer = null
         inst.lastRecognizerConfig = null
         inst.currentSttModelType = null
@@ -452,6 +463,18 @@ internal class SherpaOnnxSttHelper(
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject(SttErrorCodes.INTERNAL_ERROR, "Failed to release resources", e)
+    }
+  }
+
+  private fun releaseRecognizerSafely(recognizer: OfflineRecognizer?) {
+    if (recognizer == null) return
+    val gateKey = NativeInstanceGate.keyFor(recognizer)
+    NativeInstanceGate.releaseWhenIdle(gateKey) {
+      try {
+        recognizer.release()
+      } catch (e: Exception) {
+        Log.w(logTag, "Error releasing OfflineRecognizer: ${e.message}")
+      }
     }
   }
 }

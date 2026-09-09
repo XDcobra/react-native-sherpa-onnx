@@ -13,6 +13,8 @@ import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
+import com.sherpaonnx.lifecycle.NativeInstanceGate
+import com.sherpaonnx.slid.core.LanguageIdDebug
 import com.sherpaonnx.slid.core.LanguageIdErrorCodes
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -24,13 +26,33 @@ internal class SherpaOnnxLanguageIdHelper {
   fun shutdown() {
     executor.shutdownNow()
     for ((_, instance) in instances) {
-      try {
-        instance.release()
-      } catch (e: Exception) {
-        Log.w(LanguageIdErrorCodes.TAG, "Error releasing SLID instance during shutdown: ${e.message}")
-      }
+      releaseSlidSafely(instance, where = "shutdown")
     }
     instances.clear()
+  }
+
+  private fun releaseSlidSafely(slid: SpokenLanguageIdentification, where: String) {
+    val gateKey = NativeInstanceGate.keyFor(slid)
+    val slidIdentity = System.identityHashCode(slid)
+    val inFlight = NativeInstanceGate.inFlight(gateKey)
+    if (inFlight > 0) {
+      LanguageIdDebug.warn(
+        "UNLOAD_DURING_COMPUTE where=$where slid=$slidIdentity gateKey=$gateKey inFlight=$inFlight",
+      )
+    }
+    val released = NativeInstanceGate.releaseWhenIdle(gateKey) {
+      try {
+        slid.release()
+      } catch (e: Exception) {
+        LanguageIdDebug.warn(
+          "unload.releaseError where=$where slid=$slidIdentity msg=${e.message}",
+        )
+      }
+    }
+    LanguageIdDebug.lifecycle(
+      "unload.releaseWhenIdle",
+      "where=$where slid=$slidIdentity gateKey=$gateKey nativeReleased=$released inFlightWas=$inFlight",
+    )
   }
 
   fun getInstance(instanceId: String): SpokenLanguageIdentification? =
@@ -66,9 +88,7 @@ internal class SherpaOnnxLanguageIdHelper {
     executor.execute {
       try {
         instances.remove(instanceId)?.let { old ->
-          try {
-            old.release()
-          } catch (_: Exception) {}
+          releaseSlidSafely(old, where = "reinit:$instanceId")
         }
 
         val whisperConfig = SpokenLanguageIdentificationWhisperConfig(
@@ -172,10 +192,36 @@ internal class SherpaOnnxLanguageIdHelper {
         }
         val audioDuration = if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
 
-        stream = slid.createStream()
-        stream.acceptWaveform(samples, sampleRate)
-
-        val lang = slid.compute(stream)
+        val slidIdentity = System.identityHashCode(slid)
+        val gateKey = NativeInstanceGate.keyFor(slid)
+        if (!NativeInstanceGate.beginUse(gateKey)) {
+          promise.reject(
+            LanguageIdErrorCodes.NOT_INITIALIZED,
+            "SLID instance released: $instanceId",
+          )
+          return@execute
+        }
+        val opId = LanguageIdDebug.nextOpId()
+        LanguageIdDebug.computeEnter(
+          slidIdentity = slidIdentity,
+          where = "offline.identify",
+          opId = opId,
+          detail = "instanceId=$instanceId samples=${samples.size} sr=$sampleRate",
+        )
+        val lang: String
+        try {
+          stream = slid.createStream()
+          stream.acceptWaveform(samples, sampleRate)
+          lang = slid.compute(stream)
+        } finally {
+          LanguageIdDebug.computeLeave(
+            slidIdentity = slidIdentity,
+            where = "offline.identify",
+            opId = opId,
+            detail = "instanceId=$instanceId",
+          )
+          NativeInstanceGate.endUse(gateKey)
+        }
         val elapsedMs = (SystemClock.uptimeMillis() - t0).toDouble()
 
         val result = Arguments.createMap()
@@ -316,6 +362,22 @@ internal class SherpaOnnxLanguageIdHelper {
 
           var stream: OfflineStream? = null
           val lang: String
+          val slidIdentity = System.identityHashCode(slid)
+          val gateKey = NativeInstanceGate.keyFor(slid)
+          if (!NativeInstanceGate.beginUse(gateKey)) {
+            promise.reject(
+              LanguageIdErrorCodes.NOT_INITIALIZED,
+              "SLID instance released: $instanceId",
+            )
+            return@execute
+          }
+          val opId = LanguageIdDebug.nextOpId()
+          LanguageIdDebug.computeEnter(
+            slidIdentity = slidIdentity,
+            where = "offline.label",
+            opId = opId,
+            detail = "instanceId=$instanceId span=$i samples=${samples.size}",
+          )
           try {
             stream = slid.createStream()
             stream.acceptWaveform(samples, sampleRate)
@@ -324,6 +386,13 @@ internal class SherpaOnnxLanguageIdHelper {
             try {
               stream?.release()
             } catch (_: Exception) {}
+            LanguageIdDebug.computeLeave(
+              slidIdentity = slidIdentity,
+              where = "offline.label",
+              opId = opId,
+              detail = "instanceId=$instanceId span=$i",
+            )
+            NativeInstanceGate.endUse(gateKey)
           }
 
           val durationMs = if (span.durationMs > 0) span.durationMs else {
@@ -423,7 +492,21 @@ internal class SherpaOnnxLanguageIdHelper {
     executor.execute {
       try {
         val slid = instances.remove(instanceId)
-        slid?.release()
+        if (slid != null) {
+          val slidIdentity = System.identityHashCode(slid)
+          LanguageIdDebug.lifecycle(
+            "unload.begin",
+            "instanceId=$instanceId slid=$slidIdentity " +
+              "inFlight=${NativeInstanceGate.inFlight(NativeInstanceGate.keyFor(slid))}",
+          )
+          releaseSlidSafely(slid, where = "unload:$instanceId")
+          LanguageIdDebug.lifecycle(
+            "unload.done",
+            "instanceId=$instanceId slid=$slidIdentity",
+          )
+        } else {
+          LanguageIdDebug.lifecycle("unload.miss", "instanceId=$instanceId")
+        }
         promise.resolve(null)
       } catch (e: Exception) {
         Log.w(LanguageIdErrorCodes.TAG, "Error unloading SLID instance: ${e.message}", e)
