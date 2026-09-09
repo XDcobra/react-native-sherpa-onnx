@@ -67,6 +67,10 @@ try {
   const ok = await sid.verify('alice', query, { threshold: 0.5 });
   console.log(ok);
 
+  // Snapshot enrollments for a later session (app hat to store the resulting JSON itself)
+  const bundleJSON = await sid.exportEnrollments();
+  await sid.importEnrollments(bundleJSON); // or { replaceExisting: true } on name collision
+
   await releasePipelineAudioBuffer(aliceClip);
   await releasePipelineAudioBuffer(query);
 } finally {
@@ -291,7 +295,7 @@ interface SpeakerIdentificationEngine {
 
 ---
 
-## Offline progress (`onProgress`) and results (`onLabeled` / `onVerified`)
+## Offline JS events (`onProgress` / `onLabeled` / `onVerified`)
 
 ### `onProgress` (start-of-step)
 
