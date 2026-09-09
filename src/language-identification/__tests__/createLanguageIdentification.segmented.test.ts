@@ -3,6 +3,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   default: {
     initializeLanguageId: jest.fn(),
     identifyLanguageOffline: jest.fn(),
+    labelLanguageIdOfflineSegments: jest.fn(),
     unloadLanguageId: jest.fn(),
     detectLanguageIdModel: jest.fn(),
     getCustomModelPathRequirements: jest.fn(async () => ({
@@ -35,6 +36,7 @@ jest.mock('../../segmentbuffer', () => {
     ...actual,
     getOfflineSegmentBufferSegments: jest.fn(),
     createLiveSegmentBuffer: jest.fn(),
+    createEmptyOfflineSegmentBuffer: jest.fn(),
     appendLiveSegment: jest.fn(),
     finalizeLiveSegmentBuffer: jest.fn(),
     populateOfflineSegmentBufferIfEmpty: jest.fn(),
@@ -255,6 +257,7 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
     await engine.identify(audioId, {
       segmentation: { mode: 'auto' },
       targetSegmentBuffer: targetSegId,
+      onSegment: jest.fn(),
     });
 
     expect(appendLiveSegment).toHaveBeenCalledWith(
@@ -284,7 +287,53 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
     );
   });
 
-  it('labels existing segments via labelOfflineSegments', async () => {
+  it('runs fast-path native buffer labeling in identify segmented mode when no callbacks are passed', async () => {
+    const engine = await createLanguageIdentification({
+      customConfig: {
+        encoder: { kind: 'fs', path: '/models/encoder.onnx' },
+        decoder: { kind: 'fs', path: '/models/decoder.onnx' },
+      },
+    });
+
+    const targetSegId = 'seg_off_22222222-2222-2222-2222-222222222222';
+    (segmentOfflineBuffer as jest.Mock).mockResolvedValue({
+      segmentBufferId: 'seg_off_33333333-3333-3333-3333-333333333333',
+    });
+    (SherpaOnnx.labelLanguageIdOfflineSegments as jest.Mock).mockResolvedValue({
+      labeledCount: 1,
+      dominantLanguage: 'fr',
+      distribution: { fr: 1.0 },
+      switches: [{ timestamp: 0, from: null, to: 'fr', segmentIndex: 0 }],
+      segments: [
+        {
+          segmentIndex: 0,
+          startTime: 0,
+          endTime: 1.0,
+          durationMs: 1000,
+          lang: 'fr',
+        },
+      ],
+    });
+
+    const result = await engine.identify(audioId, {
+      segmentation: { mode: 'auto' },
+      targetSegmentBuffer: targetSegId,
+    });
+
+    expect(SherpaOnnx.labelLanguageIdOfflineSegments).toHaveBeenCalledWith(
+      engine.instanceId,
+      audioId,
+      'seg_off_33333333-3333-3333-3333-333333333333',
+      targetSegId
+    );
+    expect(result.dominantLanguage).toBe('fr');
+    expect(result.distribution).toEqual({ fr: 1.0 });
+    expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+      'seg_off_33333333-3333-3333-3333-333333333333'
+    );
+  });
+
+  it('labels existing segments via labelOfflineSegments with callbacks', async () => {
     const engine = await createLanguageIdentification({
       customConfig: {
         encoder: { kind: 'fs', path: '/models/encoder.onnx' },
@@ -315,9 +364,11 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
       elapsedMs: 40,
     });
 
-    const onLabeled = jest.fn();
+    const onSegment = jest.fn();
+    const onLanguageChanged = jest.fn();
     const result = await engine.labelOfflineSegments(audioId, segIn, segOut, {
-      onLabeled,
+      onSegment,
+      onLanguageChanged,
     });
 
     expect(result).toEqual({
@@ -333,13 +384,19 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
         },
       ],
     });
-    expect(onLabeled).toHaveBeenCalledWith({
+    expect(onSegment).toHaveBeenCalledWith({
       segmentIndex: 0,
       totalSegments: 1,
       startTime: 0,
       endTime: 3,
       durationMs: 3000,
       lang: 'es',
+    });
+    expect(onLanguageChanged).toHaveBeenCalledWith({
+      previousLang: null,
+      currentLang: 'es',
+      timestamp: 0,
+      segmentIndex: 0,
     });
     expect(appendLiveSegment).toHaveBeenCalledWith(
       'seg_live_77777777-7777-7777-7777-777777777777',
@@ -356,6 +413,49 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
         },
       }
     );
+  });
+
+  it('runs fast-path native buffer labeling in labelOfflineSegments when no callbacks are passed', async () => {
+    const engine = await createLanguageIdentification({
+      customConfig: {
+        encoder: { kind: 'fs', path: '/models/encoder.onnx' },
+        decoder: { kind: 'fs', path: '/models/decoder.onnx' },
+      },
+    });
+
+    const segIn = 'seg_off_55555555-5555-5555-5555-555555555555';
+    const segOut = 'seg_off_66666666-6666-6666-6666-666666666666';
+
+    (SherpaOnnx.labelLanguageIdOfflineSegments as jest.Mock).mockResolvedValue({
+      labeledCount: 1,
+      dominantLanguage: 'es',
+      distribution: { es: 1.0 },
+      switches: [{ timestamp: 0, from: null, to: 'es', segmentIndex: 0 }],
+      segments: [
+        {
+          segmentIndex: 0,
+          startTime: 0,
+          endTime: 3,
+          durationMs: 3000,
+          lang: 'es',
+        },
+      ],
+    });
+
+    const result = await engine.labelOfflineSegments(audioId, segIn, segOut);
+
+    expect(SherpaOnnx.labelLanguageIdOfflineSegments).toHaveBeenCalledWith(
+      engine.instanceId,
+      audioId,
+      segIn,
+      segOut
+    );
+    expect(result).toEqual({
+      labeledCount: 1,
+      dominantLanguage: 'es',
+      distribution: { es: 1.0 },
+      switches: [{ timestamp: 0, from: null, to: 'es', segmentIndex: 0 }],
+    });
   });
 
   it('rejects labelOfflineSegments if engine is destroyed', async () => {

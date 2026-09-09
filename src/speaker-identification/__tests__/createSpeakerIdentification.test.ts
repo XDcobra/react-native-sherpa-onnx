@@ -5,6 +5,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     unloadSpeakerEmbeddingExtractor: jest.fn(),
     computeSpeakerEmbeddingOffline: jest.fn(),
     identifySpeakerOffline: jest.fn(),
+    labelSpeakerIdentificationOfflineSegments: jest.fn(),
     verifySpeakerOffline: jest.fn(),
     enrollSpeakerOffline: jest.fn(),
     createSpeakerEmbeddingManager: jest.fn(),
@@ -61,6 +62,7 @@ describe('createSpeakerIdentification', () => {
     unloadSpeakerEmbeddingExtractor: jest.Mock;
     computeSpeakerEmbeddingOffline: jest.Mock;
     identifySpeakerOffline: jest.Mock;
+    labelSpeakerIdentificationOfflineSegments: jest.Mock;
     verifySpeakerOffline: jest.Mock;
     enrollSpeakerOffline: jest.Mock;
     createSpeakerEmbeddingManager: jest.Mock;
@@ -100,6 +102,10 @@ describe('createSpeakerIdentification', () => {
     native.unloadSpeakerEmbeddingExtractor.mockResolvedValue(null);
     native.computeSpeakerEmbeddingOffline.mockResolvedValue({ embedding: emb });
     native.identifySpeakerOffline.mockResolvedValue({ name: 'alice' });
+    native.labelSpeakerIdentificationOfflineSegments.mockResolvedValue({
+      labeledCount: 1,
+      unknownCount: 1,
+    });
     native.verifySpeakerOffline.mockResolvedValue({ ok: true });
     native.enrollSpeakerOffline.mockImplementation(
       async (
@@ -644,6 +650,7 @@ describe('createSpeakerIdentification', () => {
 
     const result = await sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
       threshold: 0.55,
+      onLabeled: jest.fn(),
     });
 
     expect(result).toEqual({ labeledCount: 1, unknownCount: 1 });
@@ -702,6 +709,30 @@ describe('createSpeakerIdentification', () => {
     );
   });
 
+  it('labelOfflineSegments invokes native labelSpeakerIdentificationOfflineSegments on fast-path when no callbacks are passed', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+
+    const result = await sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+      threshold: 0.55,
+    });
+
+    expect(result).toEqual({ labeledCount: 1, unknownCount: 1 });
+    expect(
+      native.labelSpeakerIdentificationOfflineSegments
+    ).toHaveBeenCalledWith(
+      sid.instanceId,
+      sid.managerId,
+      AUDIO_ID,
+      SEGS_IN,
+      SEGS_OUT,
+      0.55
+    );
+    expect(native.identifySpeakerOffline).not.toHaveBeenCalled();
+    expect(segs.createLiveSegmentBuffer).not.toHaveBeenCalled();
+  });
+
   it('labelOfflineSegments releases staging on failure', async () => {
     segs.getOfflineSegmentBufferSegments.mockResolvedValue([
       {
@@ -721,7 +752,9 @@ describe('createSpeakerIdentification', () => {
     });
 
     await expect(
-      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT)
+      sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+        onLabeled: jest.fn(),
+      })
     ).rejects.toThrow(/append failed/);
     expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
       STAGING_LIVE
