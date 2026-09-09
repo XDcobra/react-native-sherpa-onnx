@@ -303,6 +303,7 @@ Each feature doc has the full per-`modelType` table. Summary of where to look:
 | --- | --- | --- | --- |
 | STT offline | [stt-offline.md](stt-offline.md#validation-required-files) | `detectSttModel` | `stt` |
 | STT streaming | [stt-streaming.md](stt-streaming.md#validation-required-files) | `detectSttModel` | `stt_streaming` |
+| Keyword spotting | [kws-streaming.md](kws-streaming.md#validation-required-files) | `detectKwsModel` | `kws` |
 | TTS | [tts-offline.md](tts-offline.md#validation-required-files) | `detectTtsModel` | `tts` |
 | VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
 | Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
@@ -324,7 +325,8 @@ Native unified detection (`detectModel` / `detectModelsBatch`) tries domains in 
 ```mermaid
 flowchart LR
   input["DetectModelInput"] --> tts[TTS]
-  tts -->|no match| stt[STT]
+  tts -->|no match| kws[KWS]
+  kws -->|no match| stt[STT]
   stt -->|no match| vad[VAD]
   vad -->|no match| punct[Punctuation]
   punct -->|no match| enh[Enhancement]
@@ -333,6 +335,8 @@ flowchart LR
   sid -->|no match| align[Alignment]
   align -->|no match| none["matched: false"]
 ```
+
+KWS runs **before** STT because keyword packs are online transducers with `keywords.txt` and would otherwise be claimed as ASR.
 
 A domain counts as a hit when native detection succeeds and `modelType !== 'unknown'`. No match → `{ matched: false }` (no thrown error).
 
@@ -527,6 +531,7 @@ Full payloads (`success`, `error`, `detectedModels`, `paths`, `detectionSources`
 | --- | --- | --- |
 | STT offline | `detectSttModel` | [stt-offline.md — Detection](stt-offline.md#detection-and-factory) |
 | STT streaming | `detectSttModel` | [stt-streaming.md](stt-streaming.md#model-detection) |
+| Keyword spotting | `detectKwsModel` | [kws-streaming.md](kws-streaming.md) |
 | TTS | `detectTtsModel` | [tts-offline.md — Model detection](tts-offline.md#model-detection) |
 | VAD | `detectVadModel` | [vad-streaming.md — Model detection](vad-streaming.md#model-detection) |
 | Punctuation | `detectPunctuationModel` | [punctuation-offline.md](punctuation-offline.md#model-detection) |

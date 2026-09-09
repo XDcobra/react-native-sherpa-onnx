@@ -41,6 +41,7 @@ The following mapping is relevant when using the built-in GitHub providers (`git
 | `SpeakerEmbedding` | [`speaker-recongition-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
 | `Qnn`           | [`asr-models-qnn-binary`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary)             |
 | `Alignment`     | [`alignment-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models)         |
+| `Kws`           | [`kws-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models)                                   |
 
 ## Quick start
 
