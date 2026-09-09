@@ -54,6 +54,15 @@ NSString *SherpaOnnxInferModelHint(NSString *folderName) {
     }
   }
 
+  // KWS before STT: packs often contain "zipformer" in the folder name.
+  if ([name containsString:@"kws"] ||
+      [name containsString:@"keyword-spot"] ||
+      [name containsString:@"keyword_spot"] ||
+      [name containsString:@"wake-word"] ||
+      [name containsString:@"wake_word"]) {
+    return @"kws";
+  }
+
   NSArray<NSString *> *sttHints = @[
     @"zipformer",
     @"paraformer",

@@ -13,6 +13,7 @@ import LivePipelineShowcaseScreen from '../screens/live-pipeline-showcase/LivePi
 import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimestampScreen';
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
+import KeywordSpottingScreen from '../screens/kws/KeywordSpottingScreen';
 import SegmentationShowcaseScreen from '../screens/segmentation-showcase/SegmentationShowcaseScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import DiarizationStreamingScreen from '../screens/diarization-streaming/DiarizationStreamingScreen';
@@ -123,6 +124,13 @@ export default function RootNavigator() {
         component={VADScreen}
         options={{
           title: 'Voice Activity Detection',
+        }}
+      />
+      <Stack.Screen
+        name="KeywordSpotting"
+        component={KeywordSpottingScreen}
+        options={{
+          title: 'Keyword Spotting (KWS)',
         }}
       />
       <Stack.Screen

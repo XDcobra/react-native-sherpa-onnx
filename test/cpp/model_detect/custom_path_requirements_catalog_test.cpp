@@ -276,6 +276,13 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         {"encoder", true, std::nullopt},
         {"decoder", true, std::nullopt},
     });
+    ExpectRequirementsMatch("kws", "transducer", {
+        {"encoder", true, std::nullopt},
+        {"decoder", true, std::nullopt},
+        {"joiner", true, std::nullopt},
+        {"tokens", true, std::nullopt},
+        {"keywords", true, std::nullopt},
+    });
 }
 
 TEST(CustomPathRequirementsCatalog, UnknownModelTypesReturnEmpty) {

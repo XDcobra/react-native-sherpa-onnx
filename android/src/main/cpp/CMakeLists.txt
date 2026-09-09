@@ -156,6 +156,9 @@ set(SOURCES
     jni/model_detect/slid/sherpa-onnx-model-detect-slid.cpp
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
+    jni/model_detect/kws/sherpa-onnx-model-detect-kws.cpp
+    jni/model_detect/kws/sherpa-onnx-validate-kws.cpp
+    jni/model_detect/kws/sherpa-onnx-kws-detect-wrapper.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp
@@ -287,6 +290,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/slid
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/kws
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

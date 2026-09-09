@@ -62,6 +62,13 @@ const char* SttModelKindToString(SttModelKind k) {
     }
 }
 
+const char* KwsModelKindToString(KwsModelKind k) {
+    switch (k) {
+        case KwsModelKind::kTransducer: return "transducer";
+        default: return "unknown";
+    }
+}
+
 const char* VadModelKindToString(VadModelKind k) {
     switch (k) {
         case VadModelKind::kSileroVad: return "silero_vad";
@@ -214,6 +221,26 @@ UnifiedModelDetectResult DetectModelInternal(
             tts.detectionSources,
             TtsModelPathsToStringMap(tts.paths),
             tts.error);
+    }
+
+    // KWS is structurally an online transducer, so it must claim keyword packs
+    // before the generic STT detector sees encoder/decoder/joiner/tokens.
+    KwsDetectResult kws =
+        DetectKwsModel(model_dir, asset_name, modelType, quantization);
+    const std::string kwsType = KwsModelKindToString(kws.selectedKind);
+    if (IsCatalogDetectHit(kws.ok, kwsType, kws.detectionSources)) {
+        return MakeHit(
+            "kws",
+            kwsType,
+            kws.derivedLanguages,
+            kws.quantization,
+            "",
+            kws.isStreaming,
+            false,
+            kws.detectedModels,
+            kws.detectionSources,
+            KwsModelPathsToStringMap(kws.paths),
+            kws.error);
     }
 
     SttDetectResult stt = DetectSttModel(

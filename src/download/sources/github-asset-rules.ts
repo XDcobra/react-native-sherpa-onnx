@@ -55,6 +55,8 @@ export function isAssetSupportedForCategory(
         !lower.endsWith('.en.tar.bz2') &&
         !lower.includes('aishell')
       );
+    case ModelCategory.Kws:
+      return ext === 'tar.bz2' && lower.includes('kws');
     default:
       return false;
   }

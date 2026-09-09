@@ -182,3 +182,16 @@ export interface LanguageIdDetectModelResult extends ModelDetectResultBase {
     decoder?: string;
   };
 }
+
+// ─── Keyword spotting extension ────────────────────────────────────────
+
+export interface KwsDetectModelResult extends ModelDetectResultBase {
+  /** Resolved online transducer files plus the required keyword list. */
+  paths?: {
+    encoder?: string;
+    decoder?: string;
+    joiner?: string;
+    tokens?: string;
+    keywords?: string;
+  };
+}

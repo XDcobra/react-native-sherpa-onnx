@@ -187,6 +187,29 @@ const source = bundledModelFileSource('models/sherpa-onnx-whisper-tiny-en');
 const source = { kind: 'fs', path: '/data/user/0/com.myapp/files/models/sherpa-onnx-streaming-zipformer-en' };
 ```
 
+### Keyword spotting (`kws-models`)
+
+Dedicated online KWS packs (not interchangeable with streaming STT zipformer packs). Layout:
+
+```
+/data/user/0/com.myapp/files/models/
+└── sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/
+    ├── encoder-epoch-12-avg-2-chunk-16-left-64.onnx
+    ├── decoder-epoch-12-avg-2-chunk-16-left-64.onnx
+    ├── joiner-epoch-12-avg-2-chunk-16-left-64.onnx
+    ├── tokens.txt
+    └── keywords.txt
+```
+
+```typescript
+const source = {
+  kind: 'fs',
+  path: '/data/user/0/com.myapp/files/models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01',
+};
+```
+
+See [Keyword spotting (streaming)](kws-streaming.md) for `detectKwsModel`, `createKeywordSpotting`, and keywords UX.
+
 ### PAD / ODR pack (after fetch)
 
 Uncompressed folders:

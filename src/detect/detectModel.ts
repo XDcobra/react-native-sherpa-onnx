@@ -83,6 +83,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   diarization: ModelCategory.Diarization,
   alignment: ModelCategory.Alignment,
   languageId: ModelCategory.LanguageId,
+  kws: ModelCategory.Kws,
 };
 
 function isDetectModelNameInput(

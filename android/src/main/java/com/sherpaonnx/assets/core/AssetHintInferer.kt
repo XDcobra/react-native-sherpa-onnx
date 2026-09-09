@@ -60,6 +60,18 @@ internal object AssetHintInferer {
     "vad",
   )
 
+  /**
+   * Keyword spotting packs (`kws-models` release). Must run before STT heuristics:
+   * folder names often contain `zipformer` and would otherwise be mis-hinted as `stt`.
+   */
+  private val kwsHints = listOf(
+    "kws",
+    "keyword-spot",
+    "keyword_spot",
+    "wake-word",
+    "wake_word",
+  )
+
   fun inferModelHint(folderName: String): String {
     val name = folderName.lowercase()
     if (alignmentHints.any { name.contains(it) }) {
@@ -67,6 +79,9 @@ internal object AssetHintInferer {
     }
     if (vadHints.any { name.contains(it) }) {
       return "vad"
+    }
+    if (kwsHints.any { name.contains(it) }) {
+      return "kws"
     }
     val isStt = sttHints.any { name.contains(it) }
     val isTts = ttsHints.any { name.contains(it) }

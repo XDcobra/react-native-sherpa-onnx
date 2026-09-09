@@ -53,6 +53,8 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/vad/sherpa-onnx-validate-vad.cpp"
   "${MODEL_DETECT_DIR}/slid/sherpa-onnx-model-detect-slid.cpp"
   "${MODEL_DETECT_DIR}/slid/sherpa-onnx-validate-slid.cpp"
+  "${MODEL_DETECT_DIR}/kws/sherpa-onnx-model-detect-kws.cpp"
+  "${MODEL_DETECT_DIR}/kws/sherpa-onnx-validate-kws.cpp"
 )
 
 add_executable(model_detect_test
@@ -77,6 +79,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/vad"
   "${MODEL_DETECT_DIR}/alignment"
   "${MODEL_DETECT_DIR}/slid"
+  "${MODEL_DETECT_DIR}/kws"
   "${JNI_DIR}"
   "${MODEL_DETECT_TEST_DIR}"
 )

@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -42,7 +42,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 > - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
-> - **Android Build (`Gradle`):** The `syncModelsFromIos` task automatically detects and copies any models placed in `ios/sherpa_models/models/` into the Android assets directory before compilation.
+> - **Android Build (`Gradle`):** `downloadSherpaModels` fills the PAD pack; `syncPackModelsToAppAssets` mirrors those folders into `android/app/src/main/assets/models/` so plain `yarn android` can discover them via `listAssetModels()` without PAD or adb. `syncModelsFromIos` also copies any models from `ios/sherpa_models/models/` into Android assets. Optional: `yarn android:pad` exercises the PAD path (`getAssetPackPath`).
 >
 > Placing a model in either location (or both) makes it discoverable via `listAssetModels()` and immediately usable offline across all feature screens.
 
@@ -155,6 +155,14 @@ This screen streams source audio through live enhancement pipelines, including i
 
 
 This screen supports both live and offline VAD flows, including file and microphone input for live mode, plus segment timeline inspection and status polling. It validates segment buffer behavior and VAD summaries against [docs/vad-streaming.md](../docs/vad-streaming.md).
+
+## Keyword spotting (streaming)
+
+| ![Keyword spotting 1](../docs/images/example/kws_1.png) | ![Keyword spotting 2](../docs/images/example/kws_2.png) | ![Keyword spotting 3](../docs/images/example/kws_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+This screen runs real streaming keyword spotting (`createKeywordSpotting` → `engine.spot`) over a `LiveAudioBuffer` into a `LiveTextBuffer`. It covers pack-aware model init (`ModelCategory.Kws`), optional keyword overrides (`spot({ keywords })`), file or mic ingest, hit HUD / timeline, and pipeline lifecycle (start, flush, stop). Use tokens that match the loaded pack vocabulary (BPE vs ppinyin). See [docs/kws-streaming.md](../docs/kws-streaming.md).
 
 ## Punctuation (offline)
 

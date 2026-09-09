@@ -43,6 +43,12 @@
       "label": "Speaker diarization",
       "config": "sherpa_diarization_model_release_streams.json",
       "commit_message": "chore(testdata): update speaker segmentation model structures, expected CSV, and license status from speaker-segmentation-models release"
+    },
+    {
+      "id": "kws",
+      "label": "Keyword spotting",
+      "config": "sherpa_kws_model_release_streams.json",
+      "commit_message": "chore(testdata): update KWS model structures, expected CSV, and license status from kws-models release"
     }
   ]
 }

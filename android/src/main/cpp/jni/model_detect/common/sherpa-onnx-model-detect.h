@@ -140,6 +140,12 @@ enum class LanguageIdModelKind {
     kWhisper
 };
 
+/** Keyword spotting uses an online Zipformer2 transducer. */
+enum class KwsModelKind {
+    kUnknown,
+    kTransducer
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -323,6 +329,14 @@ struct LanguageIdModelPaths {
     std::string decoder;
 };
 
+struct KwsModelPaths {
+    std::string encoder;
+    std::string decoder;
+    std::string joiner;
+    std::string tokens;
+    std::string keywords;
+};
+
 struct VadModelPaths {
     std::string model;
 };
@@ -457,6 +471,19 @@ struct LanguageIdDetectResult {
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
     /** Heuristic / catalog languages (Whisper multilingual ~99 languages). */
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+};
+
+struct KwsDetectResult {
+    bool ok = false;
+    /** True only after successful layout+zipformer2 guard, or name-only kind inference. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    KwsModelKind selectedKind = KwsModelKind::kUnknown;
+    KwsModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
     std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
 };
@@ -625,6 +652,13 @@ LanguageIdDetectResult DetectLanguageIdModel(
     const std::string& quantization = ""
 );
 
+KwsDetectResult DetectKwsModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
@@ -686,6 +720,14 @@ AlignmentDetectResult DetectAlignmentModelFromFileList(
 
 /** Test-only: Like DetectLanguageIdModel but takes a pre-built file list; no filesystem access. */
 LanguageIdDetectResult DetectLanguageIdModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: KWS detection from an already collected recursive file list. */
+KwsDetectResult DetectKwsModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",

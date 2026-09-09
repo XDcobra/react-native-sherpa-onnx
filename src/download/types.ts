@@ -13,6 +13,7 @@ export enum ModelCategory {
   Qnn = 'qnn',
   Alignment = 'alignment',
   LanguageId = 'languageId',
+  Kws = 'kws',
 }
 
 export type TtsModelType = TTSModelType | 'unknown';

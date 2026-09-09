@@ -85,6 +85,11 @@
       "types": "./lib/typescript/src/language-identification/index.d.ts",
       "default": "./lib/module/language-identification/index.js"
     },
+    "./kws": {
+      "source": "./src/kws/index.ts",
+      "types": "./lib/typescript/src/kws/index.d.ts",
+      "default": "./lib/module/kws/index.js"
+    },
     "./detect": {
       "source": "./src/detect/index.ts",
       "types": "./lib/typescript/src/detect/index.d.ts",

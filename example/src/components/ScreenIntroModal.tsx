@@ -81,6 +81,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Voice activity detection showcase',
     body: 'This screen demonstrates standalone VAD with a pipeline-first flow: live or offline audio in, segment buffers out, speech-state callbacks, runtime metrics, and event timelines for debugging.',
   },
+  KeywordSpotting: {
+    title: 'Keyword spotting demo',
+    body: 'Streaming wake-word / open-vocabulary spotting with dedicated KWS packs. Spot mic or file audio through live buffers, tune sensitivity, and watch keyword hits fire in real time.',
+  },
   SegmentationShowcase: {
     title: 'Segmentation playground',
     body: 'Integrator playground for offline text and audio segmentation via shared SegmentationPolicyControls. Text: synthetic or punctuation-assisted. Audio: energy, VAD, or pyannote packs (catalog + detect → policy.modelPath). Runs segmentOfflineBuffer and lists segments with reason badges.',

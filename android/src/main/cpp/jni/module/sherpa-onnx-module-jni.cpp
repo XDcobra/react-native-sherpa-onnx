@@ -29,6 +29,7 @@
 #include "sherpa-onnx-vad-wrapper.h"
 #include "sherpa-onnx-alignment-wrapper.h"
 #include "sherpa-onnx-slid-detect-wrapper.h"
+#include "sherpa-onnx-kws-detect-wrapper.h"
 #include "sherpa-onnx-model-detect-unified.h"
 #include "sherpa-onnx-unified-detect-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
@@ -510,6 +511,31 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectLanguageIdModel(
   sherpaonnx::LanguageIdDetectResult result =
       sherpaonnx::DetectLanguageIdModel(model_dir, asset_name, model_type, quantization);
   return sherpaonnx::LanguageIdDetectResultToJava(env, result);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDetectKwsModel(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring j_model_dir,
+    jstring j_asset_name,
+    jstring j_model_type,
+    jstring j_quantization) {
+  std::optional<std::string> model_dir;
+  std::optional<std::string> asset_name;
+  std::string model_type;
+  if (!CopyOptionalJstring(env, j_model_dir, model_dir) ||
+      !CopyOptionalJstring(env, j_asset_name, asset_name) ||
+      !CopyModelTypeJstring(env, j_model_type, model_type)) {
+    return nullptr;
+  }
+  std::string quantization;
+  if (auto q = OptionalJstring(env, j_quantization)) {
+    quantization = *q;
+  }
+  const auto result =
+      sherpaonnx::DetectKwsModel(model_dir, asset_name, model_type, quantization);
+  return sherpaonnx::KwsDetectResultToJava(env, result);
 }
 
 }  // extern "C"

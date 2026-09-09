@@ -1,0 +1,115 @@
+# Asset: sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile.tar.bz2
+# updated_at: 2024-09-11T14:02:32Z
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/notes.md
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/keywords.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/decoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/test_wavs/
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/test_wavs/trans.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/test_wavs/test_keywords.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/test_wavs/1.wav
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/test_wavs/0.wav
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/keywords_raw.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/encoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/bpe.model
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/tokens.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01-mobile/README.md
+# Asset: sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2
+# updated_at: 2024-05-07T03:14:19Z
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/bpe.model
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/keywords.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/keywords_raw.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/README.md
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/test_wavs/
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/test_wavs/0.wav
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/test_wavs/1.wav
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/test_wavs/test_keywords.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/test_wavs/trans.txt
+sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/tokens.txt
+# Asset: sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile.tar.bz2
+# updated_at: 2024-09-11T14:02:27Z
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/notes.md
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/keywords.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/decoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/2.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/test_keywords.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/3.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/5.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/1.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/4.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/0.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/test_wavs/6.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/keywords_raw.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/encoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/tokens.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile/README.md
+# Asset: sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+# updated_at: 2024-09-11T14:01:24Z
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/joiner-epoch-99-avg-1-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/keywords.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/encoder-epoch-99-avg-1-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/2.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/test_keywords.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/3.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/5.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/1.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/4.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/0.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/test_wavs/6.wav
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/decoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/keywords_raw.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/decoder-epoch-99-avg-1-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/joiner-epoch-99-avg-1-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/tokens.txt
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/configuration.json
+sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01/README.md
+# Asset: sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2
+# updated_at: 2025-12-22T11:09:52Z
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-8-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/en.phone
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-8-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-8-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-8-left-64.onnx
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/en_0.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/en_1.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/en_trans.txt
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/keywords.txt
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/keywords_raw.txt
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_0.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_1.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_2.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_3.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_4.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_5.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/zh_6.wav
+sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt

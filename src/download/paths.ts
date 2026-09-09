@@ -66,6 +66,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'language-id-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/language-id`,
   },
+  [ModelCategory.Kws]: {
+    tag: 'kws-models',
+    cacheFile: 'kws-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/kws`,
+  },
 };
 
 export function getCategoryTag(category: ModelCategory): string {

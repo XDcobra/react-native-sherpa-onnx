@@ -167,6 +167,22 @@ export type LanguageIdInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeKeywordSpotting(instanceId, options)` — KWS engine lifecycle. */
+export type KeywordSpottingInitBridgeOptions = {
+  encoder: string;
+  decoder: string;
+  joiner: string;
+  tokens: string;
+  keywords: string;
+  keywordsScore?: number;
+  keywordsThreshold?: number;
+  numTrailingBlanks?: number;
+  maxActivePaths?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
 /** Native result from `identifyLanguageOffline`. */
 export type LanguageIdProcessNativeResult = {
   lang: string;
@@ -1678,6 +1694,51 @@ export interface Spec extends TurboModule {
       decoder?: string;
     };
   }>;
+
+  /** Online keyword spotting transducer model detection. */
+  detectKwsModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      encoder?: string;
+      decoder?: string;
+      joiner?: string;
+      tokens?: string;
+      keywords?: string;
+    };
+  }>;
+
+  /** Initialize a native keyword spotter. */
+  initializeKeywordSpotting(
+    instanceId: string,
+    options: KeywordSpottingInitBridgeOptions
+  ): Promise<{ success: boolean; error?: string }>;
+
+  /**
+   * Start native streaming KWS pipeline: live audio buffer → live text buffer.
+   * Optional `keywords` overrides the pack keywords file for this stream only.
+   */
+  startKeywordSpottingPipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    chunkSize?: number,
+    keywords?: string
+  ): Promise<{ pipelineId: string }>;
+
+  /** Release a native keyword spotter. Idempotent when the id is absent. */
+  unloadKeywordSpotting(instanceId: string): Promise<void>;
 
   /**
    * Initialize Spoken Language Identification (SLID) engine instance.

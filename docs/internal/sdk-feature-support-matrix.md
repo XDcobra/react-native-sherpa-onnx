@@ -14,7 +14,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Speaker Embedding / Identification | Yes (`SpeakerEmbeddingExtractorConfig`) | No | Yes (`createSpeakerIdentification`) | Yes, live overload (`labelLiveSegments`) |
 | Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
 | Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | Yes (`createLanguageIdentification`) | Yes, **live overload** (`identify(liveAudio, liveText, …)` — offline Whisper per speech span) |
-| Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | No |
+| Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | Yes, **real streaming** (`createKeywordSpotting` / `spot(LiveAudio, LiveText)`) |
 | Audio Tagging | Yes (`AudioTaggingConfig`) | No | No | No |
 | Diacritization | Yes (`OfflineDiacritizationConfig`) | No | No | No |
 
@@ -27,3 +27,4 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 - **Source separation** uses `createSeparation` for offline batch (`separate` into N offline buffers, optional offline segmentation) and live overload (`separate` into N live buffers with mandatory `continuous_frames` segmentation). There is no separate streaming separation factory.
 - **Speaker Diarization** offers offline batch clustering (`createDiarization` using Pyannote/Reverb + embedding) and true online streaming (`createStreamingDiarization` using NeMo Sortformer). Live overload was intentionally excluded.
 - **Spoken Language Identification (SLID)** uses Whisper multilingual offline weights only. The SDK exposes oneshot, segmented long-form (code-switching), and live overload via speech segmentation + per-span offline identify. There is no true streaming SLID model in sherpa-onnx.
+- **Keyword Spotting (KWS)** is streaming-only: `createKeywordSpotting` (alias `createStreamingKWS`) initializes a native KeywordSpotter, and `spot(LiveAudio, LiveText)` runs a real streaming pipeline with keyword commits to `LiveTextBuffer` (and optional `onKeyword`). Mic and file paths share the same API via live ingest. There is no offline/batch KWS API in MVP. `textOut` keeps normal LiveTextBuffer spooling defaults; use `spooling: { mode: 'off' }` when only hit callbacks/segments are needed and spool replay is not. App guide: [kws-streaming.md](../kws-streaming.md).

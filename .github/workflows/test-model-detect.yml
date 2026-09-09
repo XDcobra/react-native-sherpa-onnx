@@ -1,6 +1,23 @@
-# Test Model Detect: On PR to main, run CSV check (warning only), ASR/TTS/speech-enhancement detection tests
-# (TTS includes fixture CSV tests and TtsCatalogHints C++ tests), and validation tests.
-# If any of the called workflows fails, this workflow fails.
+# Test Model Detect: CSV drift check + C++ model_detect_test (detect + validate suites).
+#
+# Allowed `feature` input values (must match scripts/ci/sherpa_model_detect_test_manifest.json):
+#   all               — every feature × suite as parallel jobs (default)
+#   asr               — ASR / STT (+ VAD fixtures)
+#   tts               — TTS (+ language catalog check on detect)
+#   enhancement       — Speech enhancement
+#   separation        — Source separation (detect job also runs Separation* validation)
+#   speaker-embedding — Speaker embedding / recognition
+#   diarization       — Speaker diarization / segmentation
+#   kws               — Keyword spotting
+#
+# Allowed `suite` input values:
+#   all      — detect + validate where defined (default)
+#   detect   — fixture / expected-CSV detection tests only
+#   validate — ModelDetectValidation.* unit tests only
+#
+# pull_request to main always runs feature=all and suite=all.
+# Diarization / speaker-embedding core binaries stay as separate reusable workflows
+# (different C++ targets), gated by the same feature input.
 # Runs in parallel with sdk-android, sdk-ios, sdk-sdk on pull_request.
 
 name: Test – Full model detection
@@ -10,8 +27,35 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      feature:
+        description: 'Feature to test (all = every feature in parallel jobs)'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - asr
+          - tts
+          - enhancement
+          - separation
+          - speaker-embedding
+          - diarization
+          - kws
+      suite:
+        description: 'Suite to run (all = detect + validate where defined)'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - detect
+          - validate
 
-# No concurrency here to avoid deadlock with workflow_call: the called workflow (test-asr-model-detect) has its own group.
+concurrency:
+  group: test-model-detect-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-csvs:
     name: Check CSV vs GitHub assets
@@ -23,7 +67,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Check ASR/TTS/speech-enhancement/source-separation assets vs expected CSVs
+      - name: Check model assets vs expected CSVs
         run: bash scripts/ci/check-model-csvs.sh
         # Script always exits 0; outputs warning if new assets are on GitHub but not in CSVs
         # In case of new assets available on Github, follow this procedure:
@@ -38,75 +82,133 @@ jobs:
         # 3. Fill out the result column in the CSV with "unsupported"
         # 4. Push and run this workflow again
 
+  plan:
+    name: Plan detect/validate matrix
+    runs-on: ubuntu-latest
+    outputs:
+      feature: ${{ steps.plan.outputs.feature }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci
 
-  asr-model-detect:
-    name: ASR model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-asr-model-detect.yml
-    secrets: inherit
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-  tts-model-detect:
-    name: TTS model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-tts-model-detect.yml
-    secrets: inherit
+      - name: Plan matrix
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FEATURE: ${{ inputs.feature }}
+          SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          feature="$(echo -n "${FEATURE:-all}" | xargs | tr '[:upper:]' '[:lower:]')"
+          suite="$(echo -n "${SUITE:-all}" | xargs | tr '[:upper:]' '[:lower:]')"
+          [[ -z "$feature" ]] && feature="all"
+          [[ -z "$suite" ]] && suite="all"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            feature="all"
+            suite="all"
+          fi
 
-  enhancement-model-detect:
-    name: Speech enhancement model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-enhancement-model-detect.yml
-    secrets: inherit
+          manifest="scripts/ci/sherpa_model_detect_test_manifest.json"
+          allowed_features="$(jq -r '[.features[].id] | join(" ")' "$manifest")"
+          if [[ "$feature" != "all" ]] && ! jq -e --arg id "$feature" '[.features[].id] | index($id) != null' "$manifest" >/dev/null; then
+            echo "Invalid feature: '$feature'" >&2
+            echo "Allowed: all $allowed_features" >&2
+            exit 1
+          fi
+          case "$suite" in
+            all|detect|validate) ;;
+            *)
+              echo "Invalid suite: '$suite' (allowed: all detect validate)" >&2
+              exit 1
+              ;;
+          esac
 
-  separation-model-detect:
-    name: Source separation model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-separation-model-detect.yml
-    secrets: inherit
+          matrix="$(jq -c --arg feature "$feature" --arg suite "$suite" '
+            [
+              .features[]
+              | select($feature == "all" or .id == $feature)
+              | . as $feat
+              | (
+                  if ($suite == "all" or $suite == "detect") and ($feat.detect != null) then
+                    {
+                      id: $feat.id,
+                      suite: "detect",
+                      label: ($feat.label + " detect"),
+                      gtest_filter: $feat.detect.gtest_filter,
+                      check_language_catalog: ($feat.detect.check_language_catalog // false)
+                    }
+                  else empty end
+                ),
+                (
+                  if ($suite == "all" or $suite == "validate") and ($feat.validate != null) then
+                    {
+                      id: $feat.id,
+                      suite: "validate",
+                      label: ($feat.label + " validate"),
+                      gtest_filter: $feat.validate.gtest_filter,
+                      check_language_catalog: false
+                    }
+                  else empty end
+                )
+            ]
+          ' "$manifest")"
 
-  speaker-embedding-model-detect:
-    name: Speaker embedding model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-speaker-embedding-model-detect.yml
-    secrets: inherit
+          if [[ "$matrix" == "[]" ]]; then
+            echo "No jobs for feature='$feature' suite='$suite'" >&2
+            exit 1
+          fi
 
-  diarization-model-detect:
-    name: Diarization model detection
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-diarization-model-detect.yml
-    secrets: inherit
+          echo "feature=$feature" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Jobs: $matrix"
+
+  model-detect-test:
+    name: ${{ matrix.label }}
+    needs: [check-csvs, plan]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check generated model language catalog
+        if: ${{ matrix.check_language_catalog }}
+        run: yarn check:model-language-catalog
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Configure and build
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target model_detect_test
+
+      - name: Run ${{ matrix.label }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          ./test/cpp/build/model_detect_test \
+            --gtest_filter='${{ matrix.gtest_filter }}'
 
   diarization-core:
     name: Diarization core
-    needs: [check-csvs]
+    needs: [check-csvs, plan]
+    if: ${{ needs.plan.outputs.feature == 'all' || needs.plan.outputs.feature == 'diarization' }}
     uses: ./.github/workflows/test-diarization-core.yml
     secrets: inherit
 
   speaker-embedding-core:
     name: Speaker embedding core
-    needs: [check-csvs]
+    needs: [check-csvs, plan]
+    if: ${{ needs.plan.outputs.feature == 'all' || needs.plan.outputs.feature == 'speaker-embedding' }}
     uses: ./.github/workflows/test-speaker-embedding-core.yml
-    secrets: inherit
-
-  asr-validate:
-    name: ASR validation
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-asr-validate.yml
-    secrets: inherit
-
-  tts-validate:
-    name: TTS validation
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-tts-validate.yml
-    secrets: inherit
-
-  enhancement-validate:
-    name: Speech enhancement validation
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-enhancement-validate.yml
-    secrets: inherit
-
-  speaker-embedding-validate:
-    name: Speaker embedding validation
-    needs: [check-csvs]
-    uses: ./.github/workflows/test-speaker-embedding-validate.yml
     secrets: inherit

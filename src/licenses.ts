@@ -26,6 +26,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     'model_licenses/speaker-segmentation-models-license-status.csv';
   const diarizationModelsPath =
     'model_licenses/diarization-models-license-status.csv';
+  const kwsPath = 'model_licenses/kws-models-license-status.csv';
 
   const results = await Promise.allSettled([
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
@@ -38,6 +39,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(speakerEmbeddingPath),
     SherpaOnnx.readAssetFileAsUtf8(diarizationPath),
     SherpaOnnx.readAssetFileAsUtf8(diarizationModelsPath),
+    SherpaOnnx.readAssetFileAsUtf8(kwsPath),
   ]);
 
   const [
@@ -51,6 +53,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     speakerEmbeddingResult,
     diarizationResult,
     diarizationModelsResult,
+    kwsResult,
   ] = results;
 
   const licenses: ModelLicense[] = [];
@@ -132,6 +135,14 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load diarization model licenses: ${diarizationModelsResult.reason}`
+    );
+  }
+
+  if (kwsResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(kwsResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load KWS model licenses: ${kwsResult.reason}`
     );
   }
 
