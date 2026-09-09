@@ -4949,6 +4949,70 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun detectKwsModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectKwsModel(
+        modelDir.takeIf { it.isNotBlank() },
+        assetName?.takeIf { it.isNotBlank() },
+        modelType ?: "auto",
+        quantization
+      ) ?: run {
+        promise.reject("DETECT_ERROR", "KWS model detection returned null")
+        return
+      }
+      val out = Arguments.createMap()
+      out.putBoolean("success", result["success"] as? Boolean ?: false)
+      out.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: true)
+      (result["error"] as? String)?.takeIf { it.isNotBlank() }?.let { out.putString("error", it) }
+      (result["modelType"] as? String)?.let { out.putString("modelType", it) }
+      (result["quantization"] as? String)?.takeIf { it.isNotBlank() }?.let {
+        out.putString("quantization", it)
+      }
+      val models = Arguments.createArray()
+      for (model in result["detectedModels"] as? ArrayList<*> ?: arrayListOf<Any>()) {
+        if (model is HashMap<*, *>) {
+          val entry = Arguments.createMap()
+          entry.putString("type", model["type"] as? String ?: "")
+          entry.putString("modelDir", model["modelDir"] as? String ?: "")
+          models.pushMap(entry)
+        }
+      }
+      out.putArray("detectedModels", models)
+      (result["detectionSources"] as? ArrayList<*>)?.let { values ->
+        val sources = Arguments.createArray()
+        values.filterIsInstance<String>().forEach { sources.pushString(it) }
+        out.putArray("detectionSources", sources)
+      }
+      (result["languages"] as? ArrayList<*>)?.let { values ->
+        val languages = Arguments.createArray()
+        values.filterIsInstance<HashMap<*, *>>().forEach { value ->
+          val language = Arguments.createMap()
+          language.putString("id", value["id"] as? String ?: "")
+          language.putString("iso6391Hint", value["iso6391Hint"] as? String ?: "")
+          languages.pushMap(language)
+        }
+        out.putArray("languages", languages)
+      }
+      (result["paths"] as? HashMap<*, *>)?.let { values ->
+        val paths = Arguments.createMap()
+        listOf("encoder", "decoder", "joiner", "tokens", "keywords").forEach { key ->
+          (values[key] as? String)?.takeIf { it.isNotBlank() }?.let { paths.putString(key, it) }
+        }
+        out.putMap("paths", paths)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      Log.e(NAME, "detectKwsModel failed", e)
+      promise.reject("DETECT_ERROR", "KWS model detection failed: ${e.message}", e)
+    }
+  }
+
   override fun initializeLanguageId(
     instanceId: String,
     options: ReadableMap,
@@ -6061,6 +6125,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for Spoken Language Identification (SLID): Whisper multilingual. */
     @JvmStatic
     private external fun nativeDetectLanguageIdModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
+      quantization: String?
+    ): HashMap<String, Any>?
+
+    /** Model detection for online keyword spotting transducers. */
+    @JvmStatic
+    private external fun nativeDetectKwsModel(
       modelDir: String?,
       assetName: String?,
       modelType: String,

@@ -47,6 +47,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Qnn]: 'QNN',
   [ModelCategory.Alignment]: 'Alignment',
   [ModelCategory.LanguageId]: 'Language identification (SLID)',
+  [ModelCategory.Kws]: 'Keyword spotting (KWS)',
 };
 
 const ALL_CATEGORIES = Object.values(ModelCategory);

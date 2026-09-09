@@ -82,6 +82,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream speakerCsv(dir + "/speaker-recongition-models-expected.csv");
     std::ifstream diarizationStruct(dir + "/speaker-segmentation-models-structure.txt");
     std::ifstream diarizationCsv(dir + "/speaker-segmentation-models-expected.csv");
+    std::ifstream kwsStruct(dir + "/kws-models-structure.txt");
+    std::ifstream kwsCsv(dir + "/kws-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -100,6 +102,61 @@ TEST(ModelDetectTest, FixturesExist) {
         << "Missing: " << dir << "/speaker-segmentation-models-structure.txt";
     ASSERT_TRUE(diarizationCsv.is_open())
         << "Missing: " << dir << "/speaker-segmentation-models-expected.csv";
+    ASSERT_TRUE(kwsStruct.is_open()) << "Missing: " << dir << "/kws-models-structure.txt";
+    ASSERT_TRUE(kwsCsv.is_open()) << "Missing: " << dir << "/kws-models-expected.csv";
+}
+
+TEST(ModelDetectTest, DetectKwsFromFileListMatchesExpected) {
+    const std::string dir = GetFixturesDir();
+    const std::string structurePath = dir + "/kws-models-structure.txt";
+    const std::string csvPath = dir + "/kws-models-expected.csv";
+    std::string err;
+    const auto blocks =
+        model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+    const auto expected = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        const auto it = expected.find(block.assetName);
+        if (it == expected.end()) continue;
+        ASSERT_EQ(it->second, "transducer") << "Unexpected KWS fixture kind";
+        const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+            block.modelDir, block.pathLines);
+        const auto result = sherpaonnx::DetectKwsModelFromFileList(
+            files, block.modelDir, "auto", "");
+        EXPECT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(result.selectedKind, sherpaonnx::KwsModelKind::kTransducer);
+        EXPECT_TRUE(result.isStreaming);
+        EXPECT_FALSE(result.paths.encoder.empty());
+        EXPECT_FALSE(result.paths.decoder.empty());
+        EXPECT_FALSE(result.paths.joiner.empty());
+        EXPECT_FALSE(result.paths.tokens.empty());
+        EXPECT_FALSE(result.paths.keywords.empty());
+    }
+}
+
+TEST(ModelDetectValidation, KwsMissingKeywordsRejected) {
+    const std::string root = "/tmp/kws-model";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, {"encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"});
+    const auto result =
+        sherpaonnx::DetectKwsModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("keywords.txt"), std::string::npos);
+}
+
+TEST(ModelDetectValidation, KwsNestedKeywordsAccepted) {
+    const std::string root = "/tmp/kws-model";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root,
+        {"encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt",
+         "test_wavs/keywords.txt"});
+    const auto result =
+        sherpaonnx::DetectKwsModelFromFileList(files, root, "auto", "");
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.paths.keywords, "test_wavs/keywords.txt");
 }
 
 /**

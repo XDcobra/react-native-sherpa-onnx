@@ -180,6 +180,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/kws\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
@@ -196,6 +197,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/slid/core\"",
     "\"#{pod_root}/ios/slid/bridge\"",
     "\"#{pod_root}/ios/slid/pipeline\"",
+    "\"#{pod_root}/ios/kws\"",
+    "\"#{pod_root}/ios/kws/bridge\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

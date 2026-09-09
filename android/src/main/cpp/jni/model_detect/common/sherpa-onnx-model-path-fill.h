@@ -58,6 +58,11 @@ void FillLanguageIdModelPathsFromStringMap(
     LanguageIdModelPaths& out
 );
 
+void FillKwsModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    KwsModelPaths& out
+);
+
 void FillOnlineSttModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     OnlineSttModelPaths& out
@@ -80,6 +85,8 @@ std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     const AlignmentModelPaths& paths);
 std::map<std::string, std::string> LanguageIdModelPathsToStringMap(
     const LanguageIdModelPaths& paths);
+std::map<std::string, std::string> KwsModelPathsToStringMap(
+    const KwsModelPaths& paths);
 
 }  // namespace sherpaonnx
 

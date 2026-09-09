@@ -1679,6 +1679,30 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /** Online keyword spotting transducer model detection. */
+  detectKwsModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      encoder?: string;
+      decoder?: string;
+      joiner?: string;
+      tokens?: string;
+      keywords?: string;
+    };
+  }>;
+
   /**
    * Initialize Spoken Language Identification (SLID) engine instance.
    * @param instanceId - Unique ID for this engine instance

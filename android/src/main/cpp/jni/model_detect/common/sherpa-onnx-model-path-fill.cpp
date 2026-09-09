@@ -142,6 +142,17 @@ void FillLanguageIdModelPathsFromStringMap(
     SetPathFromMap(paths, "decoder", out.decoder);
 }
 
+void FillKwsModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    KwsModelPaths& out
+) {
+    SetPathFromMap(paths, "encoder", out.encoder);
+    SetPathFromMap(paths, "decoder", out.decoder);
+    SetPathFromMap(paths, "joiner", out.joiner);
+    SetPathFromMap(paths, "tokens", out.tokens);
+    SetPathFromMap(paths, "keywords", out.keywords);
+}
+
 void FillOnlineSttModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     OnlineSttModelPaths& out
@@ -283,6 +294,18 @@ std::map<std::string, std::string> LanguageIdModelPathsToStringMap(
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "encoder", paths.encoder);
     PutPathIfNonEmpty(out, "decoder", paths.decoder);
+    return out;
+}
+
+std::map<std::string, std::string> KwsModelPathsToStringMap(
+    const KwsModelPaths& paths
+) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "encoder", paths.encoder);
+    PutPathIfNonEmpty(out, "decoder", paths.decoder);
+    PutPathIfNonEmpty(out, "joiner", paths.joiner);
+    PutPathIfNonEmpty(out, "tokens", paths.tokens);
+    PutPathIfNonEmpty(out, "keywords", paths.keywords);
     return out;
 }
 
