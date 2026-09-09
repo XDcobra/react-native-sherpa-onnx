@@ -332,37 +332,87 @@ export default function KeywordSpottingScreen() {
     setEngineBusy(true);
     try {
       await destroyEngine();
-      const modelSource = resolveModelSource();
-      const det = await detectKwsModel(modelSource);
-      if (!det.success) {
-        throw new Error(det.error ?? 'detectKwsModel failed');
-      }
-      if (!det.isStreaming) {
-        throw new Error('Detected pack is not streaming KWS');
-      }
 
       const score = Number.parseFloat(keywordsScore);
       const threshold = Number.parseFloat(keywordsThreshold);
       const trailing = Number.parseInt(numTrailingBlanks, 10);
       const paths = Number.parseInt(maxActivePaths, 10);
-
-      // Init uses pack keywords.txt; textarea overrides go through spot({ keywords }).
-      const engine = await createKeywordSpotting({
-        modelSource,
+      const tuning = {
         keywordsScore: Number.isFinite(score) ? score : 1.5,
         keywordsThreshold: Number.isFinite(threshold) ? threshold : 0.25,
         numTrailingBlanks: Number.isFinite(trailing) ? trailing : 2,
         maxActivePaths: Number.isFinite(paths) ? paths : 4,
-      });
+      };
+
+      // Init uses pack keywords.txt; textarea overrides go through spot({ keywords }).
+      let engine;
+      let modelLabel: string;
+      let detectedType = 'transducer';
+      let quantNote = '';
+      let streamingNote = 'streaming=true';
+
+      if (initMode === 'custom') {
+        const {
+          encoder,
+          decoder,
+          joiner,
+          tokens,
+          keywords: keywordsFile,
+        } = customForm.fileSources;
+        const missing = (
+          [
+            ['encoder', encoder],
+            ['decoder', decoder],
+            ['joiner', joiner],
+            ['tokens', tokens],
+            ['keywords', keywordsFile],
+          ] as const
+        )
+          .filter(([, src]) => !src)
+          .map(([key]) => key);
+        if (missing.length > 0) {
+          throw new Error(
+            `Custom init missing required paths: ${missing.join(', ')}`
+          );
+        }
+        engine = await createKeywordSpotting({
+          initMode: 'custom',
+          modelType: customForm.modelType,
+          customConfig: {
+            encoder: encoder!,
+            decoder: decoder!,
+            joiner: joiner!,
+            tokens: tokens!,
+            keywords: keywordsFile!,
+          },
+          ...tuning,
+        });
+        modelLabel = selectedCatalogId
+          ? getModelDisplayName(selectedCatalogId)
+          : 'custom paths';
+      } else {
+        const modelSource = resolveModelSource();
+        const det = await detectKwsModel(modelSource);
+        if (!det.success) {
+          throw new Error(det.error ?? 'detectKwsModel failed');
+        }
+        if (!det.isStreaming) {
+          throw new Error('Detected pack is not streaming KWS');
+        }
+        engine = await createKeywordSpotting({
+          modelSource,
+          ...tuning,
+        });
+        modelLabel = selectedCatalogId
+          ? getModelDisplayName(selectedCatalogId)
+          : 'KWS model';
+        detectedType = det.modelType ?? 'transducer';
+        quantNote = det.quantization ? ` · ${det.quantization}` : '';
+        streamingNote = `streaming=${String(det.isStreaming)}`;
+      }
+
       engineRef.current = engine;
       setEngineReady(true);
-      const modelLabel = selectedCatalogId
-        ? getModelDisplayName(selectedCatalogId)
-        : initMode === 'custom'
-        ? 'custom'
-        : 'KWS model';
-      const detectedType = det.modelType ?? 'transducer';
-      const quantNote = det.quantization ? ` · ${det.quantization}` : '';
       const textareaLines = keywordsText
         .split('\n')
         .filter((l) => l.trim()).length;
@@ -372,9 +422,7 @@ export default function KeywordSpottingScreen() {
           : 'init=pack keywords.txt (textarea empty → pack on spot)';
       const summary =
         `Initialized (${initMode}): ${modelLabel}\n` +
-        `Detected: ${detectedType} · streaming=${String(
-          det.isStreaming
-        )}${quantNote}\n` +
+        `Detected: ${detectedType} · ${streamingNote}${quantNote}\n` +
         `instance: ${engine.instanceId}\n` +
         kwNote;
       setInitResult(summary);
@@ -391,6 +439,8 @@ export default function KeywordSpottingScreen() {
     }
   }, [
     appendEvent,
+    customForm.fileSources,
+    customForm.modelType,
     destroyEngine,
     initMode,
     keywordsScore,

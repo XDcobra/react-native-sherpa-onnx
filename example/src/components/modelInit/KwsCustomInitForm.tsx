@@ -40,7 +40,7 @@ const KEY_LABELS: Record<KwsCustomPathKey, string> = {
   decoder: 'Decoder ONNX',
   joiner: 'Joiner ONNX',
   tokens: 'tokens.txt',
-  keywords: 'keywords.txt (optional if textarea used)',
+  keywords: 'keywords.txt',
 };
 
 export function KwsCustomInitForm({
@@ -101,11 +101,10 @@ export function KwsCustomInitForm({
   return (
     <View style={styles.container}>
       <Text style={styles.note}>
-        Custom mode documents the KWS pack layout (encoder / decoder / joiner /
-        tokens / keywords). `createKeywordSpotting` still initializes from a
-        pack folder — use Fill to load paths from the selected catalog model,
-        then Init uses that folder. Keywords for spotting come from the Keywords
-        textarea (or pack keywords.txt when empty).
+        Custom mode initializes with explicit pack paths (initMode custom). Fill
+        from a catalog model or pick each slot (encoder / decoder / joiner /
+        tokens / keywords). Spotting keyword overrides still come from the
+        Keywords textarea via spot keywords option.
       </Text>
 
       <TouchableOpacity
