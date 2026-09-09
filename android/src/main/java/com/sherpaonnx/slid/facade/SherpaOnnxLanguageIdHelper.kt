@@ -33,6 +33,9 @@ internal class SherpaOnnxLanguageIdHelper {
     instances.clear()
   }
 
+  fun getInstance(instanceId: String): SpokenLanguageIdentification? =
+    instances[instanceId]
+
   fun initializeLanguageId(
     instanceId: String,
     options: ReadableMap,

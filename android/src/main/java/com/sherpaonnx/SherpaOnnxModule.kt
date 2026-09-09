@@ -36,6 +36,7 @@ import com.sherpaonnx.punctuation.facade.SherpaOnnxOfflinePunctuationLivePipelin
 import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdHelper
+import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdLivePipelineHelper
 import com.sherpaonnx.fileio.FileIOErrorCodes
 import com.sherpaonnx.fileio.FileIOException
 import com.sherpaonnx.stt.core.SttErrorCodes
@@ -233,6 +234,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private val languageIdHelper = SherpaOnnxLanguageIdHelper()
+  private val languageIdLivePipelineHelper =
+    SherpaOnnxLanguageIdLivePipelineHelper(
+      reactApplicationContext,
+      languageIdHelper,
+      NAME,
+    )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -4933,6 +4940,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       audioInId,
       segmentsInId,
       segmentsOutId,
+      promise
+    )
+  }
+
+  override fun startLanguageIdOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    languageIdLivePipelineHelper.startLanguageIdOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      textOutLiveBufferId,
+      options,
       promise
     )
   }
