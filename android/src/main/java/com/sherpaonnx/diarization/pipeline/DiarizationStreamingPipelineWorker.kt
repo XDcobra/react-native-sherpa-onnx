@@ -37,6 +37,7 @@ class DiarizationStreamingPipelineWorker(
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
   private var cursorId: Int = -1
   private val pendingCommands = LinkedBlockingQueue<Cmd>()
+  private val cmdLock = Any()
   private val queueDepth = AtomicInteger(0)
 
   @Volatile private var chunksProcessed = 0L
@@ -88,11 +89,20 @@ class DiarizationStreamingPipelineWorker(
       error = e.message ?: "Unknown diarization streaming pipeline error"
       emitEvent("pipeline.error", mapOf("error" to error))
     } finally {
-      isRunning = false
       if (cursorId >= 0) inputEntry.releaseCursor(cursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      drainCommands()
+      synchronized(cmdLock) {
+        while (true) {
+          val cmd = pendingCommands.poll() ?: break
+          queueDepth.decrementAndGet()
+          when (cmd) {
+            is Cmd.Flush -> cmd.done.complete(Unit)
+            is Cmd.Reset -> cmd.done.complete(Unit)
+          }
+        }
+        isRunning = false
+      }
       executor.shutdown()
     }
   }
@@ -154,24 +164,28 @@ class DiarizationStreamingPipelineWorker(
 
   override fun flush(): CompletableFuture<Unit> {
     val future = CompletableFuture<Unit>()
-    if (!isRunning) {
-      future.complete(Unit)
-      return future
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      queueDepth.incrementAndGet()
+      pendingCommands.offer(Cmd.Flush(future))
     }
-    queueDepth.incrementAndGet()
-    pendingCommands.offer(Cmd.Flush(future))
     lock.withLock { dataAvailable.signal() }
     return future
   }
 
   override fun reset(): CompletableFuture<Unit> {
     val future = CompletableFuture<Unit>()
-    if (!isRunning) {
-      future.complete(Unit)
-      return future
+    synchronized(cmdLock) {
+      if (!isRunning) {
+        future.complete(Unit)
+        return future
+      }
+      queueDepth.incrementAndGet()
+      pendingCommands.offer(Cmd.Reset(future))
     }
-    queueDepth.incrementAndGet()
-    pendingCommands.offer(Cmd.Reset(future))
     lock.withLock { dataAvailable.signal() }
     return future
   }
@@ -208,17 +222,6 @@ class DiarizationStreamingPipelineWorker(
           resetNative()
           cmd.done.complete(Unit)
         }
-      }
-    }
-  }
-
-  private fun drainCommands() {
-    while (true) {
-      val cmd = pendingCommands.poll() ?: break
-      queueDepth.decrementAndGet()
-      when (cmd) {
-        is Cmd.Flush -> cmd.done.complete(Unit)
-        is Cmd.Reset -> cmd.done.complete(Unit)
       }
     }
   }
