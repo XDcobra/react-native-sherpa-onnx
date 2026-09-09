@@ -153,20 +153,13 @@ export interface LanguageIdentificationOptions {
   targetSegmentBuffer?: OfflineSegmentBufferIdSource;
 }
 
-/** Fired after a speech span is evaluated and staged during `labelOfflineSegments`. */
-export interface LanguageIdLabeledSegmentEvent {
-  segmentIndex: number;
-  totalSegments: number;
-  startTime: number;
-  endTime: number;
-  durationMs: number;
-  lang: string;
-}
-
 /** Options for `labelOfflineSegments`. */
 export interface LanguageIdLabelOptions {
   onProgress?: (progress: OrchestrationProgress) => void;
-  onLabeled?: (event: LanguageIdLabeledSegmentEvent) => void;
+  /** Fired for every evaluated speech segment. */
+  onSegment?: (event: LanguageIdSegmentEvent) => void;
+  /** Fired specifically when a language switch is detected between segments. */
+  onLanguageChanged?: (event: LanguageChangedEvent) => void;
 }
 
 /** Result from `labelOfflineSegments`. */

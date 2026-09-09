@@ -5,6 +5,7 @@ import { segmentOfflineBuffer } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
 import {
   appendLiveSegment,
+  createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
   finalizeLiveSegmentBuffer,
   getOfflineSegmentBufferSegments,
@@ -159,6 +160,56 @@ export async function runOfflineLanguageIdSegmentation(
     segmentation.policy!
   );
 
+  const hasCallbacks =
+    typeof options?.onProgress === 'function' ||
+    typeof options?.onSegment === 'function' ||
+    typeof options?.onLanguageChanged === 'function';
+
+  // Fast-path: When no callbacks are registered, perform buffer-to-buffer labeling directly in native
+  if (!hasCallbacks) {
+    let tempTargetBufferId: string | null = null;
+    try {
+      const outBufferId =
+        targetSegmentBufferId ??
+        (tempTargetBufferId = (
+          await createEmptyOfflineSegmentBuffer({
+            sourceAudioBufferId: audioBufferId,
+          })
+        ).bufferId);
+
+      const nativeRes = await SherpaOnnx.labelLanguageIdOfflineSegments(
+        instanceId,
+        audioBufferId,
+        segRef.segmentBufferId,
+        outBufferId
+      );
+
+      return {
+        dominantLanguage: nativeRes.dominantLanguage,
+        distribution: nativeRes.distribution as Record<string, number>,
+        switches: nativeRes.switches,
+        segments: nativeRes.segments,
+        totalSegments: nativeRes.labeledCount,
+        processingTimeMs: Date.now() - t0,
+      };
+    } finally {
+      if (tempTargetBufferId != null) {
+        try {
+          await releasePipelineSegmentBuffer(tempTargetBufferId);
+        } catch {
+          // Best-effort cleanup
+        }
+      }
+      if (segRef?.segmentBufferId) {
+        try {
+          await releasePipelineSegmentBuffer(segRef.segmentBufferId);
+        } catch {
+          // Best-effort cleanup
+        }
+      }
+    }
+  }
+
   let stagingLiveBufferId: string | null = null;
   try {
     const rawSegments = await getOfflineSegmentBufferSegments(
@@ -292,6 +343,27 @@ export async function runOfflineLanguageIdLabeling(
   const segmentsInId = resolveOfflineSegmentBufferId(segmentsIn);
   const segmentsOutId = resolveOfflineSegmentBufferId(segmentsOut);
 
+  const hasCallbacks =
+    typeof options?.onProgress === 'function' ||
+    typeof options?.onSegment === 'function' ||
+    typeof options?.onLanguageChanged === 'function';
+
+  // Fast-path: When no callbacks are registered, perform buffer-to-buffer labeling directly in native
+  if (!hasCallbacks) {
+    const nativeRes = await SherpaOnnx.labelLanguageIdOfflineSegments(
+      instanceId,
+      audioBufferId,
+      segmentsInId,
+      segmentsOutId
+    );
+    return {
+      labeledCount: nativeRes.labeledCount,
+      dominantLanguage: nativeRes.dominantLanguage,
+      distribution: nativeRes.distribution as Record<string, number>,
+      switches: nativeRes.switches,
+    };
+  }
+
   const rawSegments = await getOfflineSegmentBufferSegments(segmentsInId);
   const spans = collectSpeechSpans(rawSegments);
 
@@ -315,6 +387,7 @@ export async function runOfflineLanguageIdLabeling(
     stagingLiveBufferId = staging.bufferId;
 
     const evaluatedSpans: EvaluatedSpan[] = [];
+    let previousLang: string | null = null;
 
     for (let i = 0; i < spans.length; i++) {
       const span = spans[i]!;
@@ -352,7 +425,7 @@ export async function runOfflineLanguageIdLabeling(
         payload: { source: 'languageId', lang },
       });
 
-      options?.onLabeled?.({
+      options?.onSegment?.({
         segmentIndex: i,
         totalSegments: spans.length,
         startTime,
@@ -360,6 +433,16 @@ export async function runOfflineLanguageIdLabeling(
         durationMs,
         lang,
       });
+
+      if (lang && (previousLang === null || lang !== previousLang)) {
+        options?.onLanguageChanged?.({
+          previousLang,
+          currentLang: lang,
+          timestamp: startTime,
+          segmentIndex: i,
+        });
+        previousLang = lang;
+      }
     }
 
     await finalizeLiveSegmentBuffer(stagingLiveBufferId);

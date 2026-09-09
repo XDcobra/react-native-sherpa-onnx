@@ -493,9 +493,25 @@ export async function createSpeakerIdentification(
       guard();
       assertLabelOptions(segmentOptions);
       const audioBufferId = resolvePipelineAudioBufferId(audioIn);
-      resolveOfflineSegmentBufferId(segmentsIn);
-      resolveOfflineSegmentBufferId(segmentsOut);
+      const segmentsInId = resolveOfflineSegmentBufferId(segmentsIn);
+      const segmentsOutId = resolveOfflineSegmentBufferId(segmentsOut);
       const threshold = resolveThreshold(segmentOptions);
+
+      const hasCallbacks =
+        typeof segmentOptions?.onProgress === 'function' ||
+        typeof segmentOptions?.onLabeled === 'function';
+
+      if (!hasCallbacks) {
+        return await SherpaOnnx.labelSpeakerIdentificationOfflineSegments(
+          engine.instanceId,
+          manager.managerId,
+          audioBufferId,
+          segmentsInId,
+          segmentsOutId,
+          threshold
+        );
+      }
+
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
       );
