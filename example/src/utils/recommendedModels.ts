@@ -17,8 +17,10 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     'silero-vad', // Lightweight VAD
   ],
   [ModelCategory.Kws]: [
-    // Default bilingual pack (zh + en) — also in example model-download-config.json
+    // Bundled via example/scripts/model-download-config.json (all three KWS packs)
     'sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20',
+    'sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01',
+    'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01',
   ],
   [ModelCategory.Diarization]: [
     'sherpa-onnx-speaker-diarization-en', // Default diarization

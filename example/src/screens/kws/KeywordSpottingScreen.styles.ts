@@ -88,18 +88,12 @@ export const styles = StyleSheet.create({
   dangerText: {
     color: '#DC2626',
   },
-  keywordsScroll: {
+  keywordsInput: {
+    minHeight: 120,
     maxHeight: 160,
     borderWidth: 1,
     borderColor: '#D1D1D6',
     borderRadius: 8,
-    backgroundColor: '#FAFAFA',
-  },
-  keywordsScrollContent: {
-    flexGrow: 1,
-  },
-  keywordsInput: {
-    minHeight: 120,
     padding: 10,
     fontSize: 13,
     fontFamily: 'Menlo',
@@ -227,14 +221,16 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94A3B8',
   },
-  timelineScroll: {
-    maxHeight: 52,
+  timelineRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    minHeight: 36,
   },
   timelineChip: {
     borderRadius: 16,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    marginRight: 8,
   },
   timelineChipText: {
     color: '#FFFFFF',
@@ -242,12 +238,12 @@ export const styles = StyleSheet.create({
     fontSize: 13,
   },
   eventLog: {
-    maxHeight: 180,
     borderWidth: 1,
     borderColor: '#E5E5EA',
     borderRadius: 8,
     backgroundColor: '#FAFAFA',
     padding: 8,
+    gap: 2,
   },
   initResultBox: {
     marginTop: 4,

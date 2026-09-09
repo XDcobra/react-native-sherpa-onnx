@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   ScrollView,
   Text,
   TextInput,
@@ -14,11 +13,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from '@react-native-documents/picker';
-import {
-  CachesDirectoryPath,
-  readFile,
-  writeFile,
-} from '@dr.pogodin/react-native-fs';
+import { readFile } from '@dr.pogodin/react-native-fs';
 import {
   createKeywordSpotting,
   detectKwsModel,
@@ -55,7 +50,11 @@ import {
 } from '../../components/modelInit';
 import { ExampleAudioFileList } from '../../components/OfflineAudioBufferWidget';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
-import { KWS_AUDIO_FILES, type KwsExampleAudio } from '../../audioConfig';
+import {
+  KWS_AUDIO_FILES,
+  resolveKwsExampleKeywords,
+  type KwsExampleAudio,
+} from '../../audioConfig';
 import {
   getKwsModelPathConfig,
   loadKwsModelCatalog,
@@ -76,15 +75,6 @@ import { colorForKeyword, styles } from './KeywordSpottingScreen.styles';
 
 const SAMPLE_RATE = 16000;
 const CHUNK_SIZE_OPTIONS = [800, 1600, 3200, 6400] as const;
-
-function keywordsEditorWidth(text: string): number {
-  const longest = text
-    .split('\n')
-    .reduce((max, line) => Math.max(max, line.length), 0);
-  const viewport = Dimensions.get('window').width - 64;
-  // Menlo 13 ≈ 8px/char; keep at least full card width for empty/short text.
-  return Math.max(viewport, longest * 8 + 24);
-}
 
 type SourceMode = 'mic' | 'file';
 type StreamState = 'idle' | 'running' | 'stopping';
@@ -164,8 +154,11 @@ export default function KeywordSpottingScreen() {
   const liveTextRef = useRef<LiveTextBufferRef | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
   const cleanupLockRef = useRef(false);
+  const spotStartLockRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const appendEvent = useCallback((message: string) => {
+    if (!mountedRef.current) return;
     setEvents((prev) =>
       [
         { id: `${Date.now()}_${prev.length}`, time: nowTime(), message },
@@ -185,6 +178,13 @@ export default function KeywordSpottingScreen() {
         return snap.entries[0]?.id ?? null;
       });
     } catch (e) {
+      setCatalog({
+        entries: [],
+        padModelIds: [],
+        padModelsPath: null,
+        bundledFolders: [],
+        downloadedIds: [],
+      });
       appendEvent(
         `Catalog load error: ${e instanceof Error ? e.message : String(e)}`
       );
@@ -244,21 +244,10 @@ export default function KeywordSpottingScreen() {
     }
   }, [appendEvent, resolveModelSource, selectedCatalogId]);
 
-  const writeKeywordsTempFile = useCallback(async (): Promise<
-    string | undefined
-  > => {
-    const body = keywordsText.trim();
-    if (!body) {
-      return undefined;
-    }
-    const path = `${CachesDirectoryPath}/kws_showcase_keywords.txt`;
-    await writeFile(path, body, 'utf8');
-    return path;
-  }, [keywordsText]);
-
-  const cleanupStream = useCallback(async () => {
+  const cleanupStream = useCallback(async (opts?: { updateUi?: boolean }) => {
     if (cleanupLockRef.current) return;
     cleanupLockRef.current = true;
+    const updateUi = opts?.updateUi !== false;
     try {
       const ingest = ingestRef.current;
       ingestRef.current = null;
@@ -303,26 +292,37 @@ export default function KeywordSpottingScreen() {
       }
     } finally {
       cleanupLockRef.current = false;
-      setStreamState('idle');
+      if (updateUi && mountedRef.current) {
+        setStreamState('idle');
+      }
     }
   }, []);
 
-  const destroyEngine = useCallback(async () => {
-    await cleanupStream();
-    const eng = engineRef.current;
-    engineRef.current = null;
-    setEngineReady(false);
-    setInitResult(null);
-    try {
-      await eng?.destroy();
-    } catch {
-      // ignore
-    }
-  }, [cleanupStream]);
+  const destroyEngine = useCallback(
+    async (opts?: { updateUi?: boolean }) => {
+      const updateUi = opts?.updateUi !== false;
+      await cleanupStream({ updateUi });
+      const eng = engineRef.current;
+      engineRef.current = null;
+      if (updateUi && mountedRef.current) {
+        setEngineReady(false);
+        setInitResult(null);
+      }
+      try {
+        await eng?.destroy();
+      } catch {
+        // ignore
+      }
+    },
+    [cleanupStream]
+  );
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      destroyEngine().catch(() => {});
+      mountedRef.current = false;
+      // Avoid setState after unmount.
+      destroyEngine({ updateUi: false }).catch(() => {});
     };
   }, [destroyEngine]);
 
@@ -341,15 +341,14 @@ export default function KeywordSpottingScreen() {
         throw new Error('Detected pack is not streaming KWS');
       }
 
-      const keywordsPath = await writeKeywordsTempFile();
       const score = Number.parseFloat(keywordsScore);
       const threshold = Number.parseFloat(keywordsThreshold);
       const trailing = Number.parseInt(numTrailingBlanks, 10);
       const paths = Number.parseInt(maxActivePaths, 10);
 
+      // Init uses pack keywords.txt; textarea overrides go through spot({ keywords }).
       const engine = await createKeywordSpotting({
         modelSource,
-        ...(keywordsPath ? { keywordsPath } : {}),
         keywordsScore: Number.isFinite(score) ? score : 1.5,
         keywordsThreshold: Number.isFinite(threshold) ? threshold : 0.25,
         numTrailingBlanks: Number.isFinite(trailing) ? trailing : 2,
@@ -360,16 +359,22 @@ export default function KeywordSpottingScreen() {
       const modelLabel = selectedCatalogId
         ? getModelDisplayName(selectedCatalogId)
         : initMode === 'custom'
-          ? 'custom'
-          : 'KWS model';
+        ? 'custom'
+        : 'KWS model';
       const detectedType = det.modelType ?? 'transducer';
       const quantNote = det.quantization ? ` · ${det.quantization}` : '';
-      const kwNote = keywordsPath
-        ? 'keywordsPath=textarea cache file'
-        : 'keywordsPath=pack keywords.txt (textarea empty)';
+      const textareaLines = keywordsText
+        .split('\n')
+        .filter((l) => l.trim()).length;
+      const kwNote =
+        textareaLines > 0
+          ? `init=pack keywords.txt; spot override=${textareaLines} lines`
+          : 'init=pack keywords.txt (textarea empty → pack on spot)';
       const summary =
         `Initialized (${initMode}): ${modelLabel}\n` +
-        `Detected: ${detectedType} · streaming=${String(det.isStreaming)}${quantNote}\n` +
+        `Detected: ${detectedType} · streaming=${String(
+          det.isStreaming
+        )}${quantNote}\n` +
         `instance: ${engine.instanceId}\n` +
         kwNote;
       setInitResult(summary);
@@ -389,23 +394,47 @@ export default function KeywordSpottingScreen() {
     destroyEngine,
     initMode,
     keywordsScore,
+    keywordsText,
     keywordsThreshold,
     maxActivePaths,
     numTrailingBlanks,
     resolveModelSource,
     selectedCatalogId,
-    writeKeywordsTempFile,
   ]);
 
   const onKeywordHit = useCallback(
     (event: KeywordDetection & { segmentIndex: number }) => {
-      const record: HitRecord = { ...event, atMs: Date.now() };
+      if (!mountedRef.current) return;
+      // Plain clones for React state — do not retain host/event object references.
+      const record: HitRecord = {
+        keyword: String(event.keyword ?? ''),
+        tokens: Array.isArray(event.tokens)
+          ? event.tokens.map((t) => String(t))
+          : [],
+        timestamps: Array.isArray(event.timestamps)
+          ? event.timestamps
+              .map((t) => Number(t))
+              .filter((n) => Number.isFinite(n))
+          : [],
+        segmentIndex: event.segmentIndex,
+        atMs: Date.now(),
+        ...(typeof event.startTime === 'number' &&
+        Number.isFinite(event.startTime)
+          ? { startTime: event.startTime }
+          : {}),
+      };
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('[KWS showcase] HIT', {
+          keyword: record.keyword,
+          segmentIndex: record.segmentIndex,
+        });
+      }
       setLastHit(record);
       setHits((prev) => [record, ...prev].slice(0, 40));
       appendEvent(
-        `HIT "${event.keyword}" seg=${event.segmentIndex}` +
-          (event.startTime != null
-            ? ` start=${event.startTime.toFixed(2)}s`
+        `HIT "${record.keyword}" seg=${record.segmentIndex}` +
+          (record.startTime != null
+            ? ` start=${record.startTime.toFixed(2)}s`
             : '')
       );
     },
@@ -417,13 +446,24 @@ export default function KeywordSpottingScreen() {
       Alert.alert('Engine not ready', 'Init the KWS engine first.');
       return;
     }
-    if (streamState !== 'idle') return;
+    if (streamState !== 'idle' || spotStartLockRef.current) return;
+    spotStartLockRef.current = true;
 
     setError(null);
     setHits([]);
     setLastHit(null);
-    setStreamState('running');
     setStatus('Starting spot pipeline…');
+
+    const keywordsOverride = keywordsText.trim();
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[KWS showcase] spot begin', {
+        keywordsLines: keywordsOverride
+          ? keywordsOverride.split('\n').filter((l) => l.trim()).length
+          : 0,
+        exampleId: selectedExampleId,
+        sourceMode,
+      });
+    }
 
     try {
       const liveAudio = await createEmptyLiveAudioBuffer({
@@ -436,22 +476,48 @@ export default function KeywordSpottingScreen() {
 
       const liveText = await createLiveTextBuffer({
         spooling: { mode: 'off' },
-        onSegment: (e) => {
-          if (e.segment.domain !== 'text') return;
-          if (e.segment.meta?.source !== 'kws_stream') return;
-          appendEvent(
-            `onSegment meta.source=kws_stream text="${e.segment.text}"`
-          );
-        },
       });
       liveTextRef.current = liveText;
 
       const pipeline = await engineRef.current.spot(liveAudio, liveText, {
         chunkSize,
         onKeyword: onKeywordHit,
+        ...(keywordsOverride ? { keywords: keywordsOverride } : {}),
       });
       pipelineRef.current = pipeline;
-      appendEvent(`spot started pipelineId=${pipeline.pipelineId}`);
+
+      // Let the previous layout commit finish before flipping controls to running.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+      if (!mountedRef.current) return;
+
+      setStreamState('running');
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('[KWS showcase] spot started', {
+          pipelineId: pipeline.pipelineId,
+        });
+      }
+
+      appendEvent(
+        `spot started pipelineId=${pipeline.pipelineId}` +
+          (sourceMode === 'file' &&
+          filePickMode === 'example' &&
+          selectedExampleId
+            ? ` example=${selectedExampleId}`
+            : '') +
+          (keywordsOverride
+            ? ` keywordsLines=${
+                keywordsOverride.split('\n').filter((l) => l.trim()).length
+              }`
+            : ' keywords=init file')
+      );
+
+      // Yield so the running-state layout can commit before ingest starts.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+      if (!mountedRef.current) return;
 
       if (sourceMode === 'mic') {
         await startMicToLiveAudioBuffer(liveAudio, { emitToJs: false });
@@ -484,7 +550,14 @@ export default function KeywordSpottingScreen() {
       appendEvent(`Spot error: ${msg}`);
       setStatus('Spot failed');
     } finally {
+      // Allow hit UI updates to commit before releasing native buffers.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
       await cleanupStream();
+      spotStartLockRef.current = false;
     }
   }, [
     appendEvent,
@@ -493,6 +566,7 @@ export default function KeywordSpottingScreen() {
     customFileName,
     customFileUri,
     filePickMode,
+    keywordsText,
     onKeywordHit,
     selectedExampleId,
     sourceMode,
@@ -541,15 +615,43 @@ export default function KeywordSpottingScreen() {
     }
   }, [appendEvent, destroyEngine]);
 
+  const onSelectCatalogModel = useCallback(
+    (modelId: string) => {
+      setSelectedCatalogId(modelId);
+      // Drop stale keywords from another pack (e.g. ZH ppinyin on gigaspeech BPE)
+      // so spot defaults to pack keywords.txt until the user picks an example/file.
+      setKeywordsText('');
+      appendEvent(
+        `Model selected: ${getModelDisplayName(
+          modelId
+        )} — cleared keywords (empty = pack keywords.txt)`
+      );
+    },
+    [appendEvent]
+  );
+
   const onSelectExample = useCallback(
     (file: KwsExampleAudio) => {
       setSelectedExampleId(file.id);
       setCustomFileUri(null);
       setCustomFileName(null);
-      setKeywordsText(file.keywordsBody);
-      appendEvent(`Example selected → prefilling keywords (${file.name})`);
+      const body = resolveKwsExampleKeywords(file, selectedCatalogId);
+      setKeywordsText(body);
+      if (body) {
+        appendEvent(
+          `Example selected → keywords for ${selectedCatalogId ?? 'pack'} (${
+            file.name
+          })`
+        );
+      } else {
+        appendEvent(
+          `Example selected → no pack-matched keywords for ${
+            selectedCatalogId ?? '?'
+          }; empty = pack keywords.txt (${file.name})`
+        );
+      }
     },
-    [appendEvent]
+    [appendEvent, selectedCatalogId]
   );
 
   const pickCustomAudio = useCallback(async () => {
@@ -613,8 +715,6 @@ export default function KeywordSpottingScreen() {
     [catalog]
   );
 
-  const keywordsWidth = keywordsEditorWidth(keywordsText);
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScreenIntroModal screenId="KeywordSpotting" />
@@ -622,7 +722,6 @@ export default function KeywordSpottingScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
       >
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
@@ -654,7 +753,8 @@ export default function KeywordSpottingScreen() {
                 entries={gridEntries}
                 selectedId={selectedCatalogId}
                 initializedId={engineReady ? selectedCatalogId : null}
-                onSelect={setSelectedCatalogId}
+                onSelect={onSelectCatalogModel}
+                loading={catalog == null}
                 emptyMessage="No KWS models found."
               />
               {catalog && catalog.entries.length === 0 ? (
@@ -685,7 +785,8 @@ export default function KeywordSpottingScreen() {
                 entries={gridEntries}
                 selectedId={selectedCatalogId}
                 initializedId={engineReady ? selectedCatalogId : null}
-                onSelect={setSelectedCatalogId}
+                onSelect={onSelectCatalogModel}
+                loading={catalog == null}
                 emptyMessage="No KWS models found."
               />
               <KwsCustomInitForm
@@ -880,29 +981,27 @@ export default function KeywordSpottingScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>3. Keywords</Text>
           <Text style={styles.cardSubtitle}>
-            Textarea is the init source of truth (`keywords.txt` body). Empty →
-            pack keywords.txt. File pick only loads into the textarea.
+            {
+              'Textarea is a per-session spot({ keywords }) override. Empty → pack keywords.txt. Tokens must match the selected pack (gigaspeech=BPE ▁…, wenetspeech=ppinyin, zh-en=phone+ppinyin). Example audio prefills pack-matched keywords only.'
+            }
           </Text>
-          <ScrollView
-            horizontal
-            nestedScrollEnabled
-            style={styles.keywordsScroll}
-            contentContainerStyle={styles.keywordsScrollContent}
-          >
-            <TextInput
-              style={[styles.keywordsInput, { width: keywordsWidth }]}
-              value={keywordsText}
-              onChangeText={setKeywordsText}
-              multiline
-              scrollEnabled
-              autoCorrect={false}
-              autoCapitalize="none"
-              placeholder={
-                '▁HE Y ▁S I RI :1.5 #0.25\n# empty = use pack keywords.txt'
-              }
-              editable={!busy}
-            />
-          </ScrollView>
+          <TextInput
+            style={styles.keywordsInput}
+            value={keywordsText}
+            onChangeText={(text) => {
+              // Keep editable stable while spotting; ignore edits mid-session.
+              if (streamState !== 'idle') return;
+              setKeywordsText(text);
+            }}
+            multiline
+            scrollEnabled
+            autoCorrect={false}
+            autoCapitalize="none"
+            placeholder={
+              'HEY SIRI :1.5 #0.25  (pack tokens; empty = keywords.txt)'
+            }
+            editable={!engineBusy}
+          />
           <View style={styles.rowActions}>
             <TouchableOpacity
               style={styles.secondaryButton}
@@ -1017,11 +1116,7 @@ export default function KeywordSpottingScreen() {
             ) : null}
           </View>
 
-          <ScrollView
-            horizontal
-            style={styles.timelineScroll}
-            showsHorizontalScrollIndicator={false}
-          >
+          <View style={styles.timelineRow}>
             {hits.length === 0 ? (
               <Text style={styles.hint}>Hit timeline appears here.</Text>
             ) : (
@@ -1037,14 +1132,10 @@ export default function KeywordSpottingScreen() {
                 </View>
               ))
             )}
-          </ScrollView>
+          </View>
 
           <Text style={styles.paramLabel}>Event log</Text>
-          <ScrollView
-            style={styles.eventLog}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator
-          >
+          <View style={styles.eventLog}>
             {events.length === 0 ? (
               <Text style={styles.hint}>
                 Events will show init / hits / errors.
@@ -1056,7 +1147,7 @@ export default function KeywordSpottingScreen() {
                 </Text>
               ))
             )}
-          </ScrollView>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
