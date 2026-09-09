@@ -3,6 +3,10 @@
 #include "../../livePipeline/OfflineLivePipelineWorker.h"
 #include "../native/sherpa-onnx-tts-wrapper.h"
 
+#include <memory>
+#include <optional>
+#include <string>
+
 class TtsOfflineLivePipelineWorker : public OfflineLivePipelineWorker {
 public:
   TtsOfflineLivePipelineWorker(
@@ -10,7 +14,7 @@ public:
     std::string attachedSegmentationEngineId,
     std::shared_ptr<TxtLiveEntry> textInput,
     std::shared_ptr<PaLiveEntry> audioOutput,
-    sherpaonnx::TtsWrapper *wrapper,
+    std::shared_ptr<sherpaonnx::TtsWrapper> wrapper,
     int32_t defaultSid,
     float defaultSpeed,
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
@@ -22,7 +26,7 @@ protected:
 
 private:
   std::shared_ptr<PaLiveEntry> audioOutput_;
-  sherpaonnx::TtsWrapper *wrapper_ = nullptr;
+  std::shared_ptr<sherpaonnx::TtsWrapper> wrapper_;
   int32_t defaultSid_ = 0;
   float defaultSpeed_ = 1.0f;
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone_;

@@ -62,28 +62,31 @@
     }
     std::string instanceIdStr = [instanceId UTF8String];
     @try {
+        // Drop map ownership only; TtsWrapper dtor/release runs when last shared_ptr
+        // (e.g. live worker) is released — avoids UAF during in-flight generate.
+        std::shared_ptr<TtsInstanceState> removed;
         {
             std::lock_guard<std::mutex> lock(g_tts_mutex);
             auto it = g_tts_instances.find(instanceIdStr);
             if (it != g_tts_instances.end()) {
-                TtsInstanceState *i = it->second.get();
-                if (i->wrapper != nullptr) {
-                    i->wrapper->release();
-                    i->wrapper.reset();
-                }
-                i->sink.clear();
-                i->modelDir = nil;
-                i->modelType = nil;
-                i->provider = nil;
-                i->noiseScale = nil;
-                i->noiseScaleW = nil;
-                i->lengthScale = nil;
-                i->ruleFsts = nil;
-                i->ruleFars = nil;
-                i->maxNumSentences = nil;
-                i->silenceScale = nil;
+                removed = std::move(it->second);
                 g_tts_instances.erase(it);
             }
+        }
+        if (removed) {
+            removed->sink.clear();
+            removed->modelDir = nil;
+            removed->modelType = nil;
+            removed->provider = nil;
+            removed->noiseScale = nil;
+            removed->noiseScaleW = nil;
+            removed->lengthScale = nil;
+            removed->ruleFsts = nil;
+            removed->ruleFars = nil;
+            removed->maxNumSentences = nil;
+            removed->silenceScale = nil;
+            // Do not call wrapper->release() here — last shared_ptr drop does that.
+            removed->wrapper.reset();
         }
         RCTLogInfo(@"TTS instance %@ released", instanceId);
         resolve(nil);

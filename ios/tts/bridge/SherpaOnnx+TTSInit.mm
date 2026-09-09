@@ -104,7 +104,7 @@ static NSString *TtsTrimmedString(NSString *value) {
         }
         TtsInstanceState *inst = g_tts_instances[instanceIdStr].get();
         if (inst->wrapper == nullptr) {
-            inst->wrapper = std::make_unique<sherpaonnx::TtsWrapper>();
+            inst->wrapper = std::make_shared<sherpaonnx::TtsWrapper>();
         }
 
         std::string modelDirStr = modelDir != nil ? [modelDir UTF8String] : "";

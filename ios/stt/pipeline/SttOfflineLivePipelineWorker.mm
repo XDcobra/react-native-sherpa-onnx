@@ -9,7 +9,7 @@ SttOfflineLivePipelineWorker::SttOfflineLivePipelineWorker(
   std::shared_ptr<PaLiveEntry> audioInput,
   std::string audioSegmentInputBufferId,
   std::shared_ptr<TxtLiveEntry> textOutput,
-  sherpaonnx::SttWrapper *wrapper
+  std::shared_ptr<sherpaonnx::SttWrapper> wrapper
 )
   : OfflineLivePipelineWorker(
       std::move(pipelineId),
@@ -20,7 +20,7 @@ SttOfflineLivePipelineWorker::SttOfflineLivePipelineWorker(
     ),
     audioInput_(std::move(audioInput)),
     textOutput_(std::move(textOutput)),
-    wrapper_(wrapper)
+    wrapper_(std::move(wrapper))
 {}
 
 void SttOfflineLivePipelineWorker::onSegmentCommitted(
