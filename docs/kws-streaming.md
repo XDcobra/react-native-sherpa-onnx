@@ -145,7 +145,7 @@ Each line is one keyword. Space-separated **tokens**, then optional extras (no s
 | `#threshold` | Per-keyword trigger threshold in `[0, 1]` (lower → easier to trigger) |
 | `@label` | Human-readable label returned on hit (required for some pinyin token types; **no spaces** in `@label` — use `_`) |
 
-Pack defaults ship a `keywords.txt` next to the ONNX files. Override at init with `keywordsPath`, or per session with `spot({ keywords })` (below).
+Pack defaults ship a `keywords.txt` next to the ONNX files. Override **per session** with `spot({ keywords })` (safe on OOV — Promise rejection). Optional `keywordsPath` at create is also applied via `createStream` (not via upstream `KeywordSpotter` construction — that path calls `_Exit` on encode failure; see [KNOWN_ISSUES](KNOWN_ISSUES.md)).
 
 ### Generating tokens with `text2token`
 
@@ -167,10 +167,10 @@ sherpa-onnx-cli text2token \
 | Goal | How | Engine lifecycle |
 | --- | --- | --- |
 | Default keywords from the pack | Omit overrides; detect uses `<modelDir>/keywords.txt` | — |
-| Different keywords file at engine create | `createKeywordSpotting({ keywordsPath })` | Create once; path must exist on disk |
+| Different keywords file at engine create | `createKeywordSpotting({ keywordsPath })` — body applied on each `spot` via `createStream` (pack `keywords.txt` still used for spotter construction) | Create once; path must exist on disk; tokens must match pack `tokens.txt` |
 | New phrases for **one** `spot` session | `spot(..., { keywords })` → native `createStream(keywords)` | **Same engine** — no destroy |
 | Change phrases **mid** listening | `await pipeline.stop()` then `spot(..., { keywords: next })` again | Same engine |
-| Change `keywordsScore` / `keywordsThreshold` / `numTrailingBlanks` / baked `keywordsPath` | `await engine.destroy()` then `createKeywordSpotting` again | Re-init required (init-time config) |
+| Change `keywordsScore` / `keywordsThreshold` / `numTrailingBlanks` | `await engine.destroy()` then `createKeywordSpotting` again | Re-init required (init-time config) |
 
 `spot({ keywords })` accepts the **same textual format as a `keywords.txt` body** (one or more lines). Empty / omit → use the keywords file from engine init.
 
@@ -325,7 +325,7 @@ const engine = await createKeywordSpotting({
 | Field | Notes |
 | --- | --- |
 | `modelSource` | Directory-backed `FileSource` for the KWS pack |
-| `keywordsPath` | Absolute path replacing detected `keywords.txt` |
+| `keywordsPath` | Absolute path; body applied on `spot` via `createStream` (pack `keywords.txt` still used for spotter init) |
 | `keywordsScore` / `keywordsThreshold` | Init-time KeywordSpotter config |
 | `numTrailingBlanks` / `maxActivePaths` | Decode timing / beam |
 | `numThreads` / `provider` / `debug` / `quantization` | Runtime / detect helpers |

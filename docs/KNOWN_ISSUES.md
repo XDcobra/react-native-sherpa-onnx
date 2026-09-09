@@ -25,6 +25,18 @@ Short, SDK-facing notes so we do not lose track and others can find them quickly
 
 ---
 
+## KWS: invalid `keywordsPath` / OOV tokens at spotter construction (upstream `_Exit`)
+
+**Symptom:** App dies with `EXIT_SELF` / Zygote `exited cleanly (255)` and **empty** `adb logcat -b crash`. Logcat often shows `Encode keywords failed.` / `Cannot find ID for token …` immediately before death. No Java/Kotlin exception.
+
+**Cause:** Upstream `KeywordSpotter` `InitKeywords` (from `keywordsFile`) calls **`SHERPA_ONNX_EXIT(-1)`** → `_Exit(-1)` when any keyword token is missing from pack `tokens.txt`. Common trigger: re-init with a **different language pack** while still pointing init at English ARPAbet (or other OOV) keywords from a previous session.
+
+**SDK mitigation:** `createKeywordSpotting` always constructs the spotter with the **pack** `keywords.txt`. Optional `keywordsPath` (and `spot({ keywords })`) are applied via **`createStream`**, which returns null on encode failure — surfaced as a Promise rejection instead of killing the process.
+
+**App guidance:** Prefer `spot({ keywords })` for open-vocab overrides. Keep keyword tokens in the pack’s inventory (use `text2token` against that pack’s `tokens.txt`). See [Streaming KWS](kws-streaming.md).
+
+---
+
 ## Pocket TTS (voice cloning): fragile EOS and cross-platform drift
 
 **What matters:** Pocket TTS relies on a **heuristic end-of-speech signal** (scalar threshold on LM logits in upstream sherpa-onnx). That makes **output length and quality sensitive** to small numeric differences: you can get **very short** chunks (early EOS) or **very long** ones (no EOS before `max_frames`).
