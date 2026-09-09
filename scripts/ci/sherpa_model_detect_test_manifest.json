@@ -1,0 +1,70 @@
+{
+  "description": "Model detect + validation gtest filters for Test – Full model detection. IDs must match workflow_dispatch feature options.",
+  "features": [
+    {
+      "id": "asr",
+      "label": "ASR / STT (+ VAD)",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectSttFromFileListMatchesExpected:ModelDetectTest.DetectVadFromAsrFileListMatchesExpected"
+      },
+      "validate": {
+        "gtest_filter": "ModelDetectValidation.Stt*:ModelDetectValidation.ValidateStt*"
+      }
+    },
+    {
+      "id": "tts",
+      "label": "TTS",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectTtsFromFileListMatchesExpected:TtsCatalogHints.*:CuratedLanguageCatalog.*",
+        "check_language_catalog": true
+      },
+      "validate": {
+        "gtest_filter": "ModelDetectValidation.Tts*:ModelDetectValidation.ValidateTts*"
+      }
+    },
+    {
+      "id": "enhancement",
+      "label": "Speech enhancement",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectEnhancementFromFileListMatchesExpected"
+      },
+      "validate": {
+        "gtest_filter": "ModelDetectValidation.ValidateEnhancement*:ModelDetectValidation.EnhancementMissingOnnxRejected"
+      }
+    },
+    {
+      "id": "separation",
+      "label": "Source separation",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectSeparationFromFileListMatchesExpected:ModelDetectValidation.Separation*"
+      }
+    },
+    {
+      "id": "speaker-embedding",
+      "label": "Speaker embedding",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectSpeakerEmbeddingFromFileListMatchesExpected"
+      },
+      "validate": {
+        "gtest_filter": "ModelDetectValidation.ValidateSpeakerEmbedding*:ModelDetectValidation.SpeakerEmbedding*"
+      }
+    },
+    {
+      "id": "diarization",
+      "label": "Diarization",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectDiarizationFromFileListMatchesExpected"
+      }
+    },
+    {
+      "id": "kws",
+      "label": "Keyword spotting",
+      "detect": {
+        "gtest_filter": "ModelDetectTest.FixturesExist:ModelDetectTest.DetectKwsFromFileListMatchesExpected"
+      },
+      "validate": {
+        "gtest_filter": "ModelDetectValidation.Kws*"
+      }
+    }
+  ]
+}
