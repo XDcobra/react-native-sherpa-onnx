@@ -1,5 +1,7 @@
 package com.sherpaonnx.kws.facade
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -17,7 +19,6 @@ import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.kws.pipeline.KwsStreamingPipelineWorker
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import com.sherpaonnx.text.pipeline.TextSegment
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -31,6 +32,7 @@ internal class SherpaOnnxKwsHelper(
   )
 
   private val instances = ConcurrentHashMap<String, KwsInstance>()
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   fun initializeKeywordSpotting(
     instanceId: String,
@@ -187,10 +189,7 @@ internal class SherpaOnnxKwsHelper(
         inputEntry = inputEntry,
         outputEntry = outputEntry,
         sampleRate = inst.sampleRate,
-        chunkSize = chunkSize ?: 6400,
-        onKeywordCommitted = { segment, totalSegments ->
-          emitLiveTextSegmentEvent(textOutLiveBufferId, segment, totalSegments)
-        },
+        chunkSize = chunkSize ?: KwsStreamingPipelineWorker.DEFAULT_CHUNK_SIZE,
       )
 
       StreamingPipelineRegistry.registerAndStart(worker) { completion ->
@@ -265,65 +264,33 @@ internal class SherpaOnnxKwsHelper(
     }
   }
 
-  private fun emitLiveTextSegmentEvent(
-    liveBufferId: String,
-    segment: TextSegment,
-    totalSegments: Int,
-  ) {
-    try {
-      val payload = Arguments.createMap().apply {
-        putString("liveBufferId", liveBufferId)
-        putInt("totalSegments", totalSegments)
-        putString("text", segment.text)
-        putString("source", segment.source)
-        putInt("segmentIndex", segment.segmentIndex)
-
-        if (segment.tokens.isNotEmpty()) {
-          val tokenArray = Arguments.createArray()
-          segment.tokens.forEach { tokenArray.pushString(it) }
-          putArray("tokens", tokenArray)
-        }
-
-        if (segment.timestamps.isNotEmpty()) {
-          val tsArray = Arguments.createArray()
-          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-          putArray("timestamps", tsArray)
-        }
-
-        segment.meta?.let { rawMeta ->
-          try {
-            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
-          } catch (_: Exception) {
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    // Match iOS completion watcher: deliver RN events on the main looper.
+    val emit = Runnable {
+      try {
+        val payload = Arguments.createMap().apply {
+          putString("pipelineId", completion.pipelineId)
+          putString("reason", completion.reason)
+          putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+          putDouble("unitsRead", completion.unitsRead.toDouble())
+          putDouble("unitsWritten", completion.unitsWritten.toDouble())
+          if (completion.error != null) {
+            putString("error", completion.error)
+          } else {
+            putNull("error")
           }
         }
-      }
 
-      context
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("pipelineLiveTextSegmentAppended", payload)
-    } catch (_: Exception) {
+        context
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit("streamingPipelineCompleted", payload)
+      } catch (_: Exception) {
+      }
     }
-  }
-
-  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
-    try {
-      val payload = Arguments.createMap().apply {
-        putString("pipelineId", completion.pipelineId)
-        putString("reason", completion.reason)
-        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
-        putDouble("unitsRead", completion.unitsRead.toDouble())
-        putDouble("unitsWritten", completion.unitsWritten.toDouble())
-        if (completion.error != null) {
-          putString("error", completion.error)
-        } else {
-          putNull("error")
-        }
-      }
-
-      context
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        .emit("streamingPipelineCompleted", payload)
-    } catch (_: Exception) {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      emit.run()
+    } else {
+      mainHandler.post(emit)
     }
   }
 

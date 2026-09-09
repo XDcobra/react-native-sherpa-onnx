@@ -8,7 +8,6 @@ import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
 import com.sherpaonnx.text.pipeline.LiveTextEntry
-import com.sherpaonnx.text.pipeline.TextSegment
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
@@ -29,14 +28,15 @@ class KwsStreamingPipelineWorker(
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveTextEntry,
   private val sampleRate: Int,
-  private val chunkSize: Int = 6400,
-  private val onKeywordCommitted: ((segment: TextSegment, totalSegments: Int) -> Unit)? = null,
+  /** Samples per drain; default 1600 ≈ 100ms @ 16 kHz for lower wake latency. */
+  private val chunkSize: Int = DEFAULT_CHUNK_SIZE,
 ) : StreamingPipelineWorker {
 
   companion object {
     private const val LOG_TAG = "SherpaOnnxKws"
     private const val PREFIX = "[SherpaOnnx:kws]"
     private const val SOURCE = "kws_stream"
+    const val DEFAULT_CHUNK_SIZE = 1600
   }
 
   @Volatile
@@ -159,23 +159,14 @@ class KwsStreamingPipelineWorker(
       "source" to SOURCE,
       "keyword" to keyword,
     )
+    // RN notify comes from LiveTextEntry commit listeners registered at
+    // createLiveTextBuffer (single emit, main-looper posted) — do not emit here.
     val segmentIndex = outputEntry.commitSegment(
       text = keyword,
       tokens = tokens,
       timestamps = timestamps,
       source = SOURCE,
       meta = segmentMeta,
-    )
-    onKeywordCommitted?.invoke(
-      TextSegment(
-        text = keyword,
-        tokens = tokens,
-        timestamps = timestamps,
-        source = SOURCE,
-        segmentIndex = segmentIndex,
-        meta = segmentMeta,
-      ),
-      outputEntry.segmentCount,
     )
     unitsWritten += keyword.length
     Log.i(

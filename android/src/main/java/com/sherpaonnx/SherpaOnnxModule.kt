@@ -6,6 +6,8 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.util.Base64
@@ -56,6 +58,8 @@ import org.json.JSONObject
 @ReactModule(name = SherpaOnnxModule.NAME)
 class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   NativeSherpaOnnxSpec(reactContext) {
+
+  private val mainHandler = Handler(Looper.getMainLooper())
 
   init {
     SherpaOnnxNativeLoader.ensureLoaded()
@@ -310,43 +314,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     segment: com.sherpaonnx.text.pipeline.TextSegment,
     totalSegments: Int,
   ) {
-    try {
-      val eventEmitter = reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
-      val payload = Arguments.createMap().apply {
-        putString("liveBufferId", liveBufferId)
-        putInt("totalSegments", totalSegments)
-        putString("text", eventText)
-        if (textTruncated) {
-          putBoolean("textTruncated", true)
-        }
-        putString("source", segment.source)
-        putInt("segmentIndex", segment.segmentIndex)
+    // Match iOS txt_emit_live_text_segment_event: always deliver on main looper
+    // so worker-thread commits (KWS/STT/…) never touch the RN bridge off-thread.
+    val emit = Runnable {
+      try {
+        val eventEmitter = reactApplicationContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
+        val payload = Arguments.createMap().apply {
+          putString("liveBufferId", liveBufferId)
+          putInt("totalSegments", totalSegments)
+          putString("text", eventText)
+          if (textTruncated) {
+            putBoolean("textTruncated", true)
+          }
+          putString("source", segment.source)
+          putInt("segmentIndex", segment.segmentIndex)
 
-        if (segment.tokens.isNotEmpty()) {
-          val tokenArray = Arguments.createArray()
-          segment.tokens.forEach { tokenArray.pushString(it) }
-          putArray("tokens", tokenArray)
-        }
+          if (segment.tokens.isNotEmpty()) {
+            val tokenArray = Arguments.createArray()
+            segment.tokens.forEach { tokenArray.pushString(it) }
+            putArray("tokens", tokenArray)
+          }
 
-        if (segment.timestamps.isNotEmpty()) {
-          val tsArray = Arguments.createArray()
-          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-          putArray("timestamps", tsArray)
-        }
+          if (segment.timestamps.isNotEmpty()) {
+            val tsArray = Arguments.createArray()
+            segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+            putArray("timestamps", tsArray)
+          }
 
-        segment.meta?.let { rawMeta ->
-          try {
-            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
-          } catch (_: Exception) {
-            // Ignore non-serializable meta values.
+          segment.meta?.let { rawMeta ->
+            try {
+              putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+            } catch (_: Exception) {
+              // Ignore non-serializable meta values.
+            }
           }
         }
+        eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
+      } catch (_: Exception) {
+        // JS bridge may be unavailable during teardown.
       }
-      eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
-    } catch (_: Exception) {
-      // JS bridge may be unavailable during teardown.
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      emit.run()
+    } else {
+      mainHandler.post(emit)
     }
   }
 
