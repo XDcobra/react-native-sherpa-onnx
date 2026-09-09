@@ -211,3 +211,38 @@ export const DIARIZATION_AUDIO_FILES: AudioFileInfo[] = [
     language: 'en',
   },
 ];
+
+/**
+ * Keyword Spotting example clips. Selecting an entry prefills the Keywords
+ * textarea with `keywordsBody` (keywords.txt format). Replace / extend when
+ * dedicated wake-word WAVs are dropped into test_wavs/.
+ */
+export type KwsExampleAudio = AudioFileInfo & {
+  /** keywords.txt body shown in the textarea when this example is selected */
+  keywordsBody: string;
+};
+
+export const KWS_AUDIO_FILES: KwsExampleAudio[] = [
+  // Placeholder until dedicated KWS wake clips + matching keywordsBodies are supplied.
+  // Using EN samples so the list UI is exercisable; phrases must match the pack's token inventory.
+  {
+    id: TEST_AUDIO_FILES.EN_1,
+    name: 'KWS EN sample 1 (placeholder)',
+    description:
+      'Placeholder clip — replace with a wake-word recording for your pack',
+    language: 'en',
+    keywordsBody: [
+      '▁HE LL O ▁WORLD :1.5 #0.35',
+      '▁HI ▁GO O G LE :1.0 #0.25',
+      '▁HE Y ▁S I RI',
+    ].join('\n'),
+  },
+  {
+    id: TEST_AUDIO_FILES.EN_2,
+    name: 'KWS EN sample 2 (placeholder)',
+    description:
+      'Placeholder clip — edit keywordsBody to match your KWS pack tokens',
+    language: 'en',
+    keywordsBody: '▁HE Y ▁S I RI :1.5 #0.25',
+  },
+];
