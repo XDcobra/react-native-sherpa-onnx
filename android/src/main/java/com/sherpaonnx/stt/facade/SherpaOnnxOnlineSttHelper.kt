@@ -83,11 +83,21 @@ internal class SherpaOnnxOnlineSttHelper(
         }
 
         segment.meta?.let { rawMeta ->
-          try {
-            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
-          } catch (_: Exception) {
-            // Ignore non-serializable meta values.
+          val metaMap = Arguments.createMap()
+          for ((key, value) in rawMeta) {
+            when (value) {
+              null -> metaMap.putNull(key)
+              is Boolean -> metaMap.putBoolean(key, value)
+              is Int -> metaMap.putInt(key, value)
+              is Long -> metaMap.putDouble(key, value.toDouble())
+              is Float -> metaMap.putDouble(key, value.toDouble())
+              is Double -> metaMap.putDouble(key, value)
+              is Number -> metaMap.putDouble(key, value.toDouble())
+              is String -> metaMap.putString(key, value)
+              else -> Unit
+            }
           }
+          putMap("meta", metaMap)
         }
       }
 

@@ -264,12 +264,18 @@ class SttPipelineWorker(
   }
 
   override fun stop() {
-    if (!isRunning) return
+    // Always join. Early `!isRunning` return raced unload/release against the
+    // worker finally block (isRunning cleared before stream.release completes).
     isRunning = false
     lock.withLock { dataAvailable.signal() }
-    executor.shutdown()
-    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-      executor.shutdownNow()
+    if (!executor.isShutdown) {
+      executor.shutdown()
+    }
+    if (!executor.isTerminated) {
+      if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+        executor.shutdownNow()
+        executor.awaitTermination(2, TimeUnit.SECONDS)
+      }
     }
   }
 

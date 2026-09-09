@@ -19,7 +19,8 @@ import kotlin.concurrent.withLock
  * Native streaming worker for Keyword Spotting.
  *
  * Mirrors [com.sherpaonnx.stt.pipeline.SttPipelineWorker] but commits on keyword
- * hit (non-empty result.keyword) and always resets the stream after a hit.
+ * hit. Upstream contract: after each decode, getResult → on hit commit +
+ * reset(stream) before further decode (getResult is one-shot per hit).
  */
 class KwsStreamingPipelineWorker(
   override val pipelineId: String,
@@ -36,6 +37,8 @@ class KwsStreamingPipelineWorker(
     private const val LOG_TAG = "SherpaOnnxKws"
     private const val PREFIX = "[SherpaOnnx:kws]"
     private const val SOURCE = "kws_stream"
+    /** Match sherpa-onnx python KWS examples: trailing silence before inputFinished. */
+    private const val TAIL_PADDING_SECONDS = 0.66f
     const val DEFAULT_CHUNK_SIZE = 1600
   }
 
@@ -57,6 +60,8 @@ class KwsStreamingPipelineWorker(
   private var error: String? = null
   private var audioCursorId: Int = -1
   private var hitCount = 0
+  private var decodeStepsTotal = 0L
+  private var emptyGetResults = 0L
 
   private val lock = ReentrantLock()
   private val dataAvailable = lock.newCondition()
@@ -91,6 +96,11 @@ class KwsStreamingPipelineWorker(
         val chunk = inputEntry.drainCursor(audioCursorId, chunkSize)
         if (chunk.isEmpty()) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
+            Log.i(
+              LOG_TAG,
+              "$PREFIX eof pipelineId=$pipelineId hitsSoFar=$hitCount " +
+                "chunks=$chunksProcessed unitsRead=$unitsRead → autoFlush",
+            )
             autoFlushAndCommit(endOfAudio = true)
             break
           }
@@ -103,12 +113,42 @@ class KwsStreamingPipelineWorker(
         stream.acceptWaveform(chunk, sampleRate)
         unitsRead += chunk.size
 
+        var decodeSteps = 0
+        var commitsThisChunk = 0
         while (spotter.isReady(stream)) {
           spotter.decode(stream)
+          decodeSteps++
+          decodeStepsTotal++
+          // One getResult per decode — do not call getResult again before reset.
+          val result = spotter.getResult(stream)
+          val kw = result.keyword?.trim().orEmpty()
+          if (kw.isNotEmpty()) {
+            Log.i(
+              LOG_TAG,
+              "$PREFIX decodeHit pipelineId=$pipelineId chunk=$chunksProcessed " +
+                "decodeStep=$decodeSteps keyword=$kw " +
+                "tokens=${result.tokens?.size ?: 0} " +
+                "ts0=${result.timestamps?.firstOrNull()}",
+            )
+            val before = hitCount
+            maybeCommitHit(result)
+            if (hitCount > before) {
+              commitsThisChunk++
+            }
+          } else {
+            emptyGetResults++
+          }
         }
         chunksProcessed++
 
-        maybeCommitHit(spotter.getResult(stream))
+        if (commitsThisChunk > 0) {
+          Log.d(
+            LOG_TAG,
+            "$PREFIX chunkDone pipelineId=$pipelineId chunk=$chunksProcessed " +
+              "samples=${chunk.size} decodeSteps=$decodeSteps " +
+              "commitsThisChunk=$commitsThisChunk hitsTotal=$hitCount",
+          )
+        }
       }
     } catch (e: Exception) {
       error = e.message ?: "Unknown error in KWS pipeline"
@@ -132,10 +172,22 @@ class KwsStreamingPipelineWorker(
         }
         isRunning = false
       }
+      val audioSec =
+        if (sampleRate > 0) unitsRead.toDouble() / sampleRate.toDouble() else 0.0
       Log.i(
         LOG_TAG,
-        "$PREFIX worker end pipelineId=$pipelineId hits=$hitCount " +
-          "chunks=$chunksProcessed unitsRead=$unitsRead unitsWritten=$unitsWritten",
+        "$PREFIX sessionSummary pipelineId=$pipelineId hits=$hitCount " +
+          "chunks=$chunksProcessed unitsRead=$unitsRead audioSec=${"%.2f".format(audioSec)} " +
+          "decodeSteps=$decodeStepsTotal emptyGetResults=$emptyGetResults " +
+          "unitsWritten=$unitsWritten " +
+          "verdict=${
+            when {
+              unitsRead <= 0L -> "no_audio"
+              decodeStepsTotal <= 0L -> "no_decode"
+              hitCount <= 0 -> "model_no_match"
+              else -> "ok_hits"
+            }
+          }",
       )
       executor.shutdown()
     }
@@ -149,12 +201,13 @@ class KwsStreamingPipelineWorker(
 
     hitCount++
     val createdAtMs = System.currentTimeMillis()
-    val tokens = result.tokens ?: emptyArray()
-    val timestamps = result.timestamps ?: floatArrayOf()
+    // Copy tokens/timestamps before reset — emit is posted async to the main looper.
+    val tokens = (result.tokens ?: emptyArray()).map { it.orEmpty() }.toTypedArray()
+    val timestamps = (result.timestamps ?: floatArrayOf()).copyOf()
     val segmentMeta = mapOf<String, Any>(
       "__segmentReason" to "endpoint",
       "__segmentSource" to SOURCE,
-      "__segmentCreatedAtMs" to createdAtMs,
+      "__segmentCreatedAtMs" to createdAtMs.toDouble(),
       // Public meta (survives JS toPublicTextMeta) so onKeyword can filter kws_stream.
       "source" to SOURCE,
       "keyword" to keyword,
@@ -171,19 +224,60 @@ class KwsStreamingPipelineWorker(
     unitsWritten += keyword.length
     Log.i(
       LOG_TAG,
-      "$PREFIX hit pipelineId=$pipelineId keyword=$keyword segmentIndex=$segmentIndex",
+      "$PREFIX hit pipelineId=$pipelineId keyword=$keyword segmentIndex=$segmentIndex " +
+        "hitCount=$hitCount tokens=${tokens.size} ts0=${timestamps.firstOrNull()} " +
+        "→ reset(stream)",
     )
     spotter.reset(stream)
   }
 
+  private fun appendTailPaddingIfNeeded(endOfAudio: Boolean) {
+    if (!endOfAudio) {
+      return
+    }
+    val padSamples = (sampleRate * TAIL_PADDING_SECONDS).toInt().coerceAtLeast(1)
+    val tail = FloatArray(padSamples)
+    stream.acceptWaveform(tail, sampleRate)
+    unitsRead += padSamples
+    Log.i(
+      LOG_TAG,
+      "$PREFIX tailPad pipelineId=$pipelineId samples=$padSamples sr=$sampleRate",
+    )
+  }
+
   private fun autoFlushAndCommit(endOfAudio: Boolean) {
+    appendTailPaddingIfNeeded(endOfAudio)
     if (endOfAudio) {
       stream.inputFinished()
     }
+    var decodeSteps = 0
+    var commits = 0
     while (spotter.isReady(stream)) {
       spotter.decode(stream)
+      decodeSteps++
+      decodeStepsTotal++
+      val result = spotter.getResult(stream)
+      val kw = result.keyword?.trim().orEmpty()
+      if (kw.isNotEmpty()) {
+        Log.i(
+          LOG_TAG,
+          "$PREFIX flushHit pipelineId=$pipelineId endOfAudio=$endOfAudio " +
+            "decodeStep=$decodeSteps keyword=$kw",
+        )
+        val before = hitCount
+        maybeCommitHit(result)
+        if (hitCount > before) {
+          commits++
+        }
+      } else {
+        emptyGetResults++
+      }
     }
-    maybeCommitHit(spotter.getResult(stream))
+    Log.i(
+      LOG_TAG,
+      "$PREFIX flushDone pipelineId=$pipelineId endOfAudio=$endOfAudio " +
+        "decodeSteps=$decodeSteps commits=$commits hitsTotal=$hitCount",
+    )
   }
 
   private fun processCommands() {
@@ -211,12 +305,19 @@ class KwsStreamingPipelineWorker(
   }
 
   override fun stop() {
-    if (!isRunning) return
+    // Always awaitTermination: isRunning=false in finally can race stream.release
+    // with spotter.release() during unload if stop() returns early.
     isRunning = false
     lock.withLock { dataAvailable.signal() }
-    executor.shutdown()
-    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-      executor.shutdownNow()
+    if (!executor.isShutdown) {
+      executor.shutdown()
+    }
+    if (!executor.isTerminated) {
+      if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+        Log.w(LOG_TAG, "$PREFIX stop await timeout pipelineId=$pipelineId → shutdownNow")
+        executor.shutdownNow()
+        executor.awaitTermination(2, TimeUnit.SECONDS)
+      }
     }
   }
 

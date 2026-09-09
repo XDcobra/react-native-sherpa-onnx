@@ -191,8 +191,18 @@ class DiarizationStreamingPipelineWorker(
   }
 
   override fun stop() {
+    // Always join so unload/release cannot race the worker finally block.
     isRunning = false
     lock.withLock { dataAvailable.signal() }
+    if (!executor.isShutdown) {
+      executor.shutdown()
+    }
+    if (!executor.isTerminated) {
+      if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+        executor.shutdownNow()
+        executor.awaitTermination(2, TimeUnit.SECONDS)
+      }
+    }
   }
 
   override fun release() {

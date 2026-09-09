@@ -314,46 +314,72 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     segment: com.sherpaonnx.text.pipeline.TextSegment,
     totalSegments: Int,
   ) {
-    // Match iOS txt_emit_live_text_segment_event: always deliver on main looper
-    // so worker-thread commits (KWS/STT/…) never touch the RN bridge off-thread.
+    // Snapshot before main-looper emit — do not retain JNI-backed segment fields
+    // across the hop into the JS event payload.
+    val eventTextPair = truncateSegmentEventText(segment.text)
+    val snapshotText = eventTextPair.first
+    val textTruncated = eventTextPair.second
+    val snapshotSource = segment.source
+    val snapshotIndex = segment.segmentIndex
+    val snapshotTokens = segment.tokens.map { it.orEmpty() }.toTypedArray()
+    val snapshotTimestamps = segment.timestamps.copyOf()
+    val snapshotMeta: Map<String, Any?>? = segment.meta?.mapValues { (_, v) ->
+      when (v) {
+        is Long -> v.toDouble()
+        is Float -> v.toDouble()
+        else -> v
+      }
+    }
+
     val emit = Runnable {
       try {
         val eventEmitter = reactApplicationContext
           .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
         val payload = Arguments.createMap().apply {
           putString("liveBufferId", liveBufferId)
           putInt("totalSegments", totalSegments)
-          putString("text", eventText)
+          putString("text", snapshotText)
           if (textTruncated) {
             putBoolean("textTruncated", true)
           }
-          putString("source", segment.source)
-          putInt("segmentIndex", segment.segmentIndex)
+          putString("source", snapshotSource)
+          putInt("segmentIndex", snapshotIndex)
 
-          if (segment.tokens.isNotEmpty()) {
+          if (snapshotTokens.isNotEmpty()) {
             val tokenArray = Arguments.createArray()
-            segment.tokens.forEach { tokenArray.pushString(it) }
+            snapshotTokens.forEach { tokenArray.pushString(it) }
             putArray("tokens", tokenArray)
           }
 
-          if (segment.timestamps.isNotEmpty()) {
+          if (snapshotTimestamps.isNotEmpty()) {
             val tsArray = Arguments.createArray()
-            segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+            snapshotTimestamps.forEach { tsArray.pushDouble(it.toDouble()) }
             putArray("timestamps", tsArray)
           }
 
-          segment.meta?.let { rawMeta ->
-            try {
-              putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
-            } catch (_: Exception) {
-              // Ignore non-serializable meta values.
+          snapshotMeta?.let { rawMeta ->
+            val metaMap = Arguments.createMap()
+            for ((key, value) in rawMeta) {
+              when (value) {
+                null -> metaMap.putNull(key)
+                is Boolean -> metaMap.putBoolean(key, value)
+                is Int -> metaMap.putInt(key, value)
+                is Number -> metaMap.putDouble(key, value.toDouble())
+                is String -> metaMap.putString(key, value)
+                else -> {
+                  // Skip unsupported meta value types (typed puts only).
+                }
+              }
             }
+            putMap("meta", metaMap)
           }
         }
         eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
-      } catch (_: Exception) {
-        // JS bridge may be unavailable during teardown.
+      } catch (e: Exception) {
+        android.util.Log.w(
+          "SherpaOnnxText",
+          "[SherpaOnnx:text] emitLiveTextSegment failed: ${e.message}",
+        )
       }
     }
     if (Looper.myLooper() == Looper.getMainLooper()) {
