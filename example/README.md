@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -155,6 +155,14 @@ This screen streams source audio through live enhancement pipelines, including i
 
 
 This screen supports both live and offline VAD flows, including file and microphone input for live mode, plus segment timeline inspection and status polling. It validates segment buffer behavior and VAD summaries against [docs/vad-streaming.md](../docs/vad-streaming.md).
+
+## Keyword spotting (streaming)
+
+| ![Keyword spotting 1](../docs/images/example/kws_1.png) | ![Keyword spotting 2](../docs/images/example/kws_2.png) | ![Keyword spotting 3](../docs/images/example/kws_3.png) |
+| --- | --- | --- |
+|     |     |     |
+
+This screen runs real streaming keyword spotting (`createKeywordSpotting` → `engine.spot`) over a `LiveAudioBuffer` into a `LiveTextBuffer`. It covers pack-aware model init (`ModelCategory.Kws`), optional keyword overrides (`spot({ keywords })`), file or mic ingest, hit HUD / timeline, and pipeline lifecycle (start, flush, stop). Use tokens that match the loaded pack vocabulary (BPE vs ppinyin). See [docs/kws-streaming.md](../docs/kws-streaming.md).
 
 ## Punctuation (offline)
 
