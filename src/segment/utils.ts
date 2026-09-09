@@ -39,6 +39,7 @@ export function toSegmentReason(
  */
 export function inferSegmentReasonFromSource(source: string): SegmentReason {
   if (source === 'stt_stream') return 'endpoint';
+  if (source === 'kws_stream') return 'endpoint';
   if (source === 'segmentation_engine') return 'endpoint';
   if (source === 'punctuation') return 'punctuation';
   return 'manual_commit';

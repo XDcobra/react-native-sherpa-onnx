@@ -210,6 +210,7 @@ export type LiveTextBufferRecordingSource =
 /** Source of a partial update (native can aggregate). */
 export type LiveTextBufferPartialSource =
   | 'stt_stream'
+  | 'kws_stream'
   | 'append'
   | 'replace'
   | 'unknown'

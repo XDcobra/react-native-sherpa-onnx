@@ -1,5 +1,8 @@
+import type { LiveAudioBufferIdSource } from '../audiobuffer/types';
+import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 import type { QuantizationPreference } from '../download/types';
 import type { FileSource } from '../fileio/types';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
 
 export interface KeywordSpottingInitOptions {
   /** Directory-backed KWS model source. */
@@ -24,13 +27,31 @@ export interface KeywordSpottingInitOptions {
   quantization?: QuantizationPreference;
 }
 
+export interface KeywordDetection {
+  keyword: string;
+  tokens: string[];
+  timestamps: number[];
+  startTime?: number;
+}
+
+export interface KeywordSpottingPipelineOptions {
+  /** Samples per drain from the live audio ring. Native default is 6400. */
+  chunkSize?: number;
+  /** Optional per-session keywords override (sherpa createStream(keywords)). */
+  keywords?: string;
+  /** Fired for each keyword hit (also committed to the live text buffer). */
+  onKeyword?: (event: KeywordDetection & { segmentIndex: number }) => void;
+}
+
 /**
- * Initialized native KWS engine.
- *
- * Phase 2 exposes lifecycle only; streaming `spot(...)` arrives with the native
- * pipeline worker.
+ * Initialized native KWS engine with real streaming `spot(...)`.
  */
 export interface KeywordSpottingEngine {
   readonly instanceId: string;
+  spot(
+    audioIn: LiveAudioBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options?: KeywordSpottingPipelineOptions
+  ): Promise<StreamingPipelineHandle & { instanceId: string }>;
   destroy(): Promise<void>;
 }

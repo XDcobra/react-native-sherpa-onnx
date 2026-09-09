@@ -8,6 +8,8 @@ export {
 export { buildKeywordSpottingInitBridgeOptions } from './kwsNativeBridge';
 export type { KeywordSpottingDetectedPaths } from './kwsNativeBridge';
 export type {
+  KeywordDetection,
   KeywordSpottingEngine,
   KeywordSpottingInitOptions,
+  KeywordSpottingPipelineOptions,
 } from './types';

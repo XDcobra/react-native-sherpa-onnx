@@ -289,6 +289,7 @@ function parseNativeLiveTextSegment(raw: unknown): LiveTextSegment | undefined {
 
   const source =
     raw.source === 'stt_stream' ||
+    raw.source === 'kws_stream' ||
     raw.source === 'append' ||
     raw.source === 'replace' ||
     raw.source === 'mixed' ||
@@ -1060,6 +1061,7 @@ export async function getLiveTextBufferSegments(
     text: segment.text,
     source:
       segment.source === 'stt_stream' ||
+      segment.source === 'kws_stream' ||
       segment.source === 'append' ||
       segment.source === 'replace' ||
       segment.source === 'mixed' ||

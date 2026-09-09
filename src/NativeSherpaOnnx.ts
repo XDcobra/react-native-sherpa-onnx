@@ -1719,11 +1719,23 @@ export interface Spec extends TurboModule {
     };
   }>;
 
-  /** Initialize a native keyword spotter. Streaming execution lands separately. */
+  /** Initialize a native keyword spotter. */
   initializeKeywordSpotting(
     instanceId: string,
     options: KeywordSpottingInitBridgeOptions
   ): Promise<{ success: boolean; error?: string }>;
+
+  /**
+   * Start native streaming KWS pipeline: live audio buffer → live text buffer.
+   * Optional `keywords` overrides the pack keywords file for this stream only.
+   */
+  startKeywordSpottingPipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    chunkSize?: number,
+    keywords?: string
+  ): Promise<{ pipelineId: string }>;
 
   /** Release a native keyword spotter. Idempotent when the id is absent. */
   unloadKeywordSpotting(instanceId: string): Promise<void>;
