@@ -182,7 +182,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     NAME
   )
   private val onlineSttHelper = SherpaOnnxOnlineSttHelper(reactApplicationContext, NAME)
-  private val kwsHelper = SherpaOnnxKwsHelper()
+  private val kwsHelper = SherpaOnnxKwsHelper(reactApplicationContext)
   private val offlineSttLivePipelineHelper = SherpaOnnxOfflineSttLivePipelineHelper(
     reactApplicationContext,
     sttHelper,
@@ -5022,6 +5022,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     kwsHelper.initializeKeywordSpotting(instanceId, options, promise)
+  }
+
+  override fun startKeywordSpottingPipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    chunkSize: Double?,
+    keywords: String?,
+    promise: Promise
+  ) {
+    kwsHelper.startKeywordSpottingPipeline(
+      instanceId,
+      audioInLiveBufferId,
+      textOutLiveBufferId,
+      chunkSize?.toInt(),
+      keywords,
+      promise,
+    )
   }
 
   override fun unloadKeywordSpotting(instanceId: String, promise: Promise) {

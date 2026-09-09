@@ -3,16 +3,34 @@ package com.sherpaonnx.kws.facade
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
+import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.kws.pipeline.KwsStreamingPipelineWorker
+import com.sherpaonnx.text.pipeline.TextPipelineRegistry
+import com.sherpaonnx.text.pipeline.TextSegment
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-internal class SherpaOnnxKwsHelper {
-  private val instances = ConcurrentHashMap<String, KeywordSpotter>()
+internal class SherpaOnnxKwsHelper(
+  private val context: ReactApplicationContext,
+) {
+  private data class KwsInstance(
+    val spotter: KeywordSpotter,
+    val sampleRate: Int,
+    var activePipelineId: String? = null,
+  )
+
+  private val instances = ConcurrentHashMap<String, KwsInstance>()
 
   fun initializeKeywordSpotting(
     instanceId: String,
@@ -44,6 +62,7 @@ internal class SherpaOnnxKwsHelper {
     }
 
     try {
+      val sampleRate = 16000
       val modelConfig = OnlineModelConfig(
         transducer = OnlineTransducerModelConfig(
           encoder = paths.getValue("encoder"),
@@ -57,7 +76,7 @@ internal class SherpaOnnxKwsHelper {
         modelType = "zipformer2",
       )
       val config = KeywordSpotterConfig(
-        featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+        featConfig = FeatureConfig(sampleRate = sampleRate, featureDim = 80),
         modelConfig = modelConfig,
         maxActivePaths = optionInt(options, "maxActivePaths", 4),
         keywordsFile = paths.getValue("keywords"),
@@ -66,7 +85,8 @@ internal class SherpaOnnxKwsHelper {
         numTrailingBlanks = optionInt(options, "numTrailingBlanks", 2),
       )
       val spotter = KeywordSpotter(assetManager = null, config = config)
-      val existing = instances.putIfAbsent(instanceId, spotter)
+      val inst = KwsInstance(spotter = spotter, sampleRate = sampleRate)
+      val existing = instances.putIfAbsent(instanceId, inst)
       if (existing != null) {
         spotter.release()
         promise.reject(ERROR_INIT, "Keyword spotting instance already exists: $instanceId")
@@ -81,11 +101,144 @@ internal class SherpaOnnxKwsHelper {
     }
   }
 
+  fun startKeywordSpottingPipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    chunkSize: Int?,
+    keywords: String?,
+    promise: Promise,
+  ) {
+    try {
+      val inst = instances[instanceId]
+      if (inst == null) {
+        promise.reject(
+          "KWS_PIPELINE_INSTANCE_NOT_FOUND",
+          "Keyword spotting instance not found: $instanceId",
+        )
+        return
+      }
+
+      val inputEntry = PipelineAudioRegistry.getLive(audioInLiveBufferId)
+      if (inputEntry == null) {
+        promise.reject(
+          "KWS_PIPELINE_AUDIO_BUFFER_NOT_FOUND",
+          "Input live audio buffer not found: $audioInLiveBufferId",
+        )
+        return
+      }
+
+      val outputEntry = TextPipelineRegistry.getLive(textOutLiveBufferId)
+      if (outputEntry == null) {
+        promise.reject(
+          "KWS_PIPELINE_TEXT_BUFFER_NOT_FOUND",
+          "Output live text buffer not found: $textOutLiveBufferId",
+        )
+        return
+      }
+
+      if (inputEntry.kind != "livePcmBuffer") {
+        promise.reject("KWS_PIPELINE_BUFFER_KIND_MISMATCH", "Input buffer must be a live audio buffer")
+        return
+      }
+
+      if (inputEntry.state != LiveEntry.State.RECORDING) {
+        promise.reject("KWS_PIPELINE_BUFFER_NOT_RECORDING", "Input audio buffer is not in recording state")
+        return
+      }
+
+      if (outputEntry.state != com.sherpaonnx.text.pipeline.LiveTextEntry.State.RECORDING) {
+        promise.reject("KWS_PIPELINE_BUFFER_NOT_RECORDING", "Output text buffer is not in recording state")
+        return
+      }
+
+      if (inputEntry.sampleRate != inst.sampleRate) {
+        promise.reject(
+          "KWS_PIPELINE_SAMPLE_RATE_MISMATCH",
+          "Input buffer sample rate (${inputEntry.sampleRate}) does not match spotter sample rate (${inst.sampleRate})",
+        )
+        return
+      }
+
+      synchronized(inst) {
+        val existingPipelineId = inst.activePipelineId
+        if (!existingPipelineId.isNullOrBlank()) {
+          val existingWorker = StreamingPipelineRegistry.get(existingPipelineId)
+          if (existingWorker != null && existingWorker.isRunning) {
+            promise.reject(
+              "KWS_PIPELINE_ALREADY_RUNNING",
+              "Keyword spotting pipeline already running for instance: $instanceId",
+            )
+            return
+          }
+          StreamingPipelineRegistry.remove(existingPipelineId)
+          inst.activePipelineId = null
+        }
+      }
+
+      val pipelineId = UUID.randomUUID().toString()
+      val keywordsOverride = keywords?.trim().orEmpty()
+      val stream = inst.spotter.createStream(keywordsOverride)
+
+      val worker = KwsStreamingPipelineWorker(
+        pipelineId = pipelineId,
+        spotter = inst.spotter,
+        stream = stream,
+        inputEntry = inputEntry,
+        outputEntry = outputEntry,
+        sampleRate = inst.sampleRate,
+        chunkSize = chunkSize ?: 6400,
+        onKeywordCommitted = { segment, totalSegments ->
+          emitLiveTextSegmentEvent(textOutLiveBufferId, segment, totalSegments)
+        },
+      )
+
+      StreamingPipelineRegistry.registerAndStart(worker) { completion ->
+        emitPipelineCompletedEvent(completion)
+        synchronized(inst) {
+          if (inst.activePipelineId == pipelineId) {
+            inst.activePipelineId = null
+          }
+        }
+      }
+
+      synchronized(inst) {
+        inst.activePipelineId = pipelineId
+      }
+
+      Log.i(
+        TAG,
+        "$PREFIX pipeline start instanceId=$instanceId pipelineId=$pipelineId " +
+          "keywordsOverride=${keywordsOverride.isNotEmpty()}",
+      )
+      promise.resolve(
+        Arguments.createMap().apply { putString("pipelineId", pipelineId) },
+      )
+    } catch (e: Exception) {
+      Log.e(TAG, "$PREFIX startKeywordSpottingPipeline failed: ${e.message}", e)
+      promise.reject(
+        "STREAMING_PIPELINE_ERROR",
+        "Failed to start keyword spotting pipeline: ${e.message}",
+        e,
+      )
+    }
+  }
+
   fun unloadKeywordSpotting(instanceId: String, promise: Promise) {
     try {
-      val spotter = instances.remove(instanceId)
-      spotter?.release()
-      Log.i(TAG, "$PREFIX unloaded instanceId=$instanceId found=${spotter != null}")
+      val inst = instances.remove(instanceId)
+      if (inst != null) {
+        synchronized(inst) {
+          val activePipelineId = inst.activePipelineId
+          if (!activePipelineId.isNullOrBlank()) {
+            StreamingPipelineRegistry.stop(activePipelineId)
+            StreamingPipelineRegistry.remove(activePipelineId)
+          }
+          inst.activePipelineId = null
+        }
+        inst.spotter.release()
+      }
+      Log.i(TAG, "$PREFIX unloaded instanceId=$instanceId found=${inst != null}")
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(TAG, "$PREFIX unload failed instanceId=$instanceId: ${e.message}", e)
@@ -96,10 +249,81 @@ internal class SherpaOnnxKwsHelper {
   fun shutdown() {
     instances.keys.toList().forEach { instanceId ->
       try {
-        instances.remove(instanceId)?.release()
+        val inst = instances.remove(instanceId) ?: return@forEach
+        synchronized(inst) {
+          val activePipelineId = inst.activePipelineId
+          if (!activePipelineId.isNullOrBlank()) {
+            StreamingPipelineRegistry.stop(activePipelineId)
+            StreamingPipelineRegistry.remove(activePipelineId)
+          }
+          inst.activePipelineId = null
+        }
+        inst.spotter.release()
       } catch (e: Exception) {
         Log.w(TAG, "$PREFIX shutdown release failed instanceId=$instanceId: ${e.message}")
       }
+    }
+  }
+
+  private fun emitLiveTextSegmentEvent(
+    liveBufferId: String,
+    segment: TextSegment,
+    totalSegments: Int,
+  ) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("liveBufferId", liveBufferId)
+        putInt("totalSegments", totalSegments)
+        putString("text", segment.text)
+        putString("source", segment.source)
+        putInt("segmentIndex", segment.segmentIndex)
+
+        if (segment.tokens.isNotEmpty()) {
+          val tokenArray = Arguments.createArray()
+          segment.tokens.forEach { tokenArray.pushString(it) }
+          putArray("tokens", tokenArray)
+        }
+
+        if (segment.timestamps.isNotEmpty()) {
+          val tsArray = Arguments.createArray()
+          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
+          putArray("timestamps", tsArray)
+        }
+
+        segment.meta?.let { rawMeta ->
+          try {
+            putMap("meta", Arguments.makeNativeMap(HashMap(rawMeta)))
+          } catch (_: Exception) {
+          }
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("pipelineLiveTextSegmentAppended", payload)
+    } catch (_: Exception) {
+    }
+  }
+
+  private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("pipelineId", completion.pipelineId)
+        putString("reason", completion.reason)
+        putDouble("chunksProcessed", completion.chunksProcessed.toDouble())
+        putDouble("unitsRead", completion.unitsRead.toDouble())
+        putDouble("unitsWritten", completion.unitsWritten.toDouble())
+        if (completion.error != null) {
+          putString("error", completion.error)
+        } else {
+          putNull("error")
+        }
+      }
+
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("streamingPipelineCompleted", payload)
+    } catch (_: Exception) {
     }
   }
 
