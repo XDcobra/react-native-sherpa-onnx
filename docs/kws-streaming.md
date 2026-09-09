@@ -381,7 +381,29 @@ Validate / detect category: **`kws`**.
 
 Packs are expected to be **online zipformer2**-style KWS releases. Folder names containing `kws` help auto detection; otherwise a root-level `keywords.txt` is required so the detector does not confuse the pack with STT.
 
-Query keys: `getCustomModelPathRequirements('kws', 'transducer')` when using custom-path validation helpers. Engine create today is **folder auto-detect** + optional `keywordsPath` (no `initMode: 'custom'` on `createKeywordSpotting` yet).
+Query keys: `getCustomModelPathRequirements('kws', 'transducer')`.
+
+### Custom init (`initMode: 'custom'`)
+
+Same path-slot pattern as VAD/STT. Skip folder detect and pass explicit `FileSource`s:
+
+```ts
+import { createKeywordSpotting } from 'react-native-sherpa-onnx/kws';
+
+const engine = await createKeywordSpotting({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/path/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/path/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/path/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/path/tokens.txt' },
+    keywords: { kind: 'fs', path: '/path/keywords.txt' },
+  },
+});
+```
+
+`keywords` is required for KeywordSpotter construction (safe pack vocabulary). Per-session phrase overrides still use `spot({ keywords })` / init `keywordsPath` via `createStream` (see [KNOWN_ISSUES](KNOWN_ISSUES.md)).
 
 ## Troubleshooting
 

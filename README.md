@@ -23,7 +23,7 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
-**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
+**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
 
 ## Installation
 
@@ -338,6 +338,20 @@ APIs and initialization: [VAD (streaming)](./docs/vad-streaming.md).
 </details>
 
 <details>
+<summary>Keyword Spotting (KWS) models</summary>
+
+Keyword spotting / wake-word listens continuously and fires on configured phrases. Use dedicated **KWS zipformer** packs (not arbitrary streaming STT zipformer packs). Detection resolves transducer layout + `keywords.txt`.
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` / folder scan | Finds encoder / decoder / joiner / `tokens.txt` / `keywords.txt` in the model folder. | n/a |
+| **Transducer (zipformer2)** | `'transducer'` | Online KWS pack (e.g. WenetSpeech zh, GigaSpeech en, zh+en). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models) |
+
+APIs and initialization: [Keyword spotting (streaming)](./docs/kws-streaming.md). Custom init: `initMode: 'custom'` with explicit path slots (`encoder`, `decoder`, `joiner`, `tokens`, `keywords`).
+
+</details>
+
+<details>
 <summary>Source Separation models</summary>
 
 Source separation splits mixed audio into stems (e.g. vocals / accompaniment).
@@ -445,7 +459,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, keyword spotting (KWS streaming), alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
