@@ -164,13 +164,13 @@ sherpa-onnx-cli text2token \
 
 ### Init file vs per-session override (reload without destroy)
 
-| Goal | How | Re-download / destroy? |
+| Goal | How | Engine lifecycle |
 | --- | --- | --- |
 | Default keywords from the pack | Omit overrides; detect uses `<modelDir>/keywords.txt` | — |
-| Different keywords file at engine create | `createKeywordSpotting({ keywordsPath })` | No re-download; file must exist on disk |
-| New phrases for **one** `spot` session | `spot(..., { keywords })` → native `createStream(keywords)` | **Same engine** — no destroy, no re-download |
+| Different keywords file at engine create | `createKeywordSpotting({ keywordsPath })` | Create once; path must exist on disk |
+| New phrases for **one** `spot` session | `spot(..., { keywords })` → native `createStream(keywords)` | **Same engine** — no destroy |
 | Change phrases **mid** listening | `await pipeline.stop()` then `spot(..., { keywords: next })` again | Same engine |
-| Change `keywordsScore` / `keywordsThreshold` / `numTrailingBlanks` / baked `keywordsPath` | `await engine.destroy()` then `createKeywordSpotting` again | No model re-download; re-init only |
+| Change `keywordsScore` / `keywordsThreshold` / `numTrailingBlanks` / baked `keywordsPath` | `await engine.destroy()` then `createKeywordSpotting` again | Re-init required (init-time config) |
 
 `spot({ keywords })` accepts the **same textual format as a `keywords.txt` body** (one or more lines). Empty / omit → use the keywords file from engine init.
 
@@ -194,6 +194,51 @@ Prefer **callbacks**, not polling:
 2. **`onSegment`** on `createLiveTextBuffer` — raw live-text commits (filter `meta.source` if other writers share the buffer).
 
 Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
+
+```ts
+const textOut = await createLiveTextBuffer({
+  spooling: { mode: 'off' },
+  onSegment: (e) => {
+    // e ≈ {
+    //   bufferId: 'live_text_…',
+    //   totalSegments: 1,
+    //   segment: {
+    //     domain: 'text',
+    //     text: '你好',                 // keyword label
+    //     segmentIndex: 0,
+    //     reason: 'endpoint',
+    //     source: 'segmentation_engine', // collapsed public SegmentSource
+    //     tokens: ['你', '好'],          // may be empty if native omits
+    //     timestamps: [0.12, 0.28],      // seconds; may be empty
+    //     meta: {
+    //       source: 'kws_stream',        // filter key for KWS hits
+    //       keyword: '你好',
+    //       startTime: 1.04,             // iOS often; Android usually absent
+    //     },
+    //     …segmentId, offsets, createdAtMs, utf16Length
+    //   },
+    // }
+    if (e.segment.domain !== 'text') return;
+    if (e.segment.meta?.source !== 'kws_stream') return;
+    console.log('[onSegment]', e.segment.text, e.segment.meta);
+  },
+});
+
+const pipeline = await engine.spot(audioIn, textOut, {
+  onKeyword: (e) => {
+    // e ≈ {
+    //   keyword: '你好',
+    //   tokens: ['你', '好'],
+    //   timestamps: [0.12, 0.28],
+    //   startTime: 1.04,   // optional; see platform note above
+    //   segmentIndex: 0,   // LiveTextBuffer commit index
+    // }
+    console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
+  },
+});
+```
+
+`onKeyword` is convenience over the same commit as `onSegment`: it only fires when `meta.source === 'kws_stream'`. Use either or both.
 
 ## LiveTextBuffer spooling
 
