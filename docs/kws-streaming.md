@@ -396,6 +396,7 @@ Query keys: `getCustomModelPathRequirements('kws', 'transducer')` when using cus
 
 ## See also
 
+- Example app: **Keyword Spotting** screen (`example/src/screens/kws/`) — developer lab for pack init, keywords textarea / `keywordsPath`, mic + file ingest, hit HUD, unload-while-running
 - [Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)
 - [Live audio buffers](audiobuffer-streaming.md) — mic, ingest, finalize
 - [Live text buffers](textbuffer-streaming.md) — segments, spooling
