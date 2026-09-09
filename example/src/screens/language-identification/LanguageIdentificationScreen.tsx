@@ -4,7 +4,6 @@ import {
   Alert,
   Pressable,
   ScrollView,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -36,10 +35,6 @@ import {
   type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  createLiveSegmentBuffer,
-  releasePipelineSegmentBuffer,
-} from 'react-native-sherpa-onnx/segmentbuffer';
 import {
   createLiveTextBuffer,
   releasePipelineTextBuffer,
@@ -259,7 +254,6 @@ export default function LanguageIdentificationScreen() {
     useState<AudioFileId>(TEST_AUDIO_FILES.ZH_EN_1);
   const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [populateLiveSegments, setPopulateLiveSegments] = useState(false);
   const [liveRunState, setLiveRunState] = useState<
     'idle' | 'running' | 'stopping'
   >('idle');
@@ -271,7 +265,6 @@ export default function LanguageIdentificationScreen() {
   const pipelineRef = useRef<LanguageIdentificationPipelineHandle | null>(null);
   const liveInRef = useRef<LiveAudioBufferRef | null>(null);
   const liveTextRef = useRef<LiveTextBufferRef | null>(null);
-  const liveSegOutRef = useRef<string | null>(null);
   const ingestHandleRef = useRef<FileIngestHandle | null>(null);
   const cleanupLockRef = useRef(false);
   const liveRunEpochRef = useRef(0);
@@ -361,12 +354,6 @@ export default function LanguageIdentificationScreen() {
         // ignore
       }
       pipelineRef.current = null;
-
-      const segOut = liveSegOutRef.current;
-      liveSegOutRef.current = null;
-      if (segOut) {
-        await releasePipelineSegmentBuffer(segOut).catch(() => {});
-      }
 
       const liveText = liveTextRef.current;
       liveTextRef.current = null;
@@ -730,22 +717,11 @@ export default function LanguageIdentificationScreen() {
       const liveText = await createLiveTextBuffer();
       liveTextRef.current = liveText;
 
-      let targetSegId: string | undefined;
-      if (populateLiveSegments) {
-        const labeledOut = await createLiveSegmentBuffer({
-          sourceAudioBufferId: liveIn.bufferId,
-          spooling: { mode: 'on' },
-        });
-        liveSegOutRef.current = labeledOut.bufferId;
-        targetSegId = labeledOut.bufferId;
-      }
-
       const pipeline = await engine.identify(liveIn, liveText, {
         segmentation: {
           mode: 'auto',
           policy: segOption.policy,
         },
-        targetSegmentBuffer: targetSegId,
         onSegment: (event) => {
           appendLiveLog({
             kind: 'segment',
@@ -814,7 +790,6 @@ export default function LanguageIdentificationScreen() {
     appendLiveLog,
     cleanupLiveRuntime,
     liveSourceMode,
-    populateLiveSegments,
     resolveLiveFileSource,
     segLiveConfig,
   ]);
@@ -1376,17 +1351,6 @@ export default function LanguageIdentificationScreen() {
                 commit (≥ ~1.5s). Stop when finished.
               </Text>
             )}
-
-            <View style={styles.toggleRow}>
-              <Text style={styles.bodyText}>
-                Also write LiveSegment → targetSegmentBuffer
-              </Text>
-              <Switch
-                value={populateLiveSegments}
-                onValueChange={setPopulateLiveSegments}
-                disabled={liveBusy || !engineReady}
-              />
-            </View>
 
             {liveCurrentLang ? (
               <View style={styles.langHero}>

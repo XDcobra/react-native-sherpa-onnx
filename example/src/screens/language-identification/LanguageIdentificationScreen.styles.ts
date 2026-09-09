@@ -323,12 +323,6 @@ export const styles = StyleSheet.create({
   progressIndeterminate: {
     width: '40%',
   },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
   copyBtn: {
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
