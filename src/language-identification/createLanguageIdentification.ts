@@ -2,18 +2,29 @@ import SherpaOnnx, {
   type LanguageIdProcessNativeResult,
 } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
 import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import { buildLanguageIdInitBridgeOptions } from './languageIdNativeBridge';
+import {
+  identifyLiveOverload,
+  isLiveAudioSource,
+  isLiveTextSource,
+} from './live';
 import {
   runOfflineLanguageIdLabeling,
   runOfflineLanguageIdSegmentation,
 } from './orchestrate';
+import type { LanguageIdentificationPipelineHandle } from './streamingTypes';
 import {
   LanguageIdErrorCode,
   type LanguageIdLabelOptions,
   type LanguageIdentificationEngine,
   type LanguageIdentificationInitializeOptions,
+  type LanguageIdentificationLivePipelineOptions,
   type LanguageIdentificationOptions,
   type LanguageIdentificationResult,
   type LabelOfflineSegmentsResult,
@@ -48,72 +59,106 @@ export async function createLanguageIdentification(
 
   let isDestroyed = false;
 
+  const identifyImpl = async (
+    audioOrLive: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
+    second?:
+      | LanguageIdentificationOptions
+      | LiveTextBufferIdSource
+      | LanguageIdentificationLivePipelineOptions,
+    third?: LanguageIdentificationLivePipelineOptions
+  ): Promise<
+    | LanguageIdentificationResult
+    | SegmentedLanguageIdentificationResult
+    | LanguageIdentificationPipelineHandle
+  > => {
+    if (isDestroyed) {
+      throw new Error(
+        `${LanguageIdErrorCode.DESTROYED}: Language identification engine instance ${instanceId} has been destroyed`
+      );
+    }
+    if (audioOrLive == null) {
+      throw new Error(
+        `${LanguageIdErrorCode.INVALID_ARGUMENT}: audio buffer is required`
+      );
+    }
+
+    // Mode 3: identify(liveAudio, liveText, options)
+    if (isLiveAudioSource(audioOrLive) && isLiveTextSource(second)) {
+      if (third == null || typeof third !== 'object') {
+        throw new Error(
+          `${LanguageIdErrorCode.INVALID_ARGUMENT}: live identify requires options with segmentation`
+        );
+      }
+      return identifyLiveOverload(
+        instanceId,
+        audioOrLive,
+        second,
+        third as LanguageIdentificationLivePipelineOptions
+      );
+    }
+
+    if (isLiveAudioSource(audioOrLive)) {
+      throw new Error(
+        `${LanguageIdErrorCode.INVALID_ARGUMENT}: identify(liveAudio, …) requires (liveAudio, liveText, options).`
+      );
+    }
+
+    const identifyOptions =
+      second != null && typeof second === 'object' && !isLiveTextSource(second)
+        ? (second as LanguageIdentificationOptions)
+        : undefined;
+
+    if (identifyOptions?.segmentation?.mode === 'auto') {
+      return runOfflineLanguageIdSegmentation(
+        instanceId,
+        audioOrLive,
+        identifyOptions
+      );
+    }
+
+    let audioBufferId: string;
+    try {
+      audioBufferId = resolvePipelineAudioBufferId(audioOrLive);
+    } catch (e: any) {
+      throw new Error(
+        `${LanguageIdErrorCode.INVALID_ARGUMENT}: ${e?.message ?? String(e)}`
+      );
+    }
+
+    if (
+      typeof audioBufferId !== 'string' ||
+      !audioBufferId.startsWith('off_')
+    ) {
+      throw new Error(
+        `${
+          LanguageIdErrorCode.INVALID_ARGUMENT
+        }: expected an offline audio buffer (off_...), got ${String(
+          audioBufferId
+        )}`
+      );
+    }
+
+    const res: LanguageIdProcessNativeResult =
+      await SherpaOnnx.identifyLanguageOffline(
+        instanceId,
+        audioBufferId,
+        null,
+        null
+      );
+
+    return {
+      lang: res.lang,
+      audioDuration: res.audioDuration,
+      elapsedMs: res.elapsedMs,
+    };
+  };
+
   return {
     get instanceId() {
       return instanceId;
     },
 
-    identify: (async (
-      audio: OfflineAudioBufferIdSource,
-      identifyOptions?: LanguageIdentificationOptions
-    ): Promise<
-      LanguageIdentificationResult | SegmentedLanguageIdentificationResult
-    > => {
-      if (isDestroyed) {
-        throw new Error(
-          `${LanguageIdErrorCode.DESTROYED}: Language identification engine instance ${instanceId} has been destroyed`
-        );
-      }
-      if (audio == null) {
-        throw new Error(
-          `${LanguageIdErrorCode.INVALID_ARGUMENT}: audio buffer is required`
-        );
-      }
-
-      if (identifyOptions?.segmentation?.mode === 'auto') {
-        return runOfflineLanguageIdSegmentation(
-          instanceId,
-          audio,
-          identifyOptions
-        );
-      }
-
-      let audioBufferId: string;
-      try {
-        audioBufferId = resolvePipelineAudioBufferId(audio);
-      } catch (e: any) {
-        throw new Error(
-          `${LanguageIdErrorCode.INVALID_ARGUMENT}: ${e?.message ?? String(e)}`
-        );
-      }
-
-      if (
-        typeof audioBufferId !== 'string' ||
-        !audioBufferId.startsWith('off_')
-      ) {
-        throw new Error(
-          `${
-            LanguageIdErrorCode.INVALID_ARGUMENT
-          }: expected an offline audio buffer (off_...), got ${String(
-            audioBufferId
-          )}`
-        );
-      }
-
-      const res: LanguageIdProcessNativeResult =
-        await SherpaOnnx.identifyLanguageOffline(
-          instanceId,
-          audioBufferId,
-          null,
-          null
-        );
-
-      return {
-        lang: res.lang,
-        audioDuration: res.audioDuration,
-        elapsedMs: res.elapsedMs,
-      };
-    }) as LanguageIdentificationEngine['identify'],
+    identify: identifyImpl as LanguageIdentificationEngine['identify'],
 
     async labelOfflineSegments(
       audioIn: OfflineAudioBufferIdSource,
