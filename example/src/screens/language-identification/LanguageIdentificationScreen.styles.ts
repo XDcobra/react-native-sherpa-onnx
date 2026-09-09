@@ -247,32 +247,6 @@ export const styles = StyleSheet.create({
     color: '#B45309',
     fontWeight: '700',
   },
-  exampleRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  exampleChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#F3F4F6',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    maxWidth: '48%',
-  },
-  exampleChipActive: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#93C5FD',
-  },
-  exampleChipText: {
-    fontSize: 12,
-    color: '#374151',
-    fontWeight: '600',
-  },
-  exampleChipTextActive: {
-    color: '#1D4ED8',
-  },
   progressBox: {
     gap: 6,
     marginTop: 4,

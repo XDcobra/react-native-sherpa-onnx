@@ -68,6 +68,13 @@ export const widgetStyles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
   },
+  audioFileButtonFavorite: {
+    backgroundColor: '#EEF4FF',
+    borderColor: '#93C5FD',
+  },
+  audioFileFavoriteMark: {
+    color: '#1D4ED8',
+  },
   // Decode progress
   decodeProgressContainer: {
     borderRadius: 10,

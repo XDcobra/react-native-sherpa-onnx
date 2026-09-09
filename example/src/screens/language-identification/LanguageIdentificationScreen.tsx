@@ -56,6 +56,7 @@ import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowca
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
+  ExampleAudioFileList,
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
@@ -118,6 +119,10 @@ const LANG_AUDIO_FILES = AUDIO_FILES.filter(
 
 const ZH_EN_META =
   LANG_AUDIO_FILES.find((file) => file.id === TEST_AUDIO_FILES.ZH_EN_1) ?? null;
+
+const LANG_FAVORITE_AUDIO_IDS = ZH_EN_META
+  ? ([TEST_AUDIO_FILES.ZH_EN_1] as const)
+  : undefined;
 
 const DEFAULT_LANG_ID_CUSTOM_INIT: LanguageIdentificationCustomInitFormState = {
   modelType: 'whisper',
@@ -1152,34 +1157,10 @@ export default function LanguageIdentificationScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Input (offline)</Text>
             <Text style={styles.sectionHint}>
-              Primary code-switch demo: ZH↔EN meeting (
-              {ZH_EN_META?.name ?? '中英混合样本'}). Short EN/ZH/JA/KO clips
+              Prefer the ★ ZH↔EN meeting clip with segmentation Auto for
+              code-switching (distribution + switches). Short EN/ZH/JA/KO clips
               suit oneshot.
             </Text>
-            <View style={styles.exampleRow}>
-              {LANG_AUDIO_FILES.map((audioFile) => {
-                const isZhEn = audioFile.id === TEST_AUDIO_FILES.ZH_EN_1;
-                return (
-                  <View
-                    key={audioFile.id}
-                    style={[
-                      styles.exampleChip,
-                      isZhEn && styles.exampleChipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.exampleChipText,
-                        isZhEn && styles.exampleChipTextActive,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {isZhEn ? `★ ${audioFile.name}` : audioFile.name}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
             {showZhEnOneshotWarn ? (
               <View style={styles.warnBox}>
                 <Text style={styles.warnText}>
@@ -1193,6 +1174,7 @@ export default function LanguageIdentificationScreen() {
             <OfflineAudioBufferWidget
               ref={offlineWidgetRef}
               audioFiles={LANG_AUDIO_FILES}
+              favoriteAudioFileIds={LANG_FAVORITE_AUDIO_IDS}
               visible={engineReady}
               disabled={!engineReady || identifying || liveBusy}
               onBufferReady={(info) => {
@@ -1340,37 +1322,16 @@ export default function LanguageIdentificationScreen() {
                 </View>
 
                 {liveFileSourceType === 'example' ? (
-                  <View style={styles.exampleRow}>
-                    {LANG_AUDIO_FILES.map((audioFile) => {
-                      const active = selectedExampleAudioId === audioFile.id;
-                      const isZhEn = audioFile.id === TEST_AUDIO_FILES.ZH_EN_1;
-                      return (
-                        <TouchableOpacity
-                          key={audioFile.id}
-                          style={[
-                            styles.exampleChip,
-                            (active || isZhEn) && styles.exampleChipActive,
-                          ]}
-                          onPress={() => {
-                            setSelectedExampleAudioId(audioFile.id);
-                            setLiveFileSourceType('example');
-                          }}
-                          disabled={liveBusy}
-                        >
-                          <Text
-                            style={[
-                              styles.exampleChipText,
-                              (active || isZhEn) &&
-                                styles.exampleChipTextActive,
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {isZhEn ? `★ ${audioFile.name}` : audioFile.name}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                  <ExampleAudioFileList
+                    audioFiles={LANG_AUDIO_FILES}
+                    favoriteAudioFileIds={LANG_FAVORITE_AUDIO_IDS}
+                    selectedId={selectedExampleAudioId}
+                    onSelect={(audioFile) => {
+                      setSelectedExampleAudioId(audioFile.id);
+                      setLiveFileSourceType('example');
+                    }}
+                    disabled={liveBusy}
+                  />
                 ) : !selectedFileUri ? (
                   <TouchableOpacity
                     style={lpStyles.optionButton}
