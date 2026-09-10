@@ -91,12 +91,15 @@ import { colorForEvent, styles } from './AudioTaggingScreen.styles';
 const NUM_THREADS = 2;
 const LIVE_SAMPLE_RATE = 16000;
 const TOP_K_OPTIONS = [3, 5, 10] as const;
-const AT_EVALUATORS = ['speech_energy_silence', 'continuous_frames'] as const;
+const AT_OFFLINE_EVALUATORS = ['speech_energy_silence'] as const;
+const AT_LIVE_EVALUATORS = [
+  'speech_energy_silence',
+  'continuous_frames',
+] as const;
 
 type ProcessingMode = 'batch' | 'liveOverload';
 type LiveSourceMode = 'file' | 'mic';
 type LiveFileSourceType = 'example' | 'own';
-type LiveLogEntry = { id: string; text: string };
 type PathCtx = {
   padModelIds: string[];
   padModelsPath: string | null;
@@ -281,10 +284,12 @@ export default function AudioTaggingScreen() {
   >('idle');
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [liveLastPrimary, setLiveLastPrimary] = useState<string | null>(null);
-  const [liveLastEvents, setLiveLastEvents] = useState<
-    AudioTaggingResult['events']
+  const [liveSegments, setLiveSegments] = useState<
+    AudioTaggingLiveSegmentEvent[]
   >([]);
-  const [liveLog, setLiveLog] = useState<LiveLogEntry[]>([]);
+  const [expandedLiveSegment, setExpandedLiveSegment] = useState<number | null>(
+    null
+  );
 
   const engineRef = useRef<AudioTaggingEngine | null>(null);
   const pipelineRef = useRef<AudioTaggingPipelineHandle | null>(null);
@@ -293,6 +298,7 @@ export default function AudioTaggingScreen() {
   const ingestHandleRef = useRef<FileIngestHandle | null>(null);
   const cleanupLockRef = useRef(false);
   const liveRunEpochRef = useRef(0);
+  const liveAutoExpandDoneRef = useRef(false);
   const pathCtxRef = useRef<PathCtx | null>(null);
 
   const pathCtx = useMemo((): PathCtx => {
@@ -535,8 +541,8 @@ export default function AudioTaggingScreen() {
     clearResults();
     setLiveStatus(null);
     setLiveLastPrimary(null);
-    setLiveLastEvents([]);
-    setLiveLog([]);
+    setLiveSegments([]);
+    setExpandedLiveSegment(null);
     setLiveRunState('idle');
   }, [clearResults, destroyEngine]);
 
@@ -610,23 +616,18 @@ export default function AudioTaggingScreen() {
     selectedFileUri,
   ]);
 
-  const appendLiveLog = useCallback((text: string) => {
-    setLiveLog((prev) =>
-      [...prev, { id: `${Date.now()}_${prev.length}`, text }].slice(-80)
-    );
-  }, []);
-
   const handleLiveSegment = useCallback(
     (event: AudioTaggingLiveSegmentEvent) => {
       const primary =
         event.result.primary?.name ?? event.result.events[0]?.name ?? '—';
       setLiveLastPrimary(primary);
-      setLiveLastEvents(event.result.events);
-      appendLiveLog(
-        `#${event.segmentIndex} ${primary} (${event.durationMs}ms)`
-      );
+      setLiveSegments((prev) => [...prev, event].slice(-80));
+      if (!liveAutoExpandDoneRef.current) {
+        liveAutoExpandDoneRef.current = true;
+        setExpandedLiveSegment(event.segmentIndex);
+      }
     },
-    [appendLiveLog]
+    []
   );
 
   const handleStartLive = useCallback(async () => {
@@ -656,8 +657,9 @@ export default function AudioTaggingScreen() {
     setErrorSource(null);
     setLiveStatus(null);
     setLiveLastPrimary(null);
-    setLiveLastEvents([]);
-    setLiveLog([]);
+    setLiveSegments([]);
+    setExpandedLiveSegment(null);
+    liveAutoExpandDoneRef.current = false;
     clearResults();
     await cleanupLiveRuntime();
     if (runEpoch !== liveRunEpochRef.current) return;
@@ -1009,7 +1011,8 @@ export default function AudioTaggingScreen() {
           {processingMode === 'batch' ? (
             <>
               <Text style={styles.sectionHint}>
-                Off = oneshot. Auto = segmented with policy.
+                Off = oneshot. Auto = energy windows only (cont. frames is
+                live-only).
               </Text>
               <SegmentationPolicyControls
                 variant="speech-streaming"
@@ -1017,13 +1020,14 @@ export default function AudioTaggingScreen() {
                 onChange={setSegBatchConfig}
                 disabled={tagging || liveBusy}
                 disableManual
-                allowedEvaluators={[...AT_EVALUATORS]}
+                allowedEvaluators={[...AT_OFFLINE_EVALUATORS]}
               />
             </>
           ) : (
             <>
               <Text style={styles.sectionHint}>
-                Live requires Auto. Prefer energy or fixed windows.
+                Live requires Auto. Energy or continuous_frames; windows ≥
+                1500ms.
               </Text>
               <SegmentationPolicyControls
                 variant="speech-streaming"
@@ -1032,7 +1036,7 @@ export default function AudioTaggingScreen() {
                 disabled={liveBusy}
                 disableOff
                 disableManual
-                allowedEvaluators={[...AT_EVALUATORS]}
+                allowedEvaluators={[...AT_LIVE_EVALUATORS]}
                 offDisabledMessage="Live audio tagging overload requires Auto segmentation."
               />
             </>
@@ -1174,44 +1178,60 @@ export default function AudioTaggingScreen() {
             <View style={[styles.hud, !liveLastPrimary && styles.hudIdle]}>
               <Text style={styles.hudLabel}>Last primary</Text>
               <Text style={styles.hudPrimary}>{liveLastPrimary ?? '—'}</Text>
-              {liveLastEvents.length > 0 ? (
-                <Text style={styles.hudMeta}>
-                  top-{liveLastEvents.length} events
-                </Text>
-              ) : null}
             </View>
-
-            {liveLastEvents.length > 0 ? (
-              <View style={styles.chipRow}>
-                {liveLastEvents.map((ev, index) => (
-                  <View
-                    key={`${ev.index}_${ev.name}_${index}`}
-                    style={[
-                      styles.liveEventChip,
-                      { backgroundColor: colorForEvent(ev.name, index) },
-                    ]}
-                  >
-                    <Text style={styles.liveEventChipText}>
-                      {ev.name} {formatProb(ev.prob)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
 
             {liveStatus ? (
               <Text style={styles.bodyText}>{liveStatus}</Text>
             ) : null}
 
-            {liveLog.length > 0 ? (
-              <View style={styles.logBox}>
-                <ScrollView nestedScrollEnabled>
-                  {liveLog.map((entry) => (
-                    <Text key={entry.id} style={styles.logLine}>
-                      {entry.text}
-                    </Text>
-                  ))}
-                </ScrollView>
+            {liveSegments.length > 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>
+                  Live segments ({liveSegments.length})
+                </Text>
+                <Text style={styles.sectionHint}>
+                  Tap a row for that window’s top-K.
+                </Text>
+                {liveSegments.map((seg) => {
+                  const primary =
+                    seg.result.primary?.name ??
+                    seg.result.events[0]?.name ??
+                    '—';
+                  const expanded = expandedLiveSegment === seg.segmentIndex;
+                  return (
+                    <View key={`${seg.segmentIndex}_${seg.startTime}`}>
+                      <Pressable
+                        style={styles.timelineRow}
+                        onPress={() =>
+                          setExpandedLiveSegment(
+                            expanded ? null : seg.segmentIndex
+                          )
+                        }
+                      >
+                        <View style={styles.timelineChip}>
+                          <Text
+                            style={styles.timelineChipText}
+                            numberOfLines={1}
+                          >
+                            {primary}
+                          </Text>
+                        </View>
+                        <Text style={styles.timelineMeta}>
+                          #{seg.segmentIndex} · {formatSeconds(seg.startTime)}–
+                          {formatSeconds(seg.endTime)} · {seg.durationMs}ms
+                        </Text>
+                        <Text style={styles.timelineExpand}>
+                          {expanded ? 'Hide' : 'Top-K'}
+                        </Text>
+                      </Pressable>
+                      {expanded ? (
+                        <View style={styles.timelineDetail}>
+                          <EventDistBars events={seg.result.events} />
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
             ) : null}
 
