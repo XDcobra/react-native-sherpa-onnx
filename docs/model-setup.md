@@ -210,6 +210,26 @@ const source = {
 
 See [Keyword spotting (streaming)](kws-streaming.md) for `detectKwsModel`, `createKeywordSpotting`, and keywords UX.
 
+### Audio tagging (`audio-tagging-models`)
+
+Dedicated sound-event packs (not interchangeable with ASR or KWS zipformer packs). Layout:
+
+```
+/data/user/0/com.myapp/files/models/
+└── sherpa-onnx-ced-mini-audio-tagging-2024-04-19/
+    ├── model.int8.onnx          ← or model.onnx / CED filename variants
+    └── class_labels_indices.csv
+```
+
+```typescript
+const source = {
+  kind: 'fs',
+  path: '/data/user/0/com.myapp/files/models/sherpa-onnx-ced-mini-audio-tagging-2024-04-19',
+};
+```
+
+See [Audio tagging (offline)](audio-tagging-offline.md) and [Audio tagging (live overload)](audio-tagging-live.md) for `detectAudioTaggingModel`, `createAudioTagging`, and oneshot / segmented / live usage.
+
 ### PAD / ODR pack (after fetch)
 
 Uncompressed folders:
