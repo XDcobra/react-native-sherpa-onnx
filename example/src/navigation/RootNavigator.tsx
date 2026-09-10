@@ -14,6 +14,7 @@ import GenerateTimestampScreen from '../screens/generate-timestamp/GenerateTimes
 import DownloadShowcaseScreen from '../screens/download-showcase/DownloadShowcaseScreen';
 import VADScreen from '../screens/vad/VADScreen';
 import KeywordSpottingScreen from '../screens/kws/KeywordSpottingScreen';
+import AudioTaggingScreen from '../screens/audio-tagging/AudioTaggingScreen';
 import SegmentationShowcaseScreen from '../screens/segmentation-showcase/SegmentationShowcaseScreen';
 import DiarizationScreen from '../screens/diarization/DiarizationScreen';
 import DiarizationStreamingScreen from '../screens/diarization-streaming/DiarizationStreamingScreen';
@@ -131,6 +132,13 @@ export default function RootNavigator() {
         component={KeywordSpottingScreen}
         options={{
           title: 'Keyword Spotting (KWS)',
+        }}
+      />
+      <Stack.Screen
+        name="AudioTagging"
+        component={AudioTaggingScreen}
+        options={{
+          title: 'Audio Tagging',
         }}
       />
       <Stack.Screen

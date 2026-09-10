@@ -166,6 +166,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'audio_tagging',
+    sectionTitle: 'Voice Activity',
+    title: 'Audio Tagging',
+    description:
+      'Sound-event tagging: oneshot / segmented / live overload with top-K HUD',
+    icon: 'musical-notes-outline',
+    screen: 'AudioTagging',
+    implemented: true,
+  },
+  {
     id: 'segmentation_showcase',
     sectionTitle: 'Pipelines & Demos',
     title: 'Segmentation Showcase',
