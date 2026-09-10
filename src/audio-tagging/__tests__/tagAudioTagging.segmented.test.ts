@@ -268,4 +268,17 @@ describe('createAudioTagging - segmented mode', () => {
       })
     ).rejects.toThrow(/supports only/);
   });
+
+  it('rejects continuous_frames evaluator (streaming-only)', async () => {
+    const engine = await makeEngine();
+    await expect(
+      engine.tag(audioId, {
+        segmentation: {
+          mode: 'auto',
+          policy: { evaluator: 'continuous_frames' } as any,
+        },
+      })
+    ).rejects.toThrow(/supports only/);
+    expect(segmentOfflineBuffer).not.toHaveBeenCalled();
+  });
 });

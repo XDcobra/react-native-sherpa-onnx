@@ -31,8 +31,10 @@ import type {
   LiveTextBufferRef,
   PipelineTextBufferIdSource,
 } from '../textbuffer/types';
+import type { SegmentationPolicy } from '../segment/engine-types';
 import type { AudioTaggingPipelineHandle } from './streamingTypes';
 import {
+  AUDIO_TAGGING_LIVE_MIN_SPAN_MS,
   AudioTaggingErrorCode,
   DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
 } from './types';
@@ -99,9 +101,21 @@ function assertLiveOptions(options: AudioTaggingLivePipelineOptions): void {
   }
 }
 
+/**
+ * LiveText meta is Fabric-safe scalars only (see projectNativeSegmentMeta).
+ * Native commits top-K as a JSON string under `meta.events`; keep array parse
+ * for tests / any path that still delivers a plain list.
+ */
 function parseEventsFromMeta(meta: unknown): AudioTaggingEvent[] {
   if (meta == null || typeof meta !== 'object') return [];
-  const raw = (meta as Record<string, unknown>).events;
+  let raw: unknown = (meta as Record<string, unknown>).events;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
   if (!Array.isArray(raw)) return [];
   const out: AudioTaggingEvent[] = [];
   for (const item of raw) {
@@ -118,6 +132,71 @@ function parseEventsFromMeta(meta: unknown): AudioTaggingEvent[] {
     out.push({ name, index, prob });
   }
   return out;
+}
+
+/**
+ * Reject policies that cannot produce spans the live worker will accept.
+ * Worker floor is {@link AUDIO_TAGGING_LIVE_MIN_SPAN_MS} (not policy-driven).
+ */
+export function assertAudioTaggingLiveSpanPolicy(
+  policy: SegmentationPolicy
+): void {
+  const floor = AUDIO_TAGGING_LIVE_MIN_SPAN_MS;
+
+  if (policy.evaluator === 'continuous_frames') {
+    const intervalMs = policy.checkpointIntervalMs;
+    if (
+      typeof intervalMs !== 'number' ||
+      !Number.isFinite(intervalMs) ||
+      intervalMs < floor
+    ) {
+      throw new Error(
+        `${AudioTaggingErrorCode.INVALID_ARGUMENT}: continuous_frames requires ` +
+          `checkpointIntervalMs >= ${floor}ms for live audio tagging ` +
+          `(received ${String(
+            intervalMs
+          )}; shorter windows are skipped by the worker).`
+      );
+    }
+    return;
+  }
+
+  if (policy.evaluator !== 'speech_energy_silence') {
+    return;
+  }
+
+  const defaults = DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY;
+  const minMs =
+    typeof policy.minSegmentMs === 'number' &&
+    Number.isFinite(policy.minSegmentMs)
+      ? policy.minSegmentMs
+      : defaults.minSegmentMs ?? floor;
+  const maxMs =
+    typeof policy.maxSegmentMs === 'number' &&
+    Number.isFinite(policy.maxSegmentMs)
+      ? policy.maxSegmentMs
+      : defaults.maxSegmentMs ?? floor;
+
+  if (minMs < floor) {
+    throw new Error(
+      `${AudioTaggingErrorCode.INVALID_ARGUMENT}: speech_energy_silence ` +
+        `minSegmentMs=${minMs} is below the live audio tagging minimum span of ` +
+        `${floor}ms (shorter windows are skipped by the worker).`
+    );
+  }
+  if (maxMs < floor) {
+    throw new Error(
+      `${AudioTaggingErrorCode.INVALID_ARGUMENT}: speech_energy_silence ` +
+        `maxSegmentMs=${maxMs} is below the live audio tagging minimum span of ` +
+        `${floor}ms (energy windows would be skipped with no tags).`
+    );
+  }
+  if (maxMs < minMs) {
+    throw new Error(
+      `${AudioTaggingErrorCode.INVALID_ARGUMENT}: speech_energy_silence ` +
+        `maxSegmentMs=${maxMs} must be >= minSegmentMs=${minMs}.`
+    );
+  }
 }
 
 function mapTextSegmentToLiveEvent(
@@ -277,6 +356,7 @@ export async function tagLiveOverload(
         DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
     },
   });
+  assertAudioTaggingLiveSpanPolicy(policy);
 
   const audioInId = resolvePipelineAudioBufferId(
     audioIn as PipelineAudioBufferIdSource

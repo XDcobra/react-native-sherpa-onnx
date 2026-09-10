@@ -219,6 +219,57 @@ describe('audio tagging live overload', () => {
     });
   });
 
+  it('maps meta.events JSON string (LiveText scalar contract) to top-K', async () => {
+    let textOnSegment: ((event: any) => void) | undefined;
+    mockSubscribeLiveTextBufferEvents.mockImplementation(
+      (_id: unknown, callbacks: { onSegment?: (event: any) => void }) => {
+        textOnSegment = callbacks.onSegment;
+        return jest.fn();
+      }
+    );
+
+    const engine = await createEngine();
+    const onSegment = jest.fn();
+
+    await engine.tag(LIVE_AUDIO, LIVE_TEXT, {
+      segmentation: {
+        mode: 'auto',
+        policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 2000 },
+      },
+      onSegment,
+    });
+
+    textOnSegment?.({
+      segment: {
+        domain: 'text',
+        segmentIndex: 1,
+        text: 'Whistling',
+        timestamps: [2, 4],
+        meta: {
+          durationMs: 2000,
+          events: JSON.stringify([
+            { name: 'Whistling', index: 10, prob: 0.8 },
+            { name: 'Music', index: 1, prob: 0.15 },
+          ]),
+        },
+      },
+    });
+
+    expect(onSegment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        segmentIndex: 1,
+        result: expect.objectContaining({
+          primary: { name: 'Whistling', index: 10, prob: 0.8 },
+          events: [
+            { name: 'Whistling', index: 10, prob: 0.8 },
+            { name: 'Music', index: 1, prob: 0.15 },
+          ],
+          topK: 2,
+        }),
+      })
+    );
+  });
+
   it('detaches segmentation on stop', async () => {
     const engine = await createEngine();
     const handle = (await engine.tag(LIVE_AUDIO, LIVE_TEXT, {
@@ -266,5 +317,48 @@ describe('audio tagging live overload', () => {
         },
       })
     ).rejects.toThrow();
+  });
+
+  it('rejects speech_pyannote_segmentation live evaluator', async () => {
+    const engine = await createEngine();
+    await expect(
+      engine.tag(LIVE_AUDIO, LIVE_TEXT, {
+        segmentation: {
+          mode: 'auto',
+          policy: { evaluator: 'speech_pyannote_segmentation' as any },
+        },
+      })
+    ).rejects.toThrow();
+  });
+
+  it('rejects energy maxSegmentMs below live min span', async () => {
+    const engine = await createEngine();
+    await expect(
+      engine.tag(LIVE_AUDIO, LIVE_TEXT, {
+        segmentation: {
+          mode: 'auto',
+          policy: {
+            evaluator: 'speech_energy_silence',
+            minSegmentMs: 1500,
+            maxSegmentMs: 1000,
+          },
+        },
+      })
+    ).rejects.toThrow(/maxSegmentMs=1000/);
+  });
+
+  it('rejects continuous_frames checkpoint below live min span', async () => {
+    const engine = await createEngine();
+    await expect(
+      engine.tag(LIVE_AUDIO, LIVE_TEXT, {
+        segmentation: {
+          mode: 'auto',
+          policy: {
+            evaluator: 'continuous_frames',
+            checkpointIntervalMs: 1000,
+          },
+        },
+      })
+    ).rejects.toThrow(/checkpointIntervalMs/);
   });
 });

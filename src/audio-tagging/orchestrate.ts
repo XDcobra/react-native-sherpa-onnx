@@ -103,7 +103,8 @@ export async function runOfflineAudioTaggingSegmentation(
     domain: 'speech',
     supportsManual: false,
     defaultPolicy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
-    supportedEvaluators: ['speech_energy_silence', 'continuous_frames'],
+    // continuous_frames is streaming-only in segmentOfflineBuffer.
+    supportedEvaluators: ['speech_energy_silence'],
   });
 
   const targetSegmentBufferId = options?.targetSegmentBuffer

@@ -36,6 +36,12 @@ export const DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY: SegmentationPolicy = {
   hangoverMs: 300,
 };
 
+/**
+ * Live OfflineLive workers skip spans shorter than this (Android/iOS).
+ * Energy / continuous_frames policies must produce windows ≥ this floor.
+ */
+export const AUDIO_TAGGING_LIVE_MIN_SPAN_MS = 1500;
+
 export const AudioTaggingErrorCode = {
   INVALID_ARGUMENT: 'AUDIO_TAGGING_INVALID_ARGUMENT',
   INIT_FAILED: 'AUDIO_TAGGING_INIT_FAILED',

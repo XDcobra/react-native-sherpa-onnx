@@ -17,6 +17,7 @@ export {
   isLiveAudioSource,
   isLiveSegmentSource,
   isLiveTextSource,
+  assertAudioTaggingLiveSpanPolicy,
   tagLiveOverload,
 } from './live';
 export {
@@ -32,6 +33,7 @@ export type {
 } from './streamingTypes';
 export {
   AUDIO_TAGGING_MODEL_TYPES,
+  AUDIO_TAGGING_LIVE_MIN_SPAN_MS,
   AudioTaggingErrorCode,
   DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
 } from './types';
