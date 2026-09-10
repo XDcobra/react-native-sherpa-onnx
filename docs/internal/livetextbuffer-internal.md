@@ -77,7 +77,7 @@ The segment log is an **ordered list** of committed text segments.
   - `source`: discriminator (`'stt_stream'`, `'append'`, `'replace'`, `'mixed'`, `'unknown'`).
   - `tokens`: optional token-level breakdown.
   - `timestamps`: optional per-token timestamps.
-  - `meta`: opaque metadata dictionary (pipeline workers interpret feature-specific keys, e.g., TTS `sid`, `speed`).
+  - `meta`: opaque metadata dictionary (pipeline workers interpret feature-specific keys, e.g., TTS `sid`, `speed`). **Today’s bridge contract is scalar-only** (+ optional `extra: Record<string, string>`); nested arrays/objects are dropped on Android emit / JS projection — see planned upgrade [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md).
 - **Segment index:** Monotonically increasing, never reset. Even after eviction from the in-memory window, the index continues.
 
 ### 2.3 Spool (On-Disk Persistence)
@@ -264,7 +264,7 @@ Seeds a new live buffer with the offline text buffer's content. The live buffer 
 | Spool on by default (`mode: 'on'`) | Most use cases need full history (export, post-processing). Opt-out with `'off'` for memory-only lightweight buffers. |
 | UTF-16 for slice positions | JavaScript strings are UTF-16. Using UTF-16 indices avoids costly codepoint conversion at the bridge. |
 | maxSegments eviction | Prevents unbounded memory growth in very long sessions (hours of transcription). Spool retains evicted segments. |
-| Opaque `meta` on segments | Allows pipeline workers (TTS, punctuation, etc.) to attach feature-specific metadata without schema coupling. |
+| Opaque `meta` on segments | Allows pipeline workers (TTS, punctuation, etc.) to attach feature-specific metadata without schema coupling. **Interim:** bridge allows JSON scalars (+ string `extra`) only; nested trees planned in [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md) (breaking OK). |
 
 ---
 

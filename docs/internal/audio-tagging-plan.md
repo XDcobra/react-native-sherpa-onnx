@@ -186,7 +186,7 @@ flowchart TB
 
 There is no online AT model. Continuous mic requires:
 
-1. Speech/energy/`continuous_frames` segmentation (or push-to-talk windows), then
+1. Speech/energy segmentation offline (`speech_energy_silence`) or live `continuous_frames` / energy windows (or push-to-talk), then
 2. Offline `compute` on each committed span.
 
 That is exactly SLID live overload — **not** KWS’s always-on OnlineStream worker.
@@ -218,7 +218,9 @@ interface AudioTaggingResult {
 
 | Sink | What to write |
 | --- | --- |
-| **LiveText (required)** | `text` = primary event `name`; `source` = `'audio_tagging'`; `meta.events` = plain top-K JSON; `meta.durationMs`; timestamps = span start/end |
+| **LiveText (required)** | `text` = primary event `name`; `source` = `'audio_tagging'`; `meta.events` = **JSON string** of top-K `[{name,index,prob}]` (LiveText meta is scalar-only across the bridge — interim); `meta.durationMs`; timestamps = span start/end |
+
+> **Follow-up (post AT):** Lift LiveText meta to a real JSON-tree contract and drop the string encode/decode workaround — see [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md). Breaking changes welcome.
 | **LiveSegment (optional `targetSegmentBuffer`)** | Same payload as offline: `{ source: 'audioTagging', primaryName?, events? }` |
 | **JS callbacks** | `onSegment` / `onEvent` from LiveText commits (map primary name + meta) — **no** SLID-style `onLanguageChanged` |
 
@@ -249,7 +251,7 @@ flowchart LR
 2. `validateLiveOfflinePipelineOptions` with:
    - `featureName: 'audio tagging'`
    - `domain: 'speech'` (segmentation engine speech path → `seg_live_*` + `CommittedSegmentRef.Speech`)
-   - **`supportedEvaluators: ['speech_energy_silence', 'continuous_frames']`** — same as offline Phase 3 (**not** SLID’s `speech_vad_model`; AT needs non-speech windows)
+   - **`supportedEvaluators: ['speech_energy_silence', 'continuous_frames']`** — live overload (**not** SLID’s `speech_vad_model`; AT needs non-speech windows). Offline Auto supports **`speech_energy_silence` only** (`continuous_frames` is streaming-only in `segmentOfflineBuffer`).
    - Default policy: `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY`
 3. `attachSegmentationEngine` → read `segmentBufferId` → call native start.
 4. Optional `targetSegmentBuffer` must be **live** (`seg_live_*`).
@@ -435,6 +437,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 ### 8.3 Lifecycle / Fabric notes
 
 - Snapshot event arrays to plain JSON before emitting to JS (avoid retaining native HybridData — lesson from KWS LiveText meta).
+- **Interim LiveText meta:** top-K `events` committed as a **JSON string** under `meta.events` (scalar-only LiveText contract). Planned root fix: [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md).
 - Always await worker stop before `release()` (pipeline join lesson).
 
 ---
@@ -487,7 +490,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 1. **Enum / path string:** **Resolved** — `ModelCategory.AudioTagging = 'audioTagging'`; native `"audiotagging"` (+ `"audio_tagging"` alias).
 2. **Delivery order (live vs docs/showcase):** **Resolved** — Phase 4 live overload → Phase 5 showcase (offline↔live) → Phase 6 docs. Matches SLID practice; docs authored from landed live API.
 3. **Default recommended pack for example:** **Resolved** — `sherpa-onnx-ced-mini-audio-tagging-2024-04-19` (size-first for PAD/example).
-4. **Segment policy default for AT:** **Resolved for offline + live** — default `speech_energy_silence` (`DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY`); allowed live/offline evaluators `speech_energy_silence` \| `continuous_frames` (not speech-only VAD as primary). Revisit only if showcase shows energy windows miss common non-speech events.
+4. **Segment policy default for AT:** **Resolved** — default `speech_energy_silence` (`DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY`). Offline Auto: `speech_energy_silence` only (`continuous_frames` is rejected by `segmentOfflineBuffer` as streaming-only). Live overload: `speech_energy_silence` \| `continuous_frames` only — **not** `speech_vad_model` / `speech_pyannote_segmentation` (speech-only windows miss sirens/music; rejected by `supportedEvaluators`). Live spans must be ≥ `AUDIO_TAGGING_LIVE_MIN_SPAN_MS` (1500): JS `assertAudioTaggingLiveSpanPolicy` rejects energy `max/minSegmentMs` or continuous `checkpointIntervalMs` below that floor (native worker still skips shorter spans as safety net).
 5. **LiveText `source` string:** Prefer `'audio_tagging'` (underscore, filter-friendly, parallel to SLID `'language_id'`). Segment payload keeps `source: 'audioTagging'` (already in `AudioTaggingSpeechSegmentPayload`). Confirm in Phase 4 implementation plan if any existing filter convention prefers camelCase in LiveText.
 
 ---
