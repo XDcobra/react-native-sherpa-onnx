@@ -1,0 +1,47 @@
+package com.sherpaonnx.audiotagging.config
+
+import com.facebook.react.bridge.ReadableMap
+import com.sherpaonnx.bridge.InitModeModelPathsParser
+
+/** Parse `initializeAudioTagging` TurboModule maps. */
+internal object AudioTaggingInitOptionsParser {
+  data class Parsed(
+    val initMode: String,
+    val modelDir: String?,
+    val modelPaths: Map<String, String>?,
+    val quantization: String?,
+    val modelType: String,
+    val topK: Int,
+    val numThreads: Int,
+    val provider: String?,
+    val debug: Boolean,
+  )
+
+  fun parse(options: ReadableMap?): Parsed? {
+    if (options == null) return null
+    val core = InitModeModelPathsParser.parseCore(options) ?: return null
+
+    return Parsed(
+      initMode = core.initMode,
+      modelDir = core.modelDir,
+      modelPaths = core.modelPaths,
+      quantization = optionalString(options, "quantization"),
+      modelType = core.modelType?.trim()?.takeIf { it.isNotEmpty() } ?: "auto",
+      topK = if (options.hasKey("topK")) options.getDouble("topK").toInt() else 5,
+      numThreads = if (options.hasKey("numThreads")) {
+        options.getDouble("numThreads").toInt().coerceAtLeast(1)
+      } else {
+        1
+      },
+      provider = optionalString(options, "provider"),
+      debug = if (options.hasKey("debug")) options.getBoolean("debug") else false,
+    )
+  }
+
+  private fun optionalString(options: ReadableMap, key: String): String? =
+    if (options.hasKey(key) && !options.isNull(key)) {
+      options.getString(key)?.trim()?.takeIf { it.isNotEmpty() }
+    } else {
+      null
+    }
+}

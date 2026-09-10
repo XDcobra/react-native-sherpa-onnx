@@ -29,6 +29,7 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
+import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
@@ -246,6 +247,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       languageIdHelper,
       NAME,
     )
+  private val audioTaggingHelper = SherpaOnnxAudioTaggingHelper(
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectAudioTaggingModel(modelDir, assetName, modelType, quantization)
+    }
+  )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -477,6 +483,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     speakerEmbeddingHelper.shutdown()
     diarizationHelper.shutdown()
     languageIdHelper.shutdown()
+    audioTaggingHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -5147,6 +5154,27 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadKeywordSpotting(instanceId: String, promise: Promise) {
     kwsHelper.unloadKeywordSpotting(instanceId, promise)
+  }
+
+  override fun initializeAudioTagging(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    audioTaggingHelper.initializeAudioTagging(instanceId, options, promise)
+  }
+
+  override fun tagAudioOffline(
+    instanceId: String,
+    audioBufferId: String,
+    topK: Double?,
+    promise: Promise
+  ) {
+    audioTaggingHelper.tagAudioOffline(instanceId, audioBufferId, topK, promise)
+  }
+
+  override fun unloadAudioTagging(instanceId: String, promise: Promise) {
+    audioTaggingHelper.unloadAudioTagging(instanceId, promise)
   }
 
   override fun initializeLanguageId(
