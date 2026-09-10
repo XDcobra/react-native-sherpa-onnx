@@ -30,6 +30,7 @@ import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
 import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingHelper
+import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingLivePipelineHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
@@ -252,6 +253,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectAudioTaggingModel(modelDir, assetName, modelType, quantization)
     }
   )
+  private val audioTaggingLivePipelineHelper =
+    SherpaOnnxAudioTaggingLivePipelineHelper(
+      reactApplicationContext,
+      audioTaggingHelper,
+      NAME,
+    )
   private val archiveHelper = SherpaOnnxArchiveHelper()
   private val vadHelper = SherpaOnnxVadHelper(
     reactApplicationContext,
@@ -5213,6 +5220,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadAudioTagging(instanceId: String, promise: Promise) {
     audioTaggingHelper.unloadAudioTagging(instanceId, promise)
+  }
+
+  override fun startAudioTaggingOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    audioTaggingLivePipelineHelper.startAudioTaggingOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      textOutLiveBufferId,
+      options,
+      promise,
+    )
   }
 
   override fun initializeLanguageId(

@@ -13,6 +13,7 @@ import com.sherpaonnx.audiotagging.core.AudioTaggingModelConfigFactory
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.lifecycle.ActivePipelineStop
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -25,7 +26,7 @@ internal class SherpaOnnxAudioTaggingHelper(
     quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
-  private data class Instance(
+  internal data class Instance(
     val tagger: AudioTagging,
     val defaultTopK: Int,
   )
@@ -37,8 +38,30 @@ internal class SherpaOnnxAudioTaggingHelper(
 
   private val executor = Executors.newSingleThreadExecutor()
   private val instances = ConcurrentHashMap<String, Instance>()
+  private val activeLivePipelineByInstance = ConcurrentHashMap<String, String>()
+
+  fun getInstance(instanceId: String): Instance? = instances[instanceId]
+
+  fun trackLivePipeline(instanceId: String, pipelineId: String) {
+    activeLivePipelineByInstance[instanceId] = pipelineId
+  }
+
+  fun clearLivePipeline(instanceId: String, pipelineId: String) {
+    activeLivePipelineByInstance.remove(instanceId, pipelineId)
+  }
+
+  fun stopActiveLivePipeline(instanceId: String) {
+    ActivePipelineStop.stopForInstance(
+      instanceId = instanceId,
+      activeByInstance = activeLivePipelineByInstance,
+      removeFromRegistry = false,
+    )
+  }
 
   fun shutdown() {
+    for (id in activeLivePipelineByInstance.keys.toList()) {
+      stopActiveLivePipeline(id)
+    }
     executor.shutdownNow()
     for ((_, instance) in instances) {
       releaseTaggerSafely(instance.tagger, where = "shutdown")
@@ -346,6 +369,7 @@ internal class SherpaOnnxAudioTaggingHelper(
       return
     }
     executor.execute {
+      stopActiveLivePipeline(instanceId)
       instances.remove(instanceId)?.let { old ->
         releaseTaggerSafely(old.tagger, where = "unload:$instanceId")
       }
