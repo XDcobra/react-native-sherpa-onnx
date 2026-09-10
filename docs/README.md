@@ -60,6 +60,15 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Audio Tagging
+
+| Guide | Description |
+|-------|-------------|
+| [audio-tagging-offline.md](./audio-tagging-offline.md) | Sound-event tagging — CED / Zipformer oneshot + segmented (`createAudioTagging` / `tag`) |
+| [audio-tagging-live.md](./audio-tagging-live.md) | Live overload — `tag(liveAudio, liveText)` (not a streaming audio-tagging model) |
+
+---
+
 ## Speech Enhancement
 
 | Guide | Description |

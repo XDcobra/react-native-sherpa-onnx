@@ -1,10 +1,10 @@
 # Audio Tagging — Architecture & Implementation Plan
 
-> **Status:** Phase 5 showcase landed — Phase 6 docs next  
+> **Status:** Phase 6 docs landed — feature complete for MVP  
 > **Audience:** SDK Maintainers  
 > **Category:** Speech & Media Features (`ModelCategory.AudioTagging` / `audioTagging`)  
 > **Target Branch:** `feat/add-audio-tagging-feature`  
-> **MVP scope:** Offline oneshot + segmented ✅; live overload ✅; showcase ✅; docs pending  
+> **MVP scope:** Offline oneshot + segmented ✅; live overload ✅; showcase ✅; docs ✅  
 > **Research date:** 2026-09-10 (live overload research refresh 2026-09-10)  
 > **Naming:** `ModelCategory.AudioTagging = 'audioTagging'`; native detect category `"audiotagging"` (alias `"audio_tagging"`).
 
@@ -453,7 +453,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 | **Phase 3: Offline segmentation** | • `segmentation: { mode: 'auto' }` per-span tag<br>• Optional target `OfflineSegmentBuffer`<br>• Progress / onSegment callbacks | ✅ Long-file safe offline API |
 | **Phase 4: Live overload** | • TS `live.ts` + engine overload `tag(liveAudio, liveText, options)`<br>• Native `AudioTaggingOfflineLivePipelineWorker` (Android + iOS)<br>• `startAudioTaggingOfflineLivePipeline`<br>• Required LiveText commits + optional live `targetSegmentBuffer`<br>• Jest live tests; matrix: live overload Yes<br>• Touch `docs/internal/live-overload.md` feature matrix row | ✅ Mic/file continuous tagging via offline weights |
 | **Phase 5: Showcase** | • Example screen (Home): pack init, offline file tag, **offline↔live mode toggle**, mic + file ingest, top-K HUD<br>• Shared components pattern like Language Identification screen<br>• Recommended pack + test wavs | ✅ Showcase covers offline + live |
-| **Phase 6: Docs + download catalog** | • `docs/audio-tagging-offline.md`<br>• `docs/audio-tagging-live.md` (authored from Phase 4; link from offline)<br>• README checklist + models `<details>`<br>• Download manager / example catalog wiring | App-facing docs at SLID quality |
+| **Phase 6: Docs + download catalog** | • `docs/audio-tagging-offline.md`<br>• `docs/audio-tagging-live.md` (authored from Phase 4; link from offline)<br>• README checklist + models `<details>`<br>• Download manager / example catalog wiring | ✅ App-facing docs at SLID quality |
 
 **Non-goals for MVP:**
 
