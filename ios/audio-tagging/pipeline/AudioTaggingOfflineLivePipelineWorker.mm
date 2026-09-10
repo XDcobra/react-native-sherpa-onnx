@@ -155,9 +155,22 @@ void AudioTaggingOfflineLivePipelineWorker::onSegmentCommitted(
           ? static_cast<float>(speech.endSample) / static_cast<float>(speech.sampleRate)
           : 0.f;
 
+  NSError *jsonError = nil;
+  NSData *eventsData = [NSJSONSerialization dataWithJSONObject:events
+                                                       options:0
+                                                         error:&jsonError];
+  NSString *eventsJson =
+      eventsData != nil
+          ? [[NSString alloc] initWithData:eventsData encoding:NSUTF8StringEncoding]
+          : @"[]";
+  if (jsonError != nil || eventsJson == nil) {
+    eventsJson = @"[]";
+  }
+
+  // LiveText meta is scalar-only across the RN bridge / JS projector.
   NSDictionary *meta = @{
     @"durationMs": @(durationMs),
-    @"events": events,
+    @"events": eventsJson,
   };
 
   std::vector<std::string> tokens;
