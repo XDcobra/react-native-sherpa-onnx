@@ -1,0 +1,7 @@
+asset_name,model_type
+sherpa-onnx-ced-base-audio-tagging-2024-04-19.tar.bz2,ced
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19.tar.bz2,ced
+sherpa-onnx-ced-small-audio-tagging-2024-04-19.tar.bz2,ced
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19.tar.bz2,ced
+sherpa-onnx-zipformer-audio-tagging-2024-04-09.tar.bz2,zipformer
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15.tar.bz2,zipformer
