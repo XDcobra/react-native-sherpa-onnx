@@ -15,7 +15,7 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 | Speaker Diarization | Yes (`OfflineSpeakerDiarizationConfig`) | No | Yes (`createDiarization`) | Yes, **real streaming** (`createStreamingDiarization` via NeMo Sortformer) |
 | Spoken Language Identification (SLID) | Yes (`SpokenLanguageIdentificationConfig`) | No | Yes (`createLanguageIdentification`) | Yes, **live overload** (`identify(liveAudio, liveText, …)` — offline Whisper per speech span) |
 | Keyword Spotting (KWS) | No | Yes (`KeywordSpotterConfig`) | No | Yes, **real streaming** (`createKeywordSpotting` / `spot(LiveAudio, LiveText)`) |
-| Audio Tagging | Yes (`AudioTaggingConfig`) | No | Detect/catalog in progress (`detectAudioTaggingModel`); engine Phase 2 | Live overload planned (Phase 6) |
+| Audio Tagging | Yes (`AudioTaggingConfig`) | No | Yes (oneshot `createAudioTagging` / `tag`) | Live overload planned (Phase 6) |
 | Diacritization | Yes (`OfflineDiacritizationConfig`) | No | No | No |
 
 ## Short notes

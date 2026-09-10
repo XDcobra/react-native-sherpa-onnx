@@ -1,6 +1,6 @@
 # Audio Tagging — Architecture & Implementation Plan
 
-> **Status:** Phase 1 collect/detect/licenses landed — engine Phase 2 pending  
+> **Status:** Phase 2 offline oneshot engine landed — Phase 3 segmentation pending  
 > **Audience:** SDK Maintainers  
 > **Category:** Speech & Media Features (`ModelCategory.AudioTagging` / `audioTagging`)  
 > **Target Branch:** TBD (`feat/add-audio-tagging` or similar)  
@@ -372,7 +372,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 | Phase | Tasks | Deliverables |
 | --- | --- | --- |
 | **Phase 1: Foundation, Detect, Collect & Licenses** | • `ModelCategory.AudioTagging`<br>• C++ detect/validate (+ JNI/ObjC)<br>• TS `detectAudioTaggingModel`<br>• Collect stream for `audio-tagging-models`<br>• License CSV Android + iOS + `getModelLicenses()`<br>• Update support matrix: AT = offline yes / online no / SDK offline planned / live overload planned | ✅ Detection fixtures + license status for all release assets |
-| **Phase 2: Native engine + offline oneshot** | • Android helper + iOS C-API bridge<br>• TS `createAudioTagging` + `tag(offline)` oneshot<br>• `initMode: 'auto' \| 'custom'`<br>• Jest + Android smoke | Engine lifecycle + oneshot result |
+| **Phase 2: Native engine + offline oneshot** | • Android helper + iOS C-API bridge<br>• TS `createAudioTagging` + `tag(offline)` oneshot<br>• `initMode: 'auto' \| 'custom'`<br>• Jest + Android smoke | ✅ Engine lifecycle + oneshot result |
 | **Phase 3: Offline segmentation** | • `segmentation: { mode: 'auto' }` per-span tag<br>• Optional target `OfflineSegmentBuffer`<br>• Progress / onSegment callbacks | Long-file safe offline API |
 | **Phase 4: Docs + download catalog** | • `docs/audio-tagging-offline.md`<br>• README checklist + models `<details>`<br>• Download manager category wiring | App-facing docs at SLID/enhancement quality |
 | **Phase 5: Showcase** | • Example screen (Home): pack init, file tag, top-K HUD, optional segmented toggle<br>• Bundled/small recommended pack + test wavs from release `test_wavs/` | Showcase landed |
