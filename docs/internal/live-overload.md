@@ -318,6 +318,8 @@ Both buffers must be live **or** both offline. Mixed calls throw `*_INVALID_ARGU
 | **Enhancement** | ✅ `enhance(LiveAudio, LiveAudio, { segmentation: continuous_frames })` | Implemented (restricted) |
 | **Separation** | ✅ `separate(LiveAudio, LiveAudio[], { segmentation: continuous_frames })` | Implemented (restricted; N stem outputs) |
 | **Speaker identification** | ✅ `labelLiveSegments(LiveAudio, LiveSegment, { segmentation })` | Implemented — native `startSpeakerIdentificationOfflineLivePipeline` (see §11) |
+| **Spoken language identification** | ✅ `identify(LiveAudio, LiveText, { segmentation })` | Implemented — native `startLanguageIdOfflineLivePipeline` |
+| **Audio tagging** | ✅ `tag(LiveAudio, LiveText, { segmentation })` | Implemented — native `startAudioTaggingOfflineLivePipeline` |
 | VAD | ❌ | N/A — VAD **is** the segmentation primitive; `createStreamingVAD.process()` already accepts both buffer families |
 | Alignment | ❌ | Structurally incompatible (closed, bounded problem) |
 | Diarization | ❌ | Placeholder — revisit at implementation time |
