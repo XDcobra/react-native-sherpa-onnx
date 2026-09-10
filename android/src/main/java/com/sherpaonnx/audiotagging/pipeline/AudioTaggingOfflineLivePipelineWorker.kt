@@ -133,14 +133,18 @@ internal class AudioTaggingOfflineLivePipelineWorker(
     val endTime =
       if (speech.sampleRate > 0) speech.endSample.toFloat() / speech.sampleRate.toFloat() else 0f
 
-    val eventsMeta = events.map { ev ->
-      mapOf(
-        "name" to ev.name,
-        "index" to ev.index,
-        "prob" to ev.prob.toDouble(),
+    val eventsJson = JSONArray()
+    for (ev in events) {
+      eventsJson.put(
+        JSONObject()
+          .put("name", ev.name)
+          .put("index", ev.index)
+          .put("prob", ev.prob.toDouble()),
       )
     }
 
+    // LiveText meta is scalar-only across the RN bridge / JS projector.
+    // Nested lists are dropped; commit top-K as a JSON string instead.
     textOutputEntry.commitSegment(
       text = primaryName,
       tokens = emptyArray(),
@@ -148,7 +152,7 @@ internal class AudioTaggingOfflineLivePipelineWorker(
       source = "audio_tagging",
       meta = mapOf(
         "durationMs" to durationMs,
-        "events" to eventsMeta,
+        "events" to eventsJson.toString(),
       ),
     )
     addUnitsWritten(primaryName.length.toLong())
@@ -161,15 +165,6 @@ internal class AudioTaggingOfflineLivePipelineWorker(
 
     val out = segmentsOutEntry ?: return
     val sourceAudioBufferId = speech.sourceAudioBufferId.ifBlank { audioInBufferId }
-    val eventsJson = JSONArray()
-    for (ev in events) {
-      eventsJson.put(
-        JSONObject()
-          .put("name", ev.name)
-          .put("index", ev.index)
-          .put("prob", ev.prob.toDouble()),
-      )
-    }
     val payloadJson = JSONObject()
       .put("source", "audioTagging")
       .put("primaryName", primaryName)
