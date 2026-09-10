@@ -84,6 +84,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   alignment: ModelCategory.Alignment,
   languageId: ModelCategory.LanguageId,
   kws: ModelCategory.Kws,
+  audiotagging: ModelCategory.AudioTagging,
 };
 
 function isDetectModelNameInput(

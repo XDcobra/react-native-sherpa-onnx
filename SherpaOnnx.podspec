@@ -181,6 +181,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/kws\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/audio_tagging\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
@@ -201,6 +202,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/kws/bridge\"",
     "\"#{pod_root}/ios/kws/native\"",
     "\"#{pod_root}/ios/kws/pipeline\"",
+    "\"#{pod_root}/ios/audio-tagging\"",
+    "\"#{pod_root}/ios/audio-tagging/bridge\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

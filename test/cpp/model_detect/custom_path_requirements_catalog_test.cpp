@@ -283,6 +283,18 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         {"tokens", true, std::nullopt},
         {"keywords", true, std::nullopt},
     });
+    ExpectRequirementsMatch("audiotagging", "ced", {
+        {"model", true, std::nullopt},
+        {"labels", true, std::nullopt},
+    });
+    ExpectRequirementsMatch("audiotagging", "zipformer", {
+        {"model", true, std::nullopt},
+        {"labels", true, std::nullopt},
+    });
+    ExpectRequirementsMatch("audio_tagging", "ced", {
+        {"model", true, std::nullopt},
+        {"labels", true, std::nullopt},
+    });
 }
 
 TEST(CustomPathRequirementsCatalog, UnknownModelTypesReturnEmpty) {

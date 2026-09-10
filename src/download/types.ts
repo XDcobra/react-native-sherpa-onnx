@@ -14,6 +14,7 @@ export enum ModelCategory {
   Alignment = 'alignment',
   LanguageId = 'languageId',
   Kws = 'kws',
+  AudioTagging = 'audioTagging',
 }
 
 export type TtsModelType = TTSModelType | 'unknown';

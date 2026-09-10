@@ -63,6 +63,11 @@ void FillKwsModelPathsFromStringMap(
     KwsModelPaths& out
 );
 
+void FillAudioTaggingModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    AudioTaggingModelPaths& out
+);
+
 void FillOnlineSttModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     OnlineSttModelPaths& out
@@ -87,6 +92,8 @@ std::map<std::string, std::string> LanguageIdModelPathsToStringMap(
     const LanguageIdModelPaths& paths);
 std::map<std::string, std::string> KwsModelPathsToStringMap(
     const KwsModelPaths& paths);
+std::map<std::string, std::string> AudioTaggingModelPathsToStringMap(
+    const AudioTaggingModelPaths& paths);
 
 }  // namespace sherpaonnx
 

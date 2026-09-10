@@ -25,6 +25,7 @@ const DEFAULTS: Partial<Record<ModelCategory, HuggingFaceRepoSpec[]>> = {
   [ModelCategory.Alignment]: [],
   [ModelCategory.LanguageId]: [],
   [ModelCategory.Kws]: [],
+  [ModelCategory.AudioTagging]: [],
 };
 
 export function getDefaultHuggingFaceRepos(

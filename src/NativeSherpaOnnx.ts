@@ -1719,6 +1719,27 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  /** Offline audio tagging model detection (zipformer / CED + labels CSV). */
+  detectAudioTaggingModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+      labels?: string;
+    };
+  }>;
+
   /** Initialize a native keyword spotter. */
   initializeKeywordSpotting(
     instanceId: string,

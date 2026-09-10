@@ -24,6 +24,7 @@ enum class SpeakerEmbeddingModelKind;
 enum class DiarizationModelKind;
 enum class PunctuationModelKind;
 enum class VadModelKind;
+enum class AudioTaggingModelKind;
 }
 
 namespace model_detect_test {
@@ -76,6 +77,10 @@ std::string VadKindToString(sherpaonnx::VadModelKind kind);
 sherpaonnx::PunctuationModelKind PunctuationKindFromString(const std::string& modelType);
 
 std::string PunctuationKindToString(sherpaonnx::PunctuationModelKind kind);
+
+sherpaonnx::AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType);
+
+std::string AudioTaggingKindToString(sherpaonnx::AudioTaggingModelKind kind);
 
 }  // namespace model_detect_test
 

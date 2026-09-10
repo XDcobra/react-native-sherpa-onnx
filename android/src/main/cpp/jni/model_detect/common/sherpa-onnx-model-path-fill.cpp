@@ -153,6 +153,14 @@ void FillKwsModelPathsFromStringMap(
     SetPathFromMap(paths, "keywords", out.keywords);
 }
 
+void FillAudioTaggingModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    AudioTaggingModelPaths& out
+) {
+    SetPathFromMap(paths, "model", out.model);
+    SetPathFromMap(paths, "labels", out.labels);
+}
+
 void FillOnlineSttModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     OnlineSttModelPaths& out
@@ -306,6 +314,15 @@ std::map<std::string, std::string> KwsModelPathsToStringMap(
     PutPathIfNonEmpty(out, "joiner", paths.joiner);
     PutPathIfNonEmpty(out, "tokens", paths.tokens);
     PutPathIfNonEmpty(out, "keywords", paths.keywords);
+    return out;
+}
+
+std::map<std::string, std::string> AudioTaggingModelPathsToStringMap(
+    const AudioTaggingModelPaths& paths
+) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "model", paths.model);
+    PutPathIfNonEmpty(out, "labels", paths.labels);
     return out;
 }
 

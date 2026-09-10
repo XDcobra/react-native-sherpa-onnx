@@ -320,4 +320,22 @@ std::string PunctuationKindToString(PunctuationModelKind kind) {
     }
 }
 
+AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "ced") return AudioTaggingModelKind::kCed;
+    if (t == "zipformer") return AudioTaggingModelKind::kZipformer;
+    return AudioTaggingModelKind::kUnknown;
+}
+
+std::string AudioTaggingKindToString(AudioTaggingModelKind kind) {
+    switch (kind) {
+        case AudioTaggingModelKind::kCed:
+            return "ced";
+        case AudioTaggingModelKind::kZipformer:
+            return "zipformer";
+        default:
+            return "unknown";
+    }
+}
+
 }  // namespace model_detect_test

@@ -39,6 +39,7 @@
 #include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-validate-slid.h"
 #include "sherpa-onnx-validate-kws.h"
+#include "sherpa-onnx-validate-audio-tagging.h"
 #include "sherpa-onnx-validate-vad.h"
 #include "sherpa-onnx-validate-custom.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -85,6 +86,8 @@ TEST(ModelDetectTest, FixturesExist) {
     std::ifstream diarizationCsv(dir + "/speaker-segmentation-models-expected.csv");
     std::ifstream kwsStruct(dir + "/kws-models-structure.txt");
     std::ifstream kwsCsv(dir + "/kws-models-expected.csv");
+    std::ifstream atStruct(dir + "/audio-tagging-models-structure.txt");
+    std::ifstream atCsv(dir + "/audio-tagging-models-expected.csv");
     ASSERT_TRUE(asrStruct.is_open()) << "Missing: " << dir << "/asr-models-structure.txt";
     ASSERT_TRUE(asrCsv.is_open()) << "Missing: " << dir << "/asr-models-expected.csv";
     ASSERT_TRUE(ttsStruct.is_open()) << "Missing: " << dir << "/tts-models-structure.txt";
@@ -105,6 +108,8 @@ TEST(ModelDetectTest, FixturesExist) {
         << "Missing: " << dir << "/speaker-segmentation-models-expected.csv";
     ASSERT_TRUE(kwsStruct.is_open()) << "Missing: " << dir << "/kws-models-structure.txt";
     ASSERT_TRUE(kwsCsv.is_open()) << "Missing: " << dir << "/kws-models-expected.csv";
+    ASSERT_TRUE(atStruct.is_open()) << "Missing: " << dir << "/audio-tagging-models-structure.txt";
+    ASSERT_TRUE(atCsv.is_open()) << "Missing: " << dir << "/audio-tagging-models-expected.csv";
 }
 
 TEST(ModelDetectTest, DetectKwsFromFileListMatchesExpected) {
@@ -207,6 +212,85 @@ TEST(ModelDetectValidation, KwsNestedKeywordsRejectedWithoutKwsName) {
     EXPECT_FALSE(result.ok);
     EXPECT_FALSE(result.isStreaming);
     EXPECT_NE(result.error.find("nested keywords.txt"), std::string::npos);
+}
+
+TEST(ModelDetectTest, DetectAudioTaggingFromFileListMatchesExpected) {
+    const std::string dir = GetFixturesDir();
+    const std::string structurePath = dir + "/audio-tagging-models-structure.txt";
+    const std::string csvPath = dir + "/audio-tagging-models-expected.csv";
+    std::string err;
+    const auto blocks =
+        model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+    const auto expected = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        const auto it = expected.find(block.assetName);
+        if (it == expected.end()) continue;
+        const auto expectedKind =
+            model_detect_test::AudioTaggingKindFromString(it->second);
+        if (expectedKind == sherpaonnx::AudioTaggingModelKind::kUnknown) continue;
+
+        const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+            block.modelDir, block.pathLines);
+        const auto result = sherpaonnx::DetectAudioTaggingModelFromFileList(
+            files, block.modelDir, "auto", "");
+        EXPECT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_FALSE(result.isStreaming) << "Asset " << block.assetName;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << it->second
+            << " but got " << model_detect_test::AudioTaggingKindToString(result.selectedKind);
+        EXPECT_FALSE(result.paths.model.empty()) << "Asset " << block.assetName;
+        EXPECT_FALSE(result.paths.labels.empty()) << "Asset " << block.assetName;
+        EXPECT_NE(result.paths.labels.find("class_labels_indices.csv"), std::string::npos)
+            << "Asset " << block.assetName;
+    }
+}
+
+TEST(ModelDetectValidation, AudioTaggingRejectsTransducerLayout) {
+    const std::string root = "/tmp/asr-transducer";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root,
+        {"encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt",
+         "class_labels_indices.csv"});
+    const auto result =
+        sherpaonnx::DetectAudioTaggingModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("transducer"), std::string::npos);
+}
+
+TEST(ModelDetectValidation, AudioTaggingRejectsOnnxWithoutLabels) {
+    const std::string root = "/tmp/speech-enhancement-gtcrn";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, {"model.onnx"});
+    const auto result =
+        sherpaonnx::DetectAudioTaggingModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("class_labels_indices.csv"), std::string::npos);
+}
+
+TEST(ModelDetectValidation, AudioTaggingRejectsKwsLikeFileList) {
+    const std::string root = "/tmp/sherpa-onnx-kws-zipformer";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root,
+        {"encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt",
+         "keywords.txt"});
+    const auto result =
+        sherpaonnx::DetectAudioTaggingModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectValidation, AudioTaggingRejectsGenericModelLabelsWithoutKindCue) {
+    const std::string root = "/tmp/mystery-pack";
+    const auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, {"model.onnx", "class_labels_indices.csv"});
+    const auto result =
+        sherpaonnx::DetectAudioTaggingModelFromFileList(files, root, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("cannot infer kind"), std::string::npos);
 }
 
 /**
