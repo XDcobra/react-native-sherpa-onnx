@@ -67,7 +67,14 @@ await sep.destroy();
 
 ## Mandatory segmentation
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or invalid). Live overload supports **`continuous_frames` only**.
+`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or invalid).
+
+| Evaluator | Live overload | Notes |
+| --- | --- | --- |
+| `continuous_frames` | ✅ | **Only** supported evaluator — fixed checkpoints via `checkpointIntervalMs` |
+| `speech_energy_silence` | ❌ | Silence cuts are rejected on this path |
+| `speech_vad_model` | ❌ | Speech-only windows are rejected on this path |
+| `speech_pyannote_segmentation` | ❌ | Not supported for separation live overload |
 
 `'off'` and `'manual'` modes are **not** supported on this path. Commit-only — no partial stems between segment boundaries.
 
