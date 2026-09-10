@@ -9,6 +9,7 @@
 #include "sherpa-onnx-validate-audio-tagging.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -236,6 +237,8 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
 - (void)tagAudioOffline:(NSString *)instanceId
           audioBufferId:(NSString *)audioBufferId
                    topK:(NSNumber *)topK
+            startSample:(NSNumber *)startSample
+              endSample:(NSNumber *)endSample
                 resolve:(RCTPromiseResolveBlock)resolve
                  reject:(RCTPromiseRejectBlock)reject
 {
@@ -245,6 +248,15 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
   }
   if (audioBufferId == nil || [audioBufferId length] == 0) {
     reject(@"AUDIO_TAGGING_BUFFER_NOT_FOUND", @"audioBufferId is required", nil);
+    return;
+  }
+
+  const bool hasStart = startSample != nil;
+  const bool hasEnd = endSample != nil;
+  if (hasStart != hasEnd) {
+    reject(@"AUDIO_TAGGING_INVALID_ARGUMENT",
+           @"startSample and endSample must both be provided or both omitted",
+           nil);
     return;
   }
 
@@ -291,11 +303,43 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
     @try {
       std::vector<float> samples;
       int sampleRate = inSampleRate;
-      if (!pa_read_offline_samples(audioInId, &samples, &sampleRate) || samples.empty()) {
-        reject(@"AUDIO_TAGGING_BUFFER_EMPTY",
-               [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
-               nil);
-        return;
+
+      if (!hasStart) {
+        if (!pa_read_offline_samples(audioInId, &samples, &sampleRate) || samples.empty()) {
+          reject(@"AUDIO_TAGGING_BUFFER_EMPTY",
+                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
+                 nil);
+          return;
+        }
+      } else {
+        const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
+        const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
+        const int end = std::min(endRaw, inNumSamples);
+        const int frameCount = std::max(0, end - start);
+        if (frameCount == 0) {
+          resolve(@{
+            @"events": @[],
+            @"audioDuration": @(0.0),
+            @"elapsedMs": @(0.0),
+            @"topK": @(effectiveTopK),
+          });
+          return;
+        }
+        std::string sliceErrCode;
+        std::string sliceErrMsg;
+        if (!pa_get_offline_samples_slice(
+                audioInId, start, frameCount, &samples, &sliceErrCode, &sliceErrMsg)) {
+          NSString *code = sliceErrCode.empty()
+              ? @"AUDIO_TAGGING_TAG_FAILED"
+              : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+          NSString *msg = sliceErrMsg.empty()
+              ? @"Failed to read offline audio slice"
+              : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+          reject(code, msg, nil);
+          return;
+        }
+        RCTLogInfo(@"[SherpaOnnx:audioTagging] tagOffline slice instanceId=%@ bufferId=%@ startSample=%d endSample=%d frameCount=%d",
+                   instanceId, audioBufferId, start, end, frameCount);
       }
 
       const auto t0 = std::chrono::steady_clock::now();
