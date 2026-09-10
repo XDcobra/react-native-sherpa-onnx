@@ -58,3 +58,7 @@ export {
   type KwsCustomInitFormState,
   type KwsCustomPathKey,
 } from './KwsCustomInitForm';
+export {
+  AudioTaggingCustomInitForm,
+  type AudioTaggingCustomInitFormState,
+} from './AudioTaggingCustomInitForm';
