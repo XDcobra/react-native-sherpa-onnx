@@ -1,13 +1,22 @@
 import type { FileSource } from '../fileio/types';
 import type { QuantizationPreference } from '../download/types';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
-import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
+import type { LiveOfflinePipelineBaseOptions } from '../livePipeline';
+import type {
+  LiveSegmentBufferIdSource,
+  OfflineSegmentBufferIdSource,
+} from '../segmentbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type {
   ErrorRecoveryStrategy,
   OrchestrationProgress,
 } from '../pipeline/offlineOrchestrator';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import type { AudioTaggingCustomConfig } from './customConfig';
+import type { AudioTaggingPipelineHandle } from './streamingTypes';
 
 export type AudioTaggingModelType = 'ced' | 'zipformer';
 
@@ -105,11 +114,45 @@ export type SegmentedAudioTaggingResult = {
   processingTimeMs: number;
 };
 
+/** Live `onSegment` event mapped from LiveText commits. */
+export type AudioTaggingLiveSegmentEvent = {
+  segmentIndex: number;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  result: AudioTaggingResult;
+};
+
+/**
+ * Options for Mode 3 live overload:
+ * `tag(liveAudio, liveText, options)`.
+ */
+export interface AudioTaggingLivePipelineOptions
+  extends LiveOfflinePipelineBaseOptions {
+  topK?: number;
+  onSegment?: (event: AudioTaggingLiveSegmentEvent) => void;
+  /** Optional live segment buffer to annotate with AudioTaggingSpeechSegmentPayload. */
+  targetSegmentBuffer?: LiveSegmentBufferIdSource;
+}
+
 export interface AudioTaggingEngine {
   readonly instanceId: string;
+
+  /** Mode 1: Offline oneshot. Mode 2: Offline segmented when segmentation.mode=auto. */
   tag(
     offlineAudio: OfflineAudioBufferIdSource,
     options?: AudioTaggingTagOptions
   ): Promise<AudioTaggingResult | SegmentedAudioTaggingResult>;
+
+  /**
+   * Mode 3: Live overload — mandatory segmentation; commits primary event name
+   * (+ meta top-K) into LiveText; optional live targetSegmentBuffer.
+   */
+  tag(
+    audioIn: LiveAudioBufferIdSource,
+    textOut: LiveTextBufferIdSource,
+    options: AudioTaggingLivePipelineOptions
+  ): Promise<AudioTaggingPipelineHandle>;
+
   destroy(): Promise<void>;
 }

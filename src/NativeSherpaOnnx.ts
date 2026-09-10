@@ -1790,6 +1790,23 @@ export interface Spec extends TurboModule {
   /** Release an audio tagging engine instance. Idempotent when the id is absent. */
   unloadAudioTagging(instanceId: string): Promise<void>;
 
+  /**
+   * Start a live-offline Audio Tagging pipeline.
+   * Commits primary event names (+ meta top-K) into a live text buffer;
+   * optionally labels a live segment buffer.
+   */
+  startAudioTaggingOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      targetSegmentLiveBufferId?: string | null;
+      topK?: number | null;
+    }
+  ): Promise<{ pipelineId: string }>;
+
   /** Initialize a native keyword spotter. */
   initializeKeywordSpotting(
     instanceId: string,

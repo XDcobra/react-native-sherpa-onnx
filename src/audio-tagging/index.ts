@@ -14,11 +14,22 @@ export type {
 export { buildAudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
 export type { AudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
 export {
+  isLiveAudioSource,
+  isLiveSegmentSource,
+  isLiveTextSource,
+  tagLiveOverload,
+} from './live';
+export {
   collectSpeechSpans,
   normalizeAudioTaggingNativeResult,
   runOfflineAudioTaggingSegmentation,
   spanDurationMs,
 } from './orchestrate';
+export type {
+  AudioTaggingPipelineHandle,
+  StreamingPipelineCompletion,
+  StreamingPipelineStatus,
+} from './streamingTypes';
 export {
   AUDIO_TAGGING_MODEL_TYPES,
   AudioTaggingErrorCode,
@@ -32,6 +43,8 @@ export type {
   AudioTaggingEvent,
   AudioTaggingInitOptionsShared,
   AudioTaggingInitializeOptions,
+  AudioTaggingLivePipelineOptions,
+  AudioTaggingLiveSegmentEvent,
   AudioTaggingModelType,
   AudioTaggingResult,
   AudioTaggingSegmentEvent,

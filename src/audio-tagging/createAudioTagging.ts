@@ -1,15 +1,22 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
-import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type {
+  LiveAudioBufferIdSource,
+  OfflineAudioBufferIdSource,
+} from '../audiobuffer/types';
+import type { LiveTextBufferIdSource } from '../textbuffer/types';
 import { buildAudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
+import { isLiveAudioSource, isLiveTextSource, tagLiveOverload } from './live';
 import {
   normalizeAudioTaggingNativeResult,
   runOfflineAudioTaggingSegmentation,
 } from './orchestrate';
+import type { AudioTaggingPipelineHandle } from './streamingTypes';
 import {
   AudioTaggingErrorCode,
   type AudioTaggingEngine,
   type AudioTaggingInitializeOptions,
+  type AudioTaggingLivePipelineOptions,
   type AudioTaggingResult,
   type AudioTaggingTagOptions,
   type SegmentedAudioTaggingResult,
@@ -58,79 +65,113 @@ export async function createAudioTagging(
 
   let isDestroyed = false;
 
+  const tagImpl = async (
+    audioOrLive: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
+    second?:
+      | AudioTaggingTagOptions
+      | LiveTextBufferIdSource
+      | AudioTaggingLivePipelineOptions,
+    third?: AudioTaggingLivePipelineOptions
+  ): Promise<
+    | AudioTaggingResult
+    | SegmentedAudioTaggingResult
+    | AudioTaggingPipelineHandle
+  > => {
+    if (isDestroyed) {
+      throw new Error(
+        `${AudioTaggingErrorCode.DESTROYED}: Audio tagging engine instance ${instanceId} has been destroyed`
+      );
+    }
+    if (audioOrLive == null) {
+      throw new Error(
+        `${AudioTaggingErrorCode.INVALID_ARGUMENT}: audio buffer is required`
+      );
+    }
+
+    // Mode 3: tag(liveAudio, liveText, options)
+    if (isLiveAudioSource(audioOrLive) && isLiveTextSource(second)) {
+      if (third == null || typeof third !== 'object') {
+        throw new Error(
+          `${AudioTaggingErrorCode.INVALID_ARGUMENT}: live tag requires options with segmentation`
+        );
+      }
+      return tagLiveOverload(
+        instanceId,
+        audioOrLive,
+        second,
+        third as AudioTaggingLivePipelineOptions
+      );
+    }
+
+    if (isLiveAudioSource(audioOrLive)) {
+      throw new Error(
+        `${AudioTaggingErrorCode.INVALID_ARGUMENT}: tag(liveAudio, …) requires (liveAudio, liveText, options).`
+      );
+    }
+
+    const tagOptions =
+      second != null && typeof second === 'object' && !isLiveTextSource(second)
+        ? (second as AudioTaggingTagOptions)
+        : undefined;
+
+    if (tagOptions?.segmentation?.mode === 'manual') {
+      throw new Error(
+        `${AudioTaggingErrorCode.INVALID_ARGUMENT}: audio tagging does not support segmentation.mode=manual`
+      );
+    }
+
+    if (tagOptions?.segmentation?.mode === 'auto') {
+      return runOfflineAudioTaggingSegmentation(
+        instanceId,
+        audioOrLive,
+        tagOptions
+      );
+    }
+
+    let audioBufferId: string;
+    try {
+      audioBufferId = resolvePipelineAudioBufferId(audioOrLive);
+    } catch (e: any) {
+      throw new Error(
+        `${AudioTaggingErrorCode.INVALID_ARGUMENT}: ${e?.message ?? String(e)}`
+      );
+    }
+
+    if (
+      typeof audioBufferId !== 'string' ||
+      !audioBufferId.startsWith('off_')
+    ) {
+      throw new Error(
+        `${
+          AudioTaggingErrorCode.INVALID_ARGUMENT
+        }: expected an offline audio buffer (off_...), got ${String(
+          audioBufferId
+        )}`
+      );
+    }
+
+    const topK =
+      tagOptions?.topK !== undefined && Number.isFinite(tagOptions.topK)
+        ? tagOptions.topK
+        : null;
+
+    const res = await SherpaOnnx.tagAudioOffline(
+      instanceId,
+      audioBufferId,
+      topK,
+      null,
+      null
+    );
+
+    return normalizeAudioTaggingNativeResult(res, topK ?? 5);
+  };
+
   return {
     get instanceId() {
       return instanceId;
     },
 
-    async tag(
-      offlineAudio: OfflineAudioBufferIdSource,
-      tagOptions?: AudioTaggingTagOptions
-    ): Promise<AudioTaggingResult | SegmentedAudioTaggingResult> {
-      if (isDestroyed) {
-        throw new Error(
-          `${AudioTaggingErrorCode.DESTROYED}: Audio tagging engine instance ${instanceId} has been destroyed`
-        );
-      }
-      if (offlineAudio == null) {
-        throw new Error(
-          `${AudioTaggingErrorCode.INVALID_ARGUMENT}: audio buffer is required`
-        );
-      }
-
-      if (tagOptions?.segmentation?.mode === 'manual') {
-        throw new Error(
-          `${AudioTaggingErrorCode.INVALID_ARGUMENT}: audio tagging does not support segmentation.mode=manual`
-        );
-      }
-
-      if (tagOptions?.segmentation?.mode === 'auto') {
-        return runOfflineAudioTaggingSegmentation(
-          instanceId,
-          offlineAudio,
-          tagOptions
-        );
-      }
-
-      let audioBufferId: string;
-      try {
-        audioBufferId = resolvePipelineAudioBufferId(offlineAudio);
-      } catch (e: any) {
-        throw new Error(
-          `${AudioTaggingErrorCode.INVALID_ARGUMENT}: ${
-            e?.message ?? String(e)
-          }`
-        );
-      }
-
-      if (
-        typeof audioBufferId !== 'string' ||
-        !audioBufferId.startsWith('off_')
-      ) {
-        throw new Error(
-          `${
-            AudioTaggingErrorCode.INVALID_ARGUMENT
-          }: expected an offline audio buffer (off_...), got ${String(
-            audioBufferId
-          )}`
-        );
-      }
-
-      const topK =
-        tagOptions?.topK !== undefined && Number.isFinite(tagOptions.topK)
-          ? tagOptions.topK
-          : null;
-
-      const res = await SherpaOnnx.tagAudioOffline(
-        instanceId,
-        audioBufferId,
-        topK,
-        null,
-        null
-      );
-
-      return normalizeAudioTaggingNativeResult(res, topK ?? 5);
-    },
+    tag: tagImpl as AudioTaggingEngine['tag'],
 
     async destroy(): Promise<void> {
       if (isDestroyed) return;
