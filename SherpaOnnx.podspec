@@ -205,6 +205,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/audio-tagging\"",
     "\"#{pod_root}/ios/audio-tagging/bridge\"",
     "\"#{pod_root}/ios/audio-tagging/core\"",
+    "\"#{pod_root}/ios/audio-tagging/pipeline\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

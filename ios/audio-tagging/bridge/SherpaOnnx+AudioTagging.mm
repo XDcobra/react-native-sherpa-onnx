@@ -2,6 +2,8 @@
 #import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
+#include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../core/AudioTaggingBridgeState.h"
 
 #include "sherpa-onnx-model-detect.h"
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -413,6 +416,32 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
   }
   const std::string instanceIdStr = [instanceId UTF8String];
   dispatch_async(AudioTaggingSerialQueue(), ^{
+    // Stop any live overload pipeline before destroying the tagger.
+    std::string pipelineId;
+    {
+      std::lock_guard<std::mutex> lock(sherpaonnx::audio_tagging::bridge::g_audio_tagging_mutex);
+      auto it = sherpaonnx::audio_tagging::bridge::g_audio_tagging_instances.find(instanceIdStr);
+      if (it != sherpaonnx::audio_tagging::bridge::g_audio_tagging_instances.end()) {
+        pipelineId = it->second->activeLivePipelineId;
+        it->second->activeLivePipelineId.clear();
+      }
+    }
+    if (!pipelineId.empty()) {
+      std::shared_ptr<StreamingPipelineWorker> worker;
+      {
+        std::lock_guard<std::mutex> lock(g_streaming_pipeline_mutex);
+        auto it = g_streaming_pipelines.find(pipelineId);
+        if (it != g_streaming_pipelines.end()) {
+          worker = it->second;
+          g_streaming_pipelines.erase(it);
+        }
+      }
+      if (worker) {
+        so_mark_streaming_pipeline_stop_requested(pipelineId);
+        worker->stop();
+        worker->join();
+      }
+    }
     sherpaonnx::audio_tagging::bridge::RemoveAudioTagging(instanceIdStr);
     resolve(nil);
   });

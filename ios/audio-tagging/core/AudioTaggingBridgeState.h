@@ -25,6 +25,7 @@ struct AudioTaggingInstanceState {
   int32_t numThreads = 1;
   std::string provider = "cpu";
   std::string modelType;
+  std::string activeLivePipelineId;
 
   // Keep path strings alive for the lifetime of the C-API handle (c_str pointers).
   std::string modelPath;
