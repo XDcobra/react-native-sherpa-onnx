@@ -27,6 +27,8 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   const diarizationModelsPath =
     'model_licenses/diarization-models-license-status.csv';
   const kwsPath = 'model_licenses/kws-models-license-status.csv';
+  const audioTaggingPath =
+    'model_licenses/audio-tagging-models-license-status.csv';
 
   const results = await Promise.allSettled([
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
@@ -40,6 +42,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(diarizationPath),
     SherpaOnnx.readAssetFileAsUtf8(diarizationModelsPath),
     SherpaOnnx.readAssetFileAsUtf8(kwsPath),
+    SherpaOnnx.readAssetFileAsUtf8(audioTaggingPath),
   ]);
 
   const [
@@ -54,6 +57,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     diarizationResult,
     diarizationModelsResult,
     kwsResult,
+    audioTaggingResult,
   ] = results;
 
   const licenses: ModelLicense[] = [];
@@ -143,6 +147,14 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load KWS model licenses: ${kwsResult.reason}`
+    );
+  }
+
+  if (audioTaggingResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(audioTaggingResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load audio tagging model licenses: ${audioTaggingResult.reason}`
     );
   }
 

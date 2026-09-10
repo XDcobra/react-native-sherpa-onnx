@@ -13,6 +13,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.Alignment,
   ModelCategory.LanguageId,
   ModelCategory.Kws,
+  ModelCategory.AudioTagging,
 ]);
 
 export type CatalogDetectCategory =
@@ -27,7 +28,8 @@ export type CatalogDetectCategory =
   | ModelCategory.Diarization
   | ModelCategory.Alignment
   | ModelCategory.LanguageId
-  | ModelCategory.Kws;
+  | ModelCategory.Kws
+  | ModelCategory.AudioTagging;
 
 export function categoryUsesCatalogDetect(
   category: ModelCategory

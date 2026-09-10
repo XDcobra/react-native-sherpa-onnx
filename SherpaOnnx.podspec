@@ -79,32 +79,10 @@ Pod::Spec.new do |s|
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
   end
-  # Also mark shared C++ headers from android/ as private to prevent Clang module issues.
-  private_headers += [
-    "android/src/main/cpp/jni/audio/AudioDecodeSession.h",
-    "android/src/main/cpp/jni/audio/AudioVisualization.h",
-    "android/src/main/cpp/jni/audio/FfmpegFormatGuard.h",
-    "android/src/main/cpp/jni/audio/AudioEncodeSession.h",
-    "android/src/main/cpp/jni/diagnostic/NativeDiagnostic.h",
-    "android/src/main/cpp/separation/sherpa-onnx-separation-wrapper.h",
-    "android/src/main/cpp/diarization/sherpa-onnx-diarization-wrapper.h",
-    "android/src/main/cpp/diarization/sherpa-onnx-streaming-diarization-wrapper.h",
-    "android/src/main/cpp/diarization/sortformer-fbank.h",
-    "android/src/main/cpp/diarization/sortformer-post-processor.h",
-    "android/src/main/cpp/diarization/sortformer-streaming-model.h",
-    "android/src/main/cpp/diarization/streaming-diarizer-interface.h",
-    "android/src/main/cpp/diarization/diarization-types.h",
-    "android/src/main/cpp/diarization/powerset.h",
-    "android/src/main/cpp/diarization/pyannote-segmentation-model.h",
-    "android/src/main/cpp/diarization/speaker-timeline.h",
-    "android/src/main/cpp/diarization/agglomerative-clustering.h",
-    "android/src/main/cpp/diarization/diarization-session.h",
-    "android/src/main/cpp/speaker-embedding/speaker-embedding-types.h",
-    "android/src/main/cpp/speaker-embedding/speaker-embedding-registry-key.h",
-    "android/src/main/cpp/speaker-embedding/speaker-embedding-runner.h",
-    "android/src/main/cpp/speaker-embedding/speaker-embedding-manager.h",
-    "android/src/main/cpp/speaker-embedding/sherpa-onnx-speaker-embedding-wrapper.h"
-  ]
+  # Mark all shared C++ headers from android/ as private so CocoaPods does not
+  # put them in the umbrella module map. Swift's Clang dependency scanner builds
+  # the module as non-C++ and fails on #include <cstdint> otherwise.
+  private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.h"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
@@ -181,6 +159,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/kws\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/slid\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/audio_tagging\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
@@ -201,6 +181,10 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/kws/bridge\"",
     "\"#{pod_root}/ios/kws/native\"",
     "\"#{pod_root}/ios/kws/pipeline\"",
+    "\"#{pod_root}/ios/audio-tagging\"",
+    "\"#{pod_root}/ios/audio-tagging/bridge\"",
+    "\"#{pod_root}/ios/audio-tagging/core\"",
+    "\"#{pod_root}/ios/audio-tagging/pipeline\"",
     "\"#{device_headers}\"",
     "\"#{simulator_headers}\""
   ]

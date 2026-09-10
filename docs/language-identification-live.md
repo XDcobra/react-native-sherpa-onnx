@@ -87,12 +87,16 @@ Mixed live/offline arguments throw `LANGUAGE_ID_INVALID_ARGUMENT`.
 
 ## Mandatory segmentation
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`). Supported evaluators:
+`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`).
 
-- `speech_energy_silence`
-- `speech_vad_model`
+| Evaluator | Live overload | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ | Default via `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
+| `continuous_frames` | ❌ | Fixed windows are a poor fit for utterance-level language ID |
+| `speech_pyannote_segmentation` | ❌ | Not in SLID live `supportedEvaluators` |
 
-SLID attaches the engine — you do **not** pass a pre-built VAD segment In from the app for the worker path. Default offline policy constant (`DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY`) seeds `minSegmentMs: 1500`. Policy tuning: [segmentation-engine.md](segmentation-engine.md).
+SLID attaches the engine — you do **not** pass a pre-built VAD segment In from the app for the worker path. Policy tuning: [segmentation-engine.md](segmentation-engine.md).
 
 ## Pipeline handle
 
@@ -105,14 +109,6 @@ Same control surface as other streaming / live-overload features ([streaming-pip
 | `reset()` | Clears progress counters while the pipeline remains running. |
 | `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
 | `completed` | Resolves on graceful finalize (`completed`) or `stop()` (`stopped`); rejects on fatal errors (`STREAMING_PIPELINE_ERROR`). |
-
-## Optional `targetSegmentBuffer`
-
-Pass a live segment buffer to append the same payload as offline label:
-
-```ts
-payload: { source: 'languageId'; lang: string }
-```
 
 ## API reference
 
@@ -134,6 +130,14 @@ type LanguageIdentificationLivePipelineOptions = {
   onLanguageChanged?: (event: LanguageChangedEvent) => void;
   targetSegmentBuffer?: LiveSegmentBufferIdSource;
 };
+```
+
+## Optional `targetSegmentBuffer`
+
+Pass a live segment buffer to append the same payload as offline label:
+
+```ts
+payload: { source: 'languageId'; lang: string }
 ```
 
 ## Error codes

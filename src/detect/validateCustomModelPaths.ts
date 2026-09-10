@@ -28,7 +28,8 @@ export type CustomModelPathCategory =
   | ModelCategory.Punctuation
   | ModelCategory.Alignment
   | ModelCategory.LanguageId
-  | ModelCategory.Kws;
+  | ModelCategory.Kws
+  | ModelCategory.AudioTagging;
 
 export type CustomModelPathValidationResult = {
   ok: boolean;
@@ -47,7 +48,16 @@ type NativeCustomModelPathRequirements = {
 };
 
 function normalizeCategory(category: CustomModelPathCategory | string): string {
-  return typeof category === 'string' ? category : category;
+  if (typeof category !== 'string') return category;
+  // Native validate-custom uses ToLower; map camelCase enum values explicitly
+  // so audioTagging → audiotagging (and speakerEmbedding → speakerembedding).
+  if (category === ModelCategory.AudioTagging || category === 'audioTagging') {
+    return 'audiotagging';
+  }
+  if (category === 'audio_tagging') {
+    return 'audio_tagging';
+  }
+  return category;
 }
 
 function normalizeCustomModelPathField(

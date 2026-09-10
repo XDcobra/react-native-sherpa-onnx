@@ -220,7 +220,7 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
   }
   NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
   if (source.length == 0) {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
     return false;
   }
   NSSet<NSString *> *allowed = nil;
@@ -236,10 +236,12 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
     allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"languageId"]) {
     allowed = [NSSet setWithArray:@[@"source", @"lang", @"confidence", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
+  } else if ([source isEqualToString:@"audioTagging"]) {
+    allowed = [NSSet setWithArray:@[@"source", @"primaryName", @"events", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else if ([source isEqualToString:@"manual"]) {
     allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
   } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual";
+    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
     return false;
   }
 
@@ -289,6 +291,20 @@ bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorM
       double confidence = [(NSNumber *)payload[@"confidence"] doubleValue];
       if (!std::isfinite(confidence)) {
         if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
+        return false;
+      }
+    }
+  }
+  if ([source isEqualToString:@"audioTagging"]) {
+    if (payload[@"primaryName"] != nil && payload[@"primaryName"] != [NSNull null]) {
+      if (![payload[@"primaryName"] isKindOfClass:[NSString class]]) {
+        if (errorMessage) *errorMessage = @"speech payload.primaryName must be a string when provided";
+        return false;
+      }
+    }
+    if (payload[@"events"] != nil && payload[@"events"] != [NSNull null]) {
+      if (![payload[@"events"] isKindOfClass:[NSArray class]]) {
+        if (errorMessage) *errorMessage = @"speech payload.events must be an array when provided";
         return false;
       }
     }

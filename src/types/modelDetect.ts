@@ -195,3 +195,13 @@ export interface KwsDetectModelResult extends ModelDetectResultBase {
     keywords?: string;
   };
 }
+
+// ─── Audio tagging extension ───────────────────────────────────────────
+
+export interface AudioTaggingDetectModelResult extends ModelDetectResultBase {
+  /** Resolved offline pack files (ONNX model + class_labels_indices.csv). */
+  paths?: {
+    model?: string;
+    labels?: string;
+  };
+}

@@ -74,6 +74,7 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'sid',
   'pyannote',
   'languageId',
+  'audioTagging',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
@@ -85,6 +86,7 @@ const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   sid: new Set(['source', 'speakerName']),
   pyannote: new Set(['source']),
   languageId: new Set(['source', 'lang', 'confidence']),
+  audioTagging: new Set(['source', 'primaryName', 'events']),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -214,7 +216,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -320,6 +322,43 @@ function assertSpeechPayload(
       throw new Error(
         `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.confidence must be a finite number when provided.`
       );
+    }
+  } else if (typedSource === 'audioTagging') {
+    if (obj.primaryName !== undefined && typeof obj.primaryName !== 'string') {
+      throw new Error(
+        `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.primaryName must be a string when provided.`
+      );
+    }
+    if (obj.events !== undefined) {
+      if (!Array.isArray(obj.events)) {
+        throw new Error(
+          `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.events must be an array when provided.`
+        );
+      }
+      for (let i = 0; i < obj.events.length; i++) {
+        const ev = obj.events[i];
+        if (ev == null || typeof ev !== 'object' || Array.isArray(ev)) {
+          throw new Error(
+            `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.events[${i}] must be an object.`
+          );
+        }
+        const row = ev as Record<string, unknown>;
+        if (typeof row.name !== 'string') {
+          throw new Error(
+            `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.events[${i}].name must be a string.`
+          );
+        }
+        if (typeof row.index !== 'number' || !Number.isFinite(row.index)) {
+          throw new Error(
+            `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.events[${i}].index must be a finite number.`
+          );
+        }
+        if (typeof row.prob !== 'number' || !Number.isFinite(row.prob)) {
+          throw new Error(
+            `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.events[${i}].prob must be a finite number.`
+          );
+        }
+      }
     }
   }
   // pyannote: source-only payload
@@ -1043,6 +1082,8 @@ export type {
   SpeechSegmentPayloadSource,
   SidSpeechSegmentPayload,
   PyannoteSpeechSegmentPayload,
+  LanguageIdSpeechSegmentPayload,
+  AudioTaggingSpeechSegmentPayload,
   VadSpeechSegmentPayload,
   PipelineSegmentBufferKind,
   SegmentKind,

@@ -10,6 +10,7 @@
 #   speaker-embedding — Speaker embedding / recognition models
 #   diarization  — Speaker diarization / segmentation models
 #   kws          — Keyword spotting models
+#   audio-tagging — Audio tagging models
 #
 # Invalid stream IDs fail in the plan job before any downloads.
 # Asset download+tar-list inside a stream is parallel (COLLECT_JOBS, default 4).
@@ -35,6 +36,7 @@ on:
           - speaker-embedding
           - diarization
           - kws
+          - audio-tagging
       asset_limit:
         description: 'Max assets per stream (0 = no limit)'
         required: false

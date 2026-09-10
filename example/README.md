@@ -164,6 +164,20 @@ This screen supports both live and offline VAD flows, including file and microph
 
 This screen runs real streaming keyword spotting (`createKeywordSpotting` → `engine.spot`) over a `LiveAudioBuffer` into a `LiveTextBuffer`. It covers pack-aware model init (`ModelCategory.Kws`), optional keyword overrides (`spot({ keywords })`), file or mic ingest, hit HUD / timeline, and pipeline lifecycle (start, flush, stop). Use tokens that match the loaded pack vocabulary (BPE vs ppinyin). See [docs/kws-streaming.md](../docs/kws-streaming.md).
 
+## Audio tagging (offline)
+
+| ![Audio tagging offline 1](../docs/images/example/audio_tagging_offline_1.png) | ![Audio tagging offline 2](../docs/images/example/audio_tagging_offline_2.png) | ![Audio tagging offline 3](../docs/images/example/audio_tagging_offline_3.png) |
+| --- | --- | --- |
+
+Home → **Audio Tagging** → **Offline batch**. Initializes dedicated AudioSet packs (`createAudioTagging` / `ModelCategory.AudioTagging`, e.g. ced-mini or zipformer-small). Segmentation **Off** = oneshot `tag(offline)` with primary label + top-K probability bars; **Auto** = segmented `speech_energy_silence` windows with a span timeline and per-span top-K (`continuous_frames` is live-only). Example audio includes upstream sound-event clips (`test_wavs/audio-tagging/1.wav`…`13.wav`) plus a short speech subset. See [docs/audio-tagging-offline.md](../docs/audio-tagging-offline.md).
+
+## Audio tagging (live overload)
+
+| ![Audio tagging live 1](../docs/images/example/audio_tagging_live_1.png) | ![Audio tagging live 2](../docs/images/example/audio_tagging_live_2.png) | ![Audio tagging live 3](../docs/images/example/audio_tagging_live_3.png) |
+| --- | --- | --- |
+
+Same screen, toggle **Live overload**. `tag(liveAudio, liveText, { topK, segmentation, onSegment })` with mandatory Auto segmentation (`speech_energy_silence` or `continuous_frames`). File or mic ingest; last-primary HUD plus a per-span timeline (tap row → that window’s top-K bars). LiveText commits use `source: 'audio_tagging'`. See [docs/audio-tagging-live.md](../docs/audio-tagging-live.md) and [docs/streaming-pipelines-overview.md](../docs/streaming-pipelines-overview.md).
+
 ## Punctuation (offline)
 
 

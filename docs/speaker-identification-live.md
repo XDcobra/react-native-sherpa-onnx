@@ -100,10 +100,14 @@ Mixed live/offline arguments throw `SID_INVALID_ARGUMENT`.
 
 ## Mandatory segmentation
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`). Supported evaluators:
+`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`).
 
-- `speech_energy_silence`
-- `speech_vad_model`
+| Evaluator | Live overload | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ | Energy / silence cuts for speaker spans |
+| `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
+| `continuous_frames` | ❌ | Fixed windows are a poor fit for speaker labeling |
+| `speech_pyannote_segmentation` | ❌ | Not in SID live `supportedEvaluators` |
 
 SID owns the attach — you do **not** pass a pre-built VAD segment In buffer. Policy tuning: [segmentation-engine.md](segmentation-engine.md).
 

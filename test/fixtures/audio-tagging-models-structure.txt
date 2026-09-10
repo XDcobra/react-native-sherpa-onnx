@@ -1,0 +1,125 @@
+# Asset: sherpa-onnx-ced-base-audio-tagging-2024-04-19.tar.bz2
+# updated_at: 2024-04-22T02:13:37Z
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/2.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/10.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/13.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/5.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/4.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/1.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/3.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/11.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/8.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/7.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/9.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/6.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/test_wavs/12.wav
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/README.md
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/model.int8.onnx
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/class_labels_indices.csv
+sherpa-onnx-ced-base-audio-tagging-2024-04-19/model.onnx
+# Asset: sherpa-onnx-ced-mini-audio-tagging-2024-04-19.tar.bz2
+# updated_at: 2024-04-22T02:13:30Z
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/2.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/10.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/13.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/5.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/4.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/1.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/3.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/11.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/8.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/7.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/9.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/6.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/test_wavs/12.wav
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/README.md
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/model.int8.onnx
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/class_labels_indices.csv
+sherpa-onnx-ced-mini-audio-tagging-2024-04-19/model.onnx
+# Asset: sherpa-onnx-ced-small-audio-tagging-2024-04-19.tar.bz2
+# updated_at: 2024-04-22T02:13:29Z
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/2.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/10.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/13.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/5.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/4.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/1.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/3.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/11.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/8.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/7.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/9.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/6.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/test_wavs/12.wav
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/README.md
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/model.int8.onnx
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/class_labels_indices.csv
+sherpa-onnx-ced-small-audio-tagging-2024-04-19/model.onnx
+# Asset: sherpa-onnx-ced-tiny-audio-tagging-2024-04-19.tar.bz2
+# updated_at: 2024-04-22T02:13:26Z
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/2.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/10.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/13.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/5.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/4.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/1.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/3.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/11.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/8.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/7.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/9.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/6.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/test_wavs/12.wav
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/README.md
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/model.int8.onnx
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/class_labels_indices.csv
+sherpa-onnx-ced-tiny-audio-tagging-2024-04-19/model.onnx
+# Asset: sherpa-onnx-zipformer-audio-tagging-2024-04-09.tar.bz2
+# updated_at: 2026-07-16T02:05:52Z
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/2.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/13.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/5.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/4.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/8.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/6.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/10.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/12.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/3.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/9.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/7.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/11.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/test_wavs/1.wav
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/model.int8.onnx
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/class_labels_indices.csv
+sherpa-onnx-zipformer-audio-tagging-2024-04-09/model.onnx
+# Asset: sherpa-onnx-zipformer-small-audio-tagging-2024-04-15.tar.bz2
+# updated_at: 2024-04-15T09:22:41Z
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/1.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/9.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/3.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/6.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/13.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/2.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/11.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/5.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/7.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/12.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/4.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/10.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/test_wavs/8.wav
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/class_labels_indices.csv
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/README.md
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/model.onnx
+sherpa-onnx-zipformer-small-audio-tagging-2024-04-15/model.int8.onnx

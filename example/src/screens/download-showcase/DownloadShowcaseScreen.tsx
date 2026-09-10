@@ -48,6 +48,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.Alignment]: 'Alignment',
   [ModelCategory.LanguageId]: 'Language identification (SLID)',
   [ModelCategory.Kws]: 'Keyword spotting (KWS)',
+  [ModelCategory.AudioTagging]: 'Audio tagging',
 };
 
 const ALL_CATEGORIES = Object.values(ModelCategory);

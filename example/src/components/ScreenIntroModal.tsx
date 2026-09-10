@@ -85,6 +85,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Keyword spotting demo',
     body: 'Streaming wake-word / open-vocabulary spotting with dedicated KWS packs. Spot mic or file audio through live buffers, tune sensitivity, and watch keyword hits fire in real time.',
   },
+  AudioTagging: {
+    title: 'Audio tagging demo',
+    body: 'Offline and live-overload sound-event tagging with dedicated AudioSet packs. Tag a clip or stream, switch oneshot vs segmented windows, and watch top-K ranked events update.',
+  },
   SegmentationShowcase: {
     title: 'Segmentation playground',
     body: 'Integrator playground for offline text and audio segmentation via shared SegmentationPolicyControls. Text: synthetic or punctuation-assisted. Audio: energy, VAD, or pyannote packs (catalog + detect → policy.modelPath). Runs segmentOfflineBuffer and lists segments with reason badges.',

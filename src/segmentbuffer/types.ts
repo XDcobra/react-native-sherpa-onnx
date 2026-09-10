@@ -28,7 +28,8 @@ export type SpeechSegmentPayloadSource =
   | 'tts'
   | 'sid'
   | 'pyannote'
-  | 'languageId';
+  | 'languageId'
+  | 'audioTagging';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -69,13 +70,22 @@ export interface LanguageIdSpeechSegmentPayload {
   confidence?: number;
 }
 
+export interface AudioTaggingSpeechSegmentPayload {
+  source: 'audioTagging';
+  /** Highest-probability event name, when any events were returned. */
+  primaryName?: string;
+  /** Top-K events as plain JSON (Fabric-safe). */
+  events?: Array<{ name: string; index: number; prob: number }>;
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
   | TtsSpeechSegmentPayload
   | SidSpeechSegmentPayload
   | PyannoteSpeechSegmentPayload
-  | LanguageIdSpeechSegmentPayload;
+  | LanguageIdSpeechSegmentPayload
+  | AudioTaggingSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;

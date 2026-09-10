@@ -22,6 +22,9 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     'sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01',
     'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01',
   ],
+  [ModelCategory.AudioTagging]: [
+    'sherpa-onnx-ced-mini-audio-tagging-2024-04-19',
+  ],
   [ModelCategory.Diarization]: [
     'sherpa-onnx-speaker-diarization-en', // Default diarization
   ],

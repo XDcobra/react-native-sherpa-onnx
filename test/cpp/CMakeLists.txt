@@ -55,6 +55,9 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/slid/sherpa-onnx-validate-slid.cpp"
   "${MODEL_DETECT_DIR}/kws/sherpa-onnx-model-detect-kws.cpp"
   "${MODEL_DETECT_DIR}/kws/sherpa-onnx-validate-kws.cpp"
+  "${MODEL_DETECT_DIR}/audio_tagging/sherpa-onnx-audio-tagging-catalog-metadata.cpp"
+  "${MODEL_DETECT_DIR}/audio_tagging/sherpa-onnx-model-detect-audio-tagging.cpp"
+  "${MODEL_DETECT_DIR}/audio_tagging/sherpa-onnx-validate-audio-tagging.cpp"
 )
 
 add_executable(model_detect_test
@@ -80,6 +83,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/alignment"
   "${MODEL_DETECT_DIR}/slid"
   "${MODEL_DETECT_DIR}/kws"
+  "${MODEL_DETECT_DIR}/audio_tagging"
   "${JNI_DIR}"
   "${MODEL_DETECT_TEST_DIR}"
 )

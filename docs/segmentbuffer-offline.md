@@ -153,6 +153,8 @@ Returned segment payloads are kind-discriminated:
   - `source: 'tts'` -> `source`, `text`, `chunkIndex`, `isFinalChunk`
   - `source: 'sid'` -> `source`, `speakerName` (`string | null`)
   - `source: 'pyannote'` -> `source` only (union speech spans from `speech_pyannote_segmentation`)
+  - `source: 'languageId'` -> `source`, `lang` (optional `confidence`)
+  - `source: 'audioTagging'` -> `source`, optional `primaryName`, optional `events` (`{ name, index, prob }[]`)
 - `kind: 'alignment'` -> strict `AlignmentSegmentPayload` (`text`, `timingMode`, `granularity`, ...)
 
 ```ts

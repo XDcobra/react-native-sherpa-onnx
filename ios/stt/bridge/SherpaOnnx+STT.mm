@@ -157,9 +157,9 @@ static void FillSttModelPathsFromDict(
 
         std::string quantizationStr = "";
         if (!isCustomInit) {
-            auto quantization = options.quantization();
-            if (quantization.has_value()) {
-                quantizationStr = [quantization.value() UTF8String];
+            NSString *quantization = options.quantization();
+            if (quantization != nil && [quantization length] > 0) {
+                quantizationStr = [quantization UTF8String];
             }
         }
 

@@ -9,7 +9,7 @@ Two different engines can return the same **pipeline handle** surface (`stop` / 
 | Kind | What it is | Doc signal |
 | --- | --- | --- |
 | **True streaming** | Streaming-capable model + native online worker (`createStreamingSTT`, `createStreamingEnhancement`, `createStreamingVAD`, `createKeywordSpotting`, …) | Feature `*-streaming.md` |
-| **Live overload** | **Offline** weights on **live** buffers; mandatory **segmentation** commits chunks for batch inference (“fake” streaming) | Feature `*-live.md` when the guide is **only** live overload — e.g. [speaker-identification-live.md](speaker-identification-live.md), [separation-live.md](separation-live.md), [language-identification-live.md](language-identification-live.md), [tts-live.md](tts-live.md) |
+| **Live overload** | **Offline** weights on **live** buffers; mandatory **segmentation** commits chunks for batch inference (“fake” streaming) | Feature `*-live.md` when the guide is **only** live overload — e.g. [speaker-identification-live.md](speaker-identification-live.md), [separation-live.md](separation-live.md), [language-identification-live.md](language-identification-live.md), [audio-tagging-live.md](audio-tagging-live.md), [tts-live.md](tts-live.md) |
 
 Offline guides stay batch-only and **link out** to the dedicated live-overload doc (SID / Separation / SLID pattern). Do not bury live-overload API detail inside offline docs.
 
@@ -53,6 +53,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | Punctuation streaming + `PunctuationPipelineHandle` | [punctuation-streaming.md](punctuation-streaming.md) |
 | SID live overload + `SpeakerIdentificationPipelineHandle` | [speaker-identification-live.md](speaker-identification-live.md) |
 | SLID live overload + `LanguageIdentificationPipelineHandle` | [language-identification-live.md](language-identification-live.md) |
+| Audio tagging live overload + `AudioTaggingPipelineHandle` | [audio-tagging-live.md](audio-tagging-live.md) |
 | Live audio as pipeline operand | [audiobuffer-streaming.md](audiobuffer-streaming.md) |
 | Live text as pipeline operand | [textbuffer-streaming.md](textbuffer-streaming.md) |
 | Live segments as pipeline operand | [segmentbuffer-streaming.md](segmentbuffer-streaming.md) |

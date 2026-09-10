@@ -175,6 +175,23 @@ export function ExampleAudioFileList({
     () => new Set(favoriteAudioFileIds ?? []),
     [favoriteAudioFileIds]
   );
+  const sections = useMemo(() => {
+    const hasSections = ordered.some((file) => !!file.section);
+    if (!hasSections) {
+      return [{ title: null as string | null, files: ordered }];
+    }
+    const groups: { title: string | null; files: AudioFileInfo[] }[] = [];
+    for (const file of ordered) {
+      const title = file.section ?? null;
+      const last = groups[groups.length - 1];
+      if (last && last.title === title) {
+        last.files.push(file);
+      } else {
+        groups.push({ title, files: [file] });
+      }
+    }
+    return groups;
+  }, [ordered]);
 
   if (ordered.length === 0) {
     return (
@@ -186,36 +203,49 @@ export function ExampleAudioFileList({
 
   return (
     <View style={s.audioFilesContainer}>
-      {ordered.map((audioFile) => {
-        const isFavorite = favoriteSet.has(audioFile.id);
-        const isSelected = selectedId != null && selectedId === audioFile.id;
-        return (
-          <TouchableOpacity
-            key={audioFile.id}
-            style={[
-              s.audioFileButton,
-              isFavorite && s.audioFileButtonFavorite,
-              isSelected && s.audioFileButtonActive,
-              disabled && s.buttonDisabled,
-            ]}
-            onPress={() => onSelect(audioFile)}
-            disabled={disabled}
-          >
-            <Text
-              style={[
-                s.audioFileButtonText,
-                (isFavorite || isSelected) && s.audioFileButtonTextActive,
-              ]}
-            >
-              {isFavorite ? (
-                <Text style={s.audioFileFavoriteMark}>★ </Text>
-              ) : null}
-              {audioFile.name}
-            </Text>
-            <Text style={s.audioFileDescription}>{audioFile.description}</Text>
-          </TouchableOpacity>
-        );
-      })}
+      {sections.map((section, sectionIndex) => (
+        <View
+          key={section.title ?? `section-${sectionIndex}`}
+          style={s.audioFileSection}
+        >
+          {section.title ? (
+            <Text style={s.audioFileSectionTitle}>{section.title}</Text>
+          ) : null}
+          {section.files.map((audioFile) => {
+            const isFavorite = favoriteSet.has(audioFile.id);
+            const isSelected =
+              selectedId != null && selectedId === audioFile.id;
+            return (
+              <TouchableOpacity
+                key={audioFile.id}
+                style={[
+                  s.audioFileButton,
+                  isFavorite && s.audioFileButtonFavorite,
+                  isSelected && s.audioFileButtonActive,
+                  disabled && s.buttonDisabled,
+                ]}
+                onPress={() => onSelect(audioFile)}
+                disabled={disabled}
+              >
+                <Text
+                  style={[
+                    s.audioFileButtonText,
+                    (isFavorite || isSelected) && s.audioFileButtonTextActive,
+                  ]}
+                >
+                  {isFavorite ? (
+                    <Text style={s.audioFileFavoriteMark}>★ </Text>
+                  ) : null}
+                  {audioFile.name}
+                </Text>
+                <Text style={s.audioFileDescription}>
+                  {audioFile.description}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }

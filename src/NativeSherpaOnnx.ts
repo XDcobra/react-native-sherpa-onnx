@@ -167,6 +167,28 @@ export type LanguageIdInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeAudioTagging(instanceId, options)`. */
+export type AudioTaggingInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`, `labels`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  quantization?: string;
+  modelType: string;
+  topK?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `tagAudioOffline`. */
+export type AudioTaggingProcessNativeResult = {
+  events: Array<{ name: string; index: number; prob: number }>;
+  audioDuration: number;
+  elapsedMs: number;
+  topK: number;
+};
+
 /** `initializeKeywordSpotting(instanceId, options)` — KWS engine lifecycle. */
 export type KeywordSpottingInitBridgeOptions = {
   encoder: string;
@@ -1063,13 +1085,14 @@ export interface Spec extends TurboModule {
     /**
      * Strict payload contract (validated in JS/native):
      * - kind='speech': payload.source must be one of
-     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'manual'
+     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'audioTagging' | 'manual'
      *   - source='vad' -> allowed keys: source, engine, decision, score
      *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
      *   - source='pyannote' -> allowed keys: source
      *   - source='languageId' -> allowed keys: source, lang, confidence?
+     *   - source='audioTagging' -> allowed keys: source, primaryName?, events?
      *   - source='manual' -> allowed keys: source
      * - kind='alignment': strict alignment payload contract
      * - kind='diarization': payload.source='diarization', speaker (number)
@@ -1718,6 +1741,71 @@ export interface Spec extends TurboModule {
       keywords?: string;
     };
   }>;
+
+  /** Offline audio tagging model detection (zipformer / CED + labels CSV). */
+  detectAudioTaggingModel(
+    modelDir: string,
+    assetName: string | null,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<{
+    success: boolean;
+    isStreaming?: boolean;
+    error?: string;
+    detectedModels: Array<{ type: string; modelDir: string }>;
+    modelType?: string;
+    languages?: NativePublicLanguageRow[];
+    quantization?: string;
+    detectionSources?: string[];
+    paths?: {
+      model?: string;
+      labels?: string;
+    };
+  }>;
+
+  /** Initialize an offline audio tagging engine instance. */
+  initializeAudioTagging(
+    instanceId: string,
+    options: AudioTaggingInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    modelType?: string;
+  }>;
+
+  /**
+   * Run offline audio tagging on an offline audio buffer (`off_*`).
+   * @param topK - Optional override; omit/null to use engine default from init.
+   * @param startSample - Optional start sample index (inclusive); both start/end or neither.
+   * @param endSample - Optional end sample index (exclusive).
+   */
+  tagAudioOffline(
+    instanceId: string,
+    audioBufferId: string,
+    topK?: number | null,
+    startSample?: number | null,
+    endSample?: number | null
+  ): Promise<AudioTaggingProcessNativeResult>;
+
+  /** Release an audio tagging engine instance. Idempotent when the id is absent. */
+  unloadAudioTagging(instanceId: string): Promise<void>;
+
+  /**
+   * Start a live-offline Audio Tagging pipeline.
+   * Commits primary event names (+ meta top-K) into a live text buffer;
+   * optionally labels a live segment buffer.
+   */
+  startAudioTaggingOfflineLivePipeline(
+    instanceId: string,
+    audioInLiveBufferId: string,
+    textOutLiveBufferId: string,
+    options: {
+      attachedSegmentationEngineId: string;
+      segmentLiveBufferId: string;
+      targetSegmentLiveBufferId?: string | null;
+      topK?: number | null;
+    }
+  ): Promise<{ pipelineId: string }>;
 
   /** Initialize a native keyword spotter. */
   initializeKeywordSpotting(

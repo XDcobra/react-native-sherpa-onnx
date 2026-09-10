@@ -284,7 +284,7 @@ if (!result.ok) {
 | `getCustomModelPathRequirements(category, modelType)` | Read-only schema — ordered `fields[]` with `required` and `kind` (`file` \| `dir`) |
 | `validateCustomModelPaths(category, modelType, paths)` | Enforces non-empty paths + family-specific rules |
 
-Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `separation`, `punctuation`, `alignment`, `speakerEmbedding`.
+Categories: `stt`, `stt_streaming`, `tts`, `vad`, `enhancement`, `separation`, `punctuation`, `alignment`, `speakerEmbedding`, `kws`, `audioTagging`.
 
 > [!NOTE]
 > **`stt_streaming`** keys differ from offline `stt` (e.g. streaming transducer uses `encoder`/`decoder`/`joiner`/`tokens`; offline CTC uses `ctcModel`/`tokens`). Always query the schema for the exact category.
@@ -304,6 +304,7 @@ Each feature doc has the full per-`modelType` table. Summary of where to look:
 | STT offline | [stt-offline.md](stt-offline.md#validation-required-files) | `detectSttModel` | `stt` |
 | STT streaming | [stt-streaming.md](stt-streaming.md#validation-required-files) | `detectSttModel` | `stt_streaming` |
 | Keyword spotting | [kws-streaming.md](kws-streaming.md#validation-required-files) | `detectKwsModel` | `kws` |
+| Audio tagging | [audio-tagging-offline.md](audio-tagging-offline.md#models-and-required-files) | `detectAudioTaggingModel` | `audioTagging` |
 | TTS | [tts-offline.md](tts-offline.md#validation-required-files) | `detectTtsModel` | `tts` |
 | VAD | [vad-streaming.md](vad-streaming.md#validation-required-files) | `detectVadModel` | `vad` |
 | Enhancement | [enhancement-offline.md](enhancement-offline.md#validation-required-files) | `detectEnhancementModel` | `enhancement` |
@@ -329,14 +330,15 @@ flowchart LR
   kws -->|no match| stt[STT]
   stt -->|no match| vad[VAD]
   vad -->|no match| punct[Punctuation]
-  punct -->|no match| enh[Enhancement]
+  punct -->|no match| audiotagging[AudioTagging]
+  audiotagging -->|no match| enh[Enhancement]
   enh -->|no match| sep[Separation]
   sep -->|no match| sid[SpeakerEmbedding]
   sid -->|no match| align[Alignment]
   align -->|no match| none["matched: false"]
 ```
 
-KWS runs **before** STT because keyword packs are online transducers with `keywords.txt` and would otherwise be claimed as ASR.
+KWS runs **before** STT because keyword packs are online transducers with `keywords.txt` and would otherwise be claimed as ASR. Audio tagging runs after punctuation and before enhancement so dedicated CED / Zipformer AT packs (plus labels CSV) are claimed before generic enhancement heuristics.
 
 A domain counts as a hit when native detection succeeds and `modelType !== 'unknown'`. No match → `{ matched: false }` (no thrown error).
 
@@ -532,6 +534,7 @@ Full payloads (`success`, `error`, `detectedModels`, `paths`, `detectionSources`
 | STT offline | `detectSttModel` | [stt-offline.md — Detection](stt-offline.md#detection-and-factory) |
 | STT streaming | `detectSttModel` | [stt-streaming.md](stt-streaming.md#model-detection) |
 | Keyword spotting | `detectKwsModel` | [kws-streaming.md](kws-streaming.md) |
+| Audio tagging | `detectAudioTaggingModel` | [audio-tagging-offline.md](audio-tagging-offline.md) |
 | TTS | `detectTtsModel` | [tts-offline.md — Model detection](tts-offline.md#model-detection) |
 | VAD | `detectVadModel` | [vad-streaming.md — Model detection](vad-streaming.md#model-detection) |
 | Punctuation | `detectPunctuationModel` | [punctuation-offline.md](punctuation-offline.md#model-detection) |

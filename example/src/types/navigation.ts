@@ -12,6 +12,7 @@ export type RootStackParamList = {
   DownloadShowcase: undefined;
   VAD: undefined;
   KeywordSpotting: undefined;
+  AudioTagging: undefined;
   SegmentationShowcase: undefined;
   Diarization: undefined;
   DiarizationStreaming: undefined;
@@ -38,6 +39,7 @@ export type FeatureId =
   | 'download_showcase'
   | 'vad'
   | 'keyword_spotting'
+  | 'audio_tagging'
   | 'segmentation_showcase'
   | 'diarization'
   | 'diarization_streaming'

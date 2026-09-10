@@ -6,6 +6,9 @@ import { fileSourceFromBundledPath } from './utils/fileSourceFromUri';
  * Audio files should be placed in:
  * - Android: example/android/app/src/main/assets/test_wavs/
  * - iOS: example/ios/sherpa_models/test_wavs/ (copied into the app bundle at build time)
+ *
+ * Audio tagging event clips live under `test_wavs/audio-tagging/` (upstream
+ * sherpa-onnx audio-tagging-models pack `1.wav`…`13.wav`).
  */
 
 /**
@@ -72,14 +75,35 @@ export const TEST_AUDIO_FILES = {
   TWO_SPEAKERS_EN_1: 'test_wavs/1-two-speakers-en.wav',
 } as const;
 
+/** Upstream sherpa-onnx audio-tagging pack clips (`test_wavs/1.wav`…`13.wav`). */
+export const TEST_AUDIO_TAGGING_FILES = {
+  CAT: 'test_wavs/audio-tagging/1.wav',
+  WHISTLE: 'test_wavs/audio-tagging/2.wav',
+  MUSIC: 'test_wavs/audio-tagging/3.wav',
+  LAUGHTER: 'test_wavs/audio-tagging/4.wav',
+  FINGER_SNAPPING: 'test_wavs/audio-tagging/5.wav',
+  BABY_CRY: 'test_wavs/audio-tagging/6.wav',
+  SMOKE_ALARM: 'test_wavs/audio-tagging/7.wav',
+  SIREN: 'test_wavs/audio-tagging/8.wav',
+  EVENT_9: 'test_wavs/audio-tagging/9.wav',
+  STREAM_WATER: 'test_wavs/audio-tagging/10.wav',
+  MEOW: 'test_wavs/audio-tagging/11.wav',
+  DOG_BARK: 'test_wavs/audio-tagging/12.wav',
+  OINK: 'test_wavs/audio-tagging/13.wav',
+} as const;
+
 export type AudioFileId =
-  (typeof TEST_AUDIO_FILES)[keyof typeof TEST_AUDIO_FILES];
+  | (typeof TEST_AUDIO_FILES)[keyof typeof TEST_AUDIO_FILES]
+  | (typeof TEST_AUDIO_TAGGING_FILES)[keyof typeof TEST_AUDIO_TAGGING_FILES];
 
 export interface AudioFileInfo {
   id: AudioFileId;
   name: string;
   description: string;
-  language: 'en' | 'zh' | 'ja' | 'ko' | 'yue';
+  /** Speech-language hint for STT filtering; omit for non-speech event clips. */
+  language?: 'en' | 'zh' | 'ja' | 'ko' | 'yue';
+  /** Optional group header in ExampleAudioFileList (e.g. Sound events / Speech). */
+  section?: string;
 }
 
 export const AUDIO_FILES: AudioFileInfo[] = [
@@ -143,6 +167,134 @@ export const AUDIO_FILES: AudioFileInfo[] = [
     description: 'Yue (Cantonese) audio sample',
     language: 'yue',
   },
+];
+
+const AUDIO_TAGGING_EVENT_FILES: AudioFileInfo[] = [
+  {
+    id: TEST_AUDIO_TAGGING_FILES.CAT,
+    name: 'Cat',
+    description: 'Upstream AT pack 1.wav — Cat',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.WHISTLE,
+    name: 'Whistle',
+    description: 'Upstream AT pack 2.wav — Whistle',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.MUSIC,
+    name: 'Music',
+    description: 'Upstream AT pack 3.wav — Music',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.LAUGHTER,
+    name: 'Laughter',
+    description: 'Upstream AT pack 4.wav — Laughter',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.FINGER_SNAPPING,
+    name: 'Finger snapping',
+    description: 'Upstream AT pack 5.wav — Finger snapping',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.BABY_CRY,
+    name: 'Baby cry',
+    description: 'Upstream AT pack 6.wav — Baby cry / infant cry',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.SMOKE_ALARM,
+    name: 'Smoke alarm',
+    description: 'Upstream AT pack 7.wav — Smoke detector / alarm',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.SIREN,
+    name: 'Siren',
+    description: 'Upstream AT pack 8.wav — Siren',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.EVENT_9,
+    name: 'Event clip 9',
+    description: 'Upstream AT pack 9.wav (not labeled in sherpa docs)',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.STREAM_WATER,
+    name: 'Stream water',
+    description: 'Upstream AT pack 10.wav — Stream',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.MEOW,
+    name: 'Meow',
+    description: 'Upstream AT pack 11.wav — Meow',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.DOG_BARK,
+    name: 'Dog bark',
+    description: 'Upstream AT pack 12.wav — Dog bark',
+    section: 'Sound events',
+  },
+  {
+    id: TEST_AUDIO_TAGGING_FILES.OINK,
+    name: 'Oink (pig)',
+    description: 'Upstream AT pack 13.wav — Oink / pig',
+    section: 'Sound events',
+  },
+];
+
+const AUDIO_TAGGING_SPEECH_FILES: AudioFileInfo[] = [
+  {
+    id: TEST_AUDIO_FILES.EN_1,
+    name: 'English Sample 1',
+    description: 'Speech clip — English',
+    language: 'en',
+    section: 'Speech',
+  },
+  {
+    id: TEST_AUDIO_FILES.ZH_1,
+    name: 'Chinese Sample 1',
+    description: 'Speech clip — Chinese',
+    language: 'zh',
+    section: 'Speech',
+  },
+  {
+    id: TEST_AUDIO_FILES.ZH_EN_1,
+    name: 'Chinese-English mix',
+    description: 'Speech clip — Chinese/English mixed',
+    language: 'zh',
+    section: 'Speech',
+  },
+  {
+    id: TEST_AUDIO_FILES.KO_1,
+    name: 'Korean sample',
+    description: 'Speech clip — Korean',
+    language: 'ko',
+    section: 'Speech',
+  },
+  {
+    id: TEST_AUDIO_FILES.JA_1,
+    name: 'Japanese sample',
+    description: 'Speech clip — Japanese',
+    language: 'ja',
+    section: 'Speech',
+  },
+];
+
+/**
+ * Audio tagging showcase list: upstream sound-event clips first, then a short
+ * speech subset for Speech-class contrast.
+ */
+export const AUDIO_TAGGING_AUDIO_FILES: AudioFileInfo[] = [
+  ...AUDIO_TAGGING_EVENT_FILES,
+  ...AUDIO_TAGGING_SPEECH_FILES,
 ];
 
 /**

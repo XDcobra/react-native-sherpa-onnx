@@ -5,6 +5,7 @@
 #include "sherpa-onnx-validate-alignment.h"
 #include "sherpa-onnx-validate-slid.h"
 #include "sherpa-onnx-validate-kws.h"
+#include "sherpa-onnx-validate-audio-tagging.h"
 #include "sherpa-onnx-validate-enhancement.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
@@ -85,6 +86,13 @@ LanguageIdModelKind ParseLanguageIdModelTypeLocal(const std::string& modelType) 
 KwsModelKind ParseKwsModelTypeLocal(const std::string& modelType) {
     if (modelType == "transducer") return KwsModelKind::kTransducer;
     return KwsModelKind::kUnknown;
+}
+
+AudioTaggingModelKind ParseAudioTaggingModelTypeLocal(const std::string& modelType) {
+    const std::string t = ToLower(modelType);
+    if (t == "ced") return AudioTaggingModelKind::kCed;
+    if (t == "zipformer") return AudioTaggingModelKind::kZipformer;
+    return AudioTaggingModelKind::kUnknown;
 }
 
 SeparationModelKind ParseSeparationModelTypeLocal(const std::string& modelType) {
@@ -304,6 +312,22 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "audiotagging" || cat == "audio_tagging") {
+        const AudioTaggingModelKind kind = ParseAudioTaggingModelTypeLocal(modelType);
+        if (kind == AudioTaggingModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom audio tagging model type: " + modelType
+            );
+        }
+        AudioTaggingModelPaths audioTaggingPaths;
+        FillAudioTaggingModelPathsFromStringMap(paths, audioTaggingPaths);
+        const auto vr =
+            ValidateAudioTaggingPaths(kind, audioTaggingPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     return FromValidation(
         false,
         {},
@@ -377,6 +401,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const KwsModelKind kind = ParseKwsModelTypeLocal(modelType);
         if (kind == KwsModelKind::kUnknown) return {};
         return FromSpecs(GetKwsPathRequirements(kind));
+    }
+    if (cat == "audiotagging" || cat == "audio_tagging") {
+        const AudioTaggingModelKind kind = ParseAudioTaggingModelTypeLocal(modelType);
+        if (kind == AudioTaggingModelKind::kUnknown) return {};
+        return FromSpecs(GetAudioTaggingPathRequirements(kind));
     }
 
     return {};

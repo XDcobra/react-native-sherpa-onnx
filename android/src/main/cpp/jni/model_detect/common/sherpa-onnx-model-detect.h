@@ -146,6 +146,13 @@ enum class KwsModelKind {
     kTransducer
 };
 
+/** Offline audio tagging (zipformer or CED) + class_labels_indices.csv. */
+enum class AudioTaggingModelKind {
+    kUnknown,
+    kZipformer,
+    kCed
+};
+
 struct SttModelPaths {
     std::string encoder;
     std::string decoder;
@@ -337,6 +344,11 @@ struct KwsModelPaths {
     std::string keywords;
 };
 
+struct AudioTaggingModelPaths {
+    std::string model;
+    std::string labels;
+};
+
 struct VadModelPaths {
     std::string model;
 };
@@ -483,6 +495,19 @@ struct KwsDetectResult {
     std::vector<DetectedModel> detectedModels;
     KwsModelKind selectedKind = KwsModelKind::kUnknown;
     KwsModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+};
+
+struct AudioTaggingDetectResult {
+    bool ok = false;
+    /** Always false: upstream AudioTagging is offline-only. */
+    bool isStreaming = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    AudioTaggingModelKind selectedKind = AudioTaggingModelKind::kUnknown;
+    AudioTaggingModelPaths paths;
     std::vector<DetectionSource> detectionSources;
     std::vector<PublicLanguageRow> derivedLanguages;
     std::string quantization;
@@ -659,6 +684,13 @@ KwsDetectResult DetectKwsModel(
     const std::string& quantization = ""
 );
 
+AudioTaggingDetectResult DetectAudioTaggingModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
 /** Test-only: Like DetectEnhancementModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 EnhancementDetectResult DetectEnhancementModelFromFileList(
@@ -728,6 +760,14 @@ LanguageIdDetectResult DetectLanguageIdModelFromFileList(
 
 /** Test-only: KWS detection from an already collected recursive file list. */
 KwsDetectResult DetectKwsModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: Audio tagging detection from an already collected recursive file list. */
+AudioTaggingDetectResult DetectAudioTaggingModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",

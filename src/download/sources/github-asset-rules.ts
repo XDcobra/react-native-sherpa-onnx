@@ -57,6 +57,12 @@ export function isAssetSupportedForCategory(
       );
     case ModelCategory.Kws:
       return ext === 'tar.bz2' && lower.includes('kws');
+    case ModelCategory.AudioTagging:
+      return (
+        ext === 'tar.bz2' &&
+        (lower.includes('audio-tagging') ||
+          (lower.includes('ced') && lower.includes('tagging')))
+      );
     default:
       return false;
   }

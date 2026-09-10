@@ -11,6 +11,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -156,7 +157,7 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
   std::string audioInIdStr = [audioInBufferId UTF8String];
   std::string segmentsOutIdStr = [segmentsOutBufferId UTF8String];
 
-  auto inEntry = pa_live_get_entry(audioInIdStr);
+  auto inEntry = pa_get_live_entry(audioInIdStr);
   if (!inEntry) {
     reject(@"DIARIZATION_BUFFER_NOT_FOUND", @"Live audio buffer not found", nil);
     return;
@@ -247,14 +248,15 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
   }
 
   std::string audioInIdStr = [audioInBufferId UTF8String];
-  auto offlineEntry = pa_offline_get_entry(audioInIdStr);
-  if (!offlineEntry) {
+  std::vector<float> samples;
+  int sampleRate = 0;
+  if (!pa_read_offline_samples(audioInIdStr, &samples, &sampleRate) || samples.empty()) {
     reject(@"DIARIZATION_BUFFER_NOT_FOUND", @"Audio buffer not found", nil);
     return;
   }
 
   dispatch_async(StreamingDiarizationSerialQueue(), ^{
-    auto res = wrapper->feed(offlineEntry->samples.data(), offlineEntry->samples.size());
+    auto res = wrapper->feed(samples.data(), samples.size());
     resolve(FeedResultToDict(res));
   });
 }

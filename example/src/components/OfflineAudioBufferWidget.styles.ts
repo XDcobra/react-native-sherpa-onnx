@@ -42,6 +42,16 @@ export const widgetStyles = StyleSheet.create({
   audioFilesContainer: {
     marginBottom: 12,
   },
+  audioFileSection: {
+    marginBottom: 4,
+  },
+  audioFileSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 8,
+    marginTop: 4,
+  },
   audioFileButton: {
     backgroundColor: '#f5f5f5',
     paddingVertical: 12,

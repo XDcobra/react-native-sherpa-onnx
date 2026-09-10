@@ -90,6 +90,11 @@
       "types": "./lib/typescript/src/kws/index.d.ts",
       "default": "./lib/module/kws/index.js"
     },
+    "./audio-tagging": {
+      "source": "./src/audio-tagging/index.ts",
+      "types": "./lib/typescript/src/audio-tagging/index.d.ts",
+      "default": "./lib/module/audio-tagging/index.js"
+    },
     "./detect": {
       "source": "./src/detect/index.ts",
       "types": "./lib/typescript/src/detect/index.d.ts",

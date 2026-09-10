@@ -49,6 +49,12 @@
       "label": "Keyword spotting",
       "config": "sherpa_kws_model_release_streams.json",
       "commit_message": "chore(testdata): update KWS model structures, expected CSV, and license status from kws-models release"
+    },
+    {
+      "id": "audio-tagging",
+      "label": "Audio tagging",
+      "config": "sherpa_audio_tagging_model_release_streams.json",
+      "commit_message": "chore(testdata): update audio tagging model structures, expected CSV, and license status from audio-tagging-models release"
     }
   ]
 }

@@ -23,7 +23,7 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
-**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
+**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Audio Tagging, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
 
 ## Installation
 
@@ -74,7 +74,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Speaker identification × Speaker diarization: [Named timeline](./docs/diarization-named-timeline.md)
 - ✅ Spoken language identification (SLID): [Offline](./docs/language-identification-offline.md) · [Live overload](./docs/language-identification-live.md)
 - ✅ Keyword spotting (KWS): [Streaming](./docs/kws-streaming.md)
-- ❌ Audio tagging / sound event detection: *(Not yet implemented in SDK)*
+- ✅ Audio tagging / sound event detection: [Offline](./docs/audio-tagging-offline.md) · [Live overload](./docs/audio-tagging-live.md)
 - ❌ Diacritization: *(Not yet implemented in SDK)*
 
 ### Pipeline & orchestration
@@ -352,6 +352,21 @@ APIs and initialization: [Keyword spotting (streaming)](./docs/kws-streaming.md)
 </details>
 
 <details>
+<summary>Audio Tagging models</summary>
+
+Audio tagging / sound-event detection ranks AudioSet-style labels for a clip (or per segmentation window). Use dedicated packs from the sherpa-onnx **audio-tagging-models** release — **not** ASR or KWS zipformer packs. Detection requires exactly one of CED or Zipformer ONNX plus `class_labels_indices.csv`. Detect via `detectAudioTaggingModel`; public API is `createAudioTagging`. Prefer **ced-mini** for mobile size.
+
+| Model Type | `modelType` Value | Description | Download Links |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` / folder scan | Finds CED or Zipformer ONNX + labels CSV in the model folder. | n/a |
+| **CED** | `'ced'` | Conditional Event Detection (tiny / mini / small / base). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models) |
+| **Zipformer** | `'zipformer'` | Zipformer audio-tagging packs (full / small). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models) |
+
+APIs and initialization: [Offline](./docs/audio-tagging-offline.md) · [Live overload](./docs/audio-tagging-live.md). Custom init: `initMode: 'custom'` with path slots (`model`, `labels`).
+
+</details>
+
+<details>
 <summary>Source Separation models</summary>
 
 Source separation splits mixed audio into stems (e.g. vocals / accompaniment).
@@ -459,7 +474,7 @@ It includes:
 
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
-- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, keyword spotting (KWS streaming), alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
+- **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, keyword spotting (KWS streaming), audio tagging (offline + live overload), alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks

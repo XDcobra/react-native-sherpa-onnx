@@ -42,6 +42,7 @@ The following mapping is relevant when using the built-in GitHub providers (`git
 | `Qnn`           | [`asr-models-qnn-binary`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models-qnn-binary)             |
 | `Alignment`     | [`alignment-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-models)         |
 | `Kws`           | [`kws-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models)                                   |
+| `AudioTagging`  | [`audio-tagging-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models)               |
 
 ## Quick start
 

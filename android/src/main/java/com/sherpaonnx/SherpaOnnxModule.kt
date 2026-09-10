@@ -29,6 +29,8 @@ import com.sherpaonnx.archive.core.SherpaOnnxExtractionNotificationHelper
 import com.sherpaonnx.archive.facade.SherpaOnnxArchiveHelper
 import com.sherpaonnx.assets.facade.SherpaOnnxAssetHelper
 import com.sherpaonnx.download.ForegroundDownloader
+import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingHelper
+import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingLivePipelineHelper
 import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.separation.facade.SherpaOnnxSeparationHelper
 import com.sherpaonnx.speakerembedding.facade.SherpaOnnxSpeakerEmbeddingHelper
@@ -244,6 +246,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     SherpaOnnxLanguageIdLivePipelineHelper(
       reactApplicationContext,
       languageIdHelper,
+      NAME,
+    )
+  private val audioTaggingHelper = SherpaOnnxAudioTaggingHelper(
+    { modelDir, assetName, modelType, quantization ->
+      Companion.nativeDetectAudioTaggingModel(modelDir, assetName, modelType, quantization)
+    }
+  )
+  private val audioTaggingLivePipelineHelper =
+    SherpaOnnxAudioTaggingLivePipelineHelper(
+      reactApplicationContext,
+      audioTaggingHelper,
       NAME,
     )
   private val archiveHelper = SherpaOnnxArchiveHelper()
@@ -477,6 +490,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     speakerEmbeddingHelper.shutdown()
     diarizationHelper.shutdown()
     languageIdHelper.shutdown()
+    audioTaggingHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     vadHelper.shutdown()
@@ -4144,7 +4158,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4155,10 +4169,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "pyannote" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "languageId" -> setOf("source", "lang", "confidence", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "audioTagging" -> setOf("source", "primaryName", "events", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual"
       )
     }
 
@@ -4248,6 +4263,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
               com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
               "speech payload.confidence must be a finite number when provided"
+            )
+          }
+        }
+      }
+      "audioTagging" -> {
+        if (payload.hasKey("primaryName") && !payload.isNull("primaryName")) {
+          try {
+            payload.getString("primaryName")
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.primaryName must be a string when provided",
+            )
+          }
+        }
+        if (payload.hasKey("events") && !payload.isNull("events")) {
+          try {
+            payload.getArray("events")
+              ?: throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+                com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+                "speech payload.events must be an array when provided",
+              )
+          } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+            throw e
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.events must be an array when provided",
             )
           }
         }
@@ -5055,6 +5098,70 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun detectAudioTaggingModel(
+    modelDir: String,
+    assetName: String?,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise
+  ) {
+    try {
+      val result = Companion.nativeDetectAudioTaggingModel(
+        modelDir.takeIf { it.isNotBlank() },
+        assetName?.takeIf { it.isNotBlank() },
+        modelType ?: "auto",
+        quantization
+      ) ?: run {
+        promise.reject("DETECT_ERROR", "Audio tagging model detection returned null")
+        return
+      }
+      val out = Arguments.createMap()
+      out.putBoolean("success", result["success"] as? Boolean ?: false)
+      out.putBoolean("isStreaming", result["isStreaming"] as? Boolean ?: false)
+      (result["error"] as? String)?.takeIf { it.isNotBlank() }?.let { out.putString("error", it) }
+      (result["modelType"] as? String)?.let { out.putString("modelType", it) }
+      (result["quantization"] as? String)?.takeIf { it.isNotBlank() }?.let {
+        out.putString("quantization", it)
+      }
+      val models = Arguments.createArray()
+      for (model in result["detectedModels"] as? ArrayList<*> ?: arrayListOf<Any>()) {
+        if (model is HashMap<*, *>) {
+          val entry = Arguments.createMap()
+          entry.putString("type", model["type"] as? String ?: "")
+          entry.putString("modelDir", model["modelDir"] as? String ?: "")
+          models.pushMap(entry)
+        }
+      }
+      out.putArray("detectedModels", models)
+      (result["detectionSources"] as? ArrayList<*>)?.let { values ->
+        val sources = Arguments.createArray()
+        values.filterIsInstance<String>().forEach { sources.pushString(it) }
+        out.putArray("detectionSources", sources)
+      }
+      (result["languages"] as? ArrayList<*>)?.let { values ->
+        val languages = Arguments.createArray()
+        values.filterIsInstance<HashMap<*, *>>().forEach { value ->
+          val language = Arguments.createMap()
+          language.putString("id", value["id"] as? String ?: "")
+          language.putString("iso6391Hint", value["iso6391Hint"] as? String ?: "")
+          languages.pushMap(language)
+        }
+        out.putArray("languages", languages)
+      }
+      (result["paths"] as? HashMap<*, *>)?.let { values ->
+        val paths = Arguments.createMap()
+        listOf("model", "labels").forEach { key ->
+          (values[key] as? String)?.takeIf { it.isNotBlank() }?.let { paths.putString(key, it) }
+        }
+        out.putMap("paths", paths)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      Log.e(NAME, "detectAudioTaggingModel failed", e)
+      promise.reject("DETECT_ERROR", "Audio tagging model detection failed: ${e.message}", e)
+    }
+  }
+
   override fun initializeKeywordSpotting(
     instanceId: String,
     options: ReadableMap,
@@ -5083,6 +5190,52 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadKeywordSpotting(instanceId: String, promise: Promise) {
     kwsHelper.unloadKeywordSpotting(instanceId, promise)
+  }
+
+  override fun initializeAudioTagging(
+    instanceId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    audioTaggingHelper.initializeAudioTagging(instanceId, options, promise)
+  }
+
+  override fun tagAudioOffline(
+    instanceId: String,
+    audioBufferId: String,
+    topK: Double?,
+    startSample: Double?,
+    endSample: Double?,
+    promise: Promise
+  ) {
+    audioTaggingHelper.tagAudioOffline(
+      instanceId,
+      audioBufferId,
+      topK,
+      startSample,
+      endSample,
+      promise,
+    )
+  }
+
+  override fun unloadAudioTagging(instanceId: String, promise: Promise) {
+    audioTaggingHelper.unloadAudioTagging(instanceId, promise)
+  }
+
+  override fun startAudioTaggingOfflineLivePipeline(
+    instanceId: String,
+    audioInLiveBufferId: String,
+    textOutLiveBufferId: String,
+    options: ReadableMap,
+    promise: Promise
+  ) {
+    audioTaggingLivePipelineHelper.startAudioTaggingOfflineLivePipeline(
+      instanceId,
+      audioInLiveBufferId,
+      textOutLiveBufferId,
+      options,
+      promise,
+    )
   }
 
   override fun initializeLanguageId(
@@ -6206,6 +6359,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     /** Model detection for online keyword spotting transducers. */
     @JvmStatic
     private external fun nativeDetectKwsModel(
+      modelDir: String?,
+      assetName: String?,
+      modelType: String,
+      quantization: String?
+    ): HashMap<String, Any>?
+
+    /** Model detection for offline audio tagging (zipformer / CED). */
+    @JvmStatic
+    private external fun nativeDetectAudioTaggingModel(
       modelDir: String?,
       assetName: String?,
       modelType: String,

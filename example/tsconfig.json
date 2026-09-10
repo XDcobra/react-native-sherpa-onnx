@@ -26,6 +26,7 @@
       "react-native-sherpa-onnx/speaker-embedding": ["../src/speaker-embedding/index.ts"],
       "react-native-sherpa-onnx/speaker-identification": ["../src/speaker-identification/index.ts"],
       "react-native-sherpa-onnx/language-identification": ["../src/language-identification/index.ts"],
+      "react-native-sherpa-onnx/audio-tagging": ["../src/audio-tagging/index.ts"],
       "react-native-sherpa-onnx/kws": ["../src/kws/index.ts"],
       "react-native-sherpa-onnx/extraction": ["../src/extraction/index.ts"],
       "react-native-sherpa-onnx/alignment": ["../src/alignment/index.ts"],

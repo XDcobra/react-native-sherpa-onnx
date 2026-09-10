@@ -71,6 +71,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'kws-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/kws`,
   },
+  [ModelCategory.AudioTagging]: {
+    tag: 'audio-tagging-models',
+    cacheFile: 'audio-tagging-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/audio-tagging`,
+  },
 };
 
 export function getCategoryTag(category: ModelCategory): string {
