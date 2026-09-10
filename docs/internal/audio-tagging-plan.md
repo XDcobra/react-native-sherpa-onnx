@@ -1,10 +1,10 @@
 # Audio Tagging — Architecture & Implementation Plan
 
-> **Status:** Phase 4 live overload landed — Phase 5 showcase next (offline↔live), then Phase 6 docs  
+> **Status:** Phase 5 showcase landed — Phase 6 docs next  
 > **Audience:** SDK Maintainers  
 > **Category:** Speech & Media Features (`ModelCategory.AudioTagging` / `audioTagging`)  
 > **Target Branch:** `feat/add-audio-tagging-feature`  
-> **MVP scope:** Offline oneshot + segmented ✅; live overload ✅; showcase + docs pending  
+> **MVP scope:** Offline oneshot + segmented ✅; live overload ✅; showcase ✅; docs pending  
 > **Research date:** 2026-09-10 (live overload research refresh 2026-09-10)  
 > **Naming:** `ModelCategory.AudioTagging = 'audioTagging'`; native detect category `"audiotagging"` (alias `"audio_tagging"`).
 
@@ -449,7 +449,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 | **Phase 2: Native engine + offline oneshot** | • Android helper + iOS C-API bridge<br>• TS `createAudioTagging` + `tag(offline)` oneshot<br>• `initMode: 'auto' \| 'custom'`<br>• Jest | ✅ Engine lifecycle + oneshot result |
 | **Phase 3: Offline segmentation** | • `segmentation: { mode: 'auto' }` per-span tag<br>• Optional target `OfflineSegmentBuffer`<br>• Progress / onSegment callbacks | ✅ Long-file safe offline API |
 | **Phase 4: Live overload** | • TS `live.ts` + engine overload `tag(liveAudio, liveText, options)`<br>• Native `AudioTaggingOfflineLivePipelineWorker` (Android + iOS)<br>• `startAudioTaggingOfflineLivePipeline`<br>• Required LiveText commits + optional live `targetSegmentBuffer`<br>• Jest live tests; matrix: live overload Yes<br>• Touch `docs/internal/live-overload.md` feature matrix row | ✅ Mic/file continuous tagging via offline weights |
-| **Phase 5: Showcase** | • Example screen (Home): pack init, offline file tag, **offline↔live mode toggle**, mic + file ingest, top-K HUD<br>• Shared components pattern like Language Identification screen<br>• Recommended pack + test wavs | Showcase covers offline + live |
+| **Phase 5: Showcase** | • Example screen (Home): pack init, offline file tag, **offline↔live mode toggle**, mic + file ingest, top-K HUD<br>• Shared components pattern like Language Identification screen<br>• Recommended pack + test wavs | ✅ Showcase covers offline + live |
 | **Phase 6: Docs + download catalog** | • `docs/audio-tagging-offline.md`<br>• `docs/audio-tagging-live.md` (authored from Phase 4; link from offline)<br>• README checklist + models `<details>`<br>• Download manager / example catalog wiring | App-facing docs at SLID quality |
 
 **Non-goals for MVP:**
@@ -486,7 +486,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 
 1. **Enum / path string:** **Resolved** — `ModelCategory.AudioTagging = 'audioTagging'`; native `"audiotagging"` (+ `"audio_tagging"` alias).
 2. **Delivery order (live vs docs/showcase):** **Resolved** — Phase 4 live overload → Phase 5 showcase (offline↔live) → Phase 6 docs. Matches SLID practice; docs authored from landed live API.
-3. **Default recommended pack for example:** `ced-mini` (size) vs `zipformer-small` (accuracy) — resolve in Phase 5 after on-device check.
+3. **Default recommended pack for example:** **Resolved** — `sherpa-onnx-ced-mini-audio-tagging-2024-04-19` (size-first for PAD/example).
 4. **Segment policy default for AT:** **Resolved for offline + live** — default `speech_energy_silence` (`DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY`); allowed live/offline evaluators `speech_energy_silence` \| `continuous_frames` (not speech-only VAD as primary). Revisit only if showcase shows energy windows miss common non-speech events.
 5. **LiveText `source` string:** Prefer `'audio_tagging'` (underscore, filter-friendly, parallel to SLID `'language_id'`). Segment payload keeps `source: 'audioTagging'` (already in `AudioTaggingSpeechSegmentPayload`). Confirm in Phase 4 implementation plan if any existing filter convention prefers camelCase in LiveText.
 
