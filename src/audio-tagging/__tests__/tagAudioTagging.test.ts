@@ -79,16 +79,20 @@ describe('tagAudioTagging oneshot', () => {
     expect(SherpaOnnx.tagAudioOffline).toHaveBeenCalledWith(
       engine.instanceId,
       'off_test_buffer',
+      null,
+      null,
       null
     );
-    expect(result.events).toEqual([
-      { name: 'Speech', index: 0, prob: 0.9 },
-      { name: 'Music', index: 1, prob: 0.4 },
-    ]);
-    expect(result.primary).toEqual({ name: 'Speech', index: 0, prob: 0.9 });
-    expect(result.audioDuration).toBe(1.5);
-    expect(result.elapsedMs).toBe(12);
-    expect(result.topK).toBe(5);
+    expect(result).toMatchObject({
+      events: [
+        { name: 'Speech', index: 0, prob: 0.9 },
+        { name: 'Music', index: 1, prob: 0.4 },
+      ],
+      primary: { name: 'Speech', index: 0, prob: 0.9 },
+      audioDuration: 1.5,
+      elapsedMs: 12,
+      topK: 5,
+    });
   });
 
   it('passes topK override to native', async () => {
@@ -105,7 +109,9 @@ describe('tagAudioTagging oneshot', () => {
     expect(SherpaOnnx.tagAudioOffline).toHaveBeenCalledWith(
       engine.instanceId,
       'off_clip',
-      2
+      2,
+      null,
+      null
     );
   });
 
@@ -114,14 +120,6 @@ describe('tagAudioTagging oneshot', () => {
     await expect(engine.tag('live_abc')).rejects.toThrow(
       AudioTaggingErrorCode.INVALID_ARGUMENT
     );
-    expect(SherpaOnnx.tagAudioOffline).not.toHaveBeenCalled();
-  });
-
-  it('rejects segmentation.mode auto with Phase 3 message', async () => {
-    const engine = await makeEngine();
-    await expect(
-      engine.tag('off_clip', { segmentation: { mode: 'auto' } })
-    ).rejects.toThrow(/Phase 3/);
     expect(SherpaOnnx.tagAudioOffline).not.toHaveBeenCalled();
   });
 

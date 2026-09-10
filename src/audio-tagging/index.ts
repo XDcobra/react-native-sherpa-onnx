@@ -13,7 +13,17 @@ export type {
 } from './customConfig';
 export { buildAudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
 export type { AudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
-export { AUDIO_TAGGING_MODEL_TYPES, AudioTaggingErrorCode } from './types';
+export {
+  collectSpeechSpans,
+  normalizeAudioTaggingNativeResult,
+  runOfflineAudioTaggingSegmentation,
+  spanDurationMs,
+} from './orchestrate';
+export {
+  AUDIO_TAGGING_MODEL_TYPES,
+  AudioTaggingErrorCode,
+  DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
+} from './types';
 export type {
   AudioTaggingAutoInitializeOptions,
   AudioTaggingConcreteModelType,
@@ -24,5 +34,7 @@ export type {
   AudioTaggingInitializeOptions,
   AudioTaggingModelType,
   AudioTaggingResult,
+  AudioTaggingSegmentEvent,
   AudioTaggingTagOptions,
+  SegmentedAudioTaggingResult,
 } from './types';

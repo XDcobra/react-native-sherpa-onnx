@@ -1,40 +1,21 @@
-import SherpaOnnx, {
-  type AudioTaggingProcessNativeResult,
-} from '../NativeSherpaOnnx';
+import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import { buildAudioTaggingInitBridgeOptions } from './audioTaggingNativeBridge';
 import {
+  normalizeAudioTaggingNativeResult,
+  runOfflineAudioTaggingSegmentation,
+} from './orchestrate';
+import {
   AudioTaggingErrorCode,
   type AudioTaggingEngine,
-  type AudioTaggingEvent,
   type AudioTaggingInitializeOptions,
   type AudioTaggingResult,
   type AudioTaggingTagOptions,
+  type SegmentedAudioTaggingResult,
 } from './types';
 
 let instanceCounter = 0;
-
-function normalizeEvents(
-  raw: AudioTaggingProcessNativeResult['events'] | undefined
-): AudioTaggingEvent[] {
-  if (!Array.isArray(raw)) return [];
-  const events: AudioTaggingEvent[] = [];
-  for (const item of raw) {
-    if (item == null || typeof item !== 'object') continue;
-    const name = typeof item.name === 'string' ? item.name : '';
-    const index =
-      typeof item.index === 'number' && Number.isFinite(item.index)
-        ? item.index
-        : 0;
-    const prob =
-      typeof item.prob === 'number' && Number.isFinite(item.prob)
-        ? item.prob
-        : 0;
-    events.push({ name, index, prob });
-  }
-  return events;
-}
 
 export async function createAudioTagging(
   options: AudioTaggingInitializeOptions
@@ -85,7 +66,7 @@ export async function createAudioTagging(
     async tag(
       offlineAudio: OfflineAudioBufferIdSource,
       tagOptions?: AudioTaggingTagOptions
-    ): Promise<AudioTaggingResult> {
+    ): Promise<AudioTaggingResult | SegmentedAudioTaggingResult> {
       if (isDestroyed) {
         throw new Error(
           `${AudioTaggingErrorCode.DESTROYED}: Audio tagging engine instance ${instanceId} has been destroyed`
@@ -97,9 +78,17 @@ export async function createAudioTagging(
         );
       }
 
-      if (tagOptions?.segmentation?.mode === 'auto') {
+      if (tagOptions?.segmentation?.mode === 'manual') {
         throw new Error(
-          `${AudioTaggingErrorCode.NOT_IMPLEMENTED}: segmentation.mode 'auto' is Phase 3 — not available in Phase 2 oneshot`
+          `${AudioTaggingErrorCode.INVALID_ARGUMENT}: audio tagging does not support segmentation.mode=manual`
+        );
+      }
+
+      if (tagOptions?.segmentation?.mode === 'auto') {
+        return runOfflineAudioTaggingSegmentation(
+          instanceId,
+          offlineAudio,
+          tagOptions
         );
       }
 
@@ -132,20 +121,15 @@ export async function createAudioTagging(
           ? tagOptions.topK
           : null;
 
-      const res: AudioTaggingProcessNativeResult =
-        await SherpaOnnx.tagAudioOffline(instanceId, audioBufferId, topK);
+      const res = await SherpaOnnx.tagAudioOffline(
+        instanceId,
+        audioBufferId,
+        topK,
+        null,
+        null
+      );
 
-      const events = normalizeEvents(res?.events);
-      const primary = events.length > 0 ? events[0] : undefined;
-
-      return {
-        events,
-        ...(primary !== undefined ? { primary } : {}),
-        audioDuration:
-          typeof res?.audioDuration === 'number' ? res.audioDuration : 0,
-        elapsedMs: typeof res?.elapsedMs === 'number' ? res.elapsedMs : 0,
-        topK: typeof res?.topK === 'number' ? res.topK : topK ?? 5,
-      };
+      return normalizeAudioTaggingNativeResult(res, topK ?? 5);
     },
 
     async destroy(): Promise<void> {

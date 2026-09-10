@@ -1085,13 +1085,14 @@ export interface Spec extends TurboModule {
     /**
      * Strict payload contract (validated in JS/native):
      * - kind='speech': payload.source must be one of
-     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'manual'
+     *   'vad' | 'stt' | 'tts' | 'sid' | 'pyannote' | 'languageId' | 'audioTagging' | 'manual'
      *   - source='vad' -> allowed keys: source, engine, decision, score
      *   - source='stt' -> allowed keys: source, transcript, tokenCount, isFinal
      *   - source='tts' -> allowed keys: source, text, chunkIndex, isFinalChunk
      *   - source='sid' -> allowed keys: source, speakerName (string | null)
      *   - source='pyannote' -> allowed keys: source
      *   - source='languageId' -> allowed keys: source, lang, confidence?
+     *   - source='audioTagging' -> allowed keys: source, primaryName?, events?
      *   - source='manual' -> allowed keys: source
      * - kind='alignment': strict alignment payload contract
      * - kind='diarization': payload.source='diarization', speaker (number)
@@ -1775,11 +1776,15 @@ export interface Spec extends TurboModule {
   /**
    * Run offline audio tagging on an offline audio buffer (`off_*`).
    * @param topK - Optional override; omit/null to use engine default from init.
+   * @param startSample - Optional start sample index (inclusive); both start/end or neither.
+   * @param endSample - Optional end sample index (exclusive).
    */
   tagAudioOffline(
     instanceId: string,
     audioBufferId: string,
-    topK?: number | null
+    topK?: number | null,
+    startSample?: number | null,
+    endSample?: number | null
   ): Promise<AudioTaggingProcessNativeResult>;
 
   /** Release an audio tagging engine instance. Idempotent when the id is absent. */
