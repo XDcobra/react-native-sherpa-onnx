@@ -4,6 +4,7 @@
  */
 
 export type {
+  AudioTaggingInitBridgeOptions,
   EnhancementInitBridgeOptions,
   LanguageIdInitBridgeOptions,
   OnlineSttInitBridgeOptions,

@@ -167,6 +167,28 @@ export type LanguageIdInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeAudioTagging(instanceId, options)`. */
+export type AudioTaggingInitBridgeOptions = {
+  initMode?: string;
+  modelDir?: string;
+  /** Resolved path map (`model`, `labels`); NSDictionary / ReadableMap at native boundary. */
+  modelPaths?: Object;
+  quantization?: string;
+  modelType: string;
+  topK?: number;
+  numThreads?: number;
+  provider?: string;
+  debug?: boolean;
+};
+
+/** Native result from `tagAudioOffline`. */
+export type AudioTaggingProcessNativeResult = {
+  events: Array<{ name: string; index: number; prob: number }>;
+  audioDuration: number;
+  elapsedMs: number;
+  topK: number;
+};
+
 /** `initializeKeywordSpotting(instanceId, options)` — KWS engine lifecycle. */
 export type KeywordSpottingInitBridgeOptions = {
   encoder: string;
@@ -1739,6 +1761,29 @@ export interface Spec extends TurboModule {
       labels?: string;
     };
   }>;
+
+  /** Initialize an offline audio tagging engine instance. */
+  initializeAudioTagging(
+    instanceId: string,
+    options: AudioTaggingInitBridgeOptions
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    modelType?: string;
+  }>;
+
+  /**
+   * Run offline audio tagging on an offline audio buffer (`off_*`).
+   * @param topK - Optional override; omit/null to use engine default from init.
+   */
+  tagAudioOffline(
+    instanceId: string,
+    audioBufferId: string,
+    topK?: number | null
+  ): Promise<AudioTaggingProcessNativeResult>;
+
+  /** Release an audio tagging engine instance. Idempotent when the id is absent. */
+  unloadAudioTagging(instanceId: string): Promise<void>;
 
   /** Initialize a native keyword spotter. */
   initializeKeywordSpotting(
