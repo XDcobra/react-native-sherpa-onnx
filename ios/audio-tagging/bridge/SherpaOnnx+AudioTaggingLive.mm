@@ -47,7 +47,13 @@ void StopActiveAudioTaggingLivePipeline(const std::string &instanceIdStr) {
 
   so_mark_streaming_pipeline_stop_requested(pipelineId);
   worker->stop();
-  worker->join();
+
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 120s;
+  while (worker->isRunning() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(20ms);
+  }
+  worker->release();
 }
 
 }  // namespace
@@ -132,14 +138,14 @@ void StopActiveAudioTaggingLivePipeline(const std::string &instanceIdStr) {
   (void)segmentInputEntry;
 
   std::string targetSegmentsOutIdStr;
-  auto targetOpt = options.targetSegmentLiveBufferId();
-  if (targetOpt.has_value() && targetOpt.value() != nil && [targetOpt.value() length] > 0) {
-    targetSegmentsOutIdStr = [targetOpt.value() UTF8String];
+  NSString *targetOpt = options.targetSegmentLiveBufferId();
+  if (targetOpt != nil && [targetOpt length] > 0) {
+    targetSegmentsOutIdStr = [targetOpt UTF8String];
     auto targetEntry = seg_get_live_entry(targetSegmentsOutIdStr);
     if (!targetEntry) {
       reject(
         @"AUDIO_TAGGING_BUFFER_NOT_FOUND",
-        [NSString stringWithFormat:@"Output live segment buffer not found: %@", targetOpt.value()],
+        [NSString stringWithFormat:@"Output live segment buffer not found: %@", targetOpt],
         nil
       );
       return;

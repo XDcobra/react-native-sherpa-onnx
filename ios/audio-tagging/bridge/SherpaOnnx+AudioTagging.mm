@@ -18,6 +18,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -439,7 +440,12 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
       if (worker) {
         so_mark_streaming_pipeline_stop_requested(pipelineId);
         worker->stop();
-        worker->join();
+        using namespace std::chrono_literals;
+        const auto deadline = std::chrono::steady_clock::now() + 120s;
+        while (worker->isRunning() && std::chrono::steady_clock::now() < deadline) {
+          std::this_thread::sleep_for(20ms);
+        }
+        worker->release();
       }
     }
     sherpaonnx::audio_tagging::bridge::RemoveAudioTagging(instanceIdStr);

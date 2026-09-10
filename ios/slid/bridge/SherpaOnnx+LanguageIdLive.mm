@@ -94,14 +94,14 @@
   (void)segmentInputEntry;
 
   std::string targetSegmentsOutIdStr;
-  auto targetOpt = options.targetSegmentLiveBufferId();
-  if (targetOpt.has_value() && targetOpt.value() != nil && [targetOpt.value() length] > 0) {
-    targetSegmentsOutIdStr = [targetOpt.value() UTF8String];
+  NSString *targetOpt = options.targetSegmentLiveBufferId();
+  if (targetOpt != nil && [targetOpt length] > 0) {
+    targetSegmentsOutIdStr = [targetOpt UTF8String];
     auto targetEntry = seg_get_live_entry(targetSegmentsOutIdStr);
     if (!targetEntry) {
       reject(
         @"LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND",
-        [NSString stringWithFormat:@"Output live segment buffer not found: %@", targetOpt.value()],
+        [NSString stringWithFormat:@"Output live segment buffer not found: %@", targetOpt],
         nil
       );
       return;
