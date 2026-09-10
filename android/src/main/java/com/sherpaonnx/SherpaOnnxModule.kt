@@ -4151,7 +4151,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (!payload.hasKey("source") || payload.isNull("source")) {
       throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual"
       )
     }
     val source = payload.getString("source")?.trim() ?: ""
@@ -4162,10 +4162,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "sid" -> setOf("source", "speakerName", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "pyannote" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "languageId" -> setOf("source", "lang", "confidence", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
+      "audioTagging" -> setOf("source", "primaryName", "events", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       "manual" -> setOf("source", "__annotationReason", "__annotationSource", "__annotationCreatedAtMs")
       else -> throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
         com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
-        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, manual"
+        "speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual"
       )
     }
 
@@ -4255,6 +4256,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
               com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
               "speech payload.confidence must be a finite number when provided"
+            )
+          }
+        }
+      }
+      "audioTagging" -> {
+        if (payload.hasKey("primaryName") && !payload.isNull("primaryName")) {
+          try {
+            payload.getString("primaryName")
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.primaryName must be a string when provided",
+            )
+          }
+        }
+        if (payload.hasKey("events") && !payload.isNull("events")) {
+          try {
+            payload.getArray("events")
+              ?: throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+                com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+                "speech payload.events must be an array when provided",
+              )
+          } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
+            throw e
+          } catch (_: Exception) {
+            throw com.sherpaonnx.segment.pipeline.SegmentPipelineException(
+              com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
+              "speech payload.events must be an array when provided",
             )
           }
         }
@@ -5168,9 +5197,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     instanceId: String,
     audioBufferId: String,
     topK: Double?,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise
   ) {
-    audioTaggingHelper.tagAudioOffline(instanceId, audioBufferId, topK, promise)
+    audioTaggingHelper.tagAudioOffline(
+      instanceId,
+      audioBufferId,
+      topK,
+      startSample,
+      endSample,
+      promise,
+    )
   }
 
   override fun unloadAudioTagging(instanceId: String, promise: Promise) {

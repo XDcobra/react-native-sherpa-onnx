@@ -199,6 +199,8 @@ internal class SherpaOnnxAudioTaggingHelper(
     instanceId: String,
     audioBufferId: String,
     topK: Double?,
+    startSample: Double?,
+    endSample: Double?,
     promise: Promise,
   ) {
     val instance = instances[instanceId]
@@ -226,6 +228,16 @@ internal class SherpaOnnxAudioTaggingHelper(
       return
     }
 
+    val hasStart = startSample != null
+    val hasEnd = endSample != null
+    if (hasStart != hasEnd) {
+      promise.reject(
+        AudioTaggingErrorCodes.INVALID_ARGUMENT,
+        "startSample and endSample must both be provided or both omitted",
+      )
+      return
+    }
+
     val effectiveTopK = (topK?.toInt() ?: instance.defaultTopK).coerceAtLeast(1)
 
     executor.execute {
@@ -233,7 +245,30 @@ internal class SherpaOnnxAudioTaggingHelper(
       try {
         val t0 = SystemClock.uptimeMillis()
         val sampleRate = audioEntry.sampleRate
-        val samples = audioEntry.readAllSamples()
+        val samples: FloatArray
+        if (!hasStart) {
+          samples = audioEntry.readAllSamples()
+        } else {
+          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
+          val end = endRaw.coerceAtMost(audioEntry.numSamples)
+          val frameCount = (end - start).coerceAtLeast(0)
+          if (frameCount == 0) {
+            val result = Arguments.createMap()
+            result.putArray("events", Arguments.createArray())
+            result.putDouble("audioDuration", 0.0)
+            result.putDouble("elapsedMs", 0.0)
+            result.putInt("topK", effectiveTopK)
+            promise.resolve(result)
+            return@execute
+          }
+          samples = audioEntry.readSlice(start, frameCount)
+          Log.d(
+            AudioTaggingErrorCodes.TAG,
+            "tagOffline slice instanceId=$instanceId bufferId=$audioBufferId " +
+              "startSample=$start endSample=$end frameCount=$frameCount",
+          )
+        }
         val audioDuration =
           if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
 
