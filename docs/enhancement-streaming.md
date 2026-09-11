@@ -71,6 +71,31 @@ The pipeline handle supports **`flush()`** / **`reset()`** / **`getStatus()`** w
 
 ---
 
+## Segmentation (Optional)
+
+Streaming enhancement can attach segmentation to the input live audio buffer. Useful for deterministic checkpoints or manual boundary control while processing through one streaming pipeline.
+
+**Modes:** `'off'` (default — stream continuously) | `'auto'` (policy-driven checkpoints) | `'manual'` (external boundary control).
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `continuous_frames` | ✅ **Default** | Fixed-interval checkpoints; `checkpointIntervalMs: 1000` |
+| `speech_energy_silence` | ✅ | Silence-based boundaries on the live stream |
+| Text evaluators | ❌ | Audio-domain input only |
+
+```ts
+const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Offline path: [enhancement-offline.md](enhancement-offline.md#segmentation-optional).
+
+---
+
 ## API reference
 
 Signatures below are exported from **`react-native-sherpa-onnx/enhancement`** unless noted. Types live in **`src/enhancement/types.ts`** and **`src/enhancement/streamingTypes.ts`**.
@@ -272,29 +297,6 @@ const denoiser = await createStreamingEnhancement({
   },
 });
 ```
-
-## Segmentation
-
-Streaming enhancement can attach a segmentation engine to the **input live audio buffer** before the pipeline starts. This is useful when you want deterministic checkpoints or manual boundary control while still processing through one streaming pipeline.
-
-Supported modes for streaming enhancement:
-
-- `'off'` (default): stream continuously without segmentation attachment.
-- `'manual'`: segmentation boundaries are controlled externally.
-- `'auto'`: segmentation engine attaches automatically to the input buffer.
-
-Current streaming evaluator support is limited to `continuous_frames` (default policy: `checkpointIntervalMs: 1000`).
-
-```ts
-const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
-  segmentation: {
-    mode: 'auto',
-    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
-  },
-});
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for the shared model and [memory-and-models.md](memory-and-models.md) for peak-memory planning.
 
 ## Pipeline composition
 

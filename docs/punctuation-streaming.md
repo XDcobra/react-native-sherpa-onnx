@@ -79,6 +79,31 @@ After the live input is finalized, call **`pipeline.flush()`** (then **`stop()`*
 
 ---
 
+## Segmentation (Optional)
+
+Streaming punctuation can attach segmentation to a live text stream. Useful for policy-driven commit boundaries or manual segment control around an active pipeline.
+
+**Modes:** `'off'` (default — consume committed segments as-is) | `'auto'` (policy-driven boundaries) | `'manual'` (external boundary control).
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `text_punctuation_assisted` | ✅ **Default** | Sentence boundary + length; `maxLengthChars: 500` |
+| `text_synthetic_auto` | ✅ | Synthetic sentence / length splits |
+| Speech / frame evaluators | ❌ | Text-domain input only |
+
+```ts
+const pipeline = await engine.punctuate(textIn, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_punctuation_assisted', maxLengthChars: 500 },
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline path: [punctuation-offline.md](punctuation-offline.md#segmentation-optional).
+
+---
+
 ## API reference
 
 Signatures are exported from `react-native-sherpa-onnx/punctuation`.
@@ -245,31 +270,6 @@ const engine = await createStreamingPunctuation({
   },
 });
 ```
-
-## Segmentation
-
-Streaming punctuation supports all segmentation modes because it operates on live text streams and can attach/detach segmentation around an active pipeline.
-
-- `'off'` (default): input live text segments are consumed as committed.
-- `'manual'`: boundaries come from external segment control.
-- `'auto'`: segmentation engine auto-attaches to input and uses policy boundaries.
-
-Default streaming punctuation policy evaluator: `text_punctuation_assisted`.
-
-```ts
-const pipeline = await engine.punctuate(textIn, textOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: {
-      evaluator: 'text_punctuation_assisted',
-      sentenceBoundary: true,
-      maxLengthChars: 500,
-    },
-  },
-});
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for full policy/lifecycle semantics.
 
 ## Pipeline composition
 

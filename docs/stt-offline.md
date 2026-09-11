@@ -142,6 +142,33 @@ await engine.destroy();
 | **Text out** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer from `createEmptyOfflineTextBuffer`; STT writes hypothesis + optional token/timestamp metadata |
 | **Engine** | `SttEngine` via `createSTT` | `transcribe`, `setConfig`, `destroy` |
 
+## Segmentation (Optional)
+
+Long audio in one `transcribe` call can exhaust device RAM. Auto mode splits the audio buffer into chunks, runs the STT model on each, and concatenates results in order — lower peak RAM with a small quality tradeoff at boundaries.
+
+**Modes:** `'off'` (default — whole buffer in one pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | Silence/low-energy boundaries; natural split points |
+| `continuous_frames` | ✅ | Fixed-interval checkpoints; `checkpointIntervalMs` |
+| Text evaluators | ❌ | Audio-domain input only |
+
+```ts
+const result = await engine.transcribe(audio, textOut, {
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to speech_energy_silence
+  },
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
+});
+```
+
+> **Whisper 30 s window:** Whisper's encoder uses a fixed 30-second mel-spectrogram window. Keep `maxSegmentMs` ≤ 30 000 ms for Whisper models (`policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 25000 }`). See [openai/whisper#1118](https://github.com/openai/whisper/discussions/1118). Does not apply to transducer, paraformer, or SenseVoice.
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md).
+
 ## API reference
 
 ### `detectSttModel(source, options?)`
@@ -282,53 +309,6 @@ const engine = await createSTT({
 ```
 
 Auxiliary paths (`hotwordsFile`, `bpeVocab`, `ruleFsts`, `ruleFars`) also accept `FileSource`. Full key list: `getCustomModelPathRequirements('stt', modelType)`.
-
-## Segmentation
-
-Most STT models in this SDK are **offline-only** — they have no streaming variant and process the entire input buffer at once. On mobile devices with limited RAM, transcribing long audio files can exhaust available memory (**OOM**). The segmentation engine splits the offline audio buffer into **smaller chunks** and runs the STT model repeatedly on each one, bounding peak RAM at the cost of a small quality tradeoff at segment boundaries.
-
-Supported modes for offline STT:
-
-- `'off'` (default) — no segmentation; the whole buffer is processed in one pass.
-- `'auto'` — the engine splits the audio using the configured policy.
-
-> `'manual'` mode is not supported for offline STT.
-
-Default policy evaluator: **`speech_energy_silence`** — detects silence/low-energy boundaries to find natural split points.
-
-```ts
-const result = await engine.transcribe(audio, textOut, {
-  segmentation: {
-    mode: 'auto',
-    // policy defaults to { evaluator: 'speech_energy_silence' } — override if needed
-  },
-  errorRecovery: 'skip',
-  maxRetriesPerSegment: 2,
-});
-console.log(result.totalSegments, result.completedSegments, result.skippedSegments);
-```
-
-The `SttTranscribeResult` returned by `transcribe` includes `totalSegments`, `completedSegments`, `skippedSegments`, and `processingTimeMs`.
-
-See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
-
-### Whisper and the 30-second window
-
-Whisper's encoder processes audio in a fixed 30-second mel-spectrogram window. Segments that exceed this length cause Whisper to truncate or hallucinate text. When using a Whisper model, keep `maxSegmentMs` in your segmentation policy at or below 30 000 ms:
-
-```ts
-const result = await engine.transcribe(audio, textOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: {
-      evaluator: 'speech_energy_silence',
-      maxSegmentMs: 25000, // keep well under Whisper's 30 s window
-    },
-  },
-});
-```
-
-See [openai/whisper#1118](https://github.com/openai/whisper/discussions/1118) for background. This constraint does not apply to transducer, paraformer, SenseVoice, or other non-Whisper models.
 
 ## Live overload (offline weights, live consumption)
 

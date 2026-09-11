@@ -68,6 +68,31 @@ try {
 
 ---
 
+## Segmentation (Optional)
+
+Long audio in one `enhance` call can exhaust device RAM. Auto mode splits the audio buffer into chunks, denoises each offline, and assembles output in order — lower peak RAM with a small quality tradeoff at boundaries.
+
+**Modes:** `'off'` (default — whole buffer in one pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | Silence/low-energy boundaries; natural split points |
+| `continuous_frames` | ✅ | Fixed-interval checkpoints; `checkpointIntervalMs` |
+| Text evaluators | ❌ | Audio-domain input only |
+
+```ts
+const result = await engine.enhance(inBuf, outBuf, {
+  segmentation: { mode: 'auto' },
+  // policy defaults to speech_energy_silence
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [enhancement-streaming.md](enhancement-streaming.md#segmentation-optional).
+
+---
+
 ## API reference
 
 Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. Types live in **`src/enhancement/types.ts`**.
@@ -204,52 +229,6 @@ const enhancement = await createEnhancement({
   },
 });
 ```
-
-## Segmentation
-
-Enhancement models in this SDK are primarily **offline-first**. Running enhancement on very large offline buffers can exceed memory limits on mobile devices (**OOM**). Segmentation mitigates this by splitting input audio into bounded chunks, running the offline denoiser per chunk, then assembling output in order. This lowers peak RAM, with a small quality tradeoff around segment boundaries.
-
-Supported modes for offline enhancement:
-
-- `'off'` (default): one full pass over the input buffer.
-- `'auto'`: split input by segmentation policy and process chunk by chunk.
-
-`'manual'` is not supported for offline enhancement.
-
-Default policy evaluator: `speech_energy_silence`.
-
-```ts
-import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
-import {
-  createOfflineAudioBufferFromFile,
-  createEmptyOfflineAudioBuffer,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-
-const engine = await createEnhancement({
-  modelSource: { kind: 'fs', path: '/path/to/enhancement-model' },
-  modelType: 'auto',
-});
-
-const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/long-input.wav' });
-const sampleRate = await engine.getSampleRate();
-const outBuf = await createEmptyOfflineAudioBuffer(sampleRate);
-
-try {
-  const result = await engine.enhance(inBuf, outBuf, {
-    segmentation: { mode: 'auto' },
-    errorRecovery: 'skip',
-    maxRetriesPerSegment: 2,
-  });
-  console.log(result.status, result.completedSegments, result.totalSegments);
-} finally {
-  await releasePipelineAudioBuffer(inBuf);
-  await releasePipelineAudioBuffer(outBuf);
-  await engine.destroy();
-}
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for policy details and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
 ## Live overload on offline enhancement (offline weights, live consumption)
 

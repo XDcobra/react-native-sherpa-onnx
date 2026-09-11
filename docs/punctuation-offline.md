@@ -89,6 +89,31 @@ try {
 
 ---
 
+## Segmentation (Optional)
+
+Large text in one `punctuate` call can increase memory pressure. Auto mode splits text into bounded chunks, punctuates each, and merges output in order — lower peak RAM with a small quality tradeoff at boundaries.
+
+**Modes:** `'off'` (default — full text in one pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `text_synthetic_auto` | ✅ **Default** | Sentence / length splits; `maxLengthChars` default 500 |
+| `text_punctuation_assisted` | ✅ | Needs `policy.punctuationInstanceId`; then same split as synthetic |
+| Speech / frame evaluators | ❌ | Text-domain input only |
+
+```ts
+const result = await punct.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  // policy defaults to text_synthetic_auto + maxLengthChars: 500
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [punctuation-streaming.md](punctuation-streaming.md#segmentation-optional).
+
+---
+
 ## API reference
 
 Signatures are exported from **`react-native-sherpa-onnx/punctuation`**. Types are defined in **`src/punctuation/types.ts`**; detection types mirror **`src/punctuation/detect.ts`**.
@@ -263,30 +288,6 @@ console.log(`Punctuated ${completion.unitsRead} characters`);
 | Weights | CT-Transformer (Higher quality) | CNN-BiLSTM (Lower quality) |
 | Latency | Per-segment (higher) | Per-token (lower) |
 | Context | Global (per segment) | Local (sliding window) |
-
-## Segmentation
-
-Offline punctuation runs CT-Transformer in batch mode. For very large texts, a single pass can increase memory pressure on constrained devices. Segmentation splits text into bounded chunks, runs punctuation chunk-by-chunk, then merges output order-preservingly. This reduces peak memory, with a possible small quality tradeoff around chunk boundaries.
-
-Supported modes for offline punctuation:
-
-- `'off'` (default): process full input text in one pass.
-- `'auto'`: split text by policy and punctuate each segment.
-
-`'manual'` is not supported for offline punctuation.
-
-Default policy evaluator: `text_synthetic_auto` (`sentenceBoundary: true`, `maxLengthChars: 500`).
-
-```ts
-const result = await punct.punctuate(textIn, textOut, {
-  segmentation: { mode: 'auto' },
-  errorRecovery: 'skip',
-  maxRetriesPerSegment: 2,
-});
-console.log(result.processingTimeMs, result.completedSegments, result.totalSegments);
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for shared segmentation behavior and [memory-and-models.md](memory-and-models.md) for memory tradeoffs.
 
 ## Pipeline composition
 
