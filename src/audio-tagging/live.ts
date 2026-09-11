@@ -338,12 +338,7 @@ export async function tagLiveOverload(
     featureName: 'audio tagging',
     domain: 'speech',
     supportedEvaluators: ['speech_energy_silence', 'continuous_frames'],
-    segmentation: {
-      mode: options.segmentation?.mode ?? 'auto',
-      policy:
-        options.segmentation?.policy ??
-        DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
-    },
+    segmentation: options.segmentation,
   });
   assertAudioTaggingLiveSpanPolicy(policy);
 

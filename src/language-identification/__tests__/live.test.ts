@@ -268,4 +268,27 @@ describe('language identification live overload', () => {
       )
     ).rejects.toThrow(/liveText/);
   });
+
+  it('rejects missing segmentation with LIVE_OFFLINE_SEGMENTATION_REQUIRED', async () => {
+    const engine = await createEngine();
+    await expect(
+      engine.identify(LIVE_AUDIO, LIVE_TEXT, {} as any)
+    ).rejects.toThrow('LIVE_OFFLINE_SEGMENTATION_REQUIRED');
+    expect(mockAttachSegmentationEngine).not.toHaveBeenCalled();
+  });
+
+  it('rejects segmentation.mode off with LIVE_OFFLINE_SEGMENTATION_REQUIRED', async () => {
+    const engine = await createEngine();
+    await expect(
+      engine.identify(LIVE_AUDIO, LIVE_TEXT, {
+        segmentation: {
+          mode: 'off' as any,
+          policy: {
+            evaluator: 'speech_energy_silence',
+            minSegmentMs: 1500,
+          },
+        },
+      })
+    ).rejects.toThrow('LIVE_OFFLINE_SEGMENTATION_REQUIRED');
+  });
 });
