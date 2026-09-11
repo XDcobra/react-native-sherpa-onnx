@@ -95,6 +95,30 @@ Optional empty `targetSegmentBuffer` attaches `AudioTaggingSpeechSegmentPayload`
 | **Segments out** | optional `targetSegmentBuffer` | optional `targetSegmentBuffer` |
 | **Return** | `AudioTaggingResult` | `SegmentedAudioTaggingResult` |
 
+## Segmentation (Optional)
+
+Long or mixed-content audio in one `tag` call can miss localized events. Auto mode splits the audio buffer into spans via energy-silence detection, tags each span independently, and returns per-segment results — better temporal resolution at the cost of extra compute passes.
+
+**Modes:** `'off'` (default — whole clip in one pass) | `'auto'` (policy-driven spans). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `continuous_frames` | ❌ | Streaming-only; rejected for offline audio tagging |
+| `speech_vad_model` | ❌ | Speech-only windows miss sirens, music, and other non-speech events |
+| `speech_pyannote_segmentation` | ❌ | Same reason — speech-only cuts |
+
+```ts
+const result = await tagger.tag(audio, {
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [audio-tagging-live.md](audio-tagging-live.md#segmentation-mandatory).
+
 ## API reference
 
 ### `detectAudioTaggingModel(source, options?)`

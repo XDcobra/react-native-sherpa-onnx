@@ -62,18 +62,37 @@ await releasePipelineAudioBuffer(audioIn);
 
 `finalizeLiveAudioBuffer(audioIn)` drains remaining spans and resolves `completed`. Prefer that over an early `stop()` when the session ends naturally.
 
-## Mandatory segmentation
+## Buffer matrix
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`).
-
-| Evaluator | Live overload | Notes |
+| Role | Type | Notes |
 | --- | --- | --- |
-| `speech_energy_silence` | ✅ | Default via `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed primary event names |
+| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
+| **Engine** | Same `AudioTaggingEngine` as offline | `tag(liveAudio, liveText, options)` |
+| **Pipeline handle** | `AudioTaggingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
+| | Offline | Live overload |
+| --- | --- | --- |
+| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
+| **Text out** | — | `LiveTextBuffer` (**required**) |
+| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
+| **Return** | result object | `AudioTaggingPipelineHandle` |
+
+Mixed live/offline arguments throw `AUDIO_TAGGING_INVALID_ARGUMENT`.
+
+## Segmentation (Mandatory)
+
+Live audio tagging must cut the incoming audio stream into committed spans before each offline tagging step. `options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`). Audio tagging attaches the engine — you do **not** pass a pre-built VAD segment from the app.
+
+**Modes:** `'auto'` only (policy required). `'off'` / `'manual'` are not supported on the live path.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
 | `continuous_frames` | ✅ | Fixed windows; `checkpointIntervalMs` must be ≥ 1500 |
 | `speech_vad_model` | ❌ | Speech-only windows miss sirens, music, and other non-speech events |
 | `speech_pyannote_segmentation` | ❌ | Same reason — speech-only cuts |
-
-Audio tagging attaches the engine — you do **not** pass a pre-built VAD segment In from the app for the worker path.
 
 ### Live span floor (`AUDIO_TAGGING_LIVE_MIN_SPAN_MS`)
 
@@ -84,7 +103,16 @@ Live workers skip spans shorter than **1500 ms**. JS `assertAudioTaggingLiveSpan
 | `speech_energy_silence` | `minSegmentMs` and `maxSegmentMs` ≥ 1500 (and `max ≥ min`) |
 | `continuous_frames` | `checkpointIntervalMs` ≥ 1500 |
 
-Policy tuning: [segmentation-engine.md](segmentation-engine.md).
+```ts
+const pipeline = await tagger.tag(audioIn, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [audio-tagging-offline.md](audio-tagging-offline.md#segmentation-optional).
 
 ## Pipeline handle
 
@@ -111,25 +139,6 @@ Each committed span writes one LiveText segment:
 | `meta.events` | Nested top-K array `[{ name, index, prob }]` |
 
 LiveText `meta` is a Fabric-safe JSON tree. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
-
-## Buffer matrix
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed primary event names |
-| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
-| **Engine** | Same `AudioTaggingEngine` as offline | `tag(liveAudio, liveText, options)` |
-| **Pipeline handle** | `AudioTaggingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Text out** | — | `LiveTextBuffer` (**required**) |
-| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
-| **Return** | result object | `AudioTaggingPipelineHandle` |
-
-Mixed live/offline arguments throw `AUDIO_TAGGING_INVALID_ARGUMENT`.
 
 ## API reference
 

@@ -73,18 +73,29 @@ await releasePipelineAudioBuffer(audioIn);
 
 Mixed live/offline arguments throw `LANGUAGE_ID_INVALID_ARGUMENT`.
 
-## Mandatory segmentation
+## Segmentation (Mandatory)
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`).
+Live spoken language identification must cut the incoming audio stream into committed utterance spans before each offline Whisper identification step. `options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`). SLID attaches the engine — you do **not** pass a pre-built VAD segment from the app.
 
-| Evaluator | Live overload | Notes |
+**Modes:** `'auto'` only (policy required). `'off'` / `'manual'` are not supported on the live path.
+
+| Evaluator | Supported | Notes |
 | --- | --- | --- |
-| `speech_energy_silence` | ✅ | Default via `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `speech_energy_silence` | ✅ **Default** | `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
 | `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
 | `continuous_frames` | ❌ | Fixed windows are a poor fit for utterance-level language ID |
 | `speech_pyannote_segmentation` | ❌ | Not in SLID live `supportedEvaluators` |
 
-SLID attaches the engine — you do **not** pass a pre-built VAD segment In from the app for the worker path. Policy tuning: [segmentation-engine.md](segmentation-engine.md).
+```ts
+const pipeline = await slid.identify(audioIn, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [language-identification-offline.md](language-identification-offline.md#segmentation-optional).
 
 ## Pipeline handle
 

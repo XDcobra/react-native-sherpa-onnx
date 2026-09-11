@@ -81,6 +81,30 @@ Optional empty `targetSegmentBuffer` attaches `LanguageIdSpeechSegmentPayload` f
 | **Segments out** | optional `targetSegmentBuffer` | optional `targetSegmentBuffer` |
 | **Return** | `{ lang, audioDuration, elapsedMs }` | `{ dominantLanguage, distribution, switches, segments, … }` |
 
+## Segmentation (Optional)
+
+Long or code-switching audio in one `identify` call sees only the dominant language. Auto mode splits the audio buffer into utterance-level spans, identifies each independently, and returns per-segment language tags plus switch points — essential for multilingual content.
+
+**Modes:** `'off'` (default — whole clip in one pass) | `'auto'` (policy-driven spans). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
+| `speech_pyannote_segmentation` | ✅ | Pyannote speaker/speech segmentation; pass model via policy `modelPath` |
+| `continuous_frames` | ❌ | Streaming-only; rejected for offline segmentation |
+
+```ts
+const result = await slid.identify(audio, {
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [language-identification-live.md](language-identification-live.md#segmentation-mandatory).
+
 ## API reference
 
 ### `detectLanguageIdModel(source, options?)`
