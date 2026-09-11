@@ -1,11 +1,5 @@
 # react-native-sherpa-onnx
 
-React Native SDK for sherpa-onnx – offline and streaming speech processing
-
-<div align="center">
-  <img src="./docs/images/banner.png" alt="Banner" width="560" />
-</div>
-
 <div align="center">
 
 [![npm version](https://img.shields.io/npm/v/react-native-sherpa-onnx.svg)](https://www.npmjs.com/package/react-native-sherpa-onnx)
@@ -18,12 +12,28 @@ React Native SDK for sherpa-onnx – offline and streaming speech processing
 
 </div>
 
-> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**
-> This project started as a side hobby. In practice I kept hitting the same wall: sherpa-onnx (and other React Native speech libraries) struggle with **long audio on real mobile devices**—OOM crashes, UI stalls, and brittle one-shot pipelines. Fixing that properly meant redesigning the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK built for low-end and mid-range phones, with significantly better performance and a cleaner, more consistent public API.
-
 A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
 **More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Audio Tagging, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
+
+> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**
+> This project started as a side hobby. In practice I kept hitting the same wall: sherpa-onnx (and other React Native speech libraries) struggle with **long audio on real mobile devices**—OOM crashes, UI stalls, and brittle one-shot pipelines. Fixing that properly meant redesigning the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK built for low-end and mid-range phones, with significantly better performance and a cleaner, more consistent public API.
+
+## Built with this SDK: VoiceLab
+
+**VoiceLab** is a separate production Android & iOS app built on top of this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship with `react-native-sherpa-onnx`.
+
+<p align="center">
+  <a href="https://play.google.com/store/apps/details?id=com.xdcobra.voicelab"><img src="./docs/images/badge-google-play.png" alt="Get it on Google Play" height="61" /></a>
+  &nbsp;
+  <a href="https://apps.apple.com/app/id6761100598"><img src="./docs/images/badge-app-store.png" alt="Download on the App Store" height="61" /></a>
+</p>
+
+<div align="center">
+  <img src="./docs/images/voicelab-01-home.png" alt="VoiceLab home — eight offline voice features" width="30%" />
+  <img src="./docs/images/voicelab-02-download.png" alt="VoiceLab library — download and manage on-device models" width="30%" />
+  <img src="./docs/images/voicelab-03-provider.png" alt="VoiceLab settings — NPU / execution provider" width="30%" />
+</div>
 
 ## Installation
 
