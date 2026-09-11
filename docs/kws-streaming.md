@@ -126,7 +126,7 @@ await pipeline.completed;
 
 ## Keywords UX
 
-Open vocabulary means you customize **which phrases** fire without retraining weights. Phrases must still be expressible in the pack’s **token inventory** (`tokens.txt` / BPE / pinyin units).
+Open vocabulary means you customize **which phrases** fire without retraining weights. Phrases must still be expressible in the pack's **token inventory** (`tokens.txt` / BPE / pinyin units).
 
 ### `keywords.txt` line format
 
@@ -149,7 +149,7 @@ Pack defaults ship a `keywords.txt` next to the ONNX files. Override **per sessi
 
 ### Generating tokens with `text2token`
 
-Use upstream tooling against the pack’s `tokens.txt` (and BPE / lexicon when required):
+Use upstream tooling against the pack's `tokens.txt` (and BPE / lexicon when required):
 
 ```sh
 # After: pip install sherpa-onnx
@@ -184,7 +184,7 @@ There is **no** separate `engine.reloadKeywords()` API in MVP; the patterns abov
 | `keywordsThreshold` | init | `0.25` | Global threshold when per-line `#threshold` is absent |
 | `numTrailingBlanks` | init | `2` | Lower → sooner fire, more false triggers |
 | `maxActivePaths` | init | `4` | Beam width |
-| `chunkSize` | `spot` | **1600** (~100 ms @ 16 kHz) | Samples per drain from the live ring; smaller → lower wake latency, more wakeups |
+| `chunkSize` | `spot` | **1600** (~100 ms @ 16 kHz) | Samples per drain from the live ring; smaller → lower wake latency, more wakeups |
 
 ## Observing hits
 
@@ -280,6 +280,8 @@ All signatures below are exported from `react-native-sherpa-onnx/kws`.
 
 ### `detectKwsModel(source, options?)`
 
+File-based detection **without** initializing the engine. Prefer when you know the folder is a KWS pack. Unified `detectModel` also claims **`kws` before `stt`** so keyword packs are not stolen as ASR — see [model-detect.md](model-detect.md#unified-detector-order).
+
 ```ts
 function detectKwsModel(
   source: FileSource,
@@ -299,16 +301,16 @@ const det = await detectKwsModel({
 console.log(det.success, det.isStreaming, det.paths?.keywords);
 ```
 
-Prefer this when you know the folder is a KWS pack. Unified `detectModel` also claims **`kws` before `stt`** so keyword packs are not stolen as ASR — see [model-detect.md](model-detect.md#unified-detector-order).
-
 ### `createKeywordSpotting(options)` / `createStreamingKWS(options)`
+
+Creates a `KeywordSpottingEngine`. Init modes: **`auto`** (default — `modelSource` + optional `quantization`) or **`custom`** (`initMode: 'custom'` + `modelType: 'transducer'` + `customConfig`). Shared tuning: `keywordsScore`, `keywordsThreshold`, `numTrailingBlanks`, `maxActivePaths`, `numThreads`, `provider`, `debug`.
+
+`createStreamingKWS` is an alias for `createKeywordSpotting`.
 
 ```ts
 function createKeywordSpotting(
   options: KeywordSpottingInitOptions
 ): Promise<KeywordSpottingEngine>;
-
-const createStreamingKWS = createKeywordSpotting;
 ```
 
 ```ts
@@ -322,15 +324,9 @@ const engine = await createKeywordSpotting({
 });
 ```
 
-| Field | Notes |
-| --- | --- |
-| `modelSource` | Directory-backed `FileSource` for the KWS pack |
-| `keywordsPath` | Absolute path; body applied on `spot` via `createStream` (pack `keywords.txt` still used for spotter init) |
-| `keywordsScore` / `keywordsThreshold` | Init-time KeywordSpotter config |
-| `numTrailingBlanks` / `maxActivePaths` | Decode timing / beam |
-| `numThreads` / `provider` / `debug` / `quantization` | Runtime / detect helpers |
-
 ### `engine.spot(audioIn, textOut, options?)`
+
+Starts real streaming keyword spotting. Reads continuously from `audioIn`, commits hits to `textOut`, and returns a shared streaming pipeline handle (`stop` / `flush` / `reset` / `completed`). Only **one** active pipeline per engine at a time.
 
 ```ts
 spot(
@@ -348,28 +344,17 @@ const pipeline = await engine.spot(audioIn, textOut, {
 });
 ```
 
-| Option | Notes |
-| --- | --- |
-| `chunkSize` | Samples per drain; default **1600** |
-| `keywords` | Optional `createStream` override (`keywords.txt` body text) |
-| `onKeyword` | Hit callback; `segmentIndex` is the committed LiveTextBuffer index |
-
-Only **one** active pipeline per engine at a time.
-
-### `KeywordDetection`
-
-```ts
-interface KeywordDetection {
-  keyword: string;
-  tokens: string[];
-  timestamps: number[];
-  startTime?: number; // often iOS-only
-}
-```
-
 ### `engine.destroy()`
 
 Stops any active pipeline and unloads the native KeywordSpotter. Idempotent.
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await engine.destroy();
+```
 
 ## Validation required files
 
@@ -405,13 +390,48 @@ const engine = await createKeywordSpotting({
 
 `keywords` is required for KeywordSpotter construction (safe pack vocabulary). Per-session phrase overrides still use `spot({ keywords })` / init `keywordsPath` via `createStream` (see [KNOWN_ISSUES](KNOWN_ISSUES.md)).
 
+---
+
+## Types
+
+### Core KWS types (`react-native-sherpa-onnx/kws`)
+
+| Type | Description |
+| --- | --- |
+| `KwsConcreteModelType` | `'transducer'` |
+| `KwsDetectOptions` | Options for `detectKwsModel` (`assetName?`, `modelType?`, `quantization?`) |
+| `KwsDetectModelResult` | Return of `detectKwsModel()` (`success`, `error?`, `isStreaming`, `paths`, `quantization`, …) |
+| `KeywordSpottingInitOptions` | Discriminated union: `KeywordSpottingAutoInitializeOptions \| KeywordSpottingCustomInitializeOptions` |
+| `KeywordSpottingInitOptionsShared` | Shared fields: `keywordsPath?`, `keywordsScore?`, `keywordsThreshold?`, `numTrailingBlanks?`, `maxActivePaths?`, `numThreads?`, `provider?`, `debug?` |
+| `KeywordSpottingAutoInitializeOptions` | Auto mode: `modelSource`, optional `quantization` |
+| `KeywordSpottingCustomInitializeOptions` | Custom mode: `initMode: 'custom'`, `modelType: 'transducer'`, `customConfig: KwsCustomConfig` |
+| `KeywordSpottingPipelineOptions` | `chunkSize?`, `keywords?`, `onKeyword?` |
+| `KeywordDetection` | `{ keyword: string; tokens: string[]; timestamps: number[]; startTime?: number }` |
+| `KeywordSpottingEngine` | `spot`, `destroy`, readonly `instanceId` |
+| `KwsCustomConfig` | `{ encoder, decoder, joiner, tokens, keywords }` — all `FileSource` |
+| `KwsCustomPathKey` | `'encoder' \| 'decoder' \| 'joiner' \| 'tokens' \| 'keywords'` |
+| `KwsErrorCode` | `{ INVALID_ARGUMENT: 'KWS_INVALID_ARGUMENT' }` |
+| `KeywordSpottingDetectedPaths` | Paths resolved by native detection (encoder, decoder, joiner, tokens, keywords) |
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `LiveAudioBufferIdSource` | Live audio ref or handle passed to `spot` |
+| `LiveTextBufferIdSource` | Live text buffer ref or handle for keyword hits |
+| `StreamingPipelineHandle` | Shared pipeline handle (`stop`, `flush`, `reset`, `getStatus`, `completed`) |
+
+See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [textbuffer-streaming.md](textbuffer-streaming.md) · [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to try |
 | --- | --- | --- |
-| Detect fails / “not KWS” | STT zipformer pack without KWS layout / `keywords.txt` | Use a `kws-models` release asset; prefer `detectKwsModel` |
+| Detect fails / "not KWS" | STT zipformer pack without KWS layout / `keywords.txt` | Use a `kws-models` release asset; prefer `detectKwsModel` |
 | Unified detect returns STT | Pack lacks KWS cues | Ensure folder name contains `kws` or root `keywords.txt`; KWS runs **before** STT in unified order when it matches |
-| No hits | Threshold / score / trailing blanks too strict; wrong tokens | Lower `#threshold` / `keywordsThreshold`; raise `:score`; lower `numTrailingBlanks`; regenerate tokens with the pack’s `tokens.txt` |
+| No hits | Threshold / score / trailing blanks too strict; wrong tokens | Lower `#threshold` / `keywordsThreshold`; raise `:score`; lower `numTrailingBlanks`; regenerate tokens with the pack's `tokens.txt` |
 | Slow wake | Large `chunkSize` | Use default `1600` or smaller |
 | Invalid override | Empty / wrong `spot({ keywords })` string | Pass `keywords.txt`-format lines; omit to use init file |
 | Unexpected disk I/O | LiveTextBuffer spooling on | `createLiveTextBuffer({ spooling: { mode: 'off' } })` for callback-only |
