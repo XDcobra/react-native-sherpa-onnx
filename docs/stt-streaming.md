@@ -2,15 +2,9 @@
 
 ## Introduction
 
-Low-latency online recognition with a **pipeline-first** API.
+Low-latency online recognition with a **pipeline-first** API. Partial hypotheses stream while you speak; committed segments are appended to the output text buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | One live PCM buffer the native worker reads |
-| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | Partial hypotheses and committed text segments |
-| **Engine** | `LiveSttEngine` via `createStreamingSTT` | `transcribe(audioIn, textOut)` returns `SttPipelineHandle` for pipeline control |
-
-Import path: `react-native-sherpa-onnx/stt`
+Import path: **`react-native-sherpa-onnx/stt`**.
 
 For full-file/batch transcription, see [Offline STT](stt-offline.md).
 
@@ -19,12 +13,6 @@ For full-file/batch transcription, see [Offline STT](stt-offline.md).
 ## Streaming pipeline system
 
 `transcribe` starts a **native worker** that reads **`LiveAudioBuffer`** frames and writes partial + committed **`LiveTextBuffer`** output. Control is exclusively through the returned **`SttPipelineHandle`** (not by pushing audio through JS). For the shared meaning of **`stop` / `flush` / `reset` / `getStatus` / `completed`** and how that ties into buffer finalization, see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**.
-
-### Observing committed segments
-
-Committed transcripts are **text segments** on the output `LiveTextBuffer`. Prefer **`onSegment`** on that buffer (or `subscribeLiveTextBufferEvents`) instead of polling `getLiveTextBufferSegmentCount` in a timer. See **[Pipeline text buffers — live / Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling)**.
-
-Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are a separate concern — they require **live audio segmentation** and carry **speech** metadata, not STT text. See **[Pipeline audio buffers — live / `onSegment`](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment)**.
 
 ## Quick start
 
@@ -159,6 +147,15 @@ const engine = await createStreamingSTT({
 | 7 | `pipeline.flush()` / `pipeline.reset()` / `pipeline.stop()` | Pipeline control |
 | 8 | `engine.destroy()` + release buffers | Cleanup |
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | One live PCM buffer the native worker reads |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Partial hypotheses and committed text segments |
+| **Engine** | `LiveSttEngine` via `createStreamingSTT` | `transcribe(audioIn, textOut)` returns `SttPipelineHandle` |
+| **Pipeline handle** | `SttPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/stt`. Use **`detectSttModel`** from the same package for model detection before creating a streaming engine (see [Offline STT — `detectSttModel`](stt-offline.md#detectsttmodelsource-options)). For category-unknown library scans, see [model-detect.md](model-detect.md).
@@ -289,6 +286,24 @@ Query keys: `getCustomModelPathRequirements('stt_streaming', modelType)`.
 - **Detection & init** — [model-detect.md](model-detect.md)
 - Streaming types: `transducer`, `nemo_transducer`, `paraformer`, `zipformer2_ctc`, `nemo_ctc`, `tone_ctc`
 - Offline-only models (Whisper): use [Live overload](stt-offline.md#live-overload-offline-weights-live-consumption)
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `LiveTextBufferSegmentEvent` | text segment committed to output buffer | Prefer over polling `getLiveTextBufferSegmentCount` in a timer |
+
+Committed transcripts are **text segments** on the output `LiveTextBuffer`. Use **`onSegment`** on `createLiveTextBuffer` (or `subscribeLiveTextBufferEvents`). See **[Pipeline text buffers — live / Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling)**.
+
+Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are a separate concern — they carry **speech** metadata, not STT text. See **[Pipeline audio buffers — live / `onSegment`](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment)**.
+
+```ts
+const textOut = await createLiveTextBuffer({
+  onSegment: (e) => {
+    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+  },
+});
+```
 
 ## Custom initialization (`initMode: 'custom'`)
 

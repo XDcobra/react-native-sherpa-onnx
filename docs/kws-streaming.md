@@ -2,15 +2,9 @@
 
 ## Introduction
 
-On-device **open-vocabulary keyword spotting** (wake-word / customized keywords) with a **pipeline-first** API.
+On-device **open-vocabulary keyword spotting** (wake-word / customized keywords) with a **pipeline-first** API. Each detected keyword commits a text segment with the keyword label to the output buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Continuous PCM the native worker reads |
-| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | One committed text segment per keyword hit |
-| **Engine** | `KeywordSpottingEngine` via `createKeywordSpotting` | `spot(audioIn, textOut)` returns a shared streaming pipeline handle |
-
-Import path: `react-native-sherpa-onnx/kws`
+Import path: **`react-native-sherpa-onnx/kws`**.
 
 **Naming in this doc:** **`engine`** = `KeywordSpottingEngine`; **`pipeline`** = handle from `engine.spot(...)`.
 
@@ -186,60 +180,6 @@ There is **no** separate `engine.reloadKeywords()` API in MVP; the patterns abov
 | `maxActivePaths` | init | `4` | Beam width |
 | `chunkSize` | `spot` | **1600** (~100 ms @ 16 kHz) | Samples per drain from the live ring; smaller → lower wake latency, more wakeups |
 
-## Observing hits
-
-Prefer **callbacks**, not polling:
-
-1. **`onKeyword`** on `spot(...)` — maps committed segments whose `meta.source === 'kws_stream'`.
-2. **`onSegment`** on `createLiveTextBuffer` — raw live-text commits (filter `meta.source` if other writers share the buffer).
-
-Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
-
-```ts
-const textOut = await createLiveTextBuffer({
-  spooling: { mode: 'off' },
-  onSegment: (e) => {
-    // e ≈ {
-    //   bufferId: 'live_text_…',
-    //   totalSegments: 1,
-    //   segment: {
-    //     domain: 'text',
-    //     text: '你好',                 // keyword label
-    //     segmentIndex: 0,
-    //     reason: 'endpoint',
-    //     source: 'segmentation_engine', // collapsed public SegmentSource
-    //     tokens: ['你', '好'],          // may be empty if native omits
-    //     timestamps: [0.12, 0.28],      // seconds; may be empty
-    //     meta: {
-    //       source: 'kws_stream',        // filter key for KWS hits
-    //       keyword: '你好',
-    //       startTime: 1.04,             // iOS often; Android usually absent
-    //     },
-    //     …segmentId, offsets, createdAtMs, utf16Length
-    //   },
-    // }
-    if (e.segment.domain !== 'text') return;
-    if (e.segment.meta?.source !== 'kws_stream') return;
-    console.log('[onSegment]', e.segment.text, e.segment.meta);
-  },
-});
-
-const pipeline = await engine.spot(audioIn, textOut, {
-  onKeyword: (e) => {
-    // e ≈ {
-    //   keyword: '你好',
-    //   tokens: ['你', '好'],
-    //   timestamps: [0.12, 0.28],
-    //   startTime: 1.04,   // optional; see platform note above
-    //   segmentIndex: 0,   // LiveTextBuffer commit index
-    // }
-    console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
-  },
-});
-```
-
-`onKeyword` is convenience over the same commit as `onSegment`: it only fires when `meta.source === 'kws_stream'`. Use either or both.
-
 ## LiveTextBuffer spooling
 
 `textOut` uses normal LiveTextBuffer defaults (**spooling on/auto**), same as STT/VAD. KWS does not override that.
@@ -273,6 +213,15 @@ const clip = await createOfflineAudioBufferFromLive(audioIn, 'fullIfSpooled');
 | 7 | `engine.destroy()` + release buffers | Cleanup |
 
 Shared handle semantics: [streaming-pipelines-overview.md](streaming-pipelines-overview.md). Auto-`reset(stream)` after each hit is **internal** — apps do not call that on the KeywordSpotter directly.
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Continuous PCM the native worker reads |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | One committed text segment per keyword hit |
+| **Engine** | `KeywordSpottingEngine` via `createKeywordSpotting` | `spot(audioIn, textOut)` returns pipeline handle |
+| **Pipeline handle** | `StreamingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 ## API reference
 
@@ -389,6 +338,35 @@ const engine = await createKeywordSpotting({
 ```
 
 `keywords` is required for KeywordSpotter construction (safe pack vocabulary). Per-session phrase overrides still use `spot({ keywords })` / init `keywordsPath` via `createStream` (see [KNOWN_ISSUES](KNOWN_ISSUES.md)).
+
+---
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onKeyword` | `KeywordDetection` | keyword detected in audio stream | convenience over `onSegment`; fires when `meta.source === 'kws_stream'` |
+| `onSegment` | `LiveTextBufferSegmentEvent` | committed text segment on output buffer | raw live-text commit; filter `meta.source` if other writers share the buffer |
+
+Prefer **callbacks**, not polling. `onKeyword` is convenience over the same commit as `onSegment` — use either or both.
+
+Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
+
+```ts
+const textOut = await createLiveTextBuffer({
+  spooling: { mode: 'off' },
+  onSegment: (e) => {
+    if (e.segment.meta?.source !== 'kws_stream') return;
+    console.log('[onSegment]', e.segment.text, e.segment.meta);
+  },
+});
+
+const pipeline = await engine.spot(audioIn, textOut, {
+  onKeyword: (e) => {
+    console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
+  },
+});
+```
 
 ---
 

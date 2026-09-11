@@ -2,16 +2,9 @@
 
 ## Introduction
 
-On-device streaming VAD with a **pipeline-first** API.
+On-device streaming VAD with a **pipeline-first** API. Detects speech boundaries in live or offline audio and emits speech segments to a segment buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | Pipeline audio buffer ([`audiobuffer`](audiobuffer-streaming.md)) | Live or offline PCM |
-| **Output** | Segment buffer ([`segmentbuffer`](segmentbuffer-streaming.md)) | Speech segments; subscribe via `onSegmentAppended` / `streamEvents.segmentAppended` |
-| **Engine** | `StreamingVadEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
-| **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged` for speech activity |
-
-Import path: `react-native-sherpa-onnx/vad`
+Import path: **`react-native-sherpa-onnx/vad`**.
 
 ## Streaming pipeline system
 
@@ -155,6 +148,21 @@ await releasePipelineSegmentBuffer(segmentOut);
 await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
 ```
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) or [`OfflineAudioBuffer`](audiobuffer-offline.md) | Live PCM or offline file |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) or [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Speech segments; subscribe via `onSegmentAppended` (live) |
+| **Engine** | `VADEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
+| **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged`, `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
+| | Live | Offline batch |
+| --- | --- | --- |
+| **Audio in** | `LiveAudioBuffer` | `OfflineAudioBuffer` |
+| **Segments out** | `LiveSegmentBuffer` | `OfflineSegmentBuffer` |
+| **Return** | `VADPipelineHandle` | `VADOfflineResult` |
 
 ## API reference
 
@@ -325,6 +333,25 @@ Resolves when the worker has **fully stopped** (normal completion after finalize
 ## Model detection
 
 `detectVadModel` validates Silero / Ten layouts before `createStreamingVAD`. Unified catalog: [model-detect.md](model-detect.md).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentEvent` | committed speech segment on output buffer | set on `createLiveSegmentBuffer`; live path only |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
+
+Shapes: [Types](#types).
+
+```ts
+pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
+
+const segmentOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => console.log(e.segmentId, e.durationMs),
+});
+```
 
 ## Custom initialization (`initMode: 'custom'`)
 

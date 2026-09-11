@@ -2,15 +2,9 @@
 
 ## Introduction
 
-On-device batch transcription with a **pipeline-first** API.
+On-device batch transcription with a **pipeline-first** API. Returns transcribed text with optional token-level timestamps and metadata into an offline text buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | File-backed or in-memory PCM |
-| **Output** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer from `createEmptyOfflineTextBuffer`; STT writes the hypothesis and optional token/timestamp metadata |
-| **Engine** | `SttEngine` via `createSTT` | `transcribe(audio, textOut)`, `setConfig`, `destroy`; returns `SttTranscribeResult` with orchestration stats (segments, time). Read transcript data via textbuffer slice APIs |
-
-Import path: `react-native-sherpa-onnx/stt`
+Import path: **`react-native-sherpa-onnx/stt`**.
 
 For live/real-time recognition, see [Streaming STT](stt-streaming.md).
 
@@ -140,6 +134,14 @@ await engine.destroy();
 
 `transcribe` accepts **`OfflineAudioBufferRef`**, a branded offline handle, or a raw **`bufferId` string**; the same applies to **`textOut`**. Prefer passing **refs** so call sites stay typed (see [audiobuffer — offline](audiobuffer-offline.md) / [textbuffer — offline](textbuffer-offline.md)). Timestamps, durations, lang, emotion, and other dimensions use the matching **`getOfflineTextBuffer*`** helpers; see [textbuffer-offline.md](textbuffer-offline.md).
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | File-backed or in-memory PCM |
+| **Text out** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer from `createEmptyOfflineTextBuffer`; STT writes hypothesis + optional token/timestamp metadata |
+| **Engine** | `SttEngine` via `createSTT` | `transcribe`, `setConfig`, `destroy` |
+
 ## API reference
 
 ### `detectSttModel(source, options?)`
@@ -234,6 +236,23 @@ Query exact keys: `getCustomModelPathRequirements('stt', modelType)` from `react
 - **Detection & init modes** — [model-detect.md](model-detect.md) (preflight, auto vs custom)
 - **Downloads:** [download-manager.md](download-manager.md) · category `ModelCategory.Stt`
 - **Hotwords:** [hotwords.md](hotwords.md)
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await engine.transcribe(audio, textOut, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [Live overload](#live-overload-offline-weights-live-consumption).
 
 ## Custom initialization (`initMode: 'custom'`)
 
