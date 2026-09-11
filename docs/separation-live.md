@@ -52,7 +52,6 @@ const handle = await sep.separate(liveIn, liveOuts, {
     mode: 'auto',
     policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
   },
-  // optional: onSegment fires on stem [0] (vocals) live buffer events
 });
 
 // Mic ingest → liveIn, then stop / finalize when done
@@ -86,7 +85,9 @@ Policy details: [segmentation-engine.md](segmentation-engine.md).
 
 Factory, detection, and model init are the same as offline — see [separation-offline.md](separation-offline.md#api-reference).
 
-### `sep.separate(LiveAudio, LiveAudio[], options)`
+### `sep.separate(audioIn, audioOuts, options)`
+
+Starts a live overload pipeline: separates each committed audio chunk with offline Spleeter/UVR weights, writes mono-downmixed stems into N live output buffers, and returns a pipeline handle.
 
 ```ts
 separate(
@@ -99,13 +100,13 @@ separate(
 **Constraints:** `audioOuts.length === getNumStems()`; all buffers must be `live_*`; `segmentation.policy.evaluator === 'continuous_frames'`.
 
 ```ts
-type SeparationLivePipelineOptions = {
+const handle = await sep.separate(liveIn, liveOuts, {
   segmentation: {
-    policy: SegmentationPolicy & { evaluator: 'continuous_frames' };
-    mode?: 'auto';
-  };
-  onSegment?: (segment: SpeechSegment) => void; // stem [0] events
-};
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+  onSegment: (seg) => console.log(seg.segmentIndex),
+});
 ```
 
 ## Pipeline handle
@@ -123,17 +124,18 @@ flowchart LR
 
 More patterns: [feature-pipelines.md#separation-live-overload-patterns](feature-pipelines.md#separation-live-overload-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import {
-  type SeparationEngine,
-  type SeparationLivePipelineOptions,
-  type SeparationPipelineHandle,
-} from 'react-native-sherpa-onnx/separation';
-```
+### Live-only separation types (`react-native-sherpa-onnx/separation`)
 
-Model types and offline result types: [separation-offline.md](separation-offline.md#types-and-constants).
+| Type | Description |
+| --- | --- |
+| `SeparationLivePipelineOptions` | Mandatory `segmentation.policy` (`continuous_frames`); optional `onSegment` |
+| `SeparationPipelineHandle` | Extends `StreamingPipelineHandle` — live run control surface |
+| `StreamingPipelineCompletion` | `{ reason: 'completed' \| 'stopped' }` from `completed` |
+| `StreamingPipelineStatus` | Snapshot from `getStatus()` |
+
+Engine, detect, and offline result types: [separation-offline.md](separation-offline.md#types).
 
 ## Error codes
 
