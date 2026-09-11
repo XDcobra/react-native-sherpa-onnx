@@ -154,15 +154,10 @@ await releasePipelineAudioBuffer(audioIn);
 | Role | Type | Notes |
 | --- | --- | --- |
 | **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) or [`OfflineAudioBuffer`](audiobuffer-offline.md) | Live PCM or offline file |
-| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) or [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Speech segments; subscribe via `onSegmentAppended` (live) |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) or [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Match live vs offline audio; live: subscribe via `onSegmentAppended` |
+| **Return** | `VADPipelineHandle` / `VADOfflineResult` | Live pipeline handle vs offline batch result |
 | **Engine** | `VADEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
 | **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged`, `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Live | Offline batch |
-| --- | --- | --- |
-| **Audio in** | `LiveAudioBuffer` | `OfflineAudioBuffer` |
-| **Segments out** | `LiveSegmentBuffer` | `OfflineSegmentBuffer` |
-| **Return** | `VADPipelineHandle` | `VADOfflineResult` |
 
 ## Segmentation (Optional)
 

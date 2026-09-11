@@ -87,13 +87,8 @@ Optional empty `targetSegmentBuffer` attaches `AudioTaggingSpeechSegmentPayload`
 | --- | --- | --- |
 | **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Short clip (oneshot) or long-form (segmented) |
 | **Segments out (optional)** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
+| **Return** | `AudioTaggingResult` / `SegmentedAudioTaggingResult` | Oneshot vs `mode: 'auto'` |
 | **Engine** | `AudioTaggingEngine` via `createAudioTagging` | `tag` oneshot / segmented |
-
-| | Oneshot | Segmented |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `OfflineAudioBuffer` |
-| **Segments out** | optional `targetSegmentBuffer` | optional `targetSegmentBuffer` |
-| **Return** | `AudioTaggingResult` | `SegmentedAudioTaggingResult` |
 
 ## Segmentation (Optional)
 

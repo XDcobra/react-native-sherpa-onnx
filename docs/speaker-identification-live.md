@@ -80,18 +80,13 @@ await releasePipelineAudioBuffer(audioIn);
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Labeled speech; `payload.source: 'sid'` |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest (offline path uses `OfflineAudioBuffer`) |
+| **Segments in** | — (live) | Not used on live — SID attaches its own speech policy; offline `labelOfflineSegments` requires segments in |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Append while recording; offline uses `OfflineSegmentBuffer` |
+| **Return** | `SpeakerIdentificationPipelineHandle` | Offline label returns `{ labeledCount, unknownCount }` |
+| **Per-span callback** | `onLabeled` | Live: `SidLiveLabeledSegmentEvent` (no `totalSegments`); offline: `SidLabeledSegmentEvent` |
 | **Engine** | Same `SpeakerIdentificationEngine` as offline | Enroll offline first, then `labelLiveSegments` |
 | **Pipeline handle** | `SpeakerIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Segments in** | Required for `labelOfflineSegments` | **Not used** — SID attaches its own speech policy |
-| **Segments out** | `OfflineSegmentBuffer` (empty → populated) | `LiveSegmentBuffer` (append while recording) |
-| **Return** | `{ labeledCount, unknownCount }` | `SpeakerIdentificationPipelineHandle` |
-| **Per-span callback** | `onLabeled` (`SidLabeledSegmentEvent`, includes `totalSegments`) | `onLabeled` (`SidLiveLabeledSegmentEvent`, no `totalSegments`) |
 
 Mixed live/offline arguments throw `SID_INVALID_ARGUMENT`.
 

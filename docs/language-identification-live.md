@@ -58,18 +58,12 @@ await releasePipelineAudioBuffer(audioIn);
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed language tags |
-| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'languageId'`, `lang` |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest (offline path uses `OfflineAudioBuffer`) |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required on live — committed language tags |
+| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Live `targetSegmentBuffer`; offline uses offline segment buffer |
+| **Return** | `LanguageIdentificationPipelineHandle` | Offline returns result objects instead |
 | **Engine** | Same `LanguageIdentificationEngine` as offline | `identify(liveAudio, liveText, options)` |
 | **Pipeline handle** | `LanguageIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Text out** | — | `LiveTextBuffer` (**required**) |
-| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
-| **Return** | result object | `LanguageIdentificationPipelineHandle` |
 
 Mixed live/offline arguments throw `LANGUAGE_ID_INVALID_ARGUMENT`.
 

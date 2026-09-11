@@ -73,13 +73,8 @@ Optional empty `targetSegmentBuffer` attaches `LanguageIdSpeechSegmentPayload` f
 | --- | --- | --- |
 | **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Short clip (oneshot) or long-form (segmented) |
 | **Segments out (optional)** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | `payload.source: 'languageId'`, `lang` |
+| **Return** | oneshot / `SegmentedLanguageIdentificationResult` | Oneshot: `{ lang, audioDuration, elapsedMs }`; segmented: dominant language, distribution, switches, segments |
 | **Engine** | `LanguageIdentificationEngine` via `createLanguageIdentification` | `identify` oneshot / segmented; `labelOfflineSegments` |
-
-| | Oneshot | Segmented |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `OfflineAudioBuffer` |
-| **Segments out** | optional `targetSegmentBuffer` | optional `targetSegmentBuffer` |
-| **Return** | `{ lang, audioDuration, elapsedMs }` | `{ dominantLanguage, distribution, switches, segments, … }` |
 
 ## Segmentation (Optional)
 

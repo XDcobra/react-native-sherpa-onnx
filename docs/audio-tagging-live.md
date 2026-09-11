@@ -66,18 +66,12 @@ await releasePipelineAudioBuffer(audioIn);
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed primary event names |
-| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest (offline path uses `OfflineAudioBuffer`) |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required on live — committed primary event names |
+| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Live `targetSegmentBuffer`; offline uses offline segment buffer |
+| **Return** | `AudioTaggingPipelineHandle` | Offline returns result objects instead |
 | **Engine** | Same `AudioTaggingEngine` as offline | `tag(liveAudio, liveText, options)` |
 | **Pipeline handle** | `AudioTaggingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Text out** | — | `LiveTextBuffer` (**required**) |
-| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
-| **Return** | result object | `AudioTaggingPipelineHandle` |
 
 Mixed live/offline arguments throw `AUDIO_TAGGING_INVALID_ARGUMENT`.
 

@@ -55,16 +55,11 @@ await sep.destroy();
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mixed PCM (mic, file ingest, or upstream live) |
-| **Audio out × N** | [`LiveAudioBuffer`](audiobuffer-streaming.md) × N | One live stem buffer per stem; MVP writes **mono-downmixed** stems |
-| **Engine** | Same `SeparationEngine` as offline (`createSeparation`) | `separate(Live, Live[], options)` → `SeparationPipelineHandle` |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mixed PCM (offline path uses `OfflineAudioBuffer`) |
+| **Audio out × N** | [`LiveAudioBuffer`](audiobuffer-streaming.md) × N | One live stem per stem; offline uses `OfflineAudioBuffer` × N; MVP mono-downmixed |
+| **Return** | `SeparationPipelineHandle` | Offline returns `SeparationResult` |
+| **Engine** | Same `SeparationEngine` as offline (`createSeparation`) | `separate(Live, Live[], options)` |
 | **Pipeline handle** | `SeparationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Audio out** | `OfflineAudioBuffer` × N | `LiveAudioBuffer` × N |
-| **Return** | `SeparationResult` | `SeparationPipelineHandle` |
 
 Mixed live/offline arguments throw `SEPARATION_INVALID_ARGUMENT`.
 

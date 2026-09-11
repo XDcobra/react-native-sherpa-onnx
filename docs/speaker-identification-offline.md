@@ -97,15 +97,9 @@ try {
 | Role | Type | Notes |
 | --- | --- | --- |
 | **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated PCM (full clip or ranges via segment spans) |
-| **Segments in / out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Speech ranges (typically from VAD); Out gets `payload.source: 'sid'` |
-| **Engine** | `SpeakerIdentificationEngine` via `createSpeakerIdentification` | Enroll / identify / verify / label; named-speaker manager under the hood |
-
-| | Offline audio buffer(s) | Offline audio + segment buffer |
-| --- | --- | --- |
-| **Enroll** | `enroll(name, audio \| audio[])` | `enrollOfflineSegments(name \| names[], audioIn, segmentsIn)` |
-| **Identify** | `identify(audio)` → `{ name }` | `labelOfflineSegments(audioIn, segmentsIn, segmentsOut)` |
-| **Search embedding** | `search(embedding)` → `name \| null` | — (used by diarization cluster centroids) |
-| **Verify** | `verify(name, audio)` → `boolean` | `verifyOfflineSegments(name \| names[], audioIn, segmentsIn)` → counts + per-span flags |
+| **Segments in / out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Required for `*OfflineSegments` APIs; Out gets `payload.source: 'sid'` |
+| **Return** | per API | `identify` → `{ name }`; `verify` → `boolean`; `labelOfflineSegments` → counts; see API reference |
+| **Engine** | `SpeakerIdentificationEngine` via `createSpeakerIdentification` | `enroll` / `identify` / `verify` / `label*` / manager helpers |
 
 Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech` rows are skipped. `enrollOfflineSegments` / `verifyOfflineSegments` reject when no usable speech span remains.
 

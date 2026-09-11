@@ -66,16 +66,11 @@ await tts.destroy();
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Text in** | [`LiveTextBuffer`](textbuffer-streaming.md) | Recording state; text-domain segmentation commits chunks |
-| **Audio out** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Sample rate must equal the model output rate |
-| **Engine** | Same `TtsEngine` as offline (`createTTS`) | `synthesize(LiveText, LiveAudio, options)` → `TtsPipelineHandle` |
+| **Text in** | [`LiveTextBuffer`](textbuffer-streaming.md) (`txt_live_*`) | Offline uses `OfflineTextBuffer` (`txt_off_*`) |
+| **Audio out** | [`LiveAudioBuffer`](audiobuffer-streaming.md) (`live_*`) | Sample rate must match model; offline uses empty `OfflineAudioBuffer` (`off_*`) |
+| **Return** | `TtsPipelineHandle` | Offline: `TtsSynthesisResult` / void path |
+| **Engine** | Same `TtsEngine` as offline (`createTTS`) | `synthesize(LiveText, LiveAudio, options)` |
 | **Pipeline handle** | `TtsPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Text in** | `OfflineTextBuffer` (`txt_off_*`) | `LiveTextBuffer` (`txt_live_*`) |
-| **Audio out** | `OfflineAudioBuffer` (`off_*`, empty) | `LiveAudioBuffer` (`live_*`) |
-| **Return** | `TtsSynthesisResult` / void path | `TtsPipelineHandle` |
 
 Mixed live/offline arguments throw `TTS_INVALID_ARGUMENT`.
 
