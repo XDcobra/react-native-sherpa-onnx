@@ -114,13 +114,14 @@ void SlidOfflineLivePipelineWorker::onSegmentCommitted(
   std::vector<std::string> tokens;
   std::vector<float> timestamps = { startTime, endTime };
   std::string err;
+  NSDictionary *meta = @{ @"durationMs": @(durationMs) };
   if (!txt_live_commit_segment(
         textOutput_,
         lang,
         tokens,
         timestamps,
         "language_id",
-        nil,
+        meta,
         &err
       )) {
     throw std::runtime_error(
