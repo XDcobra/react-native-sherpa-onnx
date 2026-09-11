@@ -371,20 +371,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
 
           snapshotMeta?.let { rawMeta ->
-            val metaMap = Arguments.createMap()
-            for ((key, value) in rawMeta) {
-              when (value) {
-                null -> metaMap.putNull(key)
-                is Boolean -> metaMap.putBoolean(key, value)
-                is Int -> metaMap.putInt(key, value)
-                is Number -> metaMap.putDouble(key, value.toDouble())
-                is String -> metaMap.putString(key, value)
-                else -> {
-                  // Skip unsupported meta value types (typed puts only).
-                }
-              }
+            com.sherpaonnx.text.pipeline.LiveTextJsonMeta.packMetaMap(rawMeta)?.let { metaMap ->
+              putMap("meta", metaMap)
             }
-            putMap("meta", metaMap)
           }
         }
         eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
@@ -3813,20 +3802,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             putArray("timestamps", tsArr)
           }
           if (includeMeta && segment.meta != null) {
-            val metaMap = Arguments.createMap()
-            for ((key, value) in segment.meta) {
-              when (value) {
-                is String -> metaMap.putString(key, value)
-                is Int -> metaMap.putInt(key, value)
-                is Double -> metaMap.putDouble(key, value)
-                is Float -> metaMap.putDouble(key, value.toDouble())
-                is Boolean -> metaMap.putBoolean(key, value)
-                is Number -> metaMap.putDouble(key, value.toDouble())
-                null -> metaMap.putNull(key)
-                else -> metaMap.putString(key, value.toString())
-              }
+            com.sherpaonnx.text.pipeline.LiveTextJsonMeta.packMetaMap(segment.meta)?.let { metaMap ->
+              putMap("meta", metaMap)
             }
-            putMap("meta", metaMap)
           }
         }
         outSegments.pushMap(map)
