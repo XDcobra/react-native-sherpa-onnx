@@ -10,13 +10,6 @@
 
 On-device **live-pipeline** synthesis via live overload on the offline TTS engine. Useful when text arrives continuously (e.g. from a live STT buffer or network stream) and you want high-fidelity offline models (VITS, Kokoro, Pocket, Zipvoice, Matcha, Supertonic, …) without native online decoding.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Text in** | [`LiveTextBuffer`](textbuffer-streaming.md) | Recording state; text-domain segmentation commits chunks |
-| **Audio out** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Sample rate must equal the model output rate |
-| **Engine** | Same `TtsEngine` as offline (`createTTS`) | `synthesize(LiveText, LiveAudio, options)` → `TtsPipelineHandle` |
-| **Pipeline handle** | `TtsPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
-
 Import path: **`react-native-sherpa-onnx/tts`**.
 
 Factory / detect / models: [tts-offline.md](tts-offline.md#api-reference).
@@ -72,6 +65,13 @@ await tts.destroy();
 `finalizeLiveTextBuffer(textIn)` drains remaining text spans and lets `completed` resolve. Prefer that over an early `stop()` when the session ends naturally.
 
 ## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`LiveTextBuffer`](textbuffer-streaming.md) | Recording state; text-domain segmentation commits chunks |
+| **Audio out** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Sample rate must equal the model output rate |
+| **Engine** | Same `TtsEngine` as offline (`createTTS`) | `synthesize(LiveText, LiveAudio, options)` → `TtsPipelineHandle` |
+| **Pipeline handle** | `TtsPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 | | Offline | Live overload |
 | --- | --- | --- |
@@ -150,6 +150,24 @@ flowchart LR
 ```
 
 More patterns: [feature-pipelines.md](feature-pipelines.md) · shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `TtsLiveSegmentEvent` | after each committed text span is synthesized | no `onProgress` on the live path |
+
+Shapes: [Types](#types) · offline progress fields: [tts-offline.md](tts-offline.md#types).
+
+```ts
+const handle = await tts.synthesize(textIn, audioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+  onSegment: (e) => console.log(e.segmentIndex),
+});
+```
 
 ## Types
 

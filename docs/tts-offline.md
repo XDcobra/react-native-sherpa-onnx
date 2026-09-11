@@ -2,23 +2,11 @@
 
 ## Introduction
 
-On-device **batch** synthesis with a **pipeline-first** API.
+On-device **batch** synthesis with a **pipeline-first** API. Supports VITS, Matcha, Kokoro, Kitten, Pocket, Zipvoice, and Supertonic model families with optional voice cloning (Zipvoice / Pocket). For live synthesis with PCM playback (offline weights on live buffers), see [tts-live.md](tts-live.md).
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated text buffer |
-| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
-| **Engine** | `TtsEngine` via `createTTS` | Instance-based — call `destroy()` when done |
+Import path: **`react-native-sherpa-onnx/tts`**.
 
-For live synthesis with PCM playback (offline weights on live buffers), see [TTS (live overload)](tts-live.md).
-
-**Import paths:**
-```ts
-import { createTTS, detectTtsModel, ... } from 'react-native-sherpa-onnx/tts';
-import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
-import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
-```
+Buffer helpers: `react-native-sherpa-onnx/audiobuffer`, `react-native-sherpa-onnx/textbuffer`, `react-native-sherpa-onnx/audio`.
 
 ## Quick start
 
@@ -136,6 +124,14 @@ try {
   await releasePipelineAudioBuffer(audioBuf).catch(() => {});
 }
 ```
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated text buffer |
+| **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
+| **Engine** | `TtsEngine` via `createTTS` | `synthesize`, `updateParams`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
 
 ## API reference
 
@@ -431,6 +427,23 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pipelines.md#tts-offline-patterns).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await tts.synthesize(textBuf, audioBuf, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.md](tts-live.md#js-events).
 
 ## Types
 

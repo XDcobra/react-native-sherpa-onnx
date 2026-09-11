@@ -4,19 +4,9 @@
 
 ## Introduction
 
-On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**.
+On-device **batch** source separation (vocals vs accompaniment) with a **pipeline-first** API. Supported model families: **Spleeter** and **UVR**. Stem order: `[0]=vocals`, `[1]=accompaniment` (UVR: non-vocals). Constants: `SEPARATION_STEM_LABELS`. For live overload (same offline weights on live buffers), see [separation-live.md](separation-live.md).
 
-For **live overload** (same offline weights on live buffers — not a true streaming model), see [Source separation (live overload)](separation-live.md). Shared pipeline-handle lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Mono mixed PCM (file-backed or in-memory) |
-| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) × N | N empty buffers at separation sample rate; MVP writes **mono-downmixed** stems |
-| **Engine** | `SeparationEngine` via `createSeparation` | `separate(Offline, Offline[], options?)` → `SeparationResult`. Also `getSampleRate`, `getNumStems`, `destroy` |
-
-Import path: `react-native-sherpa-onnx/separation`
-
-**Stem order** (sherpa-onnx convention): `[0]=vocals`, `[1]=accompaniment` (UVR: non-vocals). Constants: `SEPARATION_STEM_LABELS`.
+Import path: **`react-native-sherpa-onnx/separation`**.
 
 **MVP output format:** Multi-channel stems from the native engine are **downmixed to mono** when written into each output buffer. Stereo/multi-channel output buffers are planned for a later release.
 
@@ -80,6 +70,14 @@ try {
 ```
 
 ---
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Mono mixed PCM (file-backed or in-memory) |
+| **Audio out × N** | [`OfflineAudioBuffer`](audiobuffer-offline.md) × N | N empty buffers at `getSampleRate()`; MVP writes **mono-downmixed** stems |
+| **Engine** | `SeparationEngine` via `createSeparation` | `separate`, `getSampleRate`, `getNumStems`, `destroy` |
 
 ## API reference
 
@@ -237,6 +235,23 @@ console.log(result.status, result.completedSegments, result.totalSegments);
 ```
 
 Segment boundaries can introduce audible artifacts at chunk edges (same tradeoff as offline enhancement). See [segmentation-engine.md](segmentation-engine.md) for policy fields and [memory-and-models.md](memory-and-models.md) for RAM planning.
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await sep.separate(mixed, [vocalsOut, accompOut], {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [separation-live.md](separation-live.md#js-events).
 
 ## Pipeline composition
 

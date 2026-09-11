@@ -8,22 +8,11 @@
 
 ## Introduction
 
-On-device **live-pipeline** source separation (vocals vs accompaniment) via live overload on the offline engine.
+On-device **live-pipeline** source separation (vocals vs accompaniment) via live overload on the offline engine. Stem order: `[0]=vocals`, `[1]=accompaniment` (UVR: non-vocals). Constants: `SEPARATION_STEM_LABELS`. For batch separation on offline buffers, see [separation-offline.md](separation-offline.md).
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mixed PCM (mic, file ingest, or upstream live) |
-| **Output** | [`LiveAudioBuffer`](audiobuffer-streaming.md) × N | One live stem buffer per stem; MVP writes **mono-downmixed** stems |
-| **Engine** | Same `SeparationEngine` as offline (`createSeparation`) | `separate(Live, Live[], options)` → `SeparationPipelineHandle` |
-| **Pipeline handle** | `SeparationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+Import path: **`react-native-sherpa-onnx/separation`**.
 
-Import path: `react-native-sherpa-onnx/separation`
-
-**Stem order:** `[0]=vocals`, `[1]=accompaniment` (UVR: non-vocals). Constants: `SEPARATION_STEM_LABELS`.
-
-For **batch** separation on offline buffers, see [Source separation (offline)](separation-offline.md).
-
-Shared handle lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+Factory / detect / models: [separation-offline.md](separation-offline.md#api-reference).
 
 ## Quick start
 
@@ -81,6 +70,23 @@ await sep.destroy();
 
 Policy details: [segmentation-engine.md](segmentation-engine.md).
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mixed PCM (mic, file ingest, or upstream live) |
+| **Audio out × N** | [`LiveAudioBuffer`](audiobuffer-streaming.md) × N | One live stem buffer per stem; MVP writes **mono-downmixed** stems |
+| **Engine** | Same `SeparationEngine` as offline (`createSeparation`) | `separate(Live, Live[], options)` → `SeparationPipelineHandle` |
+| **Pipeline handle** | `SeparationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
+| | Offline | Live overload |
+| --- | --- | --- |
+| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
+| **Audio out** | `OfflineAudioBuffer` × N | `LiveAudioBuffer` × N |
+| **Return** | `SeparationResult` | `SeparationPipelineHandle` |
+
+Mixed live/offline arguments throw `SEPARATION_INVALID_ARGUMENT`.
+
 ## API reference
 
 Factory, detection, and model init are the same as offline — see [separation-offline.md](separation-offline.md#api-reference).
@@ -112,6 +118,24 @@ const handle = await sep.separate(liveIn, liveOuts, {
 ## Pipeline handle
 
 `SeparationPipelineHandle` shares `stop` / `flush` / `reset` / `getStatus` / `completed` with other live pipelines — see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `SeparationLiveSegmentEvent` | after each committed chunk is separated | no `onProgress` on the live path |
+
+Shapes: [Types](#types) · offline progress fields: [separation-offline.md](separation-offline.md#types).
+
+```ts
+const handle = await sep.separate(liveIn, liveOuts, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+  onSegment: (seg) => console.log(seg.segmentIndex),
+});
+```
 
 ## Pipeline composition
 
