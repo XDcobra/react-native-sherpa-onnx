@@ -80,23 +80,30 @@ Detects `pyannote` / `reverb` packs (prefers `model.onnx` over `model.int8.onnx`
 | `embedding.modelSource` | Required. Separate embedding ONNX |
 | `clustering.numClusters` | If `> 0`, threshold ignored |
 | `clustering.threshold` | Cosine dissimilarity; default `0.5` |
+| `clustering.computeConfidence` | Opt-in silhouette confidence per segment; **default `false`** (upstream parity) |
 | `minDurationOn` / `minDurationOff` | Segment filter / gap merge (seconds) |
 
 ### `engine.diarize(audioIn, segmentOut, options?)`
 
 Runs the full pipeline and writes `{start,end,speaker}` into `segmentOut`
 natively (`kind: 'diarization'`, payload `{ source: 'diarization', speaker }`).
+When `clustering.computeConfidence` is `true`, each segment also gets
+`confidence` in `[-1, 1]` (segment-buffer field + optional timeline entry).
+If confidence was not requested or could not be computed for a segment, the
+field is omitted (native sentinel `-2` is never surfaced to JS).
 
 `segmentOut` must be an **empty** offline segment buffer.
 
 Options: `onProgress`, `signal` (`AbortSignal` → `cancelDiarization`),
 `includeOverlap` (returns `speakersPerFrame` when supported).
 
-### `engine.recluster({ numClusters?, threshold? })`
+### `engine.recluster({ numClusters?, threshold?, computeConfidence? })`
 
 Re-runs clustering on the **cached** embeddings from the last `diarize` — no
-re-inference. Use a fresh empty `segmentOut` + another `diarize` if you need the
-timeline rewritten into a buffer, or read `getClusterEmbeddings()`.
+re-inference. `computeConfidence` overrides the session flag when provided;
+otherwise the previous setting is kept. Use a fresh empty `segmentOut` + another
+`diarize` if you need the timeline rewritten into a buffer, or read
+`getClusterEmbeddings()`.
 
 ### `engine.getClusterEmbeddings()`
 
@@ -126,7 +133,8 @@ Composes `getClusterEmbeddings` + `sid.search` + reading the buffer filled by
 
 The native core is a **shared C++** pipeline (Android + iOS): pyannote ONNX via
 ORT, powerset decode, timeline stitch, sherpa C-API embedding extractor (refcounted
-registry), and own agglomerative clustering. It does **not** wrap the upstream
+registry), and own agglomerative clustering (optional silhouette confidence,
+ported from upstream `compute_confidence`). It does **not** wrap the upstream
 `SherpaOnnxOfflineSpeakerDiarization` monolith (`_Exit` risk). See
 [internal/speaker-embedding-foundation.md](./internal/speaker-embedding-foundation.md) §10.
 

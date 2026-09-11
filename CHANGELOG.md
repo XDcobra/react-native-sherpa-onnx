@@ -19,6 +19,7 @@
 
 ### Features
 
+* **diarization:** Opt-in per-segment silhouette `confidence` (`clustering.computeConfidence`, default **false**, upstream parity). Ported into the shared offline C++ core — not via Kotlin `OfflineSpeakerDiarization`.
 * **pcm:** Standalone PCM player: `createPcmPlayer({ sampleRate, feed, ttsInstanceId? })` — play any mono float PCM, not just TTS output. Import from `react-native-sherpa-onnx/pcm`.
 * **pcm:** Player controls: `pause()`, `resume()`, `destroy()` on `PcmPlayer`.
 * **tts:** Native streaming playback: `generateSpeechStream(text, opts, handlers, { playback: true })` — zero-bridge-PCM playback.

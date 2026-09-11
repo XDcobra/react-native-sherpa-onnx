@@ -375,9 +375,11 @@ own types:
 
 - Segmentation: `model` path, `window_shift_ratio` (default `0.1`), threads/provider
 - Embedding: separate `model` path (tarballs contain **no** embedding ONNX)
-- Clustering: `num_clusters` (`>0` → threshold ignored) / `threshold`
+- Clustering: `num_clusters` (`>0` → threshold ignored) / `threshold` /
+  `compute_confidence` (default **false**; when true, per-segment silhouette
+  confidence in `[-1, 1]`, or unavailable sentinel when not computable)
 - `min_duration_on` / `min_duration_off`
-- Segment: `{ start, end, speaker }` in seconds (speaker = cluster id)
+- Segment: `{ start, end, speaker[, confidence] }` in seconds (speaker = cluster id)
 
 ONNX metadata keys (must all be present): `sample_rate`, `window_size`,
 `receptive_field_size`, `receptive_field_shift`, `num_speakers`,
