@@ -2,21 +2,9 @@
 
 ## Introduction
 
-On-device **named-speaker** enrollment and identification on a shared speaker-embedding foundation.
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated PCM (full clip or ranges via segment spans) |
-| **Segments in / out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Speech ranges (typically from VAD); Out gets `payload.source: 'sid'` |
-| **Engine** | `SpeakerIdentificationEngine` via `createSpeakerIdentification` | Enroll / identify / verify / label; named-speaker manager under the hood |
+On-device **named-speaker** enrollment and identification on a shared speaker-embedding foundation. Enroll known voices, then identify or verify speakers against the gallery — answers **who** spoke, not anonymous clusters ([Speaker Diarization](diarization-offline.md)). Use whole-buffer APIs for short clips or segment-buffer APIs for labeled speech timelines; continuous mic use is the [live overload](speaker-identification-live.md).
 
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
-
-Model detect is available on the SID package (`detectSpeakerEmbeddingModel`) and on **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Most embedding internals stay package-local; apps use the SID surface for enrollment and search.
-
-SID answers **who** spoke against an enrolled name list. It does **not** invent anonymous clusters — that is [Speaker Diarization](diarization-offline.md) (offline available). VAD still answers **when** speech happens; the app decides which spans belong together for enroll (for example every other interview turn).
-
-Live labeling is available via **`labelLiveSegments`** — see [speaker-identification-live.md](speaker-identification-live.md). Enrollment remains offline (`enroll` / `enrollOfflineSegments`).
 
 ## Quick start
 
@@ -104,9 +92,13 @@ try {
 
 `labelOfflineSegments` does **not** mutate `vadSegs`. It stages a live segment buffer, then populates the empty `labeledOut` offline snapshot (same writeback pattern as offline VAD merge).
 
----
-
 ## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated PCM (full clip or ranges via segment spans) |
+| **Segments in / out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Speech ranges (typically from VAD); Out gets `payload.source: 'sid'` |
+| **Engine** | `SpeakerIdentificationEngine` via `createSpeakerIdentification` | Enroll / identify / verify / label; named-speaker manager under the hood |
 
 | | Offline audio buffer(s) | Offline audio + segment buffer |
 | --- | --- | --- |
@@ -116,8 +108,6 @@ try {
 | **Verify** | `verify(name, audio)` → `boolean` | `verifyOfflineSegments(name \| names[], audioIn, segmentsIn)` → counts + per-span flags |
 
 Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech` rows are skipped. `enrollOfflineSegments` / `verifyOfflineSegments` reject when no usable speech span remains.
-
----
 
 ## API reference
 
@@ -344,55 +334,25 @@ Validate category: **`speakerEmbedding`**. Supported families: **WeSpeaker**, **
 
 Download via `ModelCategory.SpeakerEmbedding` (built-in GitHub source; see [download-manager.md](download-manager.md)).
 
----
+## JS Events
 
-## Offline JS events (`onProgress` / `onLabeled` / `onVerified`)
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | `enrollOfflineSegments` / `labelOfflineSegments` / `verifyOfflineSegments` only; whole-buffer APIs: none |
+| `onLabeled` | `SidLabeledSegmentEvent` | after each span is identified and appended | `labelOfflineSegments` only; order: progress → identify/append → `onLabeled` |
+| `onVerified` | `SidVerifiedSegmentEvent` | after each span is verified | `verifyOfflineSegments` only; order: progress → verify → `onVerified` |
 
-### `onProgress` (start-of-step)
-
-Multi-span SID paths support optional coarse offline progress via `onProgress` on `enrollOfflineSegments`, `labelOfflineSegments`, and `verifyOfflineSegments`. The payload is shared **`OrchestrationProgress`** (same fields as VAD offline / Alignment):
-
-- Fires at the **start** of step `i` (before extract / search-or-verify for that span).
-- `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
-- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span's duration.
-- Zero usable speech spans → **no** progress events (`enrollOfflineSegments` / `verifyOfflineSegments` reject; `labelOfflineSegments` returns `{ labeledCount: 0, unknownCount: 0 }`).
-- Non-function `onProgress` → `SID_INVALID_OPTIONS`. If the callback throws, the run aborts.
-
-Whole-buffer `enroll` / `identify` / `verify` do **not** emit progress. Internal staging for `labelOfflineSegments` stays silent (no `onSegmentAppended`).
-
-### `onLabeled` (per-span result — `labelOfflineSegments` only)
-
-Fires **after** search + successful staging append for each speech span:
-
-| Field | Meaning |
-| --- | --- |
-| `segmentIndex` / `totalSegments` | 0-based index and span count |
-| `startSample` / `endSample` / `sampleRate` / `durationMs` | Span range |
-| `speakerName` | Matched enrolled name, or `null` if below threshold / unknown |
-
-Order per span: `onProgress` → identify/append → `onLabeled`. Enroll paths have **no** `onLabeled`. Non-function / throwing `onLabeled` behaves like `onProgress` (`SID_INVALID_OPTIONS` / abort + staging cleanup).
+Shapes: [Types](#types).
 
 ```ts
 await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
   threshold: 0.5,
-  onProgress: (p) => console.log(`sid ${p.currentSegment + 1}/${p.totalSegments}`),
-  onLabeled: (e) => console.log(`result ${e.segmentIndex}:`, e.speakerName),
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  onLabeled: (e) => console.log(e.segmentIndex, e.speakerName),
 });
 ```
 
-### `onVerified` (per-span result — `verifyOfflineSegments` only)
-
-Fires **after** native verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
-
-```ts
-const { matchCount } = await sid.verifyOfflineSegments(
-  ['alice', 'bob', 'alice'], audio, vadSegs, {
-    onVerified: (e) => console.log(e.segmentIndex, e.expectedName, e.matched),
-  },
-);
-```
-
----
+Live overload uses `onLabeled` only (no offline `onProgress`) — see [speaker-identification-live.md](speaker-identification-live.md#js-events).
 
 ## Speech payload (`source: 'sid'`)
 
@@ -403,8 +363,6 @@ Labeled Out rows use the strict speech payload contract:
 ```
 
 Allowed keys: `source`, `speakerName` only. See [segmentbuffer-offline.md](segmentbuffer-offline.md).
-
----
 
 ## Persistence
 
@@ -427,8 +385,6 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 - Export only includes speakers enrolled through this SID instance's enroll/import paths.
 - Future: native readout via upstream `GetEmbedding` — [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
 
----
-
 ## Patterns
 
 ### Interview turns (per-span enroll names)
@@ -446,8 +402,6 @@ SID does **not** invent the name list; the app supplies who each span belongs to
 
 PCM stays native via buffer ids. Identify / label / verify / enroll use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline` / `enrollSpeakerOffline`) so embeddings stay off the JS product hot path. Low-level extract/search still move compact `dim` floats (~256) across the TurboModule when apps need raw vectors — not the full waveform.
 
----
-
 ## Out of scope
 
 - `kind: 'diarization'` segment rows (see [diarization-offline.md](diarization-offline.md))
@@ -456,8 +410,6 @@ PCM stays native via buffer ids. Identify / label / verify / enroll use combined
 - Enroll from a segment buffer **without** PCM audio
 - Native embedding dump / Upstream `GetEmbedding` (export uses the JS mirror; see [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md))
 - Automatic file / cloud I/O for enrollment bundles (app-owned storage)
-
----
 
 ## Pipeline composition
 
@@ -529,8 +481,6 @@ Live-only types (`SpeakerIdentificationLiveLabelOptions`, `SidLiveLabeledSegment
 
 See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
----
-
 ## Error codes
 
 | Error code | Explanation |
@@ -552,8 +502,6 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `FILEIO_*` | File / URI resolution for `FileSource` before or during detect/init. |
 
 JS-side SID guards (message match, not always a native `code`): empty speaker name, name-list length mismatch / empty list entries, no audio buffers for `enroll`, no speech spans for `enrollOfflineSegments` / `verifyOfflineSegments`, enroll/import when the name already exists, enrollment bundle validation, and calls after `destroy()`.
-
----
 
 ## See also
 

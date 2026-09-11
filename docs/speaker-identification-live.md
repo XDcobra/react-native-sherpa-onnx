@@ -2,25 +2,15 @@
 
 > **Live overload** — not a streaming SID model.
 >
-> This guide uses the **same offline** speaker-embedding weights as [speaker-identification-offline.md](speaker-identification-offline.md). Live audio is sliced by a mandatory **segmentation policy**; each committed utterance is labeled **natively** (offline extract + search inside an `OfflineLivePipelineWorker`). There is **no** separate online/streaming speaker-ID model family in sherpa-onnx.
->
-> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*`), which use streaming-capable models and native online workers.
+> Live audio is sliced by a mandatory segmentation policy; each committed utterance is labeled natively with the same offline speaker-embedding weights. There is no separate online/streaming speaker-ID model in sherpa-onnx.
 
 ## Introduction
 
-On-device **named-speaker labeling** over a live audio stream. SID owns speech segmentation; a native live worker extracts an embedding per committed utterance, searches the enrolled manager, and appends labeled speech segments (`payload.source: 'sid'`) to a live segment Out buffer. Public API matches other live overloads (attach segmentation → start pipeline → handle).
-
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Labeled speech; `payload.source: 'sid'` |
-| **Engine** | Same `SpeakerIdentificationEngine` as offline | Enroll offline first, then `labelLiveSegments` |
-| **Pipeline handle** | `SpeakerIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+On-device **named-speaker labeling** over a live mic or file stream. Each committed utterance is identified against the enrolled gallery and appended as labeled speech segments (`payload.source: 'sid'`). Enrollment stays offline.
 
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
-Enrollment stays offline (`enroll` / `enrollOfflineSegments`). Live SID only **labels**.
+Factory / detect / enrollment / models: [speaker-identification-offline.md](speaker-identification-offline.md#api-reference).
 
 ## Quick start
 
@@ -87,6 +77,13 @@ await releasePipelineAudioBuffer(audioIn);
 `finalizeLiveAudioBuffer(audioIn)` triggers terminal draining (detach segmentation with `flushFinal`, label remaining committed spans, finalize `labeledOut`, resolve `completed` with `reason: 'completed'`). Prefer that graceful path over an early `stop()` when the session ends naturally.
 
 ## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Labeled speech; `payload.source: 'sid'` |
+| **Engine** | Same `SpeakerIdentificationEngine` as offline | Enroll offline first, then `labelLiveSegments` |
+| **Pipeline handle** | `SpeakerIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 | | Offline | Live overload |
 | --- | --- | --- |
@@ -164,6 +161,22 @@ const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
 ## Optional `targetSegmentBuffer`
 
 Pass a **live** segment buffer (`seg_live_*`) as `segmentsOut` to append labeled speech. Offline segment buffer ids are rejected (`SID_INVALID_ARGUMENT`).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onLabeled` | `SidLiveLabeledSegmentEvent` | after each committed span is identified | no `onProgress` on the live path; no `totalSegments` |
+
+Shapes: [Types](#types) · offline result fields: [speaker-identification-offline.md](speaker-identification-offline.md#types).
+
+```ts
+await sid.labelLiveSegments(audioIn, labeledOut, {
+  segmentation: { policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 } },
+  threshold: 0.5,
+  onLabeled: (e) => console.log(e.segmentIndex, e.speakerName, e.durationMs),
+});
+```
 
 ## Pipeline composition
 

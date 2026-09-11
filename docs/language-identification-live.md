@@ -2,21 +2,11 @@
 
 > **Live overload** — not a streaming SLID model.
 >
-> This guide uses the **same offline** Whisper multilingual weights as [language-identification-offline.md](language-identification-offline.md). Live audio is sliced by a mandatory **speech segmentation policy**; each committed utterance is identified **natively** inside an `OfflineLivePipelineWorker`. There is **no** separate online/streaming spoken-language-ID model in sherpa-onnx.
->
-> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*`).
+> Live audio is sliced by a mandatory speech segmentation policy; each committed utterance is identified natively with the same offline Whisper multilingual weights. There is no separate online/streaming spoken-language-ID model in sherpa-onnx.
 
 ## Introduction
 
-On-device **language tagging** over a live audio stream. SLID owns speech segmentation; a native live worker identifies each committed utterance, commits the ISO language code to a live text Out buffer, and optionally appends labeled speech segments (`payload.source: 'languageId'`).
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed language tags |
-| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'languageId'`, `lang` |
-| **Engine** | Same `LanguageIdentificationEngine` as offline | `identify(liveAudio, liveText, options)` |
-| **Pipeline handle** | `LanguageIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+On-device **language tagging** over a live mic or file stream. Each committed utterance writes the ISO language code to a live text buffer and can optionally append labeled speech segments.
 
 Import path: **`react-native-sherpa-onnx/language-identification`**.
 
@@ -65,6 +55,14 @@ await releasePipelineAudioBuffer(audioIn);
 `finalizeLiveAudioBuffer(audioIn)` drains remaining spans and resolves `completed`. Prefer that over an early `stop()` when the session ends naturally.
 
 ## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed language tags |
+| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'languageId'`, `lang` |
+| **Engine** | Same `LanguageIdentificationEngine` as offline | `identify(liveAudio, liveText, options)` |
+| **Pipeline handle** | `LanguageIdentificationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 | | Offline | Live overload |
 | --- | --- | --- |
@@ -129,6 +127,23 @@ const pipeline = await slid.identify(audioIn, textOut, {
 ## Optional `targetSegmentBuffer`
 
 Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload: { source: 'languageId', lang }` ). Offline `targetSegmentBuffer` ids are rejected (`LANGUAGE_ID_INVALID_ARGUMENT`).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | no `onProgress` on the live path |
+| `onLanguageChanged` | `LanguageChangedEvent` | predicted `lang` differs from previous non-empty language | includes first span (`previousLang: null`) |
+
+Shapes: [Types](#types) · offline result fields: [language-identification-offline.md](language-identification-offline.md#types).
+
+```ts
+await slid.identify(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log(e.segmentIndex, e.lang),
+  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
+});
+```
 
 ## Types
 
