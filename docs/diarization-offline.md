@@ -65,61 +65,167 @@ const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 4096);
 await diar.destroy();
 ```
 
-## API
+## API reference
 
 ### `detectDiarizationModel(source, options?)`
 
-Detects `pyannote` / `reverb` packs (prefers `model.onnx` over `model.int8.onnx`).
+Detects `pyannote` / `reverb` / `sortformer` packs (prefers `model.onnx` over `model.int8.onnx`). Use before `createDiarization` to confirm pack layout. Unified detection: [model-detect.md](model-detect.md).
+
+```ts
+function detectDiarizationModel(
+  source: FileSource,
+  options?: { modelType?: DiarizationModelKind | 'auto'; assetName?: string; debug?: boolean }
+): Promise<DiarizationDetectResult>;
+```
+
+```ts
+const det = await detectDiarizationModel({
+  kind: 'fs',
+  path: '/path/to/sherpa-onnx-pyannote-segmentation-3-0',
+});
+if (!det.success) throw new Error(det.error ?? 'Detection failed');
+```
 
 ### `createDiarization(options)`
 
-| Field | Notes |
-| --- | --- |
-| `segmentation.modelSource` | Required. Path/dir for segmentation ONNX |
-| `segmentation.windowShiftRatio` | Default `0.1` |
-| `embedding.modelSource` | Required. Separate embedding ONNX |
-| `clustering.numClusters` | If `> 0`, threshold ignored |
-| `clustering.threshold` | Cosine dissimilarity; default `0.5` |
-| `clustering.computeConfidence` | Opt-in silhouette confidence per segment; **default `false`** (upstream parity) |
-| `minDurationOn` / `minDurationOff` | Segment filter / gap merge (seconds) |
+Creates a `DiarizationEngine`. Requires separate segmentation ONNX and speaker-embedding ONNX. Optional clustering tuning.
+
+```ts
+function createDiarization(
+  options: DiarizationInitializeOptions
+): Promise<DiarizationEngine>;
+```
+
+```ts
+const diar = await createDiarization({
+  segmentation: {
+    modelSource: { kind: 'fs', path: '/path/to/pyannote-seg-model' },
+  },
+  embedding: {
+    modelSource: { kind: 'fs', path: '/path/to/speaker-embedding.onnx' },
+  },
+  clustering: { threshold: 0.5, computeConfidence: true },
+});
+```
 
 ### `engine.diarize(audioIn, segmentOut, options?)`
 
-Runs the full pipeline and writes `{start,end,speaker}` into `segmentOut`
-natively (`kind: 'diarization'`, payload `{ source: 'diarization', speaker }`).
-When `clustering.computeConfidence` is `true`, each segment also gets
-`confidence` in `[-1, 1]` (segment-buffer field + optional timeline entry).
-If confidence was not requested or could not be computed for a segment, the
-field is omitted (native sentinel `-2` is never surfaced to JS).
+Runs the full pipeline and writes `{start, end, speaker}` into `segmentOut` natively (`kind: 'diarization'`, payload `{ source: 'diarization', speaker }`). When `clustering.computeConfidence` is `true`, each segment also gets `confidence` in `[-1, 1]`. If confidence was not requested or could not be computed, the field is omitted.
 
-`segmentOut` must be an **empty** offline segment buffer.
+`segmentOut` must be an **empty** offline segment buffer (`seg_off_*`).
 
-Options: `onProgress`, `signal` (`AbortSignal` → `cancelDiarization`),
-`includeOverlap` (returns `speakersPerFrame` when supported).
+```ts
+diarize(
+  audioIn: OfflineAudioBufferIdSource,
+  segmentOut: OfflineSegmentBufferIdSource,
+  options?: DiarizeOptions
+): Promise<DiarizeResult>;
+```
 
-### `engine.recluster({ numClusters?, threshold?, computeConfidence? })`
+```ts
+const result = await diar.diarize(audioIn, segmentOut, {
+  onProgress: (p) => console.log(`${(p.fraction * 100).toFixed(0)}%`),
+  signal: abortController.signal,
+});
+console.log(result.numSpeakers, result.segmentCount);
+```
 
-Re-runs clustering on the **cached** embeddings from the last `diarize` — no
-re-inference. `computeConfidence` overrides the session flag when provided;
-otherwise the previous setting is kept. Use a fresh empty `segmentOut` + another
-`diarize` if you need the timeline rewritten into a buffer, or read
-`getClusterEmbeddings()`.
+### `engine.recluster(options?)`
+
+Re-runs clustering on the **cached** embeddings from the last `diarize` — no re-inference. `computeConfidence` overrides the session flag when provided; otherwise the previous setting is kept.
+
+```ts
+recluster(options?: DiarizationReclusterOptions): Promise<DiarizeResult>;
+```
+
+```ts
+const result = await diar.recluster({ numClusters: 3 });
+console.log(result.numSpeakers, result.segments);
+```
 
 ### `engine.getClusterEmbeddings()`
 
-Mean embedding per cluster after the last `diarize` / `recluster`. Use these
-centroids to match enrolled SID names (who-spoke-when with labels), either via
-**`mapDiarizationToNames(diar, sid, diarizationSegments)`** or manually with
-`sid.search(embedding)`.
+Mean embedding per cluster after the last `diarize` / `recluster`. Use these centroids to match enrolled SID names (who-spoke-when with labels), either via **`mapDiarizationToNames`** or manually with `sid.search(embedding)`.
 
-End-to-end example (3 enrolled speakers + meeting with an unknown guest):
-**[diarization-named-timeline.md](./diarization-named-timeline.md)**.
+```ts
+getClusterEmbeddings(): Promise<DiarizationClusterEmbedding[]>;
+```
+
+```ts
+const embeddings = await diar.getClusterEmbeddings();
+// embeddings[i].speaker, embeddings[i].embedding (Float32Array)
+```
+
+End-to-end example (3 enrolled speakers + meeting with an unknown guest): **[diarization-named-timeline.md](./diarization-named-timeline.md)**.
+
+### `engine.destroy()`
+
+Releases the native diarization instance. Methods throw after this call.
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await diar.destroy();
+```
 
 ### `mapDiarizationToNames(diar, sid, diarizationSegments, options?)`
 
-Composes `getClusterEmbeddings` + `sid.search` + reading the buffer filled by
-`diarize` (`diarizationSegments`) into `{ clusterToName, timeline }`. See
-[diarization-named-timeline.md](./diarization-named-timeline.md).
+Composes `getClusterEmbeddings` + `sid.search` + reading the buffer filled by `diarize` into `{ clusterToName, timeline }`. See [diarization-named-timeline.md](./diarization-named-timeline.md).
+
+```ts
+function mapDiarizationToNames(
+  diar: DiarizationEngine,
+  sid: DiarizationNameSearch,
+  diarizationSegments: OfflineSegmentBufferIdSource,
+  options?: MapDiarizationToNamesOptions
+): Promise<MapDiarizationToNamesResult>;
+```
+
+```ts
+const { clusterToName, timeline } = await mapDiarizationToNames(
+  diar, sid, segmentOut, { threshold: 0.5 }
+);
+timeline.forEach((s) => console.log(s.name ?? 'Unknown', s.startSec, s.endSec));
+```
+
+## Types
+
+### Core diarization types (`react-native-sherpa-onnx/diarization`)
+
+| Type | Description |
+| --- | --- |
+| `DiarizationModelKind` | `'pyannote' \| 'reverb' \| 'sortformer'` |
+| `DIARIZATION_MODEL_KINDS` | Readonly runtime list of model kinds |
+| `DiarizationConcreteModelType` | Alias of `DiarizationModelKind` |
+| `DiarizationDetectResult` | Return of `detectDiarizationModel()` |
+| `DiarizationInitializeOptions` | `{ segmentation, embedding, clustering?, minDurationOn?, minDurationOff?, numThreads?, provider?, debug? }` |
+| `DiarizationSegmentationOptions` | `{ modelSource: FileSource; quantization?; windowShiftRatio? }` |
+| `DiarizationEmbeddingOptions` | `{ modelSource: FileSource; quantization? }` |
+| `DiarizationClusteringOptions` | `{ numClusters?; threshold?; computeConfidence? }` — when `numClusters > 0`, threshold is ignored; `computeConfidence` enables silhouette confidence per segment (default `false`) |
+| `DiarizeOptions` | `{ onProgress?; signal?; includeOverlap? }` |
+| `DiarizeResult` | `{ status, numSpeakers, segmentCount, sampleRate, processingTimeMs, speakersPerFrame?, segments? }` |
+| `DiarizationReclusterOptions` | `{ numClusters?; threshold?; computeConfidence? }` |
+| `DiarizationClusterEmbedding` | `{ speaker: number; embedding: Float32Array }` |
+| `DiarizationEngine` | `diarize`, `recluster`, `getClusterEmbeddings`, `destroy` |
+| `DiarizationNameSearch` | Duck-typed SID gallery — `{ search(embedding, options?): Promise<string \| null> }` |
+| `MapDiarizationToNamesOptions` | `{ threshold?: number }` — cosine similarity threshold, default `0.5` |
+| `MapDiarizationToNamesResult` | `{ clusterToName: Map<number, string \| null>; timeline: NamedDiarizationSpan[] }` |
+| `NamedDiarizationSpan` | `{ startSample, endSample, sampleRate, startSec, endSec, clusterId, name }` |
+| `DiarizationErrorCode` | Error code object (`INVALID_ARGUMENT`, `INIT_ERROR`, `NOT_INITIALIZED`, `CANCELLED`, `BUFFER_NOT_FOUND`) |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineAudioBufferIdSource` | Offline audio ref passed to `diarize` |
+| `OfflineSegmentBufferIdSource` | Offline segment buffer for `segmentOut` |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
+
+---
 
 ## Models
 

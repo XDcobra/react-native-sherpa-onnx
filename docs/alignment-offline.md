@@ -275,38 +275,77 @@ const subtitleRows = alignmentSegments.map((segment) => ({
 
 ## API reference
 
-### `createAlignment(options?)`
-
-```ts
-function createAlignment(options?: object): {
-  alignTextToAudio(
-    textIn: OfflineTextBufferIdSource,
-    audioIn: OfflineAudioBufferIdSource,
-    segmentOut: OfflineSegmentBufferIdSource,
-    options: AlignTextToAudioOptions
-  ): Promise<AlignTextToAudioWriteResult>;
-  destroy(): Promise<void>;
-};
-```
-
-`segmentOut` must be an existing offline segment buffer (`seg_off_*`). The API does not auto-create output buffers.
-
 ### `detectAlignmentModel(source, options?)`
 
-Alignment-specific layout detection. For category-unknown library scans, use [`detectModel`](model-detect.md) instead.
+Alignment-specific layout detection **without** initializing the engine. For category-unknown library scans, use [`detectModel`](model-detect.md) instead.
 
 ```ts
 function detectAlignmentModel(
   source: FileSource,
-  options?: { modelType?: AlignmentModelType }
+  options?: { modelType?: AlignmentModelType; quantization?: QuantizationPreference }
 ): Promise<AlignmentDetectModelResult>;
+```
+
+```ts
+const det = await detectAlignmentModel(
+  { kind: 'fs', path: '/path/to/wav2vec2-alignment-model' },
+  { modelType: 'auto' }
+);
+if (!det.success) throw new Error(det.error ?? 'Alignment detection failed');
+```
+
+### `createAlignment(options?)`
+
+Creates an `AlignmentEngine`. The engine itself carries no model state — model paths are per-call on `alignTextToAudio`.
+
+```ts
+function createAlignment(options?: AlignmentEngineOptions): AlignmentEngine;
+```
+
+```ts
+const engine = createAlignment();
+```
+
+### `engine.alignTextToAudio(textIn, audioIn, segmentOut, options)`
+
+Writes alignment segments into `segmentOut` (`seg_off_*`). Mode, granularity, and model config are all on the options object. `segmentOut` must be a pre-created **empty** offline segment buffer.
+
+```ts
+alignTextToAudio(
+  textIn: OfflineTextBufferIdSource,
+  audioIn: OfflineAudioBufferIdSource,
+  segmentOut: OfflineSegmentBufferIdSource,
+  options: AlignTextToAudioOptions
+): Promise<AlignTextToAudioWriteResult>;
+```
+
+```ts
+const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'proportional',
+  granularity: 'sentence',
+});
+console.log(write.segmentsWritten);
+```
+
+### `engine.destroy()`
+
+Marks the engine as destroyed. Methods throw `ALIGNMENT_ENGINE_DESTROYED` after this call.
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await engine.destroy();
 ```
 
 ### `assertAlignmentGranularityForMode(mode, granularity)`
 
+Throws if the `granularity` is not supported for the given `mode` (e.g. `character` with `vad`).
+
 ```ts
 function assertAlignmentGranularityForMode(
-  mode: 'proportional' | 'estimated' | 'aligned' | 'vad' | 'off' ,
+  mode: 'proportional' | 'estimated' | 'aligned' | 'vad' | 'off',
   granularity: AlignmentGranularity
 ): void;
 ```
@@ -417,18 +456,42 @@ Caveats:
 - In chunked paths, an invocation can terminate before reaching a conceptual final tick; callers should treat progress as a start-of-work signal, not completion proof.
 - Use returned warnings / error codes for quality and failure diagnostics.
 
-## Core types
+## Types
+
+### Core alignment types (`react-native-sherpa-onnx/alignment`)
 
 | Type | Description |
 | --- | --- |
-| `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \\| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \\| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelSource: FileSource; granularity?: 'sentence' \\| 'word' \\| 'character'; language?: string; segmentation?: { mode: 'auto'; anchorSegmentBuffer: OfflineSegmentBufferIdSource; mappingStrategy: 'asr_mediated' \\| 'chunked_forced_ctc'; asr?: { hypothesisTextBuffer: OfflineTextBufferIdSource } } }` |
-| `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \\| 'word'; segmentation: { source: 'vad'; segmentBuffer: OfflineSegmentBufferIdSource } }` |
-| `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId: string; segmentsWritten: number; linkMap?: SegmentLinkMapRef; warningCode?: string; warnings?: AlignmentWarning[] }` |
+| `AlignmentModelType` | `'wav2vec2' \| 'auto'` |
+| `AlignmentConcreteModelType` | `'wav2vec2'` |
+| `AlignmentGranularity` | `'sentence' \| 'word' \| 'character'` |
+| `AlignmentTimingMode` | `'proportional' \| 'estimated' \| 'aligned' \| 'accurate' \| 'vad'` |
+| `AlignmentMappingStrategy` | `'asr_mediated' \| 'chunked_forced_ctc'` |
+| `AlignTextToAudioOptions` | Union of `Proportional \| Estimated \| Accurate \| Vad` option types |
+| `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \| 'word'; language?: string }` |
+| `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \| 'word'; language?: string }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelSource: FileSource; granularity?: 'sentence' \| 'word' \| 'character'; segmentation?: { mode: 'auto'; anchorSegmentBuffer; mappingStrategy; asr? } }` |
+| `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \| 'word'; segmentation: { source: 'vad'; segmentBuffer } }` |
+| `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId, segmentsWritten, linkMap?, warningCode?, warnings?, vadAnchorCount?, minAnchorsApplied? }` |
+| `AlignmentChunkTimeline` | `{ sampleRate: number; segmentSampleCounts: readonly number[] }` |
+| `AlignmentAsrConfig` | `{ hypothesisTextBuffer: OfflineTextBufferIdSource }` |
+| `AlignmentWarning` | `{ code: AlignmentWarningCode; message: string }` |
+| `AlignmentWarningCode` | `'ALIGNMENT_PARTIAL_COVERAGE' \| 'ALIGNMENT_LOW_CONFIDENCE_UNIT_PRESENT' \| 'ALIGNMENT_ANCHOR_NO_PROGRESS' \| 'ALIGNMENT_RESIDUAL_TOKENS_REMAINING'` |
+| `AlignmentTimestamp` | `{ text: string; start: number; end: number }` |
+| `AlignmentDetectResult` | Return of `detectAlignmentModel()` |
+| `AlignmentEngine` | `alignTextToAudio`, `destroy` |
+| `AlignmentProgressCallbacks` | `{ onProgress?: (progress: OrchestrationProgress) => void }` |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
 | `OfflineTextBufferIdSource` | From `react-native-sherpa-onnx/textbuffer` |
 | `OfflineAudioBufferIdSource` | From `react-native-sherpa-onnx/audiobuffer` |
 | `OfflineSegmentBufferIdSource` | From `react-native-sherpa-onnx/segmentbuffer` |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md) · [textbuffer-offline.md](textbuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ## Error code quick table
 

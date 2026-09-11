@@ -179,22 +179,16 @@ const downloaded = await downloadModel(model, {
 
 All signatures below are exported from **`react-native-sherpa-onnx/diarization`**.
 
-### Detection
+### `detectDiarizationModel(source, options?)`
 
-#### `detectDiarizationModel(source, options?)`
+Inspects the provided file source. For Sortformer streaming models, returns `isStreaming: true` and populates `paths.model` and optional `paths.metadata`. Unified detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectDiarizationModel(
   source: FileSource,
-  options?: {
-    modelType?: DiarizationModelKind | 'auto';
-    assetName?: string;
-    debug?: boolean;
-  }
+  options?: { modelType?: DiarizationModelKind | 'auto'; assetName?: string; debug?: boolean }
 ): Promise<DiarizationDetectResult>;
 ```
-
-Inspects the provided file source. For Sortformer streaming models, returns `isStreaming: true` and populates `paths.model` and optional `paths.metadata`.
 
 ```ts
 const det = await detectDiarizationModel({
@@ -205,11 +199,9 @@ console.log(det.isStreaming); // true
 console.log(det.modelType);   // 'sortformer'
 ```
 
----
+### `createStreamingDiarization(options)`
 
-### Initialization
-
-#### `createStreamingDiarization(options)`
+Creates and initializes the native streaming diarization engine. Init modes: **`auto`** (default — `modelSource` + optional `modelType`) or **`custom`** (`initMode: 'custom'` + `customConfig: { model, metadata? }`). Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingDiarization(
@@ -217,94 +209,32 @@ function createStreamingDiarization(
 ): Promise<StreamingDiarizationEngine>;
 ```
 
-Creates and initializes the native streaming diarization engine.
-
-Supports two initialization modes:
-
-##### 1. Auto Mode (`StreamingDiarizationAutoInitializeOptions`)
-Resolves model paths automatically from `modelSource` using `detectDiarizationModel`.
-
 ```ts
+// Auto mode
 const engine = await createStreamingDiarization({
   modelSource: { kind: 'fs', path: '/path/to/sortformer-folder' },
-  modelType: 'sortformer', // or 'auto'
+  modelType: 'sortformer',
+  onset: 0.5,
+  offset: 0.5,
+  minDurationOff: 0.5,
 });
-```
 
-##### 2. Custom Mode (`StreamingDiarizationCustomInitializeOptions`)
-Explicitly specifies paths for the ONNX model and optional metadata.
-
-```ts
+// Custom mode
 const engine = await createStreamingDiarization({
   initMode: 'custom',
   modelType: 'sortformer',
   customConfig: {
     model: { kind: 'fs', path: '/path/to/sortformer.onnx' },
-    metadata: { kind: 'fs', path: '/path/to/metadata.json' }, // optional
+    metadata: { kind: 'fs', path: '/path/to/metadata.json' },
   },
 });
 ```
 
-##### Shared Tuning Options (`StreamingDiarizationInitOptionsShared`)
+Engine read-only properties after init: `instanceId`, `sampleRate` (always `16000`), `maxSpeakers` (e.g. `4`), `feedSamples`, `strideSamples`, `latencySeconds`.
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `onset` | `number` | `0.5` | Hysteresis onset threshold for speech turn activation (0.0 to 1.0) |
-| `offset` | `number` | `0.5` | Hysteresis offset threshold for speech turn deactivation (0.0 to 1.0) |
-| `padOnset` | `number` | `0.0` | Seconds to pad before detected speech start |
-| `padOffset` | `number` | `0.0` | Seconds to pad after detected speech end |
-| `minDurationOn` | `number` | `0.0` | Minimum duration in seconds of a speaker turn to retain |
-| `minDurationOff` | `number` | `0.5` | Maximum gap in seconds between consecutive turns of the same speaker to merge |
-| `medianWindow` | `number` | `11` | Window size for temporal median filtering of frame predictions |
-| `chunkLen` | `number` | From metadata (`124`) | Number of 80ms model frames per chunk (e.g. `6` for low latency ~1.04s, `124` for default ~10.0s) |
-| `rightContext` | `number` | From metadata (`1`) | Lookahead context frames appended after each chunk (e.g. `7` for low latency, `1` for default) |
-| `fifoLen` | `number` | From metadata (`124`) | Maximum FIFO queue frames before frames push into the speaker cache |
-| `numThreads` | `number` | `1` | Number of threads for ONNX Runtime inference |
-| `provider` | `string` | `'cpu'` | ONNX Runtime execution provider |
-| `debug` | `boolean` | `false` | Enable verbose native logging |
+### `engine.startPipeline(audioIn, segmentOut, options?)`
 
----
-
-### Streaming latency profiles & real-time feedback
-
-NeMo Sortformer natively supports dynamic sequence lengths. Applications can configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency and accuracy according to their use case:
-
-| Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Recommended Use Case |
-| --- | --- | --- | --- | --- | --- | --- |
-| **Low Latency** *(Recommended for Live Mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
-| **Ultra-Low Latency** | `3` | `1` | `188` | **0.32s** | **0.24s** (~4 updates/sec) | Ultra-fast speaker change detection |
-| **High Latency (Default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
-
-```ts
-// Example: Initialize with Low Latency for real-time live microphone streaming
-const engine = await createStreamingDiarization({
-  modelSource: { kind: 'fs', path: '/path/to/sortformer-folder' },
-  chunkLen: 6,
-  rightContext: 7,
-  fifoLen: 188,
-});
-
-console.log('Low-latency properties:', {
-  feedSamples: engine.feedSamples,       // 16640 (~1.04s window)
-  strideSamples: engine.strideSamples,   // 7680 (updates every 0.48s!)
-  latencySeconds: engine.latencySeconds, // 1.04s
-});
-```
-
----
-
-### Engine instance (`StreamingDiarizationEngine`)
-
-#### Read-Only Properties
-
-* **`instanceId`** (`string`): Unique native instance identifier (e.g. `diar_stream_1`).
-* **`sampleRate`** (`number`): Audio sample rate required by the model (always `16000` for Sortformer).
-* **`maxSpeakers`** (`number`): Maximum number of concurrent speaker channels tracked by the model (e.g. `4`).
-* **`feedSamples`** (`number`): Number of audio samples required per forward pass window (`160000` = 10.0s).
-* **`strideSamples`** (`number`): Number of audio samples advanced between successive window steps (`158720` = 9.92s).
-* **`latencySeconds`** (`number`): Algorithmic latency in seconds (`~10.0s`).
-
-#### `engine.startPipeline(audioIn, segmentOut, options?)`
+Starts a native background worker thread draining `audioIn` and appending speaker turns to `segmentOut`. `audioIn` must be a live audio buffer (`live_*`); `segmentOut` must be a live segment buffer (`seg_live_*`).
 
 ```ts
 startPipeline(
@@ -314,19 +244,13 @@ startPipeline(
 ): Promise<DiarizationPipelineHandle>;
 ```
 
-Starts a native background worker thread draining `audioIn` and appending speaker turns to `segmentOut`.
-
-* **`audioIn`**: Live audio buffer (`live_*`). Must be in `recording` state.
-* **`segmentOut`**: Live segment buffer (`seg_live_*`).
-* **`options.chunkSize`**: Number of samples drained per cursor read step (default `4096` = 256ms at 16kHz).
-
 ```ts
 const pipeline = await engine.startPipeline(audioIn, segmentOut, { chunkSize: 4096 });
 ```
 
----
+### `engine.feed(audioIn)`
 
-#### `engine.feed(audioIn)`
+Manually feeds an offline audio buffer to the engine's accumulation buffer. If enough audio has accumulated (≥ feed window), triggers forward steps and returns newly finalized segments.
 
 ```ts
 feed(
@@ -334,128 +258,116 @@ feed(
 ): Promise<Array<{ start: number; end: number; speaker: number }>>;
 ```
 
-Manually feeds an offline audio buffer to the engine's accumulation buffer. If enough audio has accumulated ($\ge 10.0\text{s}$), triggers one or more window forward steps and returns any newly finalized segments.
-
 ```ts
 const segments = await engine.feed(offlineAudioBuf);
 ```
 
----
+### `engine.flush()`
 
-#### `engine.flush()`
+Flushes remaining trailing audio in the accumulation buffer (zero-padding to window size), post-processes final predictions, and returns final segments.
 
 ```ts
 flush(): Promise<Array<{ start: number; end: number; speaker: number }>>;
 ```
 
-Flushes any remaining trailing audio in the accumulation buffer (zero-padding to window size), post-processes final predictions, and returns final segments.
-
 ```ts
 const tailSegments = await engine.flush();
 ```
 
----
+### `engine.reset()`
 
-#### `engine.reset()`
+Resets internal streaming state: clears the FIFO buffer, speaker cache, silence tracking profile, and audio accumulator.
 
 ```ts
 reset(): Promise<void>;
 ```
-
-Resets internal streaming state: clears the FIFO buffer, speaker cache, silence tracking profile, and audio accumulator.
 
 ```ts
 await engine.reset();
 ```
 
----
+### `engine.release()`
 
-#### `engine.release()`
+Unloads the native ONNX Runtime session, frees C++ DSP scratch buffers, and unregisters the native instance.
 
 ```ts
 release(): Promise<void>;
 ```
 
-Unloads the native ONNX Runtime session, frees C++ DSP scratch buffers, and unregisters the native instance.
-
 ```ts
 await engine.release();
 ```
 
----
+### `pipeline.stop()`
 
-### Pipeline handle (`DiarizationPipelineHandle`)
-
-Returned by `engine.startPipeline(...)`. Controls the background native worker thread.
-
-#### `pipeline.stop()`
+Signals the worker thread to stop and unregisters the pipeline. Call before releasing the associated audio and segment buffers.
 
 ```ts
 stop(): Promise<void>;
 ```
 
-Signals the worker thread to stop and unregisters the pipeline. Call before releasing the associated audio and segment buffers.
+### `pipeline.flush()`
 
----
-
-#### `pipeline.flush()`
+Forces an in-band flush of any buffered audio while the pipeline continues running.
 
 ```ts
 flush(): Promise<void>;
 ```
 
-Forces an in-band flush of any buffered audio while the pipeline continues running.
+### `pipeline.reset()`
 
----
-
-#### `pipeline.reset()`
+Resets the native engine state in-band without stopping the pipeline worker.
 
 ```ts
 reset(): Promise<void>;
 ```
 
-Resets the native engine state in-band without stopping the pipeline worker.
+### `pipeline.getStatus()`
 
----
-
-#### `pipeline.getStatus()`
+Returns current metrics for the pipeline worker.
 
 ```ts
 getStatus(): Promise<StreamingPipelineStatus>;
 ```
 
-Returns current metrics for the pipeline worker:
-
 ```ts
-interface StreamingPipelineStatus {
-  pipelineId: string;
-  isRunning: boolean;
-  chunksProcessed: number;
-  unitsRead: number;
-  unitsWritten: number;
-  error: string | null;
-}
+const status = await pipeline.getStatus();
+console.log(status.isRunning, status.chunksProcessed, status.unitsWritten);
 ```
 
----
+### `pipeline.completed`
 
-#### `pipeline.completed`
+A Promise that settles when the worker loop exits (normally or via error).
 
 ```ts
 readonly completed: Promise<StreamingPipelineCompletion>;
 ```
 
-A Promise that settles when the worker loop exits (normally or via error). Resolves with `StreamingPipelineCompletion`:
+```ts
+await pipeline.completed;
+// { pipelineId, reason: 'completed' | 'stopped' | 'error', chunksProcessed, unitsRead, unitsWritten, error }
+```
+
+---
+
+### Streaming latency profiles
+
+NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency vs accuracy:
+
+| Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Use Case |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Low Latency** *(recommended for live mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
+| **Ultra-Low Latency** | `3` | `1` | `188` | **0.32s** | **0.24s** (~4 updates/sec) | Ultra-fast speaker change detection |
+| **High Latency (Default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
 
 ```ts
-interface StreamingPipelineCompletion {
-  pipelineId: string;
-  reason: 'completed' | 'stopped' | 'error';
-  chunksProcessed: number;
-  unitsRead: number;
-  unitsWritten: number;
-  error: string | null;
-}
+const engine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/sortformer-folder' },
+  chunkLen: 6,
+  rightContext: 7,
+  fifoLen: 188,
+});
+console.log(engine.latencySeconds); // 1.04
 ```
 
 ---
@@ -541,29 +453,40 @@ flowchart LR
 
 ---
 
-## Types and constants
+## Types
 
-```ts
-import type {
-  StreamingDiarizationConcreteModelType,
-  StreamingDiarizationModelType,
-  StreamingDiarizationInitOptionsShared,
-  StreamingDiarizationAutoInitializeOptions,
-  StreamingDiarizationCustomInitializeOptions,
-  StreamingDiarizationInitializeOptions,
-  StreamingDiarizationOptions,
-  DiarizationPipelineHandle,
-  StreamingDiarizationEngine,
-  DiarizationDetectResult,
-} from 'react-native-sherpa-onnx/diarization';
-import type {
-  StreamingPipelineCompletion,
-  StreamingPipelineStatus,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
+### Streaming diarization types (`react-native-sherpa-onnx/diarization`)
 
-- **`StreamingDiarizationConcreteModelType`**: `'sortformer'`
-- **`StreamingDiarizationModelType`**: `'sortformer' | 'auto'`
+| Type | Description |
+| --- | --- |
+| `StreamingDiarizationConcreteModelType` | `'sortformer'` |
+| `StreamingDiarizationModelType` | `'sortformer' \| 'auto'` |
+| `StreamingDiarizationInitOptionsShared` | Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug` |
+| `StreamingDiarizationAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared tuning |
+| `StreamingDiarizationCustomInitializeOptions` | Custom init: `initMode: 'custom'`, `modelType`, `customConfig: { model, metadata? }` + shared tuning |
+| `StreamingDiarizationInitializeOptions` | Union of auto and custom init options |
+| `StreamingDiarizationOptions` | Pipeline start options: `{ chunkSize?: number }` |
+| `StreamingDiarizationEngine` | `startPipeline`, `feed`, `flush`, `reset`, `release` + read-only props (`instanceId`, `sampleRate`, `maxSpeakers`, `feedSamples`, `strideSamples`, `latencySeconds`) |
+| `DiarizationPipelineHandle` | `stop`, `flush`, `reset`, `getStatus`, `completed` + read-only `instanceId`, `pipelineId` |
+| `DiarizationDetectResult` | Return of `detectDiarizationModel()` |
+| `DiarizationCustomConfig` | `{ model: FileSource; metadata?: FileSource }` |
+
+### Shared pipeline types (`react-native-sherpa-onnx/audiobuffer`)
+
+| Type | Description |
+| --- | --- |
+| `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
+| `StreamingPipelineCompletion` | `{ pipelineId, reason: 'completed' \| 'stopped' \| 'error', chunksProcessed, unitsRead, unitsWritten, error }` |
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `LiveAudioBufferIdSource` | Live audio ref passed to `startPipeline` |
+| `LiveSegmentBufferIdSource` | Live segment buffer for pipeline output |
+| `OfflineAudioBufferIdSource` | Offline audio ref passed to `engine.feed` |
+
+See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [segmentbuffer-streaming.md](segmentbuffer-streaming.md).
 
 ---
 
