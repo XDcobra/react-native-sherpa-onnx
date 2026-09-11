@@ -4,21 +4,9 @@
 
 ## Introduction
 
-On-device **batch** speaker diarization: who spoke when in a recording, as anonymous
-cluster indices. Uses a **pyannote / reverb** segmentation model plus a separate
-**speaker-embedding** model and agglomerative clustering.
+On-device **batch** speaker diarization: who spoke when in a recording, as anonymous cluster indices. Uses a **pyannote / reverb** segmentation model plus a separate **speaker-embedding** model and agglomerative clustering. Segmentation packs from the `speaker-segmentation-models` release contain **only** the pyannote/reverb ONNX — you must supply a speaker-embedding model separately (same packs as [speaker identification](speaker-identification-offline.md)).
 
-Import path: `react-native-sherpa-onnx/diarization`
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Mono PCM |
-| **Output** | [`OfflineSegmentBuffer`](segmentbuffer.md) | Empty buffer; segments written with `kind: 'diarization'` |
-| **Engine** | `DiarizationEngine` via `createDiarization` | `diarize`, `recluster`, `getClusterEmbeddings`, `destroy` |
-
-Segmentation packs from the `speaker-segmentation-models` release contain **only**
-the pyannote/reverb ONNX — you must supply a speaker-embedding model separately
-(same packs as [speaker identification](speaker-identification-offline.md)).
+Import path: **`react-native-sherpa-onnx/diarization`**.
 
 ## Quick start
 
@@ -64,6 +52,14 @@ const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 4096);
 
 await diar.destroy();
 ```
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Mono PCM |
+| **Segments out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Empty buffer; segments written with `kind: 'diarization'` |
+| **Engine** | `DiarizationEngine` via `createDiarization` | `diarize`, `recluster`, `getClusterEmbeddings`, `destroy` |
 
 ## API reference
 
@@ -188,6 +184,18 @@ const { clusterToName, timeline } = await mapDiarizationToNames(
   diar, sid, segmentOut, { threshold: 0.5 }
 );
 timeline.forEach((s) => console.log(s.name ?? 'Unknown', s.startSec, s.endSec));
+```
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | during `diarize` pipeline steps | optional on `DiarizeOptions`; coarse fraction-based |
+
+```ts
+const result = await diar.diarize(audioIn, segmentOut, {
+  onProgress: (p) => console.log(`${(p.fraction * 100).toFixed(0)}%`),
+});
 ```
 
 ## Types

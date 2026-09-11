@@ -4,19 +4,9 @@
 
 ## Introduction
 
-On-device **true streaming** speaker diarization: continuously identifies "who spoke when"
-in real-time audio. Powered by **NeMo Sortformer** running natively on **ONNX Runtime (ORT)**
-with high-performance C++ DSP (Radix-2 FFT + sparse Mel filterbanks) and bounded memory
-via NeMo smart cache compression.
+On-device **true streaming** speaker diarization: continuously identifies "who spoke when" in real-time audio. Powered by **NeMo Sortformer** running natively on **ONNX Runtime (ORT)** with high-performance C++ DSP (Radix-2 FFT + sparse Mel filterbanks) and bounded memory via NeMo smart cache compression.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mono PCM audio buffer (`live_*`) drained by native worker |
-| **Output** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | Live segment buffer (`seg_live_*`); native worker appends segments with `kind: 'diarization'` |
-| **Engine** | `StreamingDiarizationEngine` via `createStreamingDiarization` | Starts pipeline, exposes model properties, manual feed/flush/reset |
-| **Pipeline Handle** | `DiarizationPipelineHandle` via `engine.startPipeline(...)` | `stop`, `flush`, `reset`, `getStatus`, `completed` |
-
-Import path: `react-native-sherpa-onnx/diarization`
+Import path: **`react-native-sherpa-onnx/diarization`**.
 
 In this guide:
 - **`engine`** refers to the `StreamingDiarizationEngine` instance.
@@ -174,6 +164,15 @@ const downloaded = await downloadModel(model, {
 ```
 
 ---
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mono PCM (`live_*`) drained by native worker |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `seg_live_*`; native worker appends `kind: 'diarization'` segments |
+| **Engine** | `StreamingDiarizationEngine` via `createStreamingDiarization` | Starts pipeline, exposes model properties, manual feed/flush/reset |
+| **Pipeline handle** | `DiarizationPipelineHandle` via `engine.startPipeline(...)` | `stop`, `flush`, `reset`, `getStatus`, `completed` |
 
 ## API reference
 
@@ -368,6 +367,23 @@ const engine = await createStreamingDiarization({
   fifoLen: 188,
 });
 console.log(engine.latencySeconds); // 1.04
+```
+
+---
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegmentAppended` | `{ segment, index }` | native worker appends a speaker turn to `LiveSegmentBuffer` | set on `createEmptyLiveSegmentBuffer`; `segment.payload.speaker` is cluster index |
+
+```ts
+const segmentOut = await createEmptyLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => {
+    console.log(`Speaker ${e.segment.payload?.speaker}: ${e.segment.startSample} -> ${e.segment.endSample}`);
+  },
+});
 ```
 
 ---

@@ -2,16 +2,9 @@
 
 ## Introduction
 
-Offline forced alignment with a **buffer-first** API.
+Offline forced alignment with a **buffer-first** API. Takes a reference transcript and waveform, writes time-aligned segments (`kind: 'alignment'`) into an offline segment buffer. Supports proportional, estimated, accurate (wav2vec2 CTC), and VAD-anchored modes.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input (text)** | [`OfflineTextBuffer`](textbuffer-offline.md) | Reference transcript |
-| **Input (audio)** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Waveform to align against |
-| **Output** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Caller-provided buffer; segments written with `kind: 'alignment'` |
-| **Engine** | `AlignmentEngine` via `createAlignment` | `alignTextToAudio(textIn, audioIn, segmentOut, options)` |
-
-Import path: `react-native-sherpa-onnx/alignment`
+Import path: **`react-native-sherpa-onnx/alignment`**.
 
 ## Modes
 
@@ -273,6 +266,15 @@ const subtitleRows = alignmentSegments.map((segment) => ({
 }));
 ```
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`OfflineTextBuffer`](textbuffer-offline.md) | Reference transcript |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Waveform to align against |
+| **Segments out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Caller-provided empty buffer; segments written with `kind: 'alignment'` |
+| **Engine** | `AlignmentEngine` via `createAlignment` | `alignTextToAudio(textIn, audioIn, segmentOut, options)` |
+
 ## API reference
 
 ### `detectAlignmentModel(source, options?)`
@@ -409,7 +411,11 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#alignment-offline-patterns](feature-pipelines.md#alignment-offline-patterns).
 
-## Offline progress (`onProgress`)
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each alignment step | coarse step-based; not sample-accurate |
 
 Alignment supports optional coarse offline progress via `onProgress` on all `AlignTextToAudioOptions` variants.
 The callback payload is `OrchestrationProgress` and follows offline orchestrator semantics:
