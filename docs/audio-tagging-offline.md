@@ -59,17 +59,6 @@ try {
   });
   // Omit segmentation / mode 'off' → oneshot.
   const result = await tagger.tag(audio);
-  // {
-  //   events: [
-  //     { name: 'Speech', index: 0, prob: 0.91 },
-  //     { name: 'Music', index: 137, prob: 0.12 },
-  //     …
-  //   ],
-  //   primary: { name: 'Speech', index: 0, prob: 0.91 },
-  //   audioDuration: 3.2,
-  //   elapsedMs: 180,
-  //   topK: 5,
-  // }
   console.log(result.primary?.name, result.events);
   await releasePipelineAudioBuffer(audio);
 } finally {
@@ -98,22 +87,11 @@ const result = await tagger.tag(audio, {
   },
   onProgress: (p) =>
     console.log(`${p.currentSegment + 1}/${p.totalSegments}`),
-  // p → { currentSegment: 0, totalSegments: 3, fraction: 0, currentSegmentDurationMs: 2100, elapsedMs: 12 }
   onSegment: (e) =>
     console.log('#', e.segmentIndex, e.result.primary?.name, e.durationMs),
-  // e → {
-  //   segmentIndex: 0,
-  //   totalSegments: 3,
-  //   startTime: 0.4,
-  //   endTime: 2.5,
-  //   durationMs: 2100,
-  //   result: { events: […], primary: { name: 'Siren', … }, audioDuration: 2.1, elapsedMs: 90, topK: 5 },
-  // }
 });
 
-// result.segments         // [{ segmentIndex, totalSegments, startTime, endTime, durationMs, result }, …]
-// result.totalSegments    // 3
-// result.processingTimeMs // 420
+console.log(result.totalSegments, result.processingTimeMs, result.segments.length);
 ```
 
 Offline Auto supports **`speech_energy_silence` only**. `continuous_frames` is streaming-only in `segmentOfflineBuffer` (use it on [live overload](audio-tagging-live.md)). Speech-only VAD evaluators (`speech_vad_model`, `speech_pyannote_segmentation`) are **not** supported — they can miss non-speech events such as sirens or music.
@@ -136,24 +114,96 @@ Optional empty `targetSegmentBuffer` attaches `AudioTaggingSpeechSegmentPayload`
 
 ## API reference
 
-### Detection
+### `detectAudioTaggingModel(source, options?)`
 
-#### `detectAudioTaggingModel(source, options?)`
+File-based detection **without** initializing the engine. Prefer before `createAudioTagging` to confirm pack layout and quantization. Unified detection: [model-detect.md](model-detect.md).
+
+Packs must include exactly one of CED or Zipformer ONNX **plus** `class_labels_indices.csv`. These packs are **not** interchangeable with ASR or KWS zipformer packs.
 
 ```ts
 function detectAudioTaggingModel(
   source: FileSource,
-  options?: {
-    modelType?: 'ced' | 'zipformer' | 'auto';
-    assetName?: string;
-    quantization?: QuantizationPreference;
-  }
+  options?: AudioTaggingDetectOptions
 ): Promise<AudioTaggingDetectModelResult>;
 ```
 
-Prefer detect before `createAudioTagging`. Packs must include exactly one of CED or Zipformer ONNX **plus** `class_labels_indices.csv`. These packs are **not** interchangeable with ASR or KWS zipformer packs.
+```ts
+const det = await detectAudioTaggingModel(
+  { kind: 'fs', path: '/path/to/sherpa-onnx-ced-mini-audio-tagging-2024-04-19' },
+  { modelType: 'auto' }
+);
+if (!det.success) throw new Error(det.error ?? 'Audio tagging detection failed');
+```
 
-### Models and required files
+### `createAudioTagging(options)`
+
+Creates an `AudioTaggingEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`modelType: 'ced' | 'zipformer'` + `customConfig: { model, labels }`). Shared tuning: `topK`, `numThreads`, `provider`, `debug`.
+
+```ts
+function createAudioTagging(
+  options: AudioTaggingInitializeOptions
+): Promise<AudioTaggingEngine>;
+```
+
+```ts
+const tagger = await createAudioTagging({
+  modelSource: { kind: 'fs', path: '/path/to/ced-mini' },
+  quantization: 'auto',
+  topK: 5,
+});
+```
+
+### `tagger.tag(audio, options?)` — oneshot
+
+Whole-clip offline compute. Omit `segmentation` or set `mode: 'off'`. Optional per-call `topK`. Does **not** emit `onProgress` / `onSegment`.
+
+```ts
+tag(
+  audio: OfflineAudioBufferIdSource,
+  options?: AudioTaggingTagOptions & { segmentation?: { mode?: 'off' } }
+): Promise<AudioTaggingResult>;
+```
+
+```ts
+const result = await tagger.tag(audio);
+console.log(result.primary?.name, result.events.length);
+```
+
+### `tagger.tag(audio, options)` — segmented
+
+`mode: 'auto'` + policy (`speech_energy_silence` only offline). Optional `onProgress` / `onSegment` / `targetSegmentBuffer` / `topK` / `errorRecovery`.
+
+```ts
+tag(
+  audio: OfflineAudioBufferIdSource,
+  options: AudioTaggingTagOptions & {
+    segmentation: { mode: 'auto'; policy?: SegmentationPolicy };
+  }
+): Promise<SegmentedAudioTaggingResult>;
+```
+
+```ts
+const result = await tagger.tag(audio, {
+  segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
+});
+```
+
+Live overload `tag(liveAudio, liveText, options)`: [audio-tagging-live.md](audio-tagging-live.md).
+
+### `tagger.destroy()`
+
+Releases the native instance (joins any live workers first).
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await tagger.destroy();
+```
+
+## Models and required files
 
 | `modelType` | Required files | Custom-init keys |
 | --- | --- | --- |
@@ -165,62 +215,6 @@ Validate category: **`audioTagging`**. Quantization: `'auto' \| 'int8' \| 'fp16'
 Recommended starter pack (size-first): `sherpa-onnx-ced-mini-audio-tagging-2024-04-19`. Other assets on the same release include `ced-tiny` / `ced-small` / `ced-base` and `zipformer` / `zipformer-small`.
 
 Download via `ModelCategory.AudioTagging` → release tag [`audio-tagging-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models) (built-in GitHub source; see [download-manager.md](download-manager.md)).
-
-### Factory
-
-#### `createAudioTagging(options)`
-
-```ts
-function createAudioTagging(
-  options: AudioTaggingInitializeOptions
-): Promise<AudioTaggingEngine>;
-```
-
-Init modes:
-
-- **`auto`** (default): `modelSource` + optional `modelType` / `quantization`.
-- **`custom`**: `modelType: 'ced' | 'zipformer'` + `customConfig: { model, labels }` (`FileSource` each).
-
-Shared tuning: `topK` (default applied when `tag()` omits it), `numThreads`, `provider`, `debug`.
-
-### Engine methods
-
-```ts
-interface AudioTaggingEngine {
-  readonly instanceId: string;
-
-  tag(
-    audio: OfflineAudioBufferIdSource,
-    options?: AudioTaggingTagOptions & {
-      segmentation?: { mode?: 'off' };
-    }
-  ): Promise<AudioTaggingResult>;
-
-  tag(
-    audio: OfflineAudioBufferIdSource,
-    options: AudioTaggingTagOptions & {
-      segmentation: { mode: 'auto'; policy?: SegmentationPolicy };
-    }
-  ): Promise<SegmentedAudioTaggingResult>;
-
-  /** Live overload — see audio-tagging-live.md */
-  tag(
-    audioIn: LiveAudioBufferIdSource,
-    textOut: LiveTextBufferIdSource,
-    options: AudioTaggingLivePipelineOptions
-  ): Promise<AudioTaggingPipelineHandle>;
-
-  destroy(): Promise<void>;
-}
-```
-
-| Method | Behavior |
-| --- | --- |
-| `tag` (oneshot) | Whole-clip offline compute. Omit `segmentation` or `mode: 'off'`. Optional per-call `topK`. |
-| `tag` (segmented) | `mode: 'auto'` + policy (`speech_energy_silence`). Optional `onProgress` / `onSegment` / `targetSegmentBuffer` / `topK`. |
-| `destroy` | Releases the native instance (joins any live workers first). |
-
-`AudioTaggingTagOptions` = optional `topK` + segmentation + optional `onProgress` / `onSegment` / `targetSegmentBuffer` / `errorRecovery`. Oneshot `tag` does **not** emit progress/segment events.
 
 ---
 
@@ -287,35 +281,39 @@ See [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ---
 
-## Types and constants
+## Types
 
-```ts
-import {
-  createAudioTagging,
-  detectAudioTaggingModel,
-  DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
-  AUDIO_TAGGING_LIVE_MIN_SPAN_MS,
-  AUDIO_TAGGING_MODEL_TYPES,
-  AudioTaggingErrorCode,
-  type AudioTaggingEngine,
-  type AudioTaggingTagOptions,
-  type AudioTaggingResult,
-  type SegmentedAudioTaggingResult,
-  type AudioTaggingSegmentEvent,
-  type AudioTaggingEvent,
-  type AudioTaggingLivePipelineOptions,
-  type AudioTaggingLiveSegmentEvent,
-  type AudioTaggingPipelineHandle,
-} from 'react-native-sherpa-onnx/audio-tagging';
-```
+### Core audio-tagging types (`react-native-sherpa-onnx/audio-tagging`)
 
-- **`AudioTaggingEvent`:** `{ name, index, prob }`
-- **`AudioTaggingResult`:** `{ events, primary?, audioDuration, elapsedMs, topK }`
-- **`SegmentedAudioTaggingResult`:** `{ segments, totalSegments, processingTimeMs }`
-- **`AudioTaggingSegmentEvent`:** per-span result (`result`, ranges, `totalSegments`, …)
-- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)
-- **`DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY`:** energy silence, `minSegmentMs: 1500`
-- **`AUDIO_TAGGING_LIVE_MIN_SPAN_MS`:** `1500` (live span floor — see live doc)
+| Type | Description |
+| --- | --- |
+| `AudioTaggingModelType` | `'ced' \| 'zipformer'` |
+| `AUDIO_TAGGING_MODEL_TYPES` | Readonly runtime list of model types |
+| `AudioTaggingConcreteModelType` | Alias of `AudioTaggingModelType` (non-`auto`) |
+| `AudioTaggingDetectOptions` | Options for `detectAudioTaggingModel` (`modelType?`, `assetName?`, `quantization?`) |
+| `AudioTaggingDetectModelResult` | Return of `detectAudioTaggingModel()` |
+| `AudioTaggingInitializeOptions` | Auto or custom init union for `createAudioTagging` |
+| `AudioTaggingCustomConfig` | `{ model, labels }` `FileSource` paths for custom init |
+| `AudioTaggingTagOptions` | Optional `topK`, segmentation, `onProgress`, `onSegment`, `targetSegmentBuffer`, `errorRecovery` |
+| `AudioTaggingEvent` | `{ name: string; index: number; prob: number }` |
+| `AudioTaggingResult` | `{ events, primary?, audioDuration, elapsedMs, topK }` |
+| `AudioTaggingSegmentEvent` | Per-span offline result (`segmentIndex`, ranges, `result`) |
+| `SegmentedAudioTaggingResult` | `{ segments, totalSegments, processingTimeMs }` |
+| `AudioTaggingEngine` | `tag` (oneshot / segmented / live), `destroy` |
+| `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` | Runtime constant — energy silence, `minSegmentMs: 1500` |
+| `AudioTaggingErrorCode` | Offline/live error code object |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+
+Live-only types (`AudioTaggingLivePipelineOptions`, `AudioTaggingLiveSegmentEvent`, `AudioTaggingPipelineHandle`, `AUDIO_TAGGING_LIVE_MIN_SPAN_MS`): [audio-tagging-live.md](audio-tagging-live.md#types).
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineAudioBufferIdSource` | Offline audio ref or handle passed to `tag` |
+| `OfflineSegmentBufferIdSource` | Optional `targetSegmentBuffer` for payload append |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ---
 

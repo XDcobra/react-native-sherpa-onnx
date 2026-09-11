@@ -63,33 +63,14 @@ const pipeline = await tagger.tag(audioIn, textOut, {
       e.durationMs,
       e.result.events
     ),
-  // e → {
-  //   segmentIndex: 0,
-  //   startTime: 1.2,
-  //   endTime: 3.0,
-  //   durationMs: 1800,
-  //   result: {
-  //     events: [
-  //       { name: 'Dog', index: 74, prob: 0.88 },
-  //       { name: 'Speech', index: 0, prob: 0.21 },
-  //       …
-  //     ],
-  //     primary: { name: 'Dog', index: 74, prob: 0.88 },
-  //     audioDuration: 1.8,
-  //     elapsedMs: 0,
-  //     topK: 2,
-  //   },
-  // }
 });
-// pipeline → AudioTaggingPipelineHandle
-//   { instanceId, pipelineId, stop, flush, reset, getStatus, completed }
 
 await startMicToLiveAudioBuffer(audioIn);
 // … capture …
 await stopMicToLiveAudioBuffer();
 await finalizeLiveAudioBuffer(audioIn);
 const completion = await pipeline.completed;
-// completion → { reason: 'completed' }  // or { reason: 'stopped' } after stop()
+console.log(completion.reason);
 
 await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
@@ -162,6 +143,12 @@ See [live-text-meta-json-tree-contract.md](future-work/live-text-meta-json-tree-
 
 ## API reference
 
+Factory, detection, and model init are the same as offline — see [audio-tagging-offline.md](audio-tagging-offline.md#api-reference).
+
+### `tagger.tag(audioIn, textOut, options)`
+
+Starts a live overload pipeline: tags each committed audio span with offline CED/Zipformer weights, commits the primary event name to `textOut`, and returns a pipeline handle.
+
 ```ts
 tag(
   audioIn: LiveAudioBufferIdSource,
@@ -170,33 +157,39 @@ tag(
 ): Promise<AudioTaggingPipelineHandle>;
 ```
 
+**Constraints:** both buffers must be live; `segmentation.policy` required (`speech_energy_silence` or `continuous_frames`); span floor ≥ `AUDIO_TAGGING_LIVE_MIN_SPAN_MS` (1500).
+
 ```ts
-type AudioTaggingLivePipelineOptions = {
+const pipeline = await tagger.tag(audioIn, textOut, {
+  topK: 5,
   segmentation: {
-    policy: SegmentationPolicy; // speech_energy_silence | continuous_frames
-    mode?: 'auto';
-  };
-  topK?: number;
-  onSegment?: (event: AudioTaggingLiveSegmentEvent) => void;
-  targetSegmentBuffer?: LiveSegmentBufferIdSource;
-};
+    mode: 'auto',
+    policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
+  },
+  onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
+});
 ```
 
-`AudioTaggingLiveSegmentEvent` carries `segmentIndex`, `startTime`, `endTime`, `durationMs`, and `result: AudioTaggingResult` (parsed from LiveText). There is no `onLanguageChanged` / separate `onEvent` API — use `onSegment` (and optionally read LiveText commits).
+`AudioTaggingLiveSegmentEvent` carries `segmentIndex`, `startTime`, `endTime`, `durationMs`, and `result: AudioTaggingResult` (parsed from LiveText). There is no separate `onEvent` API — use `onSegment` (and optionally read LiveText commits).
 
 ## Optional `targetSegmentBuffer`
 
-Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline:
+Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload.source: 'audioTagging'`). Offline `targetSegmentBuffer` ids are rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
 
-```ts
-payload: {
-  source: 'audioTagging';
-  primaryName?: string;
-  events?: Array<{ name: string; index: number; prob: number }>;
-}
-```
+## Types
 
-Offline `targetSegmentBuffer` ids are rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
+### Live-only audio-tagging types (`react-native-sherpa-onnx/audio-tagging`)
+
+| Type | Description |
+| --- | --- |
+| `AudioTaggingLivePipelineOptions` | Mandatory `segmentation.policy`; optional `topK`, `onSegment`, `targetSegmentBuffer` |
+| `AudioTaggingLiveSegmentEvent` | Per-span live callback: ranges + `result: AudioTaggingResult` |
+| `AudioTaggingPipelineHandle` | Extends `StreamingPipelineHandle` — live run control surface |
+| `AUDIO_TAGGING_LIVE_MIN_SPAN_MS` | Runtime constant `1500` — live span floor |
+| `StreamingPipelineCompletion` | `{ reason: 'completed' \| 'stopped' }` from `completed` |
+| `StreamingPipelineStatus` | Snapshot from `getStatus()` |
+
+Engine, detect, and offline result types: [audio-tagging-offline.md](audio-tagging-offline.md#types).
 
 ## Error codes
 
