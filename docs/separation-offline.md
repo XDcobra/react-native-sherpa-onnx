@@ -79,6 +79,28 @@ try {
 | **Audio out × N** | [`OfflineAudioBuffer`](audiobuffer-offline.md) × N | N empty buffers at `getSampleRate()`; MVP writes **mono-downmixed** stems |
 | **Engine** | `SeparationEngine` via `createSeparation` | `separate`, `getSampleRate`, `getNumStems`, `destroy` |
 
+## Segmentation (Optional)
+
+Offline batch separation can exceed mobile memory on long mixes (**OOM**). Auto mode splits input audio into bounded chunks, separates all N stems per chunk in sync, and assembles each stem output in order — lower peak RAM with a small quality tradeoff at segment boundaries.
+
+**Modes:** `'off'` (default — one full pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | Energy / silence cuts; set `maxSegmentMs` as hard cap for mixed music |
+| `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
+| Text evaluators | ❌ | Audio-domain separation does not use text policies |
+
+```ts
+const result = await sep.separate(mixed, [vocalsOut, accompOut], {
+  segmentation: { mode: 'auto' },
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [separation-live.md](separation-live.md#segmentation-mandatory).
+
 ## API reference
 
 ### `detectSeparationModel(source, options?)`
@@ -211,30 +233,6 @@ const sep = await createSeparation({
   },
 });
 ```
-
-## Segmentation
-
-Offline batch separation can exceed mobile memory on long mixes (**OOM**). Segment-wise orchestration splits input audio into bounded chunks, runs **`separateOfflineAudioBuffers`** per chunk for **all N stems in sync**, then assembles each stem output in order — same pattern as [enhancement-offline.md — Segmentation](enhancement-offline.md#segmentation).
-
-Supported modes:
-
-- `'off'` (default): one full pass over the input buffer.
-- `'auto'`: split input by segmentation policy and process chunk by chunk.
-
-`'manual'` is not supported for offline separation.
-
-Default policy evaluator: `speech_energy_silence`. Mixed music may not have clear speech pauses — set **`maxSegmentMs`** in the policy as a hard cap on chunk length (primary OOM lever). Optional **`speech_vad_model`** if VAD-based cuts fit your content better.
-
-```ts
-const result = await sep.separate(mixed, [vocalsOut, accompOut], {
-  segmentation: { mode: 'auto' },
-  errorRecovery: 'skip',
-  maxRetriesPerSegment: 2,
-});
-console.log(result.status, result.completedSegments, result.totalSegments);
-```
-
-Segment boundaries can introduce audible artifacts at chunk edges (same tradeoff as offline enhancement). See [segmentation-engine.md](segmentation-engine.md) for policy fields and [memory-and-models.md](memory-and-models.md) for RAM planning.
 
 ## JS Events
 

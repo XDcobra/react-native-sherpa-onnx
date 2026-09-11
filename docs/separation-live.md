@@ -51,23 +51,6 @@ await finalizeLiveAudioBuffer(liveOuts[1]!);
 await sep.destroy();
 ```
 
-## Mandatory segmentation
-
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or invalid).
-
-| Evaluator | Live overload | Notes |
-| --- | --- | --- |
-| `continuous_frames` | ✅ | **Only** supported evaluator — fixed checkpoints via `checkpointIntervalMs` |
-| `speech_energy_silence` | ❌ | Silence cuts are rejected on this path |
-| `speech_vad_model` | ❌ | Speech-only windows are rejected on this path |
-| `speech_pyannote_segmentation` | ❌ | Not supported for separation live overload |
-
-`'off'` and `'manual'` modes are **not** supported on this path. Commit-only — no partial stems between segment boundaries.
-
-> Offline separators are designed for whole-utterance batch inference. Chunking via segmentation can introduce **audible artifacts at segment boundaries**. Tune `checkpointIntervalMs` for RAM vs. boundary quality.
-
-Policy details: [segmentation-engine.md](segmentation-engine.md).
-
 ## Buffer matrix
 
 | Role | Type | Notes |
@@ -84,6 +67,30 @@ Policy details: [segmentation-engine.md](segmentation-engine.md).
 | **Return** | `SeparationResult` | `SeparationPipelineHandle` |
 
 Mixed live/offline arguments throw `SEPARATION_INVALID_ARGUMENT`.
+
+## Segmentation (Mandatory)
+
+Live separation must cut the incoming audio stream into committed chunks before each offline separate step. `options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or invalid). Commit-only — no partial stems between segment boundaries; chunking can introduce audible artifacts at edges.
+
+**Modes:** `'auto'` only (policy required). `'off'` / `'manual'` are not supported on the live path.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `continuous_frames` | ✅ **Default** | Fixed checkpoints via `checkpointIntervalMs`; only supported evaluator |
+| `speech_energy_silence` | ❌ | Silence cuts are rejected on this path |
+| `speech_vad_model` | ❌ | Speech-only windows are rejected on this path |
+| `speech_pyannote_segmentation` | ❌ | Not supported for separation live overload |
+
+```ts
+const handle = await sep.separate(liveIn, liveOuts, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline path: [separation-offline.md](separation-offline.md#segmentation-optional).
 
 ## API reference
 

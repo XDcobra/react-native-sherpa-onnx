@@ -95,18 +95,29 @@ await releasePipelineAudioBuffer(audioIn);
 
 Mixed live/offline arguments throw `SID_INVALID_ARGUMENT`.
 
-## Mandatory segmentation
+## Segmentation (Mandatory)
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`).
+Live speaker identification must cut the incoming audio stream into committed utterances before each offline extract + search step. `options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode !== 'auto'`). SID owns the segmentation attach — you do not pass a pre-built VAD segment buffer.
 
-| Evaluator | Live overload | Notes |
+**Modes:** `'auto'` only (policy required). `'off'` / `'manual'` are not supported on the live path.
+
+| Evaluator | Supported | Notes |
 | --- | --- | --- |
-| `speech_energy_silence` | ✅ | Energy / silence cuts for speaker spans |
+| `speech_energy_silence` | ✅ **Default** | Energy / silence cuts for speaker spans |
 | `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
 | `continuous_frames` | ❌ | Fixed windows are a poor fit for speaker labeling |
 | `speech_pyannote_segmentation` | ❌ | Not in SID live `supportedEvaluators` |
 
-SID owns the attach — you do **not** pass a pre-built VAD segment In buffer. Policy tuning: [segmentation-engine.md](segmentation-engine.md).
+```ts
+const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
+  segmentation: {
+    policy: { evaluator: 'speech_energy_silence', silenceThresholdMs: 500, minSegmentMs: 1000 },
+  },
+  threshold: 0.5,
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline enrollment & label: [speaker-identification-offline.md](speaker-identification-offline.md).
 
 ## Pipeline handle
 
