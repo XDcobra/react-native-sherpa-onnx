@@ -133,6 +133,29 @@ try {
 | **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
 | **Engine** | `TtsEngine` via `createTTS` | `synthesize`, `updateParams`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
 
+## Segmentation (Optional)
+
+Long text in one `synthesize` call can exhaust device RAM. Auto mode splits the text buffer into chunks, synthesizes each offline, and stitches PCM in order — lower peak RAM with a small quality tradeoff at boundaries.
+
+**Modes:** `'off'` (default — whole text in one pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `text_synthetic_auto` | ✅ **Default** | Sentence / length splits; `maxLengthChars` default 500 |
+| `text_punctuation_assisted` | ✅ | Needs `policy.punctuationInstanceId`; then same split as synthetic |
+| Speech / frame evaluators | ❌ | Audio-domain policies are not used for offline TTS |
+
+```ts
+await tts.synthesize(textBuf, audioBuf, {
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to text_synthetic_auto + maxLengthChars: 500
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [tts-live.md](tts-live.md#segmentation-mandatory).
+
 ## API reference
 
 ### `detectTtsModel(source, options?)`
@@ -356,50 +379,6 @@ const tts = await createTTS({
   modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
 });
 ```
-
-## Segmentation
-
-TTS models in this SDK are **offline-only** — there is no acoustic streaming at the character level. Generating audio from very long texts in a single call can exhaust device RAM (**OOM**). The segmentation engine splits the text buffer into **smaller chunks**, synthesizes each chunk with the offline engine, and stitches the resulting PCM into the output audio buffer in order — bounding peak RAM at the cost of a small quality tradeoff at segment boundaries.
-
-Supported modes for offline TTS:
-
-- `'off'` (default) — no segmentation; the entire text is synthesized in one pass.
-- `'auto'` — the engine segments the text using the configured policy.
-
-> `'manual'` mode is not supported for offline TTS.
-
-Default policy evaluator: **`text_synthetic_auto`** — splits on sentence boundaries, with a `maxLengthChars` cap of 500 characters.
-
-```ts
-import { createTTS } from 'react-native-sherpa-onnx/tts';
-import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
-import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-
-const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/vits' }, modelType: 'vits' });
-const sr = await tts.getSampleRate();
-
-const textBuf = await createOfflineTextBufferFromText(longText); // multiple sentences
-const audioBuf = await createEmptyOfflineAudioBuffer(sr);
-try {
-  const result = await tts.synthesize(textBuf, audioBuf, {
-    segmentation: {
-      mode: 'auto',
-      // policy defaults to { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 }
-    },
-    errorRecovery: 'skip',
-    onProgress: (p) => console.log(`segment ${p.completedSegments}/${p.totalSegments}`),
-  });
-  console.log(result.status, result.totalSegments, result.completedSegments);
-} finally {
-  await releasePipelineTextBuffer(textBuf);
-  await releasePipelineAudioBuffer(audioBuf);
-}
-await tts.destroy();
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
-
-For the live overload path (`LiveTextBuffer` → `LiveAudioBuffer`), see [tts-live.md](tts-live.md).
 
 ## Pipeline composition
 

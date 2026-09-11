@@ -79,23 +79,30 @@ await tts.destroy();
 
 Mixed live/offline arguments throw `TTS_INVALID_ARGUMENT`.
 
-## Mandatory segmentation
+## Segmentation (Mandatory)
 
-`options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode` is `'off'`). Commit-only — no partial audio between segment boundaries.
+Live TTS must cut the incoming text stream into committed chunks before each offline synthesize step. `options.segmentation.policy` is **required** (`LIVE_OFFLINE_SEGMENTATION_REQUIRED` if missing or `mode` is `'off'`). Commit-only — no partial audio between boundaries.
 
-| Evaluator | Live overload | Notes |
+**Modes:** `'auto'` only (policy required). `'off'` / `'manual'` are not supported on the live path.
+
+| Evaluator | Supported | Notes |
 | --- | --- | --- |
-| `text_synthetic_auto` | ✅ | Default for TTS — sentence / length commits on the live text buffer |
+| `text_synthetic_auto` | ✅ **Default** | Sentence / length commits on the live text buffer; typical `maxLengthChars: 500` |
 | `text_punctuation_assisted` | ✅ | Needs `policy.punctuationInstanceId`; then same split as synthetic |
 | Speech / frame evaluators | ❌ | Audio-domain policies are not used for TTS live overload |
 
-Text-domain engines commit segments **on the `LiveTextBuffer` itself** — no separate `seg_live_*` input is required. Policy details: [segmentation-engine.md](segmentation-engine.md).
+Text-domain engines commit on the `LiveTextBuffer` itself — no separate `seg_live_*` input.
 
-| Aspect | Live overload (`createTTS`) |
-| --- | --- |
-| Weights | Offline (VITS, Kokoro, Pocket, Zipvoice, Matcha, Supertonic, …) |
-| Incremental | No (per-segment synthesis) |
-| Latency | Per-segment (higher than true streaming TTS) |
+```ts
+await tts.synthesize(textIn, audioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [tts-offline.md](tts-offline.md#segmentation-optional).
 
 ## Pipeline handle
 
