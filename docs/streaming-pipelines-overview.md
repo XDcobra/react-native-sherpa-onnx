@@ -46,7 +46,7 @@ Handles are typed per feature (`SttPipelineHandle`, `EnhancementPipelineHandle`,
 | --- | --- |
 | STT streaming + `SttPipelineHandle` | [stt-streaming.md](stt-streaming.md) |
 | KWS streaming + `StreamingPipelineHandle` | [kws-streaming.md](kws-streaming.md) |
-| TTS live overload + `TtsPipelineHandle` | [tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption](tts-offline.md#live-overload-on-offline-tts-offline-weights-live-consumption) and [tts-live.md](tts-live.md) |
+| TTS live overload + `TtsPipelineHandle` | [tts-live.md](tts-live.md) |
 | Enhancement streaming + `EnhancementPipelineHandle` | [enhancement-streaming.md](enhancement-streaming.md) |
 | Separation live overload + `SeparationPipelineHandle` | [separation-live.md](separation-live.md) |
 | VAD streaming + `VADPipelineHandle` | [vad-streaming.md](vad-streaming.md) |

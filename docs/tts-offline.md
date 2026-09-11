@@ -2,23 +2,11 @@
 
 ## Introduction
 
-On-device **batch** synthesis with a **pipeline-first** API.
+On-device **batch** synthesis with a **pipeline-first** API. Supports VITS, Matcha, Kokoro, Kitten, Pocket, Zipvoice, and Supertonic model families with optional voice cloning (Zipvoice / Pocket). For live synthesis with PCM playback (offline weights on live buffers), see [tts-live.md](tts-live.md).
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated text buffer |
-| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
-| **Engine** | `TtsEngine` via `createTTS` | Instance-based — call `destroy()` when done |
+Import path: **`react-native-sherpa-onnx/tts`**.
 
-For live synthesis with PCM playback, see [Live overload](#live-overload-on-offline-tts-offline-weights-live-consumption) below.
-
-**Import paths:**
-```ts
-import { createTTS, detectTtsModel, ... } from 'react-native-sherpa-onnx/tts';
-import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
-import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
-```
+Buffer helpers: `react-native-sherpa-onnx/audiobuffer`, `react-native-sherpa-onnx/textbuffer`, `react-native-sherpa-onnx/audio`.
 
 ## Quick start
 
@@ -137,6 +125,65 @@ try {
 }
 ```
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated text buffer |
+| **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at model sample rate; synthesis fills it once |
+| **Engine** | `TtsEngine` via `createTTS` | `synthesize`, `updateParams`, `getModelInfo`, `getSampleRate`, `getNumSpeakers`, `destroy` |
+
+## Segmentation (Optional)
+
+Long text in one `synthesize` call can exhaust device RAM. Auto mode splits the text buffer into chunks, synthesizes each offline, and stitches PCM in order — lower peak RAM with a small quality tradeoff at boundaries.
+
+**Modes:** `'off'` (default — whole text in one pass) | `'auto'` (policy-driven chunks). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `text_synthetic_auto` | ✅ **Default** | Sentence / length splits; `maxLengthChars` default 500 |
+| `text_punctuation_assisted` | ✅ | Needs `policy.punctuationInstanceId`; then same split as synthetic |
+| Speech / frame evaluators | ❌ | Audio-domain policies are not used for offline TTS |
+
+```ts
+await tts.synthesize(textBuf, audioBuf, {
+  segmentation: {
+    mode: 'auto',
+    // policy defaults to text_synthetic_auto + maxLengthChars: 500
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [tts-live.md](tts-live.md#segmentation-mandatory).
+
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `vits` | `ttsModel`, `tokens` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `matcha` | `acousticModel`, `vocoder`, `tokens` | `acousticModel`, `vocoder`, `tokens` (+ optional `dataDir`, `lexicon`) |
+| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` | same as required (+ optional `lexicon` for kokoro) |
+| `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | same as required |
+| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` | same as required |
+| `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` | same as required |
+
+Validate category: **`tts`**. Overview: [README — TTS](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Tts`).
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+
+const tts = await createTTS({
+  initMode: 'custom',
+  modelType: 'vits',
+  customConfig: {
+    ttsModel: { kind: 'fs', path: '/data/models/model.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+    lexicon: { kind: 'fs', path: '/data/models/lexicon.txt' },
+  },
+  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
+});
+```
+
 ## API reference
 
 ### `detectTtsModel(source, options?)`
@@ -154,13 +201,7 @@ function detectTtsModel(
 
 ```ts
 const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' });
-// det.modelType       → e.g. 'kokoro'
-// det.isStreaming     → true
-// det.paths           → { ttsModel, tokens, dataDir, voices, ... } on folder scans
-// det.lexiconLanguages → [{ id: 'us-en', path: '.../lexicon-us-en.txt' }, ...] (vits/matcha/kokoro/zipvoice)
-// det.languages       → [{ iso6391Hint: 'en', id: 'us-en' }, ...]
-// det.quantization    → 'int8' | 'fp32' | ...
-// det.sizeTier        → 'small' | 'medium' | 'large'
+if (!det.success) throw new Error(det.error ?? 'TTS detection failed');
 ```
 
 ### `createTTS(options)`
@@ -322,125 +363,6 @@ await releasePipelineAudioBuffer(audioBuf); // frees native audio buffer
 await releasePipelineTextBuffer(textBuf);   // frees native text buffer
 ```
 
-## Model detection
-
-`detectTtsModel` is a cheap pre-check before `createTTS` (family, lexicons, required files). Unified catalog detect: [model-detect.md](model-detect.md).
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `vits` | `ttsModel`, `tokens` | `dataDir`, `lexicon` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `matcha` | `acousticModel`, `vocoder`, `tokens` | `dataDir`, `lexicon` | `acousticModel`, `vocoder`, `tokens` |
-| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` | `lexicon` (kokoro) | same as required |
-| `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | — | same as required |
-| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` | — | same as required |
-| `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` | — | same as required |
-
-Query keys: `getCustomModelPathRequirements('tts', modelType)`.
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). **`lexiconLanguageId`** is auto-only; pass `lexicon` in `customConfig` when needed.
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `vits` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `matcha` | `acousticModel`, `vocoder`, `tokens` |
-| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` |
-| `pocket` | 7 keys — see table above |
-| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` |
-| `supertonic` | 7 keys — see table above |
-
-```ts
-import { createTTS } from 'react-native-sherpa-onnx/tts';
-
-const tts = await createTTS({
-  initMode: 'custom',
-  modelType: 'vits',
-  customConfig: {
-    ttsModel: { kind: 'fs', path: '/data/models/model.onnx' },
-    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
-    lexicon: { kind: 'fs', path: '/data/models/lexicon.txt' },
-  },
-  modelOptions: { vits: { noiseScale: 0.667, noiseScaleW: 0.8, lengthScale: 1.0 } },
-});
-```
-
-## Segmentation
-
-TTS models in this SDK are **offline-only** — there is no acoustic streaming at the character level. Generating audio from very long texts in a single call can exhaust device RAM (**OOM**). The segmentation engine splits the text buffer into **smaller chunks**, synthesizes each chunk with the offline engine, and stitches the resulting PCM into the output audio buffer in order — bounding peak RAM at the cost of a small quality tradeoff at segment boundaries.
-
-Supported modes for offline TTS:
-
-- `'off'` (default) — no segmentation; the entire text is synthesized in one pass.
-- `'auto'` — the engine segments the text using the configured policy.
-
-> `'manual'` mode is not supported for offline TTS.
-
-Default policy evaluator: **`text_synthetic_auto`** — splits on sentence boundaries, with a `maxLengthChars` cap of 500 characters.
-
-```ts
-import { createTTS } from 'react-native-sherpa-onnx/tts';
-import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
-import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-
-const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/vits' }, modelType: 'vits' });
-const sr = await tts.getSampleRate();
-
-const textBuf = await createOfflineTextBufferFromText(longText); // multiple sentences
-const audioBuf = await createEmptyOfflineAudioBuffer(sr);
-try {
-  const result = await tts.synthesize(textBuf, audioBuf, {
-    segmentation: {
-      mode: 'auto',
-      // policy defaults to { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 }
-    },
-    errorRecovery: 'skip',
-    onProgress: (p) => console.log(`segment ${p.completedSegments}/${p.totalSegments}`),
-  });
-  console.log(result.status, result.totalSegments, result.completedSegments);
-} finally {
-  await releasePipelineTextBuffer(textBuf);
-  await releasePipelineAudioBuffer(audioBuf);
-}
-await tts.destroy();
-```
-
-See [segmentation-engine.md](segmentation-engine.md) for the full segmentation reference (policies, evaluators, `SegmentLink`, `SegmentLinkMap`). For memory planning and OOM mitigation, see [memory-and-models.md](memory-and-models.md).
-
-## Live overload on offline TTS (offline weights, live consumption)
-
-> Mandatory `segmentation.policy`. Commit-only — no partials.
-
-The offline TTS engine can drive a live pipeline directly. This is useful when you want to use a high-fidelity offline model (like VITS or Kokoro) against a live stream of text (e.g. from a live STT buffer) without the sample-level incremental generation of the native streaming engine.
-
-```ts
-const tts = await createTTS({
-  modelSource: { kind: 'fs', path: '/absolute/path/to/vits-piper-en' },
-  modelType: 'vits',
-});
-
-const handle = await tts.synthesize(liveTextIn, liveAudioOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
-  },
-});
-
-// handle.stop() / .flush() / .completed as usual
-const completion = await handle.completed;
-console.log(`Synthesized ${completion.unitsWritten} samples`);
-```
-
-| Aspect | Live overload (`createTTS`) |
-| --- | --- |
-| Weights | Offline (VITS, Kokoro, Pocket, Zipvoice, Matcha, Supertonic) |
-| Incremental | No (Per-segment synthesis) |
-| Latency | Per-segment (higher) |
-
-
-
 ## Pipeline composition
 
 ### Typical upstream
@@ -467,6 +389,23 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pipelines.md#tts-offline-patterns).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await tts.synthesize(textBuf, audioBuf, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.md](tts-live.md#js-events).
 
 ## Types
 
@@ -545,6 +484,8 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 <details>
 <summary>Synthesize and save to WAV (standard flow)</summary>
 
+Create a text buffer, synthesize into an offline audio buffer, then export WAV for sharing or playback.
+
 ```ts
 import { createTTS } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
@@ -606,6 +547,8 @@ See [segmentation-engine.md](segmentation-engine.md) for policy tuning.
 <details>
 <summary>Voice cloning with Pocket model</summary>
 
+Pass a reference WAV via `voiceClone` so Pocket synthesizes the prompt text in that speaker's timbre.
+
 ```ts
 import { createTTS } from 'react-native-sherpa-onnx/tts';
 import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
@@ -637,6 +580,7 @@ await tts.destroy();
 
 ## See also
 
+- [tts-live.md](tts-live.md) — live overload (offline weights on live text/audio buffers)
 - [android-system-tts.md](android-system-tts.md) — register as an Android system TTS engine (Kotlin-only)
 - [alignment-offline.md](alignment-offline.md) — `alignTextToAudio`, subtitle timing, alignment models
 - [execution-providers.md](execution-providers.md) — ORT execution providers

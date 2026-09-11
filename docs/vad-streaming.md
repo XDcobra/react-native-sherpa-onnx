@@ -2,20 +2,13 @@
 
 ## Introduction
 
-On-device streaming VAD with a **pipeline-first** API.
+On-device streaming VAD with a **pipeline-first** API. Detects speech boundaries in live or offline audio and emits speech segments to a segment buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | Pipeline audio buffer ([`audiobuffer`](audiobuffer-streaming.md)) | Live or offline PCM |
-| **Output** | Segment buffer ([`segmentbuffer`](segmentbuffer-streaming.md)) | Speech segments; subscribe via `onSegmentAppended` / `streamEvents.segmentAppended` |
-| **Engine** | `StreamingVadEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
-| **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged` for speech activity |
-
-Import path: `react-native-sherpa-onnx/vad`
+Import path: **`react-native-sherpa-onnx/vad`**.
 
 ## Streaming pipeline system
 
-`process` starts a **native VAD worker** that consumes **audio** and emits **speech segments** (and optional speech-state callbacks). Control uses **`VADPipelineHandle`** (`stop`, `flush`, `reset`, `getStatus`, `completed`) — same **registry-backed** pattern as STT/enhancement; see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Important:** with **`autoFlushOnInputEnded: true`** (quick start), **`finalizeLiveAudioBuffer(audioIn)`** already triggers **terminal draining** — do **not** call **`pipeline.flush()`** again afterward (redundant / race-prone). For **parallel pipelines** (VAD + STT on the same `audioIn`), call each feature’s **`flush()`** before **`stop()`** when you need a coordinated end-of-session drain.
+`process` starts a **native VAD worker** that consumes **audio** and emits **speech segments** (and optional speech-state callbacks). Control uses **`VADPipelineHandle`** (`stop`, `flush`, `reset`, `getStatus`, `completed`) — same **registry-backed** pattern as STT/enhancement; see **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)**. **Important:** with **`autoFlushOnInputEnded: true`** (quick start), **`finalizeLiveAudioBuffer(audioIn)`** already triggers **terminal draining** — do **not** call **`pipeline.flush()`** again afterward (redundant / race-prone). For **parallel pipelines** (VAD + STT on the same `audioIn`), call each feature's **`flush()`** before **`stop()`** when you need a coordinated end-of-session drain.
 
 ## Quick start
 
@@ -156,13 +149,82 @@ await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
 ```
 
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) or [`OfflineAudioBuffer`](audiobuffer-offline.md) | Live PCM or offline file |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) or [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Match live vs offline audio; live: subscribe via `onSegmentAppended` |
+| **Return** | `VADPipelineHandle` / `VADOfflineResult` | Live pipeline handle vs offline batch result |
+| **Engine** | `VADEngine` via `createStreamingVAD` | `process(...)`, `isSpeechDetected()`, `destroy()` |
+| **Pipeline handle (live)** | `VADPipelineHandle` | `onSpeechStateChanged`, `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
+## Segmentation (Optional)
+
+Offline VAD can optionally split the input audio before running detection on each slice. The live `process` path does **not** use `options.segmentation` — use `onSegmentAppended` on the live segment buffer instead.
+
+**Modes (offline):** `'off'` (default — single `runVadOffline` over the whole buffer) | `'auto'` (policy-driven slices; `policy` required). `'manual'` is not supported.
+
+| Evaluator | Supported | Notes |
+| --- | --- | --- |
+| `speech_energy_silence` | ✅ **Default** | Silence/low-energy boundaries; natural speech split points |
+| `continuous_frames` | ✅ | Fixed-interval checkpoints; `checkpointIntervalMs` |
+| Text evaluators | ❌ | Audio-domain input only |
+
+| | Offline batch | Live pipeline |
+| --- | --- | --- |
+| **Segmentation** | `options.segmentation` + `onProgress` | Not used — native VAD consumes live stream directly |
+| **Progress** | `OrchestrationProgress` per slice (`auto` only) | `onSegmentAppended` on `LiveSegmentBuffer` |
+| **Cancel** | Runs to completion | `pipeline.stop()` |
+
+```ts
+const { summary } = await vad.process({
+  audioIn: audio,
+  segmentOut: segOut,
+  options: {
+    segmentation: {
+      mode: 'auto',
+      policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 120_000 },
+    },
+    onProgress: (p) => console.log(`slice ${p.currentSegment + 1}/${p.totalSegments}`),
+  },
+});
+```
+
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md).
+
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `silero_vad` | `*.onnx` (silero VAD) | `model` |
+| `ten_vad` | `*.onnx` (ten VAD) | `model` |
+
+Validate category: **`vad`**. Overview: [README — VAD](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Vad`).
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
+  },
+});
+```
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/vad`.
 
-### Detection
+### `detectVadModel(source, options?)`
 
-#### `detectVadModel(source, options?)`
+File-based detection **without** initializing the engine. Use before `createStreamingVAD` to confirm pack layout and model family. Unified cross-feature detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectVadModel(
@@ -179,9 +241,9 @@ const det = await detectVadModel(
 console.log(det.success, det.modelType, det.paths?.model);
 ```
 
-### Initialization
+### `createStreamingVAD(options)`
 
-#### `createStreamingVAD(options)`
+Creates a `VADEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'` + `modelType` + `customConfig: { model }`). Shared tuning: `sampleRate`, `runtimeOptions`, `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingVAD(options: VADInitializeOptions): Promise<VADEngine>;
@@ -204,27 +266,46 @@ const engine = await createStreamingVAD({
 });
 ```
 
-### Engine (`VADEngine`)
+### `engine.process(input)` — live
 
-#### `engine.process(input)`
+Starts a native VAD worker on a `LiveAudioBuffer` → `LiveSegmentBuffer` pair. Returns a `VADPipelineHandle` for control and speech-state callbacks.
 
 ```ts
 process(
-  input: VADLiveProcessInput | VADOfflineProcessInput
-): Promise<VADPipelineHandle | VADOfflineResult>;
+  input: VADLiveProcessInput
+): Promise<VADPipelineHandle>;
 ```
 
 ```ts
-const run = await engine.process({
+const pipeline = await engine.process({
   audioIn,
   segmentOut,
-  options: { chunkSize: 512 },
+  options: { chunkSize: 512, autoFlushOnInputEnded: true },
 });
+pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
 ```
 
-Offline batch: `segmentation` and `onProgress` on `options` are documented under **[Segmentation](#segmentation)** (offline `off_*` audio only).
+### `engine.process(input)` — offline batch
 
-#### `engine.isSpeechDetected()`
+Runs a single offline VAD pass (or segmented pass with `mode: 'auto'`). Returns `VADOfflineResult` with `summary` and `segmentBufferId`.
+
+```ts
+process(
+  input: VADOfflineProcessInput
+): Promise<VADOfflineResult>;
+```
+
+```ts
+const { summary, segmentBufferId } = await engine.process({
+  audioIn: offlineAudio,
+  segmentOut: offlineSegOut,
+});
+console.log(summary.segmentCount, segmentBufferId);
+```
+
+### `engine.isSpeechDetected()`
+
+Returns the current VAD speech state without polling the pipeline handle.
 
 ```ts
 isSpeechDetected(): Promise<boolean>;
@@ -234,7 +315,9 @@ isSpeechDetected(): Promise<boolean>;
 const speechNow = await engine.isSpeechDetected();
 ```
 
-#### `engine.destroy()`
+### `engine.destroy()`
+
+Releases the native VAD instance (joins any live workers first).
 
 ```ts
 destroy(): Promise<void>;
@@ -244,96 +327,64 @@ destroy(): Promise<void>;
 await engine.destroy();
 ```
 
-### Pipeline handle (`VADPipelineHandle`)
+### `pipeline.onSpeechStateChanged`
 
-The handle wires **speech-state callbacks** and the same **control verbs** as other streaming pipelines. **`getStatus`** returns **`VADPipelineStatus`** (VAD-specific fields in addition to the usual running / counters pattern). See **[Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)** for how **`flush` / `stop` / `completed`** interact with **buffer finalize** vs **parallel STT**.
-
-#### `pipeline.onSpeechStateChanged` (optional)
+Assign after `process` returns to receive VAD speech/activity without polling. Throttle with `speechStateEventMinIntervalMs` in `VADLiveRunOptions`.
 
 ```ts
 onSpeechStateChanged?: (event: VADSpeechStateChangedEvent) => void;
 ```
 
-Assign after `process` returns to receive VAD speech/activity without polling. Throttle with `speechStateEventMinIntervalMs` in `VADLiveRunOptions`.
+### `pipeline.stop()`
 
-#### `pipeline.stop()`
+**Hard teardown** of the VAD worker. Resolves after native teardown; the pipeline id is then **terminal** (later control calls may return `VAD_PIPELINE_NOT_FOUND`).
 
 ```ts
 stop(): Promise<void>;
 ```
 
-**Hard teardown** of the VAD worker. Resolves after native teardown; the pipeline id is then **terminal** (later control calls may return `VAD_PIPELINE_NOT_FOUND`).
+### `pipeline.flush()`
 
-#### `pipeline.flush()`
+**Drain barrier:** forces the worker to **process pending audio** and flush internal state into **`segmentOut`** where applicable. Use when **`autoFlushOnInputEnded`** is **false** or when coordinating **multiple** pipelines on the same audio (flush VAD and STT before stops). **Do not** call after **`finalizeLiveAudioBuffer`** when **`autoFlushOnInputEnded: true`** — finalize already ran terminal draining (see quick start comment).
 
 ```ts
 flush(): Promise<void>;
 ```
 
-**Drain barrier:** forces the worker to **process pending audio** and flush internal state into **`segmentOut`** where applicable. Use when **`autoFlushOnInputEnded`** is **false** or when coordinating **multiple** pipelines on the same audio (flush VAD and STT before stops). **Do not** call after **`finalizeLiveAudioBuffer`** when **`autoFlushOnInputEnded: true`** — finalize already ran terminal draining (see quick start comment).
+### `pipeline.reset()`
 
-#### `pipeline.reset()`
+Clears **VAD runtime state** (e.g. hangover counters) while keeping the pipeline registered; semantics follow native `resetStreamingPipeline` for this worker.
 
 ```ts
 reset(): Promise<void>;
 ```
 
-Clears **VAD runtime state** (e.g. hangover counters) while keeping the pipeline registered; semantics follow native `resetStreamingPipeline` for this worker.
+### `pipeline.getStatus()`
 
-#### `pipeline.getStatus()`
+Snapshot of worker progress and VAD-specific flags (see `VADPipelineStatus` in Types).
 
 ```ts
 getStatus(): Promise<VADPipelineStatus>;
 ```
 
-Snapshot of worker progress and VAD-specific flags (see exported `VADPipelineStatus` type).
-
-#### `pipeline.completed`
+### `pipeline.completed`
 
 Resolves when the worker has **fully stopped** (normal completion after finalize + auto-flush, `stop()`, or error). Use with **`await finalizeLiveAudioBuffer`** in the graceful path shown in the quick start.
 
-## Models and paths
+## Speech payload (`source: 'vad'`)
 
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md)
-- Families: `silero_vad`, `ten_vad`
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `silero_vad` | `*.onnx` (silero VAD) | — | `model` |
-| `ten_vad` | `*.onnx` (ten VAD) | — | `model` |
-
-## Model detection
-
-`detectVadModel` validates Silero / Ten layouts before `createStreamingVAD`. Unified catalog: [model-detect.md](model-detect.md).
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `silero_vad`, `ten_vad` | `model` |
+Every committed VAD span written to `segmentOut` is `kind: 'speech'` with this payload. Downstream features (SID label, alignment `mode: 'vad'`, …) can filter on `payload.source === 'vad'` without re-running detection.
 
 ```ts
-import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-
-const vad = await createStreamingVAD({
-  initMode: 'custom',
-  modelType: 'silero_vad',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
-  },
-  sampleRate: 16000,
-  runtimeOptions: {
-    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
-  },
-});
+{
+  source: 'vad';
+  engine?: 'vad';
+  decision?: 'model';
+  score?: number;
+}
 ```
 
-`runtimeOptions` work the same as auto mode.
+`score` is the mean speech probability over the span when available. See [segmentbuffer-streaming.md](segmentbuffer-streaming.md#segment-payload-contracts).
 
 ## Pipeline composition
 
@@ -362,150 +413,76 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-pipelines.md#vad-streaming-patterns).
 
-## Segmentation
+---
 
-**Scope:** `options.segmentation` and `onProgress` exist only on **`VADOfflineRunOptions`**. The live `process` overload uses **`VADLiveProcessInput`** / **`VADLiveRunOptions`** — no batch segmentation step; use segment-buffer events instead.
 
-| | Offline batch (`off_*` → `seg_off_*` or `live_*` out) | Streaming pipeline (`live_*` → `live_*`) |
-| --- | --- | --- |
-| **Input audio** | `OfflineAudioBuffer` — full file (or finalized chunk) in one buffer | `LiveAudioBuffer` — samples appended over time |
-| **Segmentation engine** | Optional: `segmentation.mode: 'auto'` splits **offline** PCM into **speech** slices before VAD | **Not used** — the native VAD worker consumes the live stream directly |
-| **Progress** | `onProgress` with `OrchestrationProgress` **only** when `mode: 'auto'` and at least one speech slice exists; **`mode: 'off'`** → single native pass, **no** `onProgress` (STT single-pass parity) | **No** `OrchestrationProgress`. Use **`onSegmentAppended`** / `streamEvents.segmentAppended` on the **live** segment buffer for incremental segments |
-| **Stop / teardown** | Run to completion (no mid-batch cancel on offline options) | Use **`pipeline.stop()`** / teardown |
+## JS Events
 
-> `'manual'` segmentation mode is **not** supported for offline VAD (`supportsManual: false` in validation).
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentEvent` | committed speech segment on output buffer | set on `createLiveSegmentBuffer`; live path only |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
 
-### Modes (offline only)
-
-- **`'off'`** (default) — one `runVadOffline` over the **entire** `off_*` buffer; smallest surprise vs. pre-segmentation behavior.
-- **`'auto'`** — `segmentOfflineBuffer` + `getSegments` (domain **speech**); one `runVadOffline` per slice; results merged into `segmentOut`. **Segment boundaries can differ** from single-pass `off`; keep `'off'` if you need single-pass whole-file boundaries.
-
-For `mode: 'auto'`, **`policy` is required** (validation). The snippet below uses the same default shape as `validateSegmentationConfig` for offline VAD (`speech_energy_silence`, …). Tune in [segmentation-engine.md](segmentation-engine.md).
-
-### Offline: default (no segmentation)
+Shapes: [Types](#types).
 
 ```ts
-import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-import {
-  createOfflineAudioBufferFromFile,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import {
-  createEmptyOfflineSegmentBuffer,
-  releasePipelineSegmentBuffer,
-} from 'react-native-sherpa-onnx/segmentbuffer';
+pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
 
-const vad = await createStreamingVAD({
-  modelSource: { kind: 'fs', path: '/path/to/vad-model' },
-  modelType: 'auto',
-  sampleRate: 16000,
-});
-
-const audio = await createOfflineAudioBufferFromFile({
-  kind: 'fs',
-  path: '/path/to/audio.wav',
-});
-const segOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
-
-const { summary, segmentBufferId } = await vad.process({
-  audioIn: audio,
-  segmentOut: segOut,
-  // segmentation omitted → same as mode: 'off'
-});
-
-console.log(summary.segmentCount, segmentBufferId);
-
-await vad.destroy();
-await releasePipelineSegmentBuffer(segOut);
-await releasePipelineAudioBuffer(audio);
-```
-
-### Offline: segmented + progress
-
-`segmentation.mode: 'auto'` requires a **`policy`** object. `onProgress` fires **before** each per-slice `runVadOffline` (same field meanings as `offlineOrchestrator` / STT batch).
-
-```ts
-const controller = new AbortController();
-const { summary } = await vad.process({
-  audioIn: audio,
-  segmentOut: segOut,
-  options: {
-    segmentation: {
-      mode: 'auto',
-      policy: {
-        evaluator: 'speech_energy_silence',
-        silenceThresholdMs: 500,
-        energyThresholdDb: -40,
-        minSegmentMs: 1000,
-        maxSegmentMs: 120_000,
-        hangoverMs: 300,
-      },
-    },
-    onProgress: (p) =>
-      console.log(`vad slice ${p.currentSegment + 1}/${p.totalSegments}`, p.fraction),
-  },
+const segmentOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => console.log(e.segmentId, e.durationMs),
 });
 ```
 
-**Edge cases (`auto`):** zero speech slices → zero summary, **no** native calls, **no** `onProgress`. `onProgress` throws → run aborts. Fail-fast per segment (no STT-style retries on `VADOfflineRunOptions`).
+## Types
 
-### Streaming: live buffers (no `segmentation` options)
+### Core VAD types (`react-native-sherpa-onnx/vad`)
 
-Use **`VADLiveProcessInput`**: `live_*` audio in, `live_*` segment buffer out. Segment growth is **event-driven**, not `OrchestrationProgress`.
+| Type | Description |
+| --- | --- |
+| `VADModelType` | `'silero_vad' \| 'ten_vad'` |
+| `VADConcreteModelType` | Alias of `VADModelType` (non-`auto`) |
+| `VAD_MODEL_TYPES` | Readonly runtime list of model types |
+| `VADDetectResult` | Return of `detectVadModel()` (`success`, `error?`, `modelType`, `detectedModels`, `paths`, `languages`, `quantization`, `detectionSources`) |
+| `VADInitializeOptions` | Discriminated union: `VADAutoInitializeOptions \| VADCustomInitializeOptions` |
+| `VADInitOptionsShared` | Shared fields: `sampleRate?`, `runtimeOptions?`, `provider?`, `numThreads?`, `debug?` |
+| `VADAutoInitializeOptions` | Auto mode: `modelSource`, optional `quantization`, `modelType` |
+| `VADCustomInitializeOptions` | Custom mode: `initMode: 'custom'`, `modelType`, `customConfig: VadCustomConfig` |
+| `VADRuntimeOptions` | `SileroVadRuntimeOptions \| TenVadRuntimeOptions` — strict model-matched union |
+| `VADRuntimeTuningOptions` | `scoreThreshold?`, `minSilenceDurationMs?`, `minSpeechDurationMs?`, `maxSpeechDurationMs?`, `windowSize?` |
+| `VADLiveRunOptions` | `chunkSize?`, `autoFlushOnInputEnded?`, `sourceTag?`, `speechStateEventMinIntervalMs?` |
+| `VADOfflineRunOptions` | `sourceTag?`, `segmentation?`, `onProgress?` |
+| `VADRunOptions` | `VADLiveRunOptions \| VADOfflineRunOptions` |
+| `VADLiveProcessInput` | `audioIn` (live), `segmentOut` (live), `options?: VADLiveRunOptions` |
+| `VADOfflineProcessInput` | `audioIn` (offline), `segmentOut` (offline or live), `options?: VADOfflineRunOptions` |
+| `VADEngine` | `process`, `isSpeechDetected`, `destroy` |
+| `VADPipelineHandle` | `instanceId`, `pipelineId`, `completed`, `onSpeechStateChanged?`, `stop`, `flush`, `reset`, `getStatus` |
+| `VADPipelineStatus` | `pipelineId`, `isRunning`, `isFlushing`, `queueDepth`, `chunksProcessed`, `unitsRead`, `unitsWritten`, `error` |
+| `VADSpeechStateChangedEvent` | `isSpeechDetected`, `pipelineId`, `ts?` |
+| `VADSummary` | `chunksProcessed`, `unitsRead`, `unitsWritten`, `segmentCount`, `speechDurationMs` |
+| `VADOfflineResult` | `summary: VADSummary`, `segmentBufferId: string` |
+| `VadCustomConfig` | `{ model: FileSource }` |
+| `VadCustomPathKey` | `'model'` |
+| `VadErrorCode` | `{ INVALID_ARGUMENT: 'VAD_INVALID_ARGUMENT' }` |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `DetectionSource` | Trace literals from native detection |
+| `DetectedModelEntry` | `{ type: string; modelDir: string }` |
 
-```ts
-const pipeline = await vad.process({
-  audioIn: liveAudio,
-  segmentOut: liveSeg,
-  options: {
-    chunkSize: 512,
-    autoFlushOnInputEnded: true,
-    // no segmentation / onProgress here — use onSegmentAppended on liveSeg
-  },
-});
-```
+### Related buffer types
 
-See **Quick start** above for a full `onSegmentAppended` example.
+| Type | Description |
+| --- | --- |
+| `LiveAudioBufferIdSource` | Live audio ref or handle passed to `process` (streaming) |
+| `OfflineAudioBufferIdSource` | Offline audio ref or handle passed to `process` (batch) |
+| `LiveSegmentBufferIdSource` | Live segment buffer for streaming output |
+| `OfflineSegmentBufferIdSource` | Offline segment buffer for batch output |
 
+See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-streaming.md](segmentbuffer-streaming.md).
 
-## Types and constants
-
-```ts
-import {
-  createStreamingVAD,
-  detectVadModel,
-  VAD_MODEL_TYPES,
-} from 'react-native-sherpa-onnx/vad';
-
-import type {
-  VADModelType,
-  VADDetectResult,
-  VADInitializeOptions,
-  VADEngine,
-  VADSpeechStateChangedEvent,
-  VADPipelineHandle,
-  VADPipelineStatus,
-  VADSummary,
-  VADOfflineResult,
-} from 'react-native-sherpa-onnx/vad';
-```
-
-- `VADModelType`: `'silero_vad' | 'ten_vad'`
-- `VAD_MODEL_TYPES`: readonly model type list for UI/model picker usage
-- `VADDetectResult`: shared detection contract (`success`, optional `error`, `modelType`, `detectedModels`, `paths`, `languages`, `quantization`, `detectionSources`)
-- `runtimeOptions`: strict model-matched options (`sileroVad` or `tenVad`) with model-score based thresholding (`scoreThreshold`)
-
-### Runtime options by model
-
-- `silero_vad`: `runtimeOptions.sileroVad = { scoreThreshold, minSpeechDurationMs, minSilenceDurationMs, maxSpeechDurationMs, windowSize }`
-- `ten_vad`: `runtimeOptions.tenVad = { scoreThreshold, minSpeechDurationMs, minSilenceDurationMs, maxSpeechDurationMs, windowSize }`
-- Session-level options stay common: `sampleRate`, `provider`, `numThreads`, `debug`
-- `scoreThreshold` is the model score/probability cut-off used for speech/non-speech decisions
-- `neg_threshold` is intentionally not exposed in this JS SDK contract
+---
 
 ## Error codes
-
-Typical VAD-native error codes and reasons:
 
 | Code | Typical reason |
 | --- | --- |
@@ -688,4 +665,3 @@ try {
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-

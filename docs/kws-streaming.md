@@ -2,15 +2,9 @@
 
 ## Introduction
 
-On-device **open-vocabulary keyword spotting** (wake-word / customized keywords) with a **pipeline-first** API.
+On-device **open-vocabulary keyword spotting** (wake-word / customized keywords) with a **pipeline-first** API. Each detected keyword commits a text segment with the keyword label to the output buffer.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Continuous PCM the native worker reads |
-| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | One committed text segment per keyword hit |
-| **Engine** | `KeywordSpottingEngine` via `createKeywordSpotting` | `spot(audioIn, textOut)` returns a shared streaming pipeline handle |
-
-Import path: `react-native-sherpa-onnx/kws`
+Import path: **`react-native-sherpa-onnx/kws`**.
 
 **Naming in this doc:** **`engine`** = `KeywordSpottingEngine`; **`pipeline`** = handle from `engine.spot(...)`.
 
@@ -19,6 +13,7 @@ KWS is **streaming-only** in this SDK:
 - There is **no** offline/batch `spot(OfflineAudioBuffer)` API.
 - Use dedicated **`kws-models`** packs (encoder + decoder + joiner + `tokens.txt` + `keywords.txt`). Do **not** point KWS at arbitrary streaming STT zipformer packs.
 - Hits are keyword labels, not a full transcript. For continuous speech recognition see [Streaming STT](stt-streaming.md).
+- Live → offline audio transfer is for **retention** (archive, later STT/SID) only — never `spot` an offline clip.
 
 Upstream overview: [sherpa-onnx Keyword spotting](https://k2-fsa.github.io/sherpa/onnx/kws/index.html).
 
@@ -126,7 +121,7 @@ await pipeline.completed;
 
 ## Keywords UX
 
-Open vocabulary means you customize **which phrases** fire without retraining weights. Phrases must still be expressible in the pack’s **token inventory** (`tokens.txt` / BPE / pinyin units).
+Open vocabulary means you customize **which phrases** fire without retraining weights. Phrases must still be expressible in the pack's **token inventory** (`tokens.txt` / BPE / pinyin units).
 
 ### `keywords.txt` line format
 
@@ -149,7 +144,7 @@ Pack defaults ship a `keywords.txt` next to the ONNX files. Override **per sessi
 
 ### Generating tokens with `text2token`
 
-Use upstream tooling against the pack’s `tokens.txt` (and BPE / lexicon when required):
+Use upstream tooling against the pack's `tokens.txt` (and BPE / lexicon when required):
 
 ```sh
 # After: pip install sherpa-onnx
@@ -184,61 +179,7 @@ There is **no** separate `engine.reloadKeywords()` API in MVP; the patterns abov
 | `keywordsThreshold` | init | `0.25` | Global threshold when per-line `#threshold` is absent |
 | `numTrailingBlanks` | init | `2` | Lower → sooner fire, more false triggers |
 | `maxActivePaths` | init | `4` | Beam width |
-| `chunkSize` | `spot` | **1600** (~100 ms @ 16 kHz) | Samples per drain from the live ring; smaller → lower wake latency, more wakeups |
-
-## Observing hits
-
-Prefer **callbacks**, not polling:
-
-1. **`onKeyword`** on `spot(...)` — maps committed segments whose `meta.source === 'kws_stream'`.
-2. **`onSegment`** on `createLiveTextBuffer` — raw live-text commits (filter `meta.source` if other writers share the buffer).
-
-Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
-
-```ts
-const textOut = await createLiveTextBuffer({
-  spooling: { mode: 'off' },
-  onSegment: (e) => {
-    // e ≈ {
-    //   bufferId: 'live_text_…',
-    //   totalSegments: 1,
-    //   segment: {
-    //     domain: 'text',
-    //     text: '你好',                 // keyword label
-    //     segmentIndex: 0,
-    //     reason: 'endpoint',
-    //     source: 'segmentation_engine', // collapsed public SegmentSource
-    //     tokens: ['你', '好'],          // may be empty if native omits
-    //     timestamps: [0.12, 0.28],      // seconds; may be empty
-    //     meta: {
-    //       source: 'kws_stream',        // filter key for KWS hits
-    //       keyword: '你好',
-    //       startTime: 1.04,             // iOS often; Android usually absent
-    //     },
-    //     …segmentId, offsets, createdAtMs, utf16Length
-    //   },
-    // }
-    if (e.segment.domain !== 'text') return;
-    if (e.segment.meta?.source !== 'kws_stream') return;
-    console.log('[onSegment]', e.segment.text, e.segment.meta);
-  },
-});
-
-const pipeline = await engine.spot(audioIn, textOut, {
-  onKeyword: (e) => {
-    // e ≈ {
-    //   keyword: '你好',
-    //   tokens: ['你', '好'],
-    //   timestamps: [0.12, 0.28],
-    //   startTime: 1.04,   // optional; see platform note above
-    //   segmentIndex: 0,   // LiveTextBuffer commit index
-    // }
-    console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
-  },
-});
-```
-
-`onKeyword` is convenience over the same commit as `onSegment`: it only fires when `meta.source === 'kws_stream'`. Use either or both.
+| `chunkSize` | `spot` | **1600** (~100 ms @ 16 kHz) | Samples per drain from the live ring; smaller → lower wake latency, more wakeups |
 
 ## LiveTextBuffer spooling
 
@@ -249,36 +190,30 @@ const pipeline = await engine.spot(audioIn, textOut, {
 
 See [textbuffer-streaming.md](textbuffer-streaming.md).
 
-## Not offline KWS
+## Buffer matrix
 
-Live → offline audio transfer is for **retention** (archive, later STT/SID), **not** a KWS inference mode:
-
-```ts
-import { createOfflineAudioBufferFromLive } from 'react-native-sherpa-onnx/audiobuffer';
-
-const clip = await createOfflineAudioBufferFromLive(audioIn, 'fullIfSpooled');
-// later: STT / SID / export — never spot(clip)
-```
-
-## Pipeline flow
-
-| Step | Method | Result |
+| Role | Type | Notes |
 | --- | --- | --- |
-| 1 | `detectKwsModel` / `createKeywordSpotting` | Engine allocated |
-| 2 | `createEmptyLiveAudioBuffer` + `createLiveTextBuffer` | Buffers |
-| 3 | `engine.spot(audioIn, textOut, options?)` | Native KWS pipeline starts |
-| 4 | Mic / `ingestFileToLiveAudioBuffer` | Audio enters the ring |
-| 5 | `onKeyword` / `onSegment` | Hits |
-| 6 | `stopMic…` → `finalizeLiveAudioBuffer` → `pipeline.flush()` → `completed` | End session |
-| 7 | `engine.destroy()` + release buffers | Cleanup |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Continuous PCM the native worker reads |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | One committed text segment per keyword hit |
+| **Engine** | `KeywordSpottingEngine` via `createKeywordSpotting` | `spot(audioIn, textOut)` returns pipeline handle |
+| **Pipeline handle** | `StreamingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
-Shared handle semantics: [streaming-pipelines-overview.md](streaming-pipelines-overview.md). Auto-`reset(stream)` after each hit is **internal** — apps do not call that on the KeywordSpotter directly.
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt`, `keywords.txt` | `encoder`, `decoder`, `joiner`, `tokens`, `keywords` |
+
+Validate category: **`kws`**. Online zipformer2-style KWS packs (folder name with `kws` or root `keywords.txt`). Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Kws`).
 
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/kws`.
 
 ### `detectKwsModel(source, options?)`
+
+File-based detection **without** initializing the engine. Prefer when you know the folder is a KWS pack. Unified `detectModel` also claims **`kws` before `stt`** so keyword packs are not stolen as ASR — see [model-detect.md](model-detect.md#unified-detector-order).
 
 ```ts
 function detectKwsModel(
@@ -299,16 +234,16 @@ const det = await detectKwsModel({
 console.log(det.success, det.isStreaming, det.paths?.keywords);
 ```
 
-Prefer this when you know the folder is a KWS pack. Unified `detectModel` also claims **`kws` before `stt`** so keyword packs are not stolen as ASR — see [model-detect.md](model-detect.md#unified-detector-order).
-
 ### `createKeywordSpotting(options)` / `createStreamingKWS(options)`
+
+Creates a `KeywordSpottingEngine`. Init modes: **`auto`** (default — `modelSource` + optional `quantization`) or **`custom`** (`initMode: 'custom'` + `modelType: 'transducer'` + `customConfig`). Shared tuning: `keywordsScore`, `keywordsThreshold`, `numTrailingBlanks`, `maxActivePaths`, `numThreads`, `provider`, `debug`.
+
+`createStreamingKWS` is an alias for `createKeywordSpotting`.
 
 ```ts
 function createKeywordSpotting(
   options: KeywordSpottingInitOptions
 ): Promise<KeywordSpottingEngine>;
-
-const createStreamingKWS = createKeywordSpotting;
 ```
 
 ```ts
@@ -322,15 +257,9 @@ const engine = await createKeywordSpotting({
 });
 ```
 
-| Field | Notes |
-| --- | --- |
-| `modelSource` | Directory-backed `FileSource` for the KWS pack |
-| `keywordsPath` | Absolute path; body applied on `spot` via `createStream` (pack `keywords.txt` still used for spotter init) |
-| `keywordsScore` / `keywordsThreshold` | Init-time KeywordSpotter config |
-| `numTrailingBlanks` / `maxActivePaths` | Decode timing / beam |
-| `numThreads` / `provider` / `debug` / `quantization` | Runtime / detect helpers |
-
 ### `engine.spot(audioIn, textOut, options?)`
+
+Starts real streaming keyword spotting. Reads continuously from `audioIn`, commits hits to `textOut`, and returns a shared streaming pipeline handle (`stop` / `flush` / `reset` / `completed`). Only **one** active pipeline per engine at a time.
 
 ```ts
 spot(
@@ -348,73 +277,230 @@ const pipeline = await engine.spot(audioIn, textOut, {
 });
 ```
 
-| Option | Notes |
-| --- | --- |
-| `chunkSize` | Samples per drain; default **1600** |
-| `keywords` | Optional `createStream` override (`keywords.txt` body text) |
-| `onKeyword` | Hit callback; `segmentIndex` is the committed LiveTextBuffer index |
-
-Only **one** active pipeline per engine at a time.
-
-### `KeywordDetection`
-
-```ts
-interface KeywordDetection {
-  keyword: string;
-  tokens: string[];
-  timestamps: number[];
-  startTime?: number; // often iOS-only
-}
-```
-
 ### `engine.destroy()`
 
 Stops any active pipeline and unloads the native KeywordSpotter. Idempotent.
 
-## Validation required files
-
-Validate / detect category: **`kws`**.
-
-| `modelType` | Required files | Custom-init keys (validate) |
-| --- | --- | --- |
-| `transducer` (auto) | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt`, `keywords.txt` | `encoder`, `decoder`, `joiner`, `tokens`, `keywords` |
-
-Packs are expected to be **online zipformer2**-style KWS releases. Folder names containing `kws` help auto detection; otherwise a root-level `keywords.txt` is required so the detector does not confuse the pack with STT.
-
-Query keys: `getCustomModelPathRequirements('kws', 'transducer')`.
-
-### Custom init (`initMode: 'custom'`)
-
-Same path-slot pattern as VAD/STT. Skip folder detect and pass explicit `FileSource`s:
+```ts
+destroy(): Promise<void>;
+```
 
 ```ts
-import { createKeywordSpotting } from 'react-native-sherpa-onnx/kws';
+await engine.destroy();
+```
 
-const engine = await createKeywordSpotting({
-  initMode: 'custom',
-  modelType: 'transducer',
-  customConfig: {
-    encoder: { kind: 'fs', path: '/path/encoder.onnx' },
-    decoder: { kind: 'fs', path: '/path/decoder.onnx' },
-    joiner: { kind: 'fs', path: '/path/joiner.onnx' },
-    tokens: { kind: 'fs', path: '/path/tokens.txt' },
-    keywords: { kind: 'fs', path: '/path/keywords.txt' },
+---
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Mic / file ingest | `LiveAudioBuffer` (`live_*`) | Continuous audio for `spot(...)`. |
+| Keyword list | Init / `createKeywordSpotting` options | Labels become committed LiveText. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Keyword events | `LiveTextBuffer` (`txt_live_*`) | Commits with `meta.source: 'kws_stream'`. |
+| App wake / routing | `onKeyword` / `onSegment` | Prefer callbacks over polling. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B["createKeywordSpotting().spot"]
+  B --> C[LiveTextBuffer]
+  C --> D[onKeyword / UI]
+```
+
+Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onKeyword` | `KeywordDetection` | keyword detected in audio stream | convenience over `onSegment`; fires when `meta.source === 'kws_stream'` |
+| `onSegment` | `LiveTextBufferSegmentEvent` | committed text segment on output buffer | raw live-text commit; filter `meta.source` if other writers share the buffer |
+
+Prefer **callbacks**, not polling. `onKeyword` is convenience over the same commit as `onSegment` — use either or both.
+
+Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
+
+```ts
+const textOut = await createLiveTextBuffer({
+  spooling: { mode: 'off' },
+  onSegment: (e) => {
+    if (e.segment.meta?.source !== 'kws_stream') return;
+    console.log('[onSegment]', e.segment.text, e.segment.meta);
+  },
+});
+
+const pipeline = await engine.spot(audioIn, textOut, {
+  onKeyword: (e) => {
+    console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
   },
 });
 ```
 
-`keywords` is required for KeywordSpotter construction (safe pack vocabulary). Per-session phrase overrides still use `spot({ keywords })` / init `keywordsPath` via `createStream` (see [KNOWN_ISSUES](KNOWN_ISSUES.md)).
+---
+
+## Types
+
+### Core KWS types (`react-native-sherpa-onnx/kws`)
+
+| Type | Description |
+| --- | --- |
+| `KwsConcreteModelType` | `'transducer'` |
+| `KwsDetectOptions` | Options for `detectKwsModel` (`assetName?`, `modelType?`, `quantization?`) |
+| `KwsDetectModelResult` | Return of `detectKwsModel()` (`success`, `error?`, `isStreaming`, `paths`, `quantization`, …) |
+| `KeywordSpottingInitOptions` | Discriminated union: `KeywordSpottingAutoInitializeOptions \| KeywordSpottingCustomInitializeOptions` |
+| `KeywordSpottingInitOptionsShared` | Shared fields: `keywordsPath?`, `keywordsScore?`, `keywordsThreshold?`, `numTrailingBlanks?`, `maxActivePaths?`, `numThreads?`, `provider?`, `debug?` |
+| `KeywordSpottingAutoInitializeOptions` | Auto mode: `modelSource`, optional `quantization` |
+| `KeywordSpottingCustomInitializeOptions` | Custom mode: `initMode: 'custom'`, `modelType: 'transducer'`, `customConfig: KwsCustomConfig` |
+| `KeywordSpottingPipelineOptions` | `chunkSize?`, `keywords?`, `onKeyword?` |
+| `KeywordDetection` | `{ keyword: string; tokens: string[]; timestamps: number[]; startTime?: number }` |
+| `KeywordSpottingEngine` | `spot`, `destroy`, readonly `instanceId` |
+| `KwsCustomConfig` | `{ encoder, decoder, joiner, tokens, keywords }` — all `FileSource` |
+| `KwsCustomPathKey` | `'encoder' \| 'decoder' \| 'joiner' \| 'tokens' \| 'keywords'` |
+| `KwsErrorCode` | `{ INVALID_ARGUMENT: 'KWS_INVALID_ARGUMENT' }` |
+| `KeywordSpottingDetectedPaths` | Paths resolved by native detection (encoder, decoder, joiner, tokens, keywords) |
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `LiveAudioBufferIdSource` | Live audio ref or handle passed to `spot` |
+| `LiveTextBufferIdSource` | Live text buffer ref or handle for keyword hits |
+| `StreamingPipelineHandle` | Shared pipeline handle (`stop`, `flush`, `reset`, `getStatus`, `completed`) |
+
+See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [textbuffer-streaming.md](textbuffer-streaming.md) · [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
+---
+
+## Error codes
+
+| Code | Typical reason |
+| --- | --- |
+| `KWS_INVALID_ARGUMENT` | Custom config / keywords override malformed or not a `FileSource` |
+| `AUDIO_BUFFER_NOT_FOUND` | Input live audio buffer id is invalid or released |
+| `TEXT_BUFFER_NOT_FOUND` | Output live text buffer id is invalid or released |
+| `PIPELINE_NOT_FOUND` | Invalid or already-stopped pipeline handle id |
+| `STREAMING_PIPELINE_ERROR` | Fatal pipeline worker exception |
+
+Additional `FILEIO_*` / detect errors can occur during model path resolution before native init.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | What to try |
 | --- | --- | --- |
-| Detect fails / “not KWS” | STT zipformer pack without KWS layout / `keywords.txt` | Use a `kws-models` release asset; prefer `detectKwsModel` |
+| Detect fails / "not KWS" | STT zipformer pack without KWS layout / `keywords.txt` | Use a `kws-models` release asset; prefer `detectKwsModel` |
 | Unified detect returns STT | Pack lacks KWS cues | Ensure folder name contains `kws` or root `keywords.txt`; KWS runs **before** STT in unified order when it matches |
-| No hits | Threshold / score / trailing blanks too strict; wrong tokens | Lower `#threshold` / `keywordsThreshold`; raise `:score`; lower `numTrailingBlanks`; regenerate tokens with the pack’s `tokens.txt` |
+| No hits | Threshold / score / trailing blanks too strict; wrong tokens | Lower `#threshold` / `keywordsThreshold`; raise `:score`; lower `numTrailingBlanks`; regenerate tokens with the pack's `tokens.txt` |
 | Slow wake | Large `chunkSize` | Use default `1600` or smaller |
 | Invalid override | Empty / wrong `spot({ keywords })` string | Pass `keywords.txt`-format lines; omit to use init file |
 | Unexpected disk I/O | LiveTextBuffer spooling on | `createLiveTextBuffer({ spooling: { mode: 'off' } })` for callback-only |
+
+## Use case examples
+
+<details>
+<summary>Wake-word hits while the mic is still open</summary>
+
+`onKeyword` fires as soon as a hit is decoded — you can react in the UI without awaiting `pipeline.completed`.
+
+```ts
+import { createKeywordSpotting } from 'react-native-sherpa-onnx/kws';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createKeywordSpotting({
+  modelSource: { kind: 'fs', path: '/path/to/kws-models' },
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 256, spooling: { mode: 'off' } });
+
+const pipeline = await engine.spot(audioIn, textOut, {
+  chunkSize: 1600,
+  onKeyword: (hit) => console.log('wake:', hit.keyword, hit.timestamps),
+});
+const mic = await startMicToLiveAudioBuffer(audioIn);
+
+// Hits can arrive here while mic is still running
+await new Promise((r) => setTimeout(r, 30_000));
+
+await mic.stop();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.flush();
+await pipeline.completed;
+
+await engine.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>File ingest with live keyword HUD updates</summary>
+
+Start spotting, then ingest a WAV. Keyword callbacks update the HUD while ingest and decode overlap; await completion only after ingest finishes.
+
+```ts
+import { createKeywordSpotting } from 'react-native-sherpa-onnx/kws';
+import {
+  createEmptyLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createKeywordSpotting({
+  modelSource: { kind: 'fs', path: '/path/to/kws-models' },
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const hits = await createLiveTextBuffer({
+  maxSegments: 128,
+  onSegment: (e) => console.log('hit segment:', e.segment.text),
+});
+
+const pipeline = await engine.spot(audioIn, hits, {
+  onKeyword: (h) => console.log('HUD', h.keyword),
+});
+const ingest = await ingestFileToLiveAudioBuffer(audioIn, { kind: 'fs', path: '/path/to/utterance.wav' });
+
+await ingest.done;
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.flush();
+await pipeline.completed;
+
+await engine.destroy();
+await releasePipelineTextBuffer(hits);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Graceful stop: finalize audio, then await `completed`</summary>
+
+Prefer finalize + flush over an abrupt `stop` when you want the last buffered frames scored for keywords.
+
+```ts
+await mic.stop();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.flush();
+const completion = await pipeline.completed;
+console.log('chunks', completion.chunksProcessed, 'hits written', completion.unitsWritten);
+await engine.destroy();
+```
+
+</details>
 
 ## See also
 
@@ -427,3 +513,7 @@ const engine = await createKeywordSpotting({
 - [Download manager](download-manager.md) — `ModelCategory.Kws` → `kws-models`
 - [Streaming STT](stt-streaming.md) — full transcription (different feature)
 - Upstream: [Keyword spotting](https://k2-fsa.github.io/sherpa/onnx/kws/index.html) · [Pretrained KWS models](https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

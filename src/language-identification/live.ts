@@ -31,10 +31,7 @@ import type {
   LiveTextBufferRef,
   PipelineTextBufferIdSource,
 } from '../textbuffer/types';
-import {
-  DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
-  LanguageIdErrorCode,
-} from './types';
+import { LanguageIdErrorCode } from './types';
 import type {
   LanguageChangedEvent,
   LanguageIdSegmentEvent,
@@ -262,11 +259,7 @@ export async function identifyLiveOverload(
     featureName: 'spoken language identification',
     domain: 'speech',
     supportedEvaluators: ['speech_energy_silence', 'speech_vad_model'],
-    segmentation: {
-      mode: options.segmentation?.mode ?? 'auto',
-      policy:
-        options.segmentation?.policy ?? DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
-    },
+    segmentation: options.segmentation,
   });
 
   const audioInId = resolvePipelineAudioBufferId(
