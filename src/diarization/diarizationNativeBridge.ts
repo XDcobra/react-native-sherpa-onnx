@@ -62,6 +62,9 @@ export async function buildDiarizationInitBridgeOptions(
     ...(options.clustering?.threshold !== undefined
       ? { threshold: options.clustering.threshold }
       : {}),
+    ...(options.clustering?.computeConfidence !== undefined
+      ? { computeConfidence: options.clustering.computeConfidence }
+      : {}),
     ...(options.minDurationOn !== undefined
       ? { minDurationOn: options.minDurationOn }
       : {}),

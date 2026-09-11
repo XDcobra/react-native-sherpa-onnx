@@ -55,6 +55,11 @@ export interface DiarizationClusteringOptions {
   numClusters?: number;
   /** Cosine-dissimilarity threshold when numClusters is unset/≤0. Default 0.5 */
   threshold?: number;
+  /**
+   * When true, each segment includes silhouette-based `confidence` in [-1, 1].
+   * Default **false** (upstream `compute_confidence` parity).
+   */
+  computeConfidence?: boolean;
 }
 
 export interface DiarizationInitializeOptions {
@@ -81,12 +86,20 @@ export interface DiarizeResult {
   sampleRate: number;
   processingTimeMs: number;
   speakersPerFrame?: number[];
-  segments?: Array<{ start: number; end: number; speaker: number }>;
+  segments?: Array<{
+    start: number;
+    end: number;
+    speaker: number;
+    /** Present when `clustering.computeConfidence` was enabled. Range [-1, 1]. */
+    confidence?: number;
+  }>;
 }
 
 export interface DiarizationReclusterOptions {
   numClusters?: number;
   threshold?: number;
+  /** Override session confidence flag for this recluster. Default: keep prior. */
+  computeConfidence?: boolean;
 }
 
 export interface DiarizationClusterEmbedding {

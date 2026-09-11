@@ -5301,9 +5301,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     instanceId: String,
     numClusters: Double,
     threshold: Double,
+    computeConfidence: Boolean,
     promise: Promise
   ) {
-    diarizationHelper.reclusterDiarization(instanceId, numClusters, threshold, promise)
+    diarizationHelper.reclusterDiarization(
+      instanceId,
+      numClusters,
+      threshold,
+      computeConfidence,
+      promise,
+    )
   }
 
   override fun getDiarizationClusterEmbeddings(instanceId: String, promise: Promise) {

@@ -82,6 +82,10 @@ internal class SherpaOnnxDiarizationHelper(
     val windowShiftRatio = optDouble(options, "windowShiftRatio", 0.1)
     val numClusters = optDouble(options, "numClusters", -1.0).toInt()
     val threshold = optDouble(options, "threshold", 0.5).toFloat()
+    val computeConfidence =
+      options.hasKey("computeConfidence") &&
+        !options.isNull("computeConfidence") &&
+        options.getBoolean("computeConfidence")
     val minDurationOn = optDouble(options, "minDurationOn", 0.3).toFloat()
     val minDurationOff = optDouble(options, "minDurationOff", 0.5).toFloat()
     val numThreads = optDouble(options, "numThreads", 1.0).toInt().coerceAtLeast(1)
@@ -98,6 +102,7 @@ internal class SherpaOnnxDiarizationHelper(
           windowShiftRatio.toFloat(),
           numClusters,
           threshold,
+          computeConfidence,
           minDurationOn,
           minDurationOff,
           numThreads,
@@ -260,6 +265,7 @@ internal class SherpaOnnxDiarizationHelper(
           val startSec = (seg["start"] as? Number)?.toDouble() ?: 0.0
           val endSec = (seg["end"] as? Number)?.toDouble() ?: 0.0
           val speaker = (seg["speaker"] as? Number)?.toInt() ?: 0
+          val confidence = (seg["confidence"] as? Number)?.toDouble()
           val startSample =
             kotlin.math
               .round(startSec * sampleRate)
@@ -285,7 +291,7 @@ internal class SherpaOnnxDiarizationHelper(
               endSample = endSample,
               sampleRate = sampleRate,
               durationMs = durationMs,
-              confidence = null,
+              confidence = confidence,
               payloadJson = """{"source":"diarization","speaker":$speaker}""",
             ),
           )
@@ -317,6 +323,7 @@ internal class SherpaOnnxDiarizationHelper(
     instanceId: String,
     numClusters: Double,
     threshold: Double,
+    computeConfidence: Boolean,
     promise: Promise,
   ) {
     if (instanceId.isBlank()) {
@@ -329,6 +336,7 @@ internal class SherpaOnnxDiarizationHelper(
           instanceId,
           numClusters.toInt(),
           threshold.toFloat(),
+          computeConfidence,
         )
         if (result == null) {
           promise.reject(
@@ -483,6 +491,10 @@ internal class SherpaOnnxDiarizationHelper(
       m.putDouble("start", start)
       m.putDouble("end", end)
       m.putInt("speaker", speaker)
+      val confidence = (seg["confidence"] as? Number)?.toDouble()
+      if (confidence != null) {
+        m.putDouble("confidence", confidence)
+      }
       segmentsArr.pushMap(m)
     }
     map.putArray("segments", segmentsArr)
@@ -961,6 +973,7 @@ internal class SherpaOnnxDiarizationHelper(
       windowShiftRatio: Float,
       numClusters: Int,
       threshold: Float,
+      computeConfidence: Boolean,
       minDurationOn: Float,
       minDurationOff: Float,
       numThreads: Int,
@@ -981,6 +994,7 @@ internal class SherpaOnnxDiarizationHelper(
       instanceId: String,
       numClusters: Int,
       threshold: Float,
+      computeConfidence: Boolean,
     ): HashMap<String, Any>?
 
     @JvmStatic

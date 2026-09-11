@@ -44,11 +44,15 @@ int32_t OptInt32(std::optional<double> value, int32_t fallback) {
 NSDictionary *ProcessResultToDict(const sherpaonnx::DiarizationProcessResult &result) {
   NSMutableArray *segments = [NSMutableArray arrayWithCapacity:result.segments.size()];
   for (const auto &seg : result.segments) {
-    [segments addObject:@{
+    NSMutableDictionary *segDict = [@{
       @"start": @(seg.start),
       @"end": @(seg.end),
       @"speaker": @(seg.speaker),
-    }];
+    } mutableCopy];
+    if (seg.confidence > -1.5f) {
+      segDict[@"confidence"] = @(seg.confidence);
+    }
+    [segments addObject:segDict];
   }
 
   NSMutableDictionary *out = [@{
@@ -138,6 +142,11 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
   const float windowShiftRatio = OptFloat(options.windowShiftRatio(), 0.1f);
   const int32_t numClusters = OptInt32(options.numClusters(), -1);
   const float threshold = OptFloat(options.threshold(), 0.5f);
+  bool computeConfidence = false;
+  auto computeConfidenceOpt = options.computeConfidence();
+  if (computeConfidenceOpt.has_value()) {
+    computeConfidence = computeConfidenceOpt.value();
+  }
   const float minDurationOn = OptFloat(options.minDurationOn(), 0.3f);
   const float minDurationOff = OptFloat(options.minDurationOff(), 0.5f);
   const int32_t numThreads = std::max(1, OptInt32(options.numThreads(), 1));
@@ -160,6 +169,7 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
           windowShiftRatio,
           numClusters,
           threshold,
+          computeConfidence,
           minDurationOn,
           minDurationOff,
           numThreads,
@@ -322,7 +332,12 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
         r.endSample = endSample;
         r.sampleRate = sampleRate;
         r.durationMs = durationMs;
-        r.hasConfidence = false;
+        if (seg.confidence > -1.5f) {
+          r.hasConfidence = true;
+          r.confidence = seg.confidence;
+        } else {
+          r.hasConfidence = false;
+        }
         r.payloadJson =
             std::string("{\"source\":\"diarization\",\"speaker\":") +
             std::to_string(seg.speaker) + "}";
@@ -360,6 +375,7 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
 - (void)reclusterDiarization:(NSString *)instanceId
                  numClusters:(double)numClusters
                    threshold:(double)threshold
+           computeConfidence:(BOOL)computeConfidence
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
@@ -381,7 +397,8 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
       }
       sherpaonnx::DiarizationProcessResult result =
           wrapper->recluster(static_cast<int32_t>(numClusters),
-                             static_cast<float>(threshold));
+                             static_cast<float>(threshold),
+                             computeConfidence ? true : false);
       if (!result.success) {
         reject(RejectCodeForProcess(result),
                result.error.empty()
