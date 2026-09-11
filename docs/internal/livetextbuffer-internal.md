@@ -77,7 +77,7 @@ The segment log is an **ordered list** of committed text segments.
   - `source`: discriminator (`'stt_stream'`, `'append'`, `'replace'`, `'mixed'`, `'unknown'`).
   - `tokens`: optional token-level breakdown.
   - `timestamps`: optional per-token timestamps.
-  - `meta`: opaque metadata dictionary (pipeline workers interpret feature-specific keys, e.g., TTS `sid`, `speed`). **Today’s bridge contract is scalar-only** (+ optional `extra: Record<string, string>`); nested arrays/objects are dropped on Android emit / JS projection — see planned upgrade [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md).
+  - `meta`: Fabric-safe JSON tree (`Record<string, JsonValue>`). Nested arrays/objects round-trip through Android recursive Writable packing, iOS `NSDictionary`/`NSArray` passthrough, and JS `sanitizeJsonMeta`. Soft guards: depth ≤ 4, array length ≤ 64, keys/level ≤ 64 (excess dropped). TTS `extra` stays `Record<string, string>`. **Spool does not persist or reconstitute segment meta** (status quo — commits store text/tokens/timestamps only).
 - **Segment index:** Monotonically increasing, never reset. Even after eviction from the in-memory window, the index continues.
 
 ### 2.3 Spool (On-Disk Persistence)

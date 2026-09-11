@@ -116,6 +116,8 @@ Each time the native worker (or `appendLiveTextSegment`) **commits** a new trans
 - `segment` — committed segment (`domain: 'text'`, `text`, `segmentIndex`, optional `tokens` / `timestamps` / `meta`)  
 - `totalSegments` — retained segment count **after** this commit (upper bound for pull APIs)
 
+`meta` is a **Fabric-safe JSON tree** (`Record<string, JsonValue>`): scalars, nested objects, and arrays are preserved across Android emit, iOS passthrough, JS projection, and `getLiveTextBufferSegments(..., { includeMeta: true })`. Soft limits (values beyond these are dropped, not thrown): depth ≤ **4**, array length ≤ **64**, object keys per level ≤ **64**. Non-JSON values (`undefined`, functions, non-finite numbers, host objects) are stripped. Public views also remove reserved `__segment*` keys. TTS `meta.extra` remains string-valued only. **KWS** and other scalar-only producers need no change — scalars remain valid trees.
+
 This is the right hook when you want **“new subtitle line”** semantics instead of high-frequency **`onPartial`** updates. It complements (does not replace) **`onPartial`** for streaming STT.
 
 ```ts
@@ -281,9 +283,11 @@ function appendLiveTextSegment(
   text: string,
   tokens?: string[],
   timestamps?: number[],
-  meta?: Record<string, unknown>
+  meta?: Record<string, JsonValue>
 ): Promise<{ segmentIndex: number }>;
 ```
+
+`meta` accepts nested JSON (same contract as live `onSegment`); see [Committed text segments](#committed-text-segments-onsegment-no-polling).
 
 ```ts
 await appendLiveTextSegment(live, 'hello world', ['h', 'e', 'l', 'l', 'o']);
