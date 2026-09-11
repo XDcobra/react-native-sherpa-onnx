@@ -354,6 +354,60 @@ std::vector<DiarizationSegment> ComputeResult(const Int8Matrix& final_labels,
   return result;
 }
 
+void ApplySegmentConfidence(
+    std::vector<DiarizationSegment>* segments,
+    const std::vector<std::vector<SampleRange>>& embedding_ranges,
+    const std::vector<int32_t>& cluster_labels,
+    const std::vector<float>& silhouettes, int32_t sample_rate) {
+  if (segments == nullptr || segments->empty() || sample_rate <= 0) {
+    return;
+  }
+  const size_t n = std::min(
+      {embedding_ranges.size(), cluster_labels.size(), silhouettes.size()});
+  if (n == 0) {
+    return;
+  }
+
+  struct SilhouetteInterval {
+    int32_t start_sample = 0;
+    int32_t end_sample = 0;
+    float silhouette = kUnavailableConfidence;
+  };
+  std::unordered_map<int32_t, std::vector<SilhouetteInterval>> by_cluster;
+  for (size_t i = 0; i < n; ++i) {
+    const int32_t cluster = cluster_labels[i];
+    const float silhouette = silhouettes[i];
+    auto& bucket = by_cluster[cluster];
+    for (const auto& range : embedding_ranges[i]) {
+      bucket.push_back({range.start, range.end, silhouette});
+    }
+  }
+
+  for (auto& seg : *segments) {
+    auto it = by_cluster.find(seg.speaker);
+    if (it == by_cluster.end()) {
+      seg.confidence = kUnavailableConfidence;
+      continue;
+    }
+    const int32_t seg_start =
+        static_cast<int32_t>(seg.start * static_cast<float>(sample_rate));
+    const int32_t seg_end =
+        static_cast<int32_t>(seg.end * static_cast<float>(sample_rate));
+    double sum = 0.0;
+    int32_t count = 0;
+    for (const auto& interval : it->second) {
+      if (interval.end_sample > seg_start &&
+          interval.start_sample < seg_end) {
+        sum += static_cast<double>(interval.silhouette);
+        count += 1;
+      }
+    }
+    seg.confidence =
+        count == 0 ? kUnavailableConfidence
+                   : static_cast<float>(sum / static_cast<double>(count));
+  }
+}
+
 Int8Matrix SpeechUnionLabels(const std::vector<int32_t>& speakers_per_frame) {
   Int8Matrix out;
   const int32_t rows = static_cast<int32_t>(speakers_per_frame.size());

@@ -75,7 +75,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Spoken language identification (SLID): [Offline](./docs/language-identification-offline.md) · [Live overload](./docs/language-identification-live.md)
 - ✅ Keyword spotting (KWS): [Streaming](./docs/kws-streaming.md)
 - ✅ Audio tagging / sound event detection: [Offline](./docs/audio-tagging-offline.md) · [Live overload](./docs/audio-tagging-live.md)
-- ❌ Diacritization: *(Not yet implemented in SDK)*
+- ❌ Diacritization: *(Planned for a future release)*
 
 ### Pipeline & orchestration
 
@@ -455,8 +455,8 @@ Full guide: [Audio visualization](./docs/audio-visualization.md).
 
 | Platform | Version |
 |----------|---------|
-| Android | 1.13.7 |
-| iOS | 1.13.7 |
+| Android | 1.13.8 |
+| iOS | 1.13.8 |
 
 ## Known issues
 

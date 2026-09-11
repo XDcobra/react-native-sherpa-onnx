@@ -150,6 +150,8 @@ export type DiarizationInitBridgeOptions = {
   windowShiftRatio?: number;
   numClusters?: number;
   threshold?: number;
+  /** Default false — upstream FastClusteringConfig.compute_confidence parity. */
+  computeConfidence?: boolean;
   minDurationOn?: number;
   minDurationOff?: number;
   numThreads?: number;
@@ -254,7 +256,13 @@ export type DiarizationProcessNativeResult = {
    * Product `diarizeOffline` writes `segmentsOut` natively and may omit this
    * (prefer `segmentCount`).
    */
-  segments?: Array<{ start: number; end: number; speaker: number }>;
+  segments?: Array<{
+    start: number;
+    end: number;
+    speaker: number;
+    /** Present when clustering.computeConfidence was enabled. Range [-1, 1]. */
+    confidence?: number;
+  }>;
   /** Number of segments written to `segmentsOut` (product `diarizeOffline`). */
   segmentCount?: number;
   numSpeakers: number;
@@ -1908,7 +1916,8 @@ export interface Spec extends TurboModule {
   reclusterDiarization(
     instanceId: string,
     numClusters: number,
-    threshold: number
+    threshold: number,
+    computeConfidence: boolean
   ): Promise<DiarizationProcessNativeResult>;
 
   getDiarizationClusterEmbeddings(

@@ -12,7 +12,7 @@ on:
       onnxruntime_version:
         description: 'ONNX Runtime version for csukuangfj/onnxruntime-libs static iOS xcframework. Passed as SHERPA_ONNX_ONNXRUNTIME_VERSION to build-ios.sh.'
         required: false
-        default: '1.28.1'
+        default: '1.28.2'
 
 jobs:
   build-framework:
@@ -74,7 +74,7 @@ jobs:
           SHERPA_ONNX_ONNXRUNTIME_VERSION: ${{ github.event.inputs.onnxruntime_version }}
         run: |
           if [ -z "${SHERPA_ONNX_ONNXRUNTIME_VERSION:-}" ]; then
-            export SHERPA_ONNX_ONNXRUNTIME_VERSION="1.28.1"
+            export SHERPA_ONNX_ONNXRUNTIME_VERSION="1.28.2"
           fi
           echo "SHERPA_ONNX_ONNXRUNTIME_VERSION=${SHERPA_ONNX_ONNXRUNTIME_VERSION}"
           cd third_party/sherpa-onnx-prebuilt

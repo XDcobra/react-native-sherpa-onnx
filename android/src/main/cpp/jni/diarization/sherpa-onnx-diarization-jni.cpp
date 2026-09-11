@@ -190,6 +190,10 @@ jobject DiarizationProcessResultToJava(
       PutFloat(env, segMap, segPut, "start", seg.start);
       PutFloat(env, segMap, segPut, "end", seg.end);
       PutInt(env, segMap, segPut, "speaker", seg.speaker);
+      // Omit unavailable sentinel (-2) so JS can treat missing as undefined.
+      if (seg.confidence > -1.5f) {
+        PutFloat(env, segMap, segPut, "confidence", seg.confidence);
+      }
       env->CallBooleanMethod(segments, listAdd, segMap);
       env->DeleteLocalRef(segMap);
     }
@@ -242,6 +246,7 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
     jfloat windowShiftRatio,
     jint numClusters,
     jfloat threshold,
+    jboolean computeConfidence,
     jfloat minDurationOn,
     jfloat minDurationOff,
     jint numThreads,
@@ -254,10 +259,11 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
   const auto providerOpt = CopyOptionalJstring(env, provider);
 
   LOGI(
-      "nativeInitializeDiarization: instanceId=%s threads=%d numClusters=%d",
+      "nativeInitializeDiarization: instanceId=%s threads=%d numClusters=%d computeConfidence=%d",
       instanceIdStr.c_str(),
       numThreads,
-      numClusters
+      numClusters,
+      computeConfidence == JNI_TRUE ? 1 : 0
   );
 
   sherpaonnx::DiarizationInitializeResult result;
@@ -271,6 +277,7 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
         windowShiftRatio,
         numClusters,
         threshold,
+        computeConfidence == JNI_TRUE,
         minDurationOn,
         minDurationOff,
         numThreads > 0 ? numThreads : 1,
@@ -370,14 +377,16 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeReclust
     jclass /* clazz */,
     jstring instanceId,
     jint numClusters,
-    jfloat threshold
+    jfloat threshold,
+    jboolean computeConfidence
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   LOGI(
-      "nativeReclusterDiarization: instanceId=%s numClusters=%d threshold=%f",
+      "nativeReclusterDiarization: instanceId=%s numClusters=%d threshold=%f computeConfidence=%d",
       instanceIdStr.c_str(),
       numClusters,
-      threshold
+      threshold,
+      computeConfidence == JNI_TRUE ? 1 : 0
   );
 
   sherpaonnx::DiarizationProcessResult result;
@@ -388,7 +397,8 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeReclust
     result.error = "Diarization instance not found: " + instanceIdStr;
     return DiarizationProcessResultToJava(env, result);
   }
-  result = wrapper->recluster(numClusters, threshold);
+  result = wrapper->recluster(numClusters, threshold,
+                              computeConfidence == JNI_TRUE);
   return DiarizationProcessResultToJava(env, result);
 }
 

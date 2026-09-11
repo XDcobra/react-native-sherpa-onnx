@@ -6,10 +6,10 @@
 # and outputs sherpa_onnx.xcframework.
 #
 # Usage: build_sherpa_onnx_ios.sh <GIT_REF>
-#   GIT_REF: branch or tag to use (e.g. v1.13.7, main). Required.
+#   GIT_REF: branch or tag to use (e.g. v1.13.8, main). Required.
 #
 # Environment:
-#   SHERPA_ONNX_ONNXRUNTIME_VERSION or ONNXRUNTIME_VERSION — ORT version (default 1.28.1)
+#   SHERPA_ONNX_ONNXRUNTIME_VERSION or ONNXRUNTIME_VERSION — ORT version (default 1.28.2)
 #
 # Output: third_party/sherpa-onnx-prebuilt/sherpa_onnx.xcframework
 # Requires: macOS, Xcode, CMake. Run from repo root or from third_party/sherpa-onnx-prebuilt.
@@ -18,7 +18,7 @@ set -e
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <GIT_REF>" >&2
-  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v1.13.7, main)" >&2
+  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v1.13.8, main)" >&2
   exit 1
 fi
 GIT_REF="$1"
@@ -29,7 +29,7 @@ BUILD_TOP="$SCRIPT_DIR/build_ios_work"
 SHERPA_SRC="$BUILD_TOP/sherpa-onnx-source"
 OUTPUT_XCFRAMEWORK="$SCRIPT_DIR/sherpa_onnx.xcframework"
 
-ORT_VERSION="${SHERPA_ONNX_ONNXRUNTIME_VERSION:-${ONNXRUNTIME_VERSION:-1.28.1}}"
+ORT_VERSION="${SHERPA_ONNX_ONNXRUNTIME_VERSION:-${ONNXRUNTIME_VERSION:-1.28.2}}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "iOS builds require macOS" >&2

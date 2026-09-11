@@ -218,6 +218,8 @@ export async function createDiarization(
       : 0;
 
   let destroyed = false;
+  /** Effective clustering confidence flag (init default false; recluster may override). */
+  let computeConfidence = options.clustering?.computeConfidence === true;
   const guard = () => {
     if (destroyed) {
       throw new Error(
@@ -307,10 +309,14 @@ export async function createDiarization(
         typeof reclusterOptions?.threshold === 'number'
           ? reclusterOptions.threshold
           : 0.5;
+      if (typeof reclusterOptions?.computeConfidence === 'boolean') {
+        computeConfidence = reclusterOptions.computeConfidence;
+      }
       const nativeResult = await SherpaOnnx.reclusterDiarization(
         instanceId,
         numClusters,
-        threshold
+        threshold,
+        computeConfidence
       );
       if (!nativeResult.success) {
         throw new Error(
