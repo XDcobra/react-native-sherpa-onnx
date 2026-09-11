@@ -218,9 +218,9 @@ interface AudioTaggingResult {
 
 | Sink | What to write |
 | --- | --- |
-| **LiveText (required)** | `text` = primary event `name`; `source` = `'audio_tagging'`; `meta.events` = **JSON string** of top-K `[{name,index,prob}]` (LiveText meta is scalar-only across the bridge — interim); `meta.durationMs`; timestamps = span start/end |
+| **LiveText (required)** | `text` = primary event `name`; `source` = `'audio_tagging'`; `meta.events` = nested top-K `[{name,index,prob}]` (JSON-tree LiveText contract); `meta.durationMs`; timestamps = span start/end |
 
-> **Follow-up (post AT):** Lift LiveText meta to a real JSON-tree contract and drop the string encode/decode workaround — see [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md). Breaking changes welcome.
+> **Done:** LiveText meta JSON-tree contract landed — see [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md). String encode/decode workaround removed (clean cut).
 | **LiveSegment (optional `targetSegmentBuffer`)** | Same payload as offline: `{ source: 'audioTagging', primaryName?, events? }` |
 | **JS callbacks** | `onSegment` / `onEvent` from LiveText commits (map primary name + meta) — **no** SLID-style `onLanguageChanged` |
 
@@ -437,7 +437,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 ### 8.3 Lifecycle / Fabric notes
 
 - Snapshot event arrays to plain JSON before emitting to JS (avoid retaining native HybridData — lesson from KWS LiveText meta).
-- **Interim LiveText meta:** top-K `events` committed as a **JSON string** under `meta.events` (scalar-only LiveText contract). Planned root fix: [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md).
+- **LiveText meta:** top-K `events` committed as a nested array under `meta.events` (JSON-tree LiveText contract). See [live-text-meta-json-tree-contract.md](../future-work/live-text-meta-json-tree-contract.md).
 - Always await worker stop before `release()` (pipeline join lesson).
 
 ---

@@ -101,21 +101,10 @@ function assertLiveOptions(options: AudioTaggingLivePipelineOptions): void {
   }
 }
 
-/**
- * LiveText meta is Fabric-safe scalars only (see projectNativeSegmentMeta).
- * Native commits top-K as a JSON string under `meta.events`; keep array parse
- * for tests / any path that still delivers a plain list.
- */
+/** Read nested `meta.events` arrays (JSON-tree LiveText contract). */
 function parseEventsFromMeta(meta: unknown): AudioTaggingEvent[] {
   if (meta == null || typeof meta !== 'object') return [];
-  let raw: unknown = (meta as Record<string, unknown>).events;
-  if (typeof raw === 'string') {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
+  const raw: unknown = (meta as Record<string, unknown>).events;
   if (!Array.isArray(raw)) return [];
   const out: AudioTaggingEvent[] = [];
   for (const item of raw) {

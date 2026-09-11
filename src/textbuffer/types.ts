@@ -12,6 +12,7 @@
 import type { StreamEventSpec } from '../pipeline/streamEvents';
 import type { Segment } from '../segment/segment';
 import type { SegmentationPolicy } from '../segment/engine-types';
+import type { JsonValue } from './jsonMeta';
 
 // ========== Buffer Kinds ==========
 
@@ -113,12 +114,11 @@ export interface LiveTextSegment {
    * Opaque metadata dictionary attached to this segment.
    * Pipeline workers interpret feature-specific keys and fall back to pipeline defaults.
    *
-   * Native → JS projects meta to JSON scalars (+ optional `extra` string map).
-   * Nested host maps are not retained across the event boundary.
-   *
-   * TTS worker keys: { sid?: number; speed?: number; extra?: Record<string, string> }
+   * Contract: Fabric-safe JSON tree (`JsonValue`) after bridge projection.
+   * Soft limits: depth ≤ 4, array length ≤ 64, object keys/level ≤ 64.
+   * TTS: `{ sid?: number; speed?: number; extra?: Record<string, string> }`
    */
-  meta?: Record<string, unknown>;
+  meta?: Record<string, JsonValue>;
 }
 
 /** Discriminated union of all pipeline text buffer info types. */

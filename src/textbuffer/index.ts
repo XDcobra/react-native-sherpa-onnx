@@ -24,6 +24,7 @@ import {
 } from '../segment/runtime-state';
 import type { TextSegment } from '../segment/segment';
 import { PipelineTextErrorCode, TEXT_MAX_SLICE_COUNT } from './types';
+import { sanitizeJsonMeta, type JsonValue } from './jsonMeta';
 import {
   toSegmentReason,
   toSegmentSource,
@@ -176,92 +177,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
 }
 
-/** Internal LiveText meta keys consumed by emitLocalTextSegmentEvent — not public. */
-const RESERVED_SEGMENT_META_KEYS = new Set([
-  '__segmentReason',
-  '__segmentSource',
-  '__segmentCreatedAtMs',
-  '__segmentId',
-  '__segmentLang',
-]);
-
-function asJsonScalar(
-  value: unknown
-): string | number | boolean | null | undefined {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-  return undefined;
-}
-
 /**
- * Bridge boundary: project native event `meta` into a plain object.
- *
- * Contract: JSON scalars, optional `extra: Record<string, string>` (TTS).
- * Do not spread or retain host maps past this function.
+ * Bridge boundary: project native event `meta` into a Fabric-safe JSON tree.
  */
 function projectNativeSegmentMeta(
   meta: unknown
-): Record<string, unknown> | undefined {
-  if (!isRecord(meta)) {
-    return undefined;
-  }
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(meta)) {
-    const value = meta[key];
-    const scalar = asJsonScalar(value);
-    if (scalar !== undefined) {
-      out[key] = scalar;
-      continue;
-    }
-    if (key === 'extra' && isRecord(value)) {
-      const extra: Record<string, string> = {};
-      for (const extraKey of Object.keys(value)) {
-        if (typeof value[extraKey] === 'string') {
-          extra[extraKey] = value[extraKey];
-        }
-      }
-      if (Object.keys(extra).length > 0) {
-        out.extra = extra;
-      }
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
+): Record<string, JsonValue> | undefined {
+  return sanitizeJsonMeta(meta);
 }
 
 function toPublicTextMeta(
-  meta: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!meta) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(meta)) {
-    if (RESERVED_SEGMENT_META_KEYS.has(key)) continue;
-    const scalar = asJsonScalar(meta[key]);
-    if (scalar !== undefined) {
-      out[key] = scalar;
-      continue;
-    }
-    if (key === 'extra' && isRecord(meta[key])) {
-      const extra: Record<string, string> = {};
-      for (const extraKey of Object.keys(
-        meta[key] as Record<string, unknown>
-      )) {
-        const v = (meta[key] as Record<string, unknown>)[extraKey];
-        if (typeof v === 'string') {
-          extra[extraKey] = v;
-        }
-      }
-      if (Object.keys(extra).length > 0) {
-        out.extra = extra;
-      }
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
+  meta: Record<string, JsonValue> | undefined
+): Record<string, JsonValue> | undefined {
+  return sanitizeJsonMeta(meta, { publicView: true });
 }
 
 function dispatchLiveTextSegmentEvent(
@@ -307,11 +235,15 @@ function emitLocalTextSegmentEvent(
   const previousEnd = textLastSegmentEndOffsetByBuffer.get(liveBufferId) ?? 0;
   const utf16Length = segment.text.length;
   const source = toSegmentSource(
-    rawMeta?.__segmentSource,
+    typeof rawMeta?.__segmentSource === 'string'
+      ? rawMeta.__segmentSource
+      : undefined,
     segment.source === 'append' ? 'manual' : 'segmentation_engine'
   );
   const reason = toSegmentReason(
-    rawMeta?.__segmentReason,
+    typeof rawMeta?.__segmentReason === 'string'
+      ? rawMeta.__segmentReason
+      : undefined,
     inferSegmentReasonFromSource(segment.source)
   );
   const createdAtMsRaw = rawMeta?.__segmentCreatedAtMs;
@@ -1088,12 +1020,13 @@ export async function appendLiveTextSegment(
   meta?: Record<string, unknown>
 ): Promise<{ segmentIndex: number }> {
   const id = resolveLiveTextBufferId(liveBufferId);
+  const sanitizedMeta = sanitizeJsonMeta(meta);
   const out = await getNative().appendLiveTextSegment(
     id,
     text,
     tokens,
     timestamps,
-    meta
+    sanitizedMeta
   );
 
   const callbacks = textSegmentCallbacks.get(id);
@@ -1109,7 +1042,7 @@ export async function appendLiveTextSegment(
       segmentIndex: out.segmentIndex,
       ...(tokens && tokens.length > 0 ? { tokens } : {}),
       ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
-      ...(meta ? { meta } : {}),
+      ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
     };
     emitLocalTextSegmentEvent(id, segment, out.segmentIndex + 1);
   }
@@ -1154,9 +1087,7 @@ export async function getLiveTextBufferSegments(
     ...(Array.isArray(segment.timestamps)
       ? { timestamps: segment.timestamps }
       : {}),
-    ...(segment.meta != null
-      ? { meta: segment.meta as Record<string, unknown> }
-      : {}),
+    ...(segment.meta != null ? { meta: sanitizeJsonMeta(segment.meta) } : {}),
   }));
 }
 
@@ -1211,6 +1142,20 @@ export {
   TEXT_DEFAULT_SLICE_COUNT,
   TEXT_MAX_SLICE_COUNT,
 } from './types';
+
+export type {
+  JsonScalar,
+  JsonValue,
+  SanitizeJsonMetaOptions,
+} from './jsonMeta';
+
+export {
+  sanitizeJsonMeta,
+  JSON_META_MAX_DEPTH,
+  JSON_META_MAX_ARRAY_LENGTH,
+  JSON_META_MAX_OBJECT_KEYS,
+  RESERVED_SEGMENT_META_KEYS,
+} from './jsonMeta';
 
 /**
  * Resolve a text buffer source to a native buffer ID string.

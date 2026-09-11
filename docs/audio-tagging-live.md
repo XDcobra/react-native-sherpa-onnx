@@ -154,11 +154,11 @@ Each committed span writes one LiveText segment:
 | `source` | `'audio_tagging'` |
 | `timestamps` | `[startTime, endTime]` (seconds) |
 | `meta.durationMs` | Span duration in ms |
-| `meta.events` | **JSON string** of top-K `[{ name, index, prob }]` |
+| `meta.events` | Nested top-K array `[{ name, index, prob }]` |
 
-LiveText meta is **scalar-only** across the React Native bridge today, so nested event lists are stringified. Apps that read the buffer directly should `JSON.parse(meta.events)`. The JS `onSegment` callback parses this for you into `AudioTaggingLiveSegmentEvent.result`.
+LiveText `meta` is a Fabric-safe JSON tree. Apps that read the buffer directly see `meta.events` as an array. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
 
-Planned root fix (breaking later): [live-text-meta-json-tree-contract.md](future-work/live-text-meta-json-tree-contract.md).
+See [live-text-meta-json-tree-contract.md](future-work/live-text-meta-json-tree-contract.md).
 
 ## API reference
 
