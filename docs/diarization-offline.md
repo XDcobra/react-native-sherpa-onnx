@@ -61,6 +61,15 @@ await diar.destroy();
 | **Segments out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Empty buffer; segments written with `kind: 'diarization'` |
 | **Engine** | `DiarizationEngine` via `createDiarization` | `diarize`, `recluster`, `getClusterEmbeddings`, `destroy` |
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `pyannote` | `model.onnx` (or `model.int8.onnx`) | `model` |
+| `reverb` | `model.onnx` (or `model.int8.onnx`) | `model` |
+
+Validate category: **`diarization`**. Offline also needs a separate speaker-embedding ONNX (`ModelCategory.SpeakerEmbedding`). Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Diarization`).
+
 ## API reference
 
 ### `detectDiarizationModel(source, options?)`
@@ -186,6 +195,40 @@ const { clusterToName, timeline } = await mapDiarizationToNames(
 timeline.forEach((s) => console.log(s.name ?? 'Unknown', s.startSec, s.endSec));
 ```
 
+## Diarization payload (`source: 'diarization'`)
+
+`diarize` writes each speaker turn into `segmentOut` as `kind: 'diarization'` (not `speech`) with this payload. Downstream code (e.g. `mapDiarizationToNames`) filters on `payload.source === 'diarization'`.
+
+```ts
+{ source: 'diarization'; speaker: number }
+```
+
+`speaker` is the anonymous 0-based cluster id. Optional per-segment `confidence` (when `clustering.computeConfidence: true`) lives on the segment meta, not inside the payload. See [segmentbuffer-offline.md](segmentbuffer-offline.md).
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| File decode path | `OfflineAudioBuffer` (`off_*`) | Meeting / podcast clip via `createOfflineAudioBufferFromFile(...)`. |
+| Sample ingestion path | `OfflineAudioBuffer` (`off_*`) | App-owned PCM via `createOfflineAudioBufferFromSamples(...)`. |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Anonymous speaker turns | `OfflineSegmentBuffer` (`seg_off_*`) | `kind: 'diarization'`, `payload.source: 'diarization'`. |
+| Named timeline | `mapDiarizationToNames(...)` + SID | Cluster ids → enrolled names; see [diarization-named-timeline.md](diarization-named-timeline.md). |
+| Streaming diarization | Sortformer path | [diarization-streaming.md](diarization-streaming.md) (no live overload of offline pyannote). |
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer] --> B["createDiarization().diarize"]
+  B --> C[OfflineSegmentBuffer diarization]
+  C --> D[mapDiarizationToNames or UI]
+```
+
 ## JS Events
 
 | Callback | Payload | Fires when | Notes |
@@ -235,13 +278,16 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 
 ---
 
-## Models
+## Error codes
 
-| Kind | Release tag | Notes |
-| --- | --- | --- |
-| `pyannote` | `speaker-segmentation-models` | MIT |
-| `reverb` | `speaker-segmentation-models` | Often non-commercial — check license CSV |
-| embedding | `speaker-recongition-models` | Required separately |
+| Code | Typical reason |
+| --- | --- |
+| `DIARIZATION_INVALID_ARGUMENT` | Missing/malformed args (e.g. wrong buffer kind) |
+| `DIARIZATION_INIT_ERROR` | Engine init failed (missing model / ORT) |
+| `DIARIZATION_NOT_INITIALIZED` | Operation on uninitialized engine/instance |
+| `DIARIZATION_CANCELLED` | Operation cancelled |
+| `DIARIZATION_BUFFER_NOT_FOUND` | Audio or segment buffer id missing/released |
+| `DETECT_ERROR` | Model detection failed or pack layout invalid |
 
 ## Architecture note
 
@@ -259,7 +305,82 @@ ported from upstream `compute_confidence`). It does **not** wrap the upstream
   (true streaming planned; **live overload intentionally not planned**)
 - `speech_pyannote_segmentation` evaluator for the shared segmentation engine: **shipped** (offline union spans; see [segmentation-engine.md](./segmentation-engine.md))
 
-## Related
+## Use case examples
+
+<details>
+<summary>Diarize a recording into speaker cluster segments</summary>
+
+Provide pyannote/reverb segmentation plus a speaker-embedding pack, then read `kind: 'diarization'` rows from the output segment buffer.
+
+```ts
+import { createDiarization } from 'react-native-sherpa-onnx/diarization';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineSegmentBuffer,
+  getOfflineSegmentBufferSegments,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const diar = await createDiarization({
+  segmentation: { modelSource: { kind: 'fs', path: '/path/to/pyannote-seg' } },
+  embedding: { modelSource: { kind: 'fs', path: '/path/to/speaker-embedding.onnx' } },
+  clustering: { threshold: 0.5 },
+});
+const audioIn = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/meeting.wav' });
+const segmentOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audioIn });
+
+await diar.diarize(audioIn, segmentOut, { onProgress: (p) => console.log(p.fraction) });
+const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 4096);
+for (const s of segments) {
+  if (s.kind === 'diarization') console.log(s.payload?.speaker, s.startSample, s.endSample);
+}
+
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineAudioBuffer(audioIn);
+await diar.destroy();
+```
+
+</details>
+
+<details>
+<summary>Tune clustering at init time</summary>
+
+Raise/lower the clustering threshold (and optionally compute confidence) when initializing the engine for noisier or cleaner meetings.
+
+```ts
+const diar = await createDiarization({
+  segmentation: { modelSource: { kind: 'fs', path: '/path/to/pyannote-seg' } },
+  embedding: { modelSource: { kind: 'fs', path: '/path/to/speaker-embedding.onnx' } },
+  clustering: { threshold: 0.6, computeConfidence: true },
+});
+```
+
+</details>
+
+<details>
+<summary>Export a who-spoke-when timeline for UI/clipboard</summary>
+
+After `diarize`, map segment rows into a simple timeline list the app can render or copy.
+
+```ts
+const segments = await getOfflineSegmentBufferSegments(segmentOut, 0, 4096);
+const timeline = segments
+  .filter((s) => s.kind === 'diarization')
+  .map((s) => ({
+    speaker: s.payload?.speaker,
+    startSample: s.startSample,
+    endSample: s.endSample,
+    confidence: s.payload?.confidence,
+  }));
+console.log(JSON.stringify(timeline, null, 2));
+```
+
+</details>
+
+## See also
 
 - [diarization-named-timeline.md](./diarization-named-timeline.md) — SID enroll + diarize → named who-spoke-when
 - [diarization-streaming.md](./diarization-streaming.md) — streaming plans; why no live overload

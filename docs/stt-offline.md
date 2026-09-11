@@ -169,6 +169,37 @@ const result = await engine.transcribe(audio, textOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md).
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` (optional `bpeVocab`) | `encoder`, `decoder`, `joiner`, `tokens` |
+| `paraformer` | `model*.onnx` or paraformer model, `tokens.txt` | `paraformerModel` or `encoder`+`decoder`, `tokens` |
+| `zipformer_ctc`, `ctc`, `nemo_ctc`, `wenet_ctc`, `sense_voice`, `telespeech_ctc` | `model*.onnx`, `tokens.txt` | `ctcModel`, `tokens` |
+| `whisper` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` | `whisperEncoder`, `whisperDecoder`, `tokens` |
+| `qwen3_asr` | qwen3 frontend / encoder / decoder / tokenizer files | family-specific keys |
+| `cohere_transcribe` | cohere encoder / decoder, `tokens.txt` | family-specific keys |
+| `fire_red_asr`, `canary` | encoder, decoder | family-specific keys |
+| `moonshine`, `dolphin`, `omnilingual`, `medasr`, `funasr_nano` | model-family specific | query `getCustomModelPathRequirements('stt', modelType)` |
+
+Validate category: **`stt`**. Overview: [README — Speech-to-Text](../README.md#speech-to-text) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Stt`).
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+
+const engine = await createSTT({
+  initMode: 'custom',
+  modelType: 'transducer',
+  customConfig: {
+    encoder: { kind: 'fs', path: '/data/models/encoder.onnx' },
+    decoder: { kind: 'fs', path: '/data/models/decoder.onnx' },
+    joiner: { kind: 'fs', path: '/data/models/joiner.onnx' },
+    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
+  },
+  hotwordsFile: { kind: 'fs', path: '/data/hotwords.txt' },
+});
+```
+
 ## API reference
 
 ### `detectSttModel(source, options?)`
@@ -244,72 +275,6 @@ destroy(): Promise<void>;
 await engine.destroy();
 ```
 
-## Models and required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` | `bpeVocab` | `encoder`, `decoder`, `joiner`, `tokens` |
-| `paraformer` | `model*.onnx` or paraformer model, `tokens.txt` | `paraformerModel`, `encoder`, `decoder` | `paraformerModel` or `encoder`+`decoder`, `tokens` |
-| `zipformer_ctc`, `ctc`, `nemo_ctc`, `wenet_ctc`, `sense_voice`, `telespeech_ctc` | `model*.onnx`, `tokens.txt` | — | `ctcModel`, `tokens` |
-| `whisper` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` | — | `whisperEncoder`, `whisperDecoder`, `tokens` |
-| `qwen3_asr` | qwen3 frontend / encoder / decoder / tokenizer files | — | family-specific keys |
-| `cohere_transcribe` | cohere encoder / decoder, `tokens.txt` | — | family-specific keys |
-| `fire_red_asr`, `canary` | encoder, decoder | — | family-specific keys |
-| `moonshine`, `dolphin`, `omnilingual`, `medasr`, `funasr_nano` | model-family specific | — | query `getCustomModelPathRequirements('stt', modelType)` |
-
-Query exact keys: `getCustomModelPathRequirements('stt', modelType)` from `react-native-sherpa-onnx/detect`.
-
-- **`FileSource`** — see [model-setup.md](model-setup.md)
-- **Detection & init modes** — [model-detect.md](model-detect.md) (preflight, auto vs custom)
-- **Downloads:** [download-manager.md](download-manager.md) · category `ModelCategory.Stt`
-- **Hotwords:** [hotwords.md](hotwords.md)
-
-## JS Events
-
-| Callback | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
-
-Shapes: [Types](#types).
-
-```ts
-const result = await engine.transcribe(audio, textOut, {
-  segmentation: { mode: 'auto' },
-  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
-});
-```
-
-Live overload uses `onSegment` only (no offline `onProgress`) — see [Live overload](#live-overload-offline-weights-live-consumption).
-
-## Custom initialization (`initMode: 'custom'`)
-
-Use when files are scattered or folder detection fails. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `transducer` | `encoder`, `decoder`, `joiner`, `tokens` |
-| `whisper` | `whisperEncoder`, `whisperDecoder`, `tokens` |
-| `paraformer` | `paraformerModel` or `encoder`+`decoder`, `tokens` |
-| CTC families | `ctcModel`, `tokens` |
-
-```ts
-import { createSTT } from 'react-native-sherpa-onnx/stt';
-
-const engine = await createSTT({
-  initMode: 'custom',
-  modelType: 'transducer',
-  customConfig: {
-    encoder: { kind: 'fs', path: '/data/models/encoder.onnx' },
-    decoder: { kind: 'fs', path: '/data/models/decoder.onnx' },
-    joiner: { kind: 'fs', path: '/data/models/joiner.onnx' },
-    tokens: { kind: 'fs', path: '/data/models/tokens.txt' },
-  },
-  hotwordsFile: { kind: 'fs', path: '/data/hotwords.txt' },
-});
-```
-
-Auxiliary paths (`hotwordsFile`, `bpeVocab`, `ruleFsts`, `ruleFars`) also accept `FileSource`. Full key list: `getCustomModelPathRequirements('stt', modelType)`.
-
 ## Live overload (offline weights, live consumption)
 
 > Mandatory `segmentation.policy`. Commit-only — no partials.
@@ -363,6 +328,24 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#stt-offline-patterns](feature-pipelines.md#stt-offline-patterns).
+
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await engine.transcribe(audio, textOut, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [Live overload](#live-overload-offline-weights-live-consumption).
 
 ## Types
 
@@ -423,6 +406,91 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [textbuffer-offline.md](
 Text slice / validation errors are reported via the **textbuffer** pipeline; see **`PipelineTextErrorCode`** in [`src/textbuffer/types.ts`](../src/textbuffer/types.ts).
 
 ---
+
+## Use case examples
+
+<details>
+<summary>Transcribe a file into an offline text buffer</summary>
+
+Load a WAV, run offline STT into a text buffer, then read the transcript slice for UI or export.
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyOfflineTextBuffer,
+  getOfflineTextBufferTextSlice,
+  getPipelineTextBufferInfo,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createSTT({
+  modelSource: { kind: 'fs', path: '/path/to/whisper' },
+  modelType: 'whisper',
+});
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/clip.wav' });
+const textOut = await createEmptyOfflineTextBuffer();
+
+await engine.transcribe(audio, textOut);
+
+const info = await getPipelineTextBufferInfo(textOut);
+const transcript = await getOfflineTextBufferTextSlice(textOut, 0, info.length);
+console.log(transcript);
+
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audio);
+await engine.destroy();
+```
+
+</details>
+
+<details>
+<summary>Segmented offline STT for long recordings</summary>
+
+Pass an auto segmentation policy so long files are transcribed in committed spans — reduces peak memory versus one monolithic decode.
+
+```ts
+await engine.transcribe(audio, textOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      silenceThresholdMs: 500,
+      energyThresholdDb: -40,
+      minSegmentMs: 1000,
+      maxSegmentMs: 60_000,
+    },
+  },
+  onProgress: (p) => console.log(p.fraction),
+});
+```
+
+</details>
+
+<details>
+<summary>Handoff the transcript buffer into punctuation (no JS string round-trip)</summary>
+
+Keep the STT `OfflineTextBuffer` id and feed it straight into offline punctuation — the punctuated buffer is ready for TTS without copying text in JS.
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+import { createEmptyOfflineTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+await engine.transcribe(audio, textOut);
+const punct = await createOfflinePunctuation({
+  modelSource: { kind: 'fs', path: '/path/to/punct-ct-transformer' },
+});
+const punctOut = await createEmptyOfflineTextBuffer();
+await punct.punctuate(textOut, punctOut);
+// punctOut is ready for createTTS().synthesize(punctOut, audioOut)
+await releasePipelineTextBuffer(punctOut);
+await punct.destroy();
+```
+
+</details>
 
 ## See also
 

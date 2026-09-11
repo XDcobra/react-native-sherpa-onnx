@@ -100,6 +100,14 @@ const result = await slid.identify(audio, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [language-identification-live.md](language-identification-live.md#segmentation-mandatory).
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `whisper` | `encoder` + `decoder` ONNX (same layout as STT Whisper) | `encoder`, `decoder` |
+
+Validate category: **`languageId`**. Overview: [README — Spoken Language Identification](../README.md#spoken-language-identification) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.LanguageId`).
+
 ## API reference
 
 ### `detectLanguageIdModel(source, options?)`
@@ -212,15 +220,40 @@ destroy(): Promise<void>;
 await slid.destroy();
 ```
 
-## Models and required files
+## Speech payload (`source: 'languageId'`)
 
-| `modelType` | Required files | Custom-init keys |
+When you pass `targetSegmentBuffer` (or use `labelOfflineSegments`), each identified span is appended as `kind: 'speech'` with this payload. Downstream code can filter on `payload.source === 'languageId'` without re-running identification.
+
+```ts
+{ source: 'languageId'; lang: string }
+```
+
+See [segmentbuffer-offline.md](segmentbuffer-offline.md).
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
 | --- | --- | --- |
-| `whisper` | `encoder` + `decoder` ONNX (same layout as STT Whisper) | `encoder`, `decoder` |
+| File decode path | `OfflineAudioBuffer` (`off_*`) | Clip via `createOfflineAudioBufferFromFile(...)`. |
+| Sample ingestion path | `OfflineAudioBuffer` (`off_*`) | App-owned PCM via `createOfflineAudioBufferFromSamples(...)`. |
+| Existing speech spans | `OfflineSegmentBuffer` (`seg_off_*`) | For `labelOfflineSegments` (PCM still required). |
 
-Validate category: **`languageId`**. Quantization: `'auto' | 'int8' | 'fp16' | 'fp32' | …`.
+### Typical downstream
 
-Download via `ModelCategory.LanguageId` (built-in GitHub source; see [download-manager.md](download-manager.md)).
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Oneshot / segmented result | `LanguageIdentificationResult` / `SegmentedLanguageIdentificationResult` | Dominant lang, distribution, switches. |
+| Optional segment timeline | `OfflineSegmentBuffer` (`seg_off_*`) | `targetSegmentBuffer` / `labelOfflineSegments` with `payload.source: 'languageId'`. |
+| Live overload | `LiveAudioBuffer` → `LiveTextBuffer` | Same engine: [language-identification-live.md](language-identification-live.md). |
+
+```mermaid
+flowchart LR
+  A[OfflineAudioBuffer] --> B["createLanguageIdentification().identify"]
+  B --> C[LanguageIdentificationResult]
+  B --> D[Optional OfflineSegmentBuffer]
+```
 
 ## JS Events
 
@@ -242,14 +275,6 @@ await slid.identify(audio, {
 ```
 
 Live overload uses `onSegment` / `onLanguageChanged` only (no offline `onProgress`) — see [language-identification-live.md](language-identification-live.md#js-events).
-
-## Speech payload (`source: 'languageId'`)
-
-```ts
-{ source: 'languageId'; lang: string }
-```
-
-See [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ## Types
 
@@ -302,6 +327,73 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `LANGUAGE_ID_IDENTIFY_FAILED` | Identify / label path failed. |
 | `LANGUAGE_ID_DESTROYED` | Call after `destroy()`. |
 | `SEGMENT_*` / `FILEIO_*` | Segment buffers / `FileSource` resolution (same as other offline features). |
+
+## Use case examples
+
+<details>
+<summary>Identify the language of a whole clip</summary>
+
+Run oneshot language ID on an offline audio buffer and read the top language + scores.
+
+```ts
+import { createLanguageIdentification } from 'react-native-sherpa-onnx/language-identification';
+import {
+  createOfflineAudioBufferFromFile,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const slid = await createLanguageIdentification({
+  modelSource: { kind: 'fs', path: '/path/to/whisper-slid' },
+});
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/clip.wav' });
+const result = await slid.identify(audio);
+console.log(result.language, result.scores);
+
+await releasePipelineAudioBuffer(audio);
+await slid.destroy();
+```
+
+</details>
+
+<details>
+<summary>Segmented identify for code-switched audio</summary>
+
+Auto-segment long/mixed speech so each committed span gets its own language label instead of one clip-level guess.
+
+```ts
+await slid.identify(audio, {
+  segmentation: {
+    mode: 'auto',
+    policy: {
+      evaluator: 'speech_energy_silence',
+      silenceThresholdMs: 500,
+      energyThresholdDb: -40,
+      minSegmentMs: 1000,
+      maxSegmentMs: 60_000,
+    },
+  },
+  onSegment: (e) => console.log(e.segmentIndex, e.language, e.scores),
+});
+```
+
+</details>
+
+<details>
+<summary>Gate downstream work on confidence</summary>
+
+Only hand the clip to STT/TTS when the top language score clears a threshold.
+
+```ts
+const result = await slid.identify(audio);
+const top = result.scores?.[0];
+if (top && top.score >= 0.6) {
+  console.log('accept language', result.language);
+} else {
+  console.log('low confidence — ask user or skip');
+}
+```
+
+</details>
 
 ## See also
 

@@ -101,6 +101,27 @@ const result = await sep.separate(mixed, [vocalsOut, accompOut], {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [separation-live.md](separation-live.md#segmentation-mandatory).
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `spleeter` | `vocals` + `accompaniment` ONNX paths | `vocals`, `accompaniment` |
+| `uvr` | single `model` ONNX path | `model` |
+
+Validate category: **`separation`**. Overview: [README — Source Separation](../README.md#source-separation) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Separation`).
+
+```ts
+import { createSeparation } from 'react-native-sherpa-onnx/separation';
+
+const sep = await createSeparation({
+  initMode: 'custom',
+  modelType: 'uvr',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/UVR-MDX-NET-Inst_1.onnx' },
+  },
+});
+```
+
 ## API reference
 
 ### `detectSeparationModel(source, options?)`
@@ -200,57 +221,6 @@ destroy(): Promise<void>;
 await sep.destroy();
 ```
 
-## Models and required files
-
-| `modelType` | Required files | Custom-init keys |
-| --- | --- | --- |
-| `spleeter` | `vocals` + `accompaniment` ONNX paths | `vocals`, `accompaniment` |
-| `uvr` | single `model` ONNX path | `model` |
-
-Auto mode detects the layout from directory contents and filename heuristics.
-
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md)
-- Downloads: [download-manager.md](download-manager.md) · `ModelCategory.Separation`
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `spleeter` | `vocals`, `accompaniment` |
-| `uvr` | `model` |
-
-```ts
-import { createSeparation } from 'react-native-sherpa-onnx/separation';
-
-const sep = await createSeparation({
-  initMode: 'custom',
-  modelType: 'uvr',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/UVR-MDX-NET-Inst_1.onnx' },
-  },
-});
-```
-
-## JS Events
-
-| Callback | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
-
-Shapes: [Types](#types).
-
-```ts
-const result = await sep.separate(mixed, [vocalsOut, accompOut], {
-  segmentation: { mode: 'auto' },
-  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
-});
-```
-
-Live overload uses `onSegment` only (no offline `onProgress`) — see [separation-live.md](separation-live.md#js-events).
-
 ## Pipeline composition
 
 ### Typical upstream
@@ -277,6 +247,24 @@ flowchart LR
   C --> E[Offline STT or saveAudioAsFile]
   D --> F[saveAudioAsFile]
 ```
+
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+
+Shapes: [Types](#types).
+
+```ts
+const result = await sep.separate(mixed, [vocalsOut, accompOut], {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [separation-live.md](separation-live.md#js-events).
 
 ## Types
 
@@ -330,6 +318,72 @@ See [audiobuffer-offline.md](audiobuffer-offline.md).
 Live-overload-specific codes (`LIVE_OFFLINE_SEGMENTATION_REQUIRED`, …): [separation-live.md](separation-live.md#error-codes).
 
 ---
+
+## Use case examples
+
+<details>
+<summary>Separate a mix into stems and play vocals</summary>
+
+Run offline separation into N stem buffers, then play stem 0 (vocals) for a quick A/B against the mix.
+
+```ts
+import { createSeparation } from 'react-native-sherpa-onnx/separation';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+const sep = await createSeparation({ modelSource: { kind: 'fs', path: '/path/to/uvr' } });
+const sr = await sep.getSampleRate();
+const numStems = await sep.getNumStems();
+const mixed = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/mix.wav' });
+const stems = await Promise.all(
+  Array.from({ length: numStems }, () => createEmptyOfflineAudioBuffer(sr)),
+);
+
+await sep.separate(mixed, stems);
+const player = await createPcmPlayer(stems[0]!);
+await player.play();
+
+await sep.destroy();
+await releasePipelineAudioBuffer(mixed);
+for (const s of stems) await releasePipelineAudioBuffer(s);
+```
+
+</details>
+
+<details>
+<summary>Segmented separation for long mixes</summary>
+
+Use auto `continuous_frames` checkpoints so long files separate in bounded chunks and keep peak RAM under control.
+
+```ts
+await sep.separate(mixed, stems, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 2000 },
+  },
+  onProgress: (p) => console.log(p.completedSegments, p.totalSegments),
+});
+```
+
+</details>
+
+<details>
+<summary>Export one stem to WAV</summary>
+
+After separation, save a single stem (e.g. accompaniment) without re-running the model.
+
+```ts
+import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
+
+await sep.separate(mixed, stems);
+await saveAudioAsFile(stems[1]!, { kind: 'fs', path: '/output/accompaniment.wav' }, 'wav');
+```
+
+</details>
 
 ## See also
 

@@ -112,7 +112,26 @@ const result = await punct.punctuate(textIn, textOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [punctuation-streaming.md](punctuation-streaming.md#segmentation-optional).
 
----
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `ct_transformer` | `*.onnx` (CT-Transformer) | `ct_transformer` |
+| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | `cnn_bilstm`, `bpe_vocab` (streaming only) |
+
+Validate category: **`punctuation`**. Overview: [README — Punctuation](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Punctuation`). `detectPunctuationModel` with `auto` may detect either family; **`createOfflinePunctuation`** accepts **`ct_transformer`** only.
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createOfflinePunctuation({
+  initMode: 'custom',
+  modelType: 'ct_transformer',
+  customConfig: {
+    ct_transformer: { kind: 'fs', path: '/data/models/ct-punct.onnx' },
+  },
+});
+```
 
 ## API reference
 
@@ -220,45 +239,6 @@ await engine.destroy();
 ```
 
 ---
-
-## Models and paths
-
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md)
-- Offline CT only — `createOfflinePunctuation` rejects CNN-only trees
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `ct_transformer` | `*.onnx` (CT-Transformer) | — | `ct_transformer` |
-| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | — | `cnn_bilstm`, `bpe_vocab` (streaming only) |
-
-`detectPunctuationModel` with `auto` may detect either family; **`createOfflinePunctuation`** accepts **`ct_transformer`** only.
-
-## Model detection
-
-`detectPunctuationModel` pre-check — no engine load. Unified catalog: [model-detect.md](model-detect.md). Returns `paths.*`, `detectionSources`; vocabs from ONNX.
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `ct_transformer` | `ct_transformer` |
-
-```ts
-import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
-
-const engine = await createOfflinePunctuation({
-  initMode: 'custom',
-  modelType: 'ct_transformer',
-  customConfig: {
-    ct_transformer: { kind: 'fs', path: '/data/models/ct-punct.onnx' },
-  },
-});
-```
 
 ## Live overload on offline punctuation (offline weights, live consumption)
 
@@ -383,6 +363,70 @@ See [textbuffer-offline.md](textbuffer-offline.md).
 
 ---
 
+## Use case examples
+
+<details>
+<summary>Punctuate STT output before TTS</summary>
+
+Take a plain transcript buffer from STT, punctuate into a fresh text buffer, then synthesize speech from the punctuated text.
+
+```ts
+import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+import {
+  createOfflineTextBufferFromText,
+  createEmptyOfflineTextBuffer,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import { createEmptyOfflineAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+
+const punct = await createOfflinePunctuation({
+  modelSource: { kind: 'fs', path: '/path/to/punct-ct-transformer' },
+});
+const textIn = await createOfflineTextBufferFromText('hello how are you today');
+const textOut = await createEmptyOfflineTextBuffer();
+await punct.punctuate(textIn, textOut);
+
+const tts = await createTTS({ modelSource: { kind: 'fs', path: '/path/to/tts' }, modelType: 'auto' });
+const audioOut = await createEmptyOfflineAudioBuffer(await tts.getSampleRate());
+await tts.synthesize(textOut, audioOut);
+
+await releasePipelineAudioBuffer(audioOut);
+await releasePipelineTextBuffer(textOut);
+await releasePipelineTextBuffer(textIn);
+await tts.destroy();
+await punct.destroy();
+```
+
+</details>
+
+<details>
+<summary>Punctuate a long transcript with segmentation</summary>
+
+Enable auto text segmentation so long transcripts punctuate in bounded chunks with progress callbacks.
+
+```ts
+await punct.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+});
+```
+
+</details>
+
+<details>
+<summary>Reuse an existing offline text buffer id</summary>
+
+When STT already wrote into `textIn`, pass that buffer directly to `punctuate` — no JS string copy required.
+
+```ts
+// textIn = OfflineTextBuffer already populated by engine.transcribe(...)
+const textOut = await createEmptyOfflineTextBuffer();
+await punct.punctuate(textIn, textOut);
+```
+
+</details>
+
 ## See also
 
 - [Text buffers — offline](textbuffer-offline.md)
@@ -394,57 +438,6 @@ See [textbuffer-offline.md](textbuffer-offline.md).
 - [Download manager](download-manager.md)
 - [Execution providers](execution-providers.md)
 - [Speech enhancement (offline)](enhancement-offline.md) (analogous buffer-based offline pattern for audio)
-
-## Use case examples
-
-<details>
-<summary>Punctuate STT output before TTS</summary>
-
-```ts
-import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
-import {
-  createOfflineTextBufferFromText,
-  createEmptyOfflineTextBuffer,
-  getOfflineTextBufferTextSlice,
-  getPipelineTextBufferInfo,
-  releasePipelineTextBuffer,
-} from 'react-native-sherpa-onnx/textbuffer';
-
-const engine = await createOfflinePunctuation({
-  modelSource: { kind: 'fs', path: '/path/to/punctuation-ct' },
-  modelType: 'auto',
-});
-
-const plain = await createOfflineTextBufferFromText('hello world how are you today', { lang: 'en' });
-const punctuated = await createEmptyOfflineTextBuffer();
-
-try {
-  await engine.punctuate(plain, punctuated);
-  const info = await getPipelineTextBufferInfo(punctuated);
-  console.log(await getOfflineTextBufferTextSlice(punctuated, 0, info.utf16Length));
-} finally {
-  await releasePipelineTextBuffer(plain);
-  await releasePipelineTextBuffer(punctuated);
-  await engine.destroy();
-}
-```
-
-</details>
-
-<details>
-<summary>Punctuate long text with segmented offline processing</summary>
-
-```ts
-const result = await engine.punctuate(textIn, textOut, {
-  segmentation: { mode: 'auto' },
-  errorRecovery: 'skip',
-  maxRetriesPerSegment: 2,
-});
-
-console.log(result.status, result.completedSegments, result.totalSegments);
-```
-
-</details>
 
 ## Native crash diagnostics
 

@@ -91,7 +91,26 @@ const result = await engine.enhance(inBuf, outBuf, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [enhancement-streaming.md](enhancement-streaming.md#segmentation-optional).
 
----
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | `model` |
+| `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | `model` |
+
+Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both ONNX stacks are present.
+
+```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+
+const enhancement = await createEnhancement({
+  initMode: 'custom',
+  modelType: 'gtcrn',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
+  },
+});
+```
 
 ## API reference
 
@@ -186,49 +205,6 @@ await enhancement.destroy();
 ```
 
 ---
-
-## Models and paths
-
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md)
-- Downloads: [download-manager.md](download-manager.md) · `ModelCategory.Enhancement`
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | — | `model` |
-| `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | — | `model` |
-
-Auto mode prefers `gtcrn` when both ONNX stacks are present.
-
-## Model detection
-
-`detectEnhancementModel` is a pre-check before `createEnhancement` — no denoiser load. Unified catalog: [model-detect.md](model-detect.md).
-
-On filesystem-backed detection, the result includes `paths.model` (resolved `.onnx` file) when native file listing finds one. Name-only heuristics may omit `paths`.
-
-Filename rules: recursive `.onnx` scan (depth 4); `gtcrn` in path → `gtcrn`; `dpdfnet`/`dpcrn` → `dpdfnet`. Optional `assetName` for catalog hints.
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `gtcrn`, `dpdfnet` | `model` |
-
-```ts
-import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
-
-const enhancement = await createEnhancement({
-  initMode: 'custom',
-  modelType: 'gtcrn',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
-  },
-});
-```
 
 ## Live overload on offline enhancement (offline weights, live consumption)
 
@@ -352,19 +328,12 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 
 ---
 
-## See also
-
-- [Speech enhancement (streaming / live)](enhancement-streaming.md)
-- [STT offline (buffer patterns)](stt-offline.md)
-- [TTS offline](tts-offline.md)
-- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
-- [Execution providers](execution-providers.md)
-- [Model setup](model-setup.md)
-
 ## Use case examples
 
 <details>
 <summary>Denoise a long recording with segmented offline processing</summary>
+
+Use auto segmentation so long noisy files enhance in bounded spans, then export the clean WAV.
 
 ```ts
 import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -379,7 +348,6 @@ const engine = await createEnhancement({
   modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
   modelType: 'gtcrn',
 });
-
 const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/noisy-long.wav' });
 const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
 
@@ -387,6 +355,7 @@ try {
   await engine.enhance(inBuf, outBuf, {
     segmentation: { mode: 'auto' },
     errorRecovery: 'skip',
+    onProgress: (p) => console.log(p.completedSegments, p.totalSegments),
   });
   await saveAudioAsFile(outBuf, { kind: 'fs', path: '/path/to/clean.wav' }, 'wav');
 } finally {
@@ -401,19 +370,56 @@ try {
 <details>
 <summary>Single-pass enhancement for short clips</summary>
 
+For short utterances, enhance without segmentation — one offline pass into an empty output buffer.
+
 ```ts
+import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createOfflineAudioBufferFromFile,
+  createEmptyOfflineAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
 const engine = await createEnhancement({
-  modelSource: { kind: 'fs', path: '/path/to/model' },
+  modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
   modelType: 'auto',
 });
-
 const inBuf = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/short.wav' });
 const outBuf = await createEmptyOfflineAudioBuffer(await engine.getSampleRate());
-
-await engine.enhance(inBuf, outBuf, { segmentation: { mode: 'off' } });
+await engine.enhance(inBuf, outBuf);
+await releasePipelineAudioBuffer(inBuf);
+await releasePipelineAudioBuffer(outBuf);
+await engine.destroy();
 ```
 
 </details>
+
+<details>
+<summary>A/B play original vs enhanced</summary>
+
+Keep both buffer ids and create two PCM players so the user can compare noisy input against the enhanced output.
+
+```ts
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+await engine.enhance(inBuf, outBuf);
+const originalPlayer = await createPcmPlayer(inBuf);
+const cleanPlayer = await createPcmPlayer(outBuf);
+await originalPlayer.play();
+// ... later
+await cleanPlayer.play();
+```
+
+</details>
+
+## See also
+
+- [Speech enhancement (streaming / live)](enhancement-streaming.md)
+- [STT offline (buffer patterns)](stt-offline.md)
+- [TTS offline](tts-offline.md)
+- [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
+- [Execution providers](execution-providers.md)
+- [Model setup](model-setup.md)
 
 ## Native crash diagnostics
 

@@ -275,6 +275,14 @@ const subtitleRows = alignmentSegments.map((segment) => ({
 | **Segments out** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | Caller-provided empty buffer; segments written with `kind: 'alignment'` |
 | **Engine** | `AlignmentEngine` via `createAlignment` | `alignTextToAudio(textIn, audioIn, segmentOut, options)` |
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `wav2vec2` | `*.onnx` (alignment CTC model) | `model` |
+
+Validate category: **`alignment`**. Needed for `mode: 'accurate'` only. Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Alignment`).
+
 ## API reference
 
 ### `detectAlignmentModel(source, options?)`
@@ -352,35 +360,23 @@ function assertAlignmentGranularityForMode(
 ): void;
 ```
 
-## Validation required files
+## Alignment payload
 
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `wav2vec2` | `*.onnx` (alignment CTC model) | — | `model` |
-
-## Model detection
-
-`detectAlignmentModel` checks wav2vec2 packs before accurate alignment. Unified catalog: [model-detect.md](model-detect.md). Auto mode (default): pass `modelSource` — the SDK runs `detectAlignmentModel` per call.
-
-## Custom model path (`initMode: 'custom'`)
-
-Per-call custom path on `alignTextToAudio` — **no engine init**. Applies to **`mode: 'accurate'`** only. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `wav2vec2` | `model` |
+`alignTextToAudio` writes each timed unit into `segmentOut` as `kind: 'alignment'` with this payload. Downstream subtitle / timeline export reads `payload.text` and the sample ranges on the segment meta.
 
 ```ts
-await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
-  mode: 'accurate',
-  granularity: 'word',
-  initMode: 'custom',
-  modelType: 'wav2vec2',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/wav2vec2-align.onnx' },
-  },
-});
+{
+  text: string;
+  timingMode: 'proportional' | 'estimated' | 'accurate' | 'vad';
+  granularity: 'sentence' | 'word' | 'character';
+  confidence?: number;
+  tokenMetadata?: Record<string, unknown>;
+  wordMetadata?: Record<string, unknown>;
+  languageHints?: string[];
+}
 ```
+
+`timingMode` / `granularity` mirror the align options used for that run. See [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ## Pipeline composition
 
@@ -499,7 +495,7 @@ Caveats:
 
 See [audiobuffer-offline.md](audiobuffer-offline.md) · [textbuffer-offline.md](textbuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
-## Error code quick table
+## Error codes
 
 | Code | Meaning |
 | --- | --- |
@@ -580,6 +576,62 @@ try {
 ```
 
 See [segmentation-engine.md](segmentation-engine.md) for segmentation behavior and [memory-and-models.md](memory-and-models.md) for OOM planning.
+
+</details>
+
+<details>
+<summary>Proportional alignment for a short clip</summary>
+
+Use `mode: 'proportional'` when you need fast word/char timing without loading a forced-alignment model.
+
+```ts
+import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+import { createOfflineAudioBufferFromFile, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import { createOfflineTextBufferFromText, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { createEmptyOfflineSegmentBuffer, getOfflineSegmentBufferSegments, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+
+const audio = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/clip.wav' });
+const text = await createOfflineTextBufferFromText('hello world from alignment');
+const out = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+const engine = createAlignment();
+await engine.alignTextToAudio(text, audio, out, { mode: 'proportional', granularity: 'word' });
+const segs = await getOfflineSegmentBufferSegments(out, 0, 256);
+console.log(segs.map((s) => ({ text: s.payload?.text, start: s.startSample, end: s.endSample })));
+await engine.destroy();
+await releasePipelineSegmentBuffer(out);
+await releasePipelineTextBuffer(text);
+await releasePipelineAudioBuffer(audio);
+```
+
+</details>
+
+<details>
+<summary>ASR-mediated accurate alignment</summary>
+
+Transcribe first, then align the resulting text buffer to audio in `accurate` mode so timings follow the ASR hypothesis.
+
+```ts
+import { createSTT } from 'react-native-sherpa-onnx/stt';
+import { createAlignment } from 'react-native-sherpa-onnx/alignment';
+import { createEmptyOfflineTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { createEmptyOfflineSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+
+const stt = await createSTT({ modelSource: { kind: 'fs', path: '/path/to/whisper' }, modelType: 'whisper' });
+const hypothesis = await createEmptyOfflineTextBuffer();
+await stt.transcribe(audio, hypothesis);
+
+const alignedOut = await createEmptyOfflineSegmentBuffer({ sourceAudioBufferId: audio });
+const alignment = createAlignment();
+await alignment.alignTextToAudio(hypothesis, audio, alignedOut, {
+  mode: 'accurate',
+  granularity: 'word',
+  modelSource: { kind: 'fs', path: '/path/to/wav2vec2-alignment-model' },
+});
+await alignment.destroy();
+await stt.destroy();
+await releasePipelineSegmentBuffer(alignedOut);
+await releasePipelineTextBuffer(hypothesis);
+```
 
 </details>
 
