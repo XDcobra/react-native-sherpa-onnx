@@ -133,8 +133,16 @@ internal class AudioTaggingOfflineLivePipelineWorker(
     val endTime =
       if (speech.sampleRate > 0) speech.endSample.toFloat() / speech.sampleRate.toFloat() else 0f
 
+    val eventMaps = ArrayList<Map<String, Any>>(events.size)
     val eventsJson = JSONArray()
     for (ev in events) {
+      eventMaps.add(
+        mapOf(
+          "name" to ev.name,
+          "index" to ev.index,
+          "prob" to ev.prob.toDouble(),
+        ),
+      )
       eventsJson.put(
         JSONObject()
           .put("name", ev.name)
@@ -143,8 +151,7 @@ internal class AudioTaggingOfflineLivePipelineWorker(
       )
     }
 
-    // LiveText meta is scalar-only across the RN bridge / JS projector.
-    // Nested lists are dropped; commit top-K as a JSON string instead.
+    // LiveText meta is a Fabric-safe JSON tree (nested events array).
     textOutputEntry.commitSegment(
       text = primaryName,
       tokens = emptyArray(),
@@ -152,7 +159,7 @@ internal class AudioTaggingOfflineLivePipelineWorker(
       source = "audio_tagging",
       meta = mapOf(
         "durationMs" to durationMs,
-        "events" to eventsJson.toString(),
+        "events" to eventMaps,
       ),
     )
     addUnitsWritten(primaryName.length.toLong())
