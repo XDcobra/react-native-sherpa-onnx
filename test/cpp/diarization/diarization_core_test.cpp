@@ -96,6 +96,38 @@ TEST(DiarizationClustering, CutreeKForcesClusterCount) {
   EXPECT_EQ(max_label, 1);
 }
 
+TEST(DiarizationClustering, SilhouetteWhenComputeConfidence) {
+  ClusteringConfig cfg;
+  cfg.num_clusters = 2;
+  cfg.threshold = 0.5f;
+  cfg.compute_confidence = true;
+  AgglomerativeClusterer clusterer(cfg);
+  // Two tight pairs in orthogonal directions.
+  float features[] = {
+      1.f, 0.f, 0.95f, 0.05f, 0.f, 1.f, 0.05f, 0.95f,
+  };
+  std::vector<float> silhouettes;
+  auto labels = clusterer.Cluster(features, 4, 2, &silhouettes);
+  ASSERT_EQ(labels.size(), 4u);
+  ASSERT_EQ(silhouettes.size(), 4u);
+  for (float s : silhouettes) {
+    EXPECT_GE(s, -1.0f);
+    EXPECT_LE(s, 1.0f);
+  }
+}
+
+TEST(DiarizationClustering, NoSilhouetteWhenComputeConfidenceOff) {
+  ClusteringConfig cfg;
+  cfg.num_clusters = 2;
+  cfg.compute_confidence = false;
+  AgglomerativeClusterer clusterer(cfg);
+  float features[] = {1.f, 0.f, -1.f, 0.f};
+  std::vector<float> silhouettes;
+  auto labels = clusterer.Cluster(features, 2, 2, &silhouettes);
+  ASSERT_EQ(labels.size(), 2u);
+  EXPECT_TRUE(silhouettes.empty());
+}
+
 TEST(DiarizationTimeline, ExcludeOverlapZerosMultiSpeakerFrames) {
   Int8Matrix m;
   m.resize(2, 2, 0);

@@ -19,6 +19,9 @@ inline constexpr const char* kErrCancelled = "DIARIZATION_CANCELLED";
 inline constexpr const char* kErrNoSpeakers = "DIARIZATION_NO_SPEAKERS";
 inline constexpr const char* kErrInternal = "DIARIZATION_INTERNAL_ERROR";
 
+/** Sentinel when confidence was not computed or could not be determined. Outside [-1, 1]. */
+inline constexpr float kUnavailableConfidence = -2.0f;
+
 using SampleRange = ::sherpaonnx::speaker_embedding::SampleRange;
 using Status = ::sherpaonnx::speaker_embedding::Status;
 
@@ -26,6 +29,8 @@ struct DiarizationSegment {
   float start = 0.f;
   float end = 0.f;
   int32_t speaker = 0;
+  /** Silhouette-based confidence in [-1, 1], or kUnavailableConfidence. */
+  float confidence = kUnavailableConfidence;
 };
 
 struct PyannoteMeta {

@@ -227,6 +227,99 @@ std::vector<int32_t> CutreeCdist(const std::vector<Merge>& merges, int32_t n,
   return AssignLabelsFromParents(parent, n);
 }
 
+// Per-point silhouette coefficients using the condensed cosine-dissimilarity
+// matrix. Mirrors upstream sherpa-onnx FastClustering::ComputeSilhouettes.
+void ComputeSilhouettes(const std::vector<double>& distance,
+                        const std::vector<int32_t>& labels, int32_t num_rows,
+                        std::vector<float>* silhouettes) {
+  if (silhouettes == nullptr || labels.empty() || num_rows <= 0) {
+    return;
+  }
+  const int32_t num_clusters =
+      *std::max_element(labels.begin(), labels.end()) + 1;
+  if (num_clusters <= 0) {
+    silhouettes->assign(static_cast<size_t>(num_rows),
+                        kUnavailableConfidence);
+    return;
+  }
+
+  const size_t total_elements =
+      static_cast<size_t>(num_rows) * static_cast<size_t>(num_clusters);
+  std::vector<double> sum(total_elements, 0.0);
+  std::vector<int32_t> count(total_elements, 0);
+
+  int32_t distance_matrix_index = 0;
+  for (int32_t row_index = 0; row_index != num_rows; ++row_index) {
+    const size_t row_offset =
+        static_cast<size_t>(row_index) * static_cast<size_t>(num_clusters);
+    for (int32_t col_index = row_index + 1; col_index != num_rows;
+         ++col_index, ++distance_matrix_index) {
+      const double pair_distance =
+          distance[static_cast<size_t>(distance_matrix_index)];
+      const int32_t row_point_cluster =
+          labels[static_cast<size_t>(row_index)];
+      const int32_t col_point_cluster =
+          labels[static_cast<size_t>(col_index)];
+      const size_t col_offset =
+          static_cast<size_t>(col_index) * static_cast<size_t>(num_clusters);
+
+      sum[row_offset + static_cast<size_t>(col_point_cluster)] +=
+          pair_distance;
+      count[row_offset + static_cast<size_t>(col_point_cluster)] += 1;
+
+      sum[col_offset + static_cast<size_t>(row_point_cluster)] +=
+          pair_distance;
+      count[col_offset + static_cast<size_t>(row_point_cluster)] += 1;
+    }
+  }
+
+  silhouettes->assign(static_cast<size_t>(num_rows), 0.0f);
+  for (int32_t row_index = 0; row_index != num_rows; ++row_index) {
+    const int32_t row_point_cluster =
+        labels[static_cast<size_t>(row_index)];
+    const size_t base =
+        static_cast<size_t>(row_index) * static_cast<size_t>(num_clusters);
+
+    const int32_t own_count =
+        count[base + static_cast<size_t>(row_point_cluster)];
+    if (own_count == 0) {
+      // Singleton cluster → silhouette 0.
+      continue;
+    }
+
+    const double a =
+        sum[base + static_cast<size_t>(row_point_cluster)] / own_count;
+    double b = std::numeric_limits<double>::infinity();
+
+    for (int32_t cluster_index = 0; cluster_index != num_clusters;
+         ++cluster_index) {
+      if (cluster_index == row_point_cluster) {
+        continue;
+      }
+      const int32_t neighbor_count =
+          count[base + static_cast<size_t>(cluster_index)];
+      if (neighbor_count == 0) {
+        continue;
+      }
+      const double mean =
+          sum[base + static_cast<size_t>(cluster_index)] / neighbor_count;
+      if (mean < b) {
+        b = mean;
+      }
+    }
+
+    if (!std::isfinite(b)) {
+      (*silhouettes)[static_cast<size_t>(row_index)] =
+          kUnavailableConfidence;
+      continue;
+    }
+
+    const double denom = std::max(a, b);
+    (*silhouettes)[static_cast<size_t>(row_index)] =
+        denom > 0 ? static_cast<float>((b - a) / denom) : 0.0f;
+  }
+}
+
 }  // namespace
 
 AgglomerativeClusterer::AgglomerativeClusterer(ClusteringConfig config)
@@ -236,13 +329,20 @@ void AgglomerativeClusterer::setConfig(ClusteringConfig config) {
   config_ = config;
 }
 
-std::vector<int32_t> AgglomerativeClusterer::Cluster(float* features,
-                                                     int32_t num_rows,
-                                                     int32_t num_cols) const {
+std::vector<int32_t> AgglomerativeClusterer::Cluster(
+    float* features, int32_t num_rows, int32_t num_cols,
+    std::vector<float>* silhouettes) const {
+  if (silhouettes != nullptr) {
+    silhouettes->clear();
+  }
+
   if (features == nullptr || num_rows <= 0 || num_cols <= 0) {
     return {};
   }
   if (num_rows == 1) {
+    if (silhouettes != nullptr && config_.compute_confidence) {
+      silhouettes->assign(1, 0.0f);
+    }
     return {0};
   }
 
@@ -263,10 +363,19 @@ std::vector<int32_t> AgglomerativeClusterer::Cluster(float* features,
   }
 
   auto merges = LinkageComplete(dist, num_rows);
+  std::vector<int32_t> labels;
   if (config_.num_clusters > 0) {
-    return CutreeK(merges, num_rows, config_.num_clusters);
+    labels = CutreeK(merges, num_rows, config_.num_clusters);
+  } else {
+    labels =
+        CutreeCdist(merges, num_rows, static_cast<double>(config_.threshold));
   }
-  return CutreeCdist(merges, num_rows, static_cast<double>(config_.threshold));
+
+  if (silhouettes != nullptr && config_.compute_confidence &&
+      !labels.empty()) {
+    ComputeSilhouettes(dist, labels, num_rows, silhouettes);
+  }
+  return labels;
 }
 
 }  // namespace sherpaonnx::diarization

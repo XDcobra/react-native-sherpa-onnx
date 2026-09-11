@@ -21,6 +21,7 @@ void DiarizationSession::Release() {
   chunk_labels_.clear();
   speakers_per_frame_.clear();
   chunk_speaker_keys_.clear();
+  embedding_sample_ranges_.clear();
   embedding_matrix_ = {};
   last_cluster_labels_.clear();
   last_segments_.clear();
@@ -37,10 +38,12 @@ int32_t DiarizationSession::sampleRate() const {
   return segmentation_.isLoaded() ? segmentation_.meta().sample_rate : 0;
 }
 
-void DiarizationSession::setClustering(int32_t num_clusters, float threshold) {
+void DiarizationSession::setClustering(int32_t num_clusters, float threshold,
+                                       bool compute_confidence) {
   ClusteringConfig cfg;
   cfg.num_clusters = num_clusters;
   cfg.threshold = threshold;
+  cfg.compute_confidence = compute_confidence;
   clusterer_.setConfig(cfg);
 }
 
@@ -74,7 +77,8 @@ Status DiarizationSession::Initialize(const DiarizationInitConfig& config) {
     return st;
   }
 
-  setClustering(config.num_clusters, config.threshold);
+  setClustering(config.num_clusters, config.threshold,
+                config.compute_confidence);
   timeline_config_.meta = segmentation_.meta();
   timeline_config_.min_duration_on = config.min_duration_on;
   timeline_config_.min_duration_off = config.min_duration_off;
@@ -268,6 +272,8 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
   emb_mat.resize(static_cast<int32_t>(sample_indexes.size()), dim, 0.f);
   chunk_speaker_keys_.clear();
   chunk_speaker_keys_.reserve(sample_indexes.size());
+  embedding_sample_ranges_.clear();
+  embedding_sample_ranges_.reserve(sample_indexes.size());
 
   int32_t valid_rows = 0;
   const int32_t total_emb = static_cast<int32_t>(sample_indexes.size());
@@ -287,6 +293,8 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
     }
     std::copy(emb.begin(), emb.end(), emb_mat.rowPtr(valid_rows));
     chunk_speaker_keys_.push_back(sample_indexes[static_cast<size_t>(i)].key);
+    embedding_sample_ranges_.push_back(
+        sample_indexes[static_cast<size_t>(i)].ranges);
     ++valid_rows;
   }
 
@@ -316,8 +324,11 @@ ProcessResult DiarizationSession::FinishFromCache(
 
   // Copy features — Cluster normalizes in place.
   FloatMatrix features = embedding_matrix_;
+  std::vector<float> silhouettes;
+  const bool want_confidence = clusterer_.config().compute_confidence;
   last_cluster_labels_ = clusterer_.Cluster(
-      features.data.data(), features.rows, features.cols);
+      features.data.data(), features.rows, features.cols,
+      want_confidence ? &silhouettes : nullptr);
   if (last_cluster_labels_.empty()) {
     result.status = Status::Ok();
     return result;
@@ -336,6 +347,12 @@ ProcessResult DiarizationSession::FinishFromCache(
   Int8Matrix final_labels =
       FinalizeLabels(speaker_count, speakers_per_frame_);
   last_segments_ = ComputeResult(final_labels, timeline_config_);
+
+  if (want_confidence && !silhouettes.empty()) {
+    ApplySegmentConfidence(&last_segments_, embedding_sample_ranges_,
+                           last_cluster_labels_, silhouettes,
+                           working_sample_rate_);
+  }
 
   last_speaker_map_.clear();
   int32_t next_id = 0;
@@ -366,7 +383,8 @@ ProcessResult DiarizationSession::FinishFromCache(
 }
 
 ProcessResult DiarizationSession::Recluster(int32_t num_clusters,
-                                            float threshold) {
+                                            float threshold,
+                                            bool compute_confidence) {
   ProcessResult result;
   if (!initialized_) {
     result.status =
@@ -378,7 +396,7 @@ ProcessResult DiarizationSession::Recluster(int32_t num_clusters,
         Status::Fail(kErrInvalidArgument, "no cached embeddings to recluster");
     return result;
   }
-  setClustering(num_clusters, threshold);
+  setClustering(num_clusters, threshold, compute_confidence);
   ProcessOptions opts;
   opts.include_overlap = false;
   return FinishFromCache(opts);

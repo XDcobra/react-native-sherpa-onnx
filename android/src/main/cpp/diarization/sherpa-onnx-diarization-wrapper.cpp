@@ -28,6 +28,7 @@ DiarizationProcessResult ToProcessResult(
     dto.start = s.start;
     dto.end = s.end;
     dto.speaker = s.speaker;
+    dto.confidence = s.confidence;
     out.segments.push_back(dto);
   }
   return out;
@@ -61,8 +62,9 @@ void DiarizationWrapper::cancel() {
 DiarizationInitializeResult DiarizationWrapper::initialize(
     const std::string& segmentationModel, const std::string& embeddingModel,
     float windowShiftRatio, int32_t numClusters, float threshold,
-    float minDurationOn, float minDurationOff, int32_t numThreads,
-    const std::optional<std::string>& provider, bool debug) {
+    bool computeConfidence, float minDurationOn, float minDurationOff,
+    int32_t numThreads, const std::optional<std::string>& provider,
+    bool debug) {
   DiarizationInitializeResult result;
   if (!pImpl) {
     result.errorCode = diarization::kErrInternal;
@@ -76,6 +78,7 @@ DiarizationInitializeResult DiarizationWrapper::initialize(
   cfg.window_shift_ratio = windowShiftRatio;
   cfg.num_clusters = numClusters;
   cfg.threshold = threshold;
+  cfg.compute_confidence = computeConfidence;
   cfg.min_duration_on = minDurationOn;
   cfg.min_duration_off = minDurationOff;
   cfg.num_threads = numThreads;
@@ -120,14 +123,16 @@ DiarizationProcessResult DiarizationWrapper::processMonoSamples(
 }
 
 DiarizationProcessResult DiarizationWrapper::recluster(int32_t numClusters,
-                                                       float threshold) {
+                                                       float threshold,
+                                                       bool computeConfidence) {
   if (!pImpl || !pImpl->session.isInitialized()) {
     DiarizationProcessResult out;
     out.errorCode = diarization::kErrNotInitialized;
     out.error = "diarization not initialized";
     return out;
   }
-  return ToProcessResult(pImpl->session.Recluster(numClusters, threshold));
+  return ToProcessResult(
+      pImpl->session.Recluster(numClusters, threshold, computeConfidence));
 }
 
 std::vector<DiarizationClusterEmbeddingDto>

@@ -13,6 +13,11 @@ struct ClusteringConfig {
   int32_t num_clusters = -1;
   /** Cosine-dissimilarity threshold used when num_clusters <= 0. */
   float threshold = 0.5f;
+  /**
+   * When true, Cluster() optionally fills per-embedding silhouette scores.
+   * Default false — matches upstream FastClusteringConfig.compute_confidence.
+   */
+  bool compute_confidence = false;
 };
 
 /**
@@ -24,13 +29,17 @@ class AgglomerativeClusterer {
   explicit AgglomerativeClusterer(ClusteringConfig config);
 
   void setConfig(ClusteringConfig config);
+  ClusteringConfig config() const { return config_; }
 
   /**
    * \p features row-major (num_rows × num_cols). Modified in place (row normalize).
    * Returns cluster label per row in [0, num_clusters).
+   * \p silhouettes optional output; when non-null and config.compute_confidence,
+   * filled with one silhouette per row ([-1,1] or kUnavailableConfidence).
    */
   std::vector<int32_t> Cluster(float* features, int32_t num_rows,
-                               int32_t num_cols) const;
+                               int32_t num_cols,
+                               std::vector<float>* silhouettes = nullptr) const;
 
  private:
   ClusteringConfig config_;

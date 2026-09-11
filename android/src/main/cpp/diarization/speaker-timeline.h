@@ -53,6 +53,18 @@ std::vector<DiarizationSegment> ComputeResult(const Int8Matrix& final_labels,
                                               const TimelineConfig& config);
 
 /**
+ * Assign per-segment confidence as the mean silhouette of embedding sample
+ * intervals that overlap the segment (upstream pyannote parity).
+ * No-op when silhouettes empty or sizes mismatch. Leaves
+ * kUnavailableConfidence when no overlapping interval exists.
+ */
+void ApplySegmentConfidence(
+    std::vector<DiarizationSegment>* segments,
+    const std::vector<std::vector<SampleRange>>& embedding_ranges,
+    const std::vector<int32_t>& cluster_labels,
+    const std::vector<float>& silhouettes, int32_t sample_rate);
+
+/**
  * Collapse speakers-per-frame into a single speech/silence column
  * (`1` when count >= 1). Used by `speech_pyannote_segmentation` (union-only).
  */

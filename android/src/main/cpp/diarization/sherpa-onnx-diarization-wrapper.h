@@ -22,6 +22,8 @@ struct DiarizationSegmentDto {
   float start = 0.f;
   float end = 0.f;
   int32_t speaker = 0;
+  /** [-1, 1] when computed; kUnavailableConfidence (-2) when not. */
+  float confidence = -2.f;
 };
 
 struct DiarizationProcessResult {
@@ -61,14 +63,16 @@ class DiarizationWrapper {
   DiarizationInitializeResult initialize(
       const std::string& segmentationModel, const std::string& embeddingModel,
       float windowShiftRatio, int32_t numClusters, float threshold,
-      float minDurationOn, float minDurationOff, int32_t numThreads,
-      const std::optional<std::string>& provider, bool debug);
+      bool computeConfidence, float minDurationOn, float minDurationOff,
+      int32_t numThreads, const std::optional<std::string>& provider,
+      bool debug);
 
   DiarizationProcessResult processMonoSamples(
       const std::vector<float>& monoSamples, int32_t sampleRate,
       bool includeOverlap, const DiarizationProgressFn& onProgress);
 
-  DiarizationProcessResult recluster(int32_t numClusters, float threshold);
+  DiarizationProcessResult recluster(int32_t numClusters, float threshold,
+                                     bool computeConfidence);
 
   std::vector<DiarizationClusterEmbeddingDto> getClusterEmbeddings() const;
 

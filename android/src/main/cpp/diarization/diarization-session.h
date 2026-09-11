@@ -22,6 +22,8 @@ struct DiarizationInitConfig {
   float window_shift_ratio = 0.1f;
   int32_t num_clusters = -1;
   float threshold = 0.5f;
+  /** Default false — upstream FastClusteringConfig.compute_confidence parity. */
+  bool compute_confidence = false;
   float min_duration_on = 0.3f;
   float min_duration_off = 0.5f;
   int32_t num_threads = 1;
@@ -73,7 +75,8 @@ class DiarizationSession {
 
   int32_t sampleRate() const;
 
-  void setClustering(int32_t num_clusters, float threshold);
+  void setClustering(int32_t num_clusters, float threshold,
+                     bool compute_confidence);
   void requestCancel();
   void clearCancel();
 
@@ -81,7 +84,8 @@ class DiarizationSession {
                         int32_t sample_rate, const ProcessOptions& options);
 
   /** Re-run clustering on cached embeddings (no re-inference). */
-  ProcessResult Recluster(int32_t num_clusters, float threshold);
+  ProcessResult Recluster(int32_t num_clusters, float threshold,
+                          bool compute_confidence);
 
   std::vector<ClusterEmbedding> getClusterEmbeddings() const;
 
@@ -102,6 +106,8 @@ class DiarizationSession {
   std::vector<Int8Matrix> chunk_labels_;
   std::vector<int32_t> speakers_per_frame_;
   std::vector<ChunkSpeakerKey> chunk_speaker_keys_;
+  /** Sample ranges per cached embedding row (aligned with embedding_matrix_). */
+  std::vector<std::vector<SampleRange>> embedding_sample_ranges_;
   FloatMatrix embedding_matrix_;
   std::vector<int32_t> last_cluster_labels_;
   std::vector<DiarizationSegment> last_segments_;
