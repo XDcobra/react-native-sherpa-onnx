@@ -76,9 +76,15 @@ try {
 
 Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. Types live in **`src/enhancement/types.ts`**.
 
-### Detection
+### `detectEnhancementModel(source, options?)`
 
-#### `detectEnhancementModel(source, options?)`
+File-based detection **without** initializing the engine. Use before `createEnhancement` to confirm pack layout and model type. Unified cross-feature detection: [model-detect.md](model-detect.md).
+
+The result includes `isStreaming` from native enhancement detection:
+- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly.
+- Name-only detection (asset/folder heuristics without files) can return `isStreaming: true` as best effort while `success` remains `false`.
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 ```ts
 function detectEnhancementModel(
@@ -90,12 +96,6 @@ function detectEnhancementModel(
 ): Promise<EnhancementDetectResult>;
 ```
 
-The result includes `isStreaming` from native enhancement detection:
-- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly.
-- Name-only detection (asset/folder heuristics without files) can return `isStreaming: true` as best effort while `success` remains `false`.
-
-For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
-
 ```ts
 const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
@@ -104,16 +104,9 @@ const det = await detectEnhancementModel(
 console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.detectedModels);
 ```
 
-```ts
-const det2 = await detectEnhancementModel(
-  { kind: 'fs', path: '/data/enhancement-pack' },
-  { modelType: 'auto', assetName: 'sherpa-onnx-speech-enhancement-gtcrn-int8' }
-);
-```
+### `createEnhancement(options)`
 
-### Factory
-
-#### `createEnhancement(options)`
+Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig: { model }`). Shared tuning: `numThreads`, `provider`, `debug`.
 
 ```ts
 function createEnhancement(
@@ -127,13 +120,12 @@ const enhancement = await createEnhancement({
   modelType: 'auto',
   numThreads: 1,
   provider: 'cpu',
-  debug: false,
 });
 ```
 
-### Offline engine (`EnhancementEngine`)
+### `enhancement.enhance(audioIn, audioOut, options?)`
 
-#### `enhancement.enhance(audioIn, audioOut)`
+Reads populated `audioIn`, writes denoised PCM into empty `audioOut`. Both must be `OfflineAudioBuffer` (`off_*`). `audioOut` sample rate must match the denoiser's rate (from `getSampleRate()`). Returns `EnhancementResult` with orchestration status and segment counters.
 
 ```ts
 enhance(
@@ -144,28 +136,13 @@ enhance(
 ```
 
 ```ts
-import {
-  createOfflineAudioBufferFromFile,
-  createEmptyOfflineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-
-const audioIn = await createOfflineAudioBufferFromFile({
-  kind: 'fs',
-  path: '/tmp/noisy.wav',
-});
+const audioIn = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp/noisy.wav' });
 const sr = await enhancement.getSampleRate();
 const audioOut = await createEmptyOfflineAudioBuffer(sr);
-
 await enhancement.enhance(audioIn, audioOut);
 ```
 
-- **`audioIn`:** populated **`OfflineAudioBuffer`** (file-backed or RAM); must be **mono** at a rate the denoiser accepts.
-- **`audioOut`:** **empty** offline buffer with **`sampleRate`** matching the denoiser's rate (from **`getSampleRate()`**).
-- **Returns:** `EnhancementResult` with orchestration status and segment counters. Read PCM via **`getPipelineAudioBufferInfo(audioOut)`** and persist with `saveAudioAsFile(...)`.
-
----
-
-#### `enhancement.getSampleRate()`
+### `enhancement.getSampleRate()`
 
 ```ts
 getSampleRate(): Promise<number>;
@@ -173,12 +150,11 @@ getSampleRate(): Promise<number>;
 
 ```ts
 const sr = await enhancement.getSampleRate();
-console.log('Denoiser sample rate', sr);
 ```
 
----
+### `enhancement.destroy()`
 
-#### `enhancement.destroy()`
+Releases the native denoiser instance.
 
 ```ts
 destroy(): Promise<void>;
@@ -188,41 +164,7 @@ destroy(): Promise<void>;
 await enhancement.destroy();
 ```
 
-## Pipeline buffers (audio input + audio output)
-
-**Audio input**
-
-```ts
-import {
-  createOfflineAudioBufferFromFile,
-  createOfflineAudioBufferFromSamples,
-  getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
-
-See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
-
-**Audio output**
-
-```ts
-import {
-  createEmptyOfflineAudioBuffer,
-  getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
-```
-
-See [audiobuffer — offline](audiobuffer-offline.md) and [audiobuffer — live / streaming](audiobuffer-streaming.md).
-
-### Buffer data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **Offline engine** | Created with **`createEnhancement`**. Holds native **`OfflineSpeechDenoiser`**. Call **`destroy()`** when done. |
-| **`OfflineAudioBuffer` (input)** | Populated buffer from file, samples, or live snapshot. Read-only during enhancement. |
-| **`OfflineAudioBuffer` (output)** | Empty buffer created at the denoiser's sample rate. Filled exactly once by **`enhance()`**. Inspect via **`getPipelineAudioBufferInfo()`**, persist via `saveAudioAsFile(...)`. |
+---
 
 ## Models and paths
 
@@ -339,8 +281,6 @@ const completion = await handle.completed;
 console.log(`Denoised ${completion.unitsRead} samples`);
 ```
 
-
-
 ## Pipeline composition
 
 ### Typical upstream
@@ -368,28 +308,42 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#enhancement-offline-patterns](feature-pipelines.md#enhancement-offline-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import {
-  ENHANCEMENT_MODEL_TYPES,
-  type EnhancementModelType,
-  type EnhancementInitializeOptions,
-  type EnhancementEngine,
-  type EnhancementDetectResult,
-} from 'react-native-sherpa-onnx/enhancement';
-```
+### Core enhancement types (`react-native-sherpa-onnx/enhancement`)
 
-- **`EnhancementModelType`:** `'gtcrn' | 'dpdfnet'`
-- **`EnhancementDetectResult`:** shared detection base (`success`, `error`, `detectedModels`, `modelType`, optional `languages`, `quantization`, `detectionSources`)
+| Type | Description |
+| --- | --- |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet'` |
+| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
+| `EnhancementConcreteModelType` | Alias of `EnhancementModelType` (non-`auto`) |
+| `EnhancementInitOptionsShared` | Shared init fields: `numThreads?`, `provider?`, `debug?` |
+| `EnhancementAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared |
+| `EnhancementCustomInitializeOptions` | Custom init: `initMode: 'custom'`, concrete `modelType`, `customConfig` + shared |
+| `EnhancementInitializeOptions` | Union of auto and custom init options |
+| `EnhancementDetectResult` | Return of `detectEnhancementModel()` — shared detection base (`success`, `error`, `detectedModels`, `modelType`, `isStreaming`, optional `languages`, `quantization`, `detectionSources`, `paths`) |
+| `EnhanceSegmentationConfig` | `{ mode?: 'off' \| 'manual' \| 'auto'; policy?: SegmentationPolicy }` |
+| `EnhanceOptions` | `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapSamples?` |
+| `EnhancementResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs }` |
+| `EnhancementLivePipelineOptions` | Live overload options — mandatory `continuous_frames` segmentation policy, optional `onSegment` |
+| `EnhancementEngine` | `enhance` (offline / live overload), `getSampleRate`, `destroy`; readonly `instanceId` |
+| `EnhancementCustomConfig` | Custom init path map: `{ model: FileSource }` |
+| `EnhancementErrorCode` | Error code enum for enhancement operations |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
 
-Streaming types (**`StreamingEnhancementEngine`**, **`StreamingEnhancementInitializeOptions`**, **`EnhancementPipelineHandle`**) are documented in [enhancement-streaming.md](enhancement-streaming.md#types-and-constants).
+Streaming types (`StreamingEnhancementEngine`, `StreamingEnhancementInitializeOptions`, `EnhancementPipelineHandle`): [enhancement-streaming.md](enhancement-streaming.md#types).
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineAudioBufferIdSource` | Offline audio ref or handle passed to `enhance` |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md).
 
 ---
 
 ## Error codes
-
-Typical **promise rejection `code`** strings from the native layer. Message text varies; use **`code`** for branching when catching.
 
 | Error code | Explanation |
 | --- | --- |
@@ -409,7 +363,6 @@ For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), s
 ## See also
 
 - [Speech enhancement (streaming / live)](enhancement-streaming.md)
-- [Speech enhancement (streaming)](enhancement-streaming.md)
 - [STT offline (buffer patterns)](stt-offline.md)
 - [TTS offline](tts-offline.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md) · [live / streaming](audiobuffer-streaming.md)
@@ -473,4 +426,3 @@ await engine.enhance(inBuf, outBuf, { segmentation: { mode: 'off' } });
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-

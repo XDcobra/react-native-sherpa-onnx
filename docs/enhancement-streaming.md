@@ -48,7 +48,6 @@ const outputBuf = await createEmptyLiveAudioBuffer({
   sampleRate: sr,
   onFramesAppended: (e) => {
     if (e.source !== 'enhancement') return;
-    // Denoised frames landed in outputBuf — e.g. drive a meter, waveform, or downstream STT.
     console.log(
       'enhanced frames',
       e.frameCount,
@@ -56,7 +55,6 @@ const outputBuf = await createEmptyLiveAudioBuffer({
       e.totalSamplesWritten,
       e.sampleRate
     );
-    // Example line printed: enhanced frames 512 total 2048 16000
   },
 });
 
@@ -80,9 +78,11 @@ The pipeline handle supports **`flush()`** / **`reset()`** / **`getStatus()`** w
 
 Signatures below are exported from **`react-native-sherpa-onnx/enhancement`** unless noted. Types live in **`src/enhancement/types.ts`** and **`src/enhancement/streamingTypes.ts`**.
 
-### Detection
+### `detectEnhancementModel(source, options?)`
 
-#### `detectEnhancementModel(source, options?)`
+Shared with offline. File-based detection **without** initializing the engine. Unified cross-feature detection: [model-detect.md](model-detect.md).
+
+For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
 
 ```ts
 function detectEnhancementModel(
@@ -102,18 +102,9 @@ const det = await detectEnhancementModel(
 console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
 ```
 
-```ts
-const det2 = await detectEnhancementModel(
-  { kind: 'fs', path: '/data/enhancement-pack' },
-  { modelType: 'auto', assetName: 'sherpa-onnx-speech-enhancement-gtcrn-int8' }
-);
-```
+### `createStreamingEnhancement(options)`
 
-For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
-
-### Initialization
-
-#### `createStreamingEnhancement(options)`
+Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig: { model }`). Shared tuning: `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingEnhancement(
@@ -128,11 +119,11 @@ const denoiser = await createStreamingEnhancement({
 });
 ```
 
-Creates the native online denoiser instance. Use **`denoiser.enhance`** with **`LiveAudioBuffer`** ids to run a pipeline; read PCM from the **output** buffer (not from a JS return value).
+### `denoiser.enhance(inputBuffer, outputBuffer, options?)`
 
-### Denoiser instance (`StreamingEnhancementEngine`)
+Starts a native background thread that drains the input `LiveAudioBuffer`, runs samples through the denoiser, and appends enhanced output to the output `LiveAudioBuffer` with source `"enhancement"`. When the input buffer finalizes → auto-flushes and stops.
 
-#### `denoiser.enhance(inputBuffer, outputBuffer)`
+Both buffers must be **`LiveAudioBuffer`** (`livePcmBuffer`). The input buffer must be in **`recording`** state with `sampleRate` matching the model's rate.
 
 ```ts
 enhance(
@@ -142,27 +133,11 @@ enhance(
 ): Promise<EnhancementPipelineHandle>;
 ```
 
-Starts a native background thread that:
-
-1. Creates a cursor on the input `LiveAudioBuffer`.
-2. Drains `frameShiftInSamples` samples per iteration.
-3. Runs them through the denoiser.
-4. Appends enhanced output to the output `LiveAudioBuffer` with source `"enhancement"`.
-5. When the input buffer finalizes → auto-flushes and stops.
-
-**Requirements:**
-
-- Both buffers must be **`LiveAudioBuffer`** (kind `livePcmBuffer`).
-- The input buffer must be in **`recording`** state.
-- The input buffer's `sampleRate` must match the model's sample rate.
-
 ```ts
 const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
 ```
 
----
-
-#### `denoiser.getSampleRate()`
+### `denoiser.getSampleRate()`
 
 ```ts
 getSampleRate(): Promise<number>;
@@ -172,9 +147,7 @@ getSampleRate(): Promise<number>;
 const sr = await denoiser.getSampleRate();
 ```
 
----
-
-#### `denoiser.getFrameShiftInSamples()`
+### `denoiser.getFrameShiftInSamples()`
 
 ```ts
 getFrameShiftInSamples(): Promise<number>;
@@ -184,9 +157,9 @@ getFrameShiftInSamples(): Promise<number>;
 const shift = await denoiser.getFrameShiftInSamples();
 ```
 
----
+### `denoiser.destroy()`
 
-#### `denoiser.destroy()`
+Releases the native online denoiser instance.
 
 ```ts
 destroy(): Promise<void>;
@@ -202,7 +175,7 @@ await denoiser.destroy();
 
 > Mandatory `segmentation.policy`. Commit-only — no partials.
 
-The offline enhancement engine can drive a live pipeline directly. **Warning:** This is a restricted path. Because the offline engine is designed for monolithic processing, it is wrapped in a segmentation loop that processed fixed-size blocks (using the `continuous_frames` policy). This may introduce audible artifacts at segment boundaries.
+The offline enhancement engine can drive a live pipeline directly. **Warning:** This is a restricted path. Because the offline engine is designed for monolithic processing, it is wrapped in a segmentation loop that processes fixed-size blocks (using the `continuous_frames` policy). This may introduce audible artifacts at segment boundaries.
 
 ```ts
 const engine = await createEnhancement({ /* offline init */ });
@@ -225,108 +198,54 @@ console.log(`Denoised ${completion.unitsWritten} samples`);
 | Latency | Per-segment (higher) | Per-frame (lower) |
 | Recommendation | Use only for short segments | Preferred for live mic |
 
-
-
 ### Pipeline handle (`EnhancementPipelineHandle`)
 
 `EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus` / `completed`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
 
-#### `pipeline.stop()`
+### `pipeline.stop()`
+
+**Hard teardown:** stops the worker thread and unregisters the pipeline. Call before releasing **`inputBuf`** / **`outputBuf`** when you need to cancel or tear down quickly.
 
 ```ts
 stop(): Promise<void>;
 ```
 
-**Hard teardown:** stops the worker thread and unregisters the pipeline. Call before releasing **`inputBuf`** / **`outputBuf`** when you need to cancel or tear down quickly.
+### `pipeline.flush()`
 
----
-
-#### `pipeline.flush()`
+**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run, but useful if you must force a **mid-session** tail without finalizing the input.
 
 ```ts
 flush(): Promise<void>;
 ```
 
-**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run (returns **`LiveAudioBufferFinishedRef`**; worker auto-completes), but useful if you must force a **mid-session** tail without finalizing the input.
+### `pipeline.reset()`
 
----
-
-#### `pipeline.reset()`
+Resets **online denoiser state** (history / latency buffers). The pipeline **continues running** after reset.
 
 ```ts
 reset(): Promise<void>;
 ```
 
-Resets **online denoiser state** (history / latency buffers). The pipeline **continues running** after reset.
-
----
-
-#### `pipeline.getStatus()`
+### `pipeline.getStatus()`
 
 ```ts
 getStatus(): Promise<StreamingPipelineStatus>;
 ```
 
 ```ts
-interface StreamingPipelineStatus {
-  pipelineId: string;
-  isRunning: boolean;
-  chunksProcessed: number;
-  unitsRead: number;
-  unitsWritten: number;
-  error: string | null;
-}
+const status = await pipeline.getStatus();
+console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ```
 
----
+### `pipeline.completed`
 
-#### `pipeline.completed`
+Settles when the worker has **fully stopped** (including the common case where input **finalize** triggered auto-stop). Await after `stop()` if you need the completion payload or to sequence buffer release.
 
 ```ts
 readonly completed: Promise<StreamingPipelineCompletion>;
 ```
 
-Settles when the worker has **fully stopped** (including the common case where input **finalize** triggered auto-stop). Await after `stop()` if you need the completion payload or to sequence buffer release.
-
 ---
-
-## Pipeline buffers (audio input + audio output)
-
-**Audio input**
-
-```ts
-import {
-  createEmptyLiveAudioBuffer,
-  appendSamplesToLiveAudioBuffer,
-  appendOfflineToLiveAudioBuffer,
-  getPipelineAudioBufferInfo,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
-
-See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
-
-**Audio output**
-
-```ts
-import {
-  createEmptyLiveAudioBuffer,
-  getPipelineAudioBufferInfo,
-  getLiveAudioBufferSamplesSlice,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
-
-See [audiobuffer — live / streaming](audiobuffer-streaming.md) and [audiobuffer — offline](audiobuffer-offline.md).
-
-### Buffer data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **`StreamingEnhancementEngine`** | From **`createStreamingEnhancement`** (the **denoiser** in examples). **`destroy()`** releases native **`OnlineSpeechDenoiser`**. |
-| **Pipeline handle** | Returned by **`enhance()`** as **`EnhancementPipelineHandle`**. **`stop()`** / **`flush()`** / **`reset()`** / **`getStatus()`**. Registered in **`StreamingPipelineRegistry`**. |
-
-> Input/output **`LiveAudioBuffer`** sample rates must match **`getSampleRate()`** (Float PCM at the model sample rate). Call **`pipeline.stop()`** before tearing down buffers, then **`destroy()`** the denoiser and **`releasePipelineAudioBuffer()`** on buffers.
 
 ## Models and paths
 
@@ -370,28 +289,12 @@ Supported modes for streaming enhancement:
 Current streaming evaluator support is limited to `continuous_frames` (default policy: `checkpointIntervalMs: 1000`).
 
 ```ts
-import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
-import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-
-const denoiser = await createStreamingEnhancement({
-  modelSource: { kind: 'fs', path: '/path/to/model' },
-  modelType: 'auto',
-});
-
-const sr = await denoiser.getSampleRate();
-const inputBuf = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
-const outputBuf = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
-
 const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
   segmentation: {
     mode: 'auto',
     policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
   },
 });
-
-await pipeline.flush();
-await pipeline.stop();
-await denoiser.destroy();
 ```
 
 See [segmentation-engine.md](segmentation-engine.md) for the shared model and [memory-and-models.md](memory-and-models.md) for peak-memory planning.
@@ -422,27 +325,29 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#enhancement-streaming-patterns](feature-pipelines.md#enhancement-streaming-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import {
-  ENHANCEMENT_MODEL_TYPES,
-  type EnhancementModelType,
-  type StreamingEnhancementEngine,
-  type StreamingEnhancementInitializeOptions,
-  type EnhancementDetectResult,
-  type EnhancementPipelineHandle,
-} from 'react-native-sherpa-onnx/enhancement';
-import type {
-  StreamingPipelineHandle,
-  StreamingPipelineStatus,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
+### Core streaming enhancement types (`react-native-sherpa-onnx/enhancement`)
 
-- **`EnhancementModelType`:** `'gtcrn' | 'dpdfnet'`
-- **`EnhancementDetectResult`:** shared detection base (`success`, `error`, `detectedModels`, `modelType`, optional `languages`, `quantization`, `detectionSources`)
+| Type | Description |
+| --- | --- |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet'` |
+| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
+| `StreamingEnhancementInitializeOptions` | Alias of `EnhancementInitializeOptions` — same auto/custom union |
+| `StreamingEnhancementEnhanceOptions` | `{ segmentation?: EnhanceSegmentationConfig }` |
+| `StreamingEnhancementEngine` | `enhance`, `getSampleRate`, `getFrameShiftInSamples`, `destroy`; readonly `instanceId` |
+| `EnhancementPipelineHandle` | Extends `StreamingPipelineHandle` + readonly `instanceId` — `stop`, `flush`, `reset`, `getStatus`, `completed` |
+| `EnhancementDetectResult` | Shared detection base (`success`, `error`, `detectedModels`, `modelType`, `isStreaming`, optional `languages`, `quantization`, `detectionSources`, `paths`) |
 
-Offline **`createEnhancement`** / **`EnhancementEngine`** are documented in [enhancement-offline.md](enhancement-offline.md#api-reference).
+### Related pipeline types
+
+| Type | Description |
+| --- | --- |
+| `StreamingPipelineHandle` | Generic pipeline control: `stop`, `flush`, `reset`, `getStatus`, `completed` |
+| `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
+| `StreamingPipelineCompletion` | Settles when the worker fully stops |
+
+Offline types (`EnhancementEngine`, `EnhancementInitializeOptions`, `EnhanceOptions`, `EnhancementResult`): [enhancement-offline.md](enhancement-offline.md#types).
 
 ---
 
@@ -454,8 +359,6 @@ Offline **`createEnhancement`** / **`EnhancementEngine`** are documented in [enh
 ---
 
 ## Error codes
-
-Typical **promise rejection `code`** strings from the native layer (offline + streaming). Message text varies; use **`code`** for branching when catching.
 
 | Error code | Explanation |
 | --- | --- |
@@ -477,7 +380,6 @@ Typical **promise rejection `code`** strings from the native layer (offline + st
 
 ## See also
 
-- [Speech enhancement (offline)](enhancement-offline.md)
 - [Speech enhancement (offline)](enhancement-offline.md)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
 - [Execution providers](execution-providers.md)
@@ -541,8 +443,6 @@ console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.u
 
 </details>
 
-
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-

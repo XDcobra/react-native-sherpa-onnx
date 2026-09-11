@@ -85,13 +85,17 @@ try {
 }
 ```
 
+---
+
 ## API reference
 
-Signatures are exported from **`react-native-sherpa-onnx/punctuation`**. Types are defined in **`src/punctuation/types.ts`**; detection types mirror **`src/punctuation/detect.ts`** and **`PunctuationDetectModelResult`**.
+Signatures are exported from **`react-native-sherpa-onnx/punctuation`**. Types are defined in **`src/punctuation/types.ts`**; detection types mirror **`src/punctuation/detect.ts`**.
 
-### Detection
+### `detectPunctuationModel(source, options?)`
 
-#### `detectPunctuationModel(source, options?)`
+File-based detection **without** initializing the engine. Use before `createOfflinePunctuation` to confirm pack layout and model family (ct vs cnn). Unified cross-feature detection: [model-detect.md](model-detect.md).
+
+**`PunctuationModelType`:** `'ct_transformer' | 'cnn_bilstm' | 'auto'`
 
 ```ts
 function detectPunctuationModel(
@@ -99,8 +103,6 @@ function detectPunctuationModel(
   options?: { modelType?: PunctuationModelType; assetName?: string }
 ): Promise<PunctuationDetectModelResult>;
 ```
-
-**`PunctuationModelType`:** `'ct_transformer' | 'cnn_bilstm' | 'auto'`
 
 ```ts
 const pre = await detectPunctuationModel(
@@ -112,9 +114,11 @@ if (pre.success) {
 }
 ```
 
-### Factory
+### `createOfflinePunctuation(options)`
 
-#### `createOfflinePunctuation(options)`
+Creates an `OfflinePunctuationEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, `modelType: 'ct_transformer'`, `customConfig: { ct_transformer }`). Shared tuning: `numThreads`, `provider`, `debug`.
+
+If native init rejects (e.g. CNN-only pack), the promise rejects with a **`PUNCTUATION_*`** or detection-related code.
 
 ```ts
 function createOfflinePunctuation(
@@ -123,66 +127,50 @@ function createOfflinePunctuation(
 ```
 
 ```ts
-// OfflinePunctuationInitializeOptions (see src/punctuation/types.ts)
-type OfflinePunctuationInitializeOptions = {
-  modelSource: FileSource;
-  modelType?: 'ct_transformer' | 'auto';
-  numThreads?: number;
-  provider?: string;
-  debug?: boolean;
-};
-```
-
-```ts
 const engine = await createOfflinePunctuation({
   modelSource: { kind: 'fs', path: '/abs/path/to/ct-punctuation-model' },
   modelType: 'auto',
   numThreads: 1,
   provider: 'cpu',
-  debug: false,
 });
 ```
 
-- If native init rejects (e.g. CNN-only pack), the promise rejects with a **`PUNCTUATION_*`** or detection-related code. **`createOfflinePunctuation`** throws an **`Error`** on init failure so callers do not get a no-op engine.
+### `engine.punctuate(textIn, textOut, options?)`
 
-### Offline engine (`OfflinePunctuationEngine`)
-
-#### `engine.punctuate(textIn, textOut)`
+Reads full text + `lang` from populated `textIn`, runs CT-Transformer punctuation, populates empty `textOut`. Both must be `OfflineTextBuffer` (`txt_off_*`).
 
 ```ts
 punctuate(
   textIn: OfflineTextBufferIdSource,
-  textOut: OfflineTextBufferIdSource
+  textOut: OfflineTextBufferIdSource,
+  options?: OfflinePunctuateOptions
 ): Promise<OfflinePunctuateResult>;
 ```
 
-- **`textIn`:** **Populated** **`OfflineTextBuffer`**. `txt_off_*` id.
-- **`textOut`:** **Empty** **`OfflineTextBuffer`**. `txt_off_*` id. Written **once**.
-
 ```ts
-import {
-  createEmptyOfflineTextBuffer,
-} from 'react-native-sherpa-onnx/textbuffer';
-
 const inBuf = /* populated OfflineTextBufferRef */;
 const outBuf = await createEmptyOfflineTextBuffer();
 const { processingTimeMs } = await engine.punctuate(inBuf, outBuf);
 ```
 
-#### `engine.punctuateString(plain, textOut)`
+### `engine.punctuateString(plain, textOut, options?)`
+
+Populates `textOut` from a raw string. `textOut` must be **empty** before the call. `lang` on the output stays **empty** (no `textIn` to copy from).
 
 ```ts
-punctuateString(plain: string, textOut: OfflineTextBufferRef): Promise<OfflinePunctuateResult>;
+punctuateString(
+  plain: string,
+  textOut: OfflineTextBufferRef,
+  options?: OfflinePunctuateOptions
+): Promise<OfflinePunctuateResult>;
 ```
-
-- **`textOut`:** must be **empty** before the call. **`lang` on the output** is not taken from a buffer (stays **empty** unless you later edit buffer metadata in your app, which the engine does not do in v1).
 
 ```ts
 const out = await createEmptyOfflineTextBuffer();
 await engine.punctuateString('unpunctuated input here', out);
 ```
 
-#### `engine.instanceId`
+### `engine.instanceId`
 
 ```ts
 readonly instanceId: string;
@@ -192,7 +180,9 @@ readonly instanceId: string;
 console.log(engine.instanceId); // e.g. punc_off_1
 ```
 
-#### `engine.destroy()`
+### `engine.destroy()`
+
+Releases the native CT-Transformer instance.
 
 ```ts
 destroy(): Promise<void>;
@@ -203,31 +193,6 @@ await engine.destroy();
 ```
 
 ---
-
-## Pipeline text buffers (input and output)
-
-```ts
-import {
-  createEmptyOfflineTextBuffer,
-  createOfflineTextBufferFromText,
-  getOfflineTextBufferTextSlice,
-  getPipelineTextBufferInfo,
-  releasePipelineTextBuffer,
-} from 'react-native-sherpa-onnx/textbuffer';
-```
-
-See [textbuffer — offline](textbuffer-offline.md) and [textbuffer — streaming](textbuffer-streaming.md) for the live side of the pipeline.
-
-### Buffer data model and lifetime
-
-| Item | Behaviour |
-| --- | --- |
-| **Offline punctuation engine** | Created with **`createOfflinePunctuation`**. Holds native **`OfflinePunctuation`**. Call **`destroy()`** when done. |
-| **`OfflineTextBuffer` (input)** | **Populated** (immutable). Must contain the **plain** text to punctuate. |
-| **`OfflineTextBuffer` (output)** | **Empty** before **`punctuate` / `punctuateString`**. Filled **once** with punctuated `text` and `lang` **from input** (buffer path only for `lang`). |
-| **Result in JS** | **`{ processingTimeMs: number }`** only (native add-punctuation duration). Read full text with **`getOfflineTextBufferTextSlice`**. |
-
-> Always **`destroy()`** the engine and **`releasePipelineTextBuffer()`** created buffers.
 
 ## Models and paths
 
@@ -311,38 +276,12 @@ Supported modes for offline punctuation:
 Default policy evaluator: `text_synthetic_auto` (`sentenceBoundary: true`, `maxLengthChars: 500`).
 
 ```ts
-import { createOfflinePunctuation } from 'react-native-sherpa-onnx/punctuation';
-import {
-  createOfflineTextBufferFromText,
-  createEmptyOfflineTextBuffer,
-  getOfflineTextBufferTextSlice,
-  getPipelineTextBufferInfo,
-  releasePipelineTextBuffer,
-} from 'react-native-sherpa-onnx/textbuffer';
-
-const punct = await createOfflinePunctuation({
-  modelSource: { kind: 'fs', path: '/path/to/punctuation-ct' },
-  modelType: 'auto',
+const result = await punct.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  errorRecovery: 'skip',
+  maxRetriesPerSegment: 2,
 });
-
-const textIn = await createOfflineTextBufferFromText(longPlainText, { lang: 'en' });
-const textOut = await createEmptyOfflineTextBuffer();
-
-try {
-  const result = await punct.punctuate(textIn, textOut, {
-    segmentation: { mode: 'auto' },
-    errorRecovery: 'skip',
-    maxRetriesPerSegment: 2,
-  });
-  console.log(result.processingTimeMs, result.completedSegments, result.totalSegments);
-
-  const info = await getPipelineTextBufferInfo(textOut);
-  console.log(await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length));
-} finally {
-  await releasePipelineTextBuffer(textIn);
-  await releasePipelineTextBuffer(textOut);
-  await punct.destroy();
-}
+console.log(result.processingTimeMs, result.completedSegments, result.totalSegments);
 ```
 
 See [segmentation-engine.md](segmentation-engine.md) for shared segmentation behavior and [memory-and-models.md](memory-and-models.md) for memory tradeoffs.
@@ -373,41 +312,54 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](feature-pipelines.md#punctuation-offline-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import type {
-  OfflinePunctuateResult,
-  OfflinePunctuationEngine,
-  OfflinePunctuationInitializeOptions,
-  PunctuationDetectModelResult,
-  PunctuationModelType,
-} from 'react-native-sherpa-onnx/punctuation';
-```
+### Core punctuation types (`react-native-sherpa-onnx/punctuation`)
 
-- **`PunctuationModelType` (detection):** includes **`'ct_transformer' | 'cnn_bilstm' | 'auto'`** (see `src/punctuation/detect.ts`). Init-only types use **`OfflinePunctuationModelType`** (`'ct_transformer' | 'auto'`).
+| Type | Description |
+| --- | --- |
+| `PunctuationModelType` | `'ct_transformer' \| 'cnn_bilstm' \| 'auto'` (detection) |
+| `OfflinePunctuationModelType` | `'ct_transformer' \| 'auto'` (init) |
+| `OfflinePunctuationConcreteModelType` | `'ct_transformer'` |
+| `OfflinePunctuationInitOptionsShared` | Shared init fields: `numThreads?`, `provider?`, `debug?` |
+| `OfflinePunctuationAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared |
+| `OfflinePunctuationCustomInitializeOptions` | Custom init: `initMode: 'custom'`, `modelType: 'ct_transformer'`, `customConfig` + shared |
+| `OfflinePunctuationInitializeOptions` | Union of auto and custom init options |
+| `PunctuationDetectModelResult` | Return of `detectPunctuationModel()` — shared detection base |
+| `OfflinePunctuateResult` | `{ processingTimeMs, status?, totalSegments?, completedSegments?, skippedSegments?, failedSegment? }` |
+| `OfflinePunctuateOptions` | `textInputNormalization?`, `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapChars?`, `textSkipPlaceholder?`, `linkMap?` |
+| `PunctuationLivePipelineOptions` | Live overload options — mandatory segmentation, optional `textInputNormalization?`, `onSegment?` |
+| `OfflinePunctuationEngine` | `punctuate` (offline / live overload), `punctuateString`, `destroy`; readonly `instanceId` |
+| `OfflinePunctuationCustomConfig` | Custom init path map: `{ ct_transformer: FileSource }` |
+| `PunctuationErrorCode` | Error code enum for punctuation operations |
+| `TextInputNormalization` | `'lower' \| 'none'` — input casing normalization before inference |
 
-- **`OfflinePunctuateResult`:** `{ processingTimeMs: number }`
-- **`OfflinePunctuationModelType` (init):** `'ct_transformer' | 'auto'`
+Streaming types (`StreamingPunctuationEngine`, `StreamingPunctuationInitializeOptions`, `PunctuationPipelineHandle`, `OnlinePunctuationModelType`): [punctuation-streaming.md](punctuation-streaming.md#types).
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineTextBufferIdSource` | Offline text ref or handle passed to `punctuate` |
+| `OfflineTextBufferRef` | `{ info, bufferId }` returned by `createOfflineTextBufferFromText` |
+
+See [textbuffer-offline.md](textbuffer-offline.md).
 
 ---
 
 ## Error codes
 
-Typical **promise rejection `code`** strings (Android / iOS native). User-visible **message** text can vary; prefer **`code`** for branching. **`FILEIO_*`** may appear when resolving paths before native runs.
-
 | Error code | Explanation |
 | --- | --- |
 | `PUNCT_DETECT_ERROR` | `detectPunctuationModel` failed (null result, exception, or unusable layout for detection). |
-| `PUNCTUATION_INIT_ERROR` | `createOfflinePunctuation` / `initializeOfflinePunctuation` failed: not a CT layout, missing `ct_transformer` onnx path, unsupported `modelType` for offline, or native construct failure. |
+| `PUNCTUATION_INIT_ERROR` | `createOfflinePunctuation` failed: not a CT layout, missing `ct_transformer` onnx path, unsupported `modelType` for offline, or native construct failure. |
 | `PUNCTUATION_ERROR` | Punctuation **inference** or unexpected runtime failure (e.g. `addPunctuation` threw on native). |
 | `PUNCTUATION_INSTANCE_NOT_FOUND` | `instanceId` does not match a loaded engine (e.g. wrong id or already **destroyed**). |
 | `TEXT_BUFFER_NOT_FOUND` | `textIn` or `textOut` id is missing from the text registry. |
 | `TEXT_BUFFER_KIND_MISMATCH` | Not an **offline** buffer id (`txt_off_*` required). |
 | `TEXT_BUFFER_EMPTY` | `textIn` is not populated (input must have text). |
 | `TEXT_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
-| `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init (if applicable to your source kind). |
+| `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
 
@@ -477,4 +429,3 @@ console.log(result.status, result.completedSegments, result.totalSegments);
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-

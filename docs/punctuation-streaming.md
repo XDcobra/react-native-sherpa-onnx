@@ -74,15 +74,17 @@ await releasePipelineTextBuffer(textOut);
 
 After the live input is finalized, call **`pipeline.flush()`** (then **`stop()`** and **`completed`** as in the snippet). The native worker treats the post-finalize **`flush()`** as the barrier that allows it to finish draining tail segments before shutting down.
 
-**Order (recommended):** `finalizeLiveTextBuffer(textIn)` (live **text** buffer, no more writes / optional last partial → segment) → **`pipeline.flush()`** (pipeline **handle**, drain segment log through the model) → **`pipeline.stop()`** → **`pipeline.completed`**. That is **not** the same as “flush before finalize”: if you `flush()` while the input is still `recording`, more segments can still arrive afterward (e.g. last segment at finalize), so **`finalize` first** is the stable cut.
+**Order (recommended):** `finalizeLiveTextBuffer(textIn)` (live **text** buffer, no more writes / optional last partial → segment) → **`pipeline.flush()`** (pipeline **handle**, drain segment log through the model) → **`pipeline.stop()`** → **`pipeline.completed`**. That is **not** the same as "flush before finalize": if you `flush()` while the input is still `recording`, more segments can still arrive afterward (e.g. last segment at finalize), so **`finalize` first** is the stable cut.
+
+---
 
 ## API reference
 
 Signatures are exported from `react-native-sherpa-onnx/punctuation`.
 
-### Detection
+### `detectPunctuationModel(source, options?)`
 
-#### `detectPunctuationModel(source, options?)`
+Shared with offline. File-based detection **without** initializing the engine. Require `det.modelType === 'cnn_bilstm' && det.isStreaming` for streaming use. Unified cross-feature detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectPunctuationModel(
@@ -96,9 +98,9 @@ const det = await detectPunctuationModel({ kind: 'fs', path: '/path/to/punctuati
 console.log(det.success, det.modelType, det.isStreaming);
 ```
 
-### Factory
+### `createStreamingPunctuation(options)`
 
-#### `createStreamingPunctuation(options)`
+Creates a `StreamingPunctuationEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, `modelType: 'cnn_bilstm'`, `customConfig: { cnn_bilstm, bpe_vocab }`). Shared tuning: `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingPunctuation(
@@ -113,9 +115,9 @@ const engine = await createStreamingPunctuation({
 });
 ```
 
-### Engine (`StreamingPunctuationEngine`)
+### `engine.punctuate(textIn, textOut, options?)`
 
-#### `engine.punctuate(textIn, textOut, options?)`
+Starts a native worker that reads committed text segments from `textIn` and writes punctuated segments to `textOut`. Both must be live text buffers (`txt_live_*`). Input/output kind mismatch is rejected with `PUNCTUATION_INVALID_ARGUMENT`.
 
 ```ts
 punctuate(
@@ -132,15 +134,14 @@ const pipeline = await engine.punctuate(textIn, textOut, {
 ```
 
 Notes:
-
-- Both `textIn` and `textOut` must be live text buffers (`txt_live_*`).
-- Input/output kind mismatch is rejected with `PUNCTUATION_INVALID_ARGUMENT`.
 - `segmentation.mode: 'auto'` attaches the segmentation engine to input text.
 - `textInputNormalization` (default `'lower'`): lowercases each input segment before inference. Use `'none'` to keep upstream casing (not recommended for ALL-CAPS ASR).
 - `text_punctuation_assisted` segmentation commits at the **first** sentence boundary in punctuated text (not the last), so partial buffers are not re-committed wholesale on every STT update once punctuation inserts `.?!`.
 - **Do not** attach `text_punctuation_assisted` to a live buffer that already receives upstream `commitSegment` rows (e.g. pipelined `stt → punctuation`). Use `segmentation: { mode: 'off' }` and let the punctuation worker drain upstream segments only.
 
-#### `engine.destroy()`
+### `engine.destroy()`
+
+Releases the native online punctuation instance.
 
 ```ts
 destroy(): Promise<void>;
@@ -150,37 +151,33 @@ destroy(): Promise<void>;
 await engine.destroy();
 ```
 
-### Pipeline handle (`PunctuationPipelineHandle`)
+### `pipeline.stop()`
 
-Typed like other streaming handles (`stop`, `flush`, `reset`, `getStatus`). **`completed`** resolves with **`StreamingPipelineCompletion`** when the native worker finishes (same contract as STT/TTS; see [streaming-pipelines-overview.md](streaming-pipelines-overview.md)).
-
-#### `pipeline.stop()`
+**Hard teardown** of the punctuation worker. Use when cancelling or before releasing buffers if the worker might still be running.
 
 ```ts
 stop(): Promise<void>;
 ```
 
-**Hard teardown** of the punctuation worker. Use when cancelling or before releasing buffers if the worker might still be running.
+### `pipeline.flush()`
 
-#### `pipeline.flush()`
+**Drain barrier on the segment log:** drains any **unread committed segments** on the live **input**, runs **`addPunctuation`**, and commits results to **`textOut`**. After the live **input** is **`finalizeLiveTextBuffer`**, you **must** call **`flush()`** (then **`stop()`** / **`completed`**) so the worker can finish.
+
+**Contract:** after **`finalizeLiveTextBuffer`** on the live **input** text buffer, call **`pipeline.flush()`** so the worker can drain any tail segments and exit. Then **`pipeline.stop()`** and **`await pipeline.completed`**. Omitting **`flush()`** after a finished input leaves the worker running until **`stop()`**.
 
 ```ts
 flush(): Promise<void>;
 ```
 
-**Drain barrier on the segment log:** drains any **unread committed segments** on the live **input**, runs **`addPunctuation`**, and commits results to **`textOut`**. After the live **input** is **`finalizeLiveTextBuffer`**, you **must** call **`flush()`** (then **`stop()`** / **`completed`**) so the worker can finish and so `flush()` does not race a worker that already exited — see Quick start.
+### `pipeline.reset()`
 
-**Contract:** after **`finalizeLiveTextBuffer`** on the live **input** text buffer, call **`pipeline.flush()`** so the worker can drain any tail segments and exit. Then **`pipeline.stop()`** and **`await pipeline.completed`**. Omitting **`flush()`** after a finished input leaves the worker running until **`stop()`**. This is **not** “pipeline flush before text finalize”: finalize the **buffer** first, then pipeline **`flush`** — flushing while the input is still `recording` does not prevent later segments (e.g. committed at finalize).
-
-#### `pipeline.reset()`
+Clears **online punctuation** internal stream state where supported; pipeline may **continue running**. Prefer **`stop()`** for full teardown.
 
 ```ts
 reset(): Promise<void>;
 ```
 
-Clears **online punctuation** internal stream state where supported; pipeline may **continue running**. Prefer **`stop()`** for full teardown.
-
-#### `pipeline.getStatus()`
+### `pipeline.getStatus()`
 
 ```ts
 getStatus(): Promise<StreamingPipelineStatus>;
@@ -191,9 +188,15 @@ const status = await pipeline.getStatus();
 console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ```
 
-#### `pipeline.completed`
+### `pipeline.completed`
 
 Await after **`flush()`** / **`stop()`** in the recommended order so teardown and buffer release do not race.
+
+```ts
+readonly completed: Promise<StreamingPipelineCompletion>;
+```
+
+---
 
 ## Models and paths
 
@@ -212,8 +215,6 @@ Await after **`flush()`** / **`stop()`** in the recommended order so teardown an
 `detectPunctuationModel` pre-check. Require `det.modelType === 'cnn_bilstm' && det.isStreaming`. Unified catalog: [model-detect.md](model-detect.md).
 
 ```ts
-import { detectPunctuationModel } from 'react-native-sherpa-onnx/punctuation';
-
 const det = await detectPunctuationModel(
   { kind: 'fs', path: '/path/to/punctuation-online-pack' },
   { modelType: 'auto' }
@@ -295,32 +296,38 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#punctuation-streaming-patterns](feature-pipelines.md#punctuation-streaming-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import {
-  createStreamingPunctuation, // create streaming punctuation engine
-  detectPunctuationModel, // detect punctuation model family/layout
-} from 'react-native-sherpa-onnx/punctuation';
+### Core streaming punctuation types (`react-native-sherpa-onnx/punctuation`)
 
-import type {
-  StreamingPunctuationEngine, // streaming punctuation engine interface
-  StreamingPunctuationInitializeOptions, // init options for online punctuation
-  StreamingPunctuationOptions, // pipeline options including segmentation
-  PunctuationPipelineHandle, // control handle for running punctuation pipeline
-  OnlinePunctuationModelType, // 'cnn_bilstm' | 'auto'
-  PunctuationModelType, // 'ct_transformer' | 'cnn_bilstm' | 'auto' (detection)
-  PunctuationDetectModelResult, // detect result shape from native/model scan
-} from 'react-native-sherpa-onnx/punctuation';
+| Type | Description |
+| --- | --- |
+| `PunctuationModelType` | `'ct_transformer' \| 'cnn_bilstm' \| 'auto'` (detection) |
+| `OnlinePunctuationModelType` | `'cnn_bilstm' \| 'auto'` (init) |
+| `StreamingPunctuationConcreteModelType` | `'cnn_bilstm'` |
+| `StreamingPunctuationInitOptionsShared` | Shared init fields: `numThreads?`, `provider?`, `debug?` |
+| `StreamingPunctuationAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared |
+| `StreamingPunctuationCustomInitializeOptions` | Custom init: `initMode: 'custom'`, `modelType: 'cnn_bilstm'`, `customConfig` + shared |
+| `StreamingPunctuationInitializeOptions` | Union of auto and custom init options |
+| `StreamingPunctuationOptions` | `textInputNormalization?`, `segmentation?` (mode + policy) |
+| `PunctuationPipelineHandle` | `stop`, `flush`, `reset`, `getStatus`, `completed`; readonly `instanceId`, `pipelineId` |
+| `StreamingPunctuationEngine` | `punctuate`, `destroy`; readonly `instanceId` |
+| `PunctuationDetectModelResult` | Return of `detectPunctuationModel()` — shared detection base |
+| `StreamingPunctuationCustomConfig` | Custom init path map: `{ cnn_bilstm, bpe_vocab }` |
+| `TextInputNormalization` | `'lower' \| 'none'` — input casing normalization before inference |
 
-import type {
-  StreamingPipelineStatus, // common status payload for streaming pipeline handles
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
+### Related pipeline types
+
+| Type | Description |
+| --- | --- |
+| `StreamingPipelineStatus` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
+| `StreamingPipelineCompletion` | Settles when the worker fully stops |
+
+Offline types (`OfflinePunctuationEngine`, `OfflinePunctuationInitializeOptions`, `OfflinePunctuateResult`): [punctuation-offline.md](punctuation-offline.md#types).
+
+---
 
 ## Error codes
-
-Typical error codes surfaced by JS/native layers for streaming punctuation.
 
 | Code | Typical reason |
 | --- | --- |
@@ -334,6 +341,8 @@ Typical error codes surfaced by JS/native layers for streaming punctuation.
 | `STREAMING_PIPELINE_ERROR` | Generic streaming pipeline runtime failure |
 
 Additional `FILEIO_*` errors can occur during model path/source resolution before native init.
+
+---
 
 ## See also
 
@@ -386,4 +395,3 @@ console.log(status.chunksProcessed, status.unitsRead, status.unitsWritten);
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-
