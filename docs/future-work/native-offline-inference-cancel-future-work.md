@@ -1,6 +1,7 @@
 # Native offline inference cancellation (future work)
 
 **Status:** Clean cut completed (2026-08) — orchestrator-level “fake” cancel removed. **Blocked on sherpa-onnx upstream** for mid-inference native cancel before a central SDK layer can ship.  
+**Upstream decision (2026-09):** Target is **hard mid-ORT cancel** via ONNX Runtime `RunOptions::SetTerminate` — **not** callback / between-batch cooperative cancel as the product solution. Work starts **core-first** (C++ + C-API); language bindings follow after the C contract is stable.  
 **Related (done):** [Cancel clean cut (internal)](../internal/cancel-clean-cut.md) — SDK, example app, and VoiceLab.  
 **Archival context:** Pre-removal API design lives in `docs/migration/**` (orchestrator ADRs, segmentation transfer plans). Those records are **historical**; current user-facing docs no longer mention offline `abortSignal` or `'cancelled'` result status.
 
@@ -15,6 +16,8 @@ That layer was **not native cancellation**. It only stopped **between orchestrat
 Because the SDK is **unreleased**, we removed this surface entirely (**clean cut**, no deprecation). Consumers must not reintroduce segment-polling `abortSignal` as a substitute for real cancel.
 
 **What still works today** is every path where cancellation is **genuine**: I/O and lifecycle teardown (see §3).
+
+**Product goal going forward:** cancel must abort an **in-flight ORT `Session::Run`**, not only skip the next segment or return `0` from a TTS audio callback.
 
 ---
 
@@ -89,86 +92,131 @@ Segmentation in `offlineOrchestrator` splits long inputs into **multiple** nativ
 
 **Live/streaming** paths are different: workers already support **stop / flush / teardown** between chunks. That is why streaming cancel stays.
 
+### 4.1 What already exists upstream (and why it is not enough)
+
+| Mechanism | Where | Why it is **not** our target |
+|-----------|--------|------------------------------|
+| TTS `generateWithCallback` / progress callback return `0` | C / Kotlin / Java / … | Stops **between** sentence/batch chunks after a `Process`/`Run` finishes — not mid-ORT |
+| Diarization progress callback | Upstream return value often ignored; RN has its own between-phase `atomic` | Between phases only |
+| Online ASR “stop” | Stop feeding / `Reset` / pipeline `stop()` | App loop control, not ORT terminate |
+| Offline ASR `Decode` | Fully blocking, no cancel API | Must get hard ORT cancel |
+
+Wiring TTS callbacks in RN alone would restore a **half-solution** UX. We explicitly **reject** that as the shipped cancel story for offline inference.
+
 ---
 
-## 5. Upstream prerequisites (sherpa-onnx)
+## 5. Upstream decision: hard mid-ORT cancel, core-first
 
-Before reintroducing offline inference cancel in this SDK, sherpa-onnx (and our pinned native builds) need **cooperative cancellation** inside or below the feature facades. Exact API shape is an upstream design choice; minimally we need:
+### 5.1 Chosen approach
 
-### 5.1 Per-feature or shared cancel token
+Use ONNX Runtime’s existing cancel hook:
 
-A native handle or flag checked **inside** long-running loops (not only between orchestrator segments), for at least:
+1. Hold a **long-lived** `Ort::RunOptions` on the offline engine/model (not ephemeral `Run({},)` / `Ort::RunOptions{nullptr}` as today).
+2. Pass **that same** `RunOptions` into every `Session::Run` / RunWithBinding for the in-flight job.
+3. From another thread, call `RunOptions::SetTerminate()`.
+4. ORT aborts the run with an error (typically surfaces as `Ort::Exception` with terminate messaging).
+5. Map to a stable **cancelled** error in the C-API; then `UnsetTerminate()` before the engine is reused.
 
-- Offline STT (transducer / paraformer / whisper batch paths)
-- Offline TTS (including multi-segment / long-form synthesis)
-- Offline enhancement & source separation
-- Offline VAD batch passes
-- Offline punctuation (CT transformer batch)
+```mermaid
+flowchart TD
+  cancel["Cancel other thread"] --> setTerm["RunOptions.SetTerminate"]
+  decode["Decode or Generate thread"] --> run["Session.Run shared RunOptions"]
+  setTerm --> run
+  run --> throw["Ort::Exception terminated"]
+  throw --> map["C-API cancelled error"]
+  map --> unset["UnsetTerminate for reuse"]
+```
 
-### 5.2 Defined semantics on abort
+This is an **architecture refactor of the inference layer**, not a thin facade method. Today sherpa-onnx has **no** shared `RunOptions` helper; offline ASR/TTS alone have on the order of **~70+ `Run` sites** across **~30 model files**.
 
-Document and implement consistent behaviour when cancel is requested mid-run:
+### 5.2 Semantics (fixed)
 
-| Outcome | When |
-|---------|------|
-| **Hard abort** | Throw / error code; no partial output committed |
-| **Partial commit** | Return completed segments / audio frames so far; stable error or status bit |
-| **Best-effort drain** | Finish current micro-batch only, then stop (TTS latency-sensitive) |
+| Topic | Decision |
+|-------|----------|
+| Outcome | **Hard abort** — no partial audio/text from the aborted graph committed as success |
+| Partial JS orchestrator policy | Only after native defines cancelled; do **not** revive pre-2026 JS-only `'cancelled'` |
+| Latency expectation | Abort is **fast**, not necessarily instantaneous mid-kernel: ORT checks terminate **between execution steps**; a single large op may finish before exit |
+| Non-ORT EPs | QNN / RKNN / Ascend / etc. need a **separate** cancel story; initial scope is standard ORT CPU/mobile EP builds we pin (e.g. 1.28.x) |
+| Concurrency | One in-flight Decode/Generate per engine instance (RN pattern). One shared `RunOptions` cancels all Sessions that used it for that job |
 
-The old SDK `'cancelled'` status mixed these policies with `errorRecovery` (`abort` vs `skip` vs `partial_result`) **purely in JS**. A future design should align orchestrator policy with **native** capabilities per feature.
+### 5.3 Scope: core first — not “Kotlin + iOS only”
 
-### 5.3 Thread safety
+| Layer | Role |
+|-------|------|
+| **C++ core + C-API (required first)** | Own `RunOptions`, `Cancel()`, exception → cancelled mapping, tests. Without this, bindings are forks. |
+| **CXX-API** | Follow C-API once stable (thin). |
+| **Language bindings** | **After** C-API: one upstream PR per language (maintainer preference). For this SDK: **JNI/Kotlin** and **ObjC++/Swift** next. Go/Dart/C#/… optional later, same contract. |
 
-- Cancel may be invoked from the **JS thread** while native runs on a **worker / module thread**.
-- No use-after-free on session handles, buffers, or ORT sessions after cancel.
-- Idempotent cancel (second call is a no-op).
+Do **not** ship cancel only inside RN wrappers or only on two bindings without upstream core — that creates unmaintainable fork debt.
 
-### 5.4 ONNX Runtime interaction
+### 5.4 Rollout inside core (still hard-ORT only)
 
-Depending on upstream approach:
+Staff **coverage**, not **mechanism**:
 
-- ORT **Run** cancellation hooks / session termination, or
-- Chunked inference with explicit boundary checks, or
-- Separate process / isolate for batch jobs (heavier; likely out of scope for mobile RN)
+1. **Shared infrastructure** — `RunOptions` ownership + `Cancel` + error mapping (+ helper so models cannot keep calling `Run({},)`).
+2. **Pilot** — one Offline ASR model (prefer single-session, e.g. SenseVoice/Paraformer) **and** one Offline TTS model; prove terminate on **Android and iOS** with logs.
+3. **Sweep** — rewire remaining offline `Run` sites (all ASR models, all TTS, then enhancement / separation / VAD / punctuation as needed for SDK parity).
 
-We should track upstream issues/PRs in [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and bump vendored binaries only after cancel semantics are tested on **Android and iOS** for our bound features.
+Pilot ≠ soft cancel. Every step still uses `SetTerminate`.
+
+### 5.5 Complexity / risk
+
+| Scope | Effort | Notes |
+|-------|--------|-------|
+| Shared `RunOptions` + C-API cancel + exception mapping | Medium–large | Prerequisite for everything |
+| Pilot ASR + TTS (hard ORT) on Android/iOS | Medium | Proof of UX + EP behavior |
+| All offline ASR/TTS model files | Large | Mechanical but high blast radius |
+| Full feature matrix (STT, TTS, sep, enhance, VAD, punct) | Very large | Weeks–months; requires the shared helper |
+
+**Risks:** C-API today often has no try/catch around Decode/Generate (terminate would escape); session reuse after cancel; formal data race on ORT’s terminate bool (documented cross-thread API nonetheless); multi-session models must all use the same options instance.
+
+### 5.6 Explicitly rejected for the product cancel path
+
+- JS-only / orchestrator-only `abortSignal` (already removed).
+- TTS callback return `0` / progress-callback abort as the **shipped** offline cancel story.
+- Atomic flags checked only **between** sherpa loops without ORT terminate.
+- Process-kill / isolate kill as primary mobile UX.
+- Binding-only patches (Kotlin/Swift) without C++/C-API.
+
+Existing TTS callbacks may remain as optional streaming/progress APIs; they are **not** a substitute for §5.1.
 
 ---
 
 ## 6. Proposed future SDK design (after upstream)
 
-**Goal:** One **central cancellation model** wired from TS through JNI/Obj-C++ to native, instead of per-feature `AbortSignal` copies in the orchestrator.
+**Goal:** One **central cancellation model** wired from TS through JNI/Obj-C++ to sherpa-onnx **hard ORT cancel**, instead of per-feature `AbortSignal` copies in the orchestrator.
 
 ### 6.1 Layering
 
 ```mermaid
 flowchart TD
   app["App / VoiceLab"] --> sdkCancel["SDK cancel handle or signal"]
-  sdkCancel --> orch["offlineOrchestrator (segment boundaries)"]
-  sdkCancel --> native["Feature native session"]
-  native --> sherpa["sherpa-onnx cooperative cancel"]
+  sdkCancel --> orch["offlineOrchestrator stop new segments"]
+  sdkCancel --> native["Feature native session Cancel"]
+  native --> sherpa["sherpa-onnx RunOptions.SetTerminate"]
   orch --> native
 ```
 
-1. **Native first:** each offline engine exposes `requestCancel()` or checks a shared `CancelToken` during inference.
-2. **Orchestrator second:** on cancel, stop scheduling new segments **and** propagate cancel to the active native session.
-3. **TypeScript last:** public API (e.g. `CancelToken`, `run.cancel()`, or a single `AbortSignal` mapped to native — name TBD) documented once across features.
+1. **Upstream core first:** engines expose `Cancel()` backed by `SetTerminate`.
+2. **Bindings:** Kotlin/JNI + Swift/ObjC++ map to C-API.
+3. **Orchestrator:** on cancel, stop scheduling new segments **and** call active session `Cancel()`.
+4. **TypeScript last:** public API (e.g. `CancelToken`, `run.cancel()`, or `AbortSignal` mapped to native — name TBD) documented once across features.
 
 ### 6.2 Result model
 
-Reintroduce a terminal cancelled/partial outcome **only if** native defines it, e.g.:
+Reintroduce a terminal cancelled outcome **only if** native defines it, e.g.:
 
-- `status: 'cancelled' | 'partial'` with explicit fields (`completedSegments`, retained buffers), or
-- thrown error with `code: 'INFERENCE_CANCELLED'` and optional partial payload
+- thrown / rejected error with `code: 'INFERENCE_CANCELLED'`, or
+- `status: 'cancelled'` with **no** fabricated partial success from the aborted run
 
-Avoid duplicating the pre-2026 JS-only `'cancelled'` without native backing.
+Avoid duplicating the pre-2026 JS-only `'cancelled'` without native backing. Do not mix in “partial commit from mid-ORT” unless ORT/upstream later defines a safe partial contract (out of initial scope).
 
 ### 6.3 Feature parity matrix (target)
 
-| Feature | Offline batch cancel | Streaming stop (today) |
-|---------|----------------------|-------------------------|
+| Feature | Offline batch cancel (hard ORT) | Streaming stop (today) |
+|---------|----------------------------------|-------------------------|
 | STT | Future native | ✅ `pipeline.stop()` |
-| TTS | Future native (highest priority for UX) | ✅ streaming stop |
+| TTS | Future native (high UX priority; hard ORT, not callback-only) | ✅ streaming stop |
 | Separation | Future native | ✅ live overload stop |
 | Enhancement | Future native | ✅ streaming stop |
 | VAD | Future native | ✅ pipeline stop |
@@ -180,26 +228,43 @@ When native offline cancel ships:
 
 - VoiceLab can show Cancel during offline `engineRunning` for features that support it.
 - Example app batch screens can restore Stop **only** if bound to the new SDK cancel handle.
-- Re-enable SDK tests for cancel + partial paths using **native** simulation (mock native cancel callback), not `AbortController.abort()` between mocked instant segments only.
+- Re-enable SDK tests that prove **native** abort (logcat / native trace of terminate), not only JS early return between mocked segments.
 
 ---
 
 ## 7. Implementation checklist (when unblocked)
 
-- [ ] Upstream sherpa-onnx: cancel API + tests for at least one offline feature (TTS or STT pilot).
-- [ ] Vendor bump in `react-native-sherpa-onnx` Android/iOS native deps.
-- [ ] JNI / Swift bridge: propagate cancel token into existing engine handles.
-- [ ] Restore orchestrator integration (segment loop + active session cancel).
-- [ ] Unified TS types + one doc section in [streaming-pipelines-overview.md](../streaming-pipelines-overview.md) / per-feature offline docs.
-- [ ] Example app + VoiceLab: wire Cancel to SDK; remove temporary gating where native cancel exists.
-- [ ] Platform tests: cancel during long batch on mid-range Android device (logcat proves native abort, not just JS early return).
+### Upstream (sherpa-onnx) — core
+
+- [ ] Shared long-lived `Ort::RunOptions` pattern + ban ephemeral `Run({},)` for cancellable offline paths.
+- [ ] Facade `Cancel()` + C-API entry points; try/catch Decode/Generate → cancelled error; `UnsetTerminate` on reuse.
+- [ ] Pilot: one Offline ASR + one Offline TTS model; Android + iOS smoke with terminate proven in logs.
+- [ ] Sweep remaining offline ORT `Run` sites for SDK-relevant features.
+- [ ] Docs: cancel semantics, thread rules, EP caveats.
+
+### Upstream — bindings (after C-API)
+
+- [ ] JNI/Kotlin cancel surface (own PR).
+- [ ] Swift/ObjC++ cancel surface (own PR).
+- [ ] Other languages optional, same contract, separate PRs.
+
+### This SDK
+
+- [ ] Vendor bump Android/iOS native deps.
+- [ ] Bridge cancel into engine handles; restore orchestrator (stop new segments + native `Cancel()`).
+- [ ] Unified TS types + docs; Example app + VoiceLab Cancel wiring; remove temporary gating.
+- [ ] Platform tests: long batch cancel on mid-range Android (native abort, not JS-only).
 
 ---
 
 ## 8. Out of scope / non-goals
 
-- Re-adding JS-only `abortSignal` without native checks.
+- Re-adding JS-only `abortSignal` without native ORT terminate.
+- Shipping TTS callback / between-batch cancel as the primary offline cancel UX.
 - Process-kill or isolate-based “cancel” as the primary mobile UX.
+- Binding-only or RN-only cancel without upstream C++/C-API.
+- Guaranteeing abort **inside** a single ORT kernel op (only between ORT steps).
+- Non-ORT backend cancel (QNN/RKNN/…) in the initial core PR.
 - Changing migration archive documents under `docs/migration/**` (historical record only).
 
 ---
@@ -210,3 +275,4 @@ When native offline cancel ships:
 - [Streaming pipelines overview](../streaming-pipelines-overview.md) — live `stop()` semantics (unchanged)
 - [Audiobuffer streaming](../audiobuffer-streaming.md) — decode cancel (`DECODE_CANCELLED`)
 - Migration (historical): `docs/migration/segmentationEngine/sub-04-transfer-offline-orchestration.md`, `docs/migration/OrchestrationProgressVADAli/ADR-002-vad-offline-segmentation-progress-strategy.md`
+- Upstream ORT: `Ort::RunOptions::SetTerminate` / `UnsetTerminate` (pinned ORT ~1.28.x in sherpa-onnx / RN prebuilts)
