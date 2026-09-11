@@ -2,9 +2,7 @@
 
 > **Live overload** — not a streaming TTS model.
 >
-> Native sample-level incremental streaming TTS (online decoding) is **not supported** by the underlying `sherpa-onnx` engine. This guide uses the **same offline** weights as [tts-offline.md](tts-offline.md) (`createTTS`): mandatory **text segmentation** turns an incoming **`LiveTextBuffer`** into discrete chunks; each chunk is synthesized with **offline** weights into a **`LiveAudioBuffer`**.
->
-> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*`).
+> Live text is sliced by mandatory text segmentation; each committed chunk is synthesized natively with the same offline TTS weights into a live audio buffer. There is no separate online/streaming TTS engine in sherpa-onnx.
 
 ## Introduction
 

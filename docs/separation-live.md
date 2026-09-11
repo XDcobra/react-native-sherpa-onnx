@@ -2,9 +2,7 @@
 
 > **Live overload** — not a streaming separation model.
 >
-> There is **no** online / sample-level incremental separation engine in sherpa-onnx and **no** `createStreamingSeparation` factory. This guide uses **`createSeparation`** (offline Spleeter/UVR weights) on **live buffers**: mandatory **`continuous_frames`** segmentation turns incoming audio into chunks; each chunk is separated offline into **N `LiveAudioBuffer` stems**.
->
-> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*`).
+> Live audio is sliced by mandatory `continuous_frames` segmentation; each committed chunk is separated natively with the same offline Spleeter/UVR weights into N live stem buffers. There is no separate online/streaming separation engine in sherpa-onnx.
 
 ## Introduction
 
