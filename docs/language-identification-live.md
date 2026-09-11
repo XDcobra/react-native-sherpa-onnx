@@ -36,37 +36,27 @@ import {
   createLiveTextBuffer,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
+} from 'react-native-sherpa-onnx/language-identification';
 
 // Assume `slid` from createLanguageIdentification (see offline doc).
 
-const audioIn = await createEmptyLiveAudioBuffer({
-  sampleRate: 16000,
-  channelCount: 1,
-});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer();
 
 const pipeline = await slid.identify(audioIn, textOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: {
-      evaluator: 'speech_energy_silence',
-      silenceThresholdMs: 500,
-      energyThresholdDb: -40,
-      minSegmentMs: 1500, // spans shorter than ~1.5s are skipped
-      maxSegmentMs: 25000,
-      hangoverMs: 300,
-    },
-  },
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
   onSegment: (e) => console.log('#', e.segmentIndex, e.lang, e.durationMs),
-  onLanguageChanged: (e) =>
-    console.log(e.previousLang, '→', e.currentLang, '@', e.timestamp),
+  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
 });
 
 await startMicToLiveAudioBuffer(audioIn);
 // … speak …
 await stopMicToLiveAudioBuffer();
 await finalizeLiveAudioBuffer(audioIn);
-await pipeline.completed; // reason: 'completed'
+const completion = await pipeline.completed;
+console.log(completion.reason);
 
 await releasePipelineTextBuffer(textOut);
 await releasePipelineAudioBuffer(audioIn);
@@ -112,6 +102,12 @@ Same control surface as other streaming / live-overload features ([streaming-pip
 
 ## API reference
 
+Factory, detection, and model init are the same as offline — see [language-identification-offline.md](language-identification-offline.md#api-reference).
+
+### `slid.identify(audioIn, textOut, options)`
+
+Starts a live overload pipeline: identifies each committed audio span with offline Whisper weights, commits the ISO language code to `textOut`, and returns a pipeline handle.
+
 ```ts
 identify(
   audioIn: LiveAudioBufferIdSource,
@@ -120,25 +116,32 @@ identify(
 ): Promise<LanguageIdentificationPipelineHandle>;
 ```
 
+**Constraints:** both buffers must be live; `segmentation.policy` required (`speech_energy_silence` or `speech_vad_model`).
+
 ```ts
-type LanguageIdentificationLivePipelineOptions = {
-  segmentation: {
-    policy: SegmentationPolicy; // speech_energy_silence | speech_vad_model
-    mode?: 'auto';
-  };
-  onSegment?: (event: LanguageIdSegmentEvent) => void;
-  onLanguageChanged?: (event: LanguageChangedEvent) => void;
-  targetSegmentBuffer?: LiveSegmentBufferIdSource;
-};
+const pipeline = await slid.identify(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log(e.segmentIndex, e.lang),
+  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
+});
 ```
 
 ## Optional `targetSegmentBuffer`
 
-Pass a live segment buffer to append the same payload as offline label:
+Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload: { source: 'languageId', lang }` ). Offline `targetSegmentBuffer` ids are rejected (`LANGUAGE_ID_INVALID_ARGUMENT`).
 
-```ts
-payload: { source: 'languageId'; lang: string }
-```
+## Types
+
+### Live-only language-identification types (`react-native-sherpa-onnx/language-identification`)
+
+| Type | Description |
+| --- | --- |
+| `LanguageIdentificationLivePipelineOptions` | Mandatory `segmentation.policy`; optional `onSegment`, `onLanguageChanged`, `targetSegmentBuffer` |
+| `LanguageIdentificationPipelineHandle` | Extends `StreamingPipelineHandle` — live run control surface |
+| `StreamingPipelineCompletion` | `{ reason: 'completed' \| 'stopped' }` from `completed` |
+| `StreamingPipelineStatus` | Snapshot from `getStatus()` |
+
+Engine, detect, and offline result types: [language-identification-offline.md](language-identification-offline.md#types).
 
 ## Error codes
 

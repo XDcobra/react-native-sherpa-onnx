@@ -37,9 +37,7 @@ const modelDir = {
 };
 
 const det = await detectLanguageIdModel(modelDir, { modelType: 'auto' });
-if (!det.success) {
-  throw new Error(det.error ?? 'Language ID detection failed');
-}
+if (!det.success) throw new Error(det.error ?? 'Language ID detection failed');
 
 const slid = await createLanguageIdentification({
   modelSource: modelDir,
@@ -52,9 +50,8 @@ try {
     kind: 'fs',
     path: '/absolute/path/clip.wav',
   });
-  // Omit segmentation / mode 'off' → oneshot. Longer than ~30s is truncated — use segmented.
   const result = await slid.identify(audio);
-  // { lang: 'en', audioDuration: 3.2, elapsedMs: 180 }
+  console.log(result.lang, result.audioDuration, result.elapsedMs);
   await releasePipelineAudioBuffer(audio);
 } finally {
   await slid.destroy();
@@ -69,48 +66,19 @@ import { DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY } from 'react-native-sherpa-onn
 const result = await slid.identify(audio, {
   segmentation: {
     mode: 'auto',
-    // Or DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY (minSegmentMs: 1500)
-    policy: {
-      evaluator: 'speech_energy_silence',
-      silenceThresholdMs: 500,
-      energyThresholdDb: -40,
-      minSegmentMs: 1500, // Whisper SLID needs ~1.5–3 s of speech
-      maxSegmentMs: 25000,
-      hangoverMs: 300,
-    },
+    policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
   },
-  onProgress: (p) =>
-    console.log(`${p.currentSegment + 1}/${p.totalSegments}`),
+  onProgress: (p) => console.log(`${p.currentSegment + 1}/${p.totalSegments}`),
   onSegment: (e) => console.log('#', e.segmentIndex, e.lang),
-  onLanguageChanged: (e) =>
-    console.log('switch', e.previousLang, '→', e.currentLang, '@', e.timestamp),
+  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
 });
 
-// result.dominantLanguage // 'zh'
-// result.distribution     // { zh: 0.55, en: 0.45 }
-// result.switches         // [{ timestamp, from, to, segmentIndex }, …]
+console.log(result.dominantLanguage, result.distribution, result.switches.length);
 ```
 
 Acoustic SLID is **inter-sentential** (segment-level). Word-level switching belongs to STT decoders.
 
 Optional empty `targetSegmentBuffer` attaches `LanguageIdSpeechSegmentPayload` for downstream pipelines (e.g. Audio → VAD → Language ID → STT).
-
-### `labelOfflineSegments`
-
-Annotate an existing speech segment buffer without re-running segmentation:
-
-```ts
-const labeled = await slid.labelOfflineSegments(
-  audioIn,
-  segmentsIn,
-  segmentsOut,
-  {
-    onSegment: (e) => console.log(e.lang),
-    onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
-  }
-);
-// { labeledCount, dominantLanguage, distribution, switches }
-```
 
 ---
 
@@ -126,34 +94,30 @@ const labeled = await slid.labelOfflineSegments(
 
 ## API reference
 
-### Detection
+### `detectLanguageIdModel(source, options?)`
 
-#### `detectLanguageIdModel(source, options?)`
+File-based detection **without** initializing the engine. Prefer before `createLanguageIdentification` to confirm pack layout and quantization. Unified detection: [model-detect.md](model-detect.md).
+
+Packs require `model_type == "whisper"` and `is_multilingual == 1` metadata. Same layout as STT Whisper (encoder + decoder ONNX).
 
 ```ts
 function detectLanguageIdModel(
   source: FileSource,
-  options?: {
-    modelType?: 'whisper' | 'auto';
-    assetName?: string;
-    quantization?: QuantizationPreference;
-  }
+  options?: LanguageIdDetectOptions
 ): Promise<LanguageIdDetectResult>;
 ```
 
-Prefer detect before `createLanguageIdentification`. Metadata requires `model_type == "whisper"` and `is_multilingual == 1`.
+```ts
+const det = await detectLanguageIdModel(
+  { kind: 'fs', path: '/path/to/whisper-multilingual' },
+  { modelType: 'auto' }
+);
+if (!det.success) throw new Error(det.error ?? 'Language ID detection failed');
+```
 
-### Models and required files
+### `createLanguageIdentification(options)`
 
-| `modelType` | Required files | Custom-init keys |
-| --- | --- | --- |
-| `whisper` | `encoder` + `decoder` ONNX (same layout as STT Whisper) | `encoder`, `decoder` |
-
-Validate category: **`languageId`**. Quantization: `'auto' \| 'int8' \| 'fp16' \| 'fp32' \| …`.
-
-### Factory
-
-#### `createLanguageIdentification(options)`
+Creates a `LanguageIdentificationEngine`. Init via `modelSource` (auto-detect) or `customConfig` (`{ encoder, decoder }` `FileSource` paths). Shared tuning: `quantization`, `numThreads`, `provider`, `tailPaddings`, `debug`.
 
 ```ts
 function createLanguageIdentification(
@@ -161,53 +125,94 @@ function createLanguageIdentification(
 ): Promise<LanguageIdentificationEngine>;
 ```
 
-### Engine methods
-
 ```ts
-interface LanguageIdentificationEngine {
-  readonly instanceId: string;
-
-  identify(
-    audio: OfflineAudioBufferIdSource,
-    options?: LanguageIdentificationOptions & {
-      segmentation?: { mode?: 'off' };
-    }
-  ): Promise<LanguageIdentificationResult>;
-
-  identify(
-    audio: OfflineAudioBufferIdSource,
-    options: LanguageIdentificationOptions & {
-      segmentation: { mode: 'auto'; policy?: SegmentationPolicy };
-    }
-  ): Promise<SegmentedLanguageIdentificationResult>;
-
-  /** Live overload — see language-identification-live.md */
-  identify(
-    audioIn: LiveAudioBufferIdSource,
-    textOut: LiveTextBufferIdSource,
-    options: LanguageIdentificationLivePipelineOptions
-  ): Promise<LanguageIdentificationPipelineHandle>;
-
-  labelOfflineSegments(
-    audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource,
-    segmentsOut: OfflineSegmentBufferIdSource,
-    options?: LanguageIdLabelOptions
-  ): Promise<LabelOfflineSegmentsResult>;
-
-  destroy(): Promise<void>;
-}
+const slid = await createLanguageIdentification({
+  modelSource: { kind: 'fs', path: '/path/to/whisper-multilingual' },
+  quantization: 'auto',
+  numThreads: 2,
+});
 ```
 
-| Method | Behavior |
-| --- | --- |
-| `identify` (oneshot) | Single-pass Whisper SLID. Omit `segmentation` or `mode: 'off'`. |
-| `identify` (segmented) | `mode: 'auto'` + policy; duration-weighted distribution / switches. Optional `onProgress` / `onSegment` / `onLanguageChanged` / `targetSegmentBuffer`. |
-| `labelOfflineSegments` | Per speech span → populate empty `segmentsOut` with `source: 'languageId'`. Does not mutate `segmentsIn`. Optional `onProgress` / `onSegment` / `onLanguageChanged`. |
-| `destroy` | Releases the native instance. |
+### `slid.identify(audio, options?)` — oneshot
 
-`LanguageIdentificationOptions` = segmentation + optional `onProgress` / `onSegment` / `onLanguageChanged` / `targetSegmentBuffer`.  
-`LanguageIdLabelOptions` = optional `onProgress` / `onSegment` / `onLanguageChanged` (**label only**). Oneshot `identify` does **not** accept progress/segment events.
+Whole-clip offline Whisper SLID (≤ ~30 s; longer clips are truncated). Omit `segmentation` or set `mode: 'off'`. Does **not** emit `onProgress` / `onSegment`.
+
+```ts
+identify(
+  audio: OfflineAudioBufferIdSource,
+  options?: LanguageIdentificationOptions & { segmentation?: { mode?: 'off' } }
+): Promise<LanguageIdentificationResult>;
+```
+
+```ts
+const result = await slid.identify(audio);
+console.log(result.lang, result.elapsedMs);
+```
+
+### `slid.identify(audio, options)` — segmented
+
+`mode: 'auto'` + policy. Duration-weighted `distribution` / `switches`. Optional `onProgress` / `onSegment` / `onLanguageChanged` / `targetSegmentBuffer`.
+
+```ts
+identify(
+  audio: OfflineAudioBufferIdSource,
+  options: LanguageIdentificationOptions & {
+    segmentation: { mode: 'auto'; policy?: SegmentationPolicy };
+  }
+): Promise<SegmentedLanguageIdentificationResult>;
+```
+
+```ts
+const result = await slid.identify(audio, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log(e.segmentIndex, e.lang),
+});
+```
+
+Live overload `identify(liveAudio, liveText, options)`: [language-identification-live.md](language-identification-live.md).
+
+### `slid.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, options?)`
+
+Annotate existing speech segments with language labels without re-running segmentation. Reads spans from `segmentsIn`, evaluates each with Whisper SLID, writes `{ source: 'languageId', lang }` payloads to `segmentsOut`. Does not mutate `segmentsIn`.
+
+```ts
+labelOfflineSegments(
+  audioIn: OfflineAudioBufferIdSource,
+  segmentsIn: OfflineSegmentBufferIdSource,
+  segmentsOut: OfflineSegmentBufferIdSource,
+  options?: LanguageIdLabelOptions
+): Promise<LabelOfflineSegmentsResult>;
+```
+
+```ts
+const labeled = await slid.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, {
+  onSegment: (e) => console.log(e.lang),
+  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
+});
+console.log(labeled.labeledCount, labeled.dominantLanguage);
+```
+
+### `slid.destroy()`
+
+Releases the native instance (joins any live workers first).
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await slid.destroy();
+```
+
+## Models and required files
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `whisper` | `encoder` + `decoder` ONNX (same layout as STT Whisper) | `encoder`, `decoder` |
+
+Validate category: **`languageId`**. Quantization: `'auto' | 'int8' | 'fp16' | 'fp32' | …`.
+
+Download via `ModelCategory.LanguageId` (built-in GitHub source; see [download-manager.md](download-manager.md)).
 
 ---
 
@@ -219,7 +224,7 @@ Multi-span SLID paths support optional coarse offline progress via `onProgress` 
 
 - Fires at the **start** of step `i` (before native identify for that span).
 - `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
-- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span’s duration.
+- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span's duration.
 - Zero usable speech spans → **no** progress events (empty result / `labeledCount: 0`).
 - Only **function** callbacks are registered. Non-function values are ignored (segmented `identify` may take the native fast-path with **no** JS events). If a callback throws, the run aborts.
 
@@ -253,23 +258,9 @@ Same chronological list is also available on the segmented result as `switches`.
 ```ts
 await slid.identify(audio, {
   segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
-  onProgress: (p) => {
-    console.log(
-      `slid ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
-    );
-  },
-  onSegment: (e) => {
-    console.log(`#${e.segmentIndex} lang=${e.lang} (${e.durationMs}ms)`);
-  },
-  onLanguageChanged: (e) => {
-    console.log(`${e.previousLang ?? '—'} → ${e.currentLang} @ ${e.timestamp}s`);
-  },
-});
-
-await slid.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, {
-  onProgress: (p) => console.log(p.currentSegment + 1, '/', p.totalSegments),
-  onSegment: (e) => console.log(e.lang),
-  onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
+  onProgress: (p) => console.log(`slid ${p.currentSegment + 1}/${p.totalSegments}`),
+  onSegment: (e) => console.log(`#${e.segmentIndex} lang=${e.lang} (${e.durationMs}ms)`),
+  onLanguageChanged: (e) => console.log(`${e.previousLang ?? '—'} → ${e.currentLang}`),
 });
 ```
 
@@ -287,34 +278,43 @@ See [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ---
 
-## Types and constants
+## Types
 
-```ts
-import {
-  createLanguageIdentification,
-  detectLanguageIdModel,
-  DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
-  LANGUAGE_ID_MODEL_TYPES,
-  LanguageIdErrorCode,
-  type LanguageIdentificationEngine,
-  type LanguageIdentificationOptions,
-  type LanguageIdentificationResult,
-  type SegmentedLanguageIdentificationResult,
-  type LabelOfflineSegmentsResult,
-  type LanguageIdLabelOptions,
-  type LanguageChangedEvent,
-  type LanguageIdSegmentEvent,
-  type OrchestrationProgress,
-} from 'react-native-sherpa-onnx/language-identification';
-```
+### Core language-identification types (`react-native-sherpa-onnx/language-identification`)
 
-- **`LanguageIdentificationResult`:** `{ lang, audioDuration, elapsedMs }`
-- **`SegmentedLanguageIdentificationResult`:** `{ dominantLanguage, distribution, switches, segments, totalSegments, processingTimeMs }`
-- **`LabelOfflineSegmentsResult`:** `{ labeledCount, dominantLanguage, distribution, switches }`
-- **`LanguageIdSegmentEvent`:** per-span result (`lang`, ranges, `totalSegments`, …)
-- **`LanguageChangedEvent`:** language transition (`previousLang`, `currentLang`, `timestamp`, `segmentIndex`)
-- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)
-- **`DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY`:** energy silence, `minSegmentMs: 1500`
+| Type | Description |
+| --- | --- |
+| `LanguageIdModelType` | `'whisper'` |
+| `LANGUAGE_ID_MODEL_TYPES` | Readonly runtime list of model types |
+| `LanguageIdConcreteModelType` | Alias of `LanguageIdModelType` (non-`auto`) |
+| `LanguageIdDetectOptions` | Options for `detectLanguageIdModel` (`modelType?`, `assetName?`, `quantization?`) |
+| `LanguageIdDetectResult` | Return of `detectLanguageIdModel()` |
+| `LanguageIdentificationInitializeOptions` | Init options for `createLanguageIdentification` (`modelSource`, `customConfig`, `quantization`, `numThreads`, …) |
+| `LanguageIdCustomConfig` | `{ encoder, decoder }` `FileSource` paths for custom init |
+| `LanguageIdentificationOptions` | Optional `segmentation`, `onProgress`, `onSegment`, `onLanguageChanged`, `targetSegmentBuffer` |
+| `LanguageIdentificationResult` | `{ lang, audioDuration, elapsedMs }` |
+| `SegmentedLanguageIdentificationResult` | `{ dominantLanguage, distribution, switches, segments, totalSegments, processingTimeMs }` |
+| `LanguageIdSegmentEntry` | Per-segment detail: `segmentIndex`, `startTime`, `endTime`, `durationMs`, `lang` |
+| `LanguageSwitchEntry` | `{ timestamp, from, to, segmentIndex }` |
+| `LanguageIdSegmentEvent` | Per-span callback event (`segmentIndex`, ranges, `lang`) |
+| `LanguageChangedEvent` | Language transition (`previousLang`, `currentLang`, `timestamp`, `segmentIndex`) |
+| `LanguageIdLabelOptions` | Options for `labelOfflineSegments` (`onProgress`, `onSegment`, `onLanguageChanged`) |
+| `LabelOfflineSegmentsResult` | `{ labeledCount, dominantLanguage, distribution, switches }` |
+| `LanguageIdentificationEngine` | `identify` (oneshot / segmented / live), `labelOfflineSegments`, `destroy` |
+| `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` | Runtime constant — energy silence, `minSegmentMs: 1500` |
+| `LanguageIdErrorCode` | Offline/live error code object |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+
+Live-only types (`LanguageIdentificationLivePipelineOptions`, `LanguageIdentificationPipelineHandle`, `StreamingPipelineCompletion`, `StreamingPipelineStatus`): [language-identification-live.md](language-identification-live.md#types).
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineAudioBufferIdSource` | Offline audio ref or handle passed to `identify` |
+| `OfflineSegmentBufferIdSource` | Offline segment buffer for `targetSegmentBuffer` / `labelOfflineSegments` |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ---
 

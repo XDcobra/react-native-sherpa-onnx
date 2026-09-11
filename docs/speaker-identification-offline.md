@@ -58,18 +58,8 @@ try {
   });
 
   await sid.enroll('alice', aliceClip);
-  // Optional: average multiple clips
-  // await sid.enroll('alice', [clipA, clipB]);
-
   const { name } = await sid.identify(query, { threshold: 0.5 });
   console.log(name); // 'alice' | null
-
-  const ok = await sid.verify('alice', query, { threshold: 0.5 });
-  console.log(ok);
-
-  // Snapshot enrollments for a later session (app hat to store the resulting JSON itself)
-  const bundleJSON = await sid.exportEnrollments();
-  await sid.importEnrollments(bundleJSON); // or { replaceExisting: true } on name collision
 
   await releasePipelineAudioBuffer(aliceClip);
   await releasePipelineAudioBuffer(query);
@@ -89,40 +79,15 @@ import {
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
-// One name → average all speech spans under that speaker:
 await sid.enrollOfflineSegments('alice', interviewAudio, aliceSpeechSegs);
-
-// Or one name per speech span (length must match speech-span count):
-await sid.enrollOfflineSegments(
-  ['alice', 'bob', 'alice'],
-  interviewAudio,
-  vadSegs
-);
 
 const labeledOut = await createEmptyOfflineSegmentBuffer({
   sourceAudioBufferId: interviewAudio,
 });
 
 try {
-  // Label many speech spans on a long timeline. If you only have one short clip
-  // to identify against the enrolled speaker(s), use sid.identify(clip) instead —
-  // enrollOfflineSegments does not require labelOfflineSegments on the query side.
   const { labeledCount, unknownCount } = await sid.labelOfflineSegments(
-    interviewAudio,
-    vadSegs, // speech spans from VAD (or manual)
-    labeledOut,
-    {
-      threshold: 0.5,
-      onProgress: (p) =>
-        console.log(
-          `sid label ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
-        ),
-      onLabeled: (e) =>
-        console.log(
-          `labeled ${e.segmentIndex + 1}/${e.totalSegments}`,
-          e.speakerName
-        ),
-    }
+    interviewAudio, vadSegs, labeledOut, { threshold: 0.5 },
   );
   console.log({ labeledCount, unknownCount });
 
@@ -134,7 +99,6 @@ try {
   }
 } finally {
   await releasePipelineSegmentBuffer(labeledOut);
-  await sid.destroy(); // end of SID session (omit if you keep reusing `sid`)
 }
 ```
 
@@ -157,11 +121,9 @@ Segment APIs always need the **PCM** buffer. Empty speech ranges and non-`speech
 
 ## API reference
 
-### Detection
+### `detectSpeakerEmbeddingModel(source, options?)`
 
-#### `detectSpeakerEmbeddingModel(source, options?)`
-
-Available from **`react-native-sherpa-onnx/speaker-identification`** (DX re-export) and **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation).
+File-based detection **without** initializing the engine. Available from **`react-native-sherpa-onnx/speaker-identification`** (DX re-export) and **`react-native-sherpa-onnx/speaker-embedding`** (shared foundation). Unified detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectSpeakerEmbeddingModel(
@@ -173,21 +135,14 @@ function detectSpeakerEmbeddingModel(
 ): Promise<SpeakerEmbeddingDetectResult>;
 ```
 
-Supported families: **WeSpeaker**, **3D-Speaker**, **NeMo** embedding packs (see [sherpa-onnx speaker-recognition models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models)). Prefer detect before `createSpeakerIdentification`.
+```ts
+const det = await detectSpeakerEmbeddingModel(modelDir, { modelType: 'auto' });
+if (!det.success) throw new Error(det.error ?? 'detection failed');
+```
 
-### Models and required files
+### `createSpeakerIdentification(options)`
 
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `wespeaker` | `*.onnx` (WeSpeaker embedding) | — | `model` |
-| `3d-speaker` | `*.onnx` (3D-Speaker embedding) | — | `model` |
-| `nemo` | `*.onnx` (NeMo speaker embedding) | — | `model` |
-
-Validate category for custom path helpers: **`speakerEmbedding`**.
-
-### Factory
-
-#### `createSpeakerIdentification(options)`
+Creates a `SpeakerIdentificationEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`customConfig: { model }`). The extractor is **ref-counted** so diarization can share the same weights; each SID instance owns its own **named-speaker manager**.
 
 ```ts
 function createSpeakerIdentification(
@@ -195,103 +150,199 @@ function createSpeakerIdentification(
 ): Promise<SpeakerIdentificationEngine>;
 ```
 
-`SpeakerIdentificationOptions` is the same union as speaker-embedding init (`initMode: 'auto' | 'custom'`, `modelSource` / `customConfig`, `numThreads`, `provider`, `debug`).
-
-The extractor is **ref-counted** so diarization can share the same weights via the C++ `SpeakerEmbeddingRunner` registry. Each SID instance still owns its own **named-speaker manager**.
-
-### Engine methods
-
 ```ts
-interface SpeakerIdentificationEngine {
-  readonly instanceId: string;
-  readonly managerId: string;
-  readonly dim: number;
-
-  enroll(
-    name: string,
-    audio: OfflineAudioBufferIdSource | OfflineAudioBufferIdSource[]
-  ): Promise<void>;
-
-  enrollOfflineSegments(
-    nameOrNames: string | string[],
-    audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource,
-    options?: SpeakerIdentificationSegmentOptions
-  ): Promise<void>;
-
-  identify(
-    audio: OfflineAudioBufferIdSource,
-    options?: { threshold?: number }
-  ): Promise<{ name: string | null }>;
-
-  /** Precomputed embedding (e.g. diarization cluster centroid) → enrolled name. */
-  search(
-    embedding: Float32Array,
-    options?: { threshold?: number }
-  ): Promise<string | null>;
-
-  labelOfflineSegments(
-    audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource,
-    segmentsOut: OfflineSegmentBufferIdSource,
-    options?: SpeakerIdentificationLabelOptions
-  ): Promise<{ labeledCount: number; unknownCount: number }>;
-
-  /** Live overload — see speaker-identification-live.md */
-  labelLiveSegments(
-    audioIn: LiveAudioBufferIdSource,
-    segmentsOut: LiveSegmentBufferIdSource,
-    options: SpeakerIdentificationLiveLabelOptions
-  ): Promise<SpeakerIdentificationPipelineHandle>;
-
-  verify(
-    name: string,
-    audio: OfflineAudioBufferIdSource,
-    options?: { threshold?: number }
-  ): Promise<boolean>;
-
-  verifyOfflineSegments(
-    nameOrNames: string | string[],
-    audioIn: OfflineAudioBufferIdSource,
-    segmentsIn: OfflineSegmentBufferIdSource,
-    options?: SpeakerIdentificationVerifyOptions
-  ): Promise<{
-    matchCount: number;
-    mismatchCount: number;
-    matches: boolean[];
-  }>;
-
-  removeSpeaker(name: string): Promise<boolean>;
-  listSpeakers(): Promise<string[]>;
-  contains(name: string): Promise<boolean>;
-  numSpeakers(): Promise<number>;
-
-  exportEnrollments(): Promise<SpeakerEnrollmentBundle>;
-  importEnrollments(
-    bundle: SpeakerEnrollmentBundle,
-    options?: { replaceExisting?: boolean }
-  ): Promise<{ imported: number; skipped: number }>;
-
-  destroy(): Promise<void>;
-}
+const sid = await createSpeakerIdentification({
+  modelSource: modelDir,
+  modelType: 'wespeaker',
+  numThreads: 2,
+});
 ```
 
-| Method | Behavior |
-| --- | --- |
-| `enroll` | Combined `enrollSpeakerOffline` (whole buffer(s) → compute + manager.add). Fails if the name already exists. |
-| `enrollOfflineSegments` | Combined `enrollSpeakerOffline` per name group (speech spans → embeddings + add). `string`: average all under one name. `string[]`: one name per speech span (length must match); duplicate names are grouped and averaged. Optional `onProgress`. |
-| `identify` | Extract → search; `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`. |
-| `search` | Gallery search with a precomputed `Float32Array` (e.g. `getClusterEmbeddings()`). Empty / below threshold → `null`. Used by `mapDiarizationToNames` — see [diarization-named-timeline.md](diarization-named-timeline.md). |
-| `labelOfflineSegments` | Per speech span: native `identifySpeakerOffline` (extract+search in one call) → append `{ source: 'sid', speakerName }` into staging → populate empty `segmentsOut`. `speakerName == null` increments `unknownCount`. Optional `onProgress` + `onLabeled`. |
-| `labelLiveSegments` | Live overload: attach speech segmentation, label each committed utterance into a live segment Out. See [speaker-identification-live.md](speaker-identification-live.md). |
-| `verify` | Native `verifySpeakerOffline` cosine check against one enrolled name (whole buffer). |
-| `verifyOfflineSegments` | Per speech span: native `verifySpeakerOffline` (extract+verify in one call). `string`: same name on every span. `string[]`: one expected name per speech span (length must match). Returns `{ matchCount, mismatchCount, matches }`. Optional `onProgress` + `onVerified`. No segment Out buffer. |
-| `exportEnrollments` / `importEnrollments` | Cross-session enrollment snapshot — see [Persistence](#persistence). |
-| `destroy` | Releases manager + drops extractor ref-count. |
+### `sid.enroll(name, audio)`
 
-`SpeakerIdentificationSegmentOptions` = `{ threshold?: number; onProgress?: (p: OrchestrationProgress) => void }` (enroll + label + verify segments).  
-`SpeakerIdentificationLabelOptions` = segment options + `{ onLabeled?: (e: SidLabeledSegmentEvent) => void }` (**label only**).  
-`SpeakerIdentificationVerifyOptions` = segment options + `{ onVerified?: (e: SidVerifiedSegmentEvent) => void }` (**verify segments only**). Whole-buffer `identify` / `verify` only accept `{ threshold? }`.
+Enroll a named speaker from one or more offline audio buffers. Multiple clips are averaged (L2-normalized) by the native manager. Fails if the name already exists.
+
+```ts
+enroll(
+  name: string,
+  audio: OfflineAudioBufferIdSource | OfflineAudioBufferIdSource[]
+): Promise<void>;
+```
+
+```ts
+await sid.enroll('alice', aliceClip);
+await sid.enroll('bob', [bobClipA, bobClipB]);
+```
+
+### `sid.enrollOfflineSegments(nameOrNames, audioIn, segmentsIn, options?)`
+
+Enroll from speech spans in an offline segment buffer. A single `string` averages all spans under one name. A `string[]` maps one name per speech span (length must match the speech-span count); duplicate names are grouped and averaged.
+
+```ts
+enrollOfflineSegments(
+  nameOrNames: string | string[],
+  audioIn: OfflineAudioBufferIdSource,
+  segmentsIn: OfflineSegmentBufferIdSource,
+  options?: SpeakerIdentificationSegmentOptions
+): Promise<void>;
+```
+
+```ts
+await sid.enrollOfflineSegments('alice', interviewAudio, aliceSegs);
+await sid.enrollOfflineSegments(['alice', 'bob', 'alice'], audio, vadSegs);
+```
+
+### `sid.identify(audio, options?)`
+
+Extract an embedding from the audio buffer, search the enrolled gallery, and return the best match. `name` is `null` when below threshold / unknown. Default `threshold` is `0.5`.
+
+```ts
+identify(
+  audio: OfflineAudioBufferIdSource,
+  options?: { threshold?: number }
+): Promise<{ name: string | null }>;
+```
+
+```ts
+const { name } = await sid.identify(query, { threshold: 0.5 });
+console.log(name); // 'alice' | null
+```
+
+### `sid.search(embedding, options?)`
+
+Gallery search with a precomputed `Float32Array` (e.g. a diarization cluster centroid from `getClusterEmbeddings()`). Returns the best enrolled name above threshold, or `null`.
+
+```ts
+search(
+  embedding: Float32Array,
+  options?: { threshold?: number }
+): Promise<string | null>;
+```
+
+```ts
+const name = await sid.search(centroidVector, { threshold: 0.5 });
+```
+
+### `sid.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, options?)`
+
+Identify each speech span and write a labeled copy into an empty `segmentsOut` buffer (`payload.source: 'sid'`). Optional `onProgress` / `onLabeled` callbacks.
+
+```ts
+labelOfflineSegments(
+  audioIn: OfflineAudioBufferIdSource,
+  segmentsIn: OfflineSegmentBufferIdSource,
+  segmentsOut: OfflineSegmentBufferIdSource,
+  options?: SpeakerIdentificationLabelOptions
+): Promise<{ labeledCount: number; unknownCount: number }>;
+```
+
+```ts
+const { labeledCount, unknownCount } = await sid.labelOfflineSegments(
+  audio, vadSegs, labeledOut, {
+    threshold: 0.5,
+    onLabeled: (e) => console.log(e.segmentIndex, e.speakerName),
+  },
+);
+```
+
+### `sid.verify(name, audio, options?)`
+
+Cosine check of one offline audio buffer against one enrolled name. Default `threshold` is `0.5`.
+
+```ts
+verify(
+  name: string,
+  audio: OfflineAudioBufferIdSource,
+  options?: { threshold?: number }
+): Promise<boolean>;
+```
+
+```ts
+const ok = await sid.verify('alice', queryClip, { threshold: 0.5 });
+```
+
+### `sid.verifyOfflineSegments(nameOrNames, audioIn, segmentsIn, options?)`
+
+Per speech span: native verify against an enrolled name. A single `string` checks the same name on every span. A `string[]` maps one expected name per span. Optional `onProgress` / `onVerified`.
+
+```ts
+verifyOfflineSegments(
+  nameOrNames: string | string[],
+  audioIn: OfflineAudioBufferIdSource,
+  segmentsIn: OfflineSegmentBufferIdSource,
+  options?: SpeakerIdentificationVerifyOptions
+): Promise<{ matchCount: number; mismatchCount: number; matches: boolean[] }>;
+```
+
+```ts
+const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
+  ['alice', 'bob', 'alice'], audio, vadSegs, {
+    onVerified: (e) => console.log(e.segmentIndex, e.expectedName, e.matched),
+  },
+);
+```
+
+### `sid.removeSpeaker(name)` / `sid.listSpeakers()` / `sid.contains(name)` / `sid.numSpeakers()`
+
+Named-speaker manager helpers.
+
+```ts
+removeSpeaker(name: string): Promise<boolean>;
+listSpeakers(): Promise<string[]>;
+contains(name: string): Promise<boolean>;
+numSpeakers(): Promise<number>;
+```
+
+```ts
+await sid.removeSpeaker('alice');
+const names = await sid.listSpeakers();
+const has = await sid.contains('bob');
+const count = await sid.numSpeakers();
+```
+
+### `sid.exportEnrollments()` / `sid.importEnrollments(bundle, options?)`
+
+Cross-session enrollment snapshot. The SDK does **not** write files — apps store/load the `SpeakerEnrollmentBundle` JSON themselves.
+
+```ts
+exportEnrollments(): Promise<SpeakerEnrollmentBundle>;
+importEnrollments(
+  bundle: SpeakerEnrollmentBundle,
+  options?: { replaceExisting?: boolean }
+): Promise<{ imported: number; skipped: number }>;
+```
+
+```ts
+const bundle = await sid.exportEnrollments();
+await saveJson('sid-enrollments.json', bundle);
+
+const restored = await loadJson('sid-enrollments.json');
+await sid.importEnrollments(restored, { replaceExisting: true });
+```
+
+### `sid.destroy()`
+
+Releases the named-speaker manager and drops the extractor ref-count. Do not call any method after this.
+
+```ts
+destroy(): Promise<void>;
+```
+
+```ts
+await sid.destroy();
+```
+
+## Models and required files
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `wespeaker` | `*.onnx` (WeSpeaker embedding) | `model` |
+| `3d-speaker` | `*.onnx` (3D-Speaker embedding) | `model` |
+| `nemo` | `*.onnx` (NeMo speaker embedding) | `model` |
+
+Validate category: **`speakerEmbedding`**. Supported families: **WeSpeaker**, **3D-Speaker**, **NeMo** embedding packs (see [sherpa-onnx speaker-recognition models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models)).
+
+Download via `ModelCategory.SpeakerEmbedding` (built-in GitHub source; see [download-manager.md](download-manager.md)).
 
 ---
 
@@ -303,7 +354,7 @@ Multi-span SID paths support optional coarse offline progress via `onProgress` o
 
 - Fires at the **start** of step `i` (before extract / search-or-verify for that span).
 - `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
-- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span’s duration.
+- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span's duration.
 - Zero usable speech spans → **no** progress events (`enrollOfflineSegments` / `verifyOfflineSegments` reject; `labelOfflineSegments` returns `{ labeledCount: 0, unknownCount: 0 }`).
 - Non-function `onProgress` → `SID_INVALID_OPTIONS`. If the callback throws, the run aborts.
 
@@ -324,14 +375,8 @@ Order per span: `onProgress` → identify/append → `onLabeled`. Enroll paths h
 ```ts
 await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
   threshold: 0.5,
-  onProgress: (p) => {
-    console.log(
-      `sid ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
-    );
-  },
-  onLabeled: (e) => {
-    console.log(`result ${e.segmentIndex}:`, e.speakerName);
-  },
+  onProgress: (p) => console.log(`sid ${p.currentSegment + 1}/${p.totalSegments}`),
+  onLabeled: (e) => console.log(`result ${e.segmentIndex}:`, e.speakerName),
 });
 ```
 
@@ -340,19 +385,10 @@ await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
 Fires **after** native verify for each speech span. Fields match `onLabeled` ranges, plus `expectedName` (the name checked for that span) and `matched: boolean`. Order: `onProgress` → verify → `onVerified`. Non-function / throwing `onVerified` → `SID_INVALID_OPTIONS` / abort.
 
 ```ts
-const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
-  ['alice', 'bob', 'alice'],
-  audio,
-  vadSegs,
-  {
-    threshold: 0.5,
-    onVerified: (e) => {
-      console.log(
-        `span ${e.segmentIndex} vs ${e.expectedName}:`,
-        e.matched ? 'match' : 'no match'
-      );
-    },
-  }
+const { matchCount } = await sid.verifyOfflineSegments(
+  ['alice', 'bob', 'alice'], audio, vadSegs, {
+    onVerified: (e) => console.log(e.segmentIndex, e.expectedName, e.matched),
+  },
 );
 ```
 
@@ -367,6 +403,29 @@ Labeled Out rows use the strict speech payload contract:
 ```
 
 Allowed keys: `source`, `speakerName` only. See [segmentbuffer-offline.md](segmentbuffer-offline.md).
+
+---
+
+## Persistence
+
+The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors returned once from `enrollSpeakerOffline` (and from `importEnrollments`), and clears it on `removeSpeaker` / `destroy`.
+
+```ts
+const bundle = await sid.exportEnrollments();
+await saveJson('sid-enrollments.json', bundle);
+
+const restored = await loadJson('sid-enrollments.json') as SpeakerEnrollmentBundle;
+await sid.importEnrollments(restored);
+// Name collision → throws. Overwrite with:
+await sid.importEnrollments(restored, { replaceExisting: true });
+```
+
+**`SpeakerEnrollmentBundle`:** `{ version: 1, dim, modelKey?, speakers: { name, embeddings: number[][] }[] }`.
+
+- `dim` must match the current manager (else `SID_ENROLLMENT_DIM_MISMATCH`).
+- When both the bundle and this SID instance have a `modelKey`, a mismatch rejects with `SID_ENROLLMENT_MODEL_MISMATCH`.
+- Export only includes speakers enrolled through this SID instance's enroll/import paths.
+- Future: native readout via upstream `GetEmbedding` — [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
 
 ---
 
@@ -386,30 +445,6 @@ SID does **not** invent the name list; the app supplies who each span belongs to
 ### Buffer-first embeddings
 
 PCM stays native via buffer ids. Identify / label / verify / enroll use combined native TMs (`identifySpeakerOffline` / `verifySpeakerOffline` / `enrollSpeakerOffline`) so embeddings stay off the JS product hot path. Low-level extract/search still move compact `dim` floats (~256) across the TurboModule when apps need raw vectors — not the full waveform.
-
-### Persistence
-
-The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors returned once from `enrollSpeakerOffline` (and from `importEnrollments`), and clears it on `removeSpeaker` / `destroy`. Product enroll does **not** call a separate `manager.add` with embedding arrays.
-
-```ts
-// After enroll…
-const bundle = await sid.exportEnrollments();
-// App stores JSON somewhere (file, key-value store, share) — SDK does not write files.
-await saveJson('sid-enrollments.json', bundle);
-
-// Later session, same embedding model:
-const restored = await loadJson('sid-enrollments.json') as SpeakerEnrollmentBundle;
-await sid.importEnrollments(restored);
-// Name collision → throws (like enroll). Overwrite with:
-await sid.importEnrollments(restored, { replaceExisting: true });
-```
-
-**`SpeakerEnrollmentBundle`:** `{ version: 1, dim, modelKey?, speakers: { name, embeddings: number[][] }[] }`.
-
-- `dim` must match the current manager (else `SID_ENROLLMENT_DIM_MISMATCH`).
-- When both the bundle and this SID instance have a `modelKey`, a mismatch rejects with `SID_ENROLLMENT_MODEL_MISMATCH`.
-- Export only includes speakers enrolled through this SID instance’s enroll/import paths (not a raw native-only manager).
-- Future: native readout via upstream `GetEmbedding` — [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
 
 ---
 
@@ -456,58 +491,47 @@ flowchart LR
 
 More end-to-end patterns: [feature-pipelines.md#speaker-identification-offline-patterns](feature-pipelines.md#speaker-identification-offline-patterns).
 
-## Types and constants
+## Types
 
-```ts
-import {
-  createSpeakerIdentification,
-  detectSpeakerEmbeddingModel,
-  SPEAKER_EMBEDDING_MODEL_TYPES,
-  SpeakerEmbeddingErrorCode,
-  type IdentifyResult,
-  type ImportEnrollmentsOptions,
-  type ImportEnrollmentsResult,
-  type LabelOfflineSegmentsResult,
-  type OrchestrationProgress,
-  type SidLabeledSegmentEvent,
-  type SidLiveLabeledSegmentEvent,
-  type SidVerifiedSegmentEvent,
-  type SpeakerEmbeddingDetectResult,
-  type SpeakerEmbeddingModelType,
-  type SpeakerEnrollmentBundle,
-  type SpeakerEnrollmentEntry,
-  type SpeakerIdentificationEngine,
-  type SpeakerIdentificationLabelOptions,
-  type SpeakerIdentificationLiveLabelOptions,
-  type SpeakerIdentificationOptions,
-  type SpeakerIdentificationPipelineHandle,
-  type SpeakerIdentificationSegmentOptions,
-  type SpeakerIdentificationThresholdOptions,
-  type SpeakerIdentificationVerifyOptions,
-  type VerifyOfflineSegmentsResult,
-} from 'react-native-sherpa-onnx/speaker-identification';
-```
+### Core SID types (`react-native-sherpa-onnx/speaker-identification`)
 
-- **`SpeakerEmbeddingModelType`:** `'wespeaker' | '3d-speaker' | 'nemo'`
-- **`IdentifyResult`:** `{ name: string | null }`
-- **`LabelOfflineSegmentsResult`:** `{ labeledCount: number; unknownCount: number }`
-- **`VerifyOfflineSegmentsResult`:** `{ matchCount: number; mismatchCount: number; matches: boolean[] }`
-- **`SpeakerEnrollmentBundle` / `SpeakerEnrollmentEntry`:** versioned enrollment snapshot for `exportEnrollments` / `importEnrollments`
-- **`ImportEnrollmentsOptions` / `ImportEnrollmentsResult`:** `{ replaceExisting? }` → `{ imported, skipped }`
-- **`SpeakerIdentificationThresholdOptions`:** `{ threshold?: number }` (default `0.5`)
-- **`SpeakerIdentificationSegmentOptions`:** threshold + optional `onProgress`
-- **`SpeakerIdentificationLabelOptions`:** segment options + optional `onLabeled`
-- **`SpeakerIdentificationVerifyOptions`:** segment options + optional `onVerified`
-- **`SidLabeledSegmentEvent`:** per-span offline label result (`speakerName`, ranges, `totalSegments`, …)
-- **`SidVerifiedSegmentEvent`:** per-span offline verify result (`expectedName`, `matched`, ranges, `totalSegments`, …)
-- **`SpeakerIdentificationLiveLabelOptions` / `SidLiveLabeledSegmentEvent` / `SpeakerIdentificationPipelineHandle`:** live overload — see [speaker-identification-live.md](speaker-identification-live.md)
-- **`OrchestrationProgress`:** shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …)
+| Type | Description |
+| --- | --- |
+| `SpeakerEmbeddingModelType` | `'wespeaker' \| '3d-speaker' \| 'nemo'` |
+| `SPEAKER_EMBEDDING_MODEL_TYPES` | Readonly runtime list of model types |
+| `SpeakerEmbeddingDetectResult` | Return of `detectSpeakerEmbeddingModel()` |
+| `SpeakerIdentificationOptions` | Same union as speaker-embedding init (`initMode`, `modelSource` / `customConfig`, `numThreads`, `provider`, `debug`) |
+| `SpeakerIdentificationEngine` | `enroll`, `enrollOfflineSegments`, `identify`, `search`, `labelOfflineSegments`, `labelLiveSegments`, `verify`, `verifyOfflineSegments`, manager helpers, `exportEnrollments`, `importEnrollments`, `destroy` |
+| `IdentifyResult` | `{ name: string \| null }` |
+| `LabelOfflineSegmentsResult` | `{ labeledCount: number; unknownCount: number }` |
+| `VerifyOfflineSegmentsResult` | `{ matchCount: number; mismatchCount: number; matches: boolean[] }` |
+| `SpeakerIdentificationThresholdOptions` | `{ threshold?: number }` (default `0.5`) |
+| `SpeakerIdentificationSegmentOptions` | Threshold + optional `onProgress` |
+| `SpeakerIdentificationLabelOptions` | Segment options + optional `onLabeled` |
+| `SpeakerIdentificationVerifyOptions` | Segment options + optional `onVerified` |
+| `SidLabeledSegmentEvent` | Per-span offline label result (`segmentIndex`, `totalSegments`, ranges, `speakerName`) |
+| `SidVerifiedSegmentEvent` | Per-span offline verify result (`segmentIndex`, `totalSegments`, ranges, `expectedName`, `matched`) |
+| `SpeakerEnrollmentBundle` | `{ version: 1, dim, modelKey?, speakers }` — cross-session snapshot |
+| `SpeakerEnrollmentEntry` | `{ name: string; embeddings: number[][] }` |
+| `ImportEnrollmentsOptions` | `{ replaceExisting?: boolean }` |
+| `ImportEnrollmentsResult` | `{ imported: number; skipped: number }` |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `SpeakerEmbeddingErrorCode` | Error code object from the native speaker-embedding layer |
+
+Live-only types (`SpeakerIdentificationLiveLabelOptions`, `SidLiveLabeledSegmentEvent`, `SpeakerIdentificationPipelineHandle`): [speaker-identification-live.md](speaker-identification-live.md#types).
+
+### Related buffer types
+
+| Type | Description |
+| --- | --- |
+| `OfflineAudioBufferIdSource` | Offline audio ref or handle passed to enroll / identify / label / verify |
+| `OfflineSegmentBufferIdSource` | Offline segment ref or handle for speech spans / label output |
+
+See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
 ---
 
 ## Error codes
-
-Typical **promise rejection `code`** strings from the native speaker-embedding layer (used under SID). Message text varies; prefer **`code`** for branching when catching. Some failures are plain JS `Error` messages from the SID wrapper (no native `code`).
 
 | Error code | Explanation |
 | --- | --- |
@@ -519,13 +543,13 @@ Typical **promise rejection `code`** strings from the native speaker-embedding l
 | `SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH` | A non-offline audio buffer was passed to offline extract. |
 | `SPEAKER_EMBEDDING_BUFFER_EMPTY` | Offline audio buffer (or extracted range) has no samples. |
 | `SPEAKER_EMBEDDING_INVALID_ARGUMENT` | Invalid `customConfig` / init arguments on the JS custom-path resolver. |
-| `SID_INVALID_OPTIONS` | JS guard: `onProgress` / `onLabeled` / `onVerified` provided but not a function (message includes this token). |
-| `SID_ENROLLMENT_BUNDLE_INVALID` | JS guard: malformed `SpeakerEnrollmentBundle` (version, speakers, embeddings). |
-| `SID_ENROLLMENT_DIM_MISMATCH` | JS guard: bundle `dim` ≠ current manager dim. |
-| `SID_ENROLLMENT_MODEL_MISMATCH` | JS guard: bundle `modelKey` ≠ this SID instance’s model key. |
-| `SEGMENT_INVALID_ARGUMENT` | Bad segment buffer id or invalid speech payload during `labelOfflineSegments` staging (`source: 'sid'`). |
+| `SID_INVALID_OPTIONS` | `onProgress` / `onLabeled` / `onVerified` provided but not a function. |
+| `SID_ENROLLMENT_BUNDLE_INVALID` | Malformed `SpeakerEnrollmentBundle` (version, speakers, embeddings). |
+| `SID_ENROLLMENT_DIM_MISMATCH` | Bundle `dim` ≠ current manager dim. |
+| `SID_ENROLLMENT_MODEL_MISMATCH` | Bundle `modelKey` ≠ this SID instance's model key. |
+| `SEGMENT_INVALID_ARGUMENT` | Bad segment buffer id or invalid speech payload during staging. |
 | `SEGMENT_BUFFER_NOT_FOUND` | Segment In/Out or staging live buffer id missing from the segment registry. |
-| `FILEIO_*` | File / URI resolution for **`FileSource`** before or during detect/init. |
+| `FILEIO_*` | File / URI resolution for `FileSource` before or during detect/init. |
 
 JS-side SID guards (message match, not always a native `code`): empty speaker name, name-list length mismatch / empty list entries, no audio buffers for `enroll`, no speech spans for `enrollOfflineSegments` / `verifyOfflineSegments`, enroll/import when the name already exists, enrollment bundle validation, and calls after `destroy()`.
 

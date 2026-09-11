@@ -135,34 +135,35 @@ payload: { source: 'sid', speakerName: string | null }
 
 ## API reference
 
+Factory, detection, enrollment, and model init are the same as offline — see [speaker-identification-offline.md](speaker-identification-offline.md#api-reference).
+
+### `sid.labelLiveSegments(audioIn, segmentsOut, options)`
+
+Starts a live overload pipeline: attaches speech segmentation to `audioIn`, labels each committed utterance via offline extract + search, and appends results to `segmentsOut`. Returns a pipeline handle.
+
 ```ts
 labelLiveSegments(
   audioIn: LiveAudioBufferIdSource,
   segmentsOut: LiveSegmentBufferIdSource,
   options: SpeakerIdentificationLiveLabelOptions
-): Promise<SpeakerIdentificationPipelineHandle>
+): Promise<SpeakerIdentificationPipelineHandle>;
 ```
+
+**Constraints:** both buffers must be live; `segmentation.policy` required (`speech_energy_silence` or `speech_vad_model`).
 
 ```ts
-type SpeakerIdentificationLiveLabelOptions = {
+const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
   segmentation: {
-    policy: SegmentationPolicy; // speech_energy_silence | speech_vad_model
-    mode?: 'auto';
-  };
-  threshold?: number; // default 0.5
-  onLabeled?: (event: SidLiveLabeledSegmentEvent) => void;
-};
-
-type SidLiveLabeledSegmentEvent = {
-  segmentIndex: number;
-  startSample: number;
-  endSample: number;
-  sampleRate: number;
-  durationMs: number;
-  speakerName: string | null;
-  confidence?: number;
-};
+    policy: { evaluator: 'speech_energy_silence', silenceThresholdMs: 500, minSegmentMs: 1000 },
+  },
+  threshold: 0.5,
+  onLabeled: (e) => console.log(e.segmentIndex, e.speakerName),
+});
 ```
+
+## Optional `targetSegmentBuffer`
+
+Pass a **live** segment buffer (`seg_live_*`) as `segmentsOut` to append labeled speech. Offline segment buffer ids are rejected (`SID_INVALID_ARGUMENT`).
 
 ## Pipeline composition
 
@@ -175,10 +176,24 @@ flowchart LR
   E --> F[LiveSegmentBuffer source sid]
 ```
 
-Typical upstream: mic / file ingest into `LiveAudioBuffer`.  
+Typical upstream: mic / file ingest into `LiveAudioBuffer`.
 Typical downstream: UI timeline from `onLabeled` / `onSegmentAppended`, or finalize live segment Out → offline segment buffer for export.
 
 More patterns: [feature-pipelines.md#speaker-identification-live-patterns](feature-pipelines.md#speaker-identification-live-patterns).
+
+## Types
+
+### Live-only SID types (`react-native-sherpa-onnx/speaker-identification`)
+
+| Type | Description |
+| --- | --- |
+| `SpeakerIdentificationLiveLabelOptions` | Mandatory `segmentation.policy`; optional `threshold`, `onLabeled` |
+| `SidLiveLabeledSegmentEvent` | Per-span live callback: `segmentIndex`, ranges, `durationMs`, `speakerName`, `confidence?` (no `totalSegments`) |
+| `SpeakerIdentificationPipelineHandle` | Extends `StreamingPipelineHandle` + `instanceId` — live run control surface |
+| `StreamingPipelineCompletion` | `{ reason: 'completed' \| 'stopped' }` from `completed` |
+| `StreamingPipelineStatus` | Snapshot from `getStatus()` |
+
+Engine, detect, enrollment, and offline result types: [speaker-identification-offline.md](speaker-identification-offline.md#types).
 
 ## Error codes
 
