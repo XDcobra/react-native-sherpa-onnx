@@ -2,21 +2,9 @@
 
 ## Introduction
 
-On-device streaming speech denoising with a **pipeline-first** API.
+On-device streaming speech denoising with a **pipeline-first** API. A native worker drains a live audio input buffer frame-by-frame and appends denoised PCM to a live output buffer — no per-chunk JS bridging for steady-state audio. For offline batch enhancement, see [Speech enhancement (offline)](enhancement-offline.md).
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Ring/spool buffer the denoiser drains (mic, append, or upstream pipeline) |
-| **Output** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Separate live buffer; native worker appends denoised PCM |
-| **Engine** | `StreamingEnhancementEngine` via `createStreamingEnhancement` | `enhance(audioIn, audioOut)` returns `EnhancementPipelineHandle` (`flush`, `stop`, `reset`, `getStatus`, `completed`) |
-
-Import path: `react-native-sherpa-onnx/enhancement`
-
-In this guide **`denoiser`** means the `StreamingEnhancementEngine` and **`pipeline`** means the `EnhancementPipelineHandle`.
-
-For **offline batch** enhancement, see [Speech enhancement (offline)](enhancement-offline.md).
-
-For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
+Import path: **`react-native-sherpa-onnx/enhancement`**.
 
 If the enhancement model rate is not `16000`, set live buffer `sampleRate` (or ingest decode target) explicitly to the model rate from `getSampleRate()`.
 
@@ -71,6 +59,15 @@ await denoiser.destroy();
 ```
 
 The pipeline handle supports **`flush()`** / **`reset()`** / **`getStatus()`** while running. When the input buffer **finalizes**, the worker auto-flushes and stops.
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Ring/spool buffer the denoiser drains (mic, append, or upstream pipeline) |
+| **Audio out** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Separate live buffer; native worker appends denoised PCM |
+| **Engine** | `StreamingEnhancementEngine` via `createStreamingEnhancement` | `enhance(audioIn, audioOut)` returns `EnhancementPipelineHandle` |
+| **Pipeline handle** | `EnhancementPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 ---
 
@@ -324,6 +321,10 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#enhancement-streaming-patterns](feature-pipelines.md#enhancement-streaming-patterns).
+
+## JS Events
+
+No pipeline-level JS event callbacks. Buffer-level `onFramesAppended` fires on the output buffer when denoised frames are written — see [audiobuffer-streaming.md](audiobuffer-streaming.md).
 
 ## Types
 

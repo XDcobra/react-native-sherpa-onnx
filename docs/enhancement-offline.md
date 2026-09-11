@@ -2,21 +2,9 @@
 
 ## Introduction
 
-On-device batch speech denoising with a **pipeline-first** API.
+On-device batch speech denoising with a **pipeline-first** API. Reads populated noisy PCM from an offline audio buffer and writes denoised output to a second buffer; for continuous mic/file streaming use the [streaming engine](enhancement-streaming.md). If the enhancement model rate is not `16000`, set the offline buffer `sampleRate` from `getSampleRate()` explicitly to the model rate.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
-| **Output** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate (`createEmptyOfflineAudioBuffer`); `enhance` writes denoised PCM once |
-| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy`; returns `EnhancementResult` with segment stats |
-
-Import path: `react-native-sherpa-onnx/enhancement`
-
-For **streaming** enhancement (`LiveAudioBuffer` → `LiveAudioBuffer`), see [Speech enhancement (streaming)](enhancement-streaming.md).
-
-For **offline STT / TTS / alignment** composition with pipeline buffers, see [stt-offline.md](stt-offline.md), [tts-offline.md](tts-offline.md), and [alignment-offline.md](alignment-offline.md).
-
-If the enhancement model rate is not `16000`, set `targetSampleRateHz` (or offline buffer `sampleRate` from `getSampleRate()`) explicitly to the model rate.
+Import path: **`react-native-sherpa-onnx/enhancement`**.
 
 ## Quick start
 
@@ -69,6 +57,14 @@ try {
   await enhancement.destroy();
 }
 ```
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
+| **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate; `enhance` writes denoised PCM once |
+| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy` |
 
 ---
 
@@ -307,6 +303,23 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#enhancement-offline-patterns](feature-pipelines.md#enhancement-offline-patterns).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+
+Shapes: [Types](#types).
+
+```ts
+await engine.enhance(audioIn, audioOut, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [Live overload](#live-overload-on-offline-enhancement-offline-weights-live-consumption).
 
 ## Types
 

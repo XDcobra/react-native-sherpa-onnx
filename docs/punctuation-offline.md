@@ -2,15 +2,9 @@
 
 ## Introduction
 
-**CT-Transformer** batch punctuation with a **pipeline-first** API.
+**CT-Transformer** batch punctuation with a **pipeline-first** API. Reads populated plain text from an offline text buffer and writes punctuated text to a second buffer; for online CNN pipelines see [Punctuation (streaming)](punctuation-streaming.md). The offline engine also supports a [live overload](#live-overload-on-offline-punctuation-offline-weights-live-consumption) on `LiveTextBuffer` pairs.
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated plain text; `lang` is pass-through from input |
-| **Output** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer before the call; filled once with punctuated text |
-| **Engine** | `OfflinePunctuationEngine` via `createOfflinePunctuation` | `punctuate` / `punctuateString`; returns `processingTimeMs` (plus segment stats when segmentation is enabled) |
-
-Import path: `react-native-sherpa-onnx/punctuation` — **offline CT-Transformer** only. For online CNN pipelines, see [punctuation-streaming.md](punctuation-streaming.md). The offline engine also supports a [live overload](#live-overload-on-offline-punctuation-offline-weights-live-consumption) on `LiveTextBuffer` pairs.
+Import path: **`react-native-sherpa-onnx/punctuation`**.
 
 ## Quick start
 
@@ -84,6 +78,14 @@ try {
   await releasePipelineTextBuffer(textOut2);
 }
 ```
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`OfflineTextBuffer`](textbuffer-offline.md) | Populated plain text; `lang` is pass-through from input |
+| **Text out** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty buffer before the call; filled once with punctuated text |
+| **Engine** | `OfflinePunctuationEngine` via `createOfflinePunctuation` | `punctuate` / `punctuateString`, `destroy` |
 
 ---
 
@@ -311,6 +313,23 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](feature-pipelines.md#punctuation-offline-patterns).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+
+Shapes: [Types](#types).
+
+```ts
+await engine.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+});
+```
+
+Live overload uses `onSegment` only (no offline `onProgress`) — see [Live overload](#live-overload-on-offline-punctuation-offline-weights-live-consumption).
 
 ## Types
 

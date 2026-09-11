@@ -2,17 +2,9 @@
 
 ## Introduction
 
-On-device streaming punctuation with a **pipeline-first** API.
+On-device streaming punctuation with a **pipeline-first** API. A native worker reads committed text segments from a live input buffer and writes punctuated segments to a live output buffer; for batch offline punctuation see [Punctuation (offline)](punctuation-offline.md).
 
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Input** | [`LiveTextBuffer`](textbuffer-streaming.md) | Committed text segments from upstream (e.g. live STT) |
-| **Output** | [`LiveTextBuffer`](textbuffer-streaming.md) | Punctuated committed segments |
-| **Engine** | `StreamingPunctuationEngine` via `createStreamingPunctuation` | `punctuate(textIn, textOut)` returns `PunctuationPipelineHandle` (`stop`, `flush`, `reset`, `getStatus`, `completed`) |
-
-Import path: `react-native-sherpa-onnx/punctuation`
-
-For batch punctuation with offline text buffers, see [punctuation-offline.md](punctuation-offline.md).
+Import path: **`react-native-sherpa-onnx/punctuation`**.
 
 ## Streaming pipeline system
 
@@ -75,6 +67,15 @@ await releasePipelineTextBuffer(textOut);
 After the live input is finalized, call **`pipeline.flush()`** (then **`stop()`** and **`completed`** as in the snippet). The native worker treats the post-finalize **`flush()`** as the barrier that allows it to finish draining tail segments before shutting down.
 
 **Order (recommended):** `finalizeLiveTextBuffer(textIn)` (live **text** buffer, no more writes / optional last partial → segment) → **`pipeline.flush()`** (pipeline **handle**, drain segment log through the model) → **`pipeline.stop()`** → **`pipeline.completed`**. That is **not** the same as "flush before finalize": if you `flush()` while the input is still `recording`, more segments can still arrive afterward (e.g. last segment at finalize), so **`finalize` first** is the stable cut.
+
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Text in** | [`LiveTextBuffer`](textbuffer-streaming.md) | Committed text segments from upstream (e.g. live STT) |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Punctuated committed segments |
+| **Engine** | `StreamingPunctuationEngine` via `createStreamingPunctuation` | `punctuate(textIn, textOut)` returns `PunctuationPipelineHandle` |
+| **Pipeline handle** | `PunctuationPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
 
 ---
 
@@ -295,6 +296,10 @@ flowchart LR
 ```
 
 More end-to-end patterns: [feature-pipelines.md#punctuation-streaming-patterns](feature-pipelines.md#punctuation-streaming-patterns).
+
+## JS Events
+
+No pipeline-level JS event callbacks. The native worker processes committed segments automatically; monitor output via the live text buffer's segment events — see [textbuffer-streaming.md](textbuffer-streaming.md).
 
 ## Types
 
