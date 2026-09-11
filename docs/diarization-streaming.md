@@ -1,7 +1,5 @@
 # Speaker diarization (streaming)
 
-**Status:** Android ✅ · iOS ✅
-
 ## Introduction
 
 On-device **true streaming** speaker diarization: continuously identifies "who spoke when" in real-time audio. Powered by **NeMo Sortformer** running natively on **ONNX Runtime (ORT)** with high-performance C++ DSP (Radix-2 FFT + sparse Mel filterbanks) and bounded memory via NeMo smart cache compression.
@@ -114,65 +112,24 @@ await engine.release();
 
 ---
 
-## Pipeline flow
-
-| Step | Method | Result |
-| --- | --- | --- |
-| 1 | `detectDiarizationModel(source)` | Validates Sortformer model files |
-| 2 | `createStreamingDiarization(options)` | Allocates C++ DSP & ORT session (`StreamingDiarizationEngine`) |
-| 3 | `createEmptyLiveAudioBuffer(...)` | Prepares input live audio buffer (`live_*`) |
-| 4 | `createEmptyLiveSegmentBuffer(...)` | Prepares output live segment buffer (`seg_live_*`) |
-| 5 | `engine.startPipeline(audioIn, segmentOut, options?)` | Starts native worker thread (`DiarizationPipelineHandle`) |
-| 6 | `startMicToLiveAudioBuffer(audioIn)` / file ingest | Audio drains natively into DSP & ORT |
-| 7 | `onSegmentAppended` / segment buffer reads | Live speaker turns emitted in real time |
-| 8 | `pipeline.flush()` $\rightarrow$ `pipeline.stop()` $\rightarrow$ `pipeline.completed` | Flushes trailing audio and halts worker |
-| 9 | `releasePipeline*Buffer(...)` + `engine.release()` | Frees buffers and unloads ONNX model |
-
----
-
-## Models & metadata
-
-Streaming diarization uses **NeMo Sortformer** ONNX models (e.g. `diar_streaming_sortformer_4spk-v2.1`).
-
-### Archive & folder structure
-
-```
-diar_streaming_sortformer_4spk-v2.1/
-├── model.onnx          # or model.int8.onnx (required)
-├── metadata.json       # optional streaming constants
-└── LICENSE             # model license
-```
-
-### Dynamic metadata extraction & fallback
-
-The C++ streaming engine dynamically configures its tensor shapes and parameters (`chunk_len`, `right_context`, `fifo_len`, `spkcache_len`, `max_speakers`, `feature_dim`, `sample_rate`) via:
-1. **`metadata.json`** file if provided alongside the model.
-2. **Embedded ONNX `metadata_props`** fallback if `metadata.json` is missing.
-3. Default Sortformer v2.1 constants if neither is present.
-
-### Download Manager integration
-
-Sortformer models can be discovered and downloaded via the built-in [Download Manager](download-manager.md):
-
-```ts
-import { downloadModel, getModelById, ModelCategory } from 'react-native-sherpa-onnx/download';
-
-const model = await getModelById('diar_streaming_sortformer_4spk-v2.1', ModelCategory.Diarization);
-const downloaded = await downloadModel(model, {
-  onProgress: (p) => console.log(`Downloading: ${(p.fraction * 100).toFixed(1)}%`),
-});
-```
-
----
-
 ## Buffer matrix
 
 | Role | Type | Notes |
 | --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mono PCM (`live_*`) drained by native worker |
-| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `seg_live_*`; native worker appends `kind: 'diarization'` segments |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mono PCM at **16 kHz** (`live_*`); mic or file ingest |
+| **Segments out** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `seg_live_*`; observe via `onSegmentAppended` / `kind: 'diarization'` |
 | **Engine** | `StreamingDiarizationEngine` via `createStreamingDiarization` | Starts pipeline, exposes model properties, manual feed/flush/reset |
 | **Pipeline handle** | `DiarizationPipelineHandle` via `engine.startPipeline(...)` | `stop`, `flush`, `reset`, `getStatus`, `completed` |
+
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `sortformer` | `model.onnx` (or `model.int8.onnx`); optional `metadata.json` | `model`, `metadata?` |
+
+Optional `metadata.json` (or ONNX `metadata_props`) configures streaming constants; defaults apply if neither is present.
+
+Validate category: **`diarization`**. Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Diarization`).
 
 ## API reference
 
@@ -371,67 +328,9 @@ console.log(engine.latencySeconds); // 1.04
 
 ---
 
-## JS Events
+## Diarization payload (`source: 'diarization'`)
 
-| Callback | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onSegmentAppended` | `{ segment, index }` | native worker appends a speaker turn to `LiveSegmentBuffer` | set on `createEmptyLiveSegmentBuffer`; `segment.payload.speaker` is cluster index |
-
-```ts
-const segmentOut = await createEmptyLiveSegmentBuffer({
-  sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    console.log(`Speaker ${e.segment.payload?.speaker}: ${e.segment.startSample} -> ${e.segment.endSample}`);
-  },
-});
-```
-
----
-
-## Pipeline buffers (audio input + segment output)
-
-### Audio input (`LiveAudioBuffer`)
-
-```ts
-import {
-  createEmptyLiveAudioBuffer,
-  startMicToLiveAudioBuffer,
-  stopMicToLiveAudioBuffer,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
-```
-
-- Must be created with `sampleRate: 16000` (Sortformer's expected rate).
-- Can be fed by the microphone (`startMicToLiveAudioBuffer`) or upstream file ingestion (`startFileIngestToLiveAudioBuffer`).
-- See [audiobuffer — live / streaming](audiobuffer-streaming.md).
-
-### Segment output (`LiveSegmentBuffer`)
-
-```ts
-import {
-  createEmptyLiveSegmentBuffer,
-  getLiveSegmentBufferSegments,
-  releasePipelineSegmentBuffer,
-} from 'react-native-sherpa-onnx/segmentbuffer';
-```
-
-- Segments are appended with `kind: 'diarization'`.
-- `payloadJson` contains `{"source":"diarization","speaker":S}` where `S` is an integer index ($0$ to $\text{maxSpeakers}-1$).
-- See [segmentbuffer — live / streaming](segmentbuffer-streaming.md).
-
-#### Observing committed speaker segments
-
-Committed speaker turns are emitted as segments on the output `LiveSegmentBuffer`. Subscribe to `onSegmentAppended` (or `streamEvents.segmentAppended`):
-
-```ts
-const segmentOut = await createEmptyLiveSegmentBuffer({
-  sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    const speaker = e.segment.payload?.speaker;
-    console.log(`[Speaker ${speaker}] ${e.segment.startSample} -> ${e.segment.endSample} (${e.segment.durationMs}ms)`);
-  },
-});
-```
+Same contract as offline — each speaker turn appended to `segmentOut` is `kind: 'diarization'` with `{ source: 'diarization', speaker }`. Full shape: [diarization-offline.md#diarization-payload-source-diarization](diarization-offline.md#diarization-payload-source-diarization).
 
 ---
 
@@ -465,6 +364,24 @@ flowchart LR
   PostProc --> LiveSeg[LiveSegmentBuffer kind: diarization]
   LiveSeg --> UI[Real-time Speaker Timeline UI]
   LiveSeg --> SID[Speaker Identification]
+```
+
+---
+
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegmentAppended` | `{ segment, index }` | native worker appends a speaker turn to `LiveSegmentBuffer` | set on `createEmptyLiveSegmentBuffer`; `segment.payload.speaker` is cluster index |
+
+```ts
+const segmentOut = await createEmptyLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => {
+    console.log(`Speaker ${e.segment.payload?.speaker}: ${e.segment.startSample} -> ${e.segment.endSample}`);
+  },
+});
 ```
 
 ---
@@ -506,6 +423,20 @@ See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [segmentbuffer-strea
 
 ---
 
+## Error codes
+
+| Error code | Explanation |
+| --- | --- |
+| `DETECT_ERROR` | Model detection failed or input directory is invalid. |
+| `DIARIZATION_INIT_ERROR` | Engine initialization failed (missing model file, invalid ONNX structure, or ORT initialization error). |
+| `DIARIZATION_ERROR` | General streaming runtime error (e.g. pipeline start failure, invalid state transition). |
+| `DIARIZATION_BUFFER_NOT_FOUND` | Referenced audio or segment buffer ID does not exist or was already released. |
+| `DIARIZATION_NOT_INITIALIZED` | An operation was invoked on an engine or native instance that is not initialized. |
+| `DIARIZATION_INVALID_ARGUMENT` | Missing or malformed parameters (e.g. non-live buffer passed to `startPipeline`). |
+| `STREAMING_PIPELINE_ERROR` | Fatal pipeline worker thread exception. |
+
+---
+
 ## Platform notes
 
 - **Android**:
@@ -520,20 +451,6 @@ See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [segmentbuffer-strea
   - 100% portable C++ DSP (`SortformerFbank`): Radix-2 FFT with precomputed twiddle tables, periodic Hann window, and sparse Slaney Mel filterbank.
   - Zero dynamic heap allocation in steady-state streaming loops.
   - NeMo Smart Cache Compression bounds RAM usage to constant size over infinite streaming sessions.
-
----
-
-## Error codes
-
-| Error code | Explanation |
-| --- | --- |
-| `DETECT_ERROR` | Model detection failed or input directory is invalid. |
-| `DIARIZATION_INIT_ERROR` | Engine initialization failed (missing model file, invalid ONNX structure, or ORT initialization error). |
-| `DIARIZATION_ERROR` | General streaming runtime error (e.g. pipeline start failure, invalid state transition). |
-| `DIARIZATION_BUFFER_NOT_FOUND` | Referenced audio or segment buffer ID does not exist or was already released. |
-| `DIARIZATION_NOT_INITIALIZED` | An operation was invoked on an engine or native instance that is not initialized. |
-| `DIARIZATION_INVALID_ARGUMENT` | Missing or malformed parameters (e.g. non-live buffer passed to `startPipeline`). |
-| `STREAMING_PIPELINE_ERROR` | Fatal pipeline worker thread exception. |
 
 ---
 
@@ -556,3 +473,100 @@ Diarization will **not** receive a live-overload API (offline weights on live bu
 | Named speakers on an offline timeline | [Named diarization timeline (SID × Diarization)](./diarization-named-timeline.md) |
 
 *(Contrast: SID **does** provide live overload (`labelLiveSegments`) because each speech utterance is independently matched against a fixed enrollment gallery — a composition that does not apply to anonymous unsupervised clustering).*
+
+## Use case examples
+
+<details>
+<summary>Mic diarization with live `onSegmentAppended` updates</summary>
+
+Start the Sortformer pipeline, open the mic, and render speaker turns as they append — do not await `completed` before showing the first turns.
+
+```ts
+import { createStreamingDiarization } from 'react-native-sherpa-onnx/diarization';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyLiveSegmentBuffer,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const engine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/diar_streaming_sortformer_4spk-v2.1' },
+  modelType: 'sortformer',
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: engine.sampleRate });
+const segmentOut = await createEmptyLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => {
+    console.log(`spk ${e.segment.payload?.speaker}`, e.segment.startSample, e.segment.endSample);
+  },
+});
+
+const pipeline = await engine.startPipeline(audioIn, segmentOut, { chunkSize: 4096 });
+await startMicToLiveAudioBuffer(audioIn);
+
+await new Promise((r) => setTimeout(r, 60_000));
+
+await stopMicToLiveAudioBuffer();
+await pipeline.flush();
+await pipeline.stop();
+await pipeline.completed;
+
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineAudioBuffer(audioIn);
+await engine.release();
+```
+
+</details>
+
+<details>
+<summary>Keep consuming turns, then finalize/flush and await settle</summary>
+
+UI can keep reading `onSegmentAppended` throughout the session; only at the end flush the tail and await `completed` before releasing buffers.
+
+```ts
+await stopMicToLiveAudioBuffer();
+await pipeline.flush(); // emit trailing speaker turns
+await pipeline.stop();
+const done = await pipeline.completed;
+console.log('chunks', done.chunksProcessed);
+await releasePipelineSegmentBuffer(segmentOut);
+await releasePipelineAudioBuffer(audioIn);
+await engine.release();
+```
+
+</details>
+
+<details>
+<summary>Mid-run `flush` / `reset` without tearing down the session</summary>
+
+Force a soft barrier or clear model state while the pipeline handle stays alive — useful when the conversation context changes but mic capture continues.
+
+```ts
+await pipeline.flush();
+const status = await pipeline.getStatus();
+console.log(status.isRunning, status.unitsWritten);
+
+await pipeline.reset(); // clear Sortformer state; pipeline keeps running
+// continue feeding audioIn; new turns keep appending to segmentOut
+```
+
+</details>
+
+## See also
+
+- [Diarization (offline)](diarization-offline.md)
+- [Named diarization timeline (SID × Diarization)](diarization-named-timeline.md)
+- [Speaker identification (offline)](speaker-identification-offline.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
+- [Pipeline segment buffers — live / streaming](segmentbuffer-streaming.md)
+- [Streaming pipelines — shared lifecycle](streaming-pipelines-overview.md)
+- [Model setup](model-setup.md)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

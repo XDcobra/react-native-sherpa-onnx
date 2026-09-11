@@ -102,7 +102,26 @@ const pipeline = await engine.punctuate(textIn, textOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline path: [punctuation-offline.md](punctuation-offline.md#segmentation-optional).
 
----
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | `cnn_bilstm`, `bpe_vocab` |
+
+Validate category: **`punctuation`**. Streaming requires online `cnn_bilstm` (`det.isStreaming`); offline `ct_transformer` is not valid here. Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Punctuation`).
+
+```ts
+import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
+
+const engine = await createStreamingPunctuation({
+  initMode: 'custom',
+  modelType: 'cnn_bilstm',
+  customConfig: {
+    cnn_bilstm: { kind: 'fs', path: '/data/models/cnn.onnx' },
+    bpe_vocab: { kind: 'fs', path: '/data/models/bpe.vocab' },
+  },
+});
+```
 
 ## API reference
 
@@ -224,53 +243,6 @@ readonly completed: Promise<StreamingPipelineCompletion>;
 
 ---
 
-## Models and paths
-
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- Streaming requires online `cnn_bilstm` — offline `ct_transformer` is not valid here
-- **`textInputNormalization`:** defaults to `'lower'`; pass `'none'` to disable
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | — | `cnn_bilstm`, `bpe_vocab` |
-
-## Model detection
-
-`detectPunctuationModel` pre-check. Require `det.modelType === 'cnn_bilstm' && det.isStreaming`. Unified catalog: [model-detect.md](model-detect.md).
-
-```ts
-const det = await detectPunctuationModel(
-  { kind: 'fs', path: '/path/to/punctuation-online-pack' },
-  { modelType: 'auto' }
-);
-if (!det.success || det.modelType !== 'cnn_bilstm' || !det.isStreaming) {
-  throw new Error(det.error ?? 'Streaming punctuation requires cnn_bilstm');
-}
-```
-
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `cnn_bilstm` | `cnn_bilstm`, `bpe_vocab` |
-
-```ts
-import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
-
-const engine = await createStreamingPunctuation({
-  initMode: 'custom',
-  modelType: 'cnn_bilstm',
-  customConfig: {
-    cnn_bilstm: { kind: 'fs', path: '/data/models/cnn.onnx' },
-    bpe_vocab: { kind: 'fs', path: '/data/models/bpe.vocab' },
-  },
-});
-```
-
 ## Pipeline composition
 
 ### Typical upstream
@@ -349,6 +321,82 @@ Additional `FILEIO_*` errors can occur during model path/source resolution befor
 
 ---
 
+## Use case examples
+
+<details>
+<summary>Punctuate ASR commits as they arrive (no wait for session end)</summary>
+
+Start the punctuation pipeline first, then append ASR segments into `textIn`. Punctuated output shows up on `textOut` while more ASR text is still being appended.
+
+```ts
+import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
+import {
+  createLiveTextBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const engine = await createStreamingPunctuation({
+  modelSource: { kind: 'fs', path: '/path/to/punct-cnn-bilstm' },
+  modelType: 'auto',
+});
+const textIn = await createLiveTextBuffer({ maxSegments: 2048 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: (e) => console.log('[punct]', e.segment.text),
+});
+
+const pipeline = await engine.punctuate(textIn, textOut, { segmentation: { mode: 'off' } });
+
+await appendLiveTextSegment(textIn, 'hello this is an asr output segment');
+await appendLiveTextSegment(textIn, 'it has no punctuation markers yet');
+// more appends can continue here — do not await completed yet
+
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.stop();
+await pipeline.completed;
+
+await engine.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineTextBuffer(textIn);
+```
+
+</details>
+
+<details>
+<summary>Finalize → flush barrier → await `completed`</summary>
+
+After the upstream ASR text buffer is finalized, call `flush` as the required drain barrier before stop/await so trailing punctuation commits land in `textOut`.
+
+```ts
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.stop();
+const done = await pipeline.completed;
+console.log('units written', done.unitsWritten);
+```
+
+</details>
+
+<details>
+<summary>Read punctuated segments after the pipeline settles</summary>
+
+Once `completed` resolves, inspect the output live text buffer for UI freeze-frames or handoff into TTS.
+
+```ts
+import { getLiveTextBufferSegments } from 'react-native-sherpa-onnx/textbuffer';
+
+await finalizeLiveTextBuffer(textIn);
+await pipeline.flush();
+await pipeline.completed;
+const segs = await getLiveTextBufferSegments(textOut);
+console.log(segs.map((s) => s.text).join(' '));
+```
+
+</details>
+
 ## See also
 
 - [Punctuation (offline)](punctuation-offline.md)
@@ -359,43 +407,6 @@ Additional `FILEIO_*` errors can occur during model path/source resolution befor
 - [Segmentation engine](segmentation-engine.md)
 - [Model setup](model-setup.md)
 - [Execution providers](execution-providers.md)
-
-## Use case examples
-
-<details>
-<summary>Live punctuation for ASR partial/final segment feed</summary>
-
-```ts
-// textIn receives plain ASR segments; punctuation pipeline writes punctuated segments to textOut
-const pipeline = await engine.punctuate(textIn, textOut, {
-  segmentation: { mode: 'off' },
-});
-
-await appendLiveTextSegment(textIn, 'hello this is an asr output segment');
-await appendLiveTextSegment(textIn, 'it has no punctuation markers yet');
-await finalizeLiveTextBuffer(textIn);
-
-await pipeline.flush();
-```
-
-</details>
-
-<details>
-<summary>Auto segmentation for long live text streams</summary>
-
-```ts
-const pipeline = await engine.punctuate(textIn, textOut, {
-  segmentation: {
-    mode: 'auto',
-    policy: { evaluator: 'text_punctuation_assisted', maxLengthChars: 500 },
-  },
-});
-
-const status = await pipeline.getStatus();
-console.log(status.chunksProcessed, status.unitsRead, status.unitsWritten);
-```
-
-</details>
 
 ## Native crash diagnostics
 

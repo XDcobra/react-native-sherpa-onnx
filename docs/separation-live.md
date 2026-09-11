@@ -87,6 +87,14 @@ const handle = await sep.separate(liveIn, liveOuts, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline path: [separation-offline.md](separation-offline.md#segmentation-optional).
 
+## Models
+
+Same packs as [separation-offline.md#models](separation-offline.md#models).
+
+## Pipeline handle
+
+`SeparationPipelineHandle` shares `stop` / `flush` / `reset` / `getStatus` / `completed` with other live pipelines — see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
 ## API reference
 
 Factory, detection, and model init are the same as offline — see [separation-offline.md](separation-offline.md#api-reference).
@@ -115,9 +123,17 @@ const handle = await sep.separate(liveIn, liveOuts, {
 });
 ```
 
-## Pipeline handle
+## Pipeline composition
 
-`SeparationPipelineHandle` shares `stop` / `flush` / `reset` / `getStatus` / `completed` with other live pipelines — see [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer mix] --> B["createSeparation().separate live overload"]
+  B --> C[LiveAudioBuffer vocals]
+  B --> D[LiveAudioBuffer accompaniment]
+```
+
+More patterns: [feature-pipelines.md#separation-live-overload-patterns](feature-pipelines.md#separation-live-overload-patterns).
+
 
 ## JS Events
 
@@ -136,17 +152,6 @@ const handle = await sep.separate(liveIn, liveOuts, {
   onSegment: (seg) => console.log(seg.segmentIndex),
 });
 ```
-
-## Pipeline composition
-
-```mermaid
-flowchart LR
-  A[LiveAudioBuffer mix] --> B["createSeparation().separate live overload"]
-  B --> C[LiveAudioBuffer vocals]
-  B --> D[LiveAudioBuffer accompaniment]
-```
-
-More patterns: [feature-pipelines.md#separation-live-overload-patterns](feature-pipelines.md#separation-live-overload-patterns).
 
 ## Types
 
@@ -168,6 +173,96 @@ Engine, detect, and offline result types: [separation-offline.md](separation-off
 | `LIVE_OFFLINE_SEGMENTATION_REQUIRED` | Missing / invalid `segmentation.policy`, or evaluator not `continuous_frames`. |
 | `SEPARATION_INVALID_ARGUMENT` | Live/offline overload mismatch, wrong stem count, etc. |
 | `SEPARATION_*` / `DETECT_ERROR` / `OFFLINE_OOM` | Same codes as [offline separation](separation-offline.md#error-codes) where applicable. |
+
+## Use case examples
+
+<details>
+<summary>Live stem separation while file ingest is still running</summary>
+
+Start `separate` with mandatory `continuous_frames` checkpoints, then ingest a mix. Stem buffers receive audio as chunks commit — you do not wait for the whole mix before hearing/processing stems.
+
+```ts
+import { createSeparation } from 'react-native-sherpa-onnx/separation';
+import {
+  createEmptyLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+const sep = await createSeparation({ modelSource: { kind: 'fs', path: '/path/to/uvr' } });
+const sr = await sep.getSampleRate();
+const numStems = await sep.getNumStems();
+const liveIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+const liveOuts = await Promise.all(
+  Array.from({ length: numStems }, () =>
+    createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 }),
+  ),
+);
+
+const handle = await sep.separate(liveIn, liveOuts, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+  onSegment: (e) => console.log('stem commit', e.segmentIndex),
+});
+
+const ingest = await ingestFileToLiveAudioBuffer(liveIn, { kind: 'fs', path: '/path/to/mix.wav' });
+await ingest.done;
+await finalizeLiveAudioBuffer(liveIn);
+await handle.completed;
+
+for (const out of liveOuts) await finalizeLiveAudioBuffer(out);
+await sep.destroy();
+await releasePipelineAudioBuffer(liveIn);
+for (const out of liveOuts) await releasePipelineAudioBuffer(out);
+```
+
+</details>
+
+<details>
+<summary>Play vocals early from the live stem ring</summary>
+
+Attach a PCM player to stem 0 while separation continues writing later checkpoints — playback overlaps ongoing separation instead of waiting for offline batch completion.
+
+```ts
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+const handle = await sep.separate(liveIn, liveOuts, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
+  },
+});
+const vocalsPlayer = await createPcmPlayer(liveOuts[0]!);
+// start mic/file ingest into liveIn; vocalsPlayer drains frames as they arrive
+await finalizeLiveAudioBuffer(liveIn);
+await handle.completed;
+await vocalsPlayer.stop();
+```
+
+</details>
+
+<details>
+<summary>Finalize all stems, then snapshot to offline buffers</summary>
+
+After the pipeline settles, finalize each stem and convert to offline buffers for export or A/B comparison.
+
+```ts
+import { createOfflineAudioBufferFromLive, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+
+await finalizeLiveAudioBuffer(liveIn);
+await handle.completed;
+const offlineStems = [];
+for (const live of liveOuts) {
+  await finalizeLiveAudioBuffer(live);
+  offlineStems.push(await createOfflineAudioBufferFromLive(live));
+}
+// ... export / play offlineStems[0] (vocals), offlineStems[1] (accompaniment)
+```
+
+</details>
 
 ## See also
 

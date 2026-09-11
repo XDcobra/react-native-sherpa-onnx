@@ -94,7 +94,9 @@ const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Offline path: [enhancement-offline.md](enhancement-offline.md#segmentation-optional).
 
----
+## Models
+
+Same packs as offline — see [enhancement-offline.md — Models](enhancement-offline.md#models).
 
 ## API reference
 
@@ -193,33 +195,6 @@ await denoiser.destroy();
 
 ---
 
-## Live overload on offline enhancement (restricted)
-
-> Mandatory `segmentation.policy`. Commit-only — no partials.
-
-The offline enhancement engine can drive a live pipeline directly. **Warning:** This is a restricted path. Because the offline engine is designed for monolithic processing, it is wrapped in a segmentation loop that processes fixed-size blocks (using the `continuous_frames` policy). This may introduce audible artifacts at segment boundaries.
-
-```ts
-const engine = await createEnhancement({ /* offline init */ });
-const pipeline = await engine.enhance(inputBuf, outputBuf, {
-  segmentation: { 
-    mode: 'auto',
-    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 } 
-  },
-});
-
-// pipeline.stop() / .flush() / .completed as usual
-const completion = await pipeline.completed;
-console.log(`Denoised ${completion.unitsWritten} samples`);
-```
-
-| Aspect | Live overload (`createEnhancement`) | Streaming engine (`createStreamingEnhancement`) |
-| --- | --- | --- |
-| Weights | Offline-optimized | Streaming-optimized |
-| Boundary handling | Hard split (possible clicks) | Seamless stateful streaming |
-| Latency | Per-segment (higher) | Per-frame (lower) |
-| Recommendation | Use only for short segments | Preferred for live mic |
-
 ### Pipeline handle (`EnhancementPipelineHandle`)
 
 `EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus` / `completed`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
@@ -268,35 +243,6 @@ readonly completed: Promise<StreamingPipelineCompletion>;
 ```
 
 ---
-
-## Models and paths
-
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md) · same families as [enhancement-offline](enhancement-offline.md#validation-required-files)
-
-## Validation required files
-
-Same as offline — see [enhancement-offline.md — Validation required files](enhancement-offline.md#validation-required-files).
-
-## Model detection
-
-`detectEnhancementModel` pre-check before `createStreamingEnhancement`. Rules: [enhancement-offline.md — Model detection](enhancement-offline.md#model-detection).
-
-## Custom initialization (`initMode: 'custom'`)
-
-Same init union as offline. Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom). Keys: [enhancement-offline — Custom init](enhancement-offline.md#custom-initialization-initmode-custom).
-
-```ts
-import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
-
-const denoiser = await createStreamingEnhancement({
-  initMode: 'custom',
-  modelType: 'gtcrn',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/gtcrn.onnx' },
-  },
-});
-```
 
 ## Pipeline composition
 
@@ -354,13 +300,6 @@ Offline types (`EnhancementEngine`, `EnhancementInitializeOptions`, `EnhanceOpti
 
 ---
 
-## Platform notes
-
-- **Android:** `OnlineSpeechDenoiser` (sherpa-onnx Kotlin API).
-- **iOS:** C++ wrapper + sherpa-onnx cxx API (`SherpaOnnx+Enhancement.mm`, `enhancement/sherpa-onnx-enhancement-wrapper.*`).
-
----
-
 ## Error codes
 
 | Error code | Explanation |
@@ -381,26 +320,66 @@ Offline types (`EnhancementEngine`, `EnhancementInitializeOptions`, `EnhanceOpti
 
 ---
 
-## See also
+## Platform notes
 
-- [Speech enhancement (offline)](enhancement-offline.md)
-- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
-- [Execution providers](execution-providers.md)
-- [Model setup](model-setup.md)
+- **Android:** `OnlineSpeechDenoiser` (sherpa-onnx Kotlin API).
+- **iOS:** C++ wrapper + sherpa-onnx cxx API (`SherpaOnnx+Enhancement.mm`, `enhancement/sherpa-onnx-enhancement-wrapper.*`).
+
+---
+
+## Live overload on offline enhancement (restricted)
+
+> Mandatory `segmentation.policy`. Commit-only — no partials.
+
+The offline enhancement engine can drive a live pipeline directly. **Warning:** This is a restricted path. Because the offline engine is designed for monolithic processing, it is wrapped in a segmentation loop that processes fixed-size blocks (using the `continuous_frames` policy). This may introduce audible artifacts at segment boundaries.
+
+```ts
+const engine = await createEnhancement({ /* offline init */ });
+const pipeline = await engine.enhance(inputBuf, outputBuf, {
+  segmentation: { 
+    mode: 'auto',
+    policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 } 
+  },
+});
+
+// pipeline.stop() / .flush() / .completed as usual
+const completion = await pipeline.completed;
+console.log(`Denoised ${completion.unitsWritten} samples`);
+```
+
+| Aspect | Live overload (`createEnhancement`) | Streaming engine (`createStreamingEnhancement`) |
+| --- | --- | --- |
+| Weights | Offline-optimized | Streaming-optimized |
+| Boundary handling | Hard split (possible clicks) | Seamless stateful streaming |
+| Latency | Per-segment (higher) | Per-frame (lower) |
+| Recommendation | Use only for short segments | Preferred for live mic |
 
 ## Use case examples
 
 <details>
-<summary>Real-time denoise and feed output into downstream STT</summary>
+<summary>Real-time denoise feeding downstream streaming STT</summary>
+
+Start enhancement and STT on the clean live ring first, then feed noisy audio. STT partials appear while denoise is still running — await both pipelines only at stop.
 
 ```ts
 import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
-import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
 import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 
-const denoiser = await createStreamingEnhancement({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/enhancement' }, modelType: 'auto' });
-const stt = await createStreamingSTT({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' }, modelType: 'auto' });
+const denoiser = await createStreamingEnhancement({
+  modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
+  modelType: 'auto',
+});
+const stt = await createStreamingSTT({
+  modelSource: { kind: 'fs', path: '/path/to/streaming-stt' },
+  modelType: 'auto',
+});
 
 const sr = await denoiser.getSampleRate();
 const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
@@ -410,15 +389,17 @@ const textOut = await createLiveTextBuffer({
   onSegment: (e) => console.log('[stt]', e.segment.text),
 });
 
-const enhPipeline = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
-const sttPipeline = await stt.transcribe(cleanOut, textOut, { chunkSize: 3200 });
+const enhPipe = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
+const sttPipe = await stt.transcribe(cleanOut, textOut, { chunkSize: 3200 });
+const mic = await startMicToLiveAudioBuffer(noisyIn);
 
-// ... feed mic frames into noisyIn ...
-
-await enhPipeline.flush();
-await sttPipeline.flush();
-await enhPipeline.stop();
-await sttPipeline.stop();
+await new Promise((r) => setTimeout(r, 20_000));
+await mic.stop();
+await finalizeLiveAudioBuffer(noisyIn);
+await enhPipe.flush();
+await sttPipe.flush();
+await enhPipe.completed;
+await sttPipe.completed;
 
 await stt.destroy();
 await denoiser.destroy();
@@ -430,21 +411,75 @@ await releasePipelineAudioBuffer(noisyIn);
 </details>
 
 <details>
-<summary>Enable segmented streaming checkpoints for long sessions</summary>
+<summary>Ingest while enhancing, then snapshot clean audio for early playback</summary>
+
+Denoise overlaps file ingest. After a short wait you can finalize/snapshot the clean live buffer for playback without treating enhancement as a blocking offline job.
 
 ```ts
-const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId, {
+import { createStreamingEnhancement } from 'react-native-sherpa-onnx/enhancement';
+import {
+  createEmptyLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  createOfflineAudioBufferFromLive,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+const denoiser = await createStreamingEnhancement({
+  modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
+  modelType: 'auto',
+});
+const sr = await denoiser.getSampleRate();
+const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+const cleanOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
+const ingest = await ingestFileToLiveAudioBuffer(noisyIn, { kind: 'fs', path: '/path/to/noisy.wav' });
+
+await ingest.done;
+await finalizeLiveAudioBuffer(noisyIn);
+await pipeline.completed;
+await finalizeLiveAudioBuffer(cleanOut);
+
+const snapshot = await createOfflineAudioBufferFromLive(cleanOut);
+const player = await createPcmPlayer(snapshot);
+await player.play();
+
+await denoiser.destroy();
+await releasePipelineAudioBuffer(cleanOut);
+await releasePipelineAudioBuffer(noisyIn);
+```
+
+</details>
+
+<details>
+<summary>Optional `continuous_frames` checkpoints on long live sessions</summary>
+
+Enable auto segmentation checkpoints so long mic sessions commit enhanced audio in bounded spans while the pipeline keeps running.
+
+```ts
+const pipeline = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId, {
   segmentation: {
     mode: 'auto',
     policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 1000 },
   },
 });
-
-const status = await pipeline.getStatus();
-console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
+const mic = await startMicToLiveAudioBuffer(noisyIn);
+// ... UI can already play/consume cleanOut ...
+await mic.stop();
+await finalizeLiveAudioBuffer(noisyIn);
+await pipeline.completed;
 ```
 
 </details>
+
+## See also
+
+- [Speech enhancement (offline)](enhancement-offline.md)
+- [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md) · [offline](audiobuffer-offline.md)
+- [Execution providers](execution-providers.md)
+- [Model setup](model-setup.md)
 
 ## Native crash diagnostics
 

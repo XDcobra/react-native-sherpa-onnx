@@ -99,6 +99,10 @@ await tts.synthesize(textIn, audioOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [tts-offline.md](tts-offline.md#segmentation-optional).
 
+## Models
+
+Same packs as offline — see [tts-offline.md — Models](tts-offline.md#models).
+
 ## Pipeline handle
 
 Same control surface as other streaming / live-overload features ([streaming-pipelines-overview.md](streaming-pipelines-overview.md)):
@@ -188,6 +192,100 @@ Model types, offline `synthesize` options, and detect results: [tts-offline.md](
 | `TTS_INVALID_ARGUMENT` | Live/offline overload mismatch (mixed buffer kinds). |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during the run; `completed` rejects with this `code`. |
 | `TTS_*` / `DETECT_ERROR` / `OFFLINE_OOM` | Same codes as [offline TTS](tts-offline.md#error-codes) where applicable. |
+
+## Use case examples
+
+<details>
+<summary>Append text while PCM playback already drains synthesized audio</summary>
+
+Start live TTS and a player on the output ring first, then keep appending text segments — audio starts playing before you finalize the text buffer or await `completed`.
+
+```ts
+import { createTTS } from 'react-native-sherpa-onnx/tts';
+import {
+  createEmptyLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveTextBuffer,
+  appendLiveTextSegment,
+  finalizeLiveTextBuffer,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
+import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm';
+
+const tts = await createTTS({
+  modelSource: { kind: 'fs', path: '/path/to/tts-model' },
+  modelType: 'auto',
+});
+const sr = await tts.getSampleRate();
+const textIn = await createLiveTextBuffer({ maxSegments: 256 });
+const audioOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
+
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 200 },
+  },
+});
+const player = await createPcmPlayer(audioOut);
+
+await appendLiveTextSegment(textIn, 'Hello from live TTS.');
+await appendLiveTextSegment(textIn, 'More sentences keep synthesizing while playback continues.');
+// player is already draining frames — do not await pipeline.completed yet
+
+await finalizeLiveTextBuffer(textIn);
+await pipeline.completed;
+await finalizeLiveAudioBuffer(audioOut);
+await player.stop();
+await tts.destroy();
+await releasePipelineTextBuffer(textIn);
+await releasePipelineAudioBuffer(audioOut);
+```
+
+</details>
+
+<details>
+<summary>Flush mid-session, then finalize and await completion</summary>
+
+Force a mid-run flush so pending phoneme/audio tails land in the output buffer, then finalize input and await the pipeline for teardown sequencing.
+
+```ts
+await appendLiveTextSegment(textIn, 'One more line before we wind down.');
+await pipeline.flush();
+await finalizeLiveTextBuffer(textIn);
+const done = await pipeline.completed;
+console.log('units written', done.unitsWritten);
+await finalizeLiveAudioBuffer(audioOut);
+```
+
+</details>
+
+<details>
+<summary>Sentence-sized commits with `text_synthetic_auto`</summary>
+
+Use auto text segmentation so each committed sentence synthesizes as it arrives — useful for chat-style token streams that never form one giant offline string.
+
+```ts
+const pipeline = await tts.synthesize(textIn, audioOut, {
+  sid: 0,
+  speed: 1.0,
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 120 },
+  },
+  onSegment: (e) => console.log('synth commit', e.segmentIndex),
+});
+
+for (const line of chatLines) {
+  await appendLiveTextSegment(textIn, line);
+}
+await finalizeLiveTextBuffer(textIn);
+await pipeline.completed;
+```
+
+</details>
 
 ## See also
 

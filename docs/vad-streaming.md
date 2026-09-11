@@ -193,6 +193,31 @@ const { summary } = await vad.process({
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md).
 
+## Models
+
+| `modelType` | Required files | Custom-init keys |
+| --- | --- | --- |
+| `silero_vad` | `*.onnx` (silero VAD) | `model` |
+| `ten_vad` | `*.onnx` (ten VAD) | `model` |
+
+Validate category: **`vad`**. Overview: [README — VAD](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Vad`).
+
+```ts
+import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
+
+const vad = await createStreamingVAD({
+  initMode: 'custom',
+  modelType: 'silero_vad',
+  customConfig: {
+    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
+  },
+  sampleRate: 16000,
+  runtimeOptions: {
+    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
+  },
+});
+```
+
 ## API reference
 
 All signatures below are exported from `react-native-sherpa-onnx/vad`.
@@ -346,67 +371,20 @@ getStatus(): Promise<VADPipelineStatus>;
 
 Resolves when the worker has **fully stopped** (normal completion after finalize + auto-flush, `stop()`, or error). Use with **`await finalizeLiveAudioBuffer`** in the graceful path shown in the quick start.
 
-## Models and paths
+## Speech payload (`source: 'vad'`)
 
-- **`FileSource`** — [model-setup.md](model-setup.md)
-- **Detection & init** — [model-detect.md](model-detect.md)
-- Families: `silero_vad`, `ten_vad`
-
-## Validation required files
-
-| `modelType` | Required files | Optional | Custom-init keys |
-| --- | --- | --- | --- |
-| `silero_vad` | `*.onnx` (silero VAD) | — | `model` |
-| `ten_vad` | `*.onnx` (ten VAD) | — | `model` |
-
-## Model detection
-
-`detectVadModel` validates Silero / Ten layouts before `createStreamingVAD`. Unified catalog: [model-detect.md](model-detect.md).
-
-## JS Events
-
-| Callback | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
-| `onSegmentAppended` | `LiveSegmentBufferSegmentEvent` | committed speech segment on output buffer | set on `createLiveSegmentBuffer`; live path only |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
-
-Shapes: [Types](#types).
+Every committed VAD span written to `segmentOut` is `kind: 'speech'` with this payload. Downstream features (SID label, alignment `mode: 'vad'`, …) can filter on `payload.source === 'vad'` without re-running detection.
 
 ```ts
-pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
-
-const segmentOut = await createLiveSegmentBuffer({
-  sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => console.log(e.segmentId, e.durationMs),
-});
+{
+  source: 'vad';
+  engine?: 'vad';
+  decision?: 'model';
+  score?: number;
+}
 ```
 
-## Custom initialization (`initMode: 'custom'`)
-
-Concept: [model-detect.md — Init modes](model-detect.md#init-modes-auto-vs-custom).
-
-| `modelType` | Custom-init keys |
-| --- | --- |
-| `silero_vad`, `ten_vad` | `model` |
-
-```ts
-import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
-
-const vad = await createStreamingVAD({
-  initMode: 'custom',
-  modelType: 'silero_vad',
-  customConfig: {
-    model: { kind: 'fs', path: '/data/models/silero_vad.onnx' },
-  },
-  sampleRate: 16000,
-  runtimeOptions: {
-    sileroVad: { scoreThreshold: 0.5, minSpeechDurationMs: 250, minSilenceDurationMs: 250 },
-  },
-});
-```
-
-`runtimeOptions` work the same as auto mode.
+`score` is the mean speech probability over the span when available. See [segmentbuffer-streaming.md](segmentbuffer-streaming.md#segment-payload-contracts).
 
 ## Pipeline composition
 
@@ -436,6 +414,26 @@ flowchart LR
 More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-pipelines.md#vad-streaming-patterns).
 
 ---
+
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentEvent` | committed speech segment on output buffer | set on `createLiveSegmentBuffer`; live path only |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
+
+Shapes: [Types](#types).
+
+```ts
+pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
+
+const segmentOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  onSegmentAppended: (e) => console.log(e.segmentId, e.durationMs),
+});
+```
 
 ## Types
 

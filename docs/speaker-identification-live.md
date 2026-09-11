@@ -8,6 +8,8 @@
 
 On-device **named-speaker labeling** over a live mic or file stream. Each committed utterance is identified against the enrolled gallery and appended as labeled speech segments (`payload.source: 'sid'`). Enrollment stays offline.
 
+Live uses **`labelLiveSegments`** (not an `identify` overload): it is the live counterpart of offline `labelOfflineSegments` (timeline → `segmentsOut`), whereas `identify` remains whole-clip → one name.
+
 Import path: **`react-native-sherpa-onnx/speaker-identification`**.
 
 Factory / detect / enrollment / models: [speaker-identification-offline.md](speaker-identification-offline.md#api-reference).
@@ -114,6 +116,10 @@ const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline enrollment & label: [speaker-identification-offline.md](speaker-identification-offline.md).
 
+## Models
+
+Same packs as [speaker-identification-offline.md#models](speaker-identification-offline.md#models).
+
 ## Pipeline handle
 
 Same control surface as other streaming / live-overload features ([streaming-pipelines-overview.md](streaming-pipelines-overview.md)):
@@ -125,16 +131,6 @@ Same control surface as other streaming / live-overload features ([streaming-pip
 | `reset()` | Clears progress counters on the handle (`chunksProcessed` / `unitsRead` / `unitsWritten`) while the pipeline remains running. |
 | `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` (`unitsRead` = samples consumed for extract, `unitsWritten` = labeled segments appended). |
 | `completed` | Resolves on graceful input finalize (`reason: 'completed'`) or `stop()` (`reason: 'stopped'`); rejects on fatal labeling errors (`code: 'STREAMING_PIPELINE_ERROR'`). |
-
-## `sid` payload
-
-Each labeled append uses the same contract as offline label:
-
-```ts
-payload: { source: 'sid', speakerName: string | null }
-```
-
-`speakerName` is `null` when search is below threshold / unknown. You can also subscribe via `createLiveSegmentBuffer({ onSegmentAppended })` in addition to `options.onLabeled`.
 
 ## API reference
 
@@ -168,21 +164,11 @@ const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
 
 Pass a **live** segment buffer (`seg_live_*`) as `segmentsOut` to append labeled speech. Offline segment buffer ids are rejected (`SID_INVALID_ARGUMENT`).
 
-## JS Events
+## Speech payload (`source: 'sid'`)
 
-| Callback | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onLabeled` | `SidLiveLabeledSegmentEvent` | after each committed span is identified | no `onProgress` on the live path; no `totalSegments` |
+Same contract as offline — each labeled utterance appended to `segmentsOut` is `kind: 'speech'` with `{ source: 'sid', speakerName }` (`speakerName` is `null` when unknown). Full shape: [speaker-identification-offline.md#speech-payload-source-sid](speaker-identification-offline.md#speech-payload-source-sid).
 
-Shapes: [Types](#types) · offline result fields: [speaker-identification-offline.md](speaker-identification-offline.md#types).
-
-```ts
-await sid.labelLiveSegments(audioIn, labeledOut, {
-  segmentation: { policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 } },
-  threshold: 0.5,
-  onLabeled: (e) => console.log(e.segmentIndex, e.speakerName, e.durationMs),
-});
-```
+You can also subscribe via `createLiveSegmentBuffer({ onSegmentAppended })` in addition to `options.onLabeled`.
 
 ## Pipeline composition
 
@@ -199,6 +185,23 @@ Typical upstream: mic / file ingest into `LiveAudioBuffer`.
 Typical downstream: UI timeline from `onLabeled` / `onSegmentAppended`, or finalize live segment Out → offline segment buffer for export.
 
 More patterns: [feature-pipelines.md#speaker-identification-live-patterns](feature-pipelines.md#speaker-identification-live-patterns).
+
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onLabeled` | `SidLiveLabeledSegmentEvent` | after each committed span is identified | no `onProgress` on the live path; no `totalSegments` |
+
+Shapes: [Types](#types) · offline result fields: [speaker-identification-offline.md](speaker-identification-offline.md#types).
+
+```ts
+await sid.labelLiveSegments(audioIn, labeledOut, {
+  segmentation: { policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 } },
+  threshold: 0.5,
+  onLabeled: (e) => console.log(e.segmentIndex, e.speakerName, e.durationMs),
+});
+```
 
 ## Types
 
@@ -224,6 +227,106 @@ Engine, detect, enrollment, and offline result types: [speaker-identification-of
 | `SID_LABEL_FAILED` | Segmentation engine did not produce an internal segment buffer. |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during labeling; `completed` rejects with this `code`. |
 | `SPEAKER_EMBEDDING_*` / `SEGMENT_*` | Same native / segment codes as [offline SID](speaker-identification-offline.md#error-codes). |
+
+## Use case examples
+
+<details>
+<summary>Label live utterances while the mic is still open</summary>
+
+After offline enrollment, start `labelLiveSegments` and feed the mic. `onLabeled` / `onSegmentAppended` update the timeline before you finalize or await `completed`.
+
+```ts
+import { createSpeakerIdentification } from 'react-native-sherpa-onnx/speaker-identification';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createLiveSegmentBuffer,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+// Assume `sid` is created and speakers were enrolled offline.
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const labeledOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  spooling: { mode: 'on' },
+  onSegmentAppended: (e) => {
+    if (e.kind === 'speech' && e.payload?.source === 'sid') {
+      console.log(e.payload.speakerName, e.startSample, e.endSample);
+    }
+  },
+});
+
+const pipeline = await sid.labelLiveSegments(audioIn, labeledOut, {
+  segmentation: {
+    policy: {
+      evaluator: 'speech_energy_silence',
+      silenceThresholdMs: 500,
+      energyThresholdDb: -40,
+      minSegmentMs: 1000,
+      maxSegmentMs: 120_000,
+      hangoverMs: 300,
+    },
+  },
+  threshold: 0.5,
+  onLabeled: (e) => console.log('labeled', e.speakerName, e.durationMs),
+});
+
+await startMicToLiveAudioBuffer(audioIn);
+await new Promise((r) => setTimeout(r, 30_000));
+await stopMicToLiveAudioBuffer();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+await releasePipelineSegmentBuffer(labeledOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Enroll offline, then switch the same engine to live labeling</summary>
+
+Build the gallery with offline enrollments first; live labeling reuses those embeddings without waiting for a whole-clip `identify`.
+
+```ts
+import { createSpeakerIdentification } from 'react-native-sherpa-onnx/speaker-identification';
+import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';
+
+const sid = await createSpeakerIdentification({
+  modelSource: { kind: 'fs', path: '/path/to/speaker-embedding' },
+});
+const alice = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/alice.wav' });
+const bob = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/path/to/bob.wav' });
+await sid.enroll('alice', alice);
+await sid.enroll('bob', bob);
+
+// Then start labelLiveSegments(audioIn, labeledOut, { segmentation, threshold }) as above —
+// named labels stream in while mic/file audio is still being captured.
+```
+
+</details>
+
+<details>
+<summary>Finalize input, await completion, then read the labeled timeline</summary>
+
+Graceful teardown drains the last utterance into `labeledOut`; only then iterate segments for export/UI freeze-frames.
+
+```ts
+await stopMicToLiveAudioBuffer();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+// labeledOut now holds the full sid timeline for this session
+await releasePipelineSegmentBuffer(labeledOut);
+await releasePipelineAudioBuffer(audioIn);
+await sid.destroy();
+```
+
+</details>
 
 ## See also
 

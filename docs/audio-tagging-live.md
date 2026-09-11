@@ -83,7 +83,7 @@ Live audio tagging must cut the incoming audio stream into committed spans befor
 
 | Evaluator | Supported | Notes |
 | --- | --- | --- |
-| `speech_energy_silence` | ✅ **Default** | `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `speech_energy_silence` | ✅ **Recommended** | Pass `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) explicitly |
 | `continuous_frames` | ✅ | Fixed windows; `checkpointIntervalMs` must be ≥ 1500 |
 | `speech_vad_model` | ❌ | Speech-only windows miss sirens, music, and other non-speech events |
 | `speech_pyannote_segmentation` | ❌ | Same reason — speech-only cuts |
@@ -106,7 +106,11 @@ const pipeline = await tagger.tag(audioIn, textOut, {
 });
 ```
 
-Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [audio-tagging-offline.md](audio-tagging-offline.md#segmentation-optional).
+Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline path: [audio-tagging-offline.md](audio-tagging-offline.md#segmentation-optional).
+
+## Models
+
+Same packs as [audio-tagging-offline.md#models](audio-tagging-offline.md#models).
 
 ## Pipeline handle
 
@@ -119,20 +123,6 @@ Same control surface as other streaming / live-overload features ([streaming-pip
 | `reset()` | Clears progress counters while the pipeline remains running. |
 | `getStatus()` | `{ pipelineId, isRunning, chunksProcessed, unitsRead, unitsWritten, error }` |
 | `completed` | Resolves on graceful finalize (`completed`) or `stop()` (`stopped`); rejects on fatal errors (`STREAMING_PIPELINE_ERROR`). |
-
-## LiveText encoding
-
-Each committed span writes one LiveText segment:
-
-| Field | Value |
-| --- | --- |
-| `text` | Primary event `name` (highest probability) |
-| `source` | `'audio_tagging'` |
-| `timestamps` | `[startTime, endTime]` (seconds) |
-| `meta.durationMs` | Span duration in ms |
-| `meta.events` | Nested top-K array `[{ name, index, prob }]` |
-
-LiveText `meta` is a Fabric-safe JSON tree. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
 
 ## API reference
 
@@ -166,6 +156,49 @@ const pipeline = await tagger.tag(audioIn, textOut, {
 ## Optional `targetSegmentBuffer`
 
 Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload.source: 'audioTagging'`). Offline `targetSegmentBuffer` ids are rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
+
+## Speech payload (`source: 'audioTagging'`)
+
+Same contract as offline — each tagged span appended to `targetSegmentBuffer` is `kind: 'speech'` with `{ source: 'audioTagging', primaryName?, events? }`. Full shape: [audio-tagging-offline.md#speech-payload-source-audiotagging](audio-tagging-offline.md#speech-payload-source-audiotagging).
+
+### LiveText encoding
+
+Each committed span also writes one LiveText segment to `textOut`:
+
+| Field | Value |
+| --- | --- |
+| `text` | Primary event `name` (highest probability) |
+| `source` | `'audio_tagging'` |
+| `timestamps` | `[startTime, endTime]` (seconds) |
+| `meta.durationMs` | Span duration in ms |
+| `meta.events` | Nested top-K array `[{ name, index, prob }]` |
+
+LiveText `meta` is a Fabric-safe JSON tree. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Mic / file ingest | `LiveAudioBuffer` (`live_*`) | Mandatory Auto segmentation on the live path. |
+| Offline pack | Same CED / Zipformer engine | Factory/detect: [audio-tagging-offline.md](audio-tagging-offline.md). |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Live text HUD | `LiveTextBuffer` (`txt_live_*`) | Primary event name per committed span. |
+| Optional segment timeline | `LiveSegmentBuffer` (`seg_live_*`) | `targetSegmentBuffer` with `payload.source: 'audioTagging'`. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B["tag live overload"]
+  B --> C[LiveTextBuffer]
+  B --> D[Optional LiveSegmentBuffer]
+```
+
+Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
 
 ## JS Events
 
@@ -206,6 +239,108 @@ Engine, detect, and offline result types: [audio-tagging-offline.md](audio-taggi
 | `AUDIO_TAGGING_TAG_FAILED` | Live start / tag path failed. |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during the run; `completed` rejects with this `code`. |
 | `AUDIO_TAGGING_*` / `SEGMENT_*` | Same codes as [offline audio tagging](audio-tagging-offline.md#error-codes). |
+
+## Use case examples
+
+<details>
+<summary>Live tags via `onSegment` while mic audio is still flowing</summary>
+
+Start tagging with a mandatory segmentation policy, open the mic, and update the UI from `onSegment` — tags appear before you finalize or await `completed`.
+
+```ts
+import {
+  createAudioTagging,
+  DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
+} from 'react-native-sherpa-onnx/audio-tagging';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const tagger = await createAudioTagging({
+  modelSource: { kind: 'fs', path: '/path/to/audio-tagging' },
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 512 });
+
+const pipeline = await tagger.tag(audioIn, textOut, {
+  topK: 5,
+  segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log('tags', e.segment.text),
+});
+const mic = await startMicToLiveAudioBuffer(audioIn);
+
+await new Promise((r) => setTimeout(r, 20_000));
+
+await mic.stop();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+await tagger.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>File ingest overlapping the tagging pipeline</summary>
+
+Ingest a recording into the live ring while the pipeline commits tags; await `ingest.done` then finalize — no need to block the whole clip before the first tag.
+
+```ts
+import {
+  createAudioTagging,
+  DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
+} from 'react-native-sherpa-onnx/audio-tagging';
+import {
+  createEmptyLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const tagger = await createAudioTagging({ modelSource: { kind: 'fs', path: '/path/to/audio-tagging' } });
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({
+  maxSegments: 512,
+  onSegment: (e) => console.log(e.segment.text),
+});
+
+const pipeline = await tagger.tag(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+});
+const ingest = await ingestFileToLiveAudioBuffer(audioIn, { kind: 'fs', path: '/path/to/scene.wav' });
+
+await ingest.done;
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+await tagger.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Graceful teardown: finalize → await `completed`</summary>
+
+After stopping capture, finalize the input so the last speech span can commit, then await the pipeline before releasing buffers.
+
+```ts
+await mic.stop();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.flush();
+await pipeline.completed;
+await tagger.destroy();
+```
+
+</details>
 
 ## See also
 

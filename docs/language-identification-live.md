@@ -75,7 +75,7 @@ Live spoken language identification must cut the incoming audio stream into comm
 
 | Evaluator | Supported | Notes |
 | --- | --- | --- |
-| `speech_energy_silence` | ✅ **Default** | `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) |
+| `speech_energy_silence` | ✅ **Recommended** | Pass `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` (`minSegmentMs: 1500`) explicitly |
 | `speech_vad_model` | ✅ | Model-based speech cuts; pass VAD pack via policy `modelPath` |
 | `continuous_frames` | ❌ | Fixed windows are a poor fit for utterance-level language ID |
 | `speech_pyannote_segmentation` | ❌ | Not in SLID live `supportedEvaluators` |
@@ -90,6 +90,10 @@ const pipeline = await slid.identify(audioIn, textOut, {
 ```
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline Auto: [language-identification-offline.md](language-identification-offline.md#segmentation-optional).
+
+## Models
+
+Same packs as [language-identification-offline.md#models](language-identification-offline.md#models).
 
 ## Pipeline handle
 
@@ -133,6 +137,35 @@ const pipeline = await slid.identify(audioIn, textOut, {
 
 Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload: { source: 'languageId', lang }` ). Offline `targetSegmentBuffer` ids are rejected (`LANGUAGE_ID_INVALID_ARGUMENT`).
 
+## Speech payload (`source: 'languageId'`)
+
+Same contract as offline — each identified span appended to `targetSegmentBuffer` is `kind: 'speech'` with `{ source: 'languageId', lang }`. Full shape: [language-identification-offline.md#speech-payload-source-languageid](language-identification-offline.md#speech-payload-source-languageid).
+
+## Pipeline composition
+
+### Typical upstream
+
+| Source / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Mic / file ingest | `LiveAudioBuffer` (`live_*`) | Mandatory Auto segmentation on the live path. |
+| Offline Whisper SLID pack | Same engine | Factory/detect: [language-identification-offline.md](language-identification-offline.md). |
+
+### Typical downstream
+
+| Destination / feature | Buffer or handle | Notes |
+| --- | --- | --- |
+| Live text HUD | `LiveTextBuffer` (`txt_live_*`) | ISO language code per committed span. |
+| Optional segment timeline | `LiveSegmentBuffer` (`seg_live_*`) | `targetSegmentBuffer` with `payload.source: 'languageId'`. |
+
+```mermaid
+flowchart LR
+  A[LiveAudioBuffer] --> B["identify live overload"]
+  B --> C[LiveTextBuffer]
+  B --> D[Optional LiveSegmentBuffer]
+```
+
+Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview.md).
+
 ## JS Events
 
 | Callback | Payload | Fires when | Notes |
@@ -172,6 +205,108 @@ Engine, detect, and offline result types: [language-identification-offline.md](l
 | `LANGUAGE_ID_IDENTIFY_FAILED` | Live start / identify path failed. |
 | `STREAMING_PIPELINE_ERROR` | Fatal error during the run; `completed` rejects with this `code`. |
 | `LANGUAGE_ID_*` / `SEGMENT_*` | Same codes as [offline SLID](language-identification-offline.md#error-codes). |
+
+## Use case examples
+
+<details>
+<summary>Live language commits while audio is still being captured</summary>
+
+`onSegment` / `onLanguageChanged` update as speech spans commit — useful for code-switch UIs that must not wait for the whole recording.
+
+```ts
+import {
+  createLanguageIdentification,
+  DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
+} from 'react-native-sherpa-onnx/language-identification';
+import {
+  createEmptyLiveAudioBuffer,
+  startMicToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const slid = await createLanguageIdentification({
+  modelSource: { kind: 'fs', path: '/path/to/whisper-slid' },
+});
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 256 });
+
+const pipeline = await slid.identify(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log('lang segment', e.segment.text),
+  onLanguageChanged: (e) => console.log('now', e.language),
+});
+const mic = await startMicToLiveAudioBuffer(audioIn);
+
+await new Promise((r) => setTimeout(r, 25_000));
+await mic.stop();
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+await slid.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>File ingest then settle the pipeline</summary>
+
+Start identify, ingest the file, and only then finalize + await — language labels can appear during ingest.
+
+```ts
+import {
+  createLanguageIdentification,
+  DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
+} from 'react-native-sherpa-onnx/language-identification';
+import {
+  createEmptyLiveAudioBuffer,
+  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+
+const slid = await createLanguageIdentification({ modelSource: { kind: 'fs', path: '/path/to/slid' } });
+const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
+const textOut = await createLiveTextBuffer({ maxSegments: 256 });
+
+const pipeline = await slid.identify(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+});
+const ingest = await ingestFileToLiveAudioBuffer(audioIn, { kind: 'fs', path: '/path/to/mixed.wav' });
+await ingest.done;
+await finalizeLiveAudioBuffer(audioIn);
+await pipeline.completed;
+
+await slid.destroy();
+await releasePipelineTextBuffer(textOut);
+await releasePipelineAudioBuffer(audioIn);
+```
+
+</details>
+
+<details>
+<summary>Mirror commits into an optional `targetSegmentBuffer`</summary>
+
+Pass a live segment buffer so each language commit is also mirrored as a segment row for timeline UIs, while text output stays available for labels.
+
+```ts
+import { createLiveSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+
+const segOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
+const pipeline = await slid.identify(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  targetSegmentBuffer: segOut,
+  onSegment: (e) => console.log(e.segment.text),
+});
+// ... feed audio, then finalize / await as usual ...
+await releasePipelineSegmentBuffer(segOut);
+```
+
+</details>
 
 ## See also
 
