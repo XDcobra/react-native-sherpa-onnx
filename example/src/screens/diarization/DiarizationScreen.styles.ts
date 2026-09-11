@@ -446,6 +446,19 @@ export const styles = StyleSheet.create({
     color: '#374151',
     fontFamily: 'monospace',
   },
+  timelineConfidenceBadge: {
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 4,
+  },
+  timelineConfidenceText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1D4ED8',
+    fontFamily: 'monospace',
+  },
   // Diagnostics
   statusBox: {
     backgroundColor: '#1E293B',

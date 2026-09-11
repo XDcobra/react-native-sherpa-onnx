@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -66,6 +67,8 @@ export type SpeakerTurn = {
   durationSec: number;
   startSample: number;
   endSample: number;
+  /** Silhouette confidence in [-1, 1] when computeConfidence is on. */
+  confidence?: number;
 };
 
 type EventLogItem = {
@@ -80,6 +83,7 @@ type EngineInfo = {
   embId: string;
   numClusters: number;
   threshold: number;
+  computeConfidence: boolean;
   numThreads: number;
   windowShiftRatio: number;
   minDurationOn: number;
@@ -142,6 +146,8 @@ export default function DiarizationScreen() {
   const [tuningExpanded, setTuningExpanded] = useState(false);
   const [clusteringThreshold, setClusteringThreshold] = useState(0.5);
   const [numClusters, setNumClusters] = useState(4); // default 4 for initial 4-speaker sample audio
+  /** Opt-in silhouette confidence; default false matches SDK / upstream. */
+  const [computeConfidence, setComputeConfidence] = useState(false);
   const [minDurationOn, setMinDurationOn] = useState(0.3); // 0.3s filters spurious frame-glitches for clean turns
   const [minDurationOff, setMinDurationOff] = useState(0.5); // 0.5s merges conversational pauses
   const [windowShiftRatio, setWindowShiftRatio] = useState(0.25); // 0.25 (75% overlap) provides fast execution on mobile CPU
@@ -333,6 +339,7 @@ export default function DiarizationScreen() {
         clustering: {
           numClusters: numClusters > 0 ? numClusters : undefined,
           threshold: clusteringThreshold,
+          computeConfidence,
         },
         minDurationOn,
         minDurationOff,
@@ -346,12 +353,15 @@ export default function DiarizationScreen() {
         embId: embLabel,
         numClusters,
         threshold: clusteringThreshold,
+        computeConfidence,
         numThreads,
         windowShiftRatio,
         minDurationOn,
         minDurationOff,
       });
-      appendEvent('Diarization engine initialized successfully');
+      appendEvent(
+        `Diarization engine initialized successfully (computeConfidence=${computeConfidence})`
+      );
       return engine;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -364,6 +374,7 @@ export default function DiarizationScreen() {
   }, [
     appendEvent,
     clusteringThreshold,
+    computeConfidence,
     customEmbSource,
     customSegSource,
     embCatalog,
@@ -416,6 +427,7 @@ export default function DiarizationScreen() {
         engineInfo.numClusters !== numClusters ||
         engineInfo.numThreads !== numThreads ||
         engineInfo.threshold !== clusteringThreshold ||
+        engineInfo.computeConfidence !== computeConfidence ||
         engineInfo.windowShiftRatio !== windowShiftRatio ||
         engineInfo.minDurationOn !== minDurationOn ||
         engineInfo.minDurationOff !== minDurationOff;
@@ -478,13 +490,22 @@ export default function DiarizationScreen() {
           durationSec: endSec - startSec,
           startSample: seg.startSample,
           endSample: seg.endSample,
+          ...(typeof seg.confidence === 'number'
+            ? { confidence: seg.confidence }
+            : {}),
         };
       });
 
       setTurns(newTurns);
       setHasDiarizedOnce(true);
+      const withConf = newTurns.filter(
+        (t) => typeof t.confidence === 'number'
+      ).length;
       appendEvent(
-        `Diarization complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments`
+        `Diarization complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments` +
+          (computeConfidence
+            ? ` (confidence on ${withConf}/${newTurns.length})`
+            : '')
       );
     } catch (e) {
       if (abortCtrl.signal.aborted) {
@@ -507,6 +528,7 @@ export default function DiarizationScreen() {
   }, [
     appendEvent,
     clusteringThreshold,
+    computeConfidence,
     diarizeBusy,
     engineInfo,
     initEngine,
@@ -537,11 +559,12 @@ export default function DiarizationScreen() {
       appendEvent(
         `Reclustering (threshold=${clusteringThreshold.toFixed(
           2
-        )}, numClusters=${numClusters})...`
+        )}, numClusters=${numClusters}, computeConfidence=${computeConfidence})...`
       );
       const res = await engineRef.current.recluster({
         numClusters: numClusters > 0 ? numClusters : undefined,
         threshold: clusteringThreshold,
+        computeConfidence,
       });
       const durMs = Date.now() - startedAt;
       setProcessingTimeMs(durMs);
@@ -556,6 +579,9 @@ export default function DiarizationScreen() {
           durationSec: s.end - s.start,
           startSample: Math.round(s.start * sampleRate),
           endSample: Math.round(s.end * sampleRate),
+          ...(typeof s.confidence === 'number'
+            ? { confidence: s.confidence }
+            : {}),
         }));
         setTurns(updatedTurns);
         setEngineInfo((prev) =>
@@ -564,11 +590,18 @@ export default function DiarizationScreen() {
                 ...prev,
                 numClusters,
                 threshold: clusteringThreshold,
+                computeConfidence,
               }
             : prev
         );
+        const withConf = updatedTurns.filter(
+          (t) => typeof t.confidence === 'number'
+        ).length;
         appendEvent(
-          `Recluster complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments`
+          `Recluster complete in ${durMs}ms: ${res.numSpeakers} speakers, ${res.segmentCount} segments` +
+            (computeConfidence
+              ? ` (confidence on ${withConf}/${updatedTurns.length})`
+              : '')
         );
       } else {
         appendEvent(
@@ -585,6 +618,7 @@ export default function DiarizationScreen() {
   }, [
     appendEvent,
     clusteringThreshold,
+    computeConfidence,
     diarizeBusy,
     numClusters,
     reclusterBusy,
@@ -652,9 +686,13 @@ export default function DiarizationScreen() {
     const text = turns
       .map((t) => {
         const alias = speakerAliases[t.speaker] ?? `Speaker ${t.speaker}`;
+        const conf =
+          typeof t.confidence === 'number'
+            ? ` conf=${t.confidence.toFixed(3)}`
+            : '';
         return `[${formatTime(t.startSec)} → ${formatTime(
           t.endSec
-        )}] ${alias} (+${formatDuration(t.durationSec)})`;
+        )}] ${alias} (+${formatDuration(t.durationSec)})${conf}`;
       })
       .join('\n');
     Clipboard.setString(text);
@@ -871,6 +909,25 @@ export default function DiarizationScreen() {
                 </View>
               </View>
 
+              {/* Per-segment silhouette confidence (opt-in) */}
+              <View style={styles.paramRow}>
+                <View style={styles.flex1}>
+                  <Text style={styles.paramLabel}>
+                    Compute segment confidence
+                  </Text>
+                  <Text style={styles.cardSubtitle}>
+                    Silhouette score per turn [-1, 1]. Default off (SDK parity).
+                    Re-run diarize after toggling.
+                  </Text>
+                </View>
+                <Switch
+                  value={computeConfidence}
+                  onValueChange={setComputeConfidence}
+                  disabled={diarizeBusy || reclusterBusy}
+                  accessibilityLabel="Compute segment confidence"
+                />
+              </View>
+
               {/* Min Duration On */}
               <View style={styles.paramRow}>
                 <Text style={styles.paramLabel}>Min Speech Turn Duration</Text>
@@ -1064,6 +1121,12 @@ export default function DiarizationScreen() {
                   {engineInfo.numClusters > 0
                     ? `${engineInfo.numClusters} clusters (fixed)`
                     : `Threshold ${engineInfo.threshold.toFixed(2)}`}
+                </Text>
+              </View>
+              <View style={styles.metaBadge}>
+                <Text style={styles.metaBadgeLabel}>Confidence</Text>
+                <Text style={styles.metaBadgeValue}>
+                  {engineInfo.computeConfidence ? 'On' : 'Off'}
                 </Text>
               </View>
             </View>
@@ -1445,6 +1508,13 @@ export default function DiarizationScreen() {
                         +{formatDuration(turn.durationSec)}
                       </Text>
                     </View>
+                    {typeof turn.confidence === 'number' ? (
+                      <View style={styles.timelineConfidenceBadge}>
+                        <Text style={styles.timelineConfidenceText}>
+                          {turn.confidence.toFixed(2)}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                 );
               })}
@@ -1455,7 +1525,7 @@ export default function DiarizationScreen() {
                 {turns.length === 0
                   ? 'No speaker turns available. Run diarization to analyze the audio.'
                   : 'No turns match the selected speaker filter.'}
-        </Text>
+              </Text>
             </View>
           )}
         </View>
@@ -1562,7 +1632,7 @@ export default function DiarizationScreen() {
               </ScrollView>
             </View>
           )}
-      </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
