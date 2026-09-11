@@ -154,13 +154,7 @@ function detectTtsModel(
 
 ```ts
 const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' });
-// det.modelType       → e.g. 'kokoro'
-// det.isStreaming     → true
-// det.paths           → { ttsModel, tokens, dataDir, voices, ... } on folder scans
-// det.lexiconLanguages → [{ id: 'us-en', path: '.../lexicon-us-en.txt' }, ...] (vits/matcha/kokoro/zipvoice)
-// det.languages       → [{ iso6391Hint: 'en', id: 'us-en' }, ...]
-// det.quantization    → 'int8' | 'fp32' | ...
-// det.sizeTier        → 'small' | 'medium' | 'large'
+if (!det.success) throw new Error(det.error ?? 'TTS detection failed');
 ```
 
 ### `createTTS(options)`
