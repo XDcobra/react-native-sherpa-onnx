@@ -2,21 +2,11 @@
 
 > **Live overload** — not a streaming audio-tagging model.
 >
-> This guide uses the **same offline** CED / Zipformer weights as [audio-tagging-offline.md](audio-tagging-offline.md). Live audio is sliced by a mandatory **speech segmentation policy**; each committed span is tagged **natively** inside an `OfflineLivePipelineWorker`. There is **no** separate online/streaming audio tagger in sherpa-onnx.
->
-> Contrast with features that have a **true streaming** engine (e.g. [stt-streaming.md](stt-streaming.md), [vad-streaming.md](vad-streaming.md), [kws-streaming.md](kws-streaming.md), [enhancement-streaming.md](enhancement-streaming.md) via `createStreaming*` / `createKeywordSpotting`).
+> Live audio is sliced by a mandatory speech segmentation policy; each committed span is tagged natively with the same offline CED/Zipformer weights. There is no separate online/streaming audio tagger in sherpa-onnx.
 
 ## Introduction
 
-On-device **sound-event tagging** over a live audio stream. Audio tagging owns speech/energy segmentation; a native live worker tags each committed span, commits the **primary event name** to a live text Out buffer (plus top-K in meta), and optionally appends labeled speech segments (`payload.source: 'audioTagging'`).
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
-| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed primary event names |
-| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
-| **Engine** | Same `AudioTaggingEngine` as offline | `tag(liveAudio, liveText, options)` |
-| **Pipeline handle** | `AudioTaggingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+On-device **sound-event tagging** over a live mic or file stream. Each committed span writes the primary event name (and top-K meta) to a live text buffer and can optionally append labeled speech segments.
 
 Import path: **`react-native-sherpa-onnx/audio-tagging`**.
 
@@ -56,13 +46,7 @@ const pipeline = await tagger.tag(audioIn, textOut, {
     // Or continuous_frames with checkpointIntervalMs >= 1500
   },
   onSegment: (e) =>
-    console.log(
-      '#',
-      e.segmentIndex,
-      e.result.primary?.name,
-      e.durationMs,
-      e.result.events
-    ),
+    console.log(e.segmentIndex, e.result.primary?.name, e.durationMs),
 });
 
 await startMicToLiveAudioBuffer(audioIn);
@@ -77,17 +61,6 @@ await releasePipelineAudioBuffer(audioIn);
 ```
 
 `finalizeLiveAudioBuffer(audioIn)` drains remaining spans and resolves `completed`. Prefer that over an early `stop()` when the session ends naturally.
-
-## Buffer matrix
-
-| | Offline | Live overload |
-| --- | --- | --- |
-| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
-| **Text out** | — | `LiveTextBuffer` (**required**) |
-| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
-| **Return** | result object | `AudioTaggingPipelineHandle` |
-
-Mixed live/offline arguments throw `AUDIO_TAGGING_INVALID_ARGUMENT`.
 
 ## Mandatory segmentation
 
@@ -104,7 +77,7 @@ Audio tagging attaches the engine — you do **not** pass a pre-built VAD segmen
 
 ### Live span floor (`AUDIO_TAGGING_LIVE_MIN_SPAN_MS`)
 
-Live OfflineLive workers skip spans shorter than **1500 ms**. JS `assertAudioTaggingLiveSpanPolicy` rejects policies that cannot meet that floor:
+Live workers skip spans shorter than **1500 ms**. JS `assertAudioTaggingLiveSpanPolicy` rejects policies that cannot meet that floor:
 
 | Evaluator | Constraint |
 | --- | --- |
@@ -137,9 +110,26 @@ Each committed span writes one LiveText segment:
 | `meta.durationMs` | Span duration in ms |
 | `meta.events` | Nested top-K array `[{ name, index, prob }]` |
 
-LiveText `meta` is a Fabric-safe JSON tree. Apps that read the buffer directly see `meta.events` as an array. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
+LiveText `meta` is a Fabric-safe JSON tree. The JS `onSegment` callback maps it into `AudioTaggingLiveSegmentEvent.result`.
 
-See [live-text-meta-json-tree-contract.md](future-work/live-text-meta-json-tree-contract.md).
+## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`LiveAudioBuffer`](audiobuffer-streaming.md) | Mic / file ingest |
+| **Text out** | [`LiveTextBuffer`](textbuffer-streaming.md) | Required — committed primary event names |
+| **Segments out (optional)** | [`LiveSegmentBuffer`](segmentbuffer-streaming.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
+| **Engine** | Same `AudioTaggingEngine` as offline | `tag(liveAudio, liveText, options)` |
+| **Pipeline handle** | `AudioTaggingPipelineHandle` | `stop` / `flush` / `reset` / `getStatus` / `completed` |
+
+| | Offline | Live overload |
+| --- | --- | --- |
+| **Audio in** | `OfflineAudioBuffer` | `LiveAudioBuffer` |
+| **Text out** | — | `LiveTextBuffer` (**required**) |
+| **Segments out** | optional offline `targetSegmentBuffer` | optional live `targetSegmentBuffer` |
+| **Return** | result object | `AudioTaggingPipelineHandle` |
+
+Mixed live/offline arguments throw `AUDIO_TAGGING_INVALID_ARGUMENT`.
 
 ## API reference
 
@@ -170,11 +160,24 @@ const pipeline = await tagger.tag(audioIn, textOut, {
 });
 ```
 
-`AudioTaggingLiveSegmentEvent` carries `segmentIndex`, `startTime`, `endTime`, `durationMs`, and `result: AudioTaggingResult` (parsed from LiveText). There is no separate `onEvent` API — use `onSegment` (and optionally read LiveText commits).
-
 ## Optional `targetSegmentBuffer`
 
 Pass a **live** segment buffer (`seg_live_*`) to append the same payload as offline (`payload.source: 'audioTagging'`). Offline `targetSegmentBuffer` ids are rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
+
+## JS Events
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `AudioTaggingLiveSegmentEvent` | after each committed span is tagged | no `onProgress` on the live path |
+
+Shapes: [Types](#types) · offline result fields: [audio-tagging-offline.md](audio-tagging-offline.md#types).
+
+```ts
+await tagger.tag(audioIn, textOut, {
+  segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+  onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
+});
+```
 
 ## Types
 

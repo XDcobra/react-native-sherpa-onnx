@@ -2,26 +2,9 @@
 
 ## Introduction
 
-On-device **sound-event tagging** using dedicated **CED** or **Zipformer** packs from the sherpa-onnx [`audio-tagging-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models) release. Returns a **ranked top-K list** of AudioSet-style event labels with probabilities (e.g. `Speech`, `Music`, `Siren`, `Dog`).
-
-Unlike STT it does **not** produce a transcript; unlike VAD/KWS it does **not** localize events in time inside the model. Temporal structure comes only from **our** segmentation windows when you use Auto mode. Prefer this over [keyword spotting](kws-streaming.md) when you need a sound-event taxonomy rather than wake phrases; prefer [spoken language identification](language-identification-offline.md) when you need ISO language codes.
-
-For **live overload** (same offline weights on live buffers — not a true streaming model), see [Audio tagging (live overload)](audio-tagging-live.md).
-
-| Role | Type | Notes |
-| --- | --- | --- |
-| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Short clip (oneshot) or long-form (segmented) |
-| **Segments out (optional)** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
-| **Engine** | `AudioTaggingEngine` via `createAudioTagging` | `tag` oneshot / segmented |
+On-device **sound-event tagging** with CED or Zipformer packs. Returns a ranked top-K list of AudioSet-style labels with probabilities (e.g. `Speech`, `Music`, `Siren`) — not a transcript and not wake-phrase spotting. Use oneshot for short clips or segmented Auto mode for long audio; continuous mic/file use is the [live overload](audio-tagging-live.md).
 
 Import path: **`react-native-sherpa-onnx/audio-tagging`**.
-
-Sherpa-onnx exposes audio tagging **only as offline** (`AudioTagging` + `OfflineStream` — no online tagger). This SDK adds:
-
-1. **Oneshot** — single pass over the whole clip → top-K events.
-2. **Segmented** — [segmentation engine](segmentation-engine.md) slices long audio; per-span top-K results.
-
-There is **no** `createStreamingAudioTagging`. Continuous mic/file use is the [live overload](audio-tagging-live.md).
 
 ## Quick start — oneshot
 
@@ -94,23 +77,23 @@ const result = await tagger.tag(audio, {
 console.log(result.totalSegments, result.processingTimeMs, result.segments.length);
 ```
 
-Offline Auto supports **`speech_energy_silence` only**. `continuous_frames` is streaming-only in `segmentOfflineBuffer` (use it on [live overload](audio-tagging-live.md)). Speech-only VAD evaluators (`speech_vad_model`, `speech_pyannote_segmentation`) are **not** supported — they can miss non-speech events such as sirens or music.
+Offline Auto supports **`speech_energy_silence` only**. `continuous_frames` is for [live overload](audio-tagging-live.md). Speech-only VAD evaluators (`speech_vad_model`, `speech_pyannote_segmentation`) are **not** supported — they can miss non-speech events such as sirens or music.
 
-Optional empty `targetSegmentBuffer` attaches `AudioTaggingSpeechSegmentPayload` for downstream pipelines.
-
-`segmentation.mode: 'manual'` is rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
-
----
+Optional empty `targetSegmentBuffer` attaches `AudioTaggingSpeechSegmentPayload` for downstream pipelines. `segmentation.mode: 'manual'` is rejected (`AUDIO_TAGGING_INVALID_ARGUMENT`).
 
 ## Buffer matrix
+
+| Role | Type | Notes |
+| --- | --- | --- |
+| **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Short clip (oneshot) or long-form (segmented) |
+| **Segments out (optional)** | [`OfflineSegmentBuffer`](segmentbuffer-offline.md) | `payload.source: 'audioTagging'`, `primaryName`, `events` |
+| **Engine** | `AudioTaggingEngine` via `createAudioTagging` | `tag` oneshot / segmented |
 
 | | Oneshot | Segmented |
 | --- | --- | --- |
 | **Audio in** | `OfflineAudioBuffer` | `OfflineAudioBuffer` |
 | **Segments out** | optional `targetSegmentBuffer` | optional `targetSegmentBuffer` |
-| **Return** | `{ events, primary?, audioDuration, elapsedMs, topK }` | `{ segments, totalSegments, processingTimeMs }` |
-
----
+| **Return** | `AudioTaggingResult` | `SegmentedAudioTaggingResult` |
 
 ## API reference
 
@@ -216,56 +199,24 @@ Recommended starter pack (size-first): `sherpa-onnx-ced-mini-audio-tagging-2024-
 
 Download via `ModelCategory.AudioTagging` → release tag [`audio-tagging-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models) (built-in GitHub source; see [download-manager.md](download-manager.md)).
 
----
+## JS Events
 
-## Offline JS events (`onProgress` / `onSegment`)
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only; oneshot: none |
+| `onSegment` | `AudioTaggingSegmentEvent` | after each committed span is tagged | order: progress → tag → optional segment append → `onSegment` |
 
-### `onProgress` (start-of-step)
-
-Multi-span paths support optional coarse offline progress via `onProgress` on **segmented** `tag`. The payload is shared **`OrchestrationProgress`** (same fields as VAD offline / Alignment / SID / SLID):
-
-- Fires at the **start** of step `i` (before native tag for that span).
-- `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
-- `totalSegments` is the number of non-empty speech spans; `currentSegmentDurationMs` is that span’s duration.
-- Zero usable speech spans → **no** progress events (empty `segments`).
-- Only **function** callbacks are registered. If a callback throws, the run aborts.
-
-Oneshot `tag` does **not** emit progress.
-
-### `onSegment` (per-span result)
-
-Fires **after** native tag for each speech span:
-
-| Field | Meaning |
-| --- | --- |
-| `segmentIndex` / `totalSegments` | 0-based index and span count |
-| `startTime` / `endTime` / `durationMs` | Span range in seconds / ms |
-| `result` | `AudioTaggingResult` for that span (`events`, `primary`, …) |
-
-Order per span: `onProgress` → tag → (`append` when `targetSegmentBuffer` is set) → `onSegment`.
+Shapes: [Types](#types).
 
 ```ts
 await tagger.tag(audio, {
-  segmentation: {
-    mode: 'auto',
-    policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
-  },
-  onProgress: (p) => {
-    console.log(
-      `at ${p.currentSegment + 1}/${p.totalSegments} fraction=${p.fraction.toFixed(3)}`
-    );
-  },
-  onSegment: (e) => {
-    console.log(
-      `#${e.segmentIndex} ${e.result.primary?.name ?? '—'} (${e.durationMs}ms)`
-    );
-  },
+  segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
 });
 ```
 
-Live overload uses `onSegment` only (no offline `onProgress`) — see [audio-tagging-live.md](audio-tagging-live.md).
-
----
+Live overload uses `onSegment` only (no offline `onProgress`) — see [audio-tagging-live.md](audio-tagging-live.md#js-events).
 
 ## Speech payload (`source: 'audioTagging'`)
 
@@ -278,8 +229,6 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [audio-tag
 ```
 
 See [segmentbuffer-offline.md](segmentbuffer-offline.md).
-
----
 
 ## Types
 
@@ -315,8 +264,6 @@ Live-only types (`AudioTaggingLivePipelineOptions`, `AudioTaggingLiveSegmentEven
 
 See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.md](segmentbuffer-offline.md).
 
----
-
 ## Error codes
 
 | Error code | Explanation |
@@ -331,8 +278,6 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `AUDIO_TAGGING_INIT_ERROR` | Native init error token (native). |
 | `AUDIO_TAGGING_OFFLINE_OOM` | Offline compute ran out of memory (native). |
 | `SEGMENT_*` / `FILEIO_*` | Segment buffers / `FileSource` resolution (same as other offline features). |
-
----
 
 ## See also
 
