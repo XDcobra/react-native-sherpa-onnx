@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           submodules: recursive
@@ -166,7 +166,7 @@ jobs:
           retention-days: 90
 
       - name: Create GitHub Release with Framework
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.release_tag }}
           name: sherpa-onnx iOS Framework ${{ steps.version.outputs.release_tag }}

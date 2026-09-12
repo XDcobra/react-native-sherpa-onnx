@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -65,7 +65,7 @@ jobs:
           echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Cache FFmpeg prebuilts
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: ffmpeg-cache
         with:
           path: |
@@ -158,7 +158,7 @@ jobs:
           ls -la "ffmpeg-${VER}.aar"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}

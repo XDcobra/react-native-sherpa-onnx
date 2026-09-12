@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -84,13 +84,13 @@ jobs:
           echo "Release tag: $RELEASE_TAG (Maven version: $ORT_MAVEN_VERSION)"
 
       - name: Set up JDK
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Set up Android NDK
         id: setup-ndk
@@ -101,7 +101,7 @@ jobs:
           local-cache: false  # disable local cache to avoid linking errors: https://github.com/nttld/setup-ndk/issues/518#event-16541651206
 
       - name: Cache QNN SDK
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: qnn-cache
         with:
           path: qnn-sdk
@@ -138,7 +138,7 @@ jobs:
           echo "QNN SDK root: $QNN_ROOT"
 
       - name: Cache ONNX Runtime build output (AAR + all ABIs)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: ort-cache
         with:
           path: third_party/onnxruntime_prebuilt/android-arm64-qnn-nnapi-xnnpack
@@ -190,7 +190,7 @@ jobs:
 
       - name: Create GitHub Release (AAR + zip)
         id: release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.versions.outputs.release_tag }}
           name: ONNX Runtime Android + QNN ${{ steps.versions.outputs.release_tag }}

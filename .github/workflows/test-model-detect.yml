@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -90,7 +90,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           sparse-checkout: scripts/ci
 
@@ -178,7 +178,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check generated model language catalog
         if: ${{ matrix.check_language_catalog }}

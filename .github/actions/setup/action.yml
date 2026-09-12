@@ -5,7 +5,7 @@ runs:
   using: composite
   steps:
     - name: Checkout (no submodules)
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
         submodules: false
@@ -17,7 +17,7 @@ runs:
 
     - name: Restore sherpa-onnx cache
       id: submodule-cache
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: |
           third_party/sherpa-onnx
@@ -38,7 +38,7 @@ runs:
 
     - name: Save sherpa-onnx cache
       if: steps.submodule-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@v6
       with:
         path: |
           third_party/sherpa-onnx
@@ -46,13 +46,13 @@ runs:
         key: ${{ steps.submodule-cache.outputs.cache-primary-key }}
 
     - name: Setup Node.js
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version-file: .nvmrc
 
     - name: Restore dependencies
       id: yarn-cache
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: |
           **/node_modules
@@ -69,7 +69,7 @@ runs:
 
     - name: Cache dependencies
       if: steps.yarn-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@v6
       with:
         path: |
           **/node_modules
