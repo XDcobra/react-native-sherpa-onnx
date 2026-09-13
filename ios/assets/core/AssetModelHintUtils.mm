@@ -63,6 +63,13 @@ NSString *SherpaOnnxInferModelHint(NSString *folderName) {
     return @"kws";
   }
 
+  // Audio tagging before STT: zipformer AT packs contain "zipformer".
+  if ([name containsString:@"audio-tagging"] ||
+      [name containsString:@"audiotagging"] ||
+      ([name containsString:@"ced"] && [name containsString:@"tagging"])) {
+    return @"audiotagging";
+  }
+
   NSArray<NSString *> *sttHints = @[
     @"zipformer",
     @"paraformer",

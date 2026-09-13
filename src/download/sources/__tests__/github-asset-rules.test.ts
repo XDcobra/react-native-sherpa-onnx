@@ -126,3 +126,49 @@ describe('github-asset-rules — Language Identification', () => {
     ).toBe(false);
   });
 });
+
+describe('github-asset-rules — STT vs AudioTagging', () => {
+  it('rejects audio-tagging archives from the STT rail', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Stt,
+        'sherpa-onnx-zipformer-audio-tagging-2024-04-09.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Stt,
+        'sherpa-onnx-zipformer-small-audio-tagging-2024-04-15.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Stt,
+        'sherpa-onnx-ced-tiny-audio-tagging-2024-04-19.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(false);
+  });
+
+  it('still accepts normal STT archives', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Stt,
+        'sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
+
+  it('keeps audio-tagging archives on the AudioTagging rail', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.AudioTagging,
+        'sherpa-onnx-zipformer-audio-tagging-2024-04-09.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
+});

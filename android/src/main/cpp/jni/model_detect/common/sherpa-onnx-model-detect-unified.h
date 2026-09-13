@@ -33,7 +33,7 @@ struct UnifiedModelDetectResult {
 };
 
 /**
- * Run TTS→STT→VAD→Punctuation→Enhancement→Alignment detectors; first hit wins.
+ * Run TTS→KWS→AudioTagging→STT→VAD→Punctuation→… detectors; first hit wins.
  * Pass at least one of model_dir or asset_name (via UnifiedModelDetectInput).
  */
 UnifiedModelDetectResult DetectModel(

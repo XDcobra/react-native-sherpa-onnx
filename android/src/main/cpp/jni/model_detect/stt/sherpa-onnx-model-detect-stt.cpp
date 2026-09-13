@@ -172,6 +172,12 @@ static std::vector<SttModelKind> GetKindsFromDirName(const std::string& modelDir
             out.push_back(k);
     };
 
+    // Audio-tagging zipformer packs must not be claimed as STT by name.
+    if (lower.find("audio-tagging") != std::string::npos ||
+        lower.find("audiotagging") != std::string::npos) {
+        return out;
+    }
+
     if (lower.find("moonshine") != std::string::npos) {
         add(SttModelKind::kMoonshineV2);
         add(SttModelKind::kMoonshine);

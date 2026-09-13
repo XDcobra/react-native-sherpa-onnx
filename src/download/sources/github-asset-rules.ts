@@ -25,7 +25,13 @@ export function isAssetSupportedForCategory(
     case ModelCategory.Tts:
       return ext === 'tar.bz2';
     case ModelCategory.Stt:
-      return ext === 'tar.bz2' && !lower.includes('vad');
+      return (
+        ext === 'tar.bz2' &&
+        !lower.includes('vad') &&
+        !lower.includes('audio-tagging') &&
+        !lower.includes('audiotagging') &&
+        !(lower.includes('ced') && lower.includes('tagging'))
+      );
     case ModelCategory.Vad:
       return ext === 'onnx' && lower.includes('vad');
     case ModelCategory.Punctuation:

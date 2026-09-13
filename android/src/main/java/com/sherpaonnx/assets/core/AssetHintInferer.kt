@@ -72,6 +72,15 @@ internal object AssetHintInferer {
     "wake_word",
   )
 
+  /**
+   * Audio tagging packs. Must run before STT heuristics: zipformer AT folders
+   * contain `zipformer` and would otherwise be mis-hinted as `stt`.
+   */
+  private val audioTaggingHints = listOf(
+    "audio-tagging",
+    "audiotagging",
+  )
+
   fun inferModelHint(folderName: String): String {
     val name = folderName.lowercase()
     if (alignmentHints.any { name.contains(it) }) {
@@ -82,6 +91,11 @@ internal object AssetHintInferer {
     }
     if (kwsHints.any { name.contains(it) }) {
       return "kws"
+    }
+    if (audioTaggingHints.any { name.contains(it) } ||
+      (name.contains("ced") && name.contains("tagging"))
+    ) {
+      return "audiotagging"
     }
     val isStt = sttHints.any { name.contains(it) }
     val isTts = ttsHints.any { name.contains(it) }

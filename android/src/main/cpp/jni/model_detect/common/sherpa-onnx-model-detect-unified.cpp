@@ -251,6 +251,28 @@ UnifiedModelDetectResult DetectModelInternal(
             kws.error);
     }
 
+    // Audio tagging zipformer packs include "zipformer" in the folder name and
+    // would otherwise be claimed as STT transducers in name-only catalog mode.
+    AudioTaggingDetectResult audioTagging =
+        DetectAudioTaggingModel(model_dir, asset_name, modelType, quantization);
+    const std::string audioTaggingType =
+        AudioTaggingModelKindToString(audioTagging.selectedKind);
+    if (IsCatalogDetectHit(
+            audioTagging.ok, audioTaggingType, audioTagging.detectionSources)) {
+        return MakeHit(
+            "audiotagging",
+            audioTaggingType,
+            audioTagging.derivedLanguages,
+            audioTagging.quantization,
+            "",
+            false,
+            false,
+            audioTagging.detectedModels,
+            audioTagging.detectionSources,
+            AudioTaggingModelPathsToStringMap(audioTagging.paths),
+            audioTagging.error);
+    }
+
     SttDetectResult stt = DetectSttModel(
         model_dir, asset_name, modelType, quantization, false);
     const std::string sttType = SttModelKindToString(stt.selectedKind);
@@ -304,26 +326,6 @@ UnifiedModelDetectResult DetectModelInternal(
             punctuation.detectionSources,
             PunctuationModelPathsToStringMap(punctuation.paths),
             punctuation.error);
-    }
-
-    AudioTaggingDetectResult audioTagging =
-        DetectAudioTaggingModel(model_dir, asset_name, modelType, quantization);
-    const std::string audioTaggingType =
-        AudioTaggingModelKindToString(audioTagging.selectedKind);
-    if (IsCatalogDetectHit(
-            audioTagging.ok, audioTaggingType, audioTagging.detectionSources)) {
-        return MakeHit(
-            "audiotagging",
-            audioTaggingType,
-            audioTagging.derivedLanguages,
-            audioTagging.quantization,
-            "",
-            false,
-            false,
-            audioTagging.detectedModels,
-            audioTagging.detectionSources,
-            AudioTaggingModelPathsToStringMap(audioTagging.paths),
-            audioTagging.error);
     }
 
     EnhancementDetectResult enhancement =
