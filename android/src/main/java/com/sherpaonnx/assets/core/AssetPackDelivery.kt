@@ -1,5 +1,8 @@
 package com.sherpaonnx.assets.core
 
+import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -8,6 +11,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.AssetPackState
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
+import com.google.android.play.core.assetpacks.model.AssetPackErrorCode
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
 
 internal class AssetPackDelivery(
@@ -15,7 +19,20 @@ internal class AssetPackDelivery(
   private val logTag: String,
 ) {
   private val pendingEnsures = mutableMapOf<String, MutableList<Promise>>()
+  private val refetchAttempted = mutableSetOf<String>()
+  private val wifiConfirmShown = mutableSetOf<String>()
+  private val stallHandlers = mutableMapOf<String, Runnable>()
+  private val lastProgressBytes = mutableMapOf<String, Long>()
   private var packStateListener: AssetPackStateUpdateListener? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+
+  companion object {
+    /** Reject if downloaded bytes do not advance for this long while waiting. */
+    private const val STALL_TIMEOUT_MS = 60_000L
+
+    /** Historic AssetPackErrorCode.PLAY_STORE_NOT_FOUND; still returned by Play at runtime. */
+    private const val PLAY_STORE_NOT_FOUND_LEGACY = -11
+  }
 
   fun fetchAssetPack(packName: String, promise: Promise) {
     try {
@@ -28,12 +45,12 @@ internal class AssetPackDelivery(
           promise.resolve(true)
         }
         .addOnFailureListener { e ->
-          Log.w(logTag, "fetchAssetPack failed: ${e.message}")
-          promise.reject("PAD_FETCH_FAILED", e.message ?: "fetch failed", e)
+          Log.w(logTag, "[SherpaOnnx PAD] fetchAssetPack failed: ${e.message}")
+          promise.reject(padFailureCode(e), e.message ?: "fetch failed", e)
         }
     } catch (e: Exception) {
-      Log.w(logTag, "fetchAssetPack error: ${e.message}")
-      promise.reject("PAD_FETCH_ERROR", e.message ?: "fetch error", e)
+      Log.w(logTag, "[SherpaOnnx PAD] fetchAssetPack error: ${e.message}")
+      promise.reject(padFailureCode(e), e.message ?: "fetch error", e)
     }
   }
 
@@ -43,6 +60,7 @@ internal class AssetPackDelivery(
         pendingEnsures.getOrPut(packName) { mutableListOf() }.add(promise)
       }
       ensureListenerRegistered()
+      armStallWatchdog(packName)
       val manager = AssetPackManagerFactory.getInstance(context)
       Log.i(logTag, "[SherpaOnnx PAD] ensureAssetPackReady pack=$packName")
       manager
@@ -50,6 +68,10 @@ internal class AssetPackDelivery(
         .addOnSuccessListener { packStates ->
           val state = packStates.packStates()[packName]
           if (state == null) {
+            Log.i(
+              logTag,
+              "[SherpaOnnx PAD] branch=not_installed_null pack=$packName → requestFetch",
+            )
             emitProgress(notInstalledMap(packName))
             requestFetch(packName)
             return@addOnSuccessListener
@@ -57,12 +79,15 @@ internal class AssetPackDelivery(
           handlePackState(state)
         }
         .addOnFailureListener { e ->
-          Log.w(logTag, "ensureAssetPackReady getPackStates failed: ${e.message}")
-          failEnsures(packName, "PAD_ENSURE_FAILED", e.message ?: "state failed")
+          Log.w(
+            logTag,
+            "[SherpaOnnx PAD] branch=getPackStates_failed pack=$packName msg=${e.message}",
+          )
+          failEnsures(packName, padFailureCode(e), e.message ?: "state failed")
         }
     } catch (e: Exception) {
-      Log.w(logTag, "ensureAssetPackReady error: ${e.message}")
-      failEnsures(packName, "PAD_ENSURE_ERROR", e.message ?: "ensure error")
+      Log.w(logTag, "[SherpaOnnx PAD] ensureAssetPackReady error: ${e.message}")
+      failEnsures(packName, padFailureCode(e), e.message ?: "ensure error")
     }
   }
 
@@ -81,20 +106,25 @@ internal class AssetPackDelivery(
 
   private fun requestFetch(packName: String) {
     val manager = AssetPackManagerFactory.getInstance(context)
+    Log.i(logTag, "[SherpaOnnx PAD] branch=requestFetch pack=$packName")
     manager
       .fetch(listOf(packName))
       .addOnFailureListener { e ->
-        Log.w(logTag, "ensureAssetPackReady fetch failed: ${e.message}")
-        failEnsures(packName, "PAD_FETCH_FAILED", e.message ?: "fetch failed")
+        Log.w(
+          logTag,
+          "[SherpaOnnx PAD] branch=fetch_failed pack=$packName msg=${e.message}",
+        )
+        failEnsures(packName, padFailureCode(e), e.message ?: "fetch failed")
       }
   }
 
   private fun handlePackState(state: AssetPackState) {
     val packName = state.name()
     val status = state.status()
+    val bytes = state.bytesDownloaded()
     val line =
       "[SherpaOnnx PAD] pack=$packName status=${statusName(status)} " +
-        "bytes=${state.bytesDownloaded()}/${state.totalBytesToDownload()} " +
+        "bytes=$bytes/${state.totalBytesToDownload()} " +
         "errorCode=${state.errorCode()}"
     when (status) {
       AssetPackStatus.DOWNLOADING,
@@ -104,24 +134,145 @@ internal class AssetPackDelivery(
       else -> Log.i(logTag, line)
     }
     emitProgress(stateToMap(state))
-    when (state.status()) {
-      AssetPackStatus.COMPLETED -> completeEnsures(packName, state)
+    noteProgressBytes(packName, bytes)
+
+    when (status) {
+      AssetPackStatus.COMPLETED -> {
+        Log.i(logTag, "[SherpaOnnx PAD] branch=completed pack=$packName")
+        completeEnsures(packName, state)
+      }
       AssetPackStatus.FAILED,
       AssetPackStatus.CANCELED,
-      -> failEnsures(
-        packName,
-        "PAD_DELIVERY_${statusName(state.status()).uppercase()}",
-        "Asset pack $packName ${statusName(state.status())} (errorCode=${state.errorCode()})",
+      -> handleFailedOrCanceled(packName, state)
+      AssetPackStatus.NOT_INSTALLED -> {
+        Log.i(logTag, "[SherpaOnnx PAD] branch=not_installed pack=$packName → requestFetch")
+        requestFetch(packName)
+      }
+      AssetPackStatus.WAITING_FOR_WIFI -> {
+        Log.i(logTag, "[SherpaOnnx PAD] branch=waiting_for_wifi pack=$packName")
+        maybeShowWifiConfirmation(packName)
+      }
+      AssetPackStatus.REQUIRES_USER_CONFIRMATION -> {
+        Log.i(logTag, "[SherpaOnnx PAD] branch=requires_user_confirmation pack=$packName")
+        maybeShowWifiConfirmation(packName)
+      }
+      AssetPackStatus.PENDING,
+      AssetPackStatus.DOWNLOADING,
+      AssetPackStatus.TRANSFERRING,
+      -> {
+        // Keep waiting; stall watchdog covers silent hangs.
+      }
+      else -> {
+        Log.i(
+          logTag,
+          "[SherpaOnnx PAD] branch=unknown_status pack=$packName status=$status — keep waiting",
+        )
+      }
+    }
+  }
+
+  private fun handleFailedOrCanceled(packName: String, state: AssetPackState) {
+    val errorCode = state.errorCode()
+    val alreadyRetried: Boolean
+    synchronized(pendingEnsures) {
+      alreadyRetried = !refetchAttempted.add(packName)
+    }
+    if (!alreadyRetried) {
+      Log.i(
+        logTag,
+        "[SherpaOnnx PAD] branch=refetch_after_failed pack=$packName " +
+          "status=${statusName(state.status())} errorCode=$errorCode",
       )
-      AssetPackStatus.NOT_INSTALLED -> requestFetch(packName)
-      else -> Unit
+      requestFetch(packName)
+      armStallWatchdog(packName)
+      return
+    }
+    Log.w(
+      logTag,
+      "[SherpaOnnx PAD] branch=failed_terminal pack=$packName " +
+        "status=${statusName(state.status())} errorCode=$errorCode",
+    )
+    failEnsures(
+      packName,
+      deliveryFailureCode(state.status(), errorCode),
+      "Asset pack $packName ${statusName(state.status())} (errorCode=$errorCode)",
+    )
+  }
+
+  private fun maybeShowWifiConfirmation(packName: String) {
+    synchronized(pendingEnsures) {
+      if (!wifiConfirmShown.add(packName)) {
+        Log.d(
+          logTag,
+          "[SherpaOnnx PAD] branch=wifi_confirm_skip pack=$packName reason=already_shown",
+        )
+        return
+      }
+    }
+    val activity: Activity? = context.currentActivity
+    if (activity == null) {
+      Log.w(
+        logTag,
+        "[SherpaOnnx PAD] branch=wifi_confirm_skip pack=$packName reason=no_activity",
+      )
+      return
+    }
+    try {
+      Log.i(logTag, "[SherpaOnnx PAD] branch=wifi_confirm pack=$packName")
+      AssetPackManagerFactory
+        .getInstance(context)
+        .showConfirmationDialog(activity)
+    } catch (e: Exception) {
+      Log.w(
+        logTag,
+        "[SherpaOnnx PAD] branch=wifi_confirm_failed pack=$packName msg=${e.message}",
+      )
+    }
+  }
+
+  private fun noteProgressBytes(packName: String, bytes: Long) {
+    val prev = lastProgressBytes[packName]
+    if (prev == null || bytes > prev) {
+      lastProgressBytes[packName] = bytes
+      armStallWatchdog(packName)
+    }
+  }
+
+  private fun armStallWatchdog(packName: String) {
+    synchronized(stallHandlers) {
+      stallHandlers.remove(packName)?.let { mainHandler.removeCallbacks(it) }
+      val runnable =
+        Runnable {
+          Log.w(
+            logTag,
+            "[SherpaOnnx PAD] branch=stall_timeout pack=$packName " +
+              "bytes=${lastProgressBytes[packName] ?: 0} timeoutMs=$STALL_TIMEOUT_MS",
+          )
+          failEnsures(
+            packName,
+            "PAD_STALLED",
+            "Asset pack $packName stalled (no progress for ${STALL_TIMEOUT_MS}ms)",
+          )
+        }
+      stallHandlers[packName] = runnable
+      mainHandler.postDelayed(runnable, STALL_TIMEOUT_MS)
+    }
+  }
+
+  private fun clearStallWatchdog(packName: String) {
+    synchronized(stallHandlers) {
+      stallHandlers.remove(packName)?.let { mainHandler.removeCallbacks(it) }
     }
   }
 
   private fun completeEnsures(packName: String, state: AssetPackState) {
+    clearStallWatchdog(packName)
     val promises: List<Promise>
     synchronized(pendingEnsures) {
       promises = pendingEnsures.remove(packName) ?: emptyList()
+      refetchAttempted.remove(packName)
+      wifiConfirmShown.remove(packName)
+      lastProgressBytes.remove(packName)
       if (pendingEnsures.isEmpty()) {
         unregisterListenerIfIdle()
       }
@@ -138,13 +289,21 @@ internal class AssetPackDelivery(
   }
 
   private fun failEnsures(packName: String, code: String, message: String) {
+    clearStallWatchdog(packName)
     val promises: List<Promise>
     synchronized(pendingEnsures) {
       promises = pendingEnsures.remove(packName) ?: emptyList()
+      refetchAttempted.remove(packName)
+      wifiConfirmShown.remove(packName)
+      lastProgressBytes.remove(packName)
       if (pendingEnsures.isEmpty()) {
         unregisterListenerIfIdle()
       }
     }
+    Log.w(
+      logTag,
+      "[SherpaOnnx PAD] failEnsures pack=$packName code=$code waiters=${promises.size} msg=$message",
+    )
     for (p in promises) {
       p.reject(code, message, null)
     }
@@ -184,11 +343,11 @@ internal class AssetPackDelivery(
         }
         .addOnFailureListener { e ->
           Log.w(logTag, "getAssetPackState failed: ${e.message}")
-          promise.reject("PAD_STATE_FAILED", e.message ?: "state failed", e)
+          promise.reject(padFailureCode(e), e.message ?: "state failed", e)
         }
     } catch (e: Exception) {
       Log.w(logTag, "getAssetPackState error: ${e.message}")
-      promise.reject("PAD_STATE_ERROR", e.message ?: "state error", e)
+      promise.reject(padFailureCode(e), e.message ?: "state error", e)
     }
   }
 
@@ -239,7 +398,43 @@ internal class AssetPackDelivery(
       AssetPackStatus.FAILED -> "failed"
       AssetPackStatus.CANCELED -> "canceled"
       AssetPackStatus.WAITING_FOR_WIFI -> "waiting_for_wifi"
+      AssetPackStatus.REQUIRES_USER_CONFIRMATION -> "waiting_for_wifi"
       AssetPackStatus.NOT_INSTALLED -> "not_installed"
       else -> "unknown"
     }
+
+  private fun deliveryFailureCode(status: Int, errorCode: Int): String {
+    when (errorCode) {
+      AssetPackErrorCode.NETWORK_ERROR -> return "PAD_NETWORK_ERROR"
+      AssetPackErrorCode.ACCESS_DENIED -> return "PAD_ACCESS_DENIED"
+      // PLAY_STORE_NOT_FOUND (-11) existed in older Play Core docs but is absent from
+      // asset-delivery 2.3.0's AssetPackErrorCode; keep the numeric sentinel.
+      AssetPackErrorCode.API_NOT_AVAILABLE,
+      AssetPackErrorCode.APP_UNAVAILABLE,
+      AssetPackErrorCode.APP_NOT_OWNED,
+      AssetPackErrorCode.UNRECOGNIZED_INSTALLATION,
+      PLAY_STORE_NOT_FOUND_LEGACY,
+      -> return "PAD_PLAY_UNAVAILABLE"
+      AssetPackErrorCode.PACK_UNAVAILABLE -> return "PAD_PACK_UNAVAILABLE"
+      AssetPackErrorCode.INSUFFICIENT_STORAGE -> return "PAD_INSUFFICIENT_STORAGE"
+    }
+    return "PAD_DELIVERY_${statusName(status).uppercase()}"
+  }
+
+  private fun padFailureCode(error: Throwable): String {
+    val msg = (error.message ?: "").lowercase()
+    if (
+      msg.contains("play store") ||
+        msg.contains("play_store") ||
+        msg.contains("api_not_available") ||
+        msg.contains("not available") ||
+        msg.contains("binder has died")
+    ) {
+      return "PAD_PLAY_UNAVAILABLE"
+    }
+    if (msg.contains("network")) {
+      return "PAD_NETWORK_ERROR"
+    }
+    return "PAD_ENSURE_FAILED"
+  }
 }
