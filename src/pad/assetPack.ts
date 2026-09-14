@@ -1,6 +1,7 @@
 /**
  * Ship model delivery — Android PAD (install-time / fast-follow / on-demand) & iOS ODR.
  * Re-exported from `react-native-sherpa-onnx/utils`.
+ * Prefer {@link ensureAssetPackReady} over bare {@link fetchAssetPack} for app readiness.
  * @see docs/model-delivery-pad-odr.md
  */
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
@@ -25,6 +26,24 @@ export type AssetPackStateSnapshot = {
   totalBytes: number;
   errorCode: number;
 };
+
+/** Classified reason for PAD/ODR ensure failures (app resume / UI). */
+export type AssetPackDeliveryFailureReason =
+  | 'network'
+  | 'background_denied'
+  | 'play_unavailable'
+  | 'stalled'
+  | 'wifi'
+  | 'insufficient_storage'
+  | 'unknown';
+
+export type AssetPackDeliveryError = Error & {
+  deliveryReason: AssetPackDeliveryFailureReason;
+  nativeCode?: string;
+  errorCode?: number;
+};
+
+const JS_ENSURE_TIMEOUT_MS = 90_000;
 
 function normalizeStatus(raw: string): AssetPackDeliveryStatus {
   const s = raw.toLowerCase() as AssetPackDeliveryStatus;
@@ -178,6 +197,26 @@ function ensureProgressListeners(): void {
   );
 }
 
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  onTimeout: () => Error
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(onTimeout()), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 /**
  * Native fetch + listener until the pack/tag is ready (Android: COMPLETED; iOS: models path on disk).
  */
@@ -209,19 +248,160 @@ export async function ensureAssetPackReady(
         message
       );
     }
-    throw new Error(message);
+    throw classifyAssetPackDeliveryError(new Error(message), packName);
   }
 
   try {
-    const raw = await nativeEnsure(packName);
+    const raw = await withTimeout(
+      nativeEnsure(packName),
+      JS_ENSURE_TIMEOUT_MS,
+      () => {
+        const err = new Error(
+          `On-demand delivery stalled for "${packName}" (JS timeout ${JS_ENSURE_TIMEOUT_MS}ms)`
+        );
+        (err as AssetPackDeliveryError).name = 'PAD_STALLED';
+        return err;
+      }
+    );
     const state = normalizeSnapshot(raw);
     options?.onProgress?.(state, assetPackDownloadPercent(state));
     return state;
   } catch (error) {
-    throw normalizeAssetPackDeliveryError(error, packName);
+    throw classifyAssetPackDeliveryError(error, packName);
   } finally {
     progressHandlersByPack.delete(packName);
   }
+}
+
+/**
+ * Map native/JS ensure failures to a stable {@link AssetPackDeliveryFailureReason}.
+ */
+export function classifyAssetPackDeliveryFailure(
+  error: unknown
+): AssetPackDeliveryFailureReason {
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    if (
+      typeof record.deliveryReason === 'string' &&
+      isDeliveryReason(record.deliveryReason)
+    ) {
+      return record.deliveryReason;
+    }
+  }
+  const code =
+    error instanceof Error
+      ? error.name
+      : error &&
+        typeof error === 'object' &&
+        typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : '';
+  const message =
+    error instanceof Error
+      ? error.message
+      : error &&
+        typeof error === 'object' &&
+        typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error ?? '');
+  const haystack = `${code} ${message}`.toLowerCase();
+
+  if (
+    haystack.includes('pad_play_unavailable') ||
+    haystack.includes('play_store') ||
+    haystack.includes('play store') ||
+    haystack.includes('api_not_available') ||
+    haystack.includes('binder has died') ||
+    haystack.includes('app_unavailable')
+  ) {
+    return 'play_unavailable';
+  }
+  if (
+    haystack.includes('pad_access_denied') ||
+    haystack.includes('access_denied') ||
+    haystack.includes('access denied') ||
+    haystack.includes('errorcode=-7') ||
+    haystack.includes('errorcode= -7') ||
+    /\(errorcode=-7\)/.test(haystack)
+  ) {
+    return 'background_denied';
+  }
+  if (
+    haystack.includes('pad_network') ||
+    haystack.includes('network_error') ||
+    haystack.includes('network error') ||
+    haystack.includes('errorcode=-6')
+  ) {
+    return 'network';
+  }
+  if (
+    haystack.includes('pad_stalled') ||
+    haystack.includes('odr_stalled') ||
+    haystack.includes('stalled')
+  ) {
+    return 'stalled';
+  }
+  if (
+    haystack.includes('waiting_for_wifi') ||
+    haystack.includes('wifi') ||
+    haystack.includes('confirmation')
+  ) {
+    return 'wifi';
+  }
+  if (
+    haystack.includes('insufficient_storage') ||
+    haystack.includes('insufficient storage')
+  ) {
+    return 'insufficient_storage';
+  }
+  return 'unknown';
+}
+
+function isDeliveryReason(
+  value: string
+): value is AssetPackDeliveryFailureReason {
+  return (
+    value === 'network' ||
+    value === 'background_denied' ||
+    value === 'play_unavailable' ||
+    value === 'stalled' ||
+    value === 'wifi' ||
+    value === 'insufficient_storage' ||
+    value === 'unknown'
+  );
+}
+
+export function isRetryableAssetPackFailure(
+  reason: AssetPackDeliveryFailureReason
+): boolean {
+  return (
+    reason === 'network' ||
+    reason === 'stalled' ||
+    reason === 'background_denied' ||
+    reason === 'wifi'
+  );
+}
+
+function classifyAssetPackDeliveryError(
+  error: unknown,
+  packName: string
+): AssetPackDeliveryError {
+  const base = normalizeAssetPackDeliveryError(error, packName);
+  const reason = classifyAssetPackDeliveryFailure(base);
+  const classified = base as AssetPackDeliveryError;
+  classified.deliveryReason = reason;
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    if (typeof record.code === 'string') {
+      classified.nativeCode = record.code;
+    }
+  }
+  if (__DEV__) {
+    console.warn(
+      `[SherpaOnnx PAD] classify pack=${packName} reason=${reason} code=${classified.name} msg=${classified.message}`
+    );
+  }
+  return classified;
 }
 
 function normalizeAssetPackDeliveryError(

@@ -103,6 +103,8 @@ export {
   removeAssetPack,
   ensureAssetPackReady,
   assetPackDownloadPercent,
+  classifyAssetPackDeliveryFailure,
+  isRetryableAssetPackFailure,
 } from './pad/assetPack';
 export {
   listOdrDeliverySnapshot,
@@ -116,4 +118,6 @@ export type {
   AssetPackDeliveryStatus,
   AssetPackStateSnapshot,
   EnsureAssetPackReadyOptions,
+  AssetPackDeliveryFailureReason,
+  AssetPackDeliveryError,
 } from './pad/assetPack';
