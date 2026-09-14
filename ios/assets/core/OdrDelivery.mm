@@ -16,8 +16,12 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSError *> *lastErrors;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<SherpaOnnxOdrEnsureWaiter *> *> *ensureWaiters;
 @property(nonatomic, strong) NSMutableSet<NSString *> *progressObservedTags;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *lastProgressFraction;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, id> *stallTimers;
 @property(nonatomic, copy) SherpaOnnxOdrProgressHandler progressHandler;
 @end
+
+static const NSTimeInterval kOdrStallTimeoutSeconds = 60.0;
 
 @implementation SherpaOnnxOdrDelivery
 
@@ -37,6 +41,8 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
     _lastErrors = [NSMutableDictionary dictionary];
     _ensureWaiters = [NSMutableDictionary dictionary];
     _progressObservedTags = [NSMutableSet set];
+    _lastProgressFraction = [NSMutableDictionary dictionary];
+    _stallTimers = [NSMutableDictionary dictionary];
   }
   return self;
 }
@@ -323,6 +329,12 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
     NSBundleResourceRequest *request = self.activeRequests[tag];
     if (request.progress == object) {
       dispatch_async(dispatch_get_main_queue(), ^{
+        double fraction = request.progress.fractionCompleted;
+        NSNumber *prev = self.lastProgressFraction[tag];
+        if (prev == nil || fraction > prev.doubleValue + 0.0001) {
+          self.lastProgressFraction[tag] = @(fraction);
+          [self armStallWatchdogForTag:tag];
+        }
         [self emitProgressForTag:tag];
       });
       break;
@@ -330,7 +342,60 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
   }
 }
 
+- (void)armStallWatchdogForTag:(NSString *)tag {
+  id existing = self.stallTimers[tag];
+  if (existing) {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                             selector:@selector(stallTimeoutFired:)
+                                               object:existing];
+    [self.stallTimers removeObjectForKey:tag];
+  }
+  NSString *token = [tag copy];
+  self.stallTimers[tag] = token;
+  [self performSelector:@selector(stallTimeoutFired:)
+             withObject:token
+             afterDelay:kOdrStallTimeoutSeconds];
+}
+
+- (void)clearStallWatchdogForTag:(NSString *)tag {
+  id existing = self.stallTimers[tag];
+  if (existing) {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                             selector:@selector(stallTimeoutFired:)
+                                               object:existing];
+    [self.stallTimers removeObjectForKey:tag];
+  }
+  [self.lastProgressFraction removeObjectForKey:tag];
+}
+
+- (void)stallTimeoutFired:(NSString *)token {
+  NSString *tag = nil;
+  for (NSString *key in self.stallTimers) {
+    if ([self.stallTimers[key] isEqual:token]) {
+      tag = key;
+      break;
+    }
+  }
+  if (tag.length == 0) {
+    return;
+  }
+  NSLog(@"[SherpaOnnx ODR] branch=stall_timeout tag=%@ timeoutSec=%.0f",
+        tag,
+        kOdrStallTimeoutSeconds);
+  [self.stallTimers removeObjectForKey:tag];
+  [self stopObservingProgressForTag:tag];
+  [self clearAccessForTag:tag];
+  [self rejectEnsureWaitersForTag:tag
+                             code:@"ODR_STALLED"
+                          message:[NSString stringWithFormat:
+                                       @"ODR tag \"%@\" stalled (no progress for %.0fs)",
+                                       tag,
+                                       kOdrStallTimeoutSeconds]
+                            error:nil];
+}
+
 - (void)resolveEnsureWaitersForTag:(NSString *)tag {
+  [self clearStallWatchdogForTag:tag];
   NSArray<SherpaOnnxOdrEnsureWaiter *> *waiters = [self.ensureWaiters[tag] copy];
   [self.ensureWaiters removeObjectForKey:tag];
   NSDictionary *state = [self stateDictionaryForTag:tag];
@@ -343,8 +408,13 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
                              code:(NSString *)code
                           message:(NSString *)message
                             error:(NSError *_Nullable)error {
+  [self clearStallWatchdogForTag:tag];
   NSArray<SherpaOnnxOdrEnsureWaiter *> *waiters = [self.ensureWaiters[tag] copy];
   [self.ensureWaiters removeObjectForKey:tag];
+  NSLog(@"[SherpaOnnx ODR] branch=reject code=%@ tag=%@ msg=%@",
+        code ?: @"",
+        tag ?: @"",
+        message ?: @"");
   for (SherpaOnnxOdrEnsureWaiter *waiter in waiters) {
     waiter.reject(code, message, error);
   }
@@ -401,6 +471,7 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
   NSLog(@"[SherpaOnnx ODR] ensureAssetPackReady tag=%@ beginAccessingResources", tag ?: @"");
   [self startObservingProgressForTag:tag request:request];
   [self emitProgressForTag:tag];
+  [self armStallWatchdogForTag:tag];
 
   __weak SherpaOnnxOdrDelivery *weakSelf = self;
   [request beginAccessingResourcesWithCompletionHandler:^(NSError *_Nullable accessError) {
@@ -580,7 +651,17 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
   }
   [self.accessingTags removeObject:tag];
   [self.lastErrors removeObjectForKey:tag];
-  [self.ensureWaiters removeObjectForKey:tag];
+  if (self.ensureWaiters[tag].count > 0) {
+    NSLog(@"[SherpaOnnx ODR] branch=remove_rejects_waiters tag=%@", tag);
+    [self rejectEnsureWaitersForTag:tag
+                               code:@"ODR_REMOVED"
+                            message:[NSString stringWithFormat:
+                                         @"ODR tag \"%@\" access ended while ensure was pending",
+                                         tag]
+                              error:nil];
+  } else {
+    [self clearStallWatchdogForTag:tag];
+  }
   resolve(@0);
 }
 
