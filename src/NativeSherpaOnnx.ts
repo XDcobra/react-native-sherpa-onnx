@@ -2501,8 +2501,12 @@ export interface Spec extends TurboModule {
   /**
    * Fetch if needed and resolve when the pack/tag is ready.
    * Emits {@code sherpaAssetPackDeliveryProgress} during download.
+   * @param stallTimeoutMs Native stall watchdog in ms (no byte progress). Typical default 60000.
    */
-  ensureAssetPackReady(packName: string): Promise<{
+  ensureAssetPackReady(
+    packName: string,
+    stallTimeoutMs: number
+  ): Promise<{
     packName: string;
     status: string;
     bytesDownloaded: number;

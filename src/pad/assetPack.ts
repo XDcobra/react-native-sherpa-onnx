@@ -43,7 +43,20 @@ export type AssetPackDeliveryError = Error & {
   errorCode?: number;
 };
 
-const JS_ENSURE_TIMEOUT_MS = 90_000;
+/** Default native stall watchdog (no byte progress). */
+export const DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS = 60_000;
+
+/**
+ * Absolute JS backstop around native ensure. Must stay greater than
+ * {@link DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS} so stall classification wins.
+ */
+export const DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS = 90_000;
+
+function positiveTimeoutMs(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
 
 function normalizeStatus(raw: string): AssetPackDeliveryStatus {
   const s = raw.toLowerCase() as AssetPackDeliveryStatus;
@@ -125,6 +138,16 @@ export function assetPackDownloadPercent(
 
 export type EnsureAssetPackReadyOptions = {
   onProgress?: (state: AssetPackStateSnapshot, percent: number | null) => void;
+  /**
+   * Native stall watchdog (ms). Re-armed on byte progress.
+   * @default {@link DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS}
+   */
+  stallTimeoutMs?: number;
+  /**
+   * Absolute JS timeout wrapping native ensure (ms).
+   * @default {@link DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS}
+   */
+  jsEnsureTimeoutMs?: number;
 };
 
 type ProgressHandler = (
@@ -149,13 +172,18 @@ type NativeEnsureRaw = {
 
 /** TurboModule first, then NativeModules (same native listener implementation). */
 function resolveNativeEnsureAssetPackReady():
-  | ((packName: string) => Promise<NativeEnsureRaw>)
+  | ((packName: string, stallTimeoutMs: number) => Promise<NativeEnsureRaw>)
   | null {
   if (typeof SherpaOnnx.ensureAssetPackReady === 'function') {
     return SherpaOnnx.ensureAssetPackReady.bind(SherpaOnnx);
   }
   const legacy = NativeModules.SherpaOnnx as
-    | { ensureAssetPackReady?: (packName: string) => Promise<NativeEnsureRaw> }
+    | {
+        ensureAssetPackReady?: (
+          packName: string,
+          stallTimeoutMs: number
+        ) => Promise<NativeEnsureRaw>;
+      }
     | undefined;
   if (typeof legacy?.ensureAssetPackReady === 'function') {
     return legacy.ensureAssetPackReady.bind(legacy);
@@ -230,6 +258,15 @@ export async function ensureAssetPackReady(
     );
   }
 
+  const stallTimeoutMs = positiveTimeoutMs(
+    options?.stallTimeoutMs,
+    DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS
+  );
+  const jsEnsureTimeoutMs = positiveTimeoutMs(
+    options?.jsEnsureTimeoutMs,
+    DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS
+  );
+
   ensureProgressListeners();
   if (options?.onProgress) {
     progressHandlersByPack.set(packName, options.onProgress);
@@ -253,11 +290,11 @@ export async function ensureAssetPackReady(
 
   try {
     const raw = await withTimeout(
-      nativeEnsure(packName),
-      JS_ENSURE_TIMEOUT_MS,
+      nativeEnsure(packName, stallTimeoutMs),
+      jsEnsureTimeoutMs,
       () => {
         const err = new Error(
-          `On-demand delivery stalled for "${packName}" (JS timeout ${JS_ENSURE_TIMEOUT_MS}ms)`
+          `On-demand delivery stalled for "${packName}" (JS timeout ${jsEnsureTimeoutMs}ms)`
         );
         (err as AssetPackDeliveryError).name = 'PAD_STALLED';
         return err;

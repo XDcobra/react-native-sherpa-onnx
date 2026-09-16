@@ -28,11 +28,13 @@ internal class AssetPackDelivery(
 
   companion object {
     /** Reject if downloaded bytes do not advance for this long while waiting. */
-    private const val STALL_TIMEOUT_MS = 60_000L
+    private const val DEFAULT_STALL_TIMEOUT_MS = 60_000L
 
     /** Historic AssetPackErrorCode.PLAY_STORE_NOT_FOUND; still returned by Play at runtime. */
     private const val PLAY_STORE_NOT_FOUND_LEGACY = -11
   }
+
+  private val stallTimeoutMsByPack = mutableMapOf<String, Long>()
 
   fun fetchAssetPack(packName: String, promise: Promise) {
     try {
@@ -54,15 +56,25 @@ internal class AssetPackDelivery(
     }
   }
 
-  fun ensureAssetPackReady(packName: String, promise: Promise) {
+  fun ensureAssetPackReady(
+    packName: String,
+    stallTimeoutMs: Double,
+    promise: Promise,
+  ) {
     try {
+      val timeoutMs =
+        if (stallTimeoutMs > 0) stallTimeoutMs.toLong() else DEFAULT_STALL_TIMEOUT_MS
+      stallTimeoutMsByPack[packName] = timeoutMs
       synchronized(pendingEnsures) {
         pendingEnsures.getOrPut(packName) { mutableListOf() }.add(promise)
       }
       ensureListenerRegistered()
       armStallWatchdog(packName)
       val manager = AssetPackManagerFactory.getInstance(context)
-      Log.i(logTag, "[SherpaOnnx PAD] ensureAssetPackReady pack=$packName")
+      Log.i(
+        logTag,
+        "[SherpaOnnx PAD] ensureAssetPackReady pack=$packName stallTimeoutMs=$timeoutMs",
+      )
       manager
         .getPackStates(listOf(packName))
         .addOnSuccessListener { packStates ->
@@ -239,6 +251,7 @@ internal class AssetPackDelivery(
   }
 
   private fun armStallWatchdog(packName: String) {
+    val timeoutMs = stallTimeoutMsByPack[packName] ?: DEFAULT_STALL_TIMEOUT_MS
     synchronized(stallHandlers) {
       stallHandlers.remove(packName)?.let { mainHandler.removeCallbacks(it) }
       val runnable =
@@ -246,16 +259,16 @@ internal class AssetPackDelivery(
           Log.w(
             logTag,
             "[SherpaOnnx PAD] branch=stall_timeout pack=$packName " +
-              "bytes=${lastProgressBytes[packName] ?: 0} timeoutMs=$STALL_TIMEOUT_MS",
+              "bytes=${lastProgressBytes[packName] ?: 0} timeoutMs=$timeoutMs",
           )
           failEnsures(
             packName,
             "PAD_STALLED",
-            "Asset pack $packName stalled (no progress for ${STALL_TIMEOUT_MS}ms)",
+            "Asset pack $packName stalled (no progress for ${timeoutMs}ms)",
           )
         }
       stallHandlers[packName] = runnable
-      mainHandler.postDelayed(runnable, STALL_TIMEOUT_MS)
+      mainHandler.postDelayed(runnable, timeoutMs)
     }
   }
 
@@ -273,6 +286,7 @@ internal class AssetPackDelivery(
       refetchAttempted.remove(packName)
       wifiConfirmShown.remove(packName)
       lastProgressBytes.remove(packName)
+      stallTimeoutMsByPack.remove(packName)
       if (pendingEnsures.isEmpty()) {
         unregisterListenerIfIdle()
       }
@@ -296,6 +310,7 @@ internal class AssetPackDelivery(
       refetchAttempted.remove(packName)
       wifiConfirmShown.remove(packName)
       lastProgressBytes.remove(packName)
+      stallTimeoutMsByPack.remove(packName)
       if (pendingEnsures.isEmpty()) {
         unregisterListenerIfIdle()
       }

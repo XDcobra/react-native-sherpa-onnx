@@ -14,12 +14,14 @@
 }
 
 - (void)ensureAssetPackReady:(NSString *)packName
+              stallTimeoutMs:(double)stallTimeoutMs
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
   __weak SherpaOnnx *weakSelf = self;
   [[SherpaOnnxOdrDelivery shared]
       ensureAssetPackReady:packName
+           stallTimeoutMs:stallTimeoutMs
          progressHandler:^(NSDictionary *state) {
            SherpaOnnx *strongSelf = weakSelf;
            if (strongSelf) {

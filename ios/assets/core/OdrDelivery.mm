@@ -18,10 +18,11 @@ static void *kOdrProgressKvoContext = &kOdrProgressKvoContext;
 @property(nonatomic, strong) NSMutableSet<NSString *> *progressObservedTags;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *lastProgressFraction;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, id> *stallTimers;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *stallTimeoutSecondsByTag;
 @property(nonatomic, copy) SherpaOnnxOdrProgressHandler progressHandler;
 @end
 
-static const NSTimeInterval kOdrStallTimeoutSeconds = 60.0;
+static const NSTimeInterval kOdrDefaultStallTimeoutSeconds = 60.0;
 
 @implementation SherpaOnnxOdrDelivery
 
@@ -43,6 +44,7 @@ static const NSTimeInterval kOdrStallTimeoutSeconds = 60.0;
     _progressObservedTags = [NSMutableSet set];
     _lastProgressFraction = [NSMutableDictionary dictionary];
     _stallTimers = [NSMutableDictionary dictionary];
+    _stallTimeoutSecondsByTag = [NSMutableDictionary dictionary];
   }
   return self;
 }
@@ -350,11 +352,15 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
                                                object:existing];
     [self.stallTimers removeObjectForKey:tag];
   }
+  NSTimeInterval timeoutSec =
+      self.stallTimeoutSecondsByTag[tag] != nil
+          ? self.stallTimeoutSecondsByTag[tag].doubleValue
+          : kOdrDefaultStallTimeoutSeconds;
   NSString *token = [tag copy];
   self.stallTimers[tag] = token;
   [self performSelector:@selector(stallTimeoutFired:)
              withObject:token
-             afterDelay:kOdrStallTimeoutSeconds];
+             afterDelay:timeoutSec];
 }
 
 - (void)clearStallWatchdogForTag:(NSString *)tag {
@@ -366,6 +372,7 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
     [self.stallTimers removeObjectForKey:tag];
   }
   [self.lastProgressFraction removeObjectForKey:tag];
+  [self.stallTimeoutSecondsByTag removeObjectForKey:tag];
 }
 
 - (void)stallTimeoutFired:(NSString *)token {
@@ -379,9 +386,13 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
   if (tag.length == 0) {
     return;
   }
+  NSTimeInterval timeoutSec =
+      self.stallTimeoutSecondsByTag[tag] != nil
+          ? self.stallTimeoutSecondsByTag[tag].doubleValue
+          : kOdrDefaultStallTimeoutSeconds;
   NSLog(@"[SherpaOnnx ODR] branch=stall_timeout tag=%@ timeoutSec=%.0f",
         tag,
-        kOdrStallTimeoutSeconds);
+        timeoutSec);
   [self.stallTimers removeObjectForKey:tag];
   [self stopObservingProgressForTag:tag];
   [self clearAccessForTag:tag];
@@ -390,7 +401,7 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
                           message:[NSString stringWithFormat:
                                        @"ODR tag \"%@\" stalled (no progress for %.0fs)",
                                        tag,
-                                       kOdrStallTimeoutSeconds]
+                                       timeoutSec]
                             error:nil];
 }
 
@@ -498,6 +509,7 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
 }
 
 - (void)ensureAssetPackReady:(NSString *)tag
+             stallTimeoutMs:(double)stallTimeoutMs
            progressHandler:(SherpaOnnxOdrProgressHandler)progressHandler
                    resolve:(void (^)(id))resolve
                     reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject {
@@ -505,6 +517,10 @@ static NSString *OdrTaggedFolderPathForTag(NSString *tag, NSBundle *bundle) {
     reject(@"ODR_INVALID_TAG", @"ODR tag is empty", nil);
     return;
   }
+
+  NSTimeInterval timeoutSec =
+      stallTimeoutMs > 0 ? (stallTimeoutMs / 1000.0) : kOdrDefaultStallTimeoutSeconds;
+  self.stallTimeoutSecondsByTag[tag] = @(timeoutSec);
 
   if (progressHandler) {
     self.progressHandler = progressHandler;

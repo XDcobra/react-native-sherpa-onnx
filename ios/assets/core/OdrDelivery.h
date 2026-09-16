@@ -37,6 +37,7 @@ typedef void (^SherpaOnnxOdrProgressHandler)(NSDictionary *state);
  * Progress via {@p progressHandler} (bridge maps to sherpaAssetPackDeliveryProgress).
  */
 - (void)ensureAssetPackReady:(NSString *)tag
+             stallTimeoutMs:(double)stallTimeoutMs
              progressHandler:(SherpaOnnxOdrProgressHandler _Nullable)progressHandler
                      resolve:(void (^)(id result))resolve
                       reject:(void (^)(NSString *code, NSString *message, NSError *_Nullable error))reject;
