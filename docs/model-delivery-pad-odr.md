@@ -28,6 +28,7 @@ PAD/ODR APIs return a **path only** (no archive listing). Listing `.tar.zst` / `
   - [`getAssetPackState`](#getassetpackstatepackname)
   - [`removeAssetPack`](#removeassetpackpackname)
   - [`assetPackDownloadPercent`](#assetpackdownloadpercentstate)
+  - [`classifyAssetPackDeliveryFailure`](#classifyassetpackdeliveryfailureerror--isretryableassetpackfailurereason)
   - [`listOdrDeliverySnapshot`](#listodrdeliverysnapshottag)
   - [`logOdrDeliveryDiagnostics`](#logodrdeliverydiagnosticstag)
   - [Types](#types)
@@ -56,6 +57,9 @@ const targetDir = `${DocumentDirectoryPath}/models`;
 
 await ensureAssetPackReady(PACK, {
   onProgress: (_state, percent) => console.log('download', percent),
+  // Optional: override defaults (60s stall / 90s JS ensure)
+  // stallTimeoutMs: 20_000,
+  // jsEnsureTimeoutMs: 30_000,
 });
 
 const packPath = await getAssetPackPath(PACK);
@@ -274,6 +278,10 @@ import {
   getAssetPackState,
   removeAssetPack,
   assetPackDownloadPercent,
+  classifyAssetPackDeliveryFailure,
+  isRetryableAssetPackFailure,
+  DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS, // 60_000
+  DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS, // 90_000
   listOdrDeliverySnapshot,
   logOdrDeliveryDiagnostics,
 } from 'react-native-sherpa-onnx/utils';
@@ -327,16 +335,40 @@ function ensureAssetPackReady(
 
 type EnsureAssetPackReadyOptions = {
   onProgress?: (state: AssetPackStateSnapshot, percent: number | null) => void;
+  /** Native stall watchdog (ms). Re-armed on byte progress. Default: 60_000 */
+  stallTimeoutMs?: number;
+  /** Absolute JS timeout wrapping native ensure (ms). Default: 90_000 */
+  jsEnsureTimeoutMs?: number;
 };
 ```
 
 Fetches if needed and resolves when the pack/tag is ready (Android: `completed`; iOS: `beginAccessingResources` succeeded). Progress also emits on `sherpaAssetPackDeliveryProgress` when `onProgress` is set.
 
+**Timeouts** (per call; omit to use SDK defaults):
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `stallTimeoutMs` | `DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS` (`60_000`) | Native watchdog: fails if **no byte progress** for this long (timer re-arms on progress) |
+| `jsEnsureTimeoutMs` | `DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS` (`90_000`) | Absolute JS backstop around the native ensure promise |
+
+Keep `jsEnsureTimeoutMs` **greater than** `stallTimeoutMs` so a true stall is classified as `stalled` rather than a generic JS timeout. Both must be finite numbers `> 0`; invalid values fall back to the defaults.
+
+On failure, the thrown error is an `AssetPackDeliveryError` with `deliveryReason` (see [Types](#types)). Use `classifyAssetPackDeliveryFailure` / `isRetryableAssetPackFailure` for resume/UI.
+
 ```ts
-const state = await ensureAssetPackReady('sherpa_models', {
-  onProgress: (_s, percent) => console.log('download', percent),
-});
-console.log(state.status); // 'completed'
+try {
+  const state = await ensureAssetPackReady('sherpa_models', {
+    onProgress: (_s, percent) => console.log('download', percent),
+    stallTimeoutMs: 20_000,
+    jsEnsureTimeoutMs: 30_000,
+  });
+  console.log(state.status); // 'completed'
+} catch (e) {
+  const reason = classifyAssetPackDeliveryFailure(e);
+  if (isRetryableAssetPackFailure(reason)) {
+    // network / stalled / wifi / background_denied — safe to retry
+  }
+}
 ```
 
 ### `getAssetPackState(packName)`
@@ -376,6 +408,20 @@ Maps `bytesDownloaded` / `totalBytes` to `0–100`, or `null` when total size is
 const pct = assetPackDownloadPercent(await getAssetPackState('sherpa_models'));
 ```
 
+### `classifyAssetPackDeliveryFailure(error)` / `isRetryableAssetPackFailure(reason)`
+
+```ts
+function classifyAssetPackDeliveryFailure(
+  error: unknown
+): AssetPackDeliveryFailureReason
+
+function isRetryableAssetPackFailure(
+  reason: AssetPackDeliveryFailureReason
+): boolean
+```
+
+Map ensure failures to a stable reason for UI / resume. Retryable reasons: `network`, `stalled`, `background_denied`, `wifi`.
+
 ### `listOdrDeliverySnapshot(tag)`
 
 ```ts
@@ -408,6 +454,10 @@ try {
 ### Types
 
 ```ts
+/** Exported defaults for ensure timeouts */
+const DEFAULT_ASSET_PACK_STALL_TIMEOUT_MS = 60_000;
+const DEFAULT_ASSET_PACK_JS_ENSURE_TIMEOUT_MS = 90_000;
+
 type AssetPackDeliveryStatus =
   | 'unknown' | 'pending' | 'downloading' | 'transferring'
   | 'completed' | 'failed' | 'canceled' | 'waiting_for_wifi' | 'not_installed';
@@ -418,6 +468,21 @@ type AssetPackStateSnapshot = {
   bytesDownloaded: number;
   totalBytes: number;
   errorCode: number;
+};
+
+type AssetPackDeliveryFailureReason =
+  | 'network'
+  | 'background_denied'
+  | 'play_unavailable'
+  | 'stalled'
+  | 'wifi'
+  | 'insufficient_storage'
+  | 'unknown';
+
+type AssetPackDeliveryError = Error & {
+  deliveryReason: AssetPackDeliveryFailureReason;
+  nativeCode?: string;
+  errorCode?: number;
 };
 
 type OdrDeliverySnapshot = {
@@ -494,6 +559,8 @@ Ship content under the pack module’s `src/main/assets/models/`.
 | `getAssetPackPath` is `null` (install-time Android) | Expected for APK_ASSETS — `listBundledArchivesFromApkAssets('models')` |
 | `null` after on-demand fetch | Download incomplete; wrong `packName`/tag |
 | Empty `listBundledArchives` | Wrong `…/models` path; ship layout; [extraction.md](./extraction.md) |
+| Ensure throws with `deliveryReason: 'stalled'` | No byte progress for `stallTimeoutMs` (default 60s), or JS backstop hit — retry; tighten timeouts only if you have a fallback path |
+| Ensure hangs forever | Upgrade SDK: `ensureAssetPackReady` always applies stall + JS timeouts (defaults 60s / 90s) |
 | iOS ODR `path=null` after fetch | Tag/layout wrong; empty `tag/models/` at build; call `listOdrDeliverySnapshot(tag)` in `__DEV__` |
 | iOS Simulator (Debug) — ODR never mounts | In the **Debug** `.xcconfig` for the app target, enable embed + initial-install tags (see below) |
 | iOS ODR fetch error | Tag missing from build variant; network (TestFlight/App Store builds) |

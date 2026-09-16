@@ -264,7 +264,7 @@ For models too large to ship in the main APK/IPA, use **Play Asset Delivery** (A
 
 | Step | API | Notes |
 | --- | --- | --- |
-| Fetch | `fetchAssetPack` / `ensureAssetPackReady` | On-demand packs download at runtime |
+| Fetch | `fetchAssetPack` / `ensureAssetPackReady` | On-demand packs download at runtime; optional `stallTimeoutMs` / `jsEnsureTimeoutMs` (defaults 60s / 90s) |
 | Resolve path | `getAssetPackPath(packName)` | Returns `…/models/` or `null` if not ready |
 | List | `listModelsAtPath(packPath)` or `listBundledArchives(packPath)` | Folders vs compressed archives |
 | Extract (optional) | `extractArchive(archive, targetDir)` | For `.tar.zst` ship packs |
@@ -275,6 +275,7 @@ import { ensureAssetPackReady, getAssetPackPath, listModelsAtPath } from 'react-
 
 await ensureAssetPackReady('core_models', {
   onProgress: (_state, percent) => console.log('download', percent),
+  // stallTimeoutMs / jsEnsureTimeoutMs — see model-delivery-pad-odr.md
 });
 
 const packPath = await getAssetPackPath('core_models');
