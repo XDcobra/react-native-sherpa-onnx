@@ -60,6 +60,12 @@ export {
   type DownloadManagerConfig,
 } from './downloadTask';
 
+export {
+  createForegroundDownloadTask,
+  cancelForegroundDownload,
+  type ForegroundDownloadTask,
+} from './foregroundDownload';
+
 export { runAssetIndicesWithConcurrency } from './downloadConcurrency';
 
 export {
