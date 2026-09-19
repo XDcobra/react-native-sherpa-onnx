@@ -6423,6 +6423,35 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       modelType: String
     ): HashMap<String, Any?>?
 
+    /**
+     * Native detect emits `{ iso6391Hint, id }` maps. Catalog chips read those
+     * rows; casting them to String dropped Pocket/Supertonic curated hints.
+     */
+    @JvmStatic
+    internal fun publicLanguageRowsToWritableArray(
+      languages: ArrayList<*>?
+    ): com.facebook.react.bridge.WritableArray? {
+      if (languages.isNullOrEmpty()) {
+        return null
+      }
+      val arr = Arguments.createArray()
+      var count = 0
+      for (entry in languages) {
+        val row = entry as? HashMap<*, *> ?: continue
+        val hint = (row["iso6391Hint"] as? String)?.trim().orEmpty()
+        val id = (row["id"] as? String)?.trim().orEmpty()
+        if (hint.isEmpty() && id.isEmpty()) {
+          continue
+        }
+        val language = Arguments.createMap()
+        language.putString("iso6391Hint", hint.ifEmpty { id })
+        language.putString("id", id.ifEmpty { hint })
+        arr.pushMap(language)
+        count += 1
+      }
+      return if (count > 0) arr else null
+    }
+
     @JvmStatic
     internal fun unifiedDetectHashMapToWritableMap(
       result: HashMap<String, Any?>
@@ -6457,14 +6486,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       map.putArray("detectedModels", modelsArray)
 
-      val languages = result["languages"] as? ArrayList<*>
-      if (!languages.isNullOrEmpty()) {
-        val arr = Arguments.createArray()
-        for (entry in languages) {
-          val value = entry as? String
-          if (!value.isNullOrBlank()) arr.pushString(value)
-        }
-        map.putArray("languages", arr)
+      publicLanguageRowsToWritableArray(result["languages"] as? ArrayList<*>)?.let { rows ->
+        map.putArray("languages", rows)
       }
 
       val detectionSources = result["detectionSources"] as? ArrayList<*>

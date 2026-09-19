@@ -73,6 +73,61 @@ describe('detectModel', () => {
     );
   });
 
+  it('keeps Pocket and Supertonic curated language rows from native maps', async () => {
+    mockSherpa.detectModel.mockResolvedValue({
+      matched: true,
+      success: true,
+      category: 'tts',
+      modelType: 'pocket',
+      detectedModels: [{ type: 'pocket', modelDir: '.' }],
+      detectionSources: ['nameOnly', 'curatedCatalog'],
+      languages: [{ iso6391Hint: 'en', id: 'en' }],
+      quantization: 'unknown',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+
+    const pocket = await detectModel({
+      assetName: 'sherpa-onnx-pocket-tts-2026-01-26',
+    });
+    expect(pocket).toEqual(
+      expect.objectContaining({
+        matched: true,
+        category: ModelCategory.Tts,
+        modelType: 'pocket',
+        languages: ['en'],
+      })
+    );
+
+    mockSherpa.detectModel.mockResolvedValue({
+      matched: true,
+      success: true,
+      category: 'tts',
+      modelType: 'supertonic',
+      detectedModels: [{ type: 'supertonic', modelDir: '.' }],
+      detectionSources: ['nameOnly', 'curatedCatalog'],
+      languages: [
+        { iso6391Hint: 'en', id: 'en' },
+        { iso6391Hint: 'de', id: 'de' },
+        { iso6391Hint: 'na', id: 'na' },
+      ],
+      quantization: 'int8',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+
+    const supertonic = await detectModel({
+      assetName: 'sherpa-onnx-supertonic-3-tts-int8-2026-05-11',
+    });
+    expect(supertonic).toEqual(
+      expect.objectContaining({
+        matched: true,
+        modelType: 'supertonic',
+        languages: ['en', 'de', 'na'],
+      })
+    );
+  });
+
   it('returns matched false when native reports no hit', async () => {
     const result = await detectModel({ assetName: 'not-a-model' });
     expect(result).toEqual({ matched: false });

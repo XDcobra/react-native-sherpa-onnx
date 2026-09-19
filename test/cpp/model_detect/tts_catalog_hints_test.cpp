@@ -77,6 +77,16 @@ TEST(TtsCatalogHints, PrimaryKindFromNameOnly) {
     EXPECT_EQ(r.selectedKind, TtsModelKind::kKokoro);
 }
 
+TEST(TtsCatalogHints, PocketNameOnlyUsesCuratedEnglish) {
+    auto r = DetectNameOnly("sherpa-onnx-pocket-tts-2026-01-26");
+    EXPECT_EQ(r.selectedKind, TtsModelKind::kPocket);
+    EXPECT_EQ(r.derivedLanguages, RowsFromHints({"en"}));
+
+    r = DetectNameOnly("sherpa-onnx-pocket-tts-int8-2026-01-26");
+    EXPECT_EQ(r.selectedKind, TtsModelKind::kPocket);
+    EXPECT_EQ(r.derivedLanguages, RowsFromHints({"en"}));
+}
+
 TEST(TtsCatalogHints, QuantizationAndSizeTier) {
     auto r = DetectNameOnly("vits-piper-ka_GE-natia-medium-int8");
     EXPECT_EQ(r.quantization, "int8");

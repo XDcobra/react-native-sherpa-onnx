@@ -3,6 +3,7 @@ package com.sherpaonnx.tts.service
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.sherpaonnx.SherpaOnnxModule
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.dispatchNumSpeakers
 import com.sherpaonnx.tts.core.dispatchSampleRate
@@ -146,11 +147,7 @@ internal class TtsLifecycleService(
         resultMap.putArray("lexiconLanguages", lexiconArray)
       }
       val derivedLangs = result["languages"] as? ArrayList<*>
-      if (!derivedLangs.isNullOrEmpty()) {
-        val langs = Arguments.createArray()
-        for (c in derivedLangs) {
-          (c as? String)?.let { langs.pushString(it) }
-        }
+      SherpaOnnxModule.publicLanguageRowsToWritableArray(derivedLangs)?.let { langs ->
         resultMap.putArray("languages", langs)
       }
       val q = result["quantization"] as? String
