@@ -168,6 +168,7 @@ Warnings on result:
 | Code | Severity | Cause |
 |------|----------|-------|
 | `ALIGNMENT_ANCHOR_NO_PROGRESS` | warn | Single anchor consumed 0 tokens |
+| `ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED` | warn | Tag/digit/punct window had no CTC vocab tokens; skipped instead of abort |
 | `ALIGNMENT_RESIDUAL_TOKENS_REMAINING` | warn | Cursor did not reach end of R after final anchor |
 
 ---

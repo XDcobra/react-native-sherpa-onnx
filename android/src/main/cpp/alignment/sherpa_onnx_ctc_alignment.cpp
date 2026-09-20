@@ -32,6 +32,10 @@
 #include <locale.h>
 #endif
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 #if defined(__has_include)
 #if __has_include(<onnxruntime/core/session/onnxruntime_c_api.h>)
 #include <onnxruntime/core/session/onnxruntime_c_api.h>
@@ -356,7 +360,19 @@ static std::unordered_map<std::string, int32_t> ResolveVocabulary(
         std::string content;
         if (TryReadTextFile(vocab_path, &content)) {
           auto parsed = ParseVocabJson(content);
-          if (!parsed.empty()) {
+          // Reject vocabs without Latin letter keys (HF lowercase or incomplete
+          // files would otherwise make every English transcript unalignable).
+          bool has_letter = false;
+          for (char c = 'A'; c <= 'Z'; ++c) {
+            const std::string upper(1, c);
+            const std::string lower(1, static_cast<char>(c - 'A' + 'a'));
+            if (parsed.find(upper) != parsed.end() ||
+                parsed.find(lower) != parsed.end()) {
+              has_letter = true;
+              break;
+            }
+          }
+          if (!parsed.empty() && has_letter) {
             vocab = std::move(parsed);
           }
         }
@@ -400,6 +416,13 @@ static std::vector<std::string> BuildTokenTexts(
     Utf8Append(token, normalized);
     if (vocab.find(token) != vocab.end()) {
       tokens.push_back(std::move(token));
+    } else if (normalized >= U'A' && normalized <= U'Z') {
+      // HuggingFace wav2vec2 vocab.json often uses lowercase letter keys.
+      std::string lower;
+      Utf8Append(lower, normalized - U'A' + U'a');
+      if (vocab.find(lower) != vocab.end()) {
+        tokens.push_back(std::move(lower));
+      }
     }
   }
   while (!tokens.empty() && tokens.front() == "|") {
@@ -810,6 +833,16 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
 
   std::vector<std::string> tokenTexts = BuildTokenTexts(text_utf8, vocab, wordBoundaryId);
   if (tokenTexts.empty()) {
+#if defined(__ANDROID__)
+    const size_t preview_len = std::min<size_t>(text_utf8.size(), 96);
+    __android_log_print(
+        ANDROID_LOG_ERROR,
+        "SherpaOnnxAlignment",
+        "CTC no alignable tokens: text_len=%zu vocab_size=%zu preview=%.96s",
+        text_utf8.size(),
+        vocab.size(),
+        text_utf8.substr(0, preview_len).c_str());
+#endif
     throw std::runtime_error("Transcript has no alignable tokens for provided vocabulary");
   }
   std::vector<int32_t> tokenIds;

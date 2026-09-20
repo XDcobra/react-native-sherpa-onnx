@@ -52,6 +52,7 @@ import {
 } from './cursor';
 import type {
   ChunkedForcedCtcAnchor,
+  ChunkedForcedCtcCursorState,
   ChunkedForcedCtcNativeResult,
   ChunkedForcedCtcNativeToken,
 } from './types';
@@ -263,6 +264,71 @@ function toWarningCode(
   return warnings[0]?.code;
 }
 
+/**
+ * Default wav2vec2 CTC vocab is A–Z (+ `|` / `'`). Digits, punctuation-only
+ * spans, and Whisper bracket tags (after stripping) leave nothing to align.
+ */
+function stripWhisperBracketTags(text: string): string {
+  return text.replace(/\[(?:[A-Z][A-Z0-9_ ]{0,48})\]/g, ' ');
+}
+
+function hasAlignableForcedCtcTokens(text: string): boolean {
+  return /[A-Za-z]/.test(stripWhisperBracketTags(text));
+}
+
+function isNoAlignableTokensNativeError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' &&
+          error != null &&
+          typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : String(error ?? '');
+  return /no alignable tokens/i.test(message);
+}
+
+function logChunkedForcedCtc(
+  message: string,
+  details?: Record<string, unknown>
+): void {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // eslint-disable-next-line no-console
+    console.log('[SherpaOnnx:alignment]', message, details ?? {});
+  }
+}
+
+function skipUnalignableCursorUnits(
+  cursor: ChunkedForcedCtcCursorState,
+  warnings: AlignmentWarning[],
+  reason: 'precheck' | 'native_empty_vocab'
+): number {
+  let skipped = 0;
+  while (!isCursorExhausted(cursor)) {
+    const unit = cursor.units[cursor.cursorIndex];
+    if (unit == null || hasAlignableForcedCtcTokens(unit.text)) {
+      break;
+    }
+    const preview =
+      unit.text.length > 48 ? `${unit.text.slice(0, 48)}…` : unit.text;
+    advanceCursor(cursor, 1);
+    skipped += 1;
+    logChunkedForcedCtc('chunkedForcedCtc.skip_unalignable_unit', {
+      reason,
+      unitPreview: preview,
+      cursorIndex: cursor.cursorIndex,
+    });
+  }
+  if (skipped > 0) {
+    addWarning(
+      warnings,
+      'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED',
+      'Skipped reference units with no alignable CTC vocabulary tokens (e.g. tags, digits, punctuation).'
+    );
+  }
+  return skipped;
+}
+
 function deriveLinkConfidence(
   diagnostics: ChunkedForcedCtcNativeResult['diagnostics']
 ): number | undefined {
@@ -447,69 +513,133 @@ export async function runAccurateChunkedForcedCtc(
         anchor.sampleRate > 0
           ? (anchorFrameCount / anchor.sampleRate) * 1000
           : 0;
-      const textWindow = peekCursorWindow(cursor, anchorDurationMs);
-      if (textWindow.unitCount === 0 || textWindow.text.length === 0) {
-        break;
-      }
 
-      progressSession.emitStep(i, anchors.length, anchorDurationMs);
-
-      let nativeResult: ChunkedForcedCtcNativeResult;
-      try {
-        nativeResult = parseNativeResult(
-          await SherpaOnnx.alignAccurateForcedCtcFromPcm(
-            resolvedModelPath,
-            textWindow.text,
-            {
-              audioBufferId: audioInBufferId,
-              startSample: anchor.startSample,
-              sampleCount: anchorFrameCount,
-            },
-            audioInfo.sampleRate,
-            granularity,
-            typeof input.language === 'string' ? input.language : undefined
-          )
-        );
-      } catch (error) {
-        throw mapNativeChunkedForcedCtcError(error);
-      }
-
-      const maxAdvance = Math.min(
-        textWindow.unitCount,
-        getRemainingUnitCount(cursor)
-      );
-      const consumedUnitCount = Math.min(
-        maxAdvance,
-        Math.max(0, nativeResult.consumedTokenCount)
-      );
-
-      if (consumedUnitCount === 0) {
-        consecutiveNoProgress += 1;
-        addWarning(
-          warnings,
-          'ALIGNMENT_ANCHOR_NO_PROGRESS',
-          'At least one anchor consumed zero tokens during chunkedForcedCtc forced CTC.'
-        );
-
-        if (consecutiveNoProgress >= 3) {
-          throw createChunkedForcedCtcError(
-            'ALIGNMENT_FORCED_CTC_STUCK',
-            'chunkedForcedCtc made no cursor progress for three consecutive anchors.'
-          );
+      // Retry the same VAD anchor after skipping tag/digit-only text windows so
+      // speech audio is not dropped when non-vocab units lead the cursor.
+      let anchorHandled = false;
+      while (!anchorHandled && !isCursorExhausted(cursor)) {
+        skipUnalignableCursorUnits(cursor, warnings, 'precheck');
+        if (isCursorExhausted(cursor)) {
+          break;
         }
 
-        continue;
-      }
+        const textWindow = peekCursorWindow(cursor, anchorDurationMs);
+        if (textWindow.unitCount === 0 || textWindow.text.length === 0) {
+          break;
+        }
 
-      consecutiveNoProgress = 0;
+        if (!hasAlignableForcedCtcTokens(textWindow.text)) {
+          const preview =
+            textWindow.text.length > 64
+              ? `${textWindow.text.slice(0, 64)}…`
+              : textWindow.text;
+          logChunkedForcedCtc('chunkedForcedCtc.skip_unalignable_window', {
+            reason: 'precheck',
+            unitCount: textWindow.unitCount,
+            textPreview: preview,
+            anchorIndex: i,
+          });
+          advanceCursor(cursor, textWindow.unitCount);
+          addWarning(
+            warnings,
+            'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED',
+            'Skipped reference windows with no alignable CTC vocabulary tokens (e.g. tags, digits, punctuation).'
+          );
+          continue;
+        }
 
-      const consumedWindow = peekCursorPrefix(cursor, consumedUnitCount);
-      const advanced = advanceCursor(cursor, consumedUnitCount);
-      if (advanced <= 0) {
-        continue;
-      }
+        progressSession.emitStep(i, anchors.length, anchorDurationMs);
 
-      if (nativeResult.tokens.length > 0) {
+        let nativeResult: ChunkedForcedCtcNativeResult;
+        try {
+          nativeResult = parseNativeResult(
+            await SherpaOnnx.alignAccurateForcedCtcFromPcm(
+              resolvedModelPath,
+              textWindow.text,
+              {
+                audioBufferId: audioInBufferId,
+                startSample: anchor.startSample,
+                sampleCount: anchorFrameCount,
+              },
+              audioInfo.sampleRate,
+              granularity,
+              typeof input.language === 'string' ? input.language : undefined
+            )
+          );
+        } catch (error) {
+          if (isNoAlignableTokensNativeError(error)) {
+            const preview =
+              textWindow.text.length > 64
+                ? `${textWindow.text.slice(0, 64)}…`
+                : textWindow.text;
+            logChunkedForcedCtc('chunkedForcedCtc.skip_unalignable_window', {
+              reason: 'native_empty_vocab',
+              unitCount: textWindow.unitCount,
+              textPreview: preview,
+              anchorIndex: i,
+              advanceUnits: 1,
+            });
+            // Advance one unit so mixed windows can recover on the next unit.
+            advanceCursor(cursor, 1);
+            addWarning(
+              warnings,
+              'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED',
+              'Skipped reference units that native forced CTC rejected as having no alignable tokens.'
+            );
+            continue;
+          }
+          throw mapNativeChunkedForcedCtcError(error);
+        }
+
+        logChunkedForcedCtc('chunkedForcedCtc.native.ok', {
+          anchorIndex: i,
+          unitCount: textWindow.unitCount,
+          consumedTokenCount: nativeResult.consumedTokenCount,
+          tokenCount: nativeResult.tokens.length,
+          textPreview:
+            textWindow.text.length > 64
+              ? `${textWindow.text.slice(0, 64)}…`
+              : textWindow.text,
+        });
+
+        const maxAdvance = Math.min(
+          textWindow.unitCount,
+          getRemainingUnitCount(cursor)
+        );
+        const consumedUnitCount = Math.min(
+          maxAdvance,
+          Math.max(0, nativeResult.consumedTokenCount)
+        );
+
+        if (consumedUnitCount === 0) {
+          consecutiveNoProgress += 1;
+          addWarning(
+            warnings,
+            'ALIGNMENT_ANCHOR_NO_PROGRESS',
+            'At least one anchor consumed zero tokens during chunkedForcedCtc forced CTC.'
+          );
+
+          if (consecutiveNoProgress >= 3) {
+            throw createChunkedForcedCtcError(
+              'ALIGNMENT_FORCED_CTC_STUCK',
+              'chunkedForcedCtc made no cursor progress for three consecutive anchors.'
+            );
+          }
+
+          anchorHandled = true;
+          break;
+        }
+
+        consecutiveNoProgress = 0;
+
+        const consumedWindow = peekCursorPrefix(cursor, consumedUnitCount);
+        const advanced = advanceCursor(cursor, consumedUnitCount);
+        if (advanced <= 0) {
+          anchorHandled = true;
+          break;
+        }
+
+        if (nativeResult.tokens.length > 0) {
         const linkConfidence = deriveLinkConfidence(nativeResult.diagnostics);
         const textSegmentId = `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`;
         for (const token of nativeResult.tokens) {
@@ -622,6 +752,9 @@ export async function runAccurateChunkedForcedCtc(
           );
         });
         segmentsWritten += 1;
+      }
+
+        anchorHandled = true;
       }
     }
 

@@ -478,7 +478,7 @@ Caveats:
 | `AlignmentChunkTimeline` | `{ sampleRate: number; segmentSampleCounts: readonly number[] }` |
 | `AlignmentAsrConfig` | `{ hypothesisTextBuffer: OfflineTextBufferIdSource }` |
 | `AlignmentWarning` | `{ code: AlignmentWarningCode; message: string }` |
-| `AlignmentWarningCode` | `'ALIGNMENT_PARTIAL_COVERAGE' \| 'ALIGNMENT_LOW_CONFIDENCE_UNIT_PRESENT' \| 'ALIGNMENT_ANCHOR_NO_PROGRESS' \| 'ALIGNMENT_RESIDUAL_TOKENS_REMAINING'` |
+| `AlignmentWarningCode` | `'ALIGNMENT_PARTIAL_COVERAGE' \| 'ALIGNMENT_LOW_CONFIDENCE_UNIT_PRESENT' \| 'ALIGNMENT_ANCHOR_NO_PROGRESS' \| 'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED' \| 'ALIGNMENT_RESIDUAL_TOKENS_REMAINING'` |
 | `AlignmentTimestamp` | `{ text: string; start: number; end: number }` |
 | `AlignmentDetectResult` | Return of `detectAlignmentModel()` |
 | `AlignmentEngine` | `alignTextToAudio`, `destroy` |

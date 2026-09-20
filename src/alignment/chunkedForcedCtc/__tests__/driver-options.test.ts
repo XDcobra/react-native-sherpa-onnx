@@ -183,4 +183,105 @@ describe('chunkedForcedCtc/driver options', () => {
       })
     ).rejects.toMatchObject({ code: 'ALIGNMENT_FORCED_CTC_FAILED' });
   });
+
+  test('skips unalignable tag windows instead of aborting chunkedForcedCtc', async () => {
+    const textbuffer = jest.requireMock('../../../textbuffer') as {
+      getOfflineTextBufferTextSlice: jest.Mock;
+    };
+    textbuffer.getOfflineTextBufferTextSlice.mockResolvedValueOnce(
+      '[MUSIC] [APPLAUSE] hello world'
+    );
+
+    native.alignAccurateForcedCtcFromPcm.mockResolvedValueOnce({
+      tokens: [
+        { text: 'hello', startMs: 0, endMs: 40 },
+        { text: 'world', startMs: 50, endMs: 90 },
+      ],
+      consumedTokenCount: 2,
+      diagnostics: { ctcBlankRatio: 0.1, framesProcessed: 1600 },
+    });
+
+    segmentbuffer.getOfflineSegmentBufferSegments.mockResolvedValueOnce([
+      {
+        id: 'seg_anchor_0',
+        kind: 'speech',
+        sourceAudioBufferId: 'off_audio',
+        startSample: 0,
+        endSample: 16000,
+        sampleRate: 16000,
+        durationMs: 1000,
+      },
+    ]);
+
+    const out = await runAccurateChunkedForcedCtc({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      model: { modelSource: { kind: 'fs', path: '/m' } },
+      granularity: 'word',
+    });
+
+    expect(out.segmentsWritten).toBe(2);
+    expect(out.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED',
+        }),
+      ])
+    );
+    expect(native.alignAccurateForcedCtcFromPcm).toHaveBeenCalledTimes(1);
+    expect(native.alignAccurateForcedCtcFromPcm.mock.calls[0][1]).toBe(
+      'hello world'
+    );
+  });
+
+  test('recovers from native no-alignable-tokens by advancing one unit', async () => {
+    native.alignAccurateForcedCtcFromPcm
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'ALIGNMENT_FORCED_CTC_FAILED: Transcript has no alignable tokens for provided vocabulary'
+          ),
+          { code: 'ALIGNMENT_FORCED_CTC_FAILED' }
+        )
+      )
+      .mockResolvedValueOnce({
+        tokens: [{ text: 'beta', startMs: 0, endMs: 40 }],
+        consumedTokenCount: 1,
+        diagnostics: { ctcBlankRatio: 0.1, framesProcessed: 1600 },
+      });
+
+    segmentbuffer.getOfflineSegmentBufferSegments.mockResolvedValueOnce([
+      {
+        id: 'seg_anchor_0',
+        kind: 'speech',
+        sourceAudioBufferId: 'off_audio',
+        startSample: 0,
+        endSample: 16000,
+        sampleRate: 16000,
+        durationMs: 1000,
+      },
+    ]);
+
+    const out = await runAccurateChunkedForcedCtc({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      model: { modelSource: { kind: 'fs', path: '/m' } },
+      granularity: 'word',
+    });
+
+    // Default mock text is "alpha beta gamma"; first native fail advances past "alpha".
+    expect(out.segmentsWritten).toBe(1);
+    expect(out.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'ALIGNMENT_UNALIGNABLE_TEXT_SKIPPED',
+        }),
+      ])
+    );
+    expect(native.alignAccurateForcedCtcFromPcm).toHaveBeenCalledTimes(2);
+  });
 });
