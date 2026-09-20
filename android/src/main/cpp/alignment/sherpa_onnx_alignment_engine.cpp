@@ -270,6 +270,25 @@ static bool IsLetterLike(char32_t cp) {
   return false;
 }
 
+/**
+ * After a sentence terminator, allow starting the next unit when the following
+ * codepoint is whitespace (classic prose), a letter (STT often omits the space:
+ * "Hello.World"), or CJK (no space after 。). Abbreviations / decimals are
+ * filtered earlier by ShouldSplitOnPeriod.
+ */
+static bool CanStartNextSentence(char32_t cp) {
+  if (IsUnicodeWhitespace(cp)) {
+    return true;
+  }
+  if (IsCjkChar(cp)) {
+    return true;
+  }
+  if (cp == '.') {
+    return false;
+  }
+  return IsLetterLike(cp);
+}
+
 static bool IsUpperSingleLetter(const std::string& token_utf8) {
   const auto cps = DecodeUtf8WithOffsets(token_utf8);
   if (cps.size() != 1) {
@@ -422,7 +441,7 @@ static std::vector<std::string> SplitTextIntoSentences(
     }
 
     const size_t end = SentenceBoundaryEnd(cps, i);
-    if (end < cps.size() && !IsUnicodeWhitespace(cps[end].cp)) {
+    if (end < cps.size() && !CanStartNextSentence(cps[end].cp)) {
       i += 1;
       continue;
     }
