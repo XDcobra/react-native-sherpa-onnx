@@ -100,3 +100,30 @@ TEST(CuratedLanguageCatalog, FilenameHeuristicsWinOverCatalog) {
         EXPECT_NE(src, DetectionSource::kCuratedCatalog);
     }
 }
+
+TEST(CuratedLanguageCatalog, AlignmentWav2Vec2GetsEnglishHint) {
+    using sherpaonnx::DetectAlignmentModelFromFileList;
+    using sherpaonnx::model_detect::FileEntry;
+
+    FileEntry modelFile;
+    modelFile.path = "wav2vec2-base-960h-int8/model.int8.onnx";
+    modelFile.name = "model.int8.onnx";
+    modelFile.nameLower = "model.int8.onnx";
+    modelFile.size = 1024;
+
+    // Successful detect with no language tokens in the folder name → curated en.
+    auto ok = DetectAlignmentModelFromFileList(
+        {modelFile}, "wav2vec2-base-960h-int8", "wav2vec2", "int8");
+    EXPECT_TRUE(ok.ok);
+    EXPECT_EQ(ok.derivedLanguages, RowsFromHints({"en"}));
+    ASSERT_FALSE(ok.detectionSources.empty());
+    EXPECT_EQ(ok.detectionSources.back(), DetectionSource::kCuratedCatalog);
+
+    // Name-only (empty listing): infer wav2vec2 from model key → curated en.
+    auto nameOnly = DetectAlignmentModelFromFileList(
+        {}, "wav2vec2-base-960h-int8", "auto", "");
+    EXPECT_FALSE(nameOnly.ok);
+    EXPECT_EQ(nameOnly.derivedLanguages, RowsFromHints({"en"}));
+    ASSERT_FALSE(nameOnly.detectionSources.empty());
+    EXPECT_EQ(nameOnly.detectionSources.back(), DetectionSource::kCuratedCatalog);
+}

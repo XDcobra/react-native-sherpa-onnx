@@ -466,7 +466,7 @@ struct AlignmentDetectResult {
     AlignmentModelPaths paths;
     /** Ordered trace of detection mechanisms (see DetectionSource). */
     std::vector<DetectionSource> detectionSources;
-    /** Heuristic languages from folder name; currently empty for alignment. */
+    /** Languages from folder heuristics and/or curated catalog (e.g. wav2vec2 → en). */
     std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
     std::string quantization;

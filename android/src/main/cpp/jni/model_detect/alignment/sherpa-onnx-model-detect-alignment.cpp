@@ -2,6 +2,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-alignment.h"
 #include "sherpa-onnx-catalog-metadata.h"
+#include "model_language_catalog.h"
 
 #include <algorithm>
 #include <optional>
@@ -119,6 +120,11 @@ AlignmentDetectResult DetectAlignmentModel(
         }
     }
 
+    const auto pos = modelDir.find_last_of("/\\");
+    const std::string basename =
+        (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+    AppendCuratedAlignmentLanguageRowsIfEmpty(result, basename);
+
     return result;
 }
 
@@ -143,6 +149,10 @@ AlignmentDetectResult DetectAlignmentModelFromFileList(
             result.quantization = fileQuant;
         }
     }
+    const auto pos = modelDir.find_last_of("/\\");
+    const std::string basename =
+        (pos == std::string::npos) ? modelDir : modelDir.substr(pos + 1);
+    AppendCuratedAlignmentLanguageRowsIfEmpty(result, basename);
     return result;
 }
 

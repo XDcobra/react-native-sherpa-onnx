@@ -172,8 +172,11 @@ function validateCatalog(catalog) {
   if (catalog.version !== 1) {
     throw new Error(`Unsupported catalog version: ${catalog.version}`);
   }
-  if (!catalog.tts || !catalog.stt) {
-    throw new Error('Catalog must have tts and stt domains');
+  if (!catalog.tts || !catalog.stt || !catalog.alignment) {
+    throw new Error('Catalog must have tts, stt, and alignment domains');
+  }
+  if (!catalog.alignment.wav2vec2?.hints?.length) {
+    throw new Error('alignment.wav2vec2.hints must be a non-empty array');
   }
   const funasr = catalog.stt.funasr_nano;
   if (funasr?.entries) {
@@ -326,6 +329,26 @@ function emitCpp(catalog, sttRowsByType) {
   lines.push('}');
   lines.push('');
 
+  // Alignment rows
+  lines.push('inline const std::vector<PublicLanguageRow>& AlignmentRowsForModelType(');
+  lines.push('    const std::string& modelType) {');
+  lines.push(
+    '    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kMap = {'
+  );
+  for (const [modelType, spec] of Object.entries(catalog.alignment)) {
+    if (spec.hints) {
+      lines.push(
+        `        {${cppString(modelType)}, ${cppRowArray(rowsFromTtsHints(spec.hints))}},`
+      );
+    }
+  }
+  lines.push('    };');
+  lines.push('    static const std::vector<PublicLanguageRow> kEmpty;');
+  lines.push('    const auto it = kMap.find(modelType);');
+  lines.push('    return it == kMap.end() ? kEmpty : it->second;');
+  lines.push('}');
+  lines.push('');
+
   // ModelOptionIdForHint — first-match hint→id for heuristic upgrade
   lines.push('inline std::string ModelOptionIdForHint(');
   lines.push('    const std::string& modelType,');
@@ -439,6 +462,30 @@ function emitTs(catalog, sttHintsByType) {
   lines.push('    default:');
   lines.push('      return undefined;');
   lines.push('  }');
+  lines.push('}');
+  lines.push('');
+
+  const wav2vec2Hints = catalog.alignment.wav2vec2.hints;
+  lines.push(
+    `export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ${JSON.stringify(wav2vec2Hints)} as const;`
+  );
+  lines.push('');
+  lines.push('export function iso6391HintsForAlignmentModelType(');
+  lines.push('  modelType: string | undefined,');
+  lines.push('  modelKey?: string');
+  lines.push('): string[] | undefined {');
+  lines.push('  const type = (modelType ?? \'\').trim().toLowerCase();');
+  lines.push('  const key = (modelKey ?? \'\').trim().toLowerCase();');
+  lines.push('  if (type === \'wav2vec2\') {');
+  lines.push('    return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];');
+  lines.push('  }');
+  lines.push(
+    '  // Name-only catalog detect often reports modelType unknown/auto for alignment packs.'
+  );
+  lines.push('  if (key.includes(\'wav2vec\') || key.includes(\'960h\') || type === \'auto\') {');
+  lines.push('    return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];');
+  lines.push('  }');
+  lines.push('  return undefined;');
   lines.push('}');
   lines.push('');
 

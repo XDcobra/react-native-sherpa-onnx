@@ -39,7 +39,7 @@ describe('generated catalog (TTS)', () => {
     expect(rows).toEqual([{ iso6391Hint: 'en', id: 'en' }]);
   });
 
-  it('publicLanguageHintsFromNative returns empty when native sends no rows', () => {
+  it('publicLanguageHintsFromNative does not invent TTS rows (C++ curated catalog owns that)', () => {
     const rows = publicLanguageHintsFromNative({
       domain: ModelCategory.Tts,
       modelType: 'supertonic',

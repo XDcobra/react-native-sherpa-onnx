@@ -81,14 +81,14 @@ Static tables for building pickers (generated from the JSON catalog). Each retur
 | `getQwen3AsrLanguages()` | Qwen3 ASR | |
 | `getDolphinInfoLanguages()` | Dolphin (informational) | |
 
-TTS / alignment hint helpers (ISO 639-1 strings only):
+TTS / alignment hint helpers (ISO 639-1 strings only; for UI labels — runtime rows come from native detect):
 
 | Function | Scope |
 | --- | --- |
 | `iso6391HintsForTtsModelType(modelType?, modelKey?)` | TTS families |
-| `iso6391HintsForAlignmentModelType(modelType?)` | Alignment (e.g. `wav2vec2`) |
+| `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment (e.g. `wav2vec2`) — generated from catalog JSON |
 
-Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `SUPERTONIC3_TTS_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
+Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
 
 ---
 
@@ -151,7 +151,7 @@ Static tables — suitable for dropdown / chip pickers. Does not validate on-dis
 
 ```typescript
 function iso6391HintsForTtsModelType(modelType?: string, modelKey?: string): readonly string[];
-function iso6391HintsForAlignmentModelType(modelType?: string): readonly string[];
+function iso6391HintsForAlignmentModelType(modelType?: string, modelKey?: string): readonly string[];
 ```
 
 ```typescript

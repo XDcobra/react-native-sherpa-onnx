@@ -4,405 +4,405 @@ import type { ModelLanguage } from '../types';
 
 export const WHISPER_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'ru',
-    name: 'russian',
+    "id": "ru",
+    "name": "russian"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'tr',
-    name: 'turkish',
+    "id": "tr",
+    "name": "turkish"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'ca',
-    name: 'catalan',
+    "id": "ca",
+    "name": "catalan"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'ar',
-    name: 'arabic',
+    "id": "ar",
+    "name": "arabic"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'id',
-    name: 'indonesian',
+    "id": "id",
+    "name": "indonesian"
   },
   {
-    id: 'hi',
-    name: 'hindi',
+    "id": "hi",
+    "name": "hindi"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'he',
-    name: 'hebrew',
+    "id": "he",
+    "name": "hebrew"
   },
   {
-    id: 'uk',
-    name: 'ukrainian',
+    "id": "uk",
+    "name": "ukrainian"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'ms',
-    name: 'malay',
+    "id": "ms",
+    "name": "malay"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'ro',
-    name: 'romanian',
+    "id": "ro",
+    "name": "romanian"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'ta',
-    name: 'tamil',
+    "id": "ta",
+    "name": "tamil"
   },
   {
-    id: 'no',
-    name: 'norwegian',
+    "id": "no",
+    "name": "norwegian"
   },
   {
-    id: 'th',
-    name: 'thai',
+    "id": "th",
+    "name": "thai"
   },
   {
-    id: 'ur',
-    name: 'urdu',
+    "id": "ur",
+    "name": "urdu"
   },
   {
-    id: 'hr',
-    name: 'croatian',
+    "id": "hr",
+    "name": "croatian"
   },
   {
-    id: 'bg',
-    name: 'bulgarian',
+    "id": "bg",
+    "name": "bulgarian"
   },
   {
-    id: 'lt',
-    name: 'lithuanian',
+    "id": "lt",
+    "name": "lithuanian"
   },
   {
-    id: 'la',
-    name: 'latin',
+    "id": "la",
+    "name": "latin"
   },
   {
-    id: 'mi',
-    name: 'maori',
+    "id": "mi",
+    "name": "maori"
   },
   {
-    id: 'ml',
-    name: 'malayalam',
+    "id": "ml",
+    "name": "malayalam"
   },
   {
-    id: 'cy',
-    name: 'welsh',
+    "id": "cy",
+    "name": "welsh"
   },
   {
-    id: 'sk',
-    name: 'slovak',
+    "id": "sk",
+    "name": "slovak"
   },
   {
-    id: 'te',
-    name: 'telugu',
+    "id": "te",
+    "name": "telugu"
   },
   {
-    id: 'fa',
-    name: 'persian',
+    "id": "fa",
+    "name": "persian"
   },
   {
-    id: 'lv',
-    name: 'latvian',
+    "id": "lv",
+    "name": "latvian"
   },
   {
-    id: 'bn',
-    name: 'bengali',
+    "id": "bn",
+    "name": "bengali"
   },
   {
-    id: 'sr',
-    name: 'serbian',
+    "id": "sr",
+    "name": "serbian"
   },
   {
-    id: 'az',
-    name: 'azerbaijani',
+    "id": "az",
+    "name": "azerbaijani"
   },
   {
-    id: 'sl',
-    name: 'slovenian',
+    "id": "sl",
+    "name": "slovenian"
   },
   {
-    id: 'kn',
-    name: 'kannada',
+    "id": "kn",
+    "name": "kannada"
   },
   {
-    id: 'et',
-    name: 'estonian',
+    "id": "et",
+    "name": "estonian"
   },
   {
-    id: 'mk',
-    name: 'macedonian',
+    "id": "mk",
+    "name": "macedonian"
   },
   {
-    id: 'br',
-    name: 'breton',
+    "id": "br",
+    "name": "breton"
   },
   {
-    id: 'eu',
-    name: 'basque',
+    "id": "eu",
+    "name": "basque"
   },
   {
-    id: 'is',
-    name: 'icelandic',
+    "id": "is",
+    "name": "icelandic"
   },
   {
-    id: 'hy',
-    name: 'armenian',
+    "id": "hy",
+    "name": "armenian"
   },
   {
-    id: 'ne',
-    name: 'nepali',
+    "id": "ne",
+    "name": "nepali"
   },
   {
-    id: 'mn',
-    name: 'mongolian',
+    "id": "mn",
+    "name": "mongolian"
   },
   {
-    id: 'bs',
-    name: 'bosnian',
+    "id": "bs",
+    "name": "bosnian"
   },
   {
-    id: 'kk',
-    name: 'kazakh',
+    "id": "kk",
+    "name": "kazakh"
   },
   {
-    id: 'sq',
-    name: 'albanian',
+    "id": "sq",
+    "name": "albanian"
   },
   {
-    id: 'sw',
-    name: 'swahili',
+    "id": "sw",
+    "name": "swahili"
   },
   {
-    id: 'gl',
-    name: 'galician',
+    "id": "gl",
+    "name": "galician"
   },
   {
-    id: 'mr',
-    name: 'marathi',
+    "id": "mr",
+    "name": "marathi"
   },
   {
-    id: 'pa',
-    name: 'punjabi',
+    "id": "pa",
+    "name": "punjabi"
   },
   {
-    id: 'si',
-    name: 'sinhala',
+    "id": "si",
+    "name": "sinhala"
   },
   {
-    id: 'km',
-    name: 'khmer',
+    "id": "km",
+    "name": "khmer"
   },
   {
-    id: 'sn',
-    name: 'shona',
+    "id": "sn",
+    "name": "shona"
   },
   {
-    id: 'yo',
-    name: 'yoruba',
+    "id": "yo",
+    "name": "yoruba"
   },
   {
-    id: 'so',
-    name: 'somali',
+    "id": "so",
+    "name": "somali"
   },
   {
-    id: 'af',
-    name: 'afrikaans',
+    "id": "af",
+    "name": "afrikaans"
   },
   {
-    id: 'oc',
-    name: 'occitan',
+    "id": "oc",
+    "name": "occitan"
   },
   {
-    id: 'ka',
-    name: 'georgian',
+    "id": "ka",
+    "name": "georgian"
   },
   {
-    id: 'be',
-    name: 'belarusian',
+    "id": "be",
+    "name": "belarusian"
   },
   {
-    id: 'tg',
-    name: 'tajik',
+    "id": "tg",
+    "name": "tajik"
   },
   {
-    id: 'sd',
-    name: 'sindhi',
+    "id": "sd",
+    "name": "sindhi"
   },
   {
-    id: 'gu',
-    name: 'gujarati',
+    "id": "gu",
+    "name": "gujarati"
   },
   {
-    id: 'am',
-    name: 'amharic',
+    "id": "am",
+    "name": "amharic"
   },
   {
-    id: 'yi',
-    name: 'yiddish',
+    "id": "yi",
+    "name": "yiddish"
   },
   {
-    id: 'lo',
-    name: 'lao',
+    "id": "lo",
+    "name": "lao"
   },
   {
-    id: 'uz',
-    name: 'uzbek',
+    "id": "uz",
+    "name": "uzbek"
   },
   {
-    id: 'fo',
-    name: 'faroese',
+    "id": "fo",
+    "name": "faroese"
   },
   {
-    id: 'ht',
-    name: 'haitian creole',
+    "id": "ht",
+    "name": "haitian creole"
   },
   {
-    id: 'ps',
-    name: 'pashto',
+    "id": "ps",
+    "name": "pashto"
   },
   {
-    id: 'tk',
-    name: 'turkmen',
+    "id": "tk",
+    "name": "turkmen"
   },
   {
-    id: 'nn',
-    name: 'nynorsk',
+    "id": "nn",
+    "name": "nynorsk"
   },
   {
-    id: 'mt',
-    name: 'maltese',
+    "id": "mt",
+    "name": "maltese"
   },
   {
-    id: 'sa',
-    name: 'sanskrit',
+    "id": "sa",
+    "name": "sanskrit"
   },
   {
-    id: 'lb',
-    name: 'luxembourgish',
+    "id": "lb",
+    "name": "luxembourgish"
   },
   {
-    id: 'my',
-    name: 'myanmar',
+    "id": "my",
+    "name": "myanmar"
   },
   {
-    id: 'bo',
-    name: 'tibetan',
+    "id": "bo",
+    "name": "tibetan"
   },
   {
-    id: 'tl',
-    name: 'tagalog',
+    "id": "tl",
+    "name": "tagalog"
   },
   {
-    id: 'mg',
-    name: 'malagasy',
+    "id": "mg",
+    "name": "malagasy"
   },
   {
-    id: 'as',
-    name: 'assamese',
+    "id": "as",
+    "name": "assamese"
   },
   {
-    id: 'tt',
-    name: 'tatar',
+    "id": "tt",
+    "name": "tatar"
   },
   {
-    id: 'haw',
-    name: 'hawaiian',
+    "id": "haw",
+    "name": "hawaiian"
   },
   {
-    id: 'ln',
-    name: 'lingala',
+    "id": "ln",
+    "name": "lingala"
   },
   {
-    id: 'ha',
-    name: 'hausa',
+    "id": "ha",
+    "name": "hausa"
   },
   {
-    id: 'ba',
-    name: 'bashkir',
+    "id": "ba",
+    "name": "bashkir"
   },
   {
-    id: 'jw',
-    name: 'javanese',
+    "id": "jw",
+    "name": "javanese"
   },
   {
-    id: 'su',
-    name: 'sundanese',
+    "id": "su",
+    "name": "sundanese"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
-  },
+    "id": "yue",
+    "name": "cantonese"
+  }
 ] as const;
 
 export function getWhisperLanguages(): readonly ModelLanguage[] {
@@ -411,29 +411,29 @@ export function getWhisperLanguages(): readonly ModelLanguage[] {
 
 export const SENSEVOICE_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'auto',
-    name: 'auto',
+    "id": "auto",
+    "name": "auto"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
+    "id": "yue",
+    "name": "cantonese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'ko',
-    name: 'korean',
-  },
+    "id": "ko",
+    "name": "korean"
+  }
 ] as const;
 
 export function getSenseVoiceLanguages(): readonly ModelLanguage[] {
@@ -442,21 +442,21 @@ export function getSenseVoiceLanguages(): readonly ModelLanguage[] {
 
 export const CANARY_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'fr',
-    name: 'french',
-  },
+    "id": "fr",
+    "name": "french"
+  }
 ] as const;
 
 export function getCanaryLanguages(): readonly ModelLanguage[] {
@@ -465,144 +465,144 @@ export function getCanaryLanguages(): readonly ModelLanguage[] {
 
 export const FUNASR_NANO_ENTRIES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '日文',
-    name: 'japanese',
+    "id": "日文",
+    "name": "japanese"
   },
   {
-    id: '粤语',
-    name: 'cantonese',
+    "id": "粤语",
+    "name": "cantonese"
   },
   {
-    id: '韩文',
-    name: 'korean',
+    "id": "韩文",
+    "name": "korean"
   },
   {
-    id: '越南语',
-    name: 'vietnamese',
+    "id": "越南语",
+    "name": "vietnamese"
   },
   {
-    id: '印尼语',
-    name: 'indonesian',
+    "id": "印尼语",
+    "name": "indonesian"
   },
   {
-    id: '泰语',
-    name: 'thai',
+    "id": "泰语",
+    "name": "thai"
   },
   {
-    id: '马来语',
-    name: 'malay',
+    "id": "马来语",
+    "name": "malay"
   },
   {
-    id: '菲律宾语',
-    name: 'filipino',
+    "id": "菲律宾语",
+    "name": "filipino"
   },
   {
-    id: '阿拉伯语',
-    name: 'arabic',
+    "id": "阿拉伯语",
+    "name": "arabic"
   },
   {
-    id: '印地语',
-    name: 'hindi',
+    "id": "印地语",
+    "name": "hindi"
   },
   {
-    id: '保加利亚语',
-    name: 'bulgarian',
+    "id": "保加利亚语",
+    "name": "bulgarian"
   },
   {
-    id: '克罗地亚语',
-    name: 'croatian',
+    "id": "克罗地亚语",
+    "name": "croatian"
   },
   {
-    id: '捷克语',
-    name: 'czech',
+    "id": "捷克语",
+    "name": "czech"
   },
   {
-    id: '丹麦语',
-    name: 'danish',
+    "id": "丹麦语",
+    "name": "danish"
   },
   {
-    id: '荷兰语',
-    name: 'dutch',
+    "id": "荷兰语",
+    "name": "dutch"
   },
   {
-    id: '爱沙尼亚语',
-    name: 'estonian',
+    "id": "爱沙尼亚语",
+    "name": "estonian"
   },
   {
-    id: '芬兰语',
-    name: 'finnish',
+    "id": "芬兰语",
+    "name": "finnish"
   },
   {
-    id: '希腊语',
-    name: 'greek',
+    "id": "希腊语",
+    "name": "greek"
   },
   {
-    id: '匈牙利语',
-    name: 'hungarian',
+    "id": "匈牙利语",
+    "name": "hungarian"
   },
   {
-    id: '爱尔兰语',
-    name: 'irish',
+    "id": "爱尔兰语",
+    "name": "irish"
   },
   {
-    id: '拉脱维亚语',
-    name: 'latvian',
+    "id": "拉脱维亚语",
+    "name": "latvian"
   },
   {
-    id: '立陶宛语',
-    name: 'lithuanian',
+    "id": "立陶宛语",
+    "name": "lithuanian"
   },
   {
-    id: '马耳他语',
-    name: 'maltese',
+    "id": "马耳他语",
+    "name": "maltese"
   },
   {
-    id: '波兰语',
-    name: 'polish',
+    "id": "波兰语",
+    "name": "polish"
   },
   {
-    id: '葡萄牙语',
-    name: 'portuguese',
+    "id": "葡萄牙语",
+    "name": "portuguese"
   },
   {
-    id: '罗马尼亚语',
-    name: 'romanian',
+    "id": "罗马尼亚语",
+    "name": "romanian"
   },
   {
-    id: '斯洛伐克语',
-    name: 'slovak',
+    "id": "斯洛伐克语",
+    "name": "slovak"
   },
   {
-    id: '斯洛文尼亚语',
-    name: 'slovenian',
+    "id": "斯洛文尼亚语",
+    "name": "slovenian"
   },
   {
-    id: '瑞典语',
-    name: 'swedish',
-  },
+    "id": "瑞典语",
+    "name": "swedish"
+  }
 ] as const;
 
 export const FUNASR_NANO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '日文',
-    name: 'japanese',
-  },
+    "id": "日文",
+    "name": "japanese"
+  }
 ] as const;
 
 export function getFunasrNanoLanguages(): readonly ModelLanguage[] {
@@ -611,129 +611,129 @@ export function getFunasrNanoLanguages(): readonly ModelLanguage[] {
 
 export const FUNASR_MLT_NANO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '粤语',
-    name: 'cantonese',
+    "id": "粤语",
+    "name": "cantonese"
   },
   {
-    id: '日文',
-    name: 'japanese',
+    "id": "日文",
+    "name": "japanese"
   },
   {
-    id: '韩文',
-    name: 'korean',
+    "id": "韩文",
+    "name": "korean"
   },
   {
-    id: '越南语',
-    name: 'vietnamese',
+    "id": "越南语",
+    "name": "vietnamese"
   },
   {
-    id: '印尼语',
-    name: 'indonesian',
+    "id": "印尼语",
+    "name": "indonesian"
   },
   {
-    id: '泰语',
-    name: 'thai',
+    "id": "泰语",
+    "name": "thai"
   },
   {
-    id: '马来语',
-    name: 'malay',
+    "id": "马来语",
+    "name": "malay"
   },
   {
-    id: '菲律宾语',
-    name: 'filipino',
+    "id": "菲律宾语",
+    "name": "filipino"
   },
   {
-    id: '阿拉伯语',
-    name: 'arabic',
+    "id": "阿拉伯语",
+    "name": "arabic"
   },
   {
-    id: '印地语',
-    name: 'hindi',
+    "id": "印地语",
+    "name": "hindi"
   },
   {
-    id: '保加利亚语',
-    name: 'bulgarian',
+    "id": "保加利亚语",
+    "name": "bulgarian"
   },
   {
-    id: '克罗地亚语',
-    name: 'croatian',
+    "id": "克罗地亚语",
+    "name": "croatian"
   },
   {
-    id: '捷克语',
-    name: 'czech',
+    "id": "捷克语",
+    "name": "czech"
   },
   {
-    id: '丹麦语',
-    name: 'danish',
+    "id": "丹麦语",
+    "name": "danish"
   },
   {
-    id: '荷兰语',
-    name: 'dutch',
+    "id": "荷兰语",
+    "name": "dutch"
   },
   {
-    id: '爱沙尼亚语',
-    name: 'estonian',
+    "id": "爱沙尼亚语",
+    "name": "estonian"
   },
   {
-    id: '芬兰语',
-    name: 'finnish',
+    "id": "芬兰语",
+    "name": "finnish"
   },
   {
-    id: '希腊语',
-    name: 'greek',
+    "id": "希腊语",
+    "name": "greek"
   },
   {
-    id: '匈牙利语',
-    name: 'hungarian',
+    "id": "匈牙利语",
+    "name": "hungarian"
   },
   {
-    id: '爱尔兰语',
-    name: 'irish',
+    "id": "爱尔兰语",
+    "name": "irish"
   },
   {
-    id: '拉脱维亚语',
-    name: 'latvian',
+    "id": "拉脱维亚语",
+    "name": "latvian"
   },
   {
-    id: '立陶宛语',
-    name: 'lithuanian',
+    "id": "立陶宛语",
+    "name": "lithuanian"
   },
   {
-    id: '马耳他语',
-    name: 'maltese',
+    "id": "马耳他语",
+    "name": "maltese"
   },
   {
-    id: '波兰语',
-    name: 'polish',
+    "id": "波兰语",
+    "name": "polish"
   },
   {
-    id: '葡萄牙语',
-    name: 'portuguese',
+    "id": "葡萄牙语",
+    "name": "portuguese"
   },
   {
-    id: '罗马尼亚语',
-    name: 'romanian',
+    "id": "罗马尼亚语",
+    "name": "romanian"
   },
   {
-    id: '斯洛伐克语',
-    name: 'slovak',
+    "id": "斯洛伐克语",
+    "name": "slovak"
   },
   {
-    id: '斯洛文尼亚语',
-    name: 'slovenian',
+    "id": "斯洛文尼亚语",
+    "name": "slovenian"
   },
   {
-    id: '瑞典语',
-    name: 'swedish',
-  },
+    "id": "瑞典语",
+    "name": "swedish"
+  }
 ] as const;
 
 export function getFunasrMltNanoLanguages(): readonly ModelLanguage[] {
@@ -742,125 +742,125 @@ export function getFunasrMltNanoLanguages(): readonly ModelLanguage[] {
 
 export const QWEN3_ASR_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
+    "id": "yue",
+    "name": "cantonese"
   },
   {
-    id: 'ar',
-    name: 'arabic',
+    "id": "ar",
+    "name": "arabic"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'id',
-    name: 'indonesian',
+    "id": "id",
+    "name": "indonesian"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'ru',
-    name: 'russian',
+    "id": "ru",
+    "name": "russian"
   },
   {
-    id: 'th',
-    name: 'thai',
+    "id": "th",
+    "name": "thai"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'tr',
-    name: 'turkish',
+    "id": "tr",
+    "name": "turkish"
   },
   {
-    id: 'hi',
-    name: 'hindi',
+    "id": "hi",
+    "name": "hindi"
   },
   {
-    id: 'ms',
-    name: 'malay',
+    "id": "ms",
+    "name": "malay"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'fil',
-    name: 'filipino',
+    "id": "fil",
+    "name": "filipino"
   },
   {
-    id: 'fa',
-    name: 'persian',
+    "id": "fa",
+    "name": "persian"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'mk',
-    name: 'macedonian',
+    "id": "mk",
+    "name": "macedonian"
   },
   {
-    id: 'ro',
-    name: 'romanian',
-  },
+    "id": "ro",
+    "name": "romanian"
+  }
 ] as const;
 
 export function getQwen3AsrLanguages(): readonly ModelLanguage[] {
@@ -869,61 +869,61 @@ export function getQwen3AsrLanguages(): readonly ModelLanguage[] {
 
 export const COHERE_TRANSCRIBE_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'ar',
-    name: 'arabic',
-  },
+    "id": "ar",
+    "name": "arabic"
+  }
 ] as const;
 
 export function getCohereTranscribeLanguages(): readonly ModelLanguage[] {
@@ -932,359 +932,320 @@ export function getCohereTranscribeLanguages(): readonly ModelLanguage[] {
 
 export const DOLPHIN_INFO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'zh-cn',
-    name: 'chinese (mandarin)',
+    "id": "zh-cn",
+    "name": "chinese (mandarin)"
   },
   {
-    id: 'zh-tw',
-    name: 'chinese (taiwan)',
+    "id": "zh-tw",
+    "name": "chinese (taiwan)"
   },
   {
-    id: 'zh-wu',
-    name: 'chinese (wuyu)',
+    "id": "zh-wu",
+    "name": "chinese (wuyu)"
   },
   {
-    id: 'zh-sichuan',
-    name: 'chinese (sichuan)',
+    "id": "zh-sichuan",
+    "name": "chinese (sichuan)"
   },
   {
-    id: 'zh-shanxi',
-    name: 'chinese (shanxi)',
+    "id": "zh-shanxi",
+    "name": "chinese (shanxi)"
   },
   {
-    id: 'zh-anhui',
-    name: 'chinese (anhui)',
+    "id": "zh-anhui",
+    "name": "chinese (anhui)"
   },
   {
-    id: 'zh-tianjin',
-    name: 'chinese (tianjin)',
+    "id": "zh-tianjin",
+    "name": "chinese (tianjin)"
   },
   {
-    id: 'zh-ningxia',
-    name: 'chinese (ningxia)',
+    "id": "zh-ningxia",
+    "name": "chinese (ningxia)"
   },
   {
-    id: 'zh-shaanxi',
-    name: 'chinese (shaanxi)',
+    "id": "zh-shaanxi",
+    "name": "chinese (shaanxi)"
   },
   {
-    id: 'zh-hebei',
-    name: 'chinese (hebei)',
+    "id": "zh-hebei",
+    "name": "chinese (hebei)"
   },
   {
-    id: 'zh-shandong',
-    name: 'chinese (shandong)',
+    "id": "zh-shandong",
+    "name": "chinese (shandong)"
   },
   {
-    id: 'zh-guangdong',
-    name: 'chinese (guangdong)',
+    "id": "zh-guangdong",
+    "name": "chinese (guangdong)"
   },
   {
-    id: 'zh-shanghai',
-    name: 'chinese (shanghai)',
+    "id": "zh-shanghai",
+    "name": "chinese (shanghai)"
   },
   {
-    id: 'zh-hubei',
-    name: 'chinese (hubei)',
+    "id": "zh-hubei",
+    "name": "chinese (hubei)"
   },
   {
-    id: 'zh-liaoning',
-    name: 'chinese (liaoning)',
+    "id": "zh-liaoning",
+    "name": "chinese (liaoning)"
   },
   {
-    id: 'zh-gansu',
-    name: 'chinese (gansu)',
+    "id": "zh-gansu",
+    "name": "chinese (gansu)"
   },
   {
-    id: 'zh-fujian',
-    name: 'chinese (fujian)',
+    "id": "zh-fujian",
+    "name": "chinese (fujian)"
   },
   {
-    id: 'zh-hunan',
-    name: 'chinese (hunan)',
+    "id": "zh-hunan",
+    "name": "chinese (hunan)"
   },
   {
-    id: 'zh-henan',
-    name: 'chinese (henan)',
+    "id": "zh-henan",
+    "name": "chinese (henan)"
   },
   {
-    id: 'zh-yunnan',
-    name: 'chinese (yunnan)',
+    "id": "zh-yunnan",
+    "name": "chinese (yunnan)"
   },
   {
-    id: 'zh-minnan',
-    name: 'chinese (minnan)',
+    "id": "zh-minnan",
+    "name": "chinese (minnan)"
   },
   {
-    id: 'zh-wenzhou',
-    name: 'chinese (wenzhou)',
+    "id": "zh-wenzhou",
+    "name": "chinese (wenzhou)"
   },
   {
-    id: 'ja-jp',
-    name: 'japanese',
+    "id": "ja-jp",
+    "name": "japanese"
   },
   {
-    id: 'th-th',
-    name: 'thai',
+    "id": "th-th",
+    "name": "thai"
   },
   {
-    id: 'ru-ru',
-    name: 'russian',
+    "id": "ru-ru",
+    "name": "russian"
   },
   {
-    id: 'ko-kr',
-    name: 'korean',
+    "id": "ko-kr",
+    "name": "korean"
   },
   {
-    id: 'id-id',
-    name: 'indonesian',
+    "id": "id-id",
+    "name": "indonesian"
   },
   {
-    id: 'vi-vn',
-    name: 'vietnamese',
+    "id": "vi-vn",
+    "name": "vietnamese"
   },
   {
-    id: 'ct-null',
-    name: 'yue (unknown)',
+    "id": "ct-null",
+    "name": "yue (unknown)"
   },
   {
-    id: 'ct-hk',
-    name: 'yue (hong kong)',
+    "id": "ct-hk",
+    "name": "yue (hong kong)"
   },
   {
-    id: 'ct-gz',
-    name: 'yue (guangdong)',
+    "id": "ct-gz",
+    "name": "yue (guangdong)"
   },
   {
-    id: 'hi-in',
-    name: 'hindi',
+    "id": "hi-in",
+    "name": "hindi"
   },
   {
-    id: 'ur-in',
-    name: 'urdu',
+    "id": "ur-in",
+    "name": "urdu"
   },
   {
-    id: 'ur-pk',
-    name: 'urdu (pakistan)',
+    "id": "ur-pk",
+    "name": "urdu (pakistan)"
   },
   {
-    id: 'ms-my',
-    name: 'malay',
+    "id": "ms-my",
+    "name": "malay"
   },
   {
-    id: 'uz-uz',
-    name: 'uzbek',
+    "id": "uz-uz",
+    "name": "uzbek"
   },
   {
-    id: 'ar-ma',
-    name: 'arabic (morocco)',
+    "id": "ar-ma",
+    "name": "arabic (morocco)"
   },
   {
-    id: 'ar-gla',
-    name: 'arabic',
+    "id": "ar-gla",
+    "name": "arabic"
   },
   {
-    id: 'ar-sa',
-    name: 'arabic (saudi arabia)',
+    "id": "ar-sa",
+    "name": "arabic (saudi arabia)"
   },
   {
-    id: 'ar-eg',
-    name: 'arabic (egypt)',
+    "id": "ar-eg",
+    "name": "arabic (egypt)"
   },
   {
-    id: 'ar-kw',
-    name: 'arabic (kuwait)',
+    "id": "ar-kw",
+    "name": "arabic (kuwait)"
   },
   {
-    id: 'ar-ly',
-    name: 'arabic (libya)',
+    "id": "ar-ly",
+    "name": "arabic (libya)"
   },
   {
-    id: 'ar-jo',
-    name: 'arabic (jordan)',
+    "id": "ar-jo",
+    "name": "arabic (jordan)"
   },
   {
-    id: 'ar-ae',
-    name: 'arabic (uae)',
+    "id": "ar-ae",
+    "name": "arabic (uae)"
   },
   {
-    id: 'ar-lvt',
-    name: 'arabic (levant)',
+    "id": "ar-lvt",
+    "name": "arabic (levant)"
   },
   {
-    id: 'fa-ir',
-    name: 'persian',
+    "id": "fa-ir",
+    "name": "persian"
   },
   {
-    id: 'bn-bd',
-    name: 'bengali',
+    "id": "bn-bd",
+    "name": "bengali"
   },
   {
-    id: 'ta-sg',
-    name: 'tamil (singapore)',
+    "id": "ta-sg",
+    "name": "tamil (singapore)"
   },
   {
-    id: 'ta-lk',
-    name: 'tamil (sri lanka)',
+    "id": "ta-lk",
+    "name": "tamil (sri lanka)"
   },
   {
-    id: 'ta-in',
-    name: 'tamil (india)',
+    "id": "ta-in",
+    "name": "tamil (india)"
   },
   {
-    id: 'ta-my',
-    name: 'tamil (malaysia)',
+    "id": "ta-my",
+    "name": "tamil (malaysia)"
   },
   {
-    id: 'te-in',
-    name: 'telugu',
+    "id": "te-in",
+    "name": "telugu"
   },
   {
-    id: 'ug-null',
-    name: 'uighur',
+    "id": "ug-null",
+    "name": "uighur"
   },
   {
-    id: 'ug-cn',
-    name: 'uighur (china)',
+    "id": "ug-cn",
+    "name": "uighur (china)"
   },
   {
-    id: 'gu-in',
-    name: 'gujarati',
+    "id": "gu-in",
+    "name": "gujarati"
   },
   {
-    id: 'my-mm',
-    name: 'burmese',
+    "id": "my-mm",
+    "name": "burmese"
   },
   {
-    id: 'tl-ph',
-    name: 'tagalog',
+    "id": "tl-ph",
+    "name": "tagalog"
   },
   {
-    id: 'kk-kz',
-    name: 'kazakh',
+    "id": "kk-kz",
+    "name": "kazakh"
   },
   {
-    id: 'or-in',
-    name: 'odia',
+    "id": "or-in",
+    "name": "odia"
   },
   {
-    id: 'ne-np',
-    name: 'nepali',
+    "id": "ne-np",
+    "name": "nepali"
   },
   {
-    id: 'mn-mn',
-    name: 'mongolian',
+    "id": "mn-mn",
+    "name": "mongolian"
   },
   {
-    id: 'km-kh',
-    name: 'khmer',
+    "id": "km-kh",
+    "name": "khmer"
   },
   {
-    id: 'jv-id',
-    name: 'javanese',
+    "id": "jv-id",
+    "name": "javanese"
   },
   {
-    id: 'lo-la',
-    name: 'lao',
+    "id": "lo-la",
+    "name": "lao"
   },
   {
-    id: 'si-lk',
-    name: 'sinhala',
+    "id": "si-lk",
+    "name": "sinhala"
   },
   {
-    id: 'fil-ph',
-    name: 'filipino',
+    "id": "fil-ph",
+    "name": "filipino"
   },
   {
-    id: 'ps-af',
-    name: 'pushto',
+    "id": "ps-af",
+    "name": "pushto"
   },
   {
-    id: 'pa-in',
-    name: 'panjabi',
+    "id": "pa-in",
+    "name": "panjabi"
   },
   {
-    id: 'kab-null',
-    name: 'kabyle',
+    "id": "kab-null",
+    "name": "kabyle"
   },
   {
-    id: 'ba-null',
-    name: 'bashkir',
+    "id": "ba-null",
+    "name": "bashkir"
   },
   {
-    id: 'ks-in',
-    name: 'kashmiri',
+    "id": "ks-in",
+    "name": "kashmiri"
   },
   {
-    id: 'tg-tj',
-    name: 'tajik',
+    "id": "tg-tj",
+    "name": "tajik"
   },
   {
-    id: 'su-id',
-    name: 'sundanese',
+    "id": "su-id",
+    "name": "sundanese"
   },
   {
-    id: 'mr-in',
-    name: 'marathi',
+    "id": "mr-in",
+    "name": "marathi"
   },
   {
-    id: 'ky-kg',
-    name: 'kirghiz',
+    "id": "ky-kg",
+    "name": "kirghiz"
   },
   {
-    id: 'az-az',
-    name: 'azerbaijani',
-  },
+    "id": "az-az",
+    "name": "azerbaijani"
+  }
 ] as const;
 
 export function getDolphinInfoLanguages(): readonly ModelLanguage[] {
   return DOLPHIN_INFO_LANGUAGES;
 }
 
-export const POCKET_TTS_ISO6391_HINTS = ['en'] as const;
+export const POCKET_TTS_ISO6391_HINTS = ["en"] as const;
 
-export const SUPERTONIC3_TTS_ISO6391_HINTS = [
-  'ar',
-  'bg',
-  'hr',
-  'cs',
-  'da',
-  'nl',
-  'en',
-  'et',
-  'fi',
-  'fr',
-  'de',
-  'el',
-  'hi',
-  'hu',
-  'id',
-  'it',
-  'ja',
-  'ko',
-  'lv',
-  'lt',
-  'pl',
-  'pt',
-  'ro',
-  'ru',
-  'sk',
-  'sl',
-  'es',
-  'sv',
-  'tr',
-  'uk',
-  'vi',
-  'na',
-] as const;
+export const SUPERTONIC3_TTS_ISO6391_HINTS = ["ar","bg","hr","cs","da","nl","en","et","fi","fr","de","el","hi","hu","id","it","ja","ko","lv","lt","pl","pt","ro","ru","sk","sl","es","sv","tr","uk","vi","na"] as const;
 
-export const SUPERTONIC_TTS_ISO6391_HINTS = [
-  'en',
-  'ko',
-  'fr',
-  'es',
-  'pt',
-] as const;
+export const SUPERTONIC_TTS_ISO6391_HINTS = ["en","ko","fr","es","pt"] as const;
 
 /** True when modelKey denotes Supertonic 3 (not legacy Supertonic bundles). */
 export function isSupertonic3ModelKey(modelKey: string | undefined): boolean {
@@ -1317,14 +1278,32 @@ export function iso6391HintsForTtsModelType(
   }
 }
 
+export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ["en"] as const;
+
+export function iso6391HintsForAlignmentModelType(
+  modelType: string | undefined,
+  modelKey?: string
+): string[] | undefined {
+  const type = (modelType ?? '').trim().toLowerCase();
+  const key = (modelKey ?? '').trim().toLowerCase();
+  if (type === 'wav2vec2') {
+    return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];
+  }
+  // Name-only catalog detect often reports modelType unknown/auto for alignment packs.
+  if (key.includes('wav2vec') || key.includes('960h') || type === 'auto') {
+    return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];
+  }
+  return undefined;
+}
+
 const STT_ENTRIES: Readonly<Record<string, readonly ModelLanguage[]>> = {
-  whisper: WHISPER_LANGUAGES,
-  sense_voice: SENSEVOICE_LANGUAGES,
-  canary: CANARY_LANGUAGES,
-  funasr_nano: FUNASR_NANO_ENTRIES,
-  qwen3_asr: QWEN3_ASR_LANGUAGES,
-  cohere_transcribe: COHERE_TRANSCRIBE_LANGUAGES,
-  dolphin: DOLPHIN_INFO_LANGUAGES,
+  "whisper": WHISPER_LANGUAGES,
+  "sense_voice": SENSEVOICE_LANGUAGES,
+  "canary": CANARY_LANGUAGES,
+  "funasr_nano": FUNASR_NANO_ENTRIES,
+  "qwen3_asr": QWEN3_ASR_LANGUAGES,
+  "cohere_transcribe": COHERE_TRANSCRIBE_LANGUAGES,
+  "dolphin": DOLPHIN_INFO_LANGUAGES,
 };
 
 export function sttModelLanguagesForModelType(
@@ -1343,233 +1322,15 @@ export function iso6391HintsForSttModelType(
 }
 
 const STT_HINTS: Readonly<Record<string, readonly string[]>> = {
-  whisper: [
-    'en',
-    'zh',
-    'de',
-    'es',
-    'ru',
-    'ko',
-    'fr',
-    'ja',
-    'pt',
-    'tr',
-    'pl',
-    'ca',
-    'nl',
-    'ar',
-    'sv',
-    'it',
-    'id',
-    'hi',
-    'fi',
-    'vi',
-    'he',
-    'uk',
-    'el',
-    'ms',
-    'cs',
-    'ro',
-    'da',
-    'hu',
-    'ta',
-    'no',
-    'th',
-    'ur',
-    'hr',
-    'bg',
-    'lt',
-    'la',
-    'mi',
-    'ml',
-    'cy',
-    'sk',
-    'te',
-    'fa',
-    'lv',
-    'bn',
-    'sr',
-    'az',
-    'sl',
-    'kn',
-    'et',
-    'mk',
-    'br',
-    'eu',
-    'is',
-    'hy',
-    'ne',
-    'mn',
-    'bs',
-    'kk',
-    'sq',
-    'sw',
-    'gl',
-    'mr',
-    'pa',
-    'si',
-    'km',
-    'sn',
-    'yo',
-    'so',
-    'af',
-    'oc',
-    'ka',
-    'be',
-    'tg',
-    'sd',
-    'gu',
-    'am',
-    'yi',
-    'lo',
-    'uz',
-    'fo',
-    'ht',
-    'ps',
-    'tk',
-    'nn',
-    'mt',
-    'sa',
-    'lb',
-    'my',
-    'bo',
-    'tl',
-    'mg',
-    'as',
-    'tt',
-    'haw',
-    'ln',
-    'ha',
-    'ba',
-    'jv',
-    'su',
-    'yue',
-  ],
-  sense_voice: ['zh', 'en', 'yue', 'ja', 'ko'],
-  canary: ['en', 'es', 'de', 'fr'],
-  funasr_nano: [
-    'zh',
-    'en',
-    'ja',
-    'yue',
-    'ko',
-    'vi',
-    'id',
-    'th',
-    'ms',
-    'fil',
-    'ar',
-    'hi',
-    'bg',
-    'hr',
-    'cs',
-    'da',
-    'nl',
-    'et',
-    'fi',
-    'el',
-    'hu',
-    'ga',
-    'lv',
-    'lt',
-    'mt',
-    'pl',
-    'pt',
-    'ro',
-    'sk',
-    'sl',
-    'sv',
-  ],
-  qwen3_asr: [
-    'zh',
-    'en',
-    'yue',
-    'ar',
-    'de',
-    'fr',
-    'es',
-    'pt',
-    'id',
-    'it',
-    'ko',
-    'ru',
-    'th',
-    'vi',
-    'ja',
-    'tr',
-    'hi',
-    'ms',
-    'nl',
-    'sv',
-    'da',
-    'fi',
-    'pl',
-    'cs',
-    'fil',
-    'fa',
-    'el',
-    'hu',
-    'mk',
-    'ro',
-  ],
-  cohere_transcribe: [
-    'en',
-    'fr',
-    'de',
-    'it',
-    'es',
-    'pt',
-    'el',
-    'nl',
-    'pl',
-    'zh',
-    'ja',
-    'ko',
-    'vi',
-    'ar',
-  ],
-  dolphin: [
-    'zh',
-    'ja',
-    'th',
-    'ru',
-    'ko',
-    'id',
-    'vi',
-    'yue',
-    'hi',
-    'ur',
-    'ms',
-    'uz',
-    'ar',
-    'fa',
-    'bn',
-    'ta',
-    'te',
-    'ug',
-    'gu',
-    'my',
-    'tl',
-    'kk',
-    'or',
-    'ne',
-    'mn',
-    'km',
-    'jv',
-    'lo',
-    'si',
-    'ps',
-    'pa',
-    'ba',
-    'ks',
-    'tg',
-    'su',
-    'mr',
-    'ky',
-    'az',
-  ],
-  moonshine: ['en'],
-  moonshine_v2: ['en'],
+  "whisper": ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jv","su","yue"],
+  "sense_voice": ["zh","en","yue","ja","ko"],
+  "canary": ["en","es","de","fr"],
+  "funasr_nano": ["zh","en","ja","yue","ko","vi","id","th","ms","fil","ar","hi","bg","hr","cs","da","nl","et","fi","el","hu","ga","lv","lt","mt","pl","pt","ro","sk","sl","sv"],
+  "qwen3_asr": ["zh","en","yue","ar","de","fr","es","pt","id","it","ko","ru","th","vi","ja","tr","hi","ms","nl","sv","da","fi","pl","cs","fil","fa","el","hu","mk","ro"],
+  "cohere_transcribe": ["en","fr","de","it","es","pt","el","nl","pl","zh","ja","ko","vi","ar"],
+  "dolphin": ["zh","ja","th","ru","ko","id","vi","yue","hi","ur","ms","uz","ar","fa","bn","ta","te","ug","gu","my","tl","kk","or","ne","mn","km","jv","lo","si","ps","pa","ba","ks","tg","su","mr","ky","az"],
+  "moonshine": ["en"],
+  "moonshine_v2": ["en"],
 };
 
 export const CATALOG_VERSION = 1;

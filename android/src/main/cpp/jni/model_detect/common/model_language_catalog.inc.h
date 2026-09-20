@@ -75,6 +75,16 @@ inline const std::vector<PublicLanguageRow>& SttRowsForModelType(
     return it == kMap.end() ? kEmpty : it->second;
 }
 
+inline const std::vector<PublicLanguageRow>& AlignmentRowsForModelType(
+    const std::string& modelType) {
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kMap = {
+        {"wav2vec2", {PublicLanguageRow{"en", "en"}}},
+    };
+    static const std::vector<PublicLanguageRow> kEmpty;
+    const auto it = kMap.find(modelType);
+    return it == kMap.end() ? kEmpty : it->second;
+}
+
 inline std::string ModelOptionIdForHint(
     const std::string& modelType,
     const std::string& hint) {

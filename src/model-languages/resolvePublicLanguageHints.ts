@@ -1,5 +1,4 @@
 import { ModelCategory } from '../download/types';
-import { iso6391HintsForAlignmentModelType } from './alignment/hints';
 import { normalizePublicLanguageTag } from './normalize';
 
 export type PublicLanguageHint = {
@@ -67,33 +66,15 @@ export function normalizePublicLanguageRows(
 }
 
 /**
- * Normalize native structured `languages` rows from detect. Native bundles
- * `{ iso6391Hint, id }` from catalog SSOT; this layer only normalizes hints.
- * When Alignment detect returns no rows, fall back to type/key hints (EN for wav2vec2).
- *
- * TODO(multilang-alignment): drop Alignment fallback once native/catalog emits real languages.
+ * Normalize native structured `languages` rows from detect. Native (C++)
+ * already appends curated catalog rows when filename heuristics are empty
+ * (TTS / STT / Alignment via `AppendCurated*LanguageRowsIfEmpty`). This layer
+ * only normalizes those rows — no TypeScript fallback.
  */
 export function publicLanguageHintsFromNative(
   input: ResolvePublicLanguageHintsInput
 ): PublicLanguageHint[] {
-  const fromNative = normalizePublicLanguageRows(input.rawRows ?? []);
-  if (fromNative.length > 0) {
-    return fromNative;
-  }
-
-  if (input.domain === ModelCategory.Alignment) {
-    const hints = iso6391HintsForAlignmentModelType(
-      input.modelType,
-      input.modelKey
-    );
-    if (hints != null && hints.length > 0) {
-      return normalizePublicLanguageRows(
-        hints.map((iso6391Hint) => ({ iso6391Hint, id: iso6391Hint }))
-      );
-    }
-  }
-
-  return [];
+  return normalizePublicLanguageRows(input.rawRows ?? []);
 }
 
 /**

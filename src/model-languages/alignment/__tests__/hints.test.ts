@@ -1,5 +1,5 @@
 import { ModelCategory } from '../../../download/types';
-import { iso6391HintsForAlignmentModelType } from '../hints';
+import { iso6391HintsForAlignmentModelType } from '../index';
 import { publicLanguageHintsFromNative } from '../../resolvePublicLanguageHints';
 
 describe('alignment language hints', () => {
@@ -8,10 +8,12 @@ describe('alignment language hints', () => {
     expect(
       iso6391HintsForAlignmentModelType('unknown', 'wav2vec2-base-960h-int8')
     ).toEqual(['en']);
-    expect(iso6391HintsForAlignmentModelType('unknown', 'other-model')).toBeUndefined();
+    expect(
+      iso6391HintsForAlignmentModelType('unknown', 'other-model')
+    ).toBeUndefined();
   });
 
-  it('publicLanguageHintsFromNative falls back to en for empty Alignment rows', () => {
+  it('publicLanguageHintsFromNative does not invent Alignment rows (C++ curated catalog owns that)', () => {
     expect(
       publicLanguageHintsFromNative({
         domain: ModelCategory.Alignment,
@@ -19,16 +21,16 @@ describe('alignment language hints', () => {
         modelKey: 'wav2vec2-base-960h-int8',
         rawRows: [],
       })
-    ).toEqual([{ iso6391Hint: 'en', id: 'en' }]);
+    ).toEqual([]);
   });
 
-  it('publicLanguageHintsFromNative prefers native Alignment rows', () => {
+  it('publicLanguageHintsFromNative normalizes native Alignment rows', () => {
     expect(
       publicLanguageHintsFromNative({
         domain: ModelCategory.Alignment,
         modelType: 'wav2vec2',
-        rawRows: [{ iso6391Hint: 'vi', id: 'vi' }],
+        rawRows: [{ iso6391Hint: 'EN', id: 'en' }],
       })
-    ).toEqual([{ iso6391Hint: 'vi', id: 'vi' }]);
+    ).toEqual([{ iso6391Hint: 'en', id: 'en' }]);
   });
 });

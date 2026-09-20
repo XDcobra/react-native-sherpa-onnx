@@ -3,6 +3,7 @@
 #include "model_language_catalog.inc.h"
 
 #include <algorithm>
+#include <cctype>
 
 namespace sherpaonnx {
 namespace {
@@ -35,6 +36,29 @@ const char* SttKindToModelType(SttModelKind kind) {
     }
 }
 
+const char* AlignmentKindToModelType(AlignmentModelKind kind) {
+    switch (kind) {
+        case AlignmentModelKind::kWav2Vec2: return "wav2vec2";
+        default: return "";
+    }
+}
+
+std::string InferAlignmentModelTypeFromKey(const std::string& modelKey) {
+    if (modelKey.empty()) {
+        return {};
+    }
+    std::string lower;
+    lower.reserve(modelKey.size());
+    for (unsigned char c : modelKey) {
+        lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (lower.find("wav2vec") != std::string::npos ||
+        lower.find("960h") != std::string::npos) {
+        return "wav2vec2";
+    }
+    return {};
+}
+
 void AppendUniqueRows(
     std::vector<PublicLanguageRow>& derivedLanguages,
     const std::vector<PublicLanguageRow>& rows) {
@@ -65,6 +89,9 @@ const std::vector<PublicLanguageRow>& CuratedRows(
             return TtsSupertonicRows(modelKey);
         }
         return TtsSimpleRows(modelType);
+    }
+    if (domain == ModelLanguageDomain::kAlignment) {
+        return AlignmentRowsForModelType(modelType);
     }
     return SttRowsForModelType(modelType);
 }
@@ -143,6 +170,26 @@ void AppendCuratedSttLanguageRowsIfEmpty(
     UpgradeModelOptionIdsForType(modelType, result.derivedLanguages);
     AppendCuratedLanguageRowsIfEmpty(
         ModelLanguageDomain::kStt,
+        modelType,
+        modelKey,
+        result.ok,
+        HasNameOnlySource(result.detectionSources),
+        result.derivedLanguages,
+        result.detectionSources);
+}
+
+void AppendCuratedAlignmentLanguageRowsIfEmpty(
+    AlignmentDetectResult& result,
+    const std::string& modelKey) {
+    std::string modelType = AlignmentKindToModelType(result.selectedKind);
+    if (modelType.empty()) {
+        modelType = InferAlignmentModelTypeFromKey(modelKey);
+    }
+    if (modelType.empty()) {
+        return;
+    }
+    AppendCuratedLanguageRowsIfEmpty(
+        ModelLanguageDomain::kAlignment,
         modelType,
         modelKey,
         result.ok,

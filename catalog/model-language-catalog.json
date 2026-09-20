@@ -1291,5 +1291,12 @@
         "en"
       ]
     }
+  },
+  "alignment": {
+    "wav2vec2": {
+      "hints": [
+        "en"
+      ]
+    }
   }
 }
