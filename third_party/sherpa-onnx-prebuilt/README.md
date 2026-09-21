@@ -57,6 +57,7 @@ By default the script builds the **Kotlin API** (data classes, `WaveReader.readW
 
 ## Output layout
 
-- `android/<abi>/lib/*.so` – built libraries (e.g. `libsherpa-onnx-jni.so`, `libonnxruntime.so`).
+- `android/<abi>/lib/*.so` – **stripped** libraries for runtime (e.g. `libsherpa-onnx-jni.so`). Used in `sherpa-onnx-android.zip` / Maven AAR.
+- `android-native-debug-symbols/<abi>/*.so` – **unstripped** copies (same BuildID) for Crashlytics / Play Console. Packaged only as GitHub Release asset `sherpa-onnx-android-native-debug-symbols.zip` — **not** on Maven, **not** for app runtime.
 - `android/java/classes.jar` – sherpa-onnx API (default: Kotlin from `sherpa-onnx/kotlin-api`; or Java from `sherpa-onnx/java-api` when using `--java`). With `--both`, `classes-java.jar` is also produced.
-- Built `.so` files under `android/<abi>/lib/` can be copied into the RN module’s `android/src/main/jniLibs/<abi>/` when not using Maven/GitHub fetch.
+- Built stripped `.so` files under `android/<abi>/lib/` can be copied into the RN module’s `android/src/main/jniLibs/<abi>/` when not using Maven/GitHub fetch.

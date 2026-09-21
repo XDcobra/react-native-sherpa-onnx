@@ -22,6 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SHERPA_SRC="$REPO_ROOT/third_party/sherpa-onnx"
 OUTPUT_BASE="$SCRIPT_DIR/android"
+# Unstripped .so (pre install/strip) for Crashlytics/Play native-debug-symbols — not shipped in runtime zip/AAR.
+SYMBOLS_OUTPUT_BASE="$SCRIPT_DIR/android-native-debug-symbols"
+REQUIRED_SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so"
 ORT_PREBUILT_ROOT=""
 ORT_PREBUILT_ANDROID_BASE=""
 ORT_PREBUILT_ANDROID_HEADERS=""
@@ -83,6 +86,7 @@ fi
 echo "ANDROID_NDK: $ANDROID_NDK"
 echo "sherpa-onnx source: $SHERPA_SRC"
 echo "Output base: $OUTPUT_BASE"
+echo "Native debug symbols output: $SYMBOLS_OUTPUT_BASE"
 echo "QNN: $ENABLE_QNN"
 if [ "$ENABLE_QNN" = ON ]; then
     echo "QNN_SDK_ROOT: $QNN_SDK_ROOT"
@@ -260,14 +264,27 @@ build_abi() {
     (cd "$SHERPA_SRC" && ./"$SCRIPT") || { echo "Build failed for $ABI"; return 1; }
 
     local INSTALL_LIB="$SHERPA_SRC/$BUILD_DIR/install/lib"
+    local BUILD_LIB="$SHERPA_SRC/$BUILD_DIR/lib"
     local DST_LIB="$OUTPUT_BASE/$ABI/lib"
-    mkdir -p "$DST_LIB"
-    for so in libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
+    local DST_SYMBOLS="$SYMBOLS_OUTPUT_BASE/$ABI"
+    mkdir -p "$DST_LIB" "$DST_SYMBOLS"
+    for so in $REQUIRED_SHERPA_SO; do
         if [ -f "$INSTALL_LIB/$so" ]; then
             cp -v "$INSTALL_LIB/$so" "$DST_LIB/"
+        else
+            echo "Error: stripped $so missing at $INSTALL_LIB/$so"
+            exit 1
+        fi
+        # Unstripped (before make install/strip) — same BuildID as stripped runtime .so.
+        if [ -f "$BUILD_LIB/$so" ]; then
+            cp -v "$BUILD_LIB/$so" "$DST_SYMBOLS/"
+        else
+            echo "Error: unstripped $so missing at $BUILD_LIB/$so"
+            exit 1
         fi
     done
-    echo "Copied .so files to $DST_LIB"
+    echo "Copied stripped .so files to $DST_LIB"
+    echo "Copied unstripped .so files to $DST_SYMBOLS"
 
     # Fail the build if sherpa was still linked against a different ORT symbol version.
     local _jni="$DST_LIB/libsherpa-onnx-jni.so"

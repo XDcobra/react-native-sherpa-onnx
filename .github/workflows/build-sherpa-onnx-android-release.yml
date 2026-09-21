@@ -1,6 +1,7 @@
 # Build sherpa-onnx for Android (all ABIs, with QNN); produce zip + AAR; publish as GitHub Release and to Maven.
 # Release tag is read from third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG.
 # Zip layout: arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so); c-api/ (C headers); java/classes.jar.
+# Also publishes sherpa-onnx-android-native-debug-symbols.zip (unstripped .so; GitHub Release only, not Maven).
 # AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:sherpa-onnx (POM depends on com.xdcobra.sherpa:onnxruntime).
 # If MAVEN_REPO_PAT is set, the AAR is also published to XDcobra/maven with MD5/SHA1 checksums.
 
@@ -8,11 +9,11 @@
 # ──────────────────────────────────────────────────────────
 # 1. Build sherpa-onnx (Android, all ABIs, with QNN)
 # ──────────────────────────────────────────────────────────
-# 2. Package sherpa-onnx layout zip (from build output)
+# 2. Package sherpa-onnx layout zip + native-debug-symbols zip (from build output)
 # ──────────────────────────────────────────────────────────
 # 3. Prepare AAR for release asset
 # ──────────────────────────────────────────────────────────
-# 4. Create GitHub Release (AAR + zip)
+# 4. Create GitHub Release (AAR + runtime zip + symbols zip)
 # ──────────────────────────────────────────────────────────
 # 5. Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven)
 # ──────────────────────────────────────────────────────────
@@ -138,8 +139,10 @@ jobs:
         uses: actions/cache@v6
         id: sherpa-cache
         with:
-          path: third_party/sherpa-onnx-prebuilt/android
-          key: sherpa-android-prebuilt-qnn-both-v3-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
+          path: |
+            third_party/sherpa-onnx-prebuilt/android
+            third_party/sherpa-onnx-prebuilt/android-native-debug-symbols
+          key: sherpa-android-prebuilt-qnn-both-v4-${{ steps.submodules.outputs.sherpa }}-${{ hashFiles('third_party/sherpa-onnx-prebuilt/build_sherpa_onnx.sh', 'third_party/sherpa-onnx-prebuilt/kotlin-api-build/**', 'third_party/onnxruntime_prebuilt/VERSIONS', 'third_party/onnxruntime_prebuilt/ANDROID_RELEASE_TAG', 'third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG') }}
 
       - name: Build sherpa-onnx (Android, all ABIs, with QNN; Kotlin + Java API)
         if: steps.sherpa-cache.outputs.cache-hit != 'true'
@@ -190,6 +193,33 @@ jobs:
           cd ..
           ls -la sherpa-onnx-android.zip
 
+      - name: Package native debug symbols zip
+        run: |
+          set -euo pipefail
+          SYMBOLS_DIR=third_party/sherpa-onnx-prebuilt/android-native-debug-symbols
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          SHERPA_SO="libsherpa-onnx-jni.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so"
+          if [ ! -d "$SYMBOLS_DIR" ]; then
+            echo "::error::Missing $SYMBOLS_DIR (build should copy unstripped .so there)."
+            exit 1
+          fi
+          for abi in $ABIS; do
+            for so in $SHERPA_SO; do
+              f="$SYMBOLS_DIR/$abi/$so"
+              if [ ! -f "$f" ]; then
+                echo "::error::Missing unstripped symbol library: $f"
+                exit 1
+              fi
+            done
+          done
+          (
+            cd "$SYMBOLS_DIR"
+            zip -r "$GITHUB_WORKSPACE/sherpa-onnx-android-native-debug-symbols.zip" .
+          )
+          ls -lh sherpa-onnx-android-native-debug-symbols.zip
+          echo "Native debug symbols zip contents (sample):"
+          unzip -l sherpa-onnx-android-native-debug-symbols.zip | head -40
+
       - name: Add C-API headers to prebuilt layout (for AAR; Maven consumers get libs + headers)
         run: |
           SHERPA_CAPI=third_party/sherpa-onnx/sherpa-onnx/c-api
@@ -217,12 +247,18 @@ jobs:
           name: Sherpa-onnx Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false  # do not set this release as GitHub's "latest" (e.g. to keep app/npm release as latest)
           body: |
+            ## What's New
+            - Updated sherpa-onnx to the newest release `${{ steps.tag.outputs.maven_version }}`
+
+            ## Archive Structure
             Prebuilt sherpa-onnx for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN-linked native libs. **ONNX Runtime** (`libonnxruntime.so`, JNI, Java API, headers) is provided by `com.xdcobra.sherpa:onnxruntime` — not bundled in this zip/AAR.
-            - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (Sherpa `.so` only), `c-api/` (C headers), `java/classes.jar` (Kotlin API).
             - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar** – Android library (Kotlin API: data classes, `WaveReader.readWave()`, etc.). Also on Maven as default artifact; depends on `com.xdcobra.sherpa:onnxruntime`.
             - **sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar** – Same library with **Java API** (Builder pattern). Use Maven classifier `java` or this file for Java projects.
+            - **sherpa-onnx-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (Sherpa `.so` only, **stripped**), `c-api/` (C headers), `java/classes.jar` (Kotlin API).
+            - **sherpa-onnx-android-native-debug-symbols.zip** – Same ABIs/libs **unstripped** (DWARF) for Firebase Crashlytics / Play Console. **Not** for app runtime; **not** on Maven. Layout: `<abi>/libsherpa-onnx-*.so`.
 
-            **Maven:** The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:sherpa-onnx`. Add `com.xdcobra.sherpa:onnxruntime` to your repo if not already present (sherpa-onnx POM declares it as dependency).
+            ## Maven
+            The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:sherpa-onnx`. Add `com.xdcobra.sherpa:onnxruntime` to your repo if not already present (sherpa-onnx POM declares it as dependency). Native debug symbols stay on the GitHub Release only (no Maven classifier).
 
             **Kotlin / default (recommended for Kotlin and React Native):**
             ```gradle
@@ -236,6 +272,7 @@ jobs:
             ```
           files: |
             sherpa-onnx-android.zip
+            sherpa-onnx-android-native-debug-symbols.zip
             sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar
             sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar
           draft: false
@@ -269,10 +306,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| \`sherpa-onnx-android.zip\` | Sherpa \`.so\` only + \`c-api/\` + \`java/classes.jar\`. ORT via \`onnxruntime\` Maven. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-android.zip\` | Sherpa stripped \`.so\` only + \`c-api/\` + \`java/classes.jar\`. ORT via \`onnxruntime\` Maven. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`sherpa-onnx-android-native-debug-symbols.zip\` | Unstripped \`.so\` (Crashlytics/Play). **Not** on Maven; not for app runtime. |" >> $GITHUB_STEP_SUMMARY
           echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}.aar\` | Android library (Kotlin API, default on Maven). |" >> $GITHUB_STEP_SUMMARY
           echo "| \`sherpa-onnx-${{ steps.tag.outputs.maven_version }}-java.aar\` | Android library (Java API; Maven classifier \`java\`). |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "If \`MAVEN_REPO_PAT\` is set, both AARs (Kotlin + Java) are published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) with MD5/SHA1 checksums." >> $GITHUB_STEP_SUMMARY
+          echo "If \`MAVEN_REPO_PAT\` is set, both AARs (Kotlin + Java) are published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) with MD5/SHA1 checksums. Native debug symbols stay on the GitHub Release only." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Build output is cached; key \`sherpa-android-prebuilt-qnn-<sherpa_commit>-<script+VERSIONS+ANDROID_RELEASE_TAG hash>\`." >> $GITHUB_STEP_SUMMARY
+          echo "Build output is cached; key \`sherpa-android-prebuilt-qnn-both-v4-<sherpa_commit>-<script+VERSIONS+ANDROID_RELEASE_TAG hash>\` (includes \`android-native-debug-symbols/\`)." >> $GITHUB_STEP_SUMMARY
