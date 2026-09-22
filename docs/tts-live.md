@@ -46,7 +46,7 @@ const handle = await tts.synthesize(textIn, audioOut, {
     mode: 'auto',
     policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
   },
-  // sid?, speed?, lang?, voiceClone?, onSegment? — see Types
+  // sid?, speed?, lang?, numSteps?, silenceScale?, voiceClone?, onSegment? — see Types
 });
 
 // Append / stream text into textIn, then finalize when the session ends
@@ -179,7 +179,7 @@ const handle = await tts.synthesize(textIn, audioOut, {
 
 | Type | Description |
 | --- | --- |
-| `TtsLivePipelineOptions` | Extends `LiveOfflinePipelineBaseOptions` with mandatory `segmentation.policy`; plus `sid?`, `speed?`, `lang?`, `voiceClone?`, `onSegment?` |
+| `TtsLivePipelineOptions` | Extends `LiveOfflinePipelineBaseOptions` with mandatory `segmentation.policy`; plus `sid?`, `speed?`, `lang?`, `numSteps?`, `silenceScale?`, `voiceClone?`, `onSegment?`. `numSteps` follows the same rules as batch (Supertonic without clone; Zipvoice/Pocket with `voiceClone`). |
 | `TtsPipelineHandle` | Extends `StreamingPipelineHandle` — control surface for the live run |
 
 Model types, offline `synthesize` options, and detect results: [tts-offline.md](tts-offline.md#types).
