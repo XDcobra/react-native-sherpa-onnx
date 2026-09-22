@@ -1,12 +1,12 @@
 package com.sherpaonnx.tts.pipeline
 
+import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
 import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.lifecycle.NativeInstanceGate
-import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.tts.core.TtsEngineInstance
 
 /**
@@ -34,6 +34,8 @@ internal class TtsOfflineLivePipelineWorker(
   private val defaultSid: Int = 0,
   private val defaultSpeed: Float = 1.0f,
   private val defaultLang: String? = null,
+  /** When set (and no [voiceClone]), use GenerationConfig.numSteps for non-clone models. */
+  private val defaultNumSteps: Int? = null,
   private val voiceClone: TtsVoiceCloneConfig? = null,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
@@ -54,26 +56,39 @@ internal class TtsOfflineLivePipelineWorker(
     if (!NativeInstanceGate.beginUse(gateKey)) return
 
     val audio = try {
-      if (voiceClone != null) {
-        val config = com.k2fsa.sherpa.onnx.GenerationConfig(
-          sid = effectiveSid,
-          speed = effectiveSpeed,
-          referenceAudio = voiceClone.referenceAudio,
-          referenceSampleRate = voiceClone.referenceSampleRate,
-          referenceText = voiceClone.referenceText,
-          silenceScale = voiceClone.silenceScale,
-          numSteps = voiceClone.numSteps,
-        )
-        tts.generateWithConfig(text.text, config)
-      } else if (!defaultLang.isNullOrBlank()) {
-        val config = com.k2fsa.sherpa.onnx.GenerationConfig(
-          sid = effectiveSid,
-          speed = effectiveSpeed,
-          extra = mapOf("lang" to defaultLang),
-        )
-        tts.generateWithConfig(text.text, config)
-      } else {
-        tts.generate(text.text, effectiveSid, effectiveSpeed)
+      when {
+        voiceClone != null -> {
+          val config = GenerationConfig(
+            sid = effectiveSid,
+            speed = effectiveSpeed,
+            referenceAudio = voiceClone.referenceAudio,
+            referenceSampleRate = voiceClone.referenceSampleRate,
+            referenceText = voiceClone.referenceText,
+            silenceScale = voiceClone.silenceScale,
+            numSteps = voiceClone.numSteps,
+          )
+          tts.generateWithConfig(text.text, config)
+        }
+        defaultNumSteps != null -> {
+          val extra =
+            if (!defaultLang.isNullOrBlank()) mapOf("lang" to defaultLang) else null
+          val config = GenerationConfig(
+            sid = effectiveSid,
+            speed = effectiveSpeed,
+            numSteps = defaultNumSteps,
+            extra = extra,
+          )
+          tts.generateWithConfig(text.text, config)
+        }
+        !defaultLang.isNullOrBlank() -> {
+          val config = GenerationConfig(
+            sid = effectiveSid,
+            speed = effectiveSpeed,
+            extra = mapOf("lang" to defaultLang),
+          )
+          tts.generateWithConfig(text.text, config)
+        }
+        else -> tts.generate(text.text, effectiveSid, effectiveSpeed)
       }
     } finally {
       NativeInstanceGate.endUse(gateKey)
