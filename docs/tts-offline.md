@@ -82,7 +82,7 @@ await tts.synthesize(textBuf, audioBuf, {
     referenceAudio: refAudio, // OfflineAudioBufferRef — not raw samples
     referenceText: 'Transcript of the reference recording.', // required for Zipvoice
   },
-  // silenceScale and numSteps only apply when voiceClone is set
+  // silenceScale applies with voiceClone; numSteps also applies with Zipvoice/Pocket cloning
   silenceScale: 0.2,
   numSteps: 5,
 });
@@ -91,6 +91,19 @@ await releasePipelineAudioBuffer(refAudio);
 await releasePipelineTextBuffer(textBuf);
 // keep audioBuf until you've saved/played it, then release
 ```
+
+### 2b) Supertonic `numSteps` without voice cloning
+
+```ts
+import { supportsNumSteps } from 'react-native-sherpa-onnx/tts';
+
+// Diffusion steps without reference audio (batch or live)
+if (supportsNumSteps('supertonic')) {
+  await tts.synthesize(textBuf, audioBuf, { sid: 0, numSteps: 8 });
+}
+```
+
+Zipvoice/Pocket require `voiceClone` when `numSteps` is set (`TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` otherwise). Unsupported models throw `TTS_NUM_STEPS_UNSUPPORTED`.
 
 ### 3) Multi-speaker model
 
@@ -421,7 +434,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, extra?, voiceClone?, segmentation?, errorRecovery?, maxRetriesPerSegment?, retryExhaustedFallback?, onProgress?, overlapChars?, textSkipPlaceholder?, linkMap? }` — `silenceScale`/`numSteps` only apply when `voiceClone` is set; `segmentation` fields: `mode?` and `policy?` |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, segmentation?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
 | `TtsVoiceCloneZipvoice` | `{ kind: 'zipvoice'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText: string }` |
 | `TtsVoiceClonePocket` | `{ kind: 'pocket'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText?: string }` |
@@ -475,6 +488,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_TEXT_BUFFER_NOT_FOUND` | Buffer released before `synthesize` | Release **after** synthesis in a `finally` block |
 | `TTS_GENERATE_ERROR` + Zipvoice | `referenceText` empty or missing | `voiceClone.referenceText` must be non-empty for Zipvoice |
 | `TTS_GENERATE_ERROR` + cloning | Non-Zipvoice/Pocket model with `voiceClone` | Only Zipvoice and Pocket support voice cloning |
+| `TTS_NUM_STEPS_UNSUPPORTED` | `numSteps` on vits/matcha/kokoro/kitten | Use Supertonic, Zipvoice, or Pocket; or omit `numSteps` |
+| `TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` | `numSteps` on Zipvoice/Pocket without `voiceClone` | Pass `voiceClone.referenceAudio` |
 | Memory grows over time | Buffers not released | Always call `releasePipelineAudioBuffer` / `releasePipelineTextBuffer` after use |
 | Init throws with `modelOptions` | `modelType: 'auto'` or omitted | Set explicit `modelType` before passing `modelOptions` |
 | Methods throw after `destroy` | Engine already released | Create a new engine via `createTTS()` |

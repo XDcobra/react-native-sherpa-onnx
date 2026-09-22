@@ -28,6 +28,7 @@ import {
   flattenTtsModelOptionsForNative,
   toNativeSynthesisOptions,
 } from './ttsNativeBridge';
+import { assertNumStepsOptions } from './numStepsPolicy';
 import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
@@ -128,6 +129,10 @@ function toNativeOfflineLivePipelineOptions(
   const out: Record<string, unknown> = {};
   if (options.sid !== undefined) out.sid = options.sid;
   if (options.speed !== undefined) out.speed = options.speed;
+  if (options.silenceScale !== undefined) {
+    out.silenceScale = options.silenceScale;
+  }
+  if (options.numSteps !== undefined) out.numSteps = options.numSteps;
   if (options.lang !== undefined && options.lang.length > 0) {
     out.lang = options.lang;
   }
@@ -155,8 +160,10 @@ async function synthesizeLiveOverload(
   instanceId: string,
   textIn: LiveTextBufferIdSource,
   audioOut: LiveAudioBufferIdSource,
-  options: TtsLivePipelineOptions
+  options: TtsLivePipelineOptions,
+  effectiveModelType: TTSModelType | undefined
 ): Promise<TtsPipelineHandle> {
+  assertNumStepsOptions(effectiveModelType, options);
   const { policy } = validateLiveOfflinePipelineOptions({
     featureName: 'live offline TTS',
     domain: 'text',
@@ -425,12 +432,14 @@ export async function createTTS(
           instanceId,
           textIn as LiveTextBufferIdSource,
           audioOut as LiveAudioBufferIdSource,
-          opts as TtsLivePipelineOptions
+          opts as TtsLivePipelineOptions,
+          effectiveModelType
         );
       }
 
       // Batch path
       const batchOpts = opts as TtsSynthesisOptions | undefined;
+      assertNumStepsOptions(effectiveModelType, batchOpts);
       const startedAtMs = Date.now();
       const textInId = resolvePipelineTextBufferId(
         textIn as OfflineTextBufferRef | OfflineTextBufferHandle
@@ -649,6 +658,12 @@ export {
   type TtsLanguageMechanism,
   type TtsLanguagePolicy,
 } from './languagePolicy';
+export {
+  supportsNumSteps,
+  requiresVoiceCloneForNumSteps,
+  assertNumStepsOptions,
+  type TtsNumStepsOptions,
+} from './numStepsPolicy';
 export {
   DETECTION_SOURCES,
   isDetectionSource,

@@ -421,7 +421,11 @@ export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
  *
  * `lang` does **not** switch the lexicon file loaded at init; use `lexiconLanguageId` + re-init.
  *
- * `silenceScale` and `numSteps` apply only with `voiceClone` (ignored otherwise).
+ * `numSteps` (`GenerationConfig.numSteps`): honored for **supertonic** (no `voiceClone`),
+ * **zipvoice**, and **pocket**. Zipvoice/Pocket require `voiceClone` when `numSteps` is set.
+ * Setting it on vits / matcha / kokoro / kitten throws `TTS_NUM_STEPS_UNSUPPORTED`.
+ * Omit to keep the upstream default. See {@link supportsNumSteps} / {@link requiresVoiceCloneForNumSteps}.
+ * `silenceScale` applies with `voiceClone` (and GenerationConfig paths that honor it).
  */
 export type TtsSynthesisOptions = {
   sid?: number;
@@ -481,8 +485,18 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
    */
   lang?: string;
   /**
+   * Flow-/diffusion steps (`GenerationConfig.numSteps`). Live-only subset of
+   * {@link TtsSynthesisOptions.numSteps}: **supertonic** without `voiceClone`, or
+   * **pocket** with `voiceClone`. Zipvoice + `numSteps`/`voiceClone` is batch-only —
+   * native live pipelines reject Zipvoice cloning on Android and iOS.
+   */
+  numSteps?: number;
+  /** Silence scale for GenerationConfig / voice-clone paths. */
+  silenceScale?: number;
+  /**
    * Voice cloning configuration. Initialized once per pipeline.
    * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).
+   * Live: **Pocket** only. Zipvoice cloning is supported on batch `synthesize`, not live.
    */
   voiceClone?: TtsVoiceClone;
   /**

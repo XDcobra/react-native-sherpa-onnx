@@ -1,5 +1,8 @@
 #import "TtsGenerationOptionsHelpers.h"
 
+#include <string>
+#include <unordered_map>
+
 const int32_t kDefaultVoiceCloneNumSteps = 5;
 
 NSString *TtsModelKindToNSString(sherpaonnx::TtsModelKind kind) {
@@ -22,6 +25,27 @@ BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options) {
     return refId != nil && [refId isKindOfClass:[NSString class]] && [refId length] > 0;
 }
 
+BOOL NSDictionaryHasNumSteps(NSDictionary *options) {
+    return options != nil && options[@"numSteps"] != nil;
+}
+
+int32_t NumStepsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps) {
+    if (NSDictionaryHasNumSteps(options)) {
+        return static_cast<int32_t>([options[@"numSteps"] doubleValue]);
+    }
+    return defaultNumSteps;
+}
+
+BOOL TtsModelKindSupportsNumSteps(sherpaonnx::TtsModelKind kind) {
+    using K = sherpaonnx::TtsModelKind;
+    return kind == K::kSupertonic || kind == K::kZipvoice || kind == K::kPocket;
+}
+
+BOOL TtsModelKindRequiresVoiceCloneForNumSteps(sherpaonnx::TtsModelKind kind) {
+    using K = sherpaonnx::TtsModelKind;
+    return kind == K::kZipvoice || kind == K::kPocket;
+}
+
 std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options) {
     if (options == nil) return std::nullopt;
     std::unordered_map<std::string, std::string> extra;
@@ -39,9 +63,15 @@ std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictio
     if ([lang isKindOfClass:[NSString class]] && [lang length] > 0) {
         extra["lang"] = std::string([lang UTF8String]);
     }
-    if (extra.empty()) return std::nullopt;
+    const BOOL hasNumSteps = NSDictionaryHasNumSteps(options);
+    if (extra.empty() && !hasNumSteps) return std::nullopt;
+
     sherpaonnx::VoiceCloneOptions vo;
     vo.extra = std::move(extra);
+    if (hasNumSteps) {
+        vo.apply_num_steps = true;
+        vo.num_steps = NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
+    }
     return vo;
 }
 
@@ -63,6 +93,7 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     }
     if (options[@"numSteps"] != nil) {
         vo.num_steps = static_cast<int32_t>([options[@"numSteps"] doubleValue]);
+        vo.apply_num_steps = true;
     } else {
         vo.num_steps = defaultNumSteps;
     }
@@ -81,4 +112,3 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     }
     return vo;
 }
-

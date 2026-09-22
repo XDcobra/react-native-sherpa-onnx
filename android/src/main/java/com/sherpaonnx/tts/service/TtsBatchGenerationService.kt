@@ -1,7 +1,6 @@
 package com.sherpaonnx.tts.service
 
 import android.util.Log
-import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.k2fsa.sherpa.onnx.GenerationConfig
@@ -85,12 +84,16 @@ internal class TtsBatchGenerationService(
         return
       }
 
+      if (TtsGenerationOptionsParser.rejectNumStepsIfInvalid(inst, options, promise, "TTS_GENERATE_ERROR")) {
+        return
+      }
+
       // 5. Parse generation options
       val text = textEntry.text
       val sid = TtsGenerationOptionsParser.getSid(options)
       val speed = TtsGenerationOptionsParser.getSpeed(options)
 
-      // 6. Synthesis: voice clone, runtime extra (e.g. lang), or simple generate
+      // 6. Synthesis: voice clone, numSteps / runtime extra (e.g. lang), or simple generate
       val tts = inst.tts ?: run {
         promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
         return
@@ -101,7 +104,7 @@ internal class TtsBatchGenerationService(
         return
       }
       val audio: GeneratedAudio = try {
-        if (TtsSynthesisOptionsParser.hasVoiceCloneBuffer(options)) {
+        if (TtsGenerationOptionsParser.hasVoiceCloneBuffer(options)) {
           if (!inst.isZipvoice && !inst.isPocket) {
             promise.reject("TTS_GENERATE_ERROR", "Reference audio is only supported for Zipvoice and Pocket TTS.")
             return
@@ -129,8 +132,8 @@ internal class TtsBatchGenerationService(
           }
           val refSamples = refEntry.readAllSamples()
           val refSampleRate = refEntry.sampleRate
-          val silenceScale = if (options?.hasKey("silenceScale") == true) options.getDouble("silenceScale").toFloat() else 0.2f
-          val numSteps = if (options?.hasKey("numSteps") == true) options.getDouble("numSteps").toInt() else 5
+          val silenceScale = TtsGenerationOptionsParser.getSilenceScale(options)
+          val numSteps = TtsGenerationOptionsParser.getNumSteps(options)
           val refText = options?.getString("referenceText") ?: ""
           val config = GenerationConfig(
             silenceScale = silenceScale,
@@ -146,18 +149,16 @@ internal class TtsBatchGenerationService(
         } else if (inst.isPocket) {
           promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass voiceClone in options.")
           return
+        } else if (
+          TtsGenerationOptionsParser.hasNumSteps(options) ||
+          !TtsGenerationOptionsParser.buildExtraMap(options).isNullOrEmpty()
+        ) {
+          tts.generateWithConfig(
+            text,
+            TtsGenerationOptionsParser.buildNonCloneGenerationConfig(options, sid, speed)
+          )
         } else {
-          val extraMap = TtsGenerationOptionsParser.buildExtraMap(options)
-          if (!extraMap.isNullOrEmpty()) {
-            val config = GenerationConfig(
-              speed = speed,
-              sid = sid,
-              extra = extraMap
-            )
-            tts.generateWithConfig(text, config)
-          } else {
-            tts.generate(text, sid, speed)
-          }
+          tts.generate(text, sid, speed)
         }
       } finally {
         NativeInstanceGate.endUse(gateKey)
@@ -195,12 +196,9 @@ internal class TtsBatchGenerationService(
 
 /**
  * Helper to check for buffer-based voice clone options in the new pipeline API.
+ * Prefer [TtsGenerationOptionsParser.hasVoiceCloneBuffer].
  */
 internal object TtsSynthesisOptionsParser {
-  fun hasVoiceCloneBuffer(options: ReadableMap?): Boolean {
-    if (options == null) return false
-    return options.hasKey("referenceAudioBufferId") &&
-      !options.isNull("referenceAudioBufferId") &&
-      (options.getString("referenceAudioBufferId")?.isNotEmpty() == true)
-  }
+  fun hasVoiceCloneBuffer(options: ReadableMap?): Boolean =
+    TtsGenerationOptionsParser.hasVoiceCloneBuffer(options)
 }

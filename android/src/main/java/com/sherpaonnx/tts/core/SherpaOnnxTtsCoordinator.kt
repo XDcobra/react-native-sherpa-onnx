@@ -17,6 +17,7 @@ import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import com.sherpaonnx.tts.pipeline.TtsOfflineLivePipelineWorker
 import com.sherpaonnx.tts.pipeline.TtsVoiceCloneConfig
+import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.service.TtsBatchGenerationService
 import com.sherpaonnx.tts.service.TtsInitializationService
 import com.sherpaonnx.tts.service.TtsLifecycleService
@@ -176,9 +177,29 @@ internal class SherpaOnnxTtsCoordinator(
           referenceAudio = refEntry.readAllSamples(),
           referenceSampleRate = refEntry.sampleRate,
           referenceText = options.getString("referenceText") ?: "",
-          silenceScale = 0.2f,
-          numSteps = 5,
+          silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
+          numSteps = TtsGenerationOptionsParser.getNumSteps(options),
         )
+      }
+
+      val defaultNumSteps =
+        if (TtsGenerationOptionsParser.hasNumSteps(options)) {
+          TtsGenerationOptionsParser.getNumSteps(options)
+        } else {
+          null
+        }
+
+      if (
+        defaultNumSteps != null &&
+        voiceCloneConfig == null &&
+        TtsGenerationOptionsParser.rejectNumStepsIfInvalid(
+          inst,
+          options,
+          promise,
+          "TTS_OFFLINE_LIVE_PIPELINE_ERROR"
+        )
+      ) {
+        return
       }
 
       val worker = TtsOfflineLivePipelineWorker(
@@ -190,6 +211,7 @@ internal class SherpaOnnxTtsCoordinator(
         defaultSid = defaultSid,
         defaultSpeed = defaultSpeed,
         defaultLang = defaultLang,
+        defaultNumSteps = defaultNumSteps,
         voiceClone = voiceCloneConfig,
       )
 

@@ -169,6 +169,15 @@ static std::mutex g_tts_pipeline_mutex;
     if (auto speedOpt = options.speed()) defaultSpeed = static_cast<float>(speedOpt.value());
 
     std::optional<std::string> defaultLang;
+    NSString *langStr = options.lang();
+    if (langStr != nil && [langStr length] > 0) {
+        defaultLang = std::string([langStr UTF8String]);
+    }
+
+    std::optional<int32_t> defaultNumSteps;
+    if (auto stepsOpt = options.numSteps()) {
+        defaultNumSteps = static_cast<int32_t>(stepsOpt.value());
+    }
 
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone;
     NSString *refBufferId = options.referenceAudioBufferId();
@@ -192,9 +201,36 @@ static std::mutex g_tts_pipeline_mutex;
         clone.reference_sample_rate = static_cast<int32_t>(refSampleRate);
         NSString *refText = options.referenceText();
         clone.reference_text = refText != nil ? std::string([refText UTF8String] ?: "") : "";
-        clone.silence_scale = 0.2f;
-        clone.num_steps = kDefaultVoiceCloneNumSteps;
+        if (auto silenceOpt = options.silenceScale()) {
+            clone.silence_scale = static_cast<float>(silenceOpt.value());
+        } else {
+            clone.silence_scale = 0.2f;
+        }
+        if (defaultNumSteps.has_value()) {
+            clone.num_steps = *defaultNumSteps;
+            clone.apply_num_steps = true;
+        } else {
+            clone.num_steps = kDefaultVoiceCloneNumSteps;
+        }
         voiceClone = std::move(clone);
+    } else if (defaultNumSteps.has_value()) {
+        auto modelKind = inst->wrapper->getModelKind();
+        if (!TtsModelKindSupportsNumSteps(modelKind)) {
+            reject(@"TTS_NUM_STEPS_UNSUPPORTED",
+                   [NSString stringWithFormat:
+                    @"numSteps is not supported for model type \"%@\". Supported: supertonic, zipvoice, pocket.",
+                    TtsModelKindToNSString(modelKind)],
+                   nil);
+            return;
+        }
+        if (TtsModelKindRequiresVoiceCloneForNumSteps(modelKind)) {
+            reject(@"TTS_NUM_STEPS_REQUIRES_VOICE_CLONE",
+                   [NSString stringWithFormat:
+                    @"numSteps for \"%@\" requires voiceClone.referenceAudio (referenceAudioBufferId).",
+                    TtsModelKindToNSString(modelKind)],
+                   nil);
+            return;
+        }
     }
 
     try {
@@ -209,7 +245,8 @@ static std::mutex g_tts_pipeline_mutex;
           defaultSid,
           defaultSpeed,
           std::move(voiceClone),
-          std::move(defaultLang)
+          std::move(defaultLang),
+          std::move(defaultNumSteps)
         );
 
         {
