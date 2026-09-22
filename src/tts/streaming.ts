@@ -15,6 +15,7 @@ import type {
 import type { StreamingTtsEngine } from './streamingTypes';
 import type { ModelPathConfig } from '../types';
 import { resolveModelPath } from '../utils';
+import { assertNumStepsOptions } from './numStepsPolicy';
 
 let streamingTtsInstanceCounter = 0;
 let ttsRequestIdCounter = 0;
@@ -202,6 +203,12 @@ export async function createStreamingTTS(
     );
   }
 
+  const firstDetected = result.detectedModels?.[0];
+  const effectiveModelType: TTSModelType | undefined =
+    modelType && modelType !== 'auto'
+      ? modelType
+      : (firstDetected?.type as TTSModelType);
+
   let destroyed = false;
 
   const guard = () => {
@@ -223,6 +230,7 @@ export async function createStreamingTTS(
       handlers: TtsStreamHandlers
     ): Promise<TtsStreamController> {
       guard();
+      assertNumStepsOptions(effectiveModelType, opts);
       const requestId = `tts_req_${++ttsRequestIdCounter}`;
       const subscriptions: Array<{ remove: () => void }> = [];
       let unsubscribed = false;

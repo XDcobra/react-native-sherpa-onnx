@@ -259,8 +259,12 @@ export interface TtsGenerationOptions {
   referenceText?: string;
 
   /**
-   * Number of steps, e.g. flow-matching steps (Kotlin GenerationConfig.numSteps).
-   * Used by models such as Pocket.
+   * Number of flow-/diffusion steps (`GenerationConfig.numSteps`).
+   * Honored for **supertonic** (no reference audio), **zipvoice**, and **pocket**.
+   * Zipvoice/Pocket also require `referenceAudio` when `numSteps` is set.
+   * Setting this on vits / matcha / kokoro / kitten throws `TTS_NUM_STEPS_UNSUPPORTED`.
+   * Omit to keep the upstream default.
+   * See {@link supportsNumSteps} / {@link requiresVoiceCloneForNumSteps}.
    */
   numSteps?: number;
 

@@ -17,6 +17,7 @@ import {
   assertSubtitleGranularityForMode,
   generateSubtitlesFromAudio,
 } from './subtitles';
+import { assertNumStepsOptions } from './numStepsPolicy';
 import { saveAlignmentAudioToTempWav } from './tempAudio';
 
 let ttsInstanceCounter = 0;
@@ -288,6 +289,7 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudio> {
       guard();
+      assertNumStepsOptions(effectiveModelType, opts);
       const optionsWithSubtitlesOff: TtsGenerationOptions = {
         ...(opts ?? {}),
         subtitles: {
@@ -307,6 +309,7 @@ export async function createTTS(
       opts?: TtsGenerationOptions
     ): Promise<GeneratedAudioWithTimestamps> {
       guard();
+      assertNumStepsOptions(effectiveModelType, opts);
       const subtitleMode = opts?.subtitles?.mode ?? 'fast';
       const subtitleGranularity = opts?.subtitles?.granularity ?? 'sentence';
 
@@ -539,6 +542,11 @@ export function shareAudioFile(
 export { createStreamingTTS } from './streaming';
 export type { StreamingTtsEngine } from './streamingTypes';
 export { generateSubtitlesFromAudio } from './subtitles';
+export {
+  supportsNumSteps,
+  requiresVoiceCloneForNumSteps,
+  assertNumStepsOptions,
+} from './numStepsPolicy';
 
 // Export types and runtime type list
 export type {
