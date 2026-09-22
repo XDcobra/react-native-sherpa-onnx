@@ -458,12 +458,22 @@ internal class SherpaOnnxTtsHelper(
           )
           return
         }
-        else -> dispatchGenerate(inst, text, sid, speed)
-          ?: run {
-            Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-            promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+        else -> {
+          if (rejectNumStepsIfInvalid(inst, options, promise, "TTS_GENERATE_ERROR")) {
             return
           }
+          if (hasNumSteps(options)) {
+            val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+            inst.tts!!.generateWithConfig(text, config)
+          } else {
+            dispatchGenerate(inst, text, sid, speed)
+              ?: run {
+                Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+                promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+                return
+              }
+          }
+        }
       }
       val map = Arguments.createMap()
       val samplesArray = Arguments.createArray()
@@ -543,12 +553,22 @@ internal class SherpaOnnxTtsHelper(
               )
               return
             }
-            else -> dispatchGenerate(inst, text, sid, speed)
-              ?: run {
-                Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
-                promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+            else -> {
+              if (rejectNumStepsIfInvalid(inst, options, promise, "TTS_GENERATE_ERROR")) {
                 return
               }
+              if (hasNumSteps(options)) {
+                val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+                inst.tts!!.generateWithConfig(text, config)
+              } else {
+                dispatchGenerate(inst, text, sid, speed)
+                  ?: run {
+                    Log.e("SherpaOnnxTts", "TTS_GENERATE_ERROR: TTS not initialized")
+                    promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
+                    return
+                  }
+              }
+            }
           }
         }
         hasReferenceAudio(options) && (inst.isZipvoice || inst.isPocket) -> {
@@ -593,7 +613,19 @@ internal class SherpaOnnxTtsHelper(
             promise.reject("TTS_GENERATE_ERROR", "TTS not initialized")
             return
           }
-          tts.generateWithCallback(text, sid, speed, ttsChunkCallbackForJni(sentenceChunkSizes))
+          if (rejectNumStepsIfInvalid(inst, options, promise, "TTS_GENERATE_ERROR")) {
+            return
+          }
+          if (hasNumSteps(options)) {
+            val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+            tts.generateWithConfigAndCallback(
+              text,
+              config,
+              ttsChunkCallbackForJni(sentenceChunkSizes)
+            )
+          } else {
+            tts.generateWithCallback(text, sid, speed, ttsChunkCallbackForJni(sentenceChunkSizes))
+          }
         }
       }
 
@@ -675,6 +707,9 @@ internal class SherpaOnnxTtsHelper(
       )
       return
     }
+    if (rejectNumStepsIfInvalid(inst, options, promise, "TTS_STREAM_ERROR")) {
+      return
+    }
     val sid = getSid(options)
     val speed = getSpeed(options)
     inst.ttsStreamCancelled.set(false)
@@ -684,6 +719,16 @@ internal class SherpaOnnxTtsHelper(
         val sampleRate = dispatchSampleRate(inst)
         when {
           hasReferenceAudio(options) && inst.isPocket -> {
+            val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
+            inst.tts!!.generateWithConfigAndCallback(
+              text,
+              config,
+              ttsStreamChunkCallbackForJni(inst.ttsStreamCancelled) { chunk ->
+                emitChunk(instanceId, requestId, chunk, sampleRate, 0f, false)
+              }
+            )
+          }
+          hasNumSteps(options) -> {
             val config = parseGenerationConfig(options) ?: GenerationConfig(speed = speed, sid = sid)
             inst.tts!!.generateWithConfigAndCallback(
               text,
@@ -1104,6 +1149,49 @@ internal class SherpaOnnxTtsHelper(
       numSteps = numSteps,
       extra = extraMap
     )
+  }
+
+  private fun hasNumSteps(options: ReadableMap?): Boolean =
+    options != null && options.hasKey("numSteps")
+
+  private fun supportsNumSteps(inst: TtsEngineInstance): Boolean {
+    val modelType = inst.ttsInitState?.modelType ?: return false
+    return modelType == "supertonic" || modelType == "zipvoice" || modelType == "pocket"
+  }
+
+  private fun requiresVoiceCloneForNumSteps(inst: TtsEngineInstance): Boolean =
+    inst.isZipvoice || inst.isPocket
+
+  /**
+   * Reject when numSteps is set but the model does not honor it, or Zipvoice/Pocket lack reference audio.
+   * @return true if the promise was already rejected
+   */
+  private fun rejectNumStepsIfInvalid(
+    inst: TtsEngineInstance,
+    options: ReadableMap?,
+    promise: Promise,
+    errorCode: String,
+  ): Boolean {
+    if (!hasNumSteps(options)) return false
+    if (!supportsNumSteps(inst)) {
+      val modelType = inst.ttsInitState?.modelType ?: "unknown"
+      Log.e("SherpaOnnxTts", "$errorCode: numSteps unsupported for modelType=$modelType")
+      promise.reject(
+        "TTS_NUM_STEPS_UNSUPPORTED",
+        "numSteps is not supported for model type \"$modelType\". Supported: supertonic, zipvoice, pocket."
+      )
+      return true
+    }
+    if (requiresVoiceCloneForNumSteps(inst) && !hasReferenceAudio(options)) {
+      val modelType = inst.ttsInitState?.modelType ?: "unknown"
+      Log.e("SherpaOnnxTts", "$errorCode: numSteps requires voice clone for modelType=$modelType")
+      promise.reject(
+        "TTS_NUM_STEPS_REQUIRES_VOICE_CLONE",
+        "numSteps for \"$modelType\" requires referenceAudio (non-empty samples and sampleRate > 0)."
+      )
+      return true
+    }
+    return false
   }
 
   /** Dispatch generate to whichever engine is active on the instance. Returns null if none loaded. */
