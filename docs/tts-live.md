@@ -179,7 +179,7 @@ const handle = await tts.synthesize(textIn, audioOut, {
 
 | Type | Description |
 | --- | --- |
-| `TtsLivePipelineOptions` | Extends `LiveOfflinePipelineBaseOptions` with mandatory `segmentation.policy`; plus `sid?`, `speed?`, `lang?`, `numSteps?`, `silenceScale?`, `voiceClone?`, `onSegment?`. `numSteps` follows the same rules as batch (Supertonic without clone; Zipvoice/Pocket with `voiceClone`). |
+| `TtsLivePipelineOptions` | Extends `LiveOfflinePipelineBaseOptions` with mandatory `segmentation.policy`; plus `sid?`, `speed?`, `lang?`, `numSteps?`, `silenceScale?`, `voiceClone?`, `onSegment?`. Live `numSteps`: **Supertonic** without clone, or **Pocket** with `voiceClone`. Live Zipvoice cloning is not supported (batch only — see [tts-offline.md](tts-offline.md)). |
 | `TtsPipelineHandle` | Extends `StreamingPipelineHandle` — control surface for the live run |
 
 Model types, offline `synthesize` options, and detect results: [tts-offline.md](tts-offline.md#types).

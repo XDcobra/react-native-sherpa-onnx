@@ -485,8 +485,10 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
    */
   lang?: string;
   /**
-   * Flow-/diffusion steps (`GenerationConfig.numSteps`). Same rules as batch
-   * {@link TtsSynthesisOptions.numSteps}: Supertonic without clone; Zipvoice/Pocket with `voiceClone`.
+   * Flow-/diffusion steps (`GenerationConfig.numSteps`). Live-only subset of
+   * {@link TtsSynthesisOptions.numSteps}: **supertonic** without `voiceClone`, or
+   * **pocket** with `voiceClone`. Zipvoice + `numSteps`/`voiceClone` is batch-only —
+   * native live pipelines reject Zipvoice cloning on Android and iOS.
    */
   numSteps?: number;
   /** Silence scale for GenerationConfig / voice-clone paths. */
@@ -494,6 +496,7 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
   /**
    * Voice cloning configuration. Initialized once per pipeline.
    * Applies to all segments (cloning reference is loaded at pipeline start, not per segment).
+   * Live: **Pocket** only. Zipvoice cloning is supported on batch `synthesize`, not live.
    */
   voiceClone?: TtsVoiceClone;
   /**
