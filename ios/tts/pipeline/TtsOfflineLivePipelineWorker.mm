@@ -11,7 +11,8 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
   int32_t defaultSid,
   float defaultSpeed,
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
-  std::optional<std::string> defaultLang
+  std::optional<std::string> defaultLang,
+  std::optional<int32_t> defaultNumSteps
 )
   : OfflineLivePipelineWorker(
       std::move(pipelineId),
@@ -25,7 +26,8 @@ TtsOfflineLivePipelineWorker::TtsOfflineLivePipelineWorker(
     defaultSid_(defaultSid),
     defaultSpeed_(defaultSpeed),
     voiceClone_(std::move(voiceClone)),
-    defaultLang_(std::move(defaultLang))
+    defaultLang_(std::move(defaultLang)),
+    defaultNumSteps_(std::move(defaultNumSteps))
 {}
 
 void TtsOfflineLivePipelineWorker::onSegmentCommitted(
@@ -53,10 +55,21 @@ void TtsOfflineLivePipelineWorker::onSegmentCommitted(
   }
 
   std::optional<sherpaonnx::VoiceCloneOptions> genOpt = voiceClone_;
-  if (!genOpt.has_value() && defaultLang_.has_value() && !defaultLang_->empty()) {
-    sherpaonnx::VoiceCloneOptions extraOnly;
-    extraOnly.extra["lang"] = *defaultLang_;
-    genOpt = std::move(extraOnly);
+  if (!genOpt.has_value()) {
+    sherpaonnx::VoiceCloneOptions nonClone;
+    bool any = false;
+    if (defaultLang_.has_value() && !defaultLang_->empty()) {
+      nonClone.extra["lang"] = *defaultLang_;
+      any = true;
+    }
+    if (defaultNumSteps_.has_value()) {
+      nonClone.apply_num_steps = true;
+      nonClone.num_steps = *defaultNumSteps_;
+      any = true;
+    }
+    if (any) {
+      genOpt = std::move(nonClone);
+    }
   }
 
   auto audio = wrapper_->generate(

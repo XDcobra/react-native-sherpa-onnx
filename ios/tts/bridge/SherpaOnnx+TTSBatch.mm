@@ -114,6 +114,26 @@ static NSString *const kOfflineTtsOomMessage =
         using Kind = sherpaonnx::TtsModelKind;
         Kind kind = wrapper->getModelKind();
 
+        if (NSDictionaryHasNumSteps(options)) {
+            if (!TtsModelKindSupportsNumSteps(kind)) {
+                reject(@"TTS_NUM_STEPS_UNSUPPORTED",
+                       [NSString stringWithFormat:
+                        @"numSteps is not supported for model type \"%@\". Supported: supertonic, zipvoice, pocket.",
+                        TtsModelKindToNSString(kind)],
+                       nil);
+                return;
+            }
+            if (TtsModelKindRequiresVoiceCloneForNumSteps(kind) &&
+                !NSDictionaryHasVoiceCloneBuffer(options)) {
+                reject(@"TTS_NUM_STEPS_REQUIRES_VOICE_CLONE",
+                       [NSString stringWithFormat:
+                        @"numSteps for \"%@\" requires voiceClone.referenceAudio (referenceAudioBufferId).",
+                        TtsModelKindToNSString(kind)],
+                       nil);
+                return;
+            }
+        }
+
         // 6. Handle voice cloning with OfflineAudioBuffer reference
         std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
         if (NSDictionaryHasVoiceCloneBuffer(options)) {

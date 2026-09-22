@@ -519,10 +519,57 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     const std::string& text,
     int32_t sid,
     float speed,
+    int32_t numSteps
+) {
+    AudioResult result;
+    result.sampleRate = 0;
+
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return result;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return result;
+    }
+
+    try {
+        LOGI("TTS: Generating speech for text: %s (sid=%d, speed=%.2f, num_steps=%d)",
+             text.c_str(), sid, speed, numSteps);
+
+        sherpa_onnx::cxx::GenerationConfig gc;
+        gc.speed = speed;
+        gc.sid = sid;
+        gc.num_steps = numSteps;
+
+        auto audio = pImpl->tts.value().Generate(text, gc);
+
+        result.samples = std::move(audio.samples);
+        result.sampleRate = audio.sample_rate;
+
+        LOGI("TTS: Generated %zu samples at %d Hz",
+             result.samples.size(), result.sampleRate);
+
+        return result;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during generation (numSteps): %s", e.what());
+        return result;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during generation (numSteps)");
+        return result;
+    }
+}
+
+TtsWrapper::AudioResult TtsWrapper::generate(
+    const std::string& text,
+    int32_t sid,
+    float speed,
     const std::optional<VoiceCloneOptions>& cloning
 ) {
-    if (cloning.has_value() && !cloning->extra.empty() &&
-        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0)) {
+    if (cloning.has_value() &&
+        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
+        (!cloning->extra.empty() || cloning->apply_num_steps)) {
         AudioResult result;
         result.sampleRate = 0;
 
@@ -540,16 +587,21 @@ TtsWrapper::AudioResult TtsWrapper::generate(
             sherpa_onnx::cxx::GenerationConfig gc;
             gc.speed = speed;
             gc.sid = sid;
-            gc.extra = cloning->extra;
+            if (cloning->apply_num_steps) {
+                gc.num_steps = cloning->num_steps;
+            }
+            if (!cloning->extra.empty()) {
+                gc.extra = cloning->extra;
+            }
             auto audio = pImpl->tts.value().Generate(text, gc);
             result.samples = std::move(audio.samples);
             result.sampleRate = audio.sample_rate;
             return result;
         } catch (const std::exception& e) {
-            LOGE("TTS: Exception during generation (extra): %s", e.what());
+            LOGE("TTS: Exception during generation (extra/numSteps): %s", e.what());
             return result;
         } catch (...) {
-            LOGE("TTS: Unknown exception during generation (extra)");
+            LOGE("TTS: Unknown exception during generation (extra/numSteps)");
             return result;
         }
     }
@@ -647,8 +699,64 @@ bool TtsWrapper::generateStream(
     int32_t sid,
     float speed,
     const TtsStreamCallback& callback,
+    int32_t numSteps
+) {
+    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        LOGE("TTS: Not initialized. Call initialize() first.");
+        return false;
+    }
+
+    if (text.empty()) {
+        LOGE("TTS: Input text is empty");
+        return false;
+    }
+
+    try {
+        LOGI("TTS: Streaming generation for text: %s (sid=%d, speed=%.2f, num_steps=%d)",
+             text.c_str(), sid, speed, numSteps);
+
+        auto callbackCopy = callback;
+        auto shim = [](const float *samples, int32_t numSamples, float progress, void *arg) -> int32_t {
+            auto *cb = reinterpret_cast<TtsStreamCallback*>(arg);
+            if (!cb || !(*cb)) return 0;
+            return (*cb)(samples, numSamples, progress);
+        };
+
+        sherpa_onnx::cxx::GenerationConfig gc;
+        gc.speed = speed;
+        gc.sid = sid;
+        gc.num_steps = numSteps;
+
+        pImpl->tts.value().Generate(
+            text,
+            gc,
+            callbackCopy ? shim : nullptr,
+            callbackCopy ? &callbackCopy : nullptr
+        );
+
+        return true;
+    } catch (const std::exception& e) {
+        LOGE("TTS: Exception during streaming generation (numSteps): %s", e.what());
+        return false;
+    } catch (...) {
+        LOGE("TTS: Unknown exception during streaming generation (numSteps)");
+        return false;
+    }
+}
+
+bool TtsWrapper::generateStream(
+    const std::string& text,
+    int32_t sid,
+    float speed,
+    const TtsStreamCallback& callback,
     const std::optional<VoiceCloneOptions>& cloning
 ) {
+    if (cloning.has_value() &&
+        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
+        cloning->apply_num_steps) {
+        return generateStream(text, sid, speed, callback, cloning->num_steps);
+    }
+
     if (!cloning.has_value() || cloning->reference_audio.empty() ||
         cloning->reference_sample_rate <= 0) {
         return generateStream(text, sid, speed, callback);

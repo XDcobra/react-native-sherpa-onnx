@@ -28,5 +28,15 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
 /** Check if options contain a buffer-based voice clone (referenceAudioBufferId key). */
 BOOL NSDictionaryHasVoiceCloneBuffer(NSDictionary *options);
 
-/** Build VoiceCloneOptions with only `extra` (e.g. runtime `lang`) for generateWithConfig. */
+BOOL NSDictionaryHasNumSteps(NSDictionary *options);
+
+int32_t NumStepsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps);
+
+BOOL TtsModelKindSupportsNumSteps(sherpaonnx::TtsModelKind kind);
+
+BOOL TtsModelKindRequiresVoiceCloneForNumSteps(sherpaonnx::TtsModelKind kind);
+
+/**
+ * Build VoiceCloneOptions for non-clone GenerationConfig (runtime `lang` / `extra` and/or `numSteps`).
+ */
 std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options);

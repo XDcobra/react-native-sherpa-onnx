@@ -18,7 +18,8 @@ public:
     int32_t defaultSid,
     float defaultSpeed,
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
-    std::optional<std::string> defaultLang = std::nullopt
+    std::optional<std::string> defaultLang = std::nullopt,
+    std::optional<int32_t> defaultNumSteps = std::nullopt
   );
 
 protected:
@@ -31,4 +32,5 @@ private:
   float defaultSpeed_ = 1.0f;
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone_;
   std::optional<std::string> defaultLang_;
+  std::optional<int32_t> defaultNumSteps_;
 };
