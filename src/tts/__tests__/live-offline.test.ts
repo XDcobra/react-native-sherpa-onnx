@@ -161,6 +161,49 @@ describe('tts live offline overload', () => {
     expect(opts.attachedSegmentationEngineId).toBe('seg_txt_1');
   });
 
+  it('forwards numSteps and silenceScale on live options', async () => {
+    const tts = await createTTS({
+      modelSource: { kind: 'fs', path: '/models/supertonic' },
+      modelType: 'supertonic',
+    });
+
+    await tts.synthesize('txt_live_in_1', 'live_out_1', {
+      segmentation: {
+        mode: 'auto',
+        policy: { evaluator: 'text_synthetic_auto' },
+      },
+      sid: 0,
+      speed: 1,
+      numSteps: 10,
+      silenceScale: 0.3,
+    });
+
+    const opts = mockNative.startTtsOfflineLivePipeline.mock.calls[0][3] as {
+      numSteps?: number;
+      silenceScale?: number;
+    };
+    expect(opts.numSteps).toBe(10);
+    expect(opts.silenceScale).toBe(0.3);
+  });
+
+  it('rejects numSteps on unsupported live model types', async () => {
+    const tts = await createTTS({
+      modelSource: { kind: 'fs', path: '/models/vits' },
+      modelType: 'vits',
+    });
+
+    await expect(
+      tts.synthesize('txt_live_in_1', 'live_out_1', {
+        segmentation: {
+          mode: 'auto',
+          policy: { evaluator: 'text_synthetic_auto' },
+        },
+        numSteps: 8,
+      })
+    ).rejects.toThrow(/TTS_NUM_STEPS_UNSUPPORTED/);
+    expect(mockNative.startTtsOfflineLivePipeline).not.toHaveBeenCalled();
+  });
+
   it('rejects missing segmentation policy', async () => {
     const tts = await createTTS({
       modelSource: { kind: 'fs', path: '/models/tts' },

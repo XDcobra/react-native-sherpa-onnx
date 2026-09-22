@@ -2315,6 +2315,9 @@ export interface Spec extends TurboModule {
       segmentLiveBufferId?: string;
       sid?: number;
       speed?: number;
+      lang?: string;
+      numSteps?: number;
+      silenceScale?: number;
       referenceAudioBufferId?: string;
       referenceText?: string;
     }
