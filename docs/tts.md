@@ -170,7 +170,7 @@ Shared by `generateSpeech`, `generateSpeechWithTimestamps`, and `generateSpeechS
 | `silenceScale` | `number` | — | Silence scale at generation time |
 | `referenceAudio` | `{ samples: number[]; sampleRate: number }` | — | **Native:** Cloning only for **Zipvoice** / **Pocket**; requires non-empty `samples` and **`sampleRate > 0`**. VITS/Matcha/Kokoro/Kitten --> native error if set. Mono float in [-1, 1]. |
 | `referenceText` | `string` | — | **Zipvoice** cloning: **required** (non-empty transcript of reference audio). **Pocket:** not used by sherpa-onnx native code; optional (e.g. metadata). |
-| `numSteps` | `number` | `5` | Flow-matching steps when cloning (Zipvoice / Pocket); native default **5** on Android and iOS if omitted |
+| `numSteps` | `number` | upstream default (typically `5`) | Flow-/diffusion steps via `GenerationConfig.numSteps`. Honored for **supertonic** (no reference audio), **zipvoice**, and **pocket**. Zipvoice/Pocket require `referenceAudio` when `numSteps` is set. Setting it on vits / matcha / kokoro / kitten throws `TTS_NUM_STEPS_UNSUPPORTED`. Omit to keep the upstream default. See `supportsNumSteps` / `requiresVoiceCloneForNumSteps`. |
 | `extra` | `Record<string, string>` | — | Model-specific key-value options (e.g. Pocket: `temperature`, `chunk_size`) |
 | `subtitles` | `{ mode?: 'off' \| 'fast' \| 'accurate'; granularity?: 'sentence' \| 'word' \| 'character'; alignmentModelPath?: string }` | `mode: 'fast'` for `generateSpeechWithTimestamps` | Alignment/timestamp mode and granularity. **`fast`**: native chunk-based timing (`timingMode: 'estimated'`). **`accurate`**: generates speech, then runs wav2vec2 CTC alignment (`timingMode: 'aligned'`). **`character`** granularity is only valid with **`accurate`**. **`alignmentModelPath` is required in accurate mode** and should come from alignment model selection + `detectAlignmentModel(...)`. See [tts-alignment.md](tts-alignment.md). |
 
@@ -343,8 +343,12 @@ const audio = await tts.generateSpeech('Text in the reference voice', {
   // numSteps defaults to 5 on native; increase for higher quality / cost
   speed: 1.0,
 });
+
+// Supertonic: numSteps without reference audio (batch or streaming)
+const superAudio = await tts.generateSpeech('Hello', { sid: 0, numSteps: 8 });
 ```
 
+- Use `supportsNumSteps(modelType)` / `requiresVoiceCloneForNumSteps(modelType)` from `react-native-sherpa-onnx/tts` before exposing a Steps control in UI.
 - Pocket-specific: `extra: { temperature: '0.7', chunk_size: '15' }` (see sherpa-onnx Pocket docs for more `extra` keys).
 
 ---
