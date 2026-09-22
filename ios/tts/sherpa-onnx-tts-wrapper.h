@@ -73,6 +73,14 @@ public:
         float speed = 1.0f
     );
 
+    /** Non-clone path with explicit flow-/diffusion steps via GenerationConfig.num_steps. */
+    AudioResult generate(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        int32_t numSteps
+    );
+
     /**
      * When cloning is set (non-empty reference_audio and reference_sample_rate > 0), calls
      * OfflineTts::Generate(text, GenerationConfig). Otherwise same as generate(text, sid, speed).
@@ -89,6 +97,15 @@ public:
         int32_t sid,
         float speed,
         const TtsStreamCallback& callback
+    );
+
+    /** Non-clone streaming with explicit num_steps via GenerationConfig. */
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback,
+        int32_t numSteps
     );
 
     /** Pocket: streaming with reference audio. Zipvoice + cloning is not supported (match Android). */

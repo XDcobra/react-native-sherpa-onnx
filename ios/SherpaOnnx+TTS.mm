@@ -666,6 +666,55 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
     return o.has_value() && !o->reference_audio.empty() && o->reference_sample_rate > 0;
 }
 
+static bool NSDictionaryHasNumSteps(NSDictionary *options) {
+    return options != nil && options[@"numSteps"] != nil;
+}
+
+static int32_t NumStepsFromNSDictionary(NSDictionary *options, int32_t defaultNumSteps) {
+    if (options != nil && options[@"numSteps"] != nil) {
+        return static_cast<int32_t>([options[@"numSteps"] doubleValue]);
+    }
+    return defaultNumSteps;
+}
+
+static bool TtsModelKindSupportsNumSteps(sherpaonnx::TtsModelKind kind) {
+    using Kind = sherpaonnx::TtsModelKind;
+    return kind == Kind::kSupertonic || kind == Kind::kZipvoice || kind == Kind::kPocket;
+}
+
+static bool TtsModelKindRequiresVoiceCloneForNumSteps(sherpaonnx::TtsModelKind kind) {
+    using Kind = sherpaonnx::TtsModelKind;
+    return kind == Kind::kZipvoice || kind == Kind::kPocket;
+}
+
+/** Returns YES if the promise was rejected. */
+static BOOL RejectNumStepsIfInvalid(
+    sherpaonnx::TtsModelKind kind,
+    NSDictionary *options,
+    RCTPromiseRejectBlock reject
+) {
+    if (!NSDictionaryHasNumSteps(options)) {
+        return NO;
+    }
+    if (!TtsModelKindSupportsNumSteps(kind)) {
+        reject(
+            @"TTS_NUM_STEPS_UNSUPPORTED",
+            @"numSteps is not supported for this model type. Supported: supertonic, zipvoice, pocket.",
+            nil
+        );
+        return YES;
+    }
+    if (TtsModelKindRequiresVoiceCloneForNumSteps(kind) && !NSDictionaryHasValidReferenceAudio(options)) {
+        reject(
+            @"TTS_NUM_STEPS_REQUIRES_VOICE_CLONE",
+            @"numSteps for zipvoice/pocket requires referenceAudio (non-empty samples and sampleRate > 0).",
+            nil
+        );
+        return YES;
+    }
+    return NO;
+}
+
 } // namespace
 
 @implementation SherpaOnnx (TTS)
@@ -1023,18 +1072,37 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
                 return;
             }
         }
+        if (RejectNumStepsIfInvalid(kind, options, reject)) {
+            return;
+        }
 
         std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
         if (hasRef) {
             cloneOpt = VoiceCloneOptionsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
         }
 
-        auto result = wrapper->generate(
-            textStr,
-            static_cast<int32_t>(sid),
-            static_cast<float>(speed),
-            cloneOpt
-        );
+        sherpaonnx::TtsWrapper::AudioResult result;
+        if (hasRef) {
+            result = wrapper->generate(
+                textStr,
+                static_cast<int32_t>(sid),
+                static_cast<float>(speed),
+                cloneOpt
+            );
+        } else if (NSDictionaryHasNumSteps(options)) {
+            result = wrapper->generate(
+                textStr,
+                static_cast<int32_t>(sid),
+                static_cast<float>(speed),
+                NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps)
+            );
+        } else {
+            result = wrapper->generate(
+                textStr,
+                static_cast<int32_t>(sid),
+                static_cast<float>(speed)
+            );
+        }
 
         if (result.samples.empty() || result.sampleRate == 0) {
             NSString *errorMsg = @"Failed to generate speech or result is empty";
@@ -1119,6 +1187,9 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
                 return;
             }
         }
+        if (RejectNumStepsIfInvalid(kind, options, reject)) {
+            return;
+        }
 
         std::optional<sherpaonnx::VoiceCloneOptions> cloneOpt;
         if (hasRef) {
@@ -1130,12 +1201,28 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
         std::vector<int32_t> sentenceChunkSizes;
 
         if ([subtitleMode isEqualToString:@"off"]) {
-            auto result = wrapper->generate(
-                textStr,
-                static_cast<int32_t>(sid),
-                static_cast<float>(speed),
-                cloneOpt
-            );
+            sherpaonnx::TtsWrapper::AudioResult result;
+            if (hasRef) {
+                result = wrapper->generate(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    cloneOpt
+                );
+            } else if (NSDictionaryHasNumSteps(options)) {
+                result = wrapper->generate(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps)
+                );
+            } else {
+                result = wrapper->generate(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed)
+                );
+            }
             if (result.samples.empty() || result.sampleRate == 0) {
                 NSString *errorMsg = @"Failed to generate speech or result is empty";
                 RCTLogError(@"%@", errorMsg);
@@ -1155,20 +1242,31 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
                 return numSamples;
             };
 
-            bool streamOk = cloneOpt.has_value()
-                ? wrapper->generateStream(
+            bool streamOk = false;
+            if (cloneOpt.has_value()) {
+                streamOk = wrapper->generateStream(
                     textStr,
                     static_cast<int32_t>(sid),
                     static_cast<float>(speed),
                     callback,
                     cloneOpt
-                  )
-                : wrapper->generateStream(
+                );
+            } else if (NSDictionaryHasNumSteps(options)) {
+                streamOk = wrapper->generateStream(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    callback,
+                    NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps)
+                );
+            } else {
+                streamOk = wrapper->generateStream(
                     textStr,
                     static_cast<int32_t>(sid),
                     static_cast<float>(speed),
                     callback
-                  );
+                );
+            }
 
             sampleRate = wrapper->getSampleRate();
             if (!streamOk || generatedSamples.empty() || sampleRate == 0) {
@@ -1282,11 +1380,21 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
         reject(@"TTS_STREAM_ERROR", @"Reference audio streaming is only supported for Pocket TTS.", nil);
         return;
     }
+    if (RejectNumStepsIfInvalid(streamKind, options, reject)) {
+        std::lock_guard<std::mutex> lock(g_tts_mutex);
+        auto it2 = g_tts_instances.find([instanceId UTF8String]);
+        if (it2 != g_tts_instances.end()) {
+            it2->second->streamRunning.store(false);
+        }
+        return;
+    }
 
     std::optional<sherpaonnx::VoiceCloneOptions> streamCloneOpt;
     if (streamHasRef) {
         streamCloneOpt = VoiceCloneOptionsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
     }
+    const bool streamHasNumSteps = NSDictionaryHasNumSteps(options);
+    const int32_t streamNumSteps = NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
 
     std::string textStr = [text UTF8String];
     int32_t sampleRate = instRef->wrapper->getSampleRate();
@@ -1297,11 +1405,7 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool success = false;
         @try {
-            success = instRef->wrapper->generateStream(
-                textStr,
-                static_cast<int32_t>(sid),
-                static_cast<float>(speed),
-                [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
+            auto streamCallback = [weakSelf, sampleRate, instanceIdCopy, requestIdCopy, instRef](const float *samples, int32_t numSamples, float progress) -> int32_t {
                     if (instRef->streamCancelled.load()) {
                         return 0;
                     }
@@ -1327,9 +1431,32 @@ static bool NSDictionaryHasValidReferenceAudio(NSDictionary *options) {
                     });
 
                     return instRef->streamCancelled.load() ? 0 : 1;
-                },
-                streamCloneOpt
-            );
+            };
+
+            if (streamCloneOpt.has_value()) {
+                success = instRef->wrapper->generateStream(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    streamCallback,
+                    streamCloneOpt
+                );
+            } else if (streamHasNumSteps) {
+                success = instRef->wrapper->generateStream(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    streamCallback,
+                    streamNumSteps
+                );
+            } else {
+                success = instRef->wrapper->generateStream(
+                    textStr,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    streamCallback
+                );
+            }
         } @catch (NSException *exception) {
             NSString *errorMsg = [NSString stringWithFormat:@"TTS streaming failed: %@", exception.reason];
             NSMutableDictionary *errPayload = [NSMutableDictionary dictionaryWithDictionary:@{ @"instanceId": instanceIdCopy, @"message": errorMsg }];
