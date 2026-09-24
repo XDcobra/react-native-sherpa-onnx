@@ -114,10 +114,25 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory 
 
 ## Models
 
-| `modelType` | Required files | Custom-init keys |
+| `modelType` | Required files (directory detect) | Custom-init keys |
 | --- | --- | --- |
-| `ct_transformer` | `*.onnx` (CT-Transformer) | `ct_transformer` |
-| `cnn_bilstm` | `*.onnx`, `bpe_vocab` | `cnn_bilstm`, `bpe_vocab` (streaming only) |
+| `ct_transformer` | `tokens.json` + `model.int8.onnx` or `model.onnx` (no `bpe.vocab`) | `ct_transformer` |
+| `cnn_bilstm` | `bpe.vocab` + `model*.onnx` | `cnn_bilstm`, `bpe_vocab` (streaming only — use [punctuation-streaming.md](punctuation-streaming.md)) |
+
+### Official offline packs (verified)
+
+Release tag [`punctuation-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/punctuation-models) currently ships **two** offline CT archives (same zh/en vocab, fp32 vs int8):
+
+| Archive | Primary ONNX | Layout detect | ORT IO |
+| --- | --- | --- | --- |
+| `sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12` | `model.onnx` (~281 MB) | `ct_transformer` | **2 inputs** (`inputs`, `text_lengths`), **1 output** (`logits` rank-3, last dim = 6) |
+| `…-2024-04-12-int8` | `model.int8.onnx` (~72 MB) | `ct_transformer` | same **2 / 1** signature |
+
+ONNX custom metadata required by upstream `OfflineCtTransformerModel`: `tokens`, `vocab_size`, `punctuations`, `unk_symbol` (tokens are also mirrored as `tokens.json` in the official tarballs for layout detection).
+
+**Guards:** Offline CT has **path/layout validation only** at detect — there is **no** ORT IO preflight for CT (unlike online CNN-BiLSTM). Opening a ~72–281 MB session on every library/detect scan would be too expensive; upstream loads the graph once at `createOfflinePunctuation` and reads the same metadata. The online ORT guard (**3 inputs / ≥2 outputs**) must **not** be applied to CT packs — they correctly fail that check and are selected via the `tokens.json` branch instead.
+
+If an offline ORT preflight were added later (e.g. only at engine init), it should match the verified release: `inputCount == 2`, `outputCount >= 1`, output 0 rank-3 with last dim `> 0`, plus the four metadata keys above — **not** the online 3/≥2 rule.
 
 Validate category: **`punctuation`**. Overview: [README — Punctuation](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Punctuation`). `detectPunctuationModel` with `auto` may detect either family; **`createOfflinePunctuation`** accepts **`ct_transformer`** only.
 

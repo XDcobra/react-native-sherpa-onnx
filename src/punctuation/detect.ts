@@ -118,6 +118,20 @@ export async function createOnlinePunctuationConfig(
     detect.isStreaming !== true ||
     detect.modelType !== 'cnn_bilstm'
   ) {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      // Stable filter: [SherpaOnnx:punct]
+      // eslint-disable-next-line no-console
+      console.warn('[SherpaOnnx:punct] createOnlinePunctuationConfig.reject', {
+        modelDir,
+        requested,
+        success: detect.success,
+        isStreaming: detect.isStreaming,
+        modelType: detect.modelType,
+        cnn_bilstm: detect.paths?.cnn_bilstm,
+        bpe_vocab: detect.paths?.bpe_vocab,
+        error: detect.error ?? null,
+      });
+    }
     const suffix = detect.error ? `: ${detect.error}` : '';
     throw new Error(
       `PUNCTUATION_INVALID_ARGUMENT: StreamingPunctuationEngine requires an online-capable cnn_bilstm model${suffix}`

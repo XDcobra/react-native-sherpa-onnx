@@ -108,7 +108,7 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Offline
 | --- | --- | --- |
 | `cnn_bilstm` | `*.onnx`, `bpe_vocab` | `cnn_bilstm`, `bpe_vocab` |
 
-Validate category: **`punctuation`**. Streaming requires online `cnn_bilstm` (`det.isStreaming`); offline `ct_transformer` is not valid here. Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Punctuation`).
+Validate category: **`punctuation`**. Streaming requires online `cnn_bilstm` (`det.isStreaming`); offline `ct_transformer` is not valid here. The online ORT preflight expects **3 inputs** and **≥2 outputs** (official `sherpa-onnx-online-punct-*` graphs expose 3 outputs including an unused `mask`; upstream only consumes case/punct logits). Detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Punctuation`).
 
 ```ts
 import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';

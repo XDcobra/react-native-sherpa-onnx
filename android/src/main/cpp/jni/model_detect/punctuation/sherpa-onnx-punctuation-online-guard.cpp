@@ -87,8 +87,18 @@ OnlineGuardResult GuardCnnBilstmOnlineCompatibility(const std::string& modelPath
         Ort::ModelMetadata metaData = session.GetModelMetadata();
         Ort::AllocatorWithDefaultOptions allocator;
 
-        if (session.GetInputCount() != 3 || session.GetOutputCount() != 2) {
-            out.error = "CNN-BiLSTM online punctuation signature must expose 3 inputs and 2 outputs";
+        // Official sherpa-onnx-online-punct-* graphs expose 3 inputs and 3 outputs
+        // (case logits, punct logits, optional mask). Upstream OnlineCNNBiLSTMModel
+        // only consumes outputs 0/1; accept outputCount >= 2 so the real release passes.
+        // Do NOT loosen this to also accept offline CT-Transformer packs (2 inputs /
+        // 1 logits output) — those are selected via tokens.json layout, not this guard.
+        const size_t inputCount = session.GetInputCount();
+        const size_t outputCount = session.GetOutputCount();
+        if (inputCount != 3 || outputCount < 2) {
+            out.error =
+                "CNN-BiLSTM online punctuation signature must expose 3 inputs and at least "
+                "2 outputs (case/punct logits; optional mask). Got inputs=" +
+                std::to_string(inputCount) + " outputs=" + std::to_string(outputCount);
             return out;
         }
 
