@@ -548,11 +548,30 @@ export interface Spec extends TurboModule {
   /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
-   * @param mode - "fullIfSpooled" (uses spool file if available) or "windowSnapshot" (ring snapshot).
+   * @param options.mode - "fullIfSpooled" (default) or "windowSnapshot".
+   * @param options.targetSampleRateHz - omit/0 keep live rate; >0 force (native resample).
    */
   createOfflineAudioBufferFromLive(
     liveBufferId: string,
-    mode?: string
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    sampleRate: number;
+    channelCount: number;
+    numSamples: number;
+    durationMs: number;
+  }>;
+
+  /**
+   * Create a new offline audio buffer from an existing offline buffer.
+   * @param offlineBufferId - Source offline buffer (remains valid).
+   * @param options.targetSampleRateHz - omit/0 keep source rate; >0 force (native resample).
+   */
+  createOfflineAudioBufferFromOffline(
+    offlineBufferId: string,
+    options?: Object
   ): Promise<{
     bufferId: string;
     kind: string;

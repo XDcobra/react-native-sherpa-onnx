@@ -296,6 +296,29 @@ export interface StartMicToLiveOptions {
 /** Mode for creating an offline buffer from a live buffer. */
 export type OfflineFromLiveMode = 'fullIfSpooled' | 'windowSnapshot';
 
+/**
+ * Options for {@link createOfflineAudioBufferFromLive}.
+ *
+ * `targetSampleRateHz` semantics (buffer→buffer; keep-source default):
+ * - omitted / undefined: keep the live buffer's sample rate (no resample)
+ * - 0: keep the live buffer's sample rate
+ * - > 0: force that rate (native linear resample when different)
+ */
+export type OfflineFromLiveOptions = {
+  mode?: OfflineFromLiveMode;
+  targetSampleRateHz?: number;
+};
+
+/**
+ * Options for {@link createOfflineAudioBufferFromOffline}.
+ *
+ * `targetSampleRateHz` semantics match {@link OfflineFromLiveOptions}
+ * (omit/`0` keep source; `> 0` force).
+ */
+export type OfflineFromOfflineOptions = {
+  targetSampleRateHz?: number;
+};
+
 /** Mode for transferring a live spool into a new offline buffer (ownership handover). */
 export type OfflineTransferFromLiveMode = 'fullIfSpooled';
 

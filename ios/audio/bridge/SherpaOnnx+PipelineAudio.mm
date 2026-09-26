@@ -907,6 +907,46 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
 }
 
 /**
+ * Read Float32 PCM from a F32 WAV spool (skip 44-byte header).
+ * Returns empty vector on failure.
+ */
+static std::vector<float> pa_readF32WavSpoolSamples(const std::string &spoolPath) {
+  std::ifstream wavFile(spoolPath, std::ios::binary);
+  if (!wavFile) return {};
+  wavFile.seekg(0, std::ios::end);
+  std::streamoff fileSize = wavFile.tellg();
+  if (fileSize <= 44) return {};
+  wavFile.seekg(44);
+  if (!wavFile) return {};
+
+  size_t payloadBytes = (size_t)(fileSize - 44);
+  if (payloadBytes % sizeof(float) != 0) return {};
+  size_t sampleCount = payloadBytes / sizeof(float);
+  if (sampleCount == 0) return {};
+
+  std::vector<float> samples(sampleCount);
+  wavFile.read(reinterpret_cast<char *>(samples.data()), (std::streamsize)payloadBytes);
+  if (!wavFile && wavFile.gcount() != (std::streamsize)payloadBytes) {
+    return {};
+  }
+  return samples;
+}
+
+static int pa_resolveEffectiveTargetSampleRateHz(NSDictionary *options, int sourceRate) {
+  if (options == nil) return sourceRate;
+  id raw = options[@"targetSampleRateHz"];
+  if (raw == nil || raw == [NSNull null]) return sourceRate;
+  int requested = [raw intValue];
+  if (requested == 0) return sourceRate;
+  if (requested < 0) {
+    @throw [NSException exceptionWithName:@"InvalidArgument"
+                                   reason:@"targetSampleRateHz must be >= 0"
+                                 userInfo:nil];
+  }
+  return requested;
+}
+
+/**
  * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file.
  * Use file-origin threshold policy to decide between mmap and in-memory storage.
  * Returns the entry on success, or nullptr on failure (caller falls back to ring snapshot).
@@ -2119,7 +2159,7 @@ static bool pa_populate_offline_from_source_if_empty(
 
 // ---- Offline: from live ----
 - (void)createOfflineAudioBufferFromLive:(NSString *)liveBufferId
-                                    mode:(NSString *)mode
+                                 options:(NSDictionary *)options
                                  resolve:(RCTPromiseResolveBlock)resolve
                                   reject:(RCTPromiseRejectBlock)reject
 {
@@ -2140,21 +2180,49 @@ static bool pa_populate_offline_from_source_if_empty(
       live = it->second;
     }
 
-    std::string modeStr = mode ? [mode UTF8String] : "fullIfSpooled";
-    std::string bufferId = pa_generateId("off");
+    NSString *modeObj = options[@"mode"];
+    std::string modeStr = (modeObj != nil && [modeObj isKindOfClass:[NSString class]] && modeObj.length > 0)
+      ? [modeObj UTF8String]
+      : "fullIfSpooled";
+    if (modeStr != "fullIfSpooled" && modeStr != "windowSnapshot") {
+      reject(kPAErrInvalidArgument, @"Unknown mode. Use 'fullIfSpooled' or 'windowSnapshot'.", nil);
+      return;
+    }
 
+    int effectiveTarget = pa_resolveEffectiveTargetSampleRateHz(options, live->sampleRate);
+    std::string bufferId = pa_generateId("off");
     std::shared_ptr<PaOfflineEntry> entry;
 
-    if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
-      entry = pa_createOfflineFromF32WavSpool(bufferId, live->spoolPath, live->sampleRate, live->channelCount);
-      if (!entry) {
-        // Fallback: snapshot ring if streaming fails
+    if (effectiveTarget == live->sampleRate) {
+      if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
+        entry = pa_createOfflineFromF32WavSpool(bufferId, live->spoolPath, live->sampleRate, live->channelCount);
+        if (!entry) {
+          auto snapshot = live->snapshotRing();
+          entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
+        }
+      } else {
         auto snapshot = live->snapshotRing();
         entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
       }
     } else {
-      auto snapshot = live->snapshotRing();
-      entry = pa_createEntryWithThreshold(bufferId, live->sampleRate, live->channelCount, snapshot);
+      if (live->channelCount != 1) {
+        reject(kPAErrInvalidArgument, @"Resampling live→offline requires mono (channelCount=1)", nil);
+        return;
+      }
+      std::vector<float> pcm;
+      if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
+        pcm = pa_readF32WavSpoolSamples(live->spoolPath);
+      }
+      if (pcm.empty()) {
+        pcm = live->snapshotRing();
+      }
+      auto resampled = pa_resampleLinear(pcm.data(), pcm.size(), live->sampleRate, effectiveTarget);
+      entry = pa_createEntryWithThreshold(bufferId, effectiveTarget, 1, resampled);
+    }
+
+    if (!entry) {
+      reject(kPAErrInternalError, @"Failed to create offline buffer from live", nil);
+      return;
     }
 
     {
@@ -2163,7 +2231,70 @@ static bool pa_populate_offline_from_source_if_empty(
     }
     resolve(entry->toDict());
   } @catch (NSException *e) {
-    reject(kPAErrInternalError, e.reason, nil);
+    if ([e.name isEqualToString:@"InvalidArgument"]) {
+      reject(kPAErrInvalidArgument, e.reason, nil);
+    } else {
+      reject(kPAErrInternalError, e.reason, nil);
+    }
+  }
+}
+
+// ---- Offline: from offline ----
+- (void)createOfflineAudioBufferFromOffline:(NSString *)offlineBufferId
+                                    options:(NSDictionary *)options
+                                    resolve:(RCTPromiseResolveBlock)resolve
+                                     reject:(RCTPromiseRejectBlock)reject
+{
+  @try {
+    std::string sourceId = [offlineBufferId UTF8String];
+    std::shared_ptr<PaOfflineEntry> source;
+    {
+      std::lock_guard<std::mutex> lock(g_pa_mutex);
+      auto it = g_pa_offline.find(sourceId);
+      if (it == g_pa_offline.end()) {
+        reject(kPAErrBufferNotFound, @"Offline buffer not found", nil);
+        return;
+      }
+      source = it->second;
+    }
+
+    int effectiveTarget = pa_resolveEffectiveTargetSampleRateHz(options, source->sampleRate);
+    if (effectiveTarget != source->sampleRate && source->channelCount != 1) {
+      reject(kPAErrInvalidArgument, @"Resampling offline→offline requires mono (channelCount=1)", nil);
+      return;
+    }
+
+    auto pcm = source->readAllSamples();
+    std::vector<float> output;
+    if (effectiveTarget == source->sampleRate) {
+      output = pcm;
+    } else {
+      output = pa_resampleLinear(pcm.data(), pcm.size(), source->sampleRate, effectiveTarget);
+    }
+
+    std::string bufferId = pa_generateId("off");
+    auto entry = pa_createEntryWithThreshold(
+      bufferId,
+      effectiveTarget,
+      source->channelCount,
+      output
+    );
+    if (!entry) {
+      reject(kPAErrInternalError, @"Failed to create offline buffer from offline", nil);
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(g_pa_mutex);
+      g_pa_offline[bufferId] = entry;
+    }
+    resolve(entry->toDict());
+  } @catch (NSException *e) {
+    if ([e.name isEqualToString:@"InvalidArgument"]) {
+      reject(kPAErrInvalidArgument, e.reason, nil);
+    } else {
+      reject(kPAErrInternalError, e.reason, nil);
+    }
   }
 }
 

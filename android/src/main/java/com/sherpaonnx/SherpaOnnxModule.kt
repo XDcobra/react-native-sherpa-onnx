@@ -2393,11 +2393,32 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
-  override fun createOfflineAudioBufferFromLive(liveBufferId: String, mode: String?, promise: Promise) {
+  override fun createOfflineAudioBufferFromLive(
+    liveBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
     try {
+      val mode =
+        if (options != null && options.hasKey("mode") && !options.isNull("mode")) {
+          options.getString("mode") ?: "fullIfSpooled"
+        } else {
+          "fullIfSpooled"
+        }
+      val targetSampleRateHz =
+        if (
+          options != null &&
+            options.hasKey("targetSampleRateHz") &&
+            !options.isNull("targetSampleRateHz")
+        ) {
+          options.getDouble("targetSampleRateHz").toInt()
+        } else {
+          null
+        }
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromLive(
         liveBufferId,
-        mode ?: "fullIfSpooled"
+        mode,
+        targetSampleRateHz,
       )
       promise.resolve(entry.toWritableMap())
     } catch (e: IllegalArgumentException) {
@@ -2406,6 +2427,41 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message, e)
     } catch (e: IllegalStateException) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_STATE, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
+  override fun createOfflineAudioBufferFromOffline(
+    offlineBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    try {
+      val targetSampleRateHz =
+        if (
+          options != null &&
+            options.hasKey("targetSampleRateHz") &&
+            !options.isNull("targetSampleRateHz")
+        ) {
+          options.getDouble("targetSampleRateHz").toInt()
+        } else {
+          null
+        }
+      val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromOffline(
+        offlineBufferId,
+        targetSampleRateHz,
+      )
+      promise.resolve(entry.toWritableMap())
+    } catch (e: IllegalArgumentException) {
+      val msg = e.message ?: ""
+      val code =
+        if (msg.contains("not found", ignoreCase = true)) {
+          com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.BUFFER_NOT_FOUND
+        } else {
+          com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INVALID_ARGUMENT
+        }
+      promise.reject(code, e.message, e)
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.audio.pipeline.PipelineAudioErrorCodes.INTERNAL_ERROR, e.message, e)
     }

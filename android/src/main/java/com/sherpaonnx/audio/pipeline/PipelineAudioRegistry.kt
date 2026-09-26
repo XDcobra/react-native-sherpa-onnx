@@ -145,31 +145,161 @@ object PipelineAudioRegistry {
    *
    * @param liveBufferId ID of the live buffer.
    * @param mode How to create the offline buffer:
-    *   - "fullIfSpooled": If live has a spool file, use file-origin threshold policy.
+   *   - "fullIfSpooled": If live has a spool file, use file-origin threshold policy.
    *     Otherwise, snapshot the ring.
    *   - "windowSnapshot": Always snapshot the current ring window (in-memory copy).
+   * @param targetSampleRateHz omit/`null` or `0` keeps the live rate; `> 0` forces
+   *   that rate via [Resampler.resampleLinear] (mono only; materializes PCM).
    */
   fun createOfflineFromLive(
     liveBufferId: String,
-    mode: String = "fullIfSpooled"
+    mode: String = "fullIfSpooled",
+    targetSampleRateHz: Int? = null,
   ): OfflineEntry {
     val live = requireLiveEntry(liveBufferId)
+    if (mode != "fullIfSpooled" && mode != "windowSnapshot") {
+      throw IllegalArgumentException(
+        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
+      )
+    }
 
+    val effectiveTarget = resolveEffectiveTargetSampleRateHz(
+      targetSampleRateHz,
+      live.sampleRate,
+    )
+    if (effectiveTarget == live.sampleRate) {
+      return createOfflineFromLiveSameRate(live, mode)
+    }
+
+    if (live.channelCount != 1) {
+      throw IllegalArgumentException(
+        "Resampling live→offline requires mono (channelCount=1), got ${live.channelCount}"
+      )
+    }
+
+    val pcm = loadLivePcm(live, mode)
+    val resampled = Resampler.resampleLinear(pcm, live.sampleRate, effectiveTarget)
     val bufferId = "off_${UUID.randomUUID()}"
+    return createEntryWithThreshold(bufferId, effectiveTarget, 1, resampled)
+  }
 
+  /**
+   * Create a new offline buffer from an existing offline buffer.
+   * Source remains valid. `targetSampleRateHz` omit/`null`/`0` copies at source rate;
+   * `> 0` forces that rate (mono only).
+   */
+  fun createOfflineFromOffline(
+    offlineBufferId: String,
+    targetSampleRateHz: Int? = null,
+  ): OfflineEntry {
+    val source = offlineEntries[offlineBufferId]
+      ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
+
+    val effectiveTarget = resolveEffectiveTargetSampleRateHz(
+      targetSampleRateHz,
+      source.sampleRate,
+    )
+
+    if (effectiveTarget != source.sampleRate && source.channelCount != 1) {
+      throw IllegalArgumentException(
+        "Resampling offline→offline requires mono (channelCount=1), got ${source.channelCount}"
+      )
+    }
+
+    val pcm = source.readAllSamples()
+    val output =
+      if (effectiveTarget == source.sampleRate) {
+        pcm.copyOf()
+      } else {
+        Resampler.resampleLinear(pcm, source.sampleRate, effectiveTarget)
+      }
+    val bufferId = "off_${UUID.randomUUID()}"
+    return createEntryWithThreshold(
+      bufferId,
+      effectiveTarget,
+      source.channelCount,
+      output,
+    )
+  }
+
+  private fun createOfflineFromLiveSameRate(live: LiveEntry, mode: String): OfflineEntry {
+    val bufferId = "off_${UUID.randomUUID()}"
     return when (mode) {
       "fullIfSpooled" -> {
         val spoolPath = live.spoolFilePath
         if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
-          createOfflineFromF32WavSpoolFile(bufferId, spoolPath, live.sampleRate, live.channelCount)
-            ?: createFromRingSnapshot(bufferId, live)
+          createOfflineFromF32WavSpoolFile(
+            bufferId,
+            spoolPath,
+            live.sampleRate,
+            live.channelCount,
+          ) ?: createFromRingSnapshot(bufferId, live)
         } else {
           createFromRingSnapshot(bufferId, live)
         }
       }
       "windowSnapshot" -> createFromRingSnapshot(bufferId, live)
-      else -> throw IllegalArgumentException("Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'.")
+      else -> throw IllegalArgumentException(
+        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
+      )
     }
+  }
+
+  private fun loadLivePcm(live: LiveEntry, mode: String): FloatArray {
+    if (mode == "fullIfSpooled") {
+      val spoolPath = live.spoolFilePath
+      if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
+        readF32WavSpoolSamples(spoolPath)?.let { return it }
+      }
+    }
+    return live.snapshotRing()
+  }
+
+  /**
+   * Read Float32 PCM payload from a F32 WAV spool (skip 44-byte header).
+   * Returns null if the file is missing/empty/unreadable.
+   */
+  private fun readF32WavSpoolSamples(spoolPath: String): FloatArray? {
+    val spoolFile = File(spoolPath)
+    if (!spoolFile.exists() || spoolFile.length() <= 44L) {
+      return null
+    }
+    val payloadBytes = spoolFile.length() - 44L
+    if (payloadBytes <= 0L || payloadBytes % 4L != 0L) {
+      return null
+    }
+    val numSamples = (payloadBytes / 4L).toInt()
+    if (numSamples <= 0) {
+      return null
+    }
+    return try {
+      val samples = FloatArray(numSamples)
+      java.io.RandomAccessFile(spoolFile, "r").use { raf ->
+        raf.seek(44L)
+        val bytes = ByteArray(numSamples * 4)
+        raf.readFully(bytes)
+        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until numSamples) {
+          samples[i] = bb.float
+        }
+      }
+      samples
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun resolveEffectiveTargetSampleRateHz(
+    requested: Int?,
+    sourceRate: Int,
+  ): Int {
+    if (requested == null || requested == 0) {
+      return sourceRate
+    }
+    if (requested < 0) {
+      throw IllegalArgumentException("targetSampleRateHz must be >= 0")
+    }
+    return requested
   }
 
   /**

@@ -47,7 +47,8 @@ import type {
   LiveAudioBufferRecordingSource,
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
-  OfflineFromLiveMode,
+  OfflineFromLiveOptions,
+  OfflineFromOfflineOptions,
   OfflineTransferFromLiveMode,
   LiveAudioBufferCallbacks,
   LiveAudioBufferFramesAppendedEvent,
@@ -807,16 +808,43 @@ export function createOfflineAudioBufferFromSamples(
 /**
  * Create an offline audio buffer from a live buffer.
  *
- * - "fullIfSpooled" (default): uses spool file if available (no RAM duplication).
- *   Falls back to ring snapshot if no spool.
- * - "windowSnapshot": always snapshots the current ring window.
+ * - `mode: "fullIfSpooled"` (default): uses spool file if available (no RAM
+ *   duplication when rates match). Falls back to ring snapshot if no spool.
+ * - `mode: "windowSnapshot"`: always snapshots the current ring window.
+ * - `targetSampleRateHz`: omit/`0` keeps the live rate; `> 0` forces that rate
+ *   via native linear resample (materializes PCM; no spool zero-copy).
+ *
+ * Rate-changing transfers are not supported — use this API instead of
+ * {@link transferOfflineAudioBufferFromLive} when resampling.
  */
 export async function createOfflineAudioBufferFromLive(
   liveBufferId: LiveAudioBufferIdSource,
-  mode?: OfflineFromLiveMode
+  options?: OfflineFromLiveOptions
 ): Promise<OfflineAudioBufferRef> {
   const id = resolveLiveAudioBufferId(liveBufferId);
-  const result = await getNative().createOfflineAudioBufferFromLive(id, mode);
+  const result = await getNative().createOfflineAudioBufferFromLive(id, {
+    mode: options?.mode,
+    targetSampleRateHz: options?.targetSampleRateHz,
+  });
+  const info = result as unknown as OfflineAudioBufferInfo;
+  return { info, bufferId: info.bufferId as OfflineBufferHandle };
+}
+
+/**
+ * Create a new offline audio buffer from an existing offline buffer.
+ *
+ * The source buffer stays valid and independent. `targetSampleRateHz` omit/`0`
+ * copies at the source rate; `> 0` forces that rate via native linear resample
+ * (mono only).
+ */
+export async function createOfflineAudioBufferFromOffline(
+  offlineBufferId: OfflineAudioBufferIdSource,
+  options?: OfflineFromOfflineOptions
+): Promise<OfflineAudioBufferRef> {
+  const id = resolveOfflineAudioBufferId(offlineBufferId);
+  const result = await getNative().createOfflineAudioBufferFromOffline(id, {
+    targetSampleRateHz: options?.targetSampleRateHz,
+  });
   const info = result as unknown as OfflineAudioBufferInfo;
   return { info, bufferId: info.bufferId as OfflineBufferHandle };
 }
@@ -825,6 +853,8 @@ export async function createOfflineAudioBufferFromLive(
  * Transfer ownership of a finalized live spool into a new offline buffer without copying.
  *
  * On success, the source live buffer becomes invalidated and must no longer be used.
+ * This path always preserves the live sample rate — use
+ * {@link createOfflineAudioBufferFromLive} with `targetSampleRateHz` to resample.
  */
 export async function transferOfflineAudioBufferFromLive(
   liveBufferId: LiveAudioBufferIdSource,
@@ -1319,6 +1349,8 @@ export type {
   CreateEmptyLiveAudioBufferOptions,
   StartMicToLiveOptions,
   OfflineFromLiveMode,
+  OfflineFromLiveOptions,
+  OfflineFromOfflineOptions,
   OfflineTransferFromLiveMode,
   LiveAudioIngressSource,
   LiveAudioPipelineWriter,
