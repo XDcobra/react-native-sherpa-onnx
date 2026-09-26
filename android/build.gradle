@@ -139,6 +139,13 @@ android {
   kotlinOptions {
     jvmTarget = '17'
   }
+
+  // Share repo-root WAV fixtures with JVM unit tests (ClassLoader resources).
+  sourceSets {
+    test {
+      resources.srcDirs += ["${project.projectDir}/../test/fixtures"]
+    }
+  }
 }
 
 // Resolve com.xdcobra.sherpa only from this repo (never from JitPack or other app repos).
