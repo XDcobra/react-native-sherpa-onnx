@@ -305,6 +305,20 @@ const forEnhancement = await createOfflineAudioBufferFromOffline(offline16k, {
 });
 ```
 
+### Rate-conversion matrix tests (JVM)
+
+Android unit tests cover the buffer rate matrix with committed mono WAV fixtures
+(`test/fixtures/audiobuffer/tone-{16,48}k-mono.wav`):
+
+| Path | Same rate | 16→48 | 48→16 |
+| --- | --- | --- | --- |
+| `Resampler` linear | yes | yes | yes |
+| offline → offline | yes | yes | yes |
+| live → offline (`windowSnapshot`) | yes | yes | yes |
+| offline → live (`appendOfflineToLive`) | yes | yes | yes |
+
+Assertions check output sample rate, sample count (exact `Resampler` length formula), and duration. **Not** covered here: FFmpeg file decode / ingest, or real microphone capture (those need instrumented / device tests).
+
 ## Types and constants
 
 ```ts
