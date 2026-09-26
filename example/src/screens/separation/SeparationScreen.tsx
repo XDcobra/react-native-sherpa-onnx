@@ -765,7 +765,7 @@ export default function SeparationScreen() {
         await finalizeLiveAudioBuffer(liveOut.bufferId).catch(() => {});
         const offline = await createOfflineAudioBufferFromLive(
           liveOut.bufferId,
-          'fullIfSpooled'
+          { mode: 'fullIfSpooled' }
         );
         const info = await getPipelineAudioBufferInfo(offline.bufferId);
         const n = info.kind === 'offlinePcmBuffer' ? info.numSamples : 0;

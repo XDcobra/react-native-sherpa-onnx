@@ -35,7 +35,7 @@ When this buffer is used in a playback or mic+playback pipeline, choose input/ou
 
 ### Offline buffer
 
-- `createEmptyOfflineAudioBuffer`, `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`
+- `createEmptyOfflineAudioBuffer`, `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`, `createOfflineAudioBufferFromOffline`
 - `getOfflineAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 
@@ -241,17 +241,68 @@ await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac'
 
 ### Conversion: Offline buffer <--> Live buffer
 
-#### `createOfflineAudioBufferFromLive(liveBuffer, mode?)`
+#### `createOfflineAudioBufferFromLive(liveBuffer, options?)`
 
 ```ts
 function createOfflineAudioBufferFromLive(
   liveBuffer: LiveAudioBufferIdSource,
-  mode?: OfflineFromLiveMode
+  options?: OfflineFromLiveOptions
 ): Promise<OfflineAudioBufferRef>;
 ```
 
 ```ts
-const offlineFromLive = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
+const offlineFromLive = await createOfflineAudioBufferFromLive(live, {
+  mode: 'fullIfSpooled',
+});
+
+// Resample to a model rate (materializes PCM; no spool zero-copy)
+const offline48k = await createOfflineAudioBufferFromLive(live, {
+  mode: 'fullIfSpooled',
+  targetSampleRateHz: 48000,
+});
+```
+
+`targetSampleRateHz` semantics (same idea as file/fromSamples keep-source default):
+
+| Value | Behavior |
+| --- | --- |
+| omitted / `undefined` | Keep the live buffer's sample rate (fast path: spool/snapshot) |
+| `0` | Keep the live buffer's sample rate |
+| `> 0` | Force that rate via native linear resample when different |
+
+When the target rate differs from the live rate, PCM is materialized and resampled (mono only). Matching rates keep the existing zero-copy / spool path.
+
+`transferOfflineAudioBufferFromLive` always preserves the live sample rate (ownership handoff). To change rate, use `createOfflineAudioBufferFromLive` with `targetSampleRateHz`.
+
+### Conversion: Offline buffer <--> Offline buffer
+
+#### `createOfflineAudioBufferFromOffline(offlineBuffer, options?)`
+
+```ts
+function createOfflineAudioBufferFromOffline(
+  offlineBuffer: OfflineAudioBufferIdSource,
+  options?: OfflineFromOfflineOptions
+): Promise<OfflineAudioBufferRef>;
+```
+
+Creates a **new** offline buffer; the source stays valid and independent (no adopt/transfer). Use this to copy at the same rate or resample for a downstream model (e.g. 16 kHz STT snapshot → 48 kHz enhancement input).
+
+`targetSampleRateHz` semantics match from-live / fromSamples keep-source default:
+
+| Value | Behavior |
+| --- | --- |
+| omitted / `undefined` | Keep the source offline buffer's sample rate (PCM copy) |
+| `0` | Keep the source sample rate |
+| `> 0` | Force that rate via native linear resample when different (mono only) |
+
+```ts
+// Same-rate copy (new buffer id; source unchanged)
+const copy = await createOfflineAudioBufferFromOffline(offline16k);
+
+// Resample for a 48 kHz enhancement engine
+const forEnhancement = await createOfflineAudioBufferFromOffline(offline16k, {
+  targetSampleRateHz: 48000,
+});
 ```
 
 ## Types and constants
@@ -264,6 +315,8 @@ import type {
   PipelineAudioBufferInfo, // discriminated union for offline/live info
   PipelineAudioBufferIdSource, // ref/info/handle/id accepted by shared APIs
   OfflineFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  OfflineFromLiveOptions, // mode + optional targetSampleRateHz
+  OfflineFromOfflineOptions, // optional targetSampleRateHz
   AudioDecodeOptions, // decode options for createOfflineAudioBufferFromFile
   DecodeProgressEvent, // progress payload during decode
   PipelineAudioErrorCodeValue, // string union of audio error codes
@@ -327,7 +380,9 @@ await releasePipelineAudioBuffer(audio);
 
 ```ts
 // `live` is a finalized live audio buffer from a long recording session.
-const snapshot = await createOfflineAudioBufferFromLive(live, 'fullIfSpooled');
+const snapshot = await createOfflineAudioBufferFromLive(live, {
+  mode: 'fullIfSpooled',
+});
 const info = await getPipelineAudioBufferInfo(snapshot);
 console.log(info.durationMs, info.sampleRate);
 await releasePipelineAudioBuffer(snapshot);

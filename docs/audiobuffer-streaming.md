@@ -96,7 +96,7 @@ Live buffers are **window-first streaming buffers**:
 
 Provide `persistencePath` when you need full-history retention beyond the active window, for example:
 
-- creating an offline buffer from the full finalized session via `createOfflineAudioBufferFromLive('fullIfSpooled')`
+- creating an offline buffer from the full finalized session via `createOfflineAudioBufferFromLive({ mode: 'fullIfSpooled' })` (optional `targetSampleRateHz` to resample; see [offline docs](audiobuffer-offline.md))
 - exporting long recordings where early segments may have left the ring
 - post-processing workflows that must not lose pre-window audio
 

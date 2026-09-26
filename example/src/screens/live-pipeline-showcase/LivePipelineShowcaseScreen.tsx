@@ -466,7 +466,7 @@ export default function LivePipelineShowcaseScreen() {
         }
         const offline = await createOfflineAudioBufferFromLive(
           ttsLive.bufferId,
-          'fullIfSpooled'
+          { mode: 'fullIfSpooled' }
         );
         if (offline.info.numSamples <= 0) {
           await releasePipelineAudioBuffer(offline.bufferId).catch(() => {});

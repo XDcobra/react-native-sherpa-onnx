@@ -1121,7 +1121,7 @@ export default function EnhancementStreamingScreen() {
 
       const offlineOutput = await createOfflineAudioBufferFromLive(
         outputLive.bufferId,
-        'fullIfSpooled'
+        { mode: 'fullIfSpooled' }
       );
       producedOfflineBufferId = offlineOutput.bufferId;
 
