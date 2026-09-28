@@ -296,9 +296,16 @@ internal class AssetPackDelivery(
       "[SherpaOnnx PAD] ensureReady pack=$packName status=completed " +
         "waiters=${promises.size} next=app_calls_getAssetPackPath",
     )
-    val map = stateToMap(state)
+    // RN WritableMap is single-consume; each Promise needs its own map.
     for (p in promises) {
-      p.resolve(map)
+      try {
+        p.resolve(stateToMap(state))
+      } catch (e: Exception) {
+        Log.e(
+          logTag,
+          "[SherpaOnnx PAD] ensureReady resolve failed pack=$packName: ${e.message}",
+        )
+      }
     }
   }
 
