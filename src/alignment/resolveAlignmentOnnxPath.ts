@@ -1,11 +1,17 @@
+import { readFile } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { resolveAlignmentCustomConfigPaths } from './customConfig';
 import {
+  applyVocabRomanizerToProfile,
   resolveAlignmentPackProfile,
   type AlignmentConcreteModelFamily,
   type AlignmentModelProfile,
 } from './modelProfiles';
+import {
+  inferRomanizerFromVocabTokens,
+  tokensFromVocabJson,
+} from './romanization';
 import type {
   AlignTextToAudioOptionsAccurate,
   AlignmentAccurateModelConfig,
@@ -19,6 +25,31 @@ export interface AlignmentResolvedModelPaths {
   profile: AlignmentModelProfile;
   /** Basename / hint used for profile resolution (logging). */
   profileHint: string;
+}
+
+async function profileWithVocabRomanizer(
+  profileHint: string,
+  vocabPath: string
+): Promise<AlignmentModelProfile> {
+  const base = resolveAlignmentPackProfile(profileHint);
+  if (!vocabPath) {
+    return base;
+  }
+  try {
+    const rawText = await readFile(vocabPath, 'utf8');
+    const parsed: unknown = JSON.parse(rawText);
+    const tokens = tokensFromVocabJson(parsed);
+    if (!tokens) {
+      return base;
+    }
+    return applyVocabRomanizerToProfile(
+      base,
+      inferRomanizerFromVocabTokens(tokens)
+    );
+  } catch {
+    // Unreadable / invalid vocab → keep name-based romanizer.
+    return base;
+  }
 }
 
 export async function resolveAlignmentOnnxPath(
@@ -44,7 +75,7 @@ export async function resolveAlignmentOnnxPath(
             (model.customConfig.model as { path?: string }).path ?? onnxPath
           )
         : onnxPath;
-    const profile = resolveAlignmentPackProfile(profileHint);
+    const profile = await profileWithVocabRomanizer(profileHint, vocabPath);
     return {
       modelPath: onnxPath,
       vocabPath,
@@ -79,7 +110,7 @@ export async function resolveAlignmentOnnxPath(
   const vocabPath =
     typeof det.paths?.vocab === 'string' ? det.paths.vocab.trim() : '';
   const profileHint = modelDir;
-  const profile = resolveAlignmentPackProfile(profileHint);
+  const profile = await profileWithVocabRomanizer(profileHint, vocabPath);
   return {
     modelPath: onnxPath,
     vocabPath,

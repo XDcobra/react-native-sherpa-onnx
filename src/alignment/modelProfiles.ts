@@ -1,5 +1,9 @@
 import type { RomanizerId } from './romanization';
-import { getRomanizer, type Romanizer } from './romanization';
+import {
+  getRomanizer,
+  type Romanizer,
+  type VocabRomanizerInference,
+} from './romanization';
 import type {
   AlignmentConcreteModelFamily,
   AlignmentModelFamily,
@@ -98,6 +102,21 @@ export function resolveAlignmentPackProfile(
 
 export function romanizerForProfile(profile: AlignmentModelProfile): Romanizer {
   return getRomanizer(profile.romanizerId);
+}
+
+/**
+ * Override only romanizer fields from vocab charset inference.
+ * Pack `id` / `languageHints` stay name-based.
+ */
+export function applyVocabRomanizerToProfile(
+  profile: AlignmentModelProfile,
+  inference: VocabRomanizerInference
+): AlignmentModelProfile {
+  return {
+    ...profile,
+    needsRomanization: inference.needsRomanization,
+    romanizerId: inference.romanizerId,
+  };
 }
 
 /**

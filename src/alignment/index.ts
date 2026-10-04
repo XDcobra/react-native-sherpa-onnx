@@ -34,6 +34,7 @@ export {
 export type { AlignmentResolvedModelPaths } from './resolveAlignmentOnnxPath';
 export {
   resolveAlignmentPackProfile,
+  applyVocabRomanizerToProfile,
   prepareAlignmentTranscript,
   hasAlignableAlignmentLetters,
 } from './modelProfiles';
@@ -47,8 +48,14 @@ export {
   identityRomanizer,
   latinDiacriticRomanizer,
   uromanRomanizer,
+  inferRomanizerFromVocabTokens,
+  tokensFromVocabJson,
 } from './romanization';
-export type { Romanizer, RomanizerId } from './romanization';
+export type {
+  Romanizer,
+  RomanizerId,
+  VocabRomanizerInference,
+} from './romanization';
 
 export type {
   AlignTextToAudioFn,

@@ -1,4 +1,5 @@
 import {
+  applyVocabRomanizerToProfile,
   hasAlignableAlignmentLetters,
   prepareAlignmentTranscript,
   resolveAlignmentPackProfile,
@@ -6,6 +7,7 @@ import {
 import {
   getRomanizer,
   identityRomanizer,
+  inferRomanizerFromVocabTokens,
   latinDiacriticRomanizer,
 } from '../romanization';
 
@@ -45,6 +47,23 @@ describe('alignment modelProfiles', () => {
     expect(xlsr.needsRomanization).toBe(false);
     expect(xlsr.romanizerId).toBe('identity');
     expect(prepareAlignmentTranscript('你好', xlsr)).toBe('你好');
+  });
+
+  it('vocab inference overrides name-based romanizer on a renamed pack', () => {
+    const renamed = resolveAlignmentPackProfile('my-custom-aligner');
+    expect(renamed.id).toBe('char_ctc_generic');
+    expect(renamed.needsRomanization).toBe(false);
+
+    const withMmsVocab = applyVocabRomanizerToProfile(
+      renamed,
+      inferRomanizerFromVocabTokens(['<blank>', 'a', 'b', 'z', "'"])
+    );
+    expect(withMmsVocab.id).toBe('char_ctc_generic');
+    expect(withMmsVocab.needsRomanization).toBe(true);
+    expect(withMmsVocab.romanizerId).toBe('uroman');
+    expect(prepareAlignmentTranscript('你好', withMmsVocab, 'zh')).toBe(
+      'nihao'
+    );
   });
 });
 
