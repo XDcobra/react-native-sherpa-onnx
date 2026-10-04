@@ -52,8 +52,15 @@ std::string InferAlignmentModelTypeFromKey(const std::string& modelKey) {
     for (unsigned char c : modelKey) {
         lower.push_back(static_cast<char>(std::tolower(c)));
     }
+    // All current char-CTC packs share the wav2vec2 family (Omnilingual deferred).
     if (lower.find("wav2vec") != std::string::npos ||
-        lower.find("960h") != std::string::npos) {
+        lower.find("960h") != std::string::npos ||
+        lower.find("voxpopuli") != std::string::npos ||
+        lower.find("xlsr") != std::string::npos ||
+        lower.find("multilingual-56") != std::string::npos ||
+        (lower.find("mms") != std::string::npos &&
+         (lower.find("forced-aligner") != std::string::npos ||
+          lower.find("1130") != std::string::npos))) {
         return "wav2vec2";
     }
     return {};
@@ -91,6 +98,31 @@ const std::vector<PublicLanguageRow>& CuratedRows(
         return TtsSimpleRows(modelType);
     }
     if (domain == ModelLanguageDomain::kAlignment) {
+        // Pack-specific curated hints from modelKey (VoxPopuli / MMS / XLSR).
+        std::string lower = modelKey;
+        for (char& c : lower) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (lower.find("voxpopuli") != std::string::npos) {
+            static const std::vector<PublicLanguageRow> kVoxpopuli = {
+                PublicLanguageRow{"de", "de"},
+                PublicLanguageRow{"es", "es"},
+                PublicLanguageRow{"fr", "fr"},
+                PublicLanguageRow{"it", "it"},
+            };
+            return kVoxpopuli;
+        }
+        if (lower.find("mms") != std::string::npos &&
+            (lower.find("forced-aligner") != std::string::npos ||
+             lower.find("1130") != std::string::npos)) {
+            static const std::vector<PublicLanguageRow> kMmsEmpty;
+            return kMmsEmpty;
+        }
+        if (lower.find("xlsr") != std::string::npos ||
+            lower.find("multilingual-56") != std::string::npos) {
+            static const std::vector<PublicLanguageRow> kXlsrEmpty;
+            return kXlsrEmpty;
+        }
         return AlignmentRowsForModelType(modelType);
     }
     return SttRowsForModelType(modelType);

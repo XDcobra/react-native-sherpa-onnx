@@ -466,8 +466,21 @@ function emitTs(catalog, sttHintsByType) {
   lines.push('');
 
   const wav2vec2Hints = catalog.alignment.wav2vec2.hints;
+  const packHints = catalog.alignment.wav2vec2.packHints ?? {};
+  const voxpopuliHints = packHints.voxpopuli ?? ['de', 'es', 'fr', 'it'];
+  const mmsHints = packHints.mms ?? [];
+  const xlsrHints = packHints.xlsr ?? [];
   lines.push(
     `export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ${JSON.stringify(wav2vec2Hints)} as const;`
+  );
+  lines.push(
+    `export const VOXPOPULI_ALIGNMENT_ISO6391_HINTS = ${JSON.stringify(voxpopuliHints)} as const;`
+  );
+  lines.push(
+    `export const MMS_ALIGNMENT_ISO6391_HINTS = ${JSON.stringify(mmsHints)} as const;`
+  );
+  lines.push(
+    `export const XLSR_ALIGNMENT_ISO6391_HINTS = ${JSON.stringify(xlsrHints)} as const;`
   );
   lines.push('');
   lines.push('export function iso6391HintsForAlignmentModelType(');
@@ -476,6 +489,19 @@ function emitTs(catalog, sttHintsByType) {
   lines.push('): string[] | undefined {');
   lines.push('  const type = (modelType ?? \'\').trim().toLowerCase();');
   lines.push('  const key = (modelKey ?? \'\').trim().toLowerCase();');
+  lines.push('  if (key.includes(\'voxpopuli\')) {');
+  lines.push('    return [...VOXPOPULI_ALIGNMENT_ISO6391_HINTS];');
+  lines.push('  }');
+  lines.push(
+    '  if (key.includes(\'mms\') && (key.includes(\'forced-aligner\') || key.includes(\'1130\'))) {'
+  );
+  lines.push('    return [...MMS_ALIGNMENT_ISO6391_HINTS];');
+  lines.push('  }');
+  lines.push(
+    '  if (key.includes(\'xlsr\') || key.includes(\'multilingual-56\')) {'
+  );
+  lines.push('    return [...XLSR_ALIGNMENT_ISO6391_HINTS];');
+  lines.push('  }');
   lines.push('  if (type === \'wav2vec2\') {');
   lines.push('    return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];');
   lines.push('  }');

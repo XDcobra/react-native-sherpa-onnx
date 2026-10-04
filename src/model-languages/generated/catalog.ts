@@ -1279,6 +1279,9 @@ export function iso6391HintsForTtsModelType(
 }
 
 export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ["en"] as const;
+export const VOXPOPULI_ALIGNMENT_ISO6391_HINTS = ["de","es","fr","it"] as const;
+export const MMS_ALIGNMENT_ISO6391_HINTS = [] as const;
+export const XLSR_ALIGNMENT_ISO6391_HINTS = [] as const;
 
 export function iso6391HintsForAlignmentModelType(
   modelType: string | undefined,
@@ -1286,6 +1289,15 @@ export function iso6391HintsForAlignmentModelType(
 ): string[] | undefined {
   const type = (modelType ?? '').trim().toLowerCase();
   const key = (modelKey ?? '').trim().toLowerCase();
+  if (key.includes('voxpopuli')) {
+    return [...VOXPOPULI_ALIGNMENT_ISO6391_HINTS];
+  }
+  if (key.includes('mms') && (key.includes('forced-aligner') || key.includes('1130'))) {
+    return [...MMS_ALIGNMENT_ISO6391_HINTS];
+  }
+  if (key.includes('xlsr') || key.includes('multilingual-56')) {
+    return [...XLSR_ALIGNMENT_ISO6391_HINTS];
+  }
   if (type === 'wav2vec2') {
     return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];
   }

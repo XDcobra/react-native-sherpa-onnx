@@ -1296,7 +1296,17 @@
     "wav2vec2": {
       "hints": [
         "en"
-      ]
+      ],
+      "packHints": {
+        "voxpopuli": [
+          "de",
+          "es",
+          "fr",
+          "it"
+        ],
+        "mms": [],
+        "xlsr": []
+      }
     }
   }
 }

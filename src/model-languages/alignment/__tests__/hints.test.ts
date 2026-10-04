@@ -13,6 +13,27 @@ describe('alignment language hints', () => {
     ).toBeUndefined();
   });
 
+  it('returns pack-specific hints for VoxPopuli / MMS / XLSR keys', () => {
+    expect(
+      iso6391HintsForAlignmentModelType(
+        'wav2vec2',
+        'wav2vec2-voxpopuli-de-base'
+      )
+    ).toEqual(['de', 'es', 'fr', 'it']);
+    expect(
+      iso6391HintsForAlignmentModelType(
+        'unknown',
+        'mms-300m-1130-forced-aligner-int8'
+      )
+    ).toEqual([]);
+    expect(
+      iso6391HintsForAlignmentModelType(
+        'unknown',
+        'wav2vec2-xlsr-multilingual-56-q4f16'
+      )
+    ).toEqual([]);
+  });
+
   it('publicLanguageHintsFromNative does not invent Alignment rows (C++ curated catalog owns that)', () => {
     expect(
       publicLanguageHintsFromNative({

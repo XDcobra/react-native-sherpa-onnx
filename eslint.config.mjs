@@ -38,6 +38,8 @@ export default defineConfig([
       'sherpa-onnx/',
       'test/cpp/',
       'test/fixtures/',
+      // JSON.stringify-emitted catalog (yarn generate:model-language-catalog)
+      'src/model-languages/generated/**',
     ],
   },
 ]);
