@@ -1,5 +1,14 @@
 asset_name,license_type,commercial_use,confidence,detection_source,license_file
+mms-300m-1130-forced-aligner-int8.tar.bz2,cc-by-nc-4.0,no,high,manual,https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt
+mms-300m-1130-forced-aligner-q4f16.tar.bz2,cc-by-nc-4.0,no,high,manual,https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt
+omnilingual-asr-ctc-300m-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/csukuangfj2/sherpa-onnx-omnilingual-asr-1600-languages-300M-ctc-int8-2025-11-12/resolve/main/LICENSE
 wav2vec2-base-960h-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-base-960h-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-base-960h-q4f16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-base-960h.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-voxpopuli-de-base.tar.bz2,mit,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/mit.md
+wav2vec2-voxpopuli-es-base.tar.bz2,mit,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/mit.md
+wav2vec2-voxpopuli-fr-base.tar.bz2,mit,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/mit.md
+wav2vec2-voxpopuli-it-base.tar.bz2,mit,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/mit.md
+wav2vec2-xlsr-multilingual-56-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-multilingual-56-q4f16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
