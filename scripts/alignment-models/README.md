@@ -10,23 +10,28 @@ https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-model
 File: `scripts/alignment-models/sources.csv`
 
 - Delimiter: semicolon (`;`)
-- Required header (exact): `id;onnx_url;license;license_type;commercial_use`
+- Required header (exact): `id;onnx_url;license;license_type;commercial_use;tokens_url;vocab_url`
 
 Columns:
 
 | Column | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
-| `onnx_url` | yes | Direct URL to the ONNX model file |
+| `onnx_url` | yes | Direct URL to the ONNX model file (always stored as `model.onnx`) |
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE`; also written to `license_file` in `alignment-models-license-status.csv` |
 | `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) for app license screens |
 | `commercial_use` | yes | `yes` or `no`, same convention as other `*-models-license-status.csv` files |
+| `tokens_url` | no | Optional sherpa-style `tokens.txt` URL (Omnilingual, etc.) |
+| `vocab_url` | no | Optional HF `vocab.json` URL (MMS / XLSR char CTC, etc.) |
 
-Example row:
+Example rows:
 
 ```text
-wav2vec2-base-960h-int8;https://huggingface.co/…/model.onnx;https://huggingface.co/…/LICENSE;apache-2.0;yes
+wav2vec2-base-960h-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/apache-2.0.md;apache-2.0;yes;;
+omnilingual-asr-ctc-300m-int8;https://huggingface.co/…/model.int8.onnx;https://huggingface.co/…/LICENSE;apache-2.0;yes;https://huggingface.co/…/tokens.txt;
 ```
+
+The live catalog is `sources.csv` (which models get packed/uploaded). Models that need a different runtime (e.g. mel/GRU `tiny-aligner`) stay out of that CSV until packaging support exists.
 
 ### `checksum.txt`
 
@@ -47,8 +52,10 @@ Each generated archive contains exactly one model directory:
 
 ```text
 <id>/
-  model.onnx
-  LICENSE     # only if license column is non-empty
+  model.onnx      # always (source may be model.int8.onnx etc.)
+  tokens.txt      # only if tokens_url is non-empty
+  vocab.json      # only if vocab_url is non-empty
+  LICENSE         # only if license column is non-empty
 ```
 
 ## Script usage
@@ -78,6 +85,7 @@ Useful flags:
 - `--build-dir <path>`: Override local build directory (default: `build/alignment-models`)
 - `--dist-dir <path>`: Override archive output directory (default: `dist/alignment-models`)
 - `--dry-run`: Build only, skip release lookup and uploads
+- `--only <id>`: Build/upload a single model id (repeatable); checksum still covers the full CSV catalog
 
 ## Requirements
 
