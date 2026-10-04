@@ -47,13 +47,14 @@ const PROFILES: Record<AlignmentPackProfileId, AlignmentModelProfile> = {
     id: 'mms_forced_aligner',
     family: 'wav2vec2',
     needsRomanization: true,
-    romanizerId: 'latin_diacritic',
+    // ASCII-romanized vocab: uroman + MMS normalize (covers non-Latin scripts).
+    romanizerId: 'uroman',
     languageHints: [],
   },
   xlsr_56: {
     id: 'xlsr_56',
     family: 'wav2vec2',
-    // Latin scripts work without romanization; non-Latin needs future uroman.
+    // Native-script vocab — do not uroman (would destroy alignable chars).
     needsRomanization: false,
     romanizerId: 'identity',
     languageHints: [],

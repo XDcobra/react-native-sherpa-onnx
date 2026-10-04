@@ -18,3 +18,4 @@ _codeql_detected_source_root/
 example/.model-cache/
 test/cpp/
 test/fixtures/
+src/alignment/romanization/uroman/data/

@@ -46,6 +46,7 @@ export {
   getRomanizer,
   identityRomanizer,
   latinDiacriticRomanizer,
+  uromanRomanizer,
 } from './romanization';
 export type { Romanizer, RomanizerId } from './romanization';
 

@@ -30,6 +30,7 @@ describe('alignment public surface snapshot', () => {
         "resolveAlignmentCustomConfigPaths",
         "resolveAlignmentOnnxPath",
         "resolveAlignmentPackProfile",
+        "uromanRomanizer",
       ]
     `);
   });

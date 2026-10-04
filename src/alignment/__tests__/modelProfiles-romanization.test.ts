@@ -25,14 +25,26 @@ describe('alignment modelProfiles', () => {
     ).toBe('xlsr_56');
   });
 
-  it('romanizes only for MMS FA profile', () => {
+  it('romanizes only for MMS FA profile (uroman)', () => {
     const mms = resolveAlignmentPackProfile('mms-300m-1130-forced-aligner');
     expect(mms.needsRomanization).toBe(true);
+    expect(mms.romanizerId).toBe('uroman');
     expect(prepareAlignmentTranscript('café', mms)).toBe('cafe');
+    expect(prepareAlignmentTranscript('你好', mms, 'zh')).toBe('nihao');
+    expect(
+      hasAlignableAlignmentLetters(prepareAlignmentTranscript('你好', mms))
+    ).toBe(true);
 
     const vox = resolveAlignmentPackProfile('wav2vec2-voxpopuli-de-base');
     expect(vox.needsRomanization).toBe(false);
     expect(prepareAlignmentTranscript('für groß', vox)).toBe('für groß');
+
+    const xlsr = resolveAlignmentPackProfile(
+      'wav2vec2-xlsr-multilingual-56-q4f16'
+    );
+    expect(xlsr.needsRomanization).toBe(false);
+    expect(xlsr.romanizerId).toBe('identity');
+    expect(prepareAlignmentTranscript('你好', xlsr)).toBe('你好');
   });
 });
 

@@ -43,6 +43,7 @@ describe('alignment public exports', () => {
       'resolveAlignmentCustomConfigPaths',
       'resolveAlignmentOnnxPath',
       'resolveAlignmentPackProfile',
+      'uromanRomanizer',
     ]);
   });
 });

@@ -5,8 +5,7 @@ import type { Romanizer } from './types';
  * (MMS FA). NFC + compatibility decomposition, then strip combining marks.
  *
  * Does **not** transliterate non-Latin scripts (Arabic, CJK, Cyrillic, …).
- * Those require a future uroman-class backend behind the same {@link Romanizer}
- * interface.
+ * Use the `uroman` romanizer for those.
  */
 export const latinDiacriticRomanizer: Romanizer = {
   id: 'latin_diacritic',
