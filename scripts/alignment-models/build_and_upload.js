@@ -23,9 +23,52 @@ const EXPECTED_HEADER = [
   'commercial_use',
   'tokens_url',
   'vocab_url',
+  'languages',
 ];
 const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
+const VALID_ISO6391_RE = /^[a-z]{2,3}(-[a-z0-9]+)?$/i;
+/** Strip common quant / trailing -base suffixes for pack language lookup. */
+const ALIGNMENT_PACK_QUANT_SUFFIX_RE =
+  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/i;
+
+/**
+ * @param {string} languagesRaw
+ * @param {number} lineNumber
+ * @returns {string[]}
+ */
+function parseLanguagesCell(languagesRaw, lineNumber) {
+  if (!languagesRaw) {
+    return [];
+  }
+  const parts = languagesRaw
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  for (const code of parts) {
+    if (!VALID_ISO6391_RE.test(code)) {
+      throw new Error(
+        `Line ${lineNumber}: invalid language code '${code}' in languages column`
+      );
+    }
+  }
+  return [...new Set(parts)];
+}
+
+/**
+ * @param {string} modelId
+ * @returns {string}
+ */
+function alignmentPackStem(modelId) {
+  let stem = String(modelId ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(ALIGNMENT_PACK_QUANT_SUFFIX_RE, '');
+  if (stem.endsWith('-base')) {
+    stem = stem.slice(0, -'-base'.length);
+  }
+  return stem;
+}
 
 function printHelp() {
   console.log(`Usage: node scripts/alignment-models/build_and_upload.js [options]
@@ -230,6 +273,7 @@ async function readSources(csvPath) {
     let commercialUse = normalizeCell(row[4]).toLowerCase();
     const tokensUrl = normalizeCell(row[5]);
     const vocabUrl = normalizeCell(row[6]);
+    const languagesRaw = normalizeCell(row[7]);
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -250,6 +294,7 @@ async function readSources(csvPath) {
         `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[4]}")`
       );
     }
+    const languages = parseLanguagesCell(languagesRaw, lineNumber);
     if (seen.has(modelId)) {
       throw new Error(`Duplicate id value in CSV: ${modelId}`);
     }
@@ -263,6 +308,7 @@ async function readSources(csvPath) {
       commercialUse,
       tokensUrl,
       vocabUrl,
+      languages,
     });
   }
 
@@ -764,4 +810,6 @@ if (require.main === module) {
 module.exports = {
   readSources,
   EXPECTED_HEADER,
+  alignmentPackStem,
+  parseLanguagesCell,
 };

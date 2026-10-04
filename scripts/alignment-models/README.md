@@ -10,7 +10,7 @@ https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/alignment-model
 File: `scripts/alignment-models/sources.csv`
 
 - Delimiter: semicolon (`;`)
-- Required header (exact): `id;onnx_url;license;license_type;commercial_use;tokens_url;vocab_url`
+- Required header (exact): `id;onnx_url;license;license_type;commercial_use;tokens_url;vocab_url;languages`
 
 Columns:
 
@@ -23,12 +23,14 @@ Columns:
 | `commercial_use` | yes | `yes` or `no`, same convention as other `*-models-license-status.csv` files |
 | `tokens_url` | no | Optional sherpa-style `tokens.txt` URL (unused by current char-CTC packs) |
 | `vocab_url` | no | Optional HF `vocab.json` URL (MMS / XLSR / VoxPopuli char CTC, etc.) |
+| `languages` | no | Comma-separated ISO 639-1(/639-3) codes for catalog UX hints. Empty = multilingual / not enumerated (e.g. MMS FA). Source of truth for `iso6391HintsForAlignmentModelType` via `yarn generate:model-language-catalog`. |
 
 Example rows:
 
 ```text
-wav2vec2-base-960h-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/apache-2.0.md;apache-2.0;yes;;
-mms-300m-1130-forced-aligner-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/legalcode.txt;cc-by-nc-4.0;no;;https://huggingface.co/…/vocab.json
+wav2vec2-base-960h-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/apache-2.0.md;apache-2.0;yes;;;en
+wav2vec2-xlsr-53-korean-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/apache-2.0.md;apache-2.0;yes;;https://huggingface.co/…/vocab.json;ko
+mms-300m-1130-forced-aligner-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/legalcode.txt;cc-by-nc-4.0;no;;https://huggingface.co/…/vocab.json;
 ```
 
 The live catalog is `sources.csv` (which models get packed/uploaded). Only char-CTC wav2vec2-family packs belong here. Other runtimes (e.g. mel/GRU `tiny-aligner`) stay out of this release. Omnilingual ASR-CTC is an STT model (sherpa-onnx `omnilingual`), not an alignment pack.
