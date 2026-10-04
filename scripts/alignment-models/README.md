@@ -60,6 +60,23 @@ Each generated archive contains exactly one model directory:
   LICENSE         # only if license column is non-empty
 ```
 
+## Exporting a new HF ONNX pack (optional)
+
+When a commercial wav2vec2 CTC checkpoint exists on Hugging Face but has no
+ONNX export yet, use:
+
+```bash
+# venv with torch / transformers / optimum[onnxruntime] / onnxruntime
+python scripts/alignment-models/export_hf_onnx_pack.py \
+  --model <org>/<pytorch-checkpoint> \
+  --language <iso639-1> \
+  --out build/alignment-onnx-export/packs/<pack-name>-ONNX
+```
+
+That writes an onnx-community-style folder (`onnx/model*.onnx`, `vocab.json`,
+`LICENSE`, `README.md`, exporter copy). Upload the folder to Hugging Face, then
+add `onnx_url` / `vocab_url` rows to `sources.csv`.
+
 ## Script usage
 
 Build archives only (no release API call, no upload):
