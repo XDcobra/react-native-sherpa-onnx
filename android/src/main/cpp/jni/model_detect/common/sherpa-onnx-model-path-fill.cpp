@@ -132,6 +132,7 @@ void FillAlignmentModelPathsFromStringMap(
     AlignmentModelPaths& out
 ) {
     SetPathFromMap(paths, "model", out.model);
+    SetPathFromMap(paths, "vocab", out.vocab);
 }
 
 void FillLanguageIdModelPathsFromStringMap(
@@ -294,6 +295,7 @@ std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     const AlignmentModelPaths& paths) {
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
+    PutPathIfNonEmpty(out, "vocab", paths.vocab);
     return out;
 }
 

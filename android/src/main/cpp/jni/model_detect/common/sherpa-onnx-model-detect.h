@@ -329,6 +329,8 @@ struct PunctuationModelPaths {
 
 struct AlignmentModelPaths {
     std::string model;
+    /** Optional sidecar char CTC vocabulary (HF vocab.json). Empty when absent. */
+    std::string vocab;
 };
 
 struct LanguageIdModelPaths {

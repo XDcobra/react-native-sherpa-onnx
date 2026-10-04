@@ -38,6 +38,11 @@ internal object AlignmentOptionParsers {
     return p
   }
 
+  /** Optional sidecar vocab.json path; empty when absent (native falls back to sidecar/default). */
+  fun parseAlignmentVocabPath(options: ReadableMap?): String {
+    return options?.getString("vocabPath")?.trim().orEmpty()
+  }
+
   fun parseSegmentSampleCounts(options: ReadableMap?): IntArray {
     val direct = options?.getArray("segmentSampleCounts")
     if (direct != null) {

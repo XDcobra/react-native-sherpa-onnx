@@ -43,10 +43,15 @@ static NSDictionary *alignmentDetectResultToDict(
     @"detectedModels": detectedModelsArray,
     @"modelType": alignmentKindToNSString(result.selectedKind),
   } mutableCopy];
-  if (!result.paths.model.empty()) {
-    dict[@"paths"] = @{
-      @"model": [NSString stringWithUTF8String:result.paths.model.c_str()] ?: @""
-    };
+  if (!result.paths.model.empty() || !result.paths.vocab.empty()) {
+    NSMutableDictionary *paths = [NSMutableDictionary dictionary];
+    if (!result.paths.model.empty()) {
+      paths[@"model"] = [NSString stringWithUTF8String:result.paths.model.c_str()] ?: @"";
+    }
+    if (!result.paths.vocab.empty()) {
+      paths[@"vocab"] = [NSString stringWithUTF8String:result.paths.vocab.c_str()] ?: @"";
+    }
+    dict[@"paths"] = paths;
   }
   if (!result.ok && !result.error.empty()) {
     dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Alignment model detection failed";
@@ -377,6 +382,7 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             granularityStr);
       } else if (modeStr == "accurate") {
         std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
+        const std::string vocabPathStr = sherpaonnx::alignment::bridge::ParseAlignmentVocabPath(options);
         const std::string segmentationSource = sherpaonnx::alignment::bridge::ParseSegmentationSource(options);
         if (segmentationSource == "vad") {
           if (granularityStr == "character") {
@@ -463,7 +469,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                   pcm.data() + start,
                   end - start,
                   pcmSampleRate,
-                  granularityStr);
+                  granularityStr,
+                  vocabPathStr);
             } catch (const std::exception &e) {
               throw std::runtime_error(
                   std::string("ALIGNMENT_CONSTRAINED_ACCURATE_ERROR: constrained accurate run failed for anchor ") +
@@ -538,7 +545,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             pcm.data(),
             pcm.size(),
             pcmSampleRate,
-            granularityStr);
+            granularityStr,
+            vocabPathStr);
       } else if (modeStr == "vad") {
         const std::string segSourceId = sherpaonnx::alignment::bridge::ParseSegmentationBufferId(options);
         if (segSourceId.find("seg_off_") != 0) {
@@ -698,6 +706,7 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                    sampleRate:(double)sampleRate
                   granularity:(NSString *)granularity
                      language:(NSString *)language
+                    vocabPath:(NSString *)vocabPath
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
@@ -711,6 +720,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
           sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
       const std::string languageStr =
           (language != nil) ? std::string([language UTF8String]) : std::string();
+      const std::string vocabPathStr =
+          (vocabPath != nil) ? std::string([vocabPath UTF8String]) : std::string();
         (void)languageStr;
 
       if (modelPathStr.empty()) {
@@ -803,7 +814,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             samples.data(),
             samples.size(),
             requestedSampleRate,
-            granularityStr);
+            granularityStr,
+            vocabPathStr);
       } catch (const std::exception &e) {
         throw std::runtime_error(
             std::string("ALIGNMENT_NATIVE_ACCURATE_FAILED: ") + e.what());
@@ -849,6 +861,7 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                            sampleRate:(double)sampleRate
                           granularity:(NSString *)granularity
                              language:(NSString *)language
+                            vocabPath:(NSString *)vocabPath
                               resolve:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject
 {
@@ -862,6 +875,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
           sherpaonnx::alignment::bridge::NormalizeGranularity(granularity);
       const std::string languageStr =
           (language != nil) ? std::string([language UTF8String]) : std::string();
+      const std::string vocabPathStr =
+          (vocabPath != nil) ? std::string([vocabPath UTF8String]) : std::string();
 
       if (modelPathStr.empty()) {
         reject(kAlignmentErrModelLoadFailed,
@@ -957,7 +972,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             samples.size(),
             requestedSampleRate,
             effectiveGranularity,
-            languageStr);
+            languageStr,
+            vocabPathStr);
       } catch (const std::exception &e) {
         throw std::runtime_error(
             std::string("ALIGNMENT_FORCED_CTC_FAILED: ") + e.what());

@@ -81,6 +81,7 @@ jobject AlignmentDetectResultToJava(
     env->DeleteLocalRef(hashMapClass);
     if (pathsMap) {
       PutString(env, pathsMap, mapPut, "model", result.paths.model);
+      PutString(env, pathsMap, mapPut, "vocab", result.paths.vocab);
       jstring keyPaths = env->NewStringUTF("paths");
       env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
       env->DeleteLocalRef(keyPaths);

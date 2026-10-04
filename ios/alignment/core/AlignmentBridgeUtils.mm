@@ -105,6 +105,19 @@ std::string ParseAlignmentModelPath(NSDictionary *options) {
   return std::string([trimmed UTF8String]);
 }
 
+std::string ParseAlignmentVocabPath(NSDictionary *options) {
+  NSString *path = [options[@"vocabPath"] isKindOfClass:[NSString class]]
+      ? options[@"vocabPath"]
+      : nil;
+  NSString *trimmed = path != nil
+      ? [path stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmed == nil || trimmed.length == 0) {
+    return {};
+  }
+  return std::string([trimmed UTF8String]);
+}
+
 PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm) {
   if (pcm == nil) {
     throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice descriptor is required.");

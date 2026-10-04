@@ -47,6 +47,7 @@ internal class SherpaOnnxAlignmentHelper {
     samples: FloatArray,
     sampleRate: Int,
     granularity: String,
+    vocabPath: String,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateFromFile(
@@ -54,6 +55,7 @@ internal class SherpaOnnxAlignmentHelper {
     text: String,
     audioPath: String,
     granularity: String,
+    vocabPath: String,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateForcedCtcFromFloatPcm(
@@ -63,6 +65,7 @@ internal class SherpaOnnxAlignmentHelper {
     sampleRate: Int,
     granularity: String,
     language: String,
+    vocabPath: String,
   ): HashMap<String, Any>
 
   private data class VadaAnchor(
@@ -288,6 +291,7 @@ internal class SherpaOnnxAlignmentHelper {
 
           "accurate" -> {
             val modelPath = AlignmentOptionParsers.parseAlignmentModelPath(options)
+            val vocabPath = AlignmentOptionParsers.parseAlignmentVocabPath(options)
             val segmentationSource = AlignmentOptionParsers.parseSegmentationSource(options)
             if (segmentationSource == "vad") {
               if (normalizedGranularity == "character") {
@@ -353,6 +357,7 @@ internal class SherpaOnnxAlignmentHelper {
                     slice,
                     audioEntry.sampleRate,
                     normalizedGranularity,
+                    vocabPath,
                   )
                 } catch (e: Exception) {
                   throw IllegalStateException(
@@ -419,6 +424,7 @@ internal class SherpaOnnxAlignmentHelper {
               samples,
               audioEntry.sampleRate,
               normalizedGranularity,
+              vocabPath,
             )
           }
 
@@ -598,6 +604,7 @@ internal class SherpaOnnxAlignmentHelper {
     sampleRate: Double,
     granularity: String,
     language: String?,
+    vocabPath: String?,
     promise: Promise,
   ) {
     executor.execute {
@@ -630,6 +637,7 @@ internal class SherpaOnnxAlignmentHelper {
         }
 
         val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
+        val normalizedVocabPath = vocabPath?.trim().orEmpty()
         val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
         val raw = nativeAlignAccurateFromFloatPcm(
           normalizedModelPath,
@@ -637,6 +645,7 @@ internal class SherpaOnnxAlignmentHelper {
           slice,
           normalizedSampleRate,
           normalizedGranularity,
+          normalizedVocabPath,
         )
 
         promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
@@ -663,6 +672,7 @@ internal class SherpaOnnxAlignmentHelper {
     sampleRate: Double,
     granularity: String,
     language: String?,
+    vocabPath: String?,
     promise: Promise,
   ) {
     executor.execute {
@@ -699,6 +709,7 @@ internal class SherpaOnnxAlignmentHelper {
           .let { if (it == "character") "word" else it }
 
         val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
+        val normalizedVocabPath = vocabPath?.trim().orEmpty()
 
         val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
           normalizedModelPath,
@@ -707,6 +718,7 @@ internal class SherpaOnnxAlignmentHelper {
           normalizedSampleRate,
           normalizedGranularity,
           language?.trim().orEmpty(),
+          normalizedVocabPath,
         )
 
         promise.resolve(AlignmentResultMapper.forcedCtcResultToWritable(raw))
@@ -773,6 +785,7 @@ internal class SherpaOnnxAlignmentHelper {
               samples,
               sampleRate,
               normalizedGranularity,
+              "",
             )
           }
 

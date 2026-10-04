@@ -64,6 +64,7 @@ sherpaonnx::AlignmentDetectResult DetectAlignmentModelFromFiles(
     switch (selected) {
         case sherpaonnx::AlignmentModelKind::kWav2Vec2:
             result.paths.model = wav2vec2Model;
+            result.paths.vocab = FindFileByName(files, "vocab.json");
             break;
         default:
             result.error = "Alignment: no compatible model type detected in " +

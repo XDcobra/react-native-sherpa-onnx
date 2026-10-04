@@ -7,6 +7,7 @@ namespace {
 
 static const AlignmentFieldRequirement kWav2Vec2Reqs[] = {
     {"model", &AlignmentModelPaths::model, true},
+    {"vocab", &AlignmentModelPaths::vocab, false},
 };
 
 static const AlignmentFieldRequirement* GetRequirements(
