@@ -147,7 +147,8 @@ describe('alignment/native bridge slice calls', () => {
       },
       16000,
       'word',
-      'en'
+      'en',
+      undefined
     );
   });
 
@@ -176,7 +177,8 @@ describe('alignment/native bridge slice calls', () => {
       },
       16000,
       'word',
-      'en'
+      'en',
+      undefined
     );
   });
 });

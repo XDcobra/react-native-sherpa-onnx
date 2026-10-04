@@ -33,16 +33,21 @@ describe('resolveAlignmentOnnxPath', () => {
     mockResolveInit.mockResolvedValue('/models/alignment');
     mockDetect.mockResolvedValue({
       success: true,
-      paths: { model: '/models/alignment/model.onnx' },
+      paths: {
+        model: '/models/alignment/model.onnx',
+        vocab: '/models/alignment/vocab.json',
+      },
     });
     mockResolveCustom.mockResolvedValue({ model: '/custom/wav2vec2.onnx' });
   });
 
   it('auto mode resolves modelSource via detectAlignmentModel', async () => {
-    const path = await resolveAlignmentOnnxPath({
+    const resolved = await resolveAlignmentOnnxPath({
       modelSource: fsPath('/models/alignment'),
     });
-    expect(path).toBe('/models/alignment/model.onnx');
+    expect(resolved.modelPath).toBe('/models/alignment/model.onnx');
+    expect(resolved.vocabPath).toBe('/models/alignment/vocab.json');
+    expect(resolved.family).toBe('wav2vec2');
     expect(mockResolveInit).toHaveBeenCalledWith(fsPath('/models/alignment'));
     expect(mockDetect).toHaveBeenCalledWith('/models/alignment', 'auto', null);
     expect(mockResolveCustom).not.toHaveBeenCalled();
@@ -50,12 +55,12 @@ describe('resolveAlignmentOnnxPath', () => {
 
   it('custom mode resolves customConfig without detectAlignmentModel', async () => {
     const customConfig = { model: fsPath('/custom/wav2vec2.onnx') };
-    const path = await resolveAlignmentOnnxPath({
+    const resolved = await resolveAlignmentOnnxPath({
       initMode: 'custom',
       modelType: 'wav2vec2',
       customConfig,
     });
-    expect(path).toBe('/custom/wav2vec2.onnx');
+    expect(resolved.modelPath).toBe('/custom/wav2vec2.onnx');
     expect(mockResolveCustom).toHaveBeenCalledWith('wav2vec2', customConfig);
     expect(mockDetect).not.toHaveBeenCalled();
     expect(mockResolveInit).not.toHaveBeenCalled();

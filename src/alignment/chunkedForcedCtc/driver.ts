@@ -32,6 +32,11 @@ import type {
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
 import { resolveAlignmentOnnxPath } from '../resolveAlignmentOnnxPath';
+import {
+  hasAlignableAlignmentLetters,
+  prepareAlignmentTranscript,
+  type AlignmentModelProfile,
+} from '../modelProfiles';
 import { addSegmentLink, createSegmentLinkMap } from '../../segment';
 import type {
   AlignmentAccurateModelConfig,
@@ -264,16 +269,13 @@ function toWarningCode(
   return warnings[0]?.code;
 }
 
-/**
- * Default wav2vec2 CTC vocab is A–Z (+ `|` / `'`). Digits, punctuation-only
- * spans, and Whisper bracket tags (after stripping) leave nothing to align.
- */
-function stripWhisperBracketTags(text: string): string {
-  return text.replace(/\[(?:[A-Z][A-Z0-9_ ]{0,48})\]/g, ' ');
-}
-
-function hasAlignableForcedCtcTokens(text: string): boolean {
-  return /[A-Za-z]/.test(stripWhisperBracketTags(text));
+function hasAlignableForcedCtcTokens(
+  text: string,
+  profile: AlignmentModelProfile,
+  language?: string
+): boolean {
+  const prepared = prepareAlignmentTranscript(text, profile, language);
+  return hasAlignableAlignmentLetters(prepared);
 }
 
 function isNoAlignableTokensNativeError(error: unknown): boolean {
@@ -281,10 +283,10 @@ function isNoAlignableTokensNativeError(error: unknown): boolean {
     error instanceof Error
       ? error.message
       : typeof error === 'object' &&
-          error != null &&
-          typeof (error as { message?: unknown }).message === 'string'
-        ? (error as { message: string }).message
-        : String(error ?? '');
+        error != null &&
+        typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error ?? '');
   return /no alignable tokens/i.test(message);
 }
 
@@ -293,7 +295,6 @@ function logChunkedForcedCtc(
   details?: Record<string, unknown>
 ): void {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    // eslint-disable-next-line no-console
     console.log('[SherpaOnnx:alignment]', message, details ?? {});
   }
 }
@@ -301,12 +302,17 @@ function logChunkedForcedCtc(
 function skipUnalignableCursorUnits(
   cursor: ChunkedForcedCtcCursorState,
   warnings: AlignmentWarning[],
-  reason: 'precheck' | 'native_empty_vocab'
+  reason: 'precheck' | 'native_empty_vocab',
+  profile: AlignmentModelProfile,
+  language?: string
 ): number {
   let skipped = 0;
   while (!isCursorExhausted(cursor)) {
     const unit = cursor.units[cursor.cursorIndex];
-    if (unit == null || hasAlignableForcedCtcTokens(unit.text)) {
+    if (
+      unit == null ||
+      hasAlignableForcedCtcTokens(unit.text, profile, language)
+    ) {
       break;
     }
     const preview =
@@ -430,7 +436,7 @@ export async function runAccurateChunkedForcedCtc(
     anchorInfoRaw,
     segmentOutInfoRaw,
     referenceTextRaw,
-    resolvedModelPath,
+    resolvedModel,
   ] = await Promise.all([
     getPipelineAudioBufferInfo(audioInBufferId),
     getPipelineSegmentBufferInfo(anchorSegmentBufferId),
@@ -438,6 +444,11 @@ export async function runAccurateChunkedForcedCtc(
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
     resolveAlignmentOnnxPath(input.model),
   ]);
+  const resolvedModelPath = resolvedModel.modelPath;
+  const resolvedVocabPath = resolvedModel.vocabPath;
+  const alignmentProfile = resolvedModel.profile;
+  const languageOpt =
+    typeof input.language === 'string' ? input.language : undefined;
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);
   const anchorInfo = asOfflineSegmentBufferInfo(
@@ -518,7 +529,13 @@ export async function runAccurateChunkedForcedCtc(
       // speech audio is not dropped when non-vocab units lead the cursor.
       let anchorHandled = false;
       while (!anchorHandled && !isCursorExhausted(cursor)) {
-        skipUnalignableCursorUnits(cursor, warnings, 'precheck');
+        skipUnalignableCursorUnits(
+          cursor,
+          warnings,
+          'precheck',
+          alignmentProfile,
+          languageOpt
+        );
         if (isCursorExhausted(cursor)) {
           break;
         }
@@ -528,7 +545,13 @@ export async function runAccurateChunkedForcedCtc(
           break;
         }
 
-        if (!hasAlignableForcedCtcTokens(textWindow.text)) {
+        if (
+          !hasAlignableForcedCtcTokens(
+            textWindow.text,
+            alignmentProfile,
+            languageOpt
+          )
+        ) {
           const preview =
             textWindow.text.length > 64
               ? `${textWindow.text.slice(0, 64)}…`
@@ -538,6 +561,7 @@ export async function runAccurateChunkedForcedCtc(
             unitCount: textWindow.unitCount,
             textPreview: preview,
             anchorIndex: i,
+            profile: alignmentProfile.id,
           });
           advanceCursor(cursor, textWindow.unitCount);
           addWarning(
@@ -550,12 +574,18 @@ export async function runAccurateChunkedForcedCtc(
 
         progressSession.emitStep(i, anchors.length, anchorDurationMs);
 
+        const preparedWindowText = prepareAlignmentTranscript(
+          textWindow.text,
+          alignmentProfile,
+          languageOpt
+        );
+
         let nativeResult: ChunkedForcedCtcNativeResult;
         try {
           nativeResult = parseNativeResult(
             await SherpaOnnx.alignAccurateForcedCtcFromPcm(
               resolvedModelPath,
-              textWindow.text,
+              preparedWindowText,
               {
                 audioBufferId: audioInBufferId,
                 startSample: anchor.startSample,
@@ -563,7 +593,8 @@ export async function runAccurateChunkedForcedCtc(
               },
               audioInfo.sampleRate,
               granularity,
-              typeof input.language === 'string' ? input.language : undefined
+              languageOpt,
+              resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined
             )
           );
         } catch (error) {
@@ -640,28 +671,76 @@ export async function runAccurateChunkedForcedCtc(
         }
 
         if (nativeResult.tokens.length > 0) {
-        const linkConfidence = deriveLinkConfidence(nativeResult.diagnostics);
-        const textSegmentId = `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`;
-        for (const token of nativeResult.tokens) {
-          const localStartSample = Math.max(
-            0,
-            Math.trunc((token.startMs / 1000) * anchor.sampleRate)
-          );
-          const localEndSample = Math.max(
-            localStartSample,
-            Math.trunc((token.endMs / 1000) * anchor.sampleRate)
-          );
-          const startSample = Math.min(
-            anchor.endSample,
-            anchor.startSample + localStartSample
-          );
-          const endSample = Math.min(
-            anchor.endSample,
-            Math.max(startSample, anchor.startSample + localEndSample)
-          );
-          const durationMs =
+          const linkConfidence = deriveLinkConfidence(nativeResult.diagnostics);
+          const textSegmentId = `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`;
+          for (const token of nativeResult.tokens) {
+            const localStartSample = Math.max(
+              0,
+              Math.trunc((token.startMs / 1000) * anchor.sampleRate)
+            );
+            const localEndSample = Math.max(
+              localStartSample,
+              Math.trunc((token.endMs / 1000) * anchor.sampleRate)
+            );
+            const startSample = Math.min(
+              anchor.endSample,
+              anchor.startSample + localStartSample
+            );
+            const endSample = Math.min(
+              anchor.endSample,
+              Math.max(startSample, anchor.startSample + localEndSample)
+            );
+            const durationMs =
+              anchor.sampleRate > 0
+                ? ((endSample - startSample) / anchor.sampleRate) * 1000
+                : 0;
+
+            const appended = await appendLiveSegment(
+              outputLiveSegmentBuffer.bufferId,
+              {
+                kind: 'alignment',
+                sourceAudioBufferId: audioInBufferId,
+                startSample,
+                endSample,
+                sampleRate: anchor.sampleRate,
+                durationMs,
+                payload: {
+                  text: token.text,
+                  timingMode: 'accurate',
+                  granularity,
+                },
+              }
+            );
+            await addSegmentLink(linkMap, {
+              textSegmentId,
+              speechSegmentId: appended.segmentId,
+              linkType: 'alignment',
+              ...(typeof linkConfidence === 'number'
+                ? { confidence: linkConfidence }
+                : {}),
+              meta: {
+                strategy: 'chunked_forced_ctc',
+                consumedWindow: {
+                  startUnitIndex: consumedWindow.startUnitIndex,
+                  endUnitIndex: consumedWindow.endUnitIndex,
+                  unitCount: consumedWindow.unitCount,
+                },
+              },
+            }).catch((error) => {
+              throw createChunkedForcedCtcError(
+                'ALIGNMENT_LINKER_FAILED',
+                'chunkedForcedCtc failed to materialize alignment links.',
+                error
+              );
+            });
+            segmentsWritten += 1;
+          }
+        } else {
+          const fallbackStart = anchor.startSample;
+          const fallbackEnd = anchor.endSample;
+          const fallbackDurationMs =
             anchor.sampleRate > 0
-              ? ((endSample - startSample) / anchor.sampleRate) * 1000
+              ? ((fallbackEnd - fallbackStart) / anchor.sampleRate) * 1000
               : 0;
 
           const appended = await appendLiveSegment(
@@ -669,26 +748,27 @@ export async function runAccurateChunkedForcedCtc(
             {
               kind: 'alignment',
               sourceAudioBufferId: audioInBufferId,
-              startSample,
-              endSample,
+              startSample: fallbackStart,
+              endSample: fallbackEnd,
               sampleRate: anchor.sampleRate,
-              durationMs,
+              durationMs: fallbackDurationMs,
               payload: {
-                text: token.text,
+                text:
+                  consumedWindow.text.length > 0
+                    ? consumedWindow.text
+                    : '[alignment]',
                 timingMode: 'accurate',
                 granularity,
               },
             }
           );
           await addSegmentLink(linkMap, {
-            textSegmentId,
+            textSegmentId: `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`,
             speechSegmentId: appended.segmentId,
             linkType: 'alignment',
-            ...(typeof linkConfidence === 'number'
-              ? { confidence: linkConfidence }
-              : {}),
             meta: {
               strategy: 'chunked_forced_ctc',
+              fallback: true,
               consumedWindow: {
                 startUnitIndex: consumedWindow.startUnitIndex,
                 endUnitIndex: consumedWindow.endUnitIndex,
@@ -698,61 +778,12 @@ export async function runAccurateChunkedForcedCtc(
           }).catch((error) => {
             throw createChunkedForcedCtcError(
               'ALIGNMENT_LINKER_FAILED',
-              'chunkedForcedCtc failed to materialize alignment links.',
+              'chunkedForcedCtc failed to materialize fallback alignment links.',
               error
             );
           });
           segmentsWritten += 1;
         }
-      } else {
-        const fallbackStart = anchor.startSample;
-        const fallbackEnd = anchor.endSample;
-        const fallbackDurationMs =
-          anchor.sampleRate > 0
-            ? ((fallbackEnd - fallbackStart) / anchor.sampleRate) * 1000
-            : 0;
-
-        const appended = await appendLiveSegment(
-          outputLiveSegmentBuffer.bufferId,
-          {
-            kind: 'alignment',
-            sourceAudioBufferId: audioInBufferId,
-            startSample: fallbackStart,
-            endSample: fallbackEnd,
-            sampleRate: anchor.sampleRate,
-            durationMs: fallbackDurationMs,
-            payload: {
-              text:
-                consumedWindow.text.length > 0
-                  ? consumedWindow.text
-                  : '[alignment]',
-              timingMode: 'accurate',
-              granularity,
-            },
-          }
-        );
-        await addSegmentLink(linkMap, {
-          textSegmentId: `ref_${consumedWindow.startUnitIndex}_${consumedWindow.endUnitIndex}`,
-          speechSegmentId: appended.segmentId,
-          linkType: 'alignment',
-          meta: {
-            strategy: 'chunked_forced_ctc',
-            fallback: true,
-            consumedWindow: {
-              startUnitIndex: consumedWindow.startUnitIndex,
-              endUnitIndex: consumedWindow.endUnitIndex,
-              unitCount: consumedWindow.unitCount,
-            },
-          },
-        }).catch((error) => {
-          throw createChunkedForcedCtcError(
-            'ALIGNMENT_LINKER_FAILED',
-            'chunkedForcedCtc failed to materialize fallback alignment links.',
-            error
-          );
-        });
-        segmentsWritten += 1;
-      }
 
         anchorHandled = true;
       }

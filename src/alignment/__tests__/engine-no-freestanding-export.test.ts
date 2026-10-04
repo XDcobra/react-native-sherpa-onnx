@@ -35,8 +35,14 @@ describe('alignment public exports', () => {
       'assertAlignmentCustomConfig',
       'createAlignment',
       'detectAlignmentModel',
+      'getRomanizer',
+      'hasAlignableAlignmentLetters',
+      'identityRomanizer',
+      'latinDiacriticRomanizer',
+      'prepareAlignmentTranscript',
       'resolveAlignmentCustomConfigPaths',
       'resolveAlignmentOnnxPath',
+      'resolveAlignmentPackProfile',
     ]);
   });
 });

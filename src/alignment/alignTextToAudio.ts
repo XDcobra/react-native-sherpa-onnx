@@ -74,11 +74,14 @@ async function buildNativeOptions(
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const onnxPath = await resolveAlignmentOnnxPath(
+    const resolved = await resolveAlignmentOnnxPath(
       accurateOptionsToModelConfig(options)
     );
     const base: Record<string, unknown> = {
-      modelPath: onnxPath,
+      modelPath: resolved.modelPath,
+      ...(resolved.vocabPath.length > 0
+        ? { vocabPath: resolved.vocabPath }
+        : {}),
       ...(language.length > 0 ? { language } : {}),
     };
     if (options.segmentation?.mode !== 'off' && options.segmentation != null) {

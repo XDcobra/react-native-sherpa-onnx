@@ -22,8 +22,14 @@ describe('alignment public surface snapshot', () => {
         "assertAlignmentCustomConfig",
         "createAlignment",
         "detectAlignmentModel",
+        "getRomanizer",
+        "hasAlignableAlignmentLetters",
+        "identityRomanizer",
+        "latinDiacriticRomanizer",
+        "prepareAlignmentTranscript",
         "resolveAlignmentCustomConfigPaths",
         "resolveAlignmentOnnxPath",
+        "resolveAlignmentPackProfile",
       ]
     `);
   });
