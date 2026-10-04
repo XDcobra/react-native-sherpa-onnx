@@ -80,7 +80,8 @@ attribution.
 
 1. Add a row to `scripts/alignment-models/sources.csv` (optional `vocab_url`).
 2. Publish via the alignment release workflow.
-3. Optional: name heuristic in `modelProfiles.ts` for pack id / language hints
+3. Optional: name heuristic in `modelProfiles.ts` for pack id / romanizer family
    (romanizer follows vocab automatically when `vocab.json` is present).
-4. Extend language catalog pack hints if needed; regenerate with
-   `yarn generate:model-language-catalog`.
+4. Set the `languages` column on the `sources.csv` row (ISO codes). Regenerate
+   with `yarn generate:model-language-catalog` — pack language hints are
+   **pack-first** from that CSV (never “contains xlsr ⇒ multilingual list”).
