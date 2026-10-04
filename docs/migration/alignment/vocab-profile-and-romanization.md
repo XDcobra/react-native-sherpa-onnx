@@ -29,18 +29,58 @@ APIs accept optional `vocabPath`.
 ## TS: pack profile + romanization
 
 - [`src/alignment/modelProfiles.ts`](../../../src/alignment/modelProfiles.ts) —
-  pack id heuristics → `needsRomanization`, romanizer id, language hints.
-- [`src/alignment/romanization/`](../../../src/alignment/romanization/) —
-  `Romanizer` interface with `identity` and `latin_diacritic` backends.
-  Non-Latin `uroman` is reserved for a later backend behind the same API.
+  pack id / language hints still come from **name heuristics** (logging / UX).
+- [`src/alignment/romanization/inferFromVocab.ts`](../../../src/alignment/romanization/inferFromVocab.ts) —
+  **`needsRomanization` / `romanizerId` are chosen from `vocab.json` charset**
+  when a vocab path is available (`resolveAlignmentOnnxPath` reads the file).
+- Name-based romanizer is only the **fallback** when vocab is missing or unreadable.
+- No extra sidecar is required for third-party packs that already ship `vocab.json`.
 
-MMS FA is the only shipping pack that sets `needsRomanization: true` today
-(ASCII-romanized Latin vocab). VoxPopuli keeps European diacritics.
+### Vocab charset heuristic
+
+Letter tokens (skip `<…>`, `[…]`, `|`, digits/punct):
+
+| Vocab letters | Romanizer |
+| --- | --- |
+| Only ASCII `a–z` / `A–Z` | `uroman` (MMS-style ASCII vocab) |
+| Any diacritic / non-Latin letter | `identity` (VoxPopuli, XLSR, …) |
+| No letter tokens / unreadable vocab | keep name-heuristic profile |
+
+Renaming a model folder does not matter as long as `vocab.json` sits beside
+`model.onnx` (detect still returns `paths.vocab`).
+
+| Typical pack | Effective `romanizerId` | Notes |
+| --- | --- | --- |
+| MMS FA | `uroman` | ASCII-romanized vocab |
+| VoxPopuli | `identity` | Diacritics in vocab |
+| XLSR-56 | `identity` | Native-script chars in vocab |
+| EN 960h (no vocab file) | name fallback → often `identity` | Baked native defaults |
+
+### uroman backend
+
+[`src/alignment/romanization/uroman/`](../../../src/alignment/romanization/uroman/)
+implements a greedy longest-match engine over rule tables exported from
+[isi-nlp/uroman](https://github.com/isi-nlp/uroman), then applies torchaudio-style
+MMS ASCII normalize (`a-z`, `'`, space). Optional `language` (ISO 639-1/639-3)
+improves language-sensitive mappings (e.g. Russian word-initial Е → Ye).
+
+Attribution / NOTICE: [`src/alignment/romanization/uroman/NOTICE.md`](../../../src/alignment/romanization/uroman/NOTICE.md).
+
+Regenerate tables and goldens (requires `pip install uroman`):
+
+```bash
+python3 scripts/alignment-romanization/export-uroman-tables.py --goldens
+```
+
+**License note:** the MMS FA **model** remains CC-BY-NC-4.0. The uroman rule
+data itself is redistributable under the upstream uroman permission notice with
+attribution.
 
 ## Adding a future char-CTC pack
 
 1. Add a row to `scripts/alignment-models/sources.csv` (optional `vocab_url`).
 2. Publish via the alignment release workflow.
-3. Add one entry / heuristic in `modelProfiles.ts` (romanization + hints).
+3. Optional: name heuristic in `modelProfiles.ts` for pack id / language hints
+   (romanizer follows vocab automatically when `vocab.json` is present).
 4. Extend language catalog pack hints if needed; regenerate with
    `yarn generate:model-language-catalog`.
