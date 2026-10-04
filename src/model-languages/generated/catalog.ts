@@ -1281,7 +1281,247 @@ export function iso6391HintsForTtsModelType(
 export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ["en"] as const;
 export const VOXPOPULI_ALIGNMENT_ISO6391_HINTS = ["de","es","fr","it"] as const;
 export const MMS_ALIGNMENT_ISO6391_HINTS = [] as const;
-export const XLSR_ALIGNMENT_ISO6391_HINTS = [] as const;
+export const XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS = ["ar","as","br","ca","cnh","cs","cv","cy","de","dv","el","en","eo","es","et","eu","fa","fi","fr","hi","hsb","hu","ia","id","ja","ka","ky","lg","lt","ly","mn","mt","nl","or","pl","pt","ro","ru","sah","sl","ta","th","tr","tt","uk","vi"] as const;
+export const XLSR_ALIGNMENT_ISO6391_HINTS = XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS;
+export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
+  "mms-300m-1130-forced-aligner-int8": [],
+  "mms-300m-1130-forced-aligner-q4f16": [],
+  "wav2vec2-base-960h": [
+    "en"
+  ],
+  "wav2vec2-base-960h-fp16": [
+    "en"
+  ],
+  "wav2vec2-base-960h-int8": [
+    "en"
+  ],
+  "wav2vec2-base-960h-q4f16": [
+    "en"
+  ],
+  "wav2vec2-voxpopuli-de-base": [
+    "de"
+  ],
+  "wav2vec2-voxpopuli-es-base": [
+    "es"
+  ],
+  "wav2vec2-voxpopuli-fr-base": [
+    "fr"
+  ],
+  "wav2vec2-voxpopuli-it-base": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn-int8": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn-q4f16": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-korean-fp16": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-korean-int8": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-vietnamese-fp16": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-53-vietnamese-int8": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56-fp16": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56-q4f16": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-turkish-int8": [
+    "tr"
+  ],
+  "wav2vec2-xlsr-turkish-q4f16": [
+    "tr"
+  ]
+} as const;
+export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, readonly string[]>> = {
+  "mms-300m-1130-forced-aligner": [],
+  "wav2vec2-base-960h": [
+    "en"
+  ],
+  "wav2vec2-voxpopuli-de": [
+    "de"
+  ],
+  "wav2vec2-voxpopuli-es": [
+    "es"
+  ],
+  "wav2vec2-voxpopuli-fr": [
+    "fr"
+  ],
+  "wav2vec2-voxpopuli-it": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-korean": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-vietnamese": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-turkish": [
+    "tr"
+  ]
+} as const;
+
+const ALIGNMENT_PACK_QUANT_SUFFIX_RE =
+  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/;
+
+/** Strip quant / trailing -base for pack language lookup. */
+export function alignmentPackLanguageStem(modelKey: string): string {
+  let stem = (modelKey ?? '').trim().toLowerCase();
+  stem = stem.replace(ALIGNMENT_PACK_QUANT_SUFFIX_RE, '');
+  if (stem.endsWith('-base')) {
+    stem = stem.slice(0, -'-base'.length);
+  }
+  return stem;
+}
 
 export function iso6391HintsForAlignmentModelType(
   modelType: string | undefined,
@@ -1289,20 +1529,38 @@ export function iso6391HintsForAlignmentModelType(
 ): string[] | undefined {
   const type = (modelType ?? '').trim().toLowerCase();
   const key = (modelKey ?? '').trim().toLowerCase();
-  if (key.includes('voxpopuli')) {
-    return [...VOXPOPULI_ALIGNMENT_ISO6391_HINTS];
+
+  // 1–2) Pack-first from sources.csv (exact id, then stem).
+  if (key) {
+    const byId = ALIGNMENT_PACK_ISO6391_HINTS_BY_ID[key];
+    if (byId) {
+      return [...byId];
+    }
+    const stem = alignmentPackLanguageStem(key);
+    const byStem = ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM[stem];
+    if (byStem) {
+      return [...byStem];
+    }
   }
+
+  // 3) Family fallbacks only for explicit multilingual markers.
+  // Never map bare "xlsr" → multilingual list (mono fine-tunes also contain xlsr).
   if (key.includes('mms') && (key.includes('forced-aligner') || key.includes('1130'))) {
     return [...MMS_ALIGNMENT_ISO6391_HINTS];
   }
-  if (key.includes('xlsr') || key.includes('multilingual-56')) {
-    return [...XLSR_ALIGNMENT_ISO6391_HINTS];
+  if (key.includes('multilingual-56')) {
+    return [...XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS];
   }
-  if (type === 'wav2vec2') {
+  if (key.includes('voxpopuli')) {
+    return [...VOXPOPULI_ALIGNMENT_ISO6391_HINTS];
+  }
+
+  // 4) Default EN only for type-only queries or known EN base packs.
+  // Do not treat every "wav2vec" substring as English (mono XLSR fine-tunes).
+  if (!key && (type === 'wav2vec2' || type === 'auto')) {
     return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];
   }
-  // Name-only catalog detect often reports modelType unknown/auto for alignment packs.
-  if (key.includes('wav2vec') || key.includes('960h') || type === 'auto') {
+  if (key.includes('960h') || key.includes('wav2vec2-base')) {
     return [...WAV2VEC2_ALIGNMENT_ISO6391_HINTS];
   }
   return undefined;

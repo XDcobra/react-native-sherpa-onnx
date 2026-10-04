@@ -49,6 +49,23 @@ describe('alignment modelProfiles', () => {
     expect(prepareAlignmentTranscript('你好', xlsr)).toBe('你好');
   });
 
+  it('overrides languageHints from sources.csv pack map', () => {
+    expect(
+      resolveAlignmentPackProfile('wav2vec2-voxpopuli-de-base').languageHints
+    ).toEqual(['de']);
+    expect(
+      resolveAlignmentPackProfile('wav2vec2-xlsr-53-korean-int8').languageHints
+    ).toEqual(['ko']);
+    expect(
+      resolveAlignmentPackProfile('wav2vec2-xlsr-53-vietnamese-int8')
+        .languageHints
+    ).toEqual(['vi']);
+    expect(
+      resolveAlignmentPackProfile('mms-300m-1130-forced-aligner-int8')
+        .languageHints
+    ).toEqual([]);
+  });
+
   it('vocab inference overrides name-based romanizer on a renamed pack', () => {
     const renamed = resolveAlignmentPackProfile('my-custom-aligner');
     expect(renamed.id).toBe('char_ctc_generic');

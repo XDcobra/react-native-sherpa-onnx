@@ -1,3 +1,4 @@
+import { iso6391HintsForAlignmentModelType } from '../model-languages/generated/catalog';
 import type { RomanizerId } from './romanization';
 import {
   getRomanizer,
@@ -45,6 +46,7 @@ const PROFILES: Record<AlignmentPackProfileId, AlignmentModelProfile> = {
     // Keep European diacritics — vocab has ä/ö/ü/ß etc.
     needsRomanization: false,
     romanizerId: 'identity',
+    // Per-pack languages come from sources.csv via catalog override.
     languageHints: ['de', 'es', 'fr', 'it'],
   },
   mms_forced_aligner: {
@@ -53,6 +55,7 @@ const PROFILES: Record<AlignmentPackProfileId, AlignmentModelProfile> = {
     needsRomanization: true,
     // ASCII-romanized vocab: uroman + MMS normalize (covers non-Latin scripts).
     romanizerId: 'uroman',
+    // Empty = multilingual / not enumerated for UI chips (see sources.csv).
     languageHints: [],
   },
   xlsr_56: {
@@ -61,6 +64,7 @@ const PROFILES: Record<AlignmentPackProfileId, AlignmentModelProfile> = {
     // Native-script vocab — do not uroman (would destroy alignable chars).
     needsRomanization: false,
     romanizerId: 'identity',
+    // Family default unused for mono packs; catalog override fills pack languages.
     languageHints: [],
   },
   char_ctc_generic: {
@@ -72,6 +76,17 @@ const PROFILES: Record<AlignmentPackProfileId, AlignmentModelProfile> = {
   },
 };
 
+function withCatalogLanguageHints(
+  profile: AlignmentModelProfile,
+  packHint: string
+): AlignmentModelProfile {
+  const languageHints = iso6391HintsForAlignmentModelType('wav2vec2', packHint);
+  if (languageHints == null) {
+    return profile;
+  }
+  return { ...profile, languageHints };
+}
+
 /**
  * Resolve a pack profile from a model directory basename, ONNX path, or asset id.
  */
@@ -82,22 +97,19 @@ export function resolveAlignmentPackProfile(
   if (!key) {
     return PROFILES.char_ctc_generic;
   }
+  let profile: AlignmentModelProfile = PROFILES.char_ctc_generic;
   if (key.includes('mms') && key.includes('forced-aligner')) {
-    return PROFILES.mms_forced_aligner;
+    profile = PROFILES.mms_forced_aligner;
+  } else if (key.includes('mms-300m-1130') || key.includes('mms_300m_1130')) {
+    profile = PROFILES.mms_forced_aligner;
+  } else if (key.includes('voxpopuli')) {
+    profile = PROFILES.voxpopuli;
+  } else if (key.includes('xlsr') || key.includes('multilingual-56')) {
+    profile = PROFILES.xlsr_56;
+  } else if (key.includes('960h') || key.includes('wav2vec2-base')) {
+    profile = PROFILES.wav2vec2_base_960h;
   }
-  if (key.includes('mms-300m-1130') || key.includes('mms_300m_1130')) {
-    return PROFILES.mms_forced_aligner;
-  }
-  if (key.includes('voxpopuli')) {
-    return PROFILES.voxpopuli;
-  }
-  if (key.includes('xlsr') || key.includes('multilingual-56')) {
-    return PROFILES.xlsr_56;
-  }
-  if (key.includes('960h') || key.includes('wav2vec2-base')) {
-    return PROFILES.wav2vec2_base_960h;
-  }
-  return PROFILES.char_ctc_generic;
+  return withCatalogLanguageHints(profile, key);
 }
 
 export function romanizerForProfile(profile: AlignmentModelProfile): Romanizer {
@@ -106,7 +118,7 @@ export function romanizerForProfile(profile: AlignmentModelProfile): Romanizer {
 
 /**
  * Override only romanizer fields from vocab charset inference.
- * Pack `id` / `languageHints` stay name-based.
+ * Pack `id` stays name-based; `languageHints` come from sources.csv via catalog.
  */
 export function applyVocabRomanizerToProfile(
   profile: AlignmentModelProfile,

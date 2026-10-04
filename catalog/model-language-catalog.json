@@ -1297,16 +1297,15 @@
       "hints": [
         "en"
       ],
-      "packHints": {
-        "voxpopuli": [
-          "de",
-          "es",
-          "fr",
-          "it"
-        ],
-        "mms": [],
-        "xlsr": []
-      }
+    "packHints": {
+      "voxpopuliFamilyFallback": [
+        "de",
+        "es",
+        "fr",
+        "it"
+      ],
+      "mmsFamilyFallback": []
+    }
     }
   }
 }
