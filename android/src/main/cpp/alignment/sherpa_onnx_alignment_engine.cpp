@@ -8,6 +8,7 @@
 #include <cwctype>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -1025,13 +1026,27 @@ AlignmentResult AlignEstimated(
   return out;
 }
 
+static std::string LoadVocabJsonIfPresent(const std::string& vocab_path) {
+  if (vocab_path.empty()) {
+    return {};
+  }
+  std::ifstream ifs(vocab_path, std::ios::in | std::ios::binary);
+  if (!ifs.is_open()) {
+    throw std::runtime_error("Failed to open vocabPath: " + vocab_path);
+  }
+  std::ostringstream oss;
+  oss << ifs.rdbuf();
+  return oss.str();
+}
+
 AlignmentResult AlignAccurateFromPcm(
     const std::string& model_path,
     const std::string& text,
     const float* samples,
     size_t sample_count,
     int32_t sample_rate,
-    const std::string& granularity) {
+    const std::string& granularity,
+    const std::string& vocab_path) {
   AssertGranularity("aligned", granularity);
 
   if (model_path.empty()) {
@@ -1047,10 +1062,11 @@ AlignmentResult AlignAccurateFromPcm(
     throw std::runtime_error("sampleRate must be positive");
   }
 
+  const std::string vocab_json = LoadVocabJsonIfPresent(vocab_path);
   const auto ctc = sherpa_onnx::ctc_alignment::RunCtcAlignmentFromFloatPcm(
       model_path,
       text,
-      "",
+      vocab_json,
       samples,
       sample_count,
       sample_rate);
@@ -1076,7 +1092,8 @@ AlignmentResult AlignAccurateFromFile(
     const std::string& model_path,
     const std::string& text,
     const std::string& audio_path,
-    const std::string& granularity) {
+    const std::string& granularity,
+    const std::string& vocab_path) {
   if (audio_path.empty()) {
     throw std::runtime_error("audioPath is required");
   }
@@ -1093,7 +1110,8 @@ AlignmentResult AlignAccurateFromFile(
       samples.data(),
       samples.size(),
       sample_rate,
-      granularity);
+      granularity,
+      vocab_path);
 }
 
 ForcedCtcResult AlignAccurateForcedCtcFromPcm(
@@ -1103,7 +1121,8 @@ ForcedCtcResult AlignAccurateForcedCtcFromPcm(
     size_t sample_count,
     int32_t sample_rate,
     const std::string& granularity,
-    const std::string& /*language*/) {
+    const std::string& /*language*/,
+    const std::string& vocab_path) {
   if (window_text.empty()) {
     throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: windowText is required");
   }
@@ -1114,7 +1133,8 @@ ForcedCtcResult AlignAccurateForcedCtcFromPcm(
       samples,
       sample_count,
       sample_rate,
-      granularity);
+      granularity,
+      vocab_path);
 
   ForcedCtcResult out;
   out.diagnostics.frames_processed =

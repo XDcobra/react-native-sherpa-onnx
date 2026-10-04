@@ -298,4 +298,106 @@ TEST(CtcAlignmentCore, PipelineWithTinyLinearModel) {
   }
 }
 
+TEST(VocabProfile, MmsPrefersBlankZeroAndNoDelimiter) {
+  using namespace sherpa_onnx::ctc_alignment;
+  const std::string vocab_json =
+      ReadWholeFile(RepoRelativeFixture("alignment/vocab_mms_fa.json"));
+  const AlignmentVocabProfile profile = ResolveVocabProfile("", vocab_json);
+  EXPECT_EQ(profile.blankId, 0);
+  EXPECT_EQ(profile.unkId, 3);
+  EXPECT_EQ(profile.wordDelimiterId, -1);
+  EXPECT_EQ(profile.caseMode, CaseMode::kLower);
+
+  const BuiltTokens built = BuildTokens("hello world", profile);
+  ASSERT_FALSE(built.ids.empty());
+  // No word-delimiter emissions when vocab has no '|'.
+  for (int32_t wi : built.wordIndex) {
+    EXPECT_GE(wi, 0);
+  }
+  // Two words → word indices 0 then 1.
+  EXPECT_EQ(built.wordIndex.front(), 0);
+  EXPECT_EQ(built.wordIndex.back(), 1);
+  int32_t maxWord = 0;
+  for (int32_t wi : built.wordIndex) {
+    maxWord = std::max(maxWord, wi);
+  }
+  EXPECT_EQ(maxWord, 1);
+}
+
+TEST(VocabProfile, VoxPopuliKeepsUmlautsAndDelimiter) {
+  using namespace sherpa_onnx::ctc_alignment;
+  const std::string vocab_json =
+      ReadWholeFile(RepoRelativeFixture("alignment/vocab_voxpopuli_de.json"));
+  const AlignmentVocabProfile profile = ResolveVocabProfile("", vocab_json);
+  EXPECT_EQ(profile.blankId, 0);
+  EXPECT_EQ(profile.wordDelimiterId, 4);
+  EXPECT_EQ(profile.caseMode, CaseMode::kLower);
+
+  const BuiltTokens built = BuildTokens("für groß", profile);
+  ASSERT_GE(built.ids.size(), 5u);
+  // Expect a delimiter emission between the two words.
+  bool saw_delim = false;
+  for (int32_t wi : built.wordIndex) {
+    if (wi < 0) {
+      saw_delim = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_delim);
+  // ü and ß must be present as alignable chars (not skipped).
+  bool saw_u_umlaut = false;
+  bool saw_eszett = false;
+  for (const auto& d : built.display) {
+    if (d == "ü") {
+      saw_u_umlaut = true;
+    }
+    if (d == "ß") {
+      saw_eszett = true;
+    }
+  }
+  EXPECT_TRUE(saw_u_umlaut);
+  EXPECT_TRUE(saw_eszett);
+}
+
+TEST(VocabProfile, XlsrUsesBracketPadAsBlank) {
+  using namespace sherpa_onnx::ctc_alignment;
+  const std::string vocab_json =
+      ReadWholeFile(RepoRelativeFixture("alignment/vocab_xlsr_pad.json"));
+  const AlignmentVocabProfile profile = ResolveVocabProfile("", vocab_json);
+  EXPECT_EQ(profile.blankId, 50);
+  EXPECT_EQ(profile.unkId, 49);
+  EXPECT_EQ(profile.wordDelimiterId, 48);
+  // Both cases present → kNone; lookup still finds lowercase letters.
+  EXPECT_EQ(profile.caseMode, CaseMode::kNone);
+
+  const BuiltTokens built = BuildTokens("Hi there", profile);
+  ASSERT_FALSE(built.ids.empty());
+  bool saw_delim = false;
+  for (int32_t wi : built.wordIndex) {
+    if (wi < 0) {
+      saw_delim = true;
+    }
+  }
+  EXPECT_TRUE(saw_delim);
+}
+
+TEST(VocabProfile, DefaultBakedEnglishUppercase) {
+  using namespace sherpa_onnx::ctc_alignment;
+  const AlignmentVocabProfile profile = ResolveVocabProfile("", "");
+  EXPECT_EQ(profile.blankId, 0);
+  EXPECT_EQ(profile.wordDelimiterId, 4);
+  EXPECT_EQ(profile.caseMode, CaseMode::kUpper);
+
+  const BuiltTokens built = BuildTokens("hi there", profile);
+  ASSERT_FALSE(built.ids.empty());
+  for (const auto& d : built.display) {
+    if (d == "|") {
+      continue;
+    }
+    for (char c : d) {
+      EXPECT_TRUE(c < 'a' || c > 'z') << d;
+    }
+  }
+}
+
 }  // namespace
