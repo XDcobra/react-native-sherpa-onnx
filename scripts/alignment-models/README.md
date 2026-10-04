@@ -21,17 +21,19 @@ Columns:
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE`; also written to `license_file` in `alignment-models-license-status.csv` |
 | `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) for app license screens |
 | `commercial_use` | yes | `yes` or `no`, same convention as other `*-models-license-status.csv` files |
-| `tokens_url` | no | Optional sherpa-style `tokens.txt` URL (Omnilingual, etc.) |
-| `vocab_url` | no | Optional HF `vocab.json` URL (MMS / XLSR char CTC, etc.) |
+| `tokens_url` | no | Optional sherpa-style `tokens.txt` URL (unused by current char-CTC packs) |
+| `vocab_url` | no | Optional HF `vocab.json` URL (MMS / XLSR / VoxPopuli char CTC, etc.) |
 
 Example rows:
 
 ```text
 wav2vec2-base-960h-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/apache-2.0.md;apache-2.0;yes;;
-omnilingual-asr-ctc-300m-int8;https://huggingface.co/…/model.int8.onnx;https://huggingface.co/…/LICENSE;apache-2.0;yes;https://huggingface.co/…/tokens.txt;
+mms-300m-1130-forced-aligner-int8;https://huggingface.co/…/model_int8.onnx;https://huggingface.co/…/legalcode.txt;cc-by-nc-4.0;no;;https://huggingface.co/…/vocab.json
 ```
 
-The live catalog is `sources.csv` (which models get packed/uploaded). Models that need a different runtime (e.g. mel/GRU `tiny-aligner`) stay out of that CSV until packaging support exists.
+The live catalog is `sources.csv` (which models get packed/uploaded). Only char-CTC wav2vec2-family packs belong here. Other runtimes (e.g. mel/GRU `tiny-aligner`) stay out of this release. Omnilingual ASR-CTC is an STT model (sherpa-onnx `omnilingual`), not an alignment pack.
+
+Runtime design (vocab profile + romanization): [`docs/migration/alignment/vocab-profile-and-romanization.md`](../../docs/migration/alignment/vocab-profile-and-romanization.md).
 
 ### `checksum.txt`
 
