@@ -1313,17 +1313,41 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-voxpopuli-it-base": [
     "it"
   ],
+  "wav2vec2-voxrex-swedish-fp16": [
+    "sv"
+  ],
+  "wav2vec2-voxrex-swedish-int8": [
+    "sv"
+  ],
   "wav2vec2-xlsr-53-chinese-zh-cn-int8": [
     "zh"
   ],
   "wav2vec2-xlsr-53-chinese-zh-cn-q4f16": [
     "zh"
   ],
+  "wav2vec2-xlsr-53-dutch-fp16": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-dutch-int8": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-japanese-fp16": [
+    "ja"
+  ],
+  "wav2vec2-xlsr-53-japanese-int8": [
+    "ja"
+  ],
   "wav2vec2-xlsr-53-korean-fp16": [
     "ko"
   ],
   "wav2vec2-xlsr-53-korean-int8": [
     "ko"
+  ],
+  "wav2vec2-xlsr-53-polish-fp16": [
+    "pl"
+  ],
+  "wav2vec2-xlsr-53-polish-int8": [
+    "pl"
   ],
   "wav2vec2-xlsr-53-portuguese-q4f16": [
     "pt"
@@ -1463,11 +1487,23 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-voxpopuli-it": [
     "it"
   ],
+  "wav2vec2-voxrex-swedish": [
+    "sv"
+  ],
   "wav2vec2-xlsr-53-chinese-zh-cn": [
     "zh"
   ],
+  "wav2vec2-xlsr-53-dutch": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-japanese": [
+    "ja"
+  ],
   "wav2vec2-xlsr-53-korean": [
     "ko"
+  ],
+  "wav2vec2-xlsr-53-polish": [
+    "pl"
   ],
   "wav2vec2-xlsr-53-portuguese": [
     "pt"
