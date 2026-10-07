@@ -1298,6 +1298,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-base-960h-q4f16": [
     "en"
   ],
+  "wav2vec2-base-arabic-q4f16": [
+    "ar"
+  ],
   "wav2vec2-voxpopuli-de-base": [
     "de"
   ],
@@ -1321,6 +1324,15 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   ],
   "wav2vec2-xlsr-53-korean-int8": [
     "ko"
+  ],
+  "wav2vec2-xlsr-53-portuguese-q4f16": [
+    "pt"
+  ],
+  "wav2vec2-xlsr-53-russian-int8": [
+    "ru"
+  ],
+  "wav2vec2-xlsr-53-russian-q4f16": [
+    "ru"
   ],
   "wav2vec2-xlsr-53-vietnamese-fp16": [
     "vi"
@@ -1436,6 +1448,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-base-960h": [
     "en"
   ],
+  "wav2vec2-base-arabic": [
+    "ar"
+  ],
   "wav2vec2-voxpopuli-de": [
     "de"
   ],
@@ -1453,6 +1468,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   ],
   "wav2vec2-xlsr-53-korean": [
     "ko"
+  ],
+  "wav2vec2-xlsr-53-portuguese": [
+    "pt"
+  ],
+  "wav2vec2-xlsr-53-russian": [
+    "ru"
   ],
   "wav2vec2-xlsr-53-vietnamese": [
     "vi"
