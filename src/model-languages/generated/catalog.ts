@@ -1331,6 +1331,24 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-dutch-int8": [
     "nl"
   ],
+  "wav2vec2-xlsr-53-french-fp16": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-french-int8": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-german-fp16": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-german-int8": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-italian-fp16": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-italian-int8": [
+    "it"
+  ],
   "wav2vec2-xlsr-53-japanese-fp16": [
     "ja"
   ],
@@ -1357,6 +1375,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   ],
   "wav2vec2-xlsr-53-russian-q4f16": [
     "ru"
+  ],
+  "wav2vec2-xlsr-53-spanish-fp16": [
+    "es"
+  ],
+  "wav2vec2-xlsr-53-spanish-int8": [
+    "es"
   ],
   "wav2vec2-xlsr-53-vietnamese-fp16": [
     "vi"
@@ -1496,6 +1520,15 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-xlsr-53-dutch": [
     "nl"
   ],
+  "wav2vec2-xlsr-53-french": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-german": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-italian": [
+    "it"
+  ],
   "wav2vec2-xlsr-53-japanese": [
     "ja"
   ],
@@ -1510,6 +1543,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   ],
   "wav2vec2-xlsr-53-russian": [
     "ru"
+  ],
+  "wav2vec2-xlsr-53-spanish": [
+    "es"
   ],
   "wav2vec2-xlsr-53-vietnamese": [
     "vi"
