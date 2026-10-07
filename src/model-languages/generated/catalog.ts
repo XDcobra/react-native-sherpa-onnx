@@ -1331,6 +1331,18 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-dutch-int8": [
     "nl"
   ],
+  "wav2vec2-xlsr-53-estonian-fp16": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-estonian-int8": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-finnish-fp16": [
+    "fi"
+  ],
+  "wav2vec2-xlsr-53-finnish-int8": [
+    "fi"
+  ],
   "wav2vec2-xlsr-53-french-fp16": [
     "fr"
   ],
@@ -1342,6 +1354,18 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   ],
   "wav2vec2-xlsr-53-german-int8": [
     "de"
+  ],
+  "wav2vec2-xlsr-53-greek-fp16": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-greek-int8": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-hungarian-fp16": [
+    "hu"
+  ],
+  "wav2vec2-xlsr-53-hungarian-int8": [
+    "hu"
   ],
   "wav2vec2-xlsr-53-italian-fp16": [
     "it"
@@ -1361,6 +1385,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-korean-int8": [
     "ko"
   ],
+  "wav2vec2-xlsr-53-persian-fp16": [
+    "fa"
+  ],
+  "wav2vec2-xlsr-53-persian-int8": [
+    "fa"
+  ],
   "wav2vec2-xlsr-53-polish-fp16": [
     "pl"
   ],
@@ -1370,17 +1400,35 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-portuguese-q4f16": [
     "pt"
   ],
+  "wav2vec2-xlsr-53-romanian-fp16": [
+    "ro"
+  ],
+  "wav2vec2-xlsr-53-romanian-int8": [
+    "ro"
+  ],
   "wav2vec2-xlsr-53-russian-int8": [
     "ru"
   ],
   "wav2vec2-xlsr-53-russian-q4f16": [
     "ru"
   ],
+  "wav2vec2-xlsr-53-slovenian-fp16": [
+    "sl"
+  ],
+  "wav2vec2-xlsr-53-slovenian-int8": [
+    "sl"
+  ],
   "wav2vec2-xlsr-53-spanish-fp16": [
     "es"
   ],
   "wav2vec2-xlsr-53-spanish-int8": [
     "es"
+  ],
+  "wav2vec2-xlsr-53-ukrainian-fp16": [
+    "uk"
+  ],
+  "wav2vec2-xlsr-53-ukrainian-int8": [
+    "uk"
   ],
   "wav2vec2-xlsr-53-vietnamese-fp16": [
     "vi"
@@ -1520,11 +1568,23 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-xlsr-53-dutch": [
     "nl"
   ],
+  "wav2vec2-xlsr-53-estonian": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-finnish": [
+    "fi"
+  ],
   "wav2vec2-xlsr-53-french": [
     "fr"
   ],
   "wav2vec2-xlsr-53-german": [
     "de"
+  ],
+  "wav2vec2-xlsr-53-greek": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-hungarian": [
+    "hu"
   ],
   "wav2vec2-xlsr-53-italian": [
     "it"
@@ -1535,17 +1595,29 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-xlsr-53-korean": [
     "ko"
   ],
+  "wav2vec2-xlsr-53-persian": [
+    "fa"
+  ],
   "wav2vec2-xlsr-53-polish": [
     "pl"
   ],
   "wav2vec2-xlsr-53-portuguese": [
     "pt"
   ],
+  "wav2vec2-xlsr-53-romanian": [
+    "ro"
+  ],
   "wav2vec2-xlsr-53-russian": [
     "ru"
   ],
+  "wav2vec2-xlsr-53-slovenian": [
+    "sl"
+  ],
   "wav2vec2-xlsr-53-spanish": [
     "es"
+  ],
+  "wav2vec2-xlsr-53-ukrainian": [
+    "uk"
   ],
   "wav2vec2-xlsr-53-vietnamese": [
     "vi"

@@ -61,16 +61,25 @@ def download(url: str, dest: Path) -> None:
         dest.write_bytes(resp.read())
 
 
-def write_readme(
-    out_dir: Path,
+SDK_GITHUB_URL = "https://github.com/XDcobra/react-native-sherpa-onnx"
+VOICELAB_ANDROID_URL = (
+    "https://play.google.com/store/apps/details?id=com.xdcobra.voicelab"
+)
+VOICELAB_IOS_URL = (
+    "https://apps.apple.com/us/app/voice-lab-stt-tts-more/id6761100598"
+)
+VOICELAB_SITE_URL = "https://xdcobra.github.io/voice-lab-offline-tools/"
+
+
+def build_readme_markdown(
     *,
     model_id: str,
     base_model: str,
     language: str,
     license_spdx: str,
-) -> None:
-    # YAML front matter compatible with HF model cards.
-    body = f"""---
+) -> str:
+    """HF model-card markdown used for new exports and README refreshes."""
+    return f"""---
 language:
 - {language}
 license: {license_spdx}
@@ -84,13 +93,27 @@ tags:
 - onnx
 - forced-alignment
 - char-ctc
+- react-native
 pipeline_tag: automatic-speech-recognition
 ---
 
 # {model_id}
 
 ONNX export of [`{base_model}`](https://huggingface.co/{base_model}) for char-CTC
-forced alignment / ASR (wav2vec2 XLSR family).
+forced alignment / ASR (wav2vec2 family).
+
+These weights were prepared for the mobile SDK
+**[react-native-sherpa-onnx]({SDK_GITHUB_URL})** (offline speech tooling for
+React Native / Android / iOS), including forced-alignment model packs used by
+the app.
+
+## Try it live in VoiceLab
+
+Download and run this model on device in **VoiceLab** (built on the same SDK):
+
+- Android: [VoiceLab on Google Play]({VOICELAB_ANDROID_URL})
+- iOS: [VoiceLab on the App Store]({VOICELAB_IOS_URL})
+- Product page: [{VOICELAB_SITE_URL}]({VOICELAB_SITE_URL})
 
 ## Files
 
@@ -107,6 +130,8 @@ forced alignment / ASR (wav2vec2 XLSR family).
 
 - Base checkpoint: `{base_model}` ({license_spdx})
 - Export: `optimum-cli export onnx` + `onnxruntime` dynamic quantization
+  ([`export_hf_onnx_pack.py`]({SDK_GITHUB_URL}/blob/main/scripts/alignment-models/export_hf_onnx_pack.py)
+  in the SDK repo)
 - Intended use: offline forced alignment (CTC) in commercial apps when the
   base model license allows it
 
@@ -114,6 +139,22 @@ forced alignment / ASR (wav2vec2 XLSR family).
 
 16 kHz mono PCM.
 """
+
+
+def write_readme(
+    out_dir: Path,
+    *,
+    model_id: str,
+    base_model: str,
+    language: str,
+    license_spdx: str,
+) -> None:
+    body = build_readme_markdown(
+        model_id=model_id,
+        base_model=base_model,
+        language=language,
+        license_spdx=license_spdx,
+    )
     (out_dir / "README.md").write_text(body, encoding="utf-8")
 
 
