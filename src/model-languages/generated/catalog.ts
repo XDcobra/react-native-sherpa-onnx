@@ -1361,6 +1361,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-greek-int8": [
     "el"
   ],
+  "wav2vec2-xlsr-53-hebrew-fp16": [
+    "he"
+  ],
+  "wav2vec2-xlsr-53-hebrew-int8": [
+    "he"
+  ],
   "wav2vec2-xlsr-53-hungarian-fp16": [
     "hu"
   ],
@@ -1400,6 +1406,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   "wav2vec2-xlsr-53-portuguese-q4f16": [
     "pt"
   ],
+  "wav2vec2-xlsr-53-punjabi-fp16": [
+    "pa"
+  ],
+  "wav2vec2-xlsr-53-punjabi-int8": [
+    "pa"
+  ],
   "wav2vec2-xlsr-53-romanian-fp16": [
     "ro"
   ],
@@ -1423,6 +1435,12 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonl
   ],
   "wav2vec2-xlsr-53-spanish-int8": [
     "es"
+  ],
+  "wav2vec2-xlsr-53-telugu-fp16": [
+    "te"
+  ],
+  "wav2vec2-xlsr-53-telugu-int8": [
+    "te"
   ],
   "wav2vec2-xlsr-53-ukrainian-fp16": [
     "uk"
@@ -1583,6 +1601,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-xlsr-53-greek": [
     "el"
   ],
+  "wav2vec2-xlsr-53-hebrew": [
+    "he"
+  ],
   "wav2vec2-xlsr-53-hungarian": [
     "hu"
   ],
@@ -1604,6 +1625,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   "wav2vec2-xlsr-53-portuguese": [
     "pt"
   ],
+  "wav2vec2-xlsr-53-punjabi": [
+    "pa"
+  ],
   "wav2vec2-xlsr-53-romanian": [
     "ro"
   ],
@@ -1615,6 +1639,9 @@ export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, reado
   ],
   "wav2vec2-xlsr-53-spanish": [
     "es"
+  ],
+  "wav2vec2-xlsr-53-telugu": [
+    "te"
   ],
   "wav2vec2-xlsr-53-ukrainian": [
     "uk"

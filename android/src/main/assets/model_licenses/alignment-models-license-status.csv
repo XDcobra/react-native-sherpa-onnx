@@ -27,6 +27,8 @@ wav2vec2-xlsr-53-german-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingf
 wav2vec2-xlsr-53-german-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-greek-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-greek-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-hebrew-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-hebrew-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-hungarian-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-hungarian-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-italian-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
@@ -40,6 +42,8 @@ wav2vec2-xlsr-53-persian-int8.tar.bz2,apache-2.0,yes,high,manual,https://hugging
 wav2vec2-xlsr-53-polish-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-polish-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-portuguese-q4f16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-punjabi-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-punjabi-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-romanian-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-romanian-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-russian-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
@@ -48,6 +52,8 @@ wav2vec2-xlsr-53-slovenian-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggi
 wav2vec2-xlsr-53-slovenian-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-spanish-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-spanish-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-telugu-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+wav2vec2-xlsr-53-telugu-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-ukrainian-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-ukrainian-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
 wav2vec2-xlsr-53-vietnamese-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
