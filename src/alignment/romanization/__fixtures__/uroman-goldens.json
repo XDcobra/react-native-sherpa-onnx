@@ -1,0 +1,111 @@
+[
+  {
+    "text": "café naïve",
+    "language": null,
+    "uroman": "cafe naive",
+    "mmsNormalized": "cafe naive"
+  },
+  {
+    "text": "Непал",
+    "language": "ru",
+    "uroman": "Nepal",
+    "mmsNormalized": "nepal"
+  },
+  {
+    "text": "Νεπάλ",
+    "language": "el",
+    "uroman": "Nepal",
+    "mmsNormalized": "nepal"
+  },
+  {
+    "text": "नेपाल",
+    "language": "hi",
+    "uroman": "nepaal",
+    "mmsNormalized": "nepaal"
+  },
+  {
+    "text": "نیپال",
+    "language": "ur",
+    "uroman": "nipal",
+    "mmsNormalized": "nipal"
+  },
+  {
+    "text": "こんにちは",
+    "language": "ja",
+    "uroman": "konnichiha",
+    "mmsNormalized": "konnichiha"
+  },
+  {
+    "text": "안녕하세요",
+    "language": "ko",
+    "uroman": "annyeonghaseyo",
+    "mmsNormalized": "annyeonghaseyo"
+  },
+  {
+    "text": "你好",
+    "language": "zh",
+    "uroman": "nihao",
+    "mmsNormalized": "nihao"
+  },
+  {
+    "text": "العربية",
+    "language": "ar",
+    "uroman": "al'rbya",
+    "mmsNormalized": "al'rbya"
+  },
+  {
+    "text": "Straße",
+    "language": "de",
+    "uroman": "Strasse",
+    "mmsNormalized": "strasse"
+  },
+  {
+    "text": "Ельцин",
+    "language": "ru",
+    "uroman": "Yeltsin",
+    "mmsNormalized": "yeltsin",
+    "note": "language-sensitive ye/e"
+  },
+  {
+    "text": "Ельцин",
+    "language": null,
+    "uroman": "Eltsin",
+    "mmsNormalized": "eltsin",
+    "note": "no-language baseline for Ельцин"
+  },
+  {
+    "text": "Xin chào Việt Nam",
+    "language": "vi",
+    "uroman": "Xin chao Viet Nam",
+    "mmsNormalized": "xin chao viet nam",
+    "note": "Vietnamese phrase with tone marks"
+  },
+  {
+    "text": "người",
+    "language": "vi",
+    "uroman": "nguoi",
+    "mmsNormalized": "nguoi",
+    "note": "Vietnamese ươ + tone"
+  },
+  {
+    "text": "Đặng",
+    "language": "vi",
+    "uroman": "Dang",
+    "mmsNormalized": "dang",
+    "note": "Vietnamese Đ/đ + tone"
+  },
+  {
+    "text": "Hà Nội",
+    "language": "vi",
+    "uroman": "Ha Noi",
+    "mmsNormalized": "ha noi",
+    "note": "Vietnamese place name"
+  },
+  {
+    "text": "tiếng Việt",
+    "language": "vi",
+    "uroman": "tieng Viet",
+    "mmsNormalized": "tieng viet",
+    "note": "Vietnamese language name"
+  }
+]

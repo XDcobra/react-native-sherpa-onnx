@@ -1,14 +1,60 @@
+import { readFile } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import { resolveAlignmentCustomConfigPaths } from './customConfig';
+import {
+  applyVocabRomanizerToProfile,
+  resolveAlignmentPackProfile,
+  type AlignmentConcreteModelFamily,
+  type AlignmentModelProfile,
+} from './modelProfiles';
+import {
+  inferRomanizerFromVocabTokens,
+  tokensFromVocabJson,
+} from './romanization';
 import type {
   AlignTextToAudioOptionsAccurate,
   AlignmentAccurateModelConfig,
 } from './types';
 
+export interface AlignmentResolvedModelPaths {
+  modelPath: string;
+  /** Absolute path to vocab.json when detected / provided; empty otherwise. */
+  vocabPath: string;
+  family: AlignmentConcreteModelFamily;
+  profile: AlignmentModelProfile;
+  /** Basename / hint used for profile resolution (logging). */
+  profileHint: string;
+}
+
+async function profileWithVocabRomanizer(
+  profileHint: string,
+  vocabPath: string
+): Promise<AlignmentModelProfile> {
+  const base = resolveAlignmentPackProfile(profileHint);
+  if (!vocabPath) {
+    return base;
+  }
+  try {
+    const rawText = await readFile(vocabPath, 'utf8');
+    const parsed: unknown = JSON.parse(rawText);
+    const tokens = tokensFromVocabJson(parsed);
+    if (!tokens) {
+      return base;
+    }
+    return applyVocabRomanizerToProfile(
+      base,
+      inferRomanizerFromVocabTokens(tokens)
+    );
+  } catch {
+    // Unreadable / invalid vocab → keep name-based romanizer.
+    return base;
+  }
+}
+
 export async function resolveAlignmentOnnxPath(
   model: AlignmentAccurateModelConfig
-): Promise<string> {
+): Promise<AlignmentResolvedModelPaths> {
   if (model.initMode === 'custom') {
     const paths = await resolveAlignmentCustomConfigPaths(
       model.modelType,
@@ -20,7 +66,23 @@ export async function resolveAlignmentOnnxPath(
         'ALIGNMENT_MODEL_LOAD_FAILED: Custom alignment model path is missing after validation.'
       );
     }
-    return onnxPath;
+    const vocabPath = paths.vocab?.trim() ?? '';
+    const profileHint =
+      typeof model.customConfig.model === 'object' &&
+      model.customConfig.model != null &&
+      'path' in model.customConfig.model
+        ? String(
+            (model.customConfig.model as { path?: string }).path ?? onnxPath
+          )
+        : onnxPath;
+    const profile = await profileWithVocabRomanizer(profileHint, vocabPath);
+    return {
+      modelPath: onnxPath,
+      vocabPath,
+      family: model.modelType,
+      profile,
+      profileHint,
+    };
   }
 
   const modelDir = (
@@ -45,7 +107,17 @@ export async function resolveAlignmentOnnxPath(
         : 'Alignment model detection failed: no ONNX path.';
     throw new Error(`ALIGNMENT_MODEL_LOAD_FAILED: ${err}`);
   }
-  return onnxPath;
+  const vocabPath =
+    typeof det.paths?.vocab === 'string' ? det.paths.vocab.trim() : '';
+  const profileHint = modelDir;
+  const profile = await profileWithVocabRomanizer(profileHint, vocabPath);
+  return {
+    modelPath: onnxPath,
+    vocabPath,
+    family: 'wav2vec2',
+    profile,
+    profileHint,
+  };
 }
 
 export function accurateOptionsToModelConfig(
@@ -61,5 +133,8 @@ export function accurateOptionsToModelConfig(
   return {
     initMode: 'auto',
     modelSource: options.modelSource,
+    ...(options.quantization != null
+      ? { quantization: options.quantization }
+      : {}),
   };
 }

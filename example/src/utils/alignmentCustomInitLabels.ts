@@ -6,6 +6,7 @@ export const ALIGNMENT_CUSTOM_PATH_LABELS: Record<
   string
 > = {
   model: 'Wav2vec2 alignment model (.onnx)',
+  vocab: 'Optional vocab.json sidecar',
 };
 
 export function labelForAlignmentCustomPathKey(

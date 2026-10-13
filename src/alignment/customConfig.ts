@@ -4,16 +4,18 @@ import {
   assertCustomModelConfig,
   resolveCustomModelConfigPaths,
 } from '../detect/customConfigResolver';
-import type { AlignmentConcreteModelType } from './types';
+import type { AlignmentConcreteModelFamily } from './types';
 
 export const AlignmentErrorCode = {
   INVALID_ARGUMENT: 'ALIGNMENT_INVALID_ARGUMENT',
 } as const;
 
-export type AlignmentCustomPathKey = 'model';
+export type AlignmentCustomPathKey = 'model' | 'vocab';
 
 export interface AlignmentCustomConfig {
   model: FileSource;
+  /** Optional HF vocab.json sidecar. */
+  vocab?: FileSource;
 }
 
 export function assertAlignmentCustomConfig(
@@ -23,7 +25,7 @@ export function assertAlignmentCustomConfig(
 }
 
 export async function resolveAlignmentCustomConfigPaths(
-  modelType: AlignmentConcreteModelType,
+  modelType: AlignmentConcreteModelFamily,
   customConfig: AlignmentCustomConfig
 ): Promise<Record<string, string>> {
   return resolveCustomModelConfigPaths({

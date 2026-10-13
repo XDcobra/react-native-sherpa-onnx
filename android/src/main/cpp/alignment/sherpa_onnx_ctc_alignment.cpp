@@ -10,6 +10,7 @@
 #include "sherpa_onnx_ctc_alignment.hpp"
 
 #include <algorithm>
+#include <cstdarg>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -111,6 +112,28 @@ static char32_t UpperCodePointEnUs(char32_t cp) {
   return cp;
 }
 
+static char32_t LowerCodePointEnUs(char32_t cp) {
+  locale_t L = AcquireEnUsUtf8Locale();
+  if (cp <= 0xFFFFu) {
+    wint_t w = towlower_l(static_cast<wint_t>(cp), L);
+    if (w != static_cast<wint_t>(WEOF)) {
+      return static_cast<char32_t>(w);
+    }
+  }
+  return cp;
+}
+
+static void LogAlignmentDebug(const char* fmt, ...) {
+#if defined(__ANDROID__)
+  va_list args;
+  va_start(args, fmt);
+  __android_log_vprint(ANDROID_LOG_INFO, "SherpaOnnxAlignment", fmt, args);
+  va_end(args);
+#else
+  (void)fmt;
+#endif
+}
+
 static bool IsUnicodeWhitespace(char32_t c) {
   if (c <= 0xFFu) {
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0x0Bu || c == 0x0Cu) {
@@ -202,7 +225,9 @@ static void Utf8Append(std::string& s, char32_t cp) {
   s.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
 }
 
-static std::string Utf8UpperEnUs(const std::string& utf8) {
+static std::string Utf8MapCase(
+    const std::string& utf8,
+    char32_t (*mapper)(char32_t)) {
   std::string out;
   out.reserve(utf8.size());
   size_t i = 0;
@@ -211,9 +236,17 @@ static std::string Utf8UpperEnUs(const std::string& utf8) {
     if (!Utf8DecodeOne(utf8, i, cp)) {
       throw std::runtime_error("Invalid UTF-8 in alignment text");
     }
-    Utf8Append(out, UpperCodePointEnUs(cp));
+    Utf8Append(out, mapper(cp));
   }
   return out;
+}
+
+static std::string Utf8UpperEnUs(const std::string& utf8) {
+  return Utf8MapCase(utf8, UpperCodePointEnUs);
+}
+
+static std::string Utf8LowerEnUs(const std::string& utf8) {
+  return Utf8MapCase(utf8, LowerCodePointEnUs);
 }
 
 static std::unordered_map<std::string, int32_t> ParseVocabJson(const std::string& json) {
@@ -327,85 +360,227 @@ static bool TryReadTextFile(const std::filesystem::path& path, std::string* out)
   return true;
 }
 
-static std::unordered_map<std::string, int32_t> ResolveVocabulary(
+static int32_t LookupFirstKey(
+    const std::unordered_map<std::string, int32_t>& vocab,
+    std::initializer_list<const char*> keys,
+    int32_t fallback) {
+  for (const char* key : keys) {
+    auto it = vocab.find(key);
+    if (it != vocab.end()) {
+      return it->second;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Prefer the blank-like key with the smallest id. MMS ships both
+ * `<blank>`=0 (true CTC blank) and `<pad>`=1; EN only has `<pad>`=0.
+ */
+static int32_t ResolveBlankId(const std::unordered_map<std::string, int32_t>& vocab) {
+  static const char* kBlankKeys[] = {"<pad>", "<blank>", "[PAD]", "<blk>", "blank"};
+  bool found = false;
+  int32_t best = 0;
+  for (const char* key : kBlankKeys) {
+    auto it = vocab.find(key);
+    if (it == vocab.end()) {
+      continue;
+    }
+    if (!found || it->second < best) {
+      best = it->second;
+      found = true;
+    }
+  }
+  return found ? best : 0;
+}
+
+static CaseMode DetectCaseMode(const std::unordered_map<std::string, int32_t>& vocab) {
+  bool has_upper = false;
+  bool has_lower = false;
+  for (char c = 'A'; c <= 'Z'; ++c) {
+    if (vocab.find(std::string(1, c)) != vocab.end()) {
+      has_upper = true;
+    }
+    if (vocab.find(std::string(1, static_cast<char>(c - 'A' + 'a'))) != vocab.end()) {
+      has_lower = true;
+    }
+  }
+  if (has_upper && !has_lower) {
+    return CaseMode::kUpper;
+  }
+  if (has_lower && !has_upper) {
+    return CaseMode::kLower;
+  }
+  return CaseMode::kNone;
+}
+
+static bool VocabLooksUsable(const std::unordered_map<std::string, int32_t>& vocab) {
+  return !vocab.empty();
+}
+
+static AlignmentVocabProfile BuildProfileFromVocab(
+    std::unordered_map<std::string, int32_t> vocab) {
+  AlignmentVocabProfile profile;
+  profile.vocab = std::move(vocab);
+  profile.blankId = ResolveBlankId(profile.vocab);
+  profile.unkId = LookupFirstKey(
+      profile.vocab, {"<unk>", "[UNK]"}, profile.blankId);
+  auto delimIt = profile.vocab.find("|");
+  profile.wordDelimiterId =
+      delimIt != profile.vocab.end() ? delimIt->second : -1;
+  profile.caseMode = DetectCaseMode(profile.vocab);
+  profile.frameSeconds = 0.02;
+  return profile;
+}
+
+static std::string TryLoadSidecarVocabJson(const std::string& model_path) {
+  try {
+    namespace fs = std::filesystem;
+    fs::path model_p(model_path);
+    fs::path model_dir = model_p.parent_path();
+    if (model_dir.empty() && fs::is_directory(model_p)) {
+      model_dir = model_p;
+    }
+    const fs::path vocab_path = model_dir / "vocab.json";
+    if (!model_dir.empty() && fs::exists(vocab_path) && fs::is_regular_file(vocab_path)) {
+      std::string content;
+      if (TryReadTextFile(vocab_path, &content) && !content.empty()) {
+        return content;
+      }
+    }
+  } catch (...) {
+    // Ignore optional sidecar load failures.
+  }
+  return {};
+}
+
+}  // namespace
+
+AlignmentVocabProfile ResolveVocabProfile(
     const std::string& model_path,
     const std::string& vocab_json_utf8) {
-  static std::mutex g_vocab_mutex;
+  static std::mutex g_profile_mutex;
   static std::string g_cache_key;
-  static std::unordered_map<std::string, int32_t> g_cached_vocab;
+  static AlignmentVocabProfile g_cached_profile;
 
   const std::string cache_key = model_path + "|" + vocab_json_utf8;
   {
-    std::lock_guard<std::mutex> lock(g_vocab_mutex);
-    if (!g_cached_vocab.empty() && g_cache_key == cache_key) {
-      return g_cached_vocab;
+    std::lock_guard<std::mutex> lock(g_profile_mutex);
+    if (!g_cached_profile.vocab.empty() && g_cache_key == cache_key) {
+      return g_cached_profile;
     }
   }
 
-  std::unordered_map<std::string, int32_t> vocab;
-  if (!vocab_json_utf8.empty()) {
-    vocab = ParseVocabJson(vocab_json_utf8);
-  } else {
-    vocab = DefaultWav2Vec2Vocab();
-
-    try {
-      namespace fs = std::filesystem;
-      fs::path model_p(model_path);
-      fs::path model_dir = model_p.parent_path();
-      if (model_dir.empty() && fs::is_directory(model_p)) {
-        model_dir = model_p;
-      }
-      const fs::path vocab_path = model_dir / "vocab.json";
-      if (!model_dir.empty() && fs::exists(vocab_path) && fs::is_regular_file(vocab_path)) {
-        std::string content;
-        if (TryReadTextFile(vocab_path, &content)) {
-          auto parsed = ParseVocabJson(content);
-          // Reject vocabs without Latin letter keys (HF lowercase or incomplete
-          // files would otherwise make every English transcript unalignable).
-          bool has_letter = false;
-          for (char c = 'A'; c <= 'Z'; ++c) {
-            const std::string upper(1, c);
-            const std::string lower(1, static_cast<char>(c - 'A' + 'a'));
-            if (parsed.find(upper) != parsed.end() ||
-                parsed.find(lower) != parsed.end()) {
-              has_letter = true;
-              break;
-            }
-          }
-          if (!parsed.empty() && has_letter) {
-            vocab = std::move(parsed);
-          }
+  AlignmentVocabProfile profile;
+  const char* source = "default";
+  try {
+    if (!vocab_json_utf8.empty()) {
+      profile = BuildProfileFromVocab(ParseVocabJson(vocab_json_utf8));
+      source = "explicit";
+    } else {
+      const std::string sidecar = TryLoadSidecarVocabJson(model_path);
+      if (!sidecar.empty()) {
+        auto parsed = ParseVocabJson(sidecar);
+        if (VocabLooksUsable(parsed)) {
+          profile = BuildProfileFromVocab(std::move(parsed));
+          source = "sidecar";
+        } else {
+          profile = BuildProfileFromVocab(DefaultWav2Vec2Vocab());
+          source = "default_after_rejected_sidecar";
         }
+      } else {
+        profile = BuildProfileFromVocab(DefaultWav2Vec2Vocab());
+        source = "default";
       }
-    } catch (...) {
-      // Ignore optional vocab loading failures and keep baked defaults.
     }
+  } catch (...) {
+    profile = BuildProfileFromVocab(DefaultWav2Vec2Vocab());
+    source = "default_after_parse_error";
   }
+
+  LogAlignmentDebug(
+      "vocab profile: source=%s size=%zu blank=%d unk=%d delim=%d case=%d frame=%.3f",
+      source,
+      profile.vocab.size(),
+      static_cast<int>(profile.blankId),
+      static_cast<int>(profile.unkId),
+      static_cast<int>(profile.wordDelimiterId),
+      static_cast<int>(profile.caseMode),
+      profile.frameSeconds);
 
   {
-    std::lock_guard<std::mutex> lock(g_vocab_mutex);
+    std::lock_guard<std::mutex> lock(g_profile_mutex);
     g_cache_key = cache_key;
-    g_cached_vocab = vocab;
-    return g_cached_vocab;
+    g_cached_profile = profile;
+    return g_cached_profile;
   }
 }
 
-static std::vector<std::string> BuildTokenTexts(
-    const std::string& text,
-    const std::unordered_map<std::string, int32_t>& vocab,
-    int32_t wordBoundaryId) {
-  const std::string uppercase = Utf8UpperEnUs(text);
-  std::vector<std::string> tokens;
+namespace {
+
+static bool TryLookupToken(
+    const AlignmentVocabProfile& profile,
+    const std::string& token,
+    int32_t* out_id) {
+  auto it = profile.vocab.find(token);
+  if (it != profile.vocab.end()) {
+    *out_id = it->second;
+    return true;
+  }
+  if (profile.caseMode == CaseMode::kLower || profile.caseMode == CaseMode::kNone) {
+    const std::string lower = Utf8LowerEnUs(token);
+    if (lower != token) {
+      it = profile.vocab.find(lower);
+      if (it != profile.vocab.end()) {
+        *out_id = it->second;
+        return true;
+      }
+    }
+  }
+  if (profile.caseMode == CaseMode::kUpper || profile.caseMode == CaseMode::kNone) {
+    const std::string upper = Utf8UpperEnUs(token);
+    if (upper != token) {
+      it = profile.vocab.find(upper);
+      if (it != profile.vocab.end()) {
+        *out_id = it->second;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+BuiltTokens BuildTokens(
+    const std::string& text_utf8,
+    const AlignmentVocabProfile& profile) {
+  BuiltTokens out;
+  int32_t current_word = -1;
+  bool in_word = false;
+  size_t skipped = 0;
   size_t idx = 0;
-  while (idx < uppercase.size()) {
+
+  auto flush_word_boundary = [&]() {
+    if (!in_word) {
+      return;
+    }
+    in_word = false;
+    if (profile.wordDelimiterId >= 0 && !out.ids.empty() &&
+        out.wordIndex.back() >= 0) {
+      out.ids.push_back(profile.wordDelimiterId);
+      out.wordIndex.push_back(-1);
+      out.display.push_back("|");
+    }
+  };
+
+  while (idx < text_utf8.size()) {
     char32_t c = 0;
-    if (!Utf8DecodeOne(uppercase, idx, c)) {
-      throw std::runtime_error("Invalid UTF-8 after uppercasing alignment text");
+    if (!Utf8DecodeOne(text_utf8, idx, c)) {
+      throw std::runtime_error("Invalid UTF-8 in alignment text");
     }
     if (IsUnicodeWhitespace(c)) {
-      if (!tokens.empty() && tokens.back() != "|") {
-        tokens.push_back("|");
-      }
+      flush_word_boundary();
       continue;
     }
     char32_t normalized = c;
@@ -414,29 +589,51 @@ static std::vector<std::string> BuildTokenTexts(
     }
     std::string token;
     Utf8Append(token, normalized);
-    if (vocab.find(token) != vocab.end()) {
-      tokens.push_back(std::move(token));
-    } else if (normalized >= U'A' && normalized <= U'Z') {
-      // HuggingFace wav2vec2 vocab.json often uses lowercase letter keys.
-      std::string lower;
-      Utf8Append(lower, normalized - U'A' + U'a');
-      if (vocab.find(lower) != vocab.end()) {
-        tokens.push_back(std::move(lower));
-      }
+
+    if (!in_word) {
+      current_word += 1;
+      in_word = true;
     }
+
+    int32_t id = 0;
+    std::string display = token;
+    if (TryLookupToken(profile, token, &id)) {
+      // Prefer the case that matched the vocab for display when possible.
+      if (profile.caseMode == CaseMode::kLower) {
+        display = Utf8LowerEnUs(token);
+      } else if (profile.caseMode == CaseMode::kUpper) {
+        display = Utf8UpperEnUs(token);
+      }
+    } else {
+      // Unknown character: skip (do not emit blank) so CTC target stays tight.
+      ++skipped;
+      continue;
+    }
+
+    out.ids.push_back(id);
+    out.wordIndex.push_back(current_word);
+    out.display.push_back(std::move(display));
   }
-  while (!tokens.empty() && tokens.front() == "|") {
-    tokens.erase(tokens.begin());
+
+  // Drop trailing delimiter if we emitted one after the last word.
+  if (!out.ids.empty() && out.wordIndex.back() < 0) {
+    out.ids.pop_back();
+    out.wordIndex.pop_back();
+    out.display.pop_back();
   }
-  while (!tokens.empty() && tokens.back() == "|") {
-    tokens.pop_back();
-  }
-  auto boundaryIt = vocab.find("|");
-  if (boundaryIt == vocab.end() || boundaryIt->second != wordBoundaryId) {
-    tokens.erase(std::remove(tokens.begin(), tokens.end(), "|"), tokens.end());
-  }
-  return tokens;
+
+  LogAlignmentDebug(
+      "BuildTokens: text_len=%zu tokens=%zu words=%d skipped=%zu delim=%d",
+      text_utf8.size(),
+      out.ids.size(),
+      current_word + 1,
+      skipped,
+      static_cast<int>(profile.wordDelimiterId));
+
+  return out;
 }
+
+namespace {
 
 static std::vector<float> ResampleLinear(
     const std::vector<float>& input,
@@ -819,41 +1016,23 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
   throw std::runtime_error(
       "Accurate alignment requires ONNX Runtime C API headers at build time (onnxruntime_c_api.h).");
 #else
-  auto vocab = ResolveVocabulary(model_path, vocab_json_utf8);
-  int32_t blankId = 0;
-  auto blankIt = vocab.find("<pad>");
-  if (blankIt != vocab.end()) {
-    blankId = blankIt->second;
-  }
-  int32_t wordBoundaryId = 4;
-  auto boundaryIt = vocab.find("|");
-  if (boundaryIt != vocab.end()) {
-    wordBoundaryId = boundaryIt->second;
-  }
-
-  std::vector<std::string> tokenTexts = BuildTokenTexts(text_utf8, vocab, wordBoundaryId);
-  if (tokenTexts.empty()) {
+  const AlignmentVocabProfile profile = ResolveVocabProfile(model_path, vocab_json_utf8);
+  const int32_t blankId = profile.blankId;
+  const BuiltTokens built = BuildTokens(text_utf8, profile);
+  if (built.ids.empty()) {
 #if defined(__ANDROID__)
     const size_t preview_len = std::min<size_t>(text_utf8.size(), 96);
     __android_log_print(
         ANDROID_LOG_ERROR,
         "SherpaOnnxAlignment",
-        "CTC no alignable tokens: text_len=%zu vocab_size=%zu preview=%.96s",
+        "CTC no alignable tokens: text_len=%zu vocab_size=%zu blank=%d delim=%d preview=%.96s",
         text_utf8.size(),
-        vocab.size(),
+        profile.vocab.size(),
+        static_cast<int>(blankId),
+        static_cast<int>(profile.wordDelimiterId),
         text_utf8.substr(0, preview_len).c_str());
 #endif
     throw std::runtime_error("Transcript has no alignable tokens for provided vocabulary");
-  }
-  std::vector<int32_t> tokenIds;
-  tokenIds.reserve(tokenTexts.size());
-  for (const auto& token : tokenTexts) {
-    auto it = vocab.find(token);
-    if (it != vocab.end()) {
-      tokenIds.push_back(it->second);
-    } else {
-      tokenIds.push_back(blankId);
-    }
   }
 
   std::vector<float> raw(samples, samples + sample_count);
@@ -869,10 +1048,10 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
     throw std::runtime_error("Alignment model produced empty probabilities");
   }
 
-  ExpandedTarget expanded = BuildExpandedTarget(tokenIds, blankId);
+  ExpandedTarget expanded = BuildExpandedTarget(built.ids, blankId);
   std::vector<int32_t> path = CtcBacktrack(logProbs, expanded.ids, blankId);
 
-  std::vector<std::vector<int32_t>> frameIndicesByToken(tokenIds.size());
+  std::vector<std::vector<int32_t>> frameIndicesByToken(built.ids.size());
   for (int32_t t = 0; t < static_cast<int32_t>(path.size()); ++t) {
     int32_t state = path[t];
     if (state < 0 || state >= static_cast<int32_t>(expanded.tokenIndices.size())) {
@@ -880,16 +1059,22 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
     }
     int32_t tokenIndex = expanded.tokenIndices[state];
     int32_t tokenId = expanded.ids[state];
-    if (tokenIndex >= 0 && tokenIndex < static_cast<int32_t>(frameIndicesByToken.size()) && tokenId != blankId) {
+    if (tokenIndex >= 0 &&
+        tokenIndex < static_cast<int32_t>(frameIndicesByToken.size()) &&
+        tokenId != blankId) {
       frameIndicesByToken[tokenIndex].push_back(t);
     }
   }
 
   std::vector<AlignmentInterval> charItems;
-  charItems.reserve(tokenTexts.size());
+  charItems.reserve(built.ids.size());
+  // Parallel array: for each charItem, which word index it belongs to.
+  std::vector<int32_t> charWordIndex;
+  charWordIndex.reserve(built.ids.size());
   int32_t fallbackEndFrame = 0;
-  for (size_t i = 0; i < tokenTexts.size(); ++i) {
-    if (tokenTexts[i] == "|") {
+  for (size_t i = 0; i < built.ids.size(); ++i) {
+    if (built.wordIndex[i] < 0) {
+      // Word-delimiter emission — skip for char intervals.
       continue;
     }
     const auto& frames = frameIndicesByToken[i];
@@ -900,38 +1085,33 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
       endFrameExclusive = frames.back() + 1;
       fallbackEndFrame = std::max(fallbackEndFrame, endFrameExclusive);
     }
-    double start = startFrame * 0.02;
-    double end = std::max(start, endFrameExclusive * 0.02);
-    charItems.push_back(AlignmentInterval{tokenTexts[i], start, end});
+    const double start = startFrame * profile.frameSeconds;
+    const double end = std::max(start, endFrameExclusive * profile.frameSeconds);
+    charItems.push_back(AlignmentInterval{built.display[i], start, end});
+    charWordIndex.push_back(built.wordIndex[i]);
   }
 
   std::vector<AlignmentInterval> wordItems;
-  std::string currentWord;
-  double wordStart = 0.0;
-  double wordEnd = 0.0;
-  size_t charCursor = 0;
-  for (const auto& token : tokenTexts) {
-    if (token == "|") {
-      if (!currentWord.empty()) {
+  if (!charItems.empty()) {
+    int32_t activeWord = charWordIndex.front();
+    std::string currentWord = charItems.front().text;
+    double wordStart = charItems.front().start_s;
+    double wordEnd = charItems.front().end_s;
+    for (size_t i = 1; i < charItems.size(); ++i) {
+      if (charWordIndex[i] != activeWord) {
         wordItems.push_back(AlignmentInterval{currentWord, wordStart, wordEnd});
-        currentWord.clear();
+        activeWord = charWordIndex[i];
+        currentWord = charItems[i].text;
+        wordStart = charItems[i].start_s;
+        wordEnd = charItems[i].end_s;
+      } else {
+        currentWord += charItems[i].text;
+        wordEnd = std::max(wordEnd, charItems[i].end_s);
       }
-      continue;
     }
-    if (charCursor >= charItems.size()) {
-      continue;
+    if (!currentWord.empty()) {
+      wordItems.push_back(AlignmentInterval{currentWord, wordStart, wordEnd});
     }
-    const AlignmentInterval& charItem = charItems[charCursor++];
-    if (currentWord.empty()) {
-      wordStart = charItem.start_s;
-      wordEnd = charItem.end_s;
-    } else {
-      wordEnd = std::max(wordEnd, charItem.end_s);
-    }
-    currentWord += charItem.text;
-  }
-  if (!currentWord.empty()) {
-    wordItems.push_back(AlignmentInterval{currentWord, wordStart, wordEnd});
   }
 
   CtcAlignmentResult out;

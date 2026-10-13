@@ -1488,7 +1488,8 @@ export interface Spec extends TurboModule {
     },
     sampleRate: number,
     granularity: 'sentence' | 'word' | 'character',
-    language?: string
+    language?: string,
+    vocabPath?: string
   ): Promise<{
     subtitles: Array<{
       text: string;
@@ -1512,7 +1513,8 @@ export interface Spec extends TurboModule {
     },
     sampleRate: number,
     granularity: 'sentence' | 'word',
-    language?: string
+    language?: string,
+    vocabPath?: string
   ): Promise<{
     tokens: Array<{
       text: string;
@@ -1537,6 +1539,7 @@ export interface Spec extends TurboModule {
     modelType?: string;
     paths?: {
       model?: string;
+      vocab?: string;
     };
     /** Raw heuristic language tags from folder name (catalog). */
     languages?: NativePublicLanguageRow[];

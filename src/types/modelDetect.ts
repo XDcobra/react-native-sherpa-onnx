@@ -147,9 +147,13 @@ export interface SeparationDetectModelResult extends ModelDetectResultBase {
 // ─── Alignment extension ────────────────────────────────────────────────
 
 export interface AlignmentDetectModelResult extends ModelDetectResultBase {
-  /** Resolved model file path from detection (wav2vec2 model). */
+  /**
+   * Resolved paths from detection.
+   * `model` is the ONNX; `vocab` is optional sidecar HF vocab.json.
+   */
   paths?: {
     model?: string;
+    vocab?: string;
   };
 }
 

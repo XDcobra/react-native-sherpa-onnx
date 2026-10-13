@@ -86,7 +86,7 @@ TTS / alignment hint helpers (ISO 639-1 strings only; for UI labels — runtime 
 | Function | Scope |
 | --- | --- |
 | `iso6391HintsForTtsModelType(modelType?, modelKey?)` | TTS families |
-| `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment (e.g. `wav2vec2`) — generated from catalog JSON |
+| `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment — **pack-first** from `scripts/alignment-models/sources.csv` `languages` column (via generator); family fallbacks only for explicit multilingual markers (`multilingual-56`, MMS FA), never bare `xlsr` |
 
 Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
 

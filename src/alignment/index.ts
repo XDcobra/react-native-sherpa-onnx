@@ -31,6 +31,31 @@ export {
   resolveAlignmentOnnxPath,
   accurateOptionsToModelConfig,
 } from './resolveAlignmentOnnxPath';
+export type { AlignmentResolvedModelPaths } from './resolveAlignmentOnnxPath';
+export {
+  resolveAlignmentPackProfile,
+  applyVocabRomanizerToProfile,
+  prepareAlignmentTranscript,
+  hasAlignableAlignmentLetters,
+} from './modelProfiles';
+export type {
+  AlignmentModelProfile,
+  AlignmentPackProfileId,
+  AlignmentConcreteModelFamily as AlignmentPackFamily,
+} from './modelProfiles';
+export {
+  getRomanizer,
+  identityRomanizer,
+  latinDiacriticRomanizer,
+  uromanRomanizer,
+  inferRomanizerFromVocabTokens,
+  tokensFromVocabJson,
+} from './romanization';
+export type {
+  Romanizer,
+  RomanizerId,
+  VocabRomanizerInference,
+} from './romanization';
 
 export type {
   AlignTextToAudioFn,
@@ -42,7 +67,9 @@ export type {
   AlignmentAccurateModelAuto,
   AlignmentAccurateModelConfig,
   AlignmentAccurateModelCustom,
+  AlignmentConcreteModelFamily,
   AlignmentConcreteModelType,
+  AlignmentModelFamily,
   AlignmentProgressCallbacks,
   AlignTextToAudioWriteResult,
   AlignmentAccurateSegmentationConfig,
@@ -102,6 +129,15 @@ export async function detectAlignmentModel(
   const quantization = normalizeQuantization(raw.quantization);
   const modelFilePath =
     typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
+  const vocabFilePath =
+    typeof raw.paths?.vocab === 'string' ? raw.paths.vocab.trim() : '';
+  const paths =
+    modelFilePath.length > 0 || vocabFilePath.length > 0
+      ? {
+          ...(modelFilePath.length > 0 ? { model: modelFilePath } : {}),
+          ...(vocabFilePath.length > 0 ? { vocab: vocabFilePath } : {}),
+        }
+      : undefined;
   return {
     success: raw.success,
     isStreaming: false,
@@ -111,6 +147,6 @@ export async function detectAlignmentModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
-    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }

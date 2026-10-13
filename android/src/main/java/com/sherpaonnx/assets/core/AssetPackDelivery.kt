@@ -434,6 +434,7 @@ internal class AssetPackDelivery(
       AssetPackErrorCode.API_NOT_AVAILABLE,
       AssetPackErrorCode.APP_UNAVAILABLE,
       AssetPackErrorCode.APP_NOT_OWNED,
+      // -15 UNRECOGNIZED_INSTALLATION (sideload / Play does not recognize install)
       AssetPackErrorCode.UNRECOGNIZED_INSTALLATION,
       PLAY_STORE_NOT_FOUND_LEGACY,
       -> return "PAD_PLAY_UNAVAILABLE"

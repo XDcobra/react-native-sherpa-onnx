@@ -19,11 +19,21 @@ describe('alignment public surface snapshot', () => {
       [
         "AlignmentErrorCode",
         "accurateOptionsToModelConfig",
+        "applyVocabRomanizerToProfile",
         "assertAlignmentCustomConfig",
         "createAlignment",
         "detectAlignmentModel",
+        "getRomanizer",
+        "hasAlignableAlignmentLetters",
+        "identityRomanizer",
+        "inferRomanizerFromVocabTokens",
+        "latinDiacriticRomanizer",
+        "prepareAlignmentTranscript",
         "resolveAlignmentCustomConfigPaths",
         "resolveAlignmentOnnxPath",
+        "resolveAlignmentPackProfile",
+        "tokensFromVocabJson",
+        "uromanRomanizer",
       ]
     `);
   });

@@ -12,9 +12,20 @@ export interface AlignmentTimestamp {
   end: number;
 }
 
-export type AlignmentModelType = 'wav2vec2' | 'auto';
+/**
+ * Alignment model family (detect / custom-init).
+ * Currently only char-CTC wav2vec2-family packs.
+ */
+export type AlignmentModelFamily = 'wav2vec2' | 'auto';
 
-export type AlignmentConcreteModelType = 'wav2vec2';
+/** Concrete family for custom init (no `auto`). */
+export type AlignmentConcreteModelFamily = 'wav2vec2';
+
+/** @deprecated Use {@link AlignmentModelFamily}. */
+export type AlignmentModelType = AlignmentModelFamily;
+
+/** @deprecated Use {@link AlignmentConcreteModelFamily}. */
+export type AlignmentConcreteModelType = AlignmentConcreteModelFamily;
 
 export type AlignmentAccurateModelAuto = {
   initMode?: 'auto';
@@ -24,7 +35,7 @@ export type AlignmentAccurateModelAuto = {
 
 export type AlignmentAccurateModelCustom = {
   initMode: 'custom';
-  modelType: AlignmentConcreteModelType;
+  modelType: AlignmentConcreteModelFamily;
   customConfig: import('./customConfig').AlignmentCustomConfig;
 };
 

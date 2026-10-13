@@ -32,6 +32,7 @@ import type {
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
 import { resolveAlignmentOnnxPath } from '../resolveAlignmentOnnxPath';
+import { prepareAlignmentTranscript } from '../modelProfiles';
 import { runLinker } from '../linker/linker';
 import type {
   AlignmentAccurateModelConfig,
@@ -434,7 +435,7 @@ export async function runAccurateAsrMediated(
     anchorInfoRaw,
     segmentOutInfoRaw,
     referenceTextRaw,
-    resolvedModelPath,
+    resolvedModel,
   ] = await Promise.all([
     getPipelineAudioBufferInfo(audioInBufferId),
     getPipelineSegmentBufferInfo(anchorSegmentBufferId),
@@ -442,6 +443,11 @@ export async function runAccurateAsrMediated(
     getOfflineTextBufferTextSlice(textInBufferId, 0, textInfo.utf16Length ?? 0),
     resolveAlignmentOnnxPath(input.model),
   ]);
+  const resolvedModelPath = resolvedModel.modelPath;
+  const resolvedVocabPath = resolvedModel.vocabPath;
+  const alignmentProfile = resolvedModel.profile;
+  const languageOpt =
+    typeof input.language === 'string' ? input.language : undefined;
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);
   const anchorInfo = asOfflineSegmentBufferInfo(
@@ -520,11 +526,16 @@ export async function runAccurateAsrMediated(
 
     progressSession.emitStep(j, jobs.length, currentSegmentDurationMs);
 
+    const preparedText = prepareAlignmentTranscript(
+      job.referenceText,
+      alignmentProfile,
+      languageOpt
+    );
     const nativeResultRaw = await (async () => {
       try {
         return SherpaOnnx.alignAccurateFromPcm(
           resolvedModelPath,
-          job.referenceText,
+          preparedText,
           {
             audioBufferId: audioInBufferId,
             startSample: job.anchor.startSample,
@@ -532,7 +543,8 @@ export async function runAccurateAsrMediated(
           },
           audioInfo.sampleRate,
           granularity,
-          typeof input.language === 'string' ? input.language : undefined
+          languageOpt,
+          resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined
         );
       } catch (error) {
         throw mapNativeAsrMediatedError(error);

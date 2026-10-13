@@ -34,6 +34,8 @@ std::vector<int32_t> ParseSegmentSampleCounts(NSDictionary *options);
 std::vector<float> ParseFloatSamples(NSArray *samples);
 int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRate);
 std::string ParseAlignmentModelPath(NSDictionary *options);
+/** Optional sidecar vocab.json path; empty when absent. */
+std::string ParseAlignmentVocabPath(NSDictionary *options);
 PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm);
 std::string ParseSegmentationBufferId(NSDictionary *options);
 std::string ParseSegmentationSource(NSDictionary *options);

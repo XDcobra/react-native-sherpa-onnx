@@ -349,7 +349,12 @@ export function classifyAssetPackDeliveryFailure(
     haystack.includes('play store') ||
     haystack.includes('api_not_available') ||
     haystack.includes('binder has died') ||
-    haystack.includes('app_unavailable')
+    haystack.includes('app_unavailable') ||
+    haystack.includes('unrecognized_installation') ||
+    haystack.includes('errorcode=-15') ||
+    haystack.includes('errorcode= -15') ||
+    /\(errorcode=-15\)/.test(haystack) ||
+    /download error\(-15\)/.test(haystack)
   ) {
     return 'play_unavailable';
   }

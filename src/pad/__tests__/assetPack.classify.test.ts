@@ -30,6 +30,26 @@ describe('classifyAssetPackDeliveryFailure', () => {
     ).toBe('play_unavailable');
   });
 
+  it('maps UNRECOGNIZED_INSTALLATION (-15) to play_unavailable', () => {
+    expect(
+      classifyAssetPackDeliveryFailure(
+        new Error('Asset pack core_stt failed (errorCode=-15)')
+      )
+    ).toBe('play_unavailable');
+    expect(
+      classifyAssetPackDeliveryFailure(
+        new Error('-15: Asset Pack Download Error(-15)')
+      )
+    ).toBe('play_unavailable');
+    expect(
+      classifyAssetPackDeliveryFailure(
+        Object.assign(new Error('unrecognized installation'), {
+          name: 'PAD_PLAY_UNAVAILABLE',
+        })
+      )
+    ).toBe('play_unavailable');
+  });
+
   it('maps stalled', () => {
     expect(
       classifyAssetPackDeliveryFailure(

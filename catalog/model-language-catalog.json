@@ -1296,7 +1296,16 @@
     "wav2vec2": {
       "hints": [
         "en"
-      ]
+      ],
+    "packHints": {
+      "voxpopuliFamilyFallback": [
+        "de",
+        "es",
+        "fr",
+        "it"
+      ],
+      "mmsFamilyFallback": []
+    }
     }
   }
 }

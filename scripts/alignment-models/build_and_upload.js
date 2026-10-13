@@ -21,9 +21,54 @@ const EXPECTED_HEADER = [
   'license',
   'license_type',
   'commercial_use',
+  'tokens_url',
+  'vocab_url',
+  'languages',
 ];
 const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
+const VALID_ISO6391_RE = /^[a-z]{2,3}(-[a-z0-9]+)?$/i;
+/** Strip common quant / trailing -base suffixes for pack language lookup. */
+const ALIGNMENT_PACK_QUANT_SUFFIX_RE =
+  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/i;
+
+/**
+ * @param {string} languagesRaw
+ * @param {number} lineNumber
+ * @returns {string[]}
+ */
+function parseLanguagesCell(languagesRaw, lineNumber) {
+  if (!languagesRaw) {
+    return [];
+  }
+  const parts = languagesRaw
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  for (const code of parts) {
+    if (!VALID_ISO6391_RE.test(code)) {
+      throw new Error(
+        `Line ${lineNumber}: invalid language code '${code}' in languages column`
+      );
+    }
+  }
+  return [...new Set(parts)];
+}
+
+/**
+ * @param {string} modelId
+ * @returns {string}
+ */
+function alignmentPackStem(modelId) {
+  let stem = String(modelId ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(ALIGNMENT_PACK_QUANT_SUFFIX_RE, '');
+  if (stem.endsWith('-base')) {
+    stem = stem.slice(0, -'-base'.length);
+  }
+  return stem;
+}
 
 function printHelp() {
   console.log(`Usage: node scripts/alignment-models/build_and_upload.js [options]
@@ -34,6 +79,7 @@ Options:
   --dist-dir <path>   Output directory for generated .tar.bz2 files
   --repo <owner/name> GitHub repository in owner/name format
   --tag <tag>         Release tag to inspect and upload assets to
+  --only <id>         Build/upload only this model id (repeatable)
   --dry-run           Build archives only, skip release lookup and upload
   -h, --help          Show this help message
 
@@ -54,6 +100,7 @@ function parseArgs(argv) {
     repo: DEFAULT_REPO,
     tag: DEFAULT_TAG,
     dryRun: false,
+    onlyIds: [],
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -74,7 +121,8 @@ function parseArgs(argv) {
       arg === '--build-dir' ||
       arg === '--dist-dir' ||
       arg === '--repo' ||
-      arg === '--tag'
+      arg === '--tag' ||
+      arg === '--only'
     ) {
       const value = argv[i + 1];
       if (!value || value.startsWith('--')) {
@@ -91,6 +139,8 @@ function parseArgs(argv) {
         args.repo = value;
       } else if (arg === '--tag') {
         args.tag = value;
+      } else if (arg === '--only') {
+        args.onlyIds.push(value);
       }
 
       i += 1;
@@ -221,6 +271,9 @@ async function readSources(csvPath) {
     const licenseUrl = normalizeCell(row[2]);
     const licenseType = normalizeCell(row[3]);
     let commercialUse = normalizeCell(row[4]).toLowerCase();
+    const tokensUrl = normalizeCell(row[5]);
+    const vocabUrl = normalizeCell(row[6]);
+    const languagesRaw = normalizeCell(row[7]);
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -241,6 +294,7 @@ async function readSources(csvPath) {
         `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[4]}")`
       );
     }
+    const languages = parseLanguagesCell(languagesRaw, lineNumber);
     if (seen.has(modelId)) {
       throw new Error(`Duplicate id value in CSV: ${modelId}`);
     }
@@ -252,6 +306,9 @@ async function readSources(csvPath) {
       licenseUrl,
       licenseType,
       commercialUse,
+      tokensUrl,
+      vocabUrl,
+      languages,
     });
   }
 
@@ -591,6 +648,18 @@ async function buildArchives(sources, buildDir, distDir) {
     console.log(`[download] ${source.modelId}: model.onnx`);
     await downloadFile(source.onnxUrl, modelPath);
 
+    if (source.tokensUrl) {
+      const tokensPath = path.join(modelDir, 'tokens.txt');
+      console.log(`[download] ${source.modelId}: tokens.txt`);
+      await downloadFile(source.tokensUrl, tokensPath);
+    }
+
+    if (source.vocabUrl) {
+      const vocabPath = path.join(modelDir, 'vocab.json');
+      console.log(`[download] ${source.modelId}: vocab.json`);
+      await downloadFile(source.vocabUrl, vocabPath);
+    }
+
     if (source.licenseUrl) {
       const licensePath = path.join(modelDir, 'LICENSE');
       console.log(`[download] ${source.modelId}: LICENSE`);
@@ -606,13 +675,33 @@ async function buildArchives(sources, buildDir, distDir) {
   return archives;
 }
 
+function filterSourcesByOnly(allSources, onlyIds) {
+  if (!onlyIds || onlyIds.length === 0) {
+    return allSources;
+  }
+  const wanted = new Set(onlyIds);
+  const filtered = allSources.filter((s) => wanted.has(s.modelId));
+  const missing = onlyIds.filter(
+    (id) => !allSources.some((s) => s.modelId === id)
+  );
+  if (missing.length > 0) {
+    throw new Error(`Unknown --only id(s): ${missing.join(', ')}`);
+  }
+  if (filtered.length === 0) {
+    throw new Error('--only matched no sources');
+  }
+  return filtered;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const allSources = await readSources(args.csv);
+  // Full CSV is the checksum/release source of truth; --only only limits builds.
+  const catalogSources = await readSources(args.csv);
+  const selectedSources = filterSourcesByOnly(catalogSources, args.onlyIds);
 
   if (args.dryRun) {
     const archives = await buildArchives(
-      allSources,
+      selectedSources,
       args.buildDir,
       args.distDir
     );
@@ -642,7 +731,7 @@ async function main() {
   const sourcesToBuild = [];
   let skipped = 0;
 
-  for (const source of allSources) {
+  for (const source of selectedSources) {
     const assetName = `${source.modelId}.tar.bz2`;
     if (existingAssets.has(assetName)) {
       console.log(`[skip] ${assetName} already exists in release`);
@@ -678,12 +767,12 @@ async function main() {
     assetsForChecksum = refreshed.assets;
   }
 
-  const archiveNames = allSources
+  const archiveNames = catalogSources
     .map((s) => `${s.modelId}.tar.bz2`)
     .sort((a, b) => a.localeCompare(b));
 
   const checksumMap = await buildChecksumMap(
-    allSources,
+    catalogSources,
     args.distDir,
     builtNames,
     assetsForChecksum,
@@ -706,7 +795,7 @@ async function main() {
   }
 
   console.log(
-    `[done] uploaded=${uploaded} skipped=${skipped} total=${allSources.length}`
+    `[done] uploaded=${uploaded} skipped=${skipped} selected=${selectedSources.length} catalog=${catalogSources.length}`
   );
 }
 
@@ -721,4 +810,6 @@ if (require.main === module) {
 module.exports = {
   readSources,
   EXPECTED_HEADER,
+  alignmentPackStem,
+  parseLanguagesCell,
 };

@@ -32,11 +32,21 @@ describe('alignment public exports', () => {
     expect(Object.keys(alignment).sort()).toEqual([
       'AlignmentErrorCode',
       'accurateOptionsToModelConfig',
+      'applyVocabRomanizerToProfile',
       'assertAlignmentCustomConfig',
       'createAlignment',
       'detectAlignmentModel',
+      'getRomanizer',
+      'hasAlignableAlignmentLetters',
+      'identityRomanizer',
+      'inferRomanizerFromVocabTokens',
+      'latinDiacriticRomanizer',
+      'prepareAlignmentTranscript',
       'resolveAlignmentCustomConfigPaths',
       'resolveAlignmentOnnxPath',
+      'resolveAlignmentPackProfile',
+      'tokensFromVocabJson',
+      'uromanRomanizer',
     ]);
   });
 });

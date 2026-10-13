@@ -187,7 +187,8 @@ describe('chunkedForcedCtc/driver pipeline', () => {
       },
       16000,
       'word',
-      'en'
+      'en',
+      undefined
     );
     expect(onProgress).toHaveBeenCalledTimes(2);
     expect(onProgress).toHaveBeenNthCalledWith(
