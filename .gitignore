@@ -115,6 +115,10 @@ dist/alignment-models/
 build/diarization-models/
 dist/diarization-models/
 
+# OCR release asset pipeline outputs
+build/ocr-models/
+dist/ocr-models/
+
 # React Native Codegen
 ios/generated
 android/generated
