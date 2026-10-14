@@ -77,6 +77,13 @@ if(SHERPA_ONNX_DISABLE_LIBARCHIVE)
     message(STATUS "libarchive disabled (SHERPA_ONNX_DISABLE_LIBARCHIVE=ON). extractTarBz2/cancelExtractTarBz2 will return an error at runtime.")
 endif()
 
+# Optional: disable libwebp (gradle.properties: sherpaOnnxDisableLibwebp=true). ImageBuffer WebP decode requires it.
+set(USE_LIBWEBP ON)
+if(SHERPA_ONNX_DISABLE_LIBWEBP)
+    set(USE_LIBWEBP OFF)
+    message(STATUS "libwebp disabled (SHERPA_ONNX_DISABLE_LIBWEBP=ON). WebP decode will return ERR_IMAGE_FORMAT_UNSUPPORTED at runtime.")
+endif()
+
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
     alignment/sherpa_onnx_ctc_alignment.cpp
@@ -177,6 +184,10 @@ set(SOURCES
     jni/diagnostic/NativeDiagnosticAndroid.cpp
     jni/diagnostic/native_diagnostic_jni.cpp
     crypto/sha256.cpp
+    image/ImageMmapThreshold.cpp
+    image/ImageRegistry.cpp
+    image/decode/ImageDecoder.cpp
+    jni/image/sherpa-onnx-imagebuffer-jni.cpp
 )
 
 if(USE_LIBARCHIVE)
@@ -218,6 +229,41 @@ else()
     message(STATUS "libarchive built successfully")
 endif()
 endif(USE_LIBARCHIVE)
+
+if(USE_LIBWEBP)
+# libwebp: prebuilt from third_party/libwebp_prebuilt or jniLibs + cpp/include/webp (Maven/GitHub).
+# No in-tree CMake source build here — use third_party/libwebp_prebuilt/build_libwebp_android.sh.
+set(LIBWEBP_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libwebp_prebuilt/android")
+set(LIBWEBP_PREBUILT_LIB "${LIBWEBP_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LIBWEBP_PREBUILT_JNI_ABI "${LIBWEBP_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(LIBWEBP_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LIBWEBP_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/webp")
+set(USE_LIBWEBP_PREBUILT OFF)
+if(EXISTS "${LIBWEBP_PREBUILT_LIB}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_PREBUILT_LIB}")
+elseif(EXISTS "${LIBWEBP_PREBUILT_JNI_ABI}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${LIBWEBP_JNILIBS}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_JNILIBS}")
+endif()
+if(EXISTS "${LIBWEBP_PREBUILT_BASE}/include/webp/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_PREBUILT_BASE}/include")
+elseif(EXISTS "${LIBWEBP_INCLUDE_CPP}/webp/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_INCLUDE_CPP}")
+elseif(EXISTS "${LIBWEBP_INCLUDE_CPP}/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_INCLUDE_CPP}")
+endif()
+if(USE_LIBWEBP_PREBUILT AND LIBWEBP_INCLUDE_DIR)
+    message(STATUS "libwebp: using prebuilt (libs: ${LIBWEBP_LIB_DIR}, include: ${LIBWEBP_INCLUDE_DIR})")
+else()
+    message(WARNING "libwebp prebuilt not found for ${ANDROID_ABI}. "
+                    "Run: (cd third_party/libwebp_prebuilt && ./build_libwebp_android.sh) "
+                    "or let Gradle resolve Maven/GitHub release. Or set SHERPA_ONNX_DISABLE_LIBWEBP=ON.")
+endif()
+endif(USE_LIBWEBP)
 
 # Create shared library
 add_library(sherpaonnx SHARED
@@ -297,6 +343,8 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/kws
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/audio_tagging
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/image
+    ${CMAKE_CURRENT_SOURCE_DIR}/image/decode
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -304,6 +352,9 @@ if(USE_FFMPEG)
 endif()
 if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
+endif()
+if(USE_LIBWEBP AND LIBWEBP_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LIBWEBP_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
 # in C++ and the stub (#else) branches are used — no FFmpeg headers needed.
@@ -314,6 +365,9 @@ endif()
 if(USE_LIBARCHIVE)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBARCHIVE=1)
 endif()
+if(USE_LIBWEBP)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBWEBP=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
@@ -321,6 +375,9 @@ if(USE_FFMPEG)
 endif()
 if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
+endif()
+if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT AND LIBWEBP_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LIBWEBP_LIB_DIR})
 endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
@@ -348,6 +405,9 @@ if(USE_FFMPEG)
 endif()
 if(USE_LIBARCHIVE)
     target_link_libraries(sherpaonnx PRIVATE archive)
+endif()
+if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT)
+    target_link_libraries(sherpaonnx PRIVATE webp sharpyuv)
 endif()
 target_link_libraries(sherpaonnx PRIVATE log android)
 
