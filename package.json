@@ -150,6 +150,11 @@
       "types": "./lib/typescript/src/segmentbuffer/index.d.ts",
       "default": "./lib/module/segmentbuffer/index.js"
     },
+    "./imagebuffer": {
+      "source": "./src/imagebuffer/index.ts",
+      "types": "./lib/typescript/src/imagebuffer/index.d.ts",
+      "default": "./lib/module/imagebuffer/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",
@@ -176,6 +181,8 @@
     "third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG",
     "third_party/libarchive_prebuilt/IOS_RELEASE_TAG",
     "third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/libwebp_prebuilt/IOS_RELEASE_TAG",
+    "third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG",
     "!ios/build",
     "!android/build",
     "!android/gradle",

@@ -904,6 +904,76 @@ export interface Spec extends TurboModule {
    */
   releasePipelineTextBuffer(bufferId: string): Promise<void>;
 
+  // ==================== Offline ImageBuffer ====================
+
+  /** Create an empty offline image buffer (`img_off_*`). */
+  createEmptyOfflineImageBuffer(): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  /**
+   * Decode one or more images from serialized {@link FileSource} maps into an offline ImageBuffer.
+   * Options: `{ maxSide?: number, operationId?: string }`.
+   * Progress events: `SherpaOnnxImageProgress` with `{ operationId, done, total, phase }`.
+   */
+  createOfflineImageBufferFromFiles(
+    sources: Object[],
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  /**
+   * Decode image blobs (base64 strings) into an offline ImageBuffer.
+   * Options: `{ maxSide?: number, operationId?: string }`.
+   */
+  createOfflineImageBufferFromBase64(
+    base64List: string[],
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  getOfflineImageBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  getOfflineImageBufferFrameInfo(
+    bufferId: string,
+    frameIndex: number
+  ): Promise<{
+    index: number;
+    width: number;
+    height: number;
+    byteSize: number;
+    storageKind: string;
+  }>;
+
+  releaseOfflineImageBuffer(bufferId: string): Promise<void>;
+
+  /** Cancel an in-flight create (matched by options.operationId). */
+  cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
+
   /**
    * Get a slice of hypothesis text from an offline text buffer.
    */

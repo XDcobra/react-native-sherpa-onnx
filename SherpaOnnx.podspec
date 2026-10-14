@@ -10,7 +10,7 @@ if File.exist?(setup_script)
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
   unless system("bash", setup_script)
     ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
-    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt) and network. Run manually: bash #{setup_script}")
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt, libwebp_prebuilt) and network. Run manually: bash #{setup_script}")
   end
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
 end
@@ -56,7 +56,9 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/diarization/*.h",
     # Shared speaker-embedding core (C-API runner + manager + SID facade).
     "android/src/main/cpp/speaker-embedding/*.cpp",
-    "android/src/main/cpp/speaker-embedding/*.h"
+    "android/src/main/cpp/speaker-embedding/*.h",
+    # Shared ImageBuffer core (decode + registry; JNI excluded below).
+    "android/src/main/cpp/image/**/*.{h,cpp}",
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -74,7 +76,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diagnostic/native_diagnostic_jni.cpp",
     "android/src/main/cpp/jni/separation/sherpa-onnx-separation-jni.cpp",
     "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp",
-    "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp"
+    "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
+    "android/src/main/cpp/jni/image/**/*",
+    # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
+    "android/src/main/cpp/image/decode/vendor/**/*"
   ]
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
@@ -85,10 +90,11 @@ Pod::Spec.new do |s|
   private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.h"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
-  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox"
+  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox", "ImageIO", "CoreGraphics", "UIKit"
 
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
   libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
+  libwebp_xcframework = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
   
   has_ffmpeg = false
   disable_ffmpeg = ENV['SHERPA_ONNX_DISABLE_FFMPEG']
@@ -102,9 +108,16 @@ Pod::Spec.new do |s|
     has_libarchive = true
   end
 
+  has_libwebp = false
+  disable_libwebp = ENV['SHERPA_ONNX_DISABLE_LIBWEBP']
+  if (!disable_libwebp || disable_libwebp == '0' || disable_libwebp == 'false') && File.exist?(libwebp_xcframework)
+    has_libwebp = true
+  end
+
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
   vendored << "ios/Frameworks/libarchive.xcframework" if has_libarchive
+  vendored << "ios/Frameworks/libwebp.xcframework" if has_libwebp
   
   s.vendored_frameworks = vendored
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
@@ -122,6 +135,12 @@ Pod::Spec.new do |s|
   libarchive_simulator_slice = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator")
   libarchive_device_slice = File.join(libarchive_xcframework_root, "ios-arm64")
 
+  libwebp_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
+  libwebp_simulator_headers = File.join(libwebp_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  libwebp_device_headers = File.join(libwebp_xcframework_root, "ios-arm64", "Headers")
+  libwebp_simulator_slice = File.join(libwebp_xcframework_root, "ios-arm64_x86_64-simulator")
+  libwebp_device_slice = File.join(libwebp_xcframework_root, "ios-arm64")
+
   ffmpeg_simulator_headers = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator", "Headers")
   ffmpeg_device_headers = File.join(ffmpeg_xcframework, "ios-arm64", "Headers")
   ffmpeg_simulator_slice = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator")
@@ -130,6 +149,7 @@ Pod::Spec.new do |s|
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
+  gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp
 
   ld_flags_base = '$(inherited)'
   if has_ffmpeg
@@ -137,6 +157,9 @@ Pod::Spec.new do |s|
   end
   if has_libarchive
     ld_flags_base += ' -larchive'
+  end
+  if has_libwebp
+    ld_flags_base += ' -lwebp'
   end
   ld_flags_ios = "#{ld_flags_base} -force_load \"#{device_sherpa_binary}\""
   ld_flags_sim = "#{ld_flags_base} -force_load \"#{simulator_sherpa_binary}\""
@@ -163,6 +186,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/audio_tagging\"",
     "\"#{pod_root}/android/src/main/cpp/alignment\"",
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
+    "\"#{pod_root}/android/src/main/cpp/image\"",
+    "\"#{pod_root}/android/src/main/cpp/image/decode\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
@@ -192,6 +217,10 @@ Pod::Spec.new do |s|
     header_search_paths << "\"#{libarchive_device_headers}\""
     header_search_paths << "\"#{libarchive_simulator_headers}\""
   end
+  if has_libwebp
+    header_search_paths << "\"#{libwebp_device_headers}\""
+    header_search_paths << "\"#{libwebp_simulator_headers}\""
+  end
   if has_ffmpeg
     header_search_paths << "\"#{ffmpeg_device_headers}\""
     header_search_paths << "\"#{ffmpeg_simulator_headers}\""
@@ -206,6 +235,10 @@ Pod::Spec.new do |s|
   if has_libarchive
     library_search_paths_ios << "\"#{libarchive_device_slice}\""
     library_search_paths_sim << "\"#{libarchive_simulator_slice}\""
+  end
+  if has_libwebp
+    library_search_paths_ios << "\"#{libwebp_device_slice}\""
+    library_search_paths_sim << "\"#{libwebp_simulator_slice}\""
   end
 
   s.pod_target_xcconfig = {

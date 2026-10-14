@@ -3515,6 +3515,185 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  // ==================== Offline ImageBuffer ====================
+
+  private fun imageInfoToWritableMap(info: Map<String, Any>): com.facebook.react.bridge.WritableMap {
+    val m = Arguments.createMap()
+    m.putString("bufferId", info["bufferId"] as? String ?: "")
+    m.putString("kind", info["kind"] as? String ?: "offlineImageBuffer")
+    m.putString("state", info["state"] as? String ?: "immutable")
+    when (val fc = info["frameCount"]) {
+      is Number -> m.putInt("frameCount", fc.toInt())
+      else -> m.putInt("frameCount", 0)
+    }
+    when (val tb = info["totalBytes"]) {
+      is Number -> m.putDouble("totalBytes", tb.toDouble())
+      else -> m.putDouble("totalBytes", 0.0)
+    }
+    m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+    return m
+  }
+
+  private fun emitImageProgress(operationId: String?, done: Int, total: Int, phase: String) {
+    if (operationId.isNullOrEmpty()) return
+    try {
+      val event = Arguments.createMap()
+      event.putString("operationId", operationId)
+      event.putInt("done", done)
+      event.putInt("total", total)
+      event.putString("phase", phase)
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("SherpaOnnxImageProgress", event)
+    } catch (_: Exception) {
+    }
+  }
+
+  override fun createEmptyOfflineImageBuffer(promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val info = com.sherpaonnx.image.ImageBufferService.createEmpty()
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun createOfflineImageBufferFromFiles(
+    sources: ReadableArray,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      if (sources.size() == 0) {
+        promise.reject("ERR_IMAGE_INVALID_ARGUMENT", "sources required")
+        return
+      }
+      val blobs = ArrayList<ByteArray>()
+      for (i in 0 until sources.size()) {
+        val source = sources.getMap(i)
+          ?: throw RuntimeException("ERR_IMAGE_INVALID_ARGUMENT: source[$i] must be a FileSource map")
+        val handle = fileIOHelper.resolveSource(source)
+        try {
+          blobs.add(readImageSourceBytes(handle))
+        } finally {
+          try {
+            handle.close()
+          } catch (_: Exception) {
+          }
+        }
+      }
+      val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
+      val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
+      val info = com.sherpaonnx.image.ImageBufferService.createFromBytesList(
+        reactApplicationContext,
+        blobs,
+        maxSide,
+        operationId,
+        fileOrigin = true,
+      ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      val msg = e.message ?: "createFromFiles failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_DECODE_FAILED"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  private fun readImageSourceBytes(handle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle): ByteArray {
+    return when (handle) {
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
+        handle.file.readBytes()
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FileDescriptor ->
+        java.io.FileInputStream(handle.pfd.fileDescriptor).use { it.readBytes() }
+      is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.Stream ->
+        handle.inputStream.readBytes()
+    }
+  }
+
+  override fun createOfflineImageBufferFromBase64(
+    base64List: ReadableArray,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      val blobs = ArrayList<ByteArray>()
+      for (i in 0 until base64List.size()) {
+        val b64 = base64List.getString(i) ?: continue
+        blobs.add(Base64.decode(b64, Base64.DEFAULT))
+      }
+      val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
+      val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
+      val info = com.sherpaonnx.image.ImageBufferService.createFromBytesList(
+        reactApplicationContext,
+        blobs,
+        maxSide,
+        operationId,
+        fileOrigin = false,
+      ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      val msg = e.message ?: "createFromBase64 failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_DECODE_FAILED"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  override fun getOfflineImageBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val info = com.sherpaonnx.image.ImageBufferService.getInfo(bufferId)
+      if (info == null) {
+        promise.reject("ERR_IMAGE_BUFFER_NOT_FOUND", "Image buffer not found: $bufferId")
+        return
+      }
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun getOfflineImageBufferFrameInfo(bufferId: String, frameIndex: Double, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val info = com.sherpaonnx.image.ImageBufferService.getFrameInfo(bufferId, frameIndex.toInt())
+      if (info == null) {
+        promise.reject("ERR_IMAGE_BUFFER_NOT_FOUND", "Frame not found: $bufferId[$frameIndex]")
+        return
+      }
+      val m = Arguments.createMap()
+      m.putInt("index", (info["index"] as? Number)?.toInt() ?: frameIndex.toInt())
+      m.putInt("width", (info["width"] as? Number)?.toInt() ?: 0)
+      m.putInt("height", (info["height"] as? Number)?.toInt() ?: 0)
+      m.putDouble("byteSize", (info["byteSize"] as? Number)?.toDouble() ?: 0.0)
+      m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+      promise.resolve(m)
+    } catch (e: Exception) {
+      promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun releaseOfflineImageBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      com.sherpaonnx.image.ImageBufferService.release(bufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun cancelOfflineImageBufferCreate(operationId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.requestCancel(operationId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
   override fun getOfflineTextBufferTextSlice(bufferId: String, startUtf16: Double, maxUtf16: Double, promise: Promise) {
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
