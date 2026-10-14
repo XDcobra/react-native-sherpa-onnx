@@ -2,6 +2,8 @@
 
 This directory contains **full license texts** for libraries shipped with this module (e.g. sherpa-onnx, ONNX Runtime, FFmpeg). See the repository [README](../README.md#third-party-libraries) for links.
 
+OCR (PP-OCR spike / `PpocrBackend`) additionally attributes RapidOCR and PaddleOCR under Apache-2.0 — see [`rapidocr-paddleocr.txt`](rapidocr-paddleocr.txt).
+
 ## Prebuilt model release assets (per-model metadata)
 
 **Model-specific license status** (which release `.tar.bz2` / asset has which `license_type`, `commercial_use`, provenance URL, etc.) is **not** stored here.
