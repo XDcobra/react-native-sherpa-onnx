@@ -1,23 +1,24 @@
 name: Publish OCR model assets
 
 on:
-  workflow_dispatch:
-    inputs:
-      csv_path:
-        description: Path to sources CSV file
-        required: false
-        default: scripts/ocr-models/sources.csv
-        type: string
-      release_tag:
-        description: Release tag for assets
-        required: false
-        default: ocr-models
-        type: string
-      dry_run:
-        description: Build archives only and skip upload
-        required: false
-        default: false
-        type: boolean
+  push:
+  #workflow_dispatch:
+  #  inputs:
+  #    csv_path:
+  #      description: Path to sources CSV file
+  #      required: false
+  #      default: scripts/ocr-models/sources.csv
+  #      type: string
+  #    release_tag:
+  #      description: Release tag for assets
+  #      required: false
+  #      default: ocr-models
+  #      type: string
+  #    dry_run:
+  #      description: Build archives only and skip upload
+  #      required: false
+  #      default: false
+  #      type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
