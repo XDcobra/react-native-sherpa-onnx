@@ -39,9 +39,10 @@ Each generated archive contains exactly one model directory:
   LICENSE             # only if license column is non-empty
 ```
 
-v1 packs (`ppocrv6-small`, `ppocrv6-tiny`) are Apache-2.0 full packs (det + rec +
-shared textline orientation cls). Empty `languages` means multilingual PP-OCRv6
-coverage (zh / Latin / ja for small; tiny drops Japanese — see PaddleOCR docs).
+v1 packs (`ppocrv6-medium`, `ppocrv6-small`, `ppocrv6-tiny`) are Apache-2.0 full
+packs (det + rec + shared textline orientation cls). Empty `languages` means
+multilingual PP-OCRv6 coverage (zh / Latin / ja for medium/small; tiny drops
+Japanese — see PaddleOCR docs). Medium is the accuracy-oriented / flagship tier.
 
 v5 per-script recognizer packs are out of scope for this initial catalog.
 
