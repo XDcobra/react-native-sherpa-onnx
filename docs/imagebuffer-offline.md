@@ -6,7 +6,7 @@
 
 **Import path:** `react-native-sherpa-onnx/imagebuffer`
 
-Storage matches [OfflineAudioBuffer](audiobuffer-offline.md) parity: small buffers stay on the heap (`storageKind: 'ram'`); larger ones upgrade to per-frame mmap temp files (`storageKind: 'mmap'`).
+Storage follows the same RAM-vs-mmap model as [OfflineAudioBuffer](audiobuffer-offline.md): small buffers stay on the heap (`storageKind: 'ram'`); larger ones upgrade to per-frame mmap temp files (`storageKind: 'mmap'`).
 
 Live / streaming ImageBuffer is **not** implemented yet (types may be reserved).
 
@@ -98,7 +98,7 @@ await releaseOfflineImageBuffer(buf);
 
 ---
 
-## Storage (parity with OfflineAudioBuffer)
+## Storage
 
 | Concern | Behavior |
 | --- | --- |
