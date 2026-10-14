@@ -117,3 +117,35 @@ Useful flags:
 - `HUGGINGFACE_TOKEN` (optional) for Hugging Face downloads in CI
 
 Existing assets are never overwritten by this script. If an archive name already exists in the release, it is skipped.
+
+## Host GTests (CTC alignment golden)
+
+Real English forced-alignment is covered by `CtcAlignmentGolden` inside
+`ctc_alignment_host_test` (`test/cpp/alignment/`). CI:
+`.github/workflows/test-alignment-host.yml` (downloads `wav2vec2-base-960h-int8`
+from this release tag).
+
+Local:
+
+```bash
+mkdir -p build/alignment-models
+tar xjf dist/alignment-models/wav2vec2-base-960h-int8.tar.bz2 -C build/alignment-models
+# or curl from releases/download/alignment-models/wav2vec2-base-960h-int8.tar.bz2
+
+cmake -S test/cpp -B test/cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build test/cpp/build --target ctc_alignment_host_test
+ALIGNMENT_MODEL_DIR=$PWD/build/alignment-models/wav2vec2-base-960h-int8 \
+  ./test/cpp/build/ctc_alignment_host_test
+```
+
+Missing pack fails `CtcAlignmentGolden` with an unpack/download hint.
+Smoke/unit suites still run with `--gtest_filter=-CtcAlignmentGolden.*`.
+
+To regenerate `test/fixtures/alignment/expected/0-en.json` after an ORT or
+model bump:
+
+```bash
+ALIGNMENT_MODEL_DIR=$PWD/build/alignment-models/wav2vec2-base-960h-int8 \
+ALIGNMENT_DUMP_GOLDEN=$PWD/test/fixtures/alignment/expected/0-en.json \
+  ./test/cpp/build/ctc_alignment_host_test --gtest_filter=CtcAlignmentGolden.*
+```

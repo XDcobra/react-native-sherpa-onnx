@@ -103,3 +103,22 @@ Useful flags:
 
 Existing assets are never overwritten by this script. If an archive name already
 exists in the release, it is skipped.
+
+## Host GTests (PpocrBackend)
+
+OCR recognition is covered by `ppocr_host_test` under `test/cpp/ocr/` (not a
+manual CLI). CI workflow: `.github/workflows/test-ocr-host.yml` (downloads
+`ppocrv6-tiny` from this release tag).
+
+Local:
+
+```bash
+mkdir -p build/ocr-models
+tar xjf dist/ocr-models/ppocrv6-tiny.tar.bz2 -C build/ocr-models
+cmake -S test/cpp -B test/cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build test/cpp/build --target ppocr_host_test
+PPOCR_MODEL_DIR=$PWD/build/ocr-models/ppocrv6-tiny \
+  ctest --test-dir test/cpp/build -R ppocr_host_test --output-on-failure
+```
+
+Missing pack fails golden tests with an unpack/download hint (unit tests still run).

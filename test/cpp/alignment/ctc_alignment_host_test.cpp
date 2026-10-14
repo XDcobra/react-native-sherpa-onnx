@@ -1,19 +1,11 @@
 /**
- * Host-side tests for CTC alignment core + ONNX Runtime smoke (Linux/macOS CI).
+ * Host-side tests for CTC alignment core + ONNX Runtime (Linux/macOS CI).
  * Fixtures under test/fixtures/alignment/ (or TEST_FIXTURES_DIR).
  *
- * What these tests do (regression / integration smoke, not phonetic ground truth):
- *
- * - OrtSmoke: Loads a tiny ReLU ONNX graph and checks one inference ([-1,2] -> [0,2]).
- *   Ensures the pinned ONNX Runtime host library loads, opens a model, and runs on CPU.
- *
- * - WavFixture: Loads 0-en.wav via the minimal WAV reader (16-bit mono PCM -> float).
- *   Ensures fixture paths and basic audio I/O work for alignment-related fixtures.
- *
- * - CtcAlignmentCore: Calls RunCtcAlignmentFromFloatPcm with tiny_ctc_linear.onnx and
- *   tiny_vocab.json on synthetic PCM. Ensures the production alignment pipeline returns
- *   non-empty words/chars with sane time bounds. Does not validate real STT quality or
- *   alignment accuracy against reference timestamps.
+ * - OrtSmoke / WavFixture / CtcAlignmentCore (tiny stub) / VocabProfile: no real pack.
+ * - CtcAlignmentGolden: real wav2vec2-base-960h-int8 E2E on 0-en.wav (ALIGNMENT_MODEL_DIR).
+ *   Missing pack → hard FAIL with unpack hint. Audio-host CI filters this suite out;
+ *   test-alignment-host.yml downloads the pack and runs the full binary.
  */
 
 #include <gtest/gtest.h>
@@ -23,10 +15,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 #include "onnxruntime/core/session/onnxruntime_c_api.h"
 #include "sherpa_onnx_ctc_alignment.hpp"
@@ -397,6 +394,184 @@ TEST(VocabProfile, DefaultBakedEnglishUppercase) {
     for (char c : d) {
       EXPECT_TRUE(c < 'a' || c > 'z') << d;
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Real EN golden (wav2vec2-base-960h-int8)
+// ---------------------------------------------------------------------------
+
+std::string ResolveAlignmentModelDir() {
+  if (const char* env = std::getenv("ALIGNMENT_MODEL_DIR")) {
+    if (env[0] != '\0' && fs::is_directory(env)) {
+      return env;
+    }
+  }
+  const char* candidates[] = {
+      "build/alignment-models/wav2vec2-base-960h-int8",
+      "dist/alignment-models/wav2vec2-base-960h-int8",
+  };
+  for (const char* c : candidates) {
+    if (fs::is_directory(c)) {
+      return c;
+    }
+  }
+  return {};
+}
+
+bool AlignmentPackLooksValid(const std::string& dir) {
+  return fs::exists(dir + "/model.onnx");
+}
+
+std::string NormAlignText(std::string s) {
+  static const std::regex ws(R"(\s+)");
+  s = std::regex_replace(s, ws, "");
+  return s;
+}
+
+std::string TrimCopy(std::string s) {
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) {
+    s.pop_back();
+  }
+  size_t i = 0;
+  while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r')) {
+    ++i;
+  }
+  return s.substr(i);
+}
+
+/** Minimal parser for {"words":[{"text":"...","start_s":1.2,"end_s":1.4},...]} */
+struct GoldenWord {
+  std::string text;
+  double start_s = 0.0;
+  double end_s = 0.0;
+};
+
+std::vector<GoldenWord> ParseGoldenWords(const std::string& json) {
+  std::vector<GoldenWord> out;
+  size_t pos = 0;
+  while (true) {
+    const size_t tkey = json.find("\"text\"", pos);
+    if (tkey == std::string::npos) {
+      break;
+    }
+    const size_t q0 = json.find('"', json.find(':', tkey) + 1);
+    if (q0 == std::string::npos) {
+      break;
+    }
+    size_t q1 = q0 + 1;
+    while (q1 < json.size() && json[q1] != '"') {
+      if (json[q1] == '\\') {
+        q1 += 2;
+      } else {
+        ++q1;
+      }
+    }
+    GoldenWord w;
+    w.text = json.substr(q0 + 1, q1 - q0 - 1);
+
+    const size_t skey = json.find("\"start_s\"", q1);
+    const size_t ekey = json.find("\"end_s\"", q1);
+    if (skey == std::string::npos || ekey == std::string::npos) {
+      break;
+    }
+    w.start_s = std::stod(json.substr(json.find(':', skey) + 1));
+    w.end_s = std::stod(json.substr(json.find(':', ekey) + 1));
+    out.push_back(w);
+    pos = ekey + 1;
+  }
+  return out;
+}
+
+std::string FormatGoldenJson(
+    const sherpa_onnx::ctc_alignment::CtcAlignmentResult& result) {
+  std::ostringstream o;
+  o << std::setprecision(6) << std::fixed;
+  o << "{\"words\":[";
+  for (size_t i = 0; i < result.words.size(); ++i) {
+    if (i) {
+      o << ',';
+    }
+    const auto& w = result.words[i];
+    o << "{\"text\":\"" << w.text << "\",\"start_s\":" << w.start_s
+      << ",\"end_s\":" << w.end_s << '}';
+  }
+  o << "]}";
+  return o.str();
+}
+
+TEST(CtcAlignmentGolden, ZeroEnMatchesExpectedWords) {
+  using namespace sherpa_onnx::ctc_alignment;
+
+  const std::string model_dir = ResolveAlignmentModelDir();
+  if (model_dir.empty() || !AlignmentPackLooksValid(model_dir)) {
+    FAIL() << "wav2vec2-base-960h-int8 pack not found. Set ALIGNMENT_MODEL_DIR or unpack:\n"
+              "  tar xjf dist/alignment-models/wav2vec2-base-960h-int8.tar.bz2 "
+              "-C build/alignment-models\n"
+              "  # or download:\n"
+              "  curl -fsSL -o /tmp/wav2vec2-base-960h-int8.tar.bz2 \\\n"
+              "    https://github.com/XDcobra/react-native-sherpa-onnx/releases/"
+              "download/alignment-models/wav2vec2-base-960h-int8.tar.bz2\n"
+              "  mkdir -p build/alignment-models && "
+              "tar xjf /tmp/wav2vec2-base-960h-int8.tar.bz2 -C build/alignment-models";
+  }
+
+  const std::string model_path = model_dir + "/model.onnx";
+  const std::string wav_path = RepoRelativeFixture("alignment/0-en.wav");
+  const std::string text_path = RepoRelativeFixture("alignment/0-en.txt");
+  const std::string expected_path = RepoRelativeFixture("alignment/expected/0-en.json");
+
+  const std::string transcript = TrimCopy(ReadWholeFile(text_path));
+  ASSERT_FALSE(transcript.empty());
+
+  std::vector<float> samples;
+  int32_t rate = 0;
+  ASSERT_TRUE(ReadWavPcmMonoFloat(wav_path, &samples, &rate)) << wav_path;
+  ASSERT_GT(samples.size(), 0u);
+  ASSERT_GT(rate, 0);
+  const double duration_s =
+      static_cast<double>(samples.size()) / static_cast<double>(rate);
+
+  CtcAlignmentResult result = RunCtcAlignmentFromFloatPcm(
+      model_path, transcript, /*vocab_json_utf8=*/"", samples.data(), samples.size(), rate);
+
+  ASSERT_FALSE(result.words.empty());
+  for (size_t i = 0; i < result.words.size(); ++i) {
+    EXPECT_GE(result.words[i].start_s, 0.0);
+    EXPECT_GE(result.words[i].end_s, result.words[i].start_s);
+    EXPECT_LE(result.words[i].end_s, duration_s + 0.05);
+    if (i + 1 < result.words.size()) {
+      EXPECT_LE(result.words[i].start_s, result.words[i + 1].start_s + 1e-6);
+    }
+  }
+
+  std::string joined;
+  for (size_t i = 0; i < result.words.size(); ++i) {
+    if (i) {
+      joined.push_back(' ');
+    }
+    joined += result.words[i].text;
+  }
+  EXPECT_EQ(NormAlignText(joined), NormAlignText(transcript));
+
+  if (const char* dump = std::getenv("ALIGNMENT_DUMP_GOLDEN")) {
+    if (dump[0] != '\0') {
+      std::ofstream out(dump);
+      ASSERT_TRUE(out) << "cannot write " << dump;
+      out << FormatGoldenJson(result) << '\n';
+      // Bootstrap mode: write golden and stop before comparing to expected file.
+      return;
+    }
+  }
+
+  const std::string expected_json = ReadWholeFile(expected_path);
+  const auto expected = ParseGoldenWords(expected_json);
+  ASSERT_EQ(result.words.size(), expected.size());
+  constexpr double kTolS = 0.05;
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(result.words[i].text, expected[i].text) << "word index " << i;
+    EXPECT_NEAR(result.words[i].start_s, expected[i].start_s, kTolS) << "word " << i;
+    EXPECT_NEAR(result.words[i].end_s, expected[i].end_s, kTolS) << "word " << i;
   }
 }
 
