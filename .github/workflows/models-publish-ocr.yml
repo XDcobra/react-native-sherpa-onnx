@@ -1,24 +1,28 @@
 name: Publish OCR model assets
 
 on:
+  # Temporary: keep a path-filtered push so GitHub re-indexes this workflow
+  # while it only exists on a feature branch. Remove after the file is on main.
   push:
-  #workflow_dispatch:
-  #  inputs:
-  #    csv_path:
-  #      description: Path to sources CSV file
-  #      required: false
-  #      default: scripts/ocr-models/sources.csv
-  #      type: string
-  #    release_tag:
-  #      description: Release tag for assets
-  #      required: false
-  #      default: ocr-models
-  #      type: string
-  #    dry_run:
-  #      description: Build archives only and skip upload
-  #      required: false
-  #      default: false
-  #      type: boolean
+    paths:
+      - '.github/workflows/models-publish-ocr.yml'
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: Path to sources CSV file
+        required: false
+        default: scripts/ocr-models/sources.csv
+        type: string
+      release_tag:
+        description: Release tag for assets
+        required: false
+        default: ocr-models
+        type: string
+      dry_run:
+        description: Build archives only and skip upload
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -68,7 +72,7 @@ jobs:
           node scripts/ocr-models/build_and_upload.js "${args[@]}"
 
       - name: Sync OCR model license status CSVs
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run != true }}
         run: |
           set -euo pipefail
           CSV_PATH="${{ inputs.csv_path }}"
@@ -76,7 +80,7 @@ jobs:
           node scripts/ocr-models/sync_ocr_license_status.js "$CSV_PATH"
 
       - name: Commit license status updates
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run != true }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
