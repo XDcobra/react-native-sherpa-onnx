@@ -59,6 +59,8 @@ android {
   def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, libarchive is not linked; extractTarBz2/cancelExtractTarBz2 will fail at runtime. See docs/disable-libarchive.md.
   def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
+  // When true, libwebp is not linked; WebP decode fails at runtime with ERR_IMAGE_FORMAT_UNSUPPORTED.
+  def sherpaOnnxDisableLibwebp = (project.findProperty("sherpaOnnxDisableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
 
   defaultConfig {
     minSdkVersion = getExtOrDefault("minSdkVersion")
@@ -75,6 +77,7 @@ android {
         def cmakeArgList = ["-DANDROID_STL=c++_shared"]
         if (sherpaOnnxDisableFfmpeg) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_FFMPEG=ON")
         if (sherpaOnnxDisableLibarchive) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBARCHIVE=ON")
+        if (sherpaOnnxDisableLibwebp) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBWEBP=ON")
         arguments(*cmakeArgList)
       }
     }
@@ -162,7 +165,7 @@ repositories {
 
 // Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
 // extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
-configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; onnxruntimeAar }
+configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; libwebpAar; onnxruntimeAar }
 
 // Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
 apply from: file("${project.projectDir}/prebuilt-download.gradle")
@@ -179,6 +182,7 @@ dependencies {
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
+  libwebpAar "com.xdcobra.sherpa:libwebp:${libwebpVersion}@aar"
   onnxruntimeAar "com.xdcobra.sherpa:onnxruntime:${ortVersion}@aar"
 
   // sherpa-onnx Java API: extractSherpaOnnxClasses (in prebuilt-download.gradle) fills sherpaOnnxClassesDir.

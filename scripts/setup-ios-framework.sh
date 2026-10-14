@@ -103,6 +103,12 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
+if [ "${SHERPA_ONNX_DISABLE_LIBWEBP:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_LIBWEBP:-false}" != "true" ]; then
+  FRAMEWORK_SLUGS+=(libwebp)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBWEBP is set. Skipping libwebp framework download.${NC}" >&2
+fi
+
 if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
   FRAMEWORK_SLUGS+=(ffmpeg)
 else
@@ -145,6 +151,17 @@ get_framework_config() {
       LIB_SIMULATOR="libarchive.a"
       HEADER_CHECK="Headers/archive.h"
       DISPLAY_NAME="libarchive"
+      ;;
+    libwebp)
+      TAG_FILE="$PROJECT_ROOT/third_party/libwebp_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libwebp-ios-v"
+      XCFRAMEWORK_NAME="libwebp.xcframework"
+      ZIP_ASSET_NAME="libwebp-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libwebp"
+      LIB_DEVICE="libwebp.a"
+      LIB_SIMULATOR="libwebp.a"
+      HEADER_CHECK="Headers/webp/decode.h"
+      DISPLAY_NAME="libwebp"
       ;;
     *)
       echo "Unknown framework: $slug" >&2

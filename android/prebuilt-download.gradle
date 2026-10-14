@@ -1,6 +1,6 @@
 // Prebuilt download and check logic. Applied after android {} and configurations.
-// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, ortVersion (from prebuilt-versions.gradle)
-// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, onnxruntimeAar (from build.gradle).
+// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, libwebpVersion, ortVersion (from prebuilt-versions.gradle)
+// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, libwebpAar, onnxruntimeAar (from build.gradle).
 //
 // Resolution order per artifact (see docs/PREBUILT_RESOLUTION.md):
 //   (1) THIRD_PARTY    — prebuilt files under third_party/<bundle>/android/ (no network)
@@ -10,9 +10,11 @@
 //   (5) ERROR           — build failure if artifact still missing
 // When sherpaOnnxDisableFfmpeg=true (gradle.properties), FFmpeg is not required; see docs/disable-ffmpeg.md.
 // When sherpaOnnxDisableLibarchive=true (gradle.properties), libarchive is not required; see docs/disable-libarchive.md.
+// When sherpaOnnxDisableLibwebp=true (gradle.properties), libwebp is not required (ImageBuffer WebP decode disabled).
 
 def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
 def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
+def sherpaOnnxDisableLibwebp = (project.findProperty("sherpaOnnxDisableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
 
 def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def requiredFfmpegSoFiles = [
@@ -22,6 +24,7 @@ def requiredSherpaOnnxSoFiles = [
   'libsherpa-onnx-jni.so', 'libsherpa-onnx-c-api.so', 'libsherpa-onnx-cxx-api.so'
 ]
 def requiredLibarchiveSoFiles = ['libarchive.so', 'libzstd.so']
+def requiredLibwebpSoFiles = ['libwebp.so', 'libsharpyuv.so']
 def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
 /** Both from the same onnxruntime release (AAR or third_party); required for Java ORT + symbol consistency. */
 def requiredOnnxruntimeBundleSoFiles = ['libonnxruntime4j_jni.so', 'libonnxruntime.so']
@@ -35,6 +38,7 @@ def thirdPartySherpaDir = new File(thirdPartyDir, "sherpa-onnx-prebuilt/android"
 def thirdPartyFfmpegDir = new File(thirdPartyDir, "ffmpeg_prebuilt/android")
 def thirdPartyShineDir = new File(thirdPartyDir, "shine_prebuilt/android")
 def thirdPartyLibarchiveDir = new File(thirdPartyDir, "libarchive_prebuilt/android")
+def thirdPartyLibwebpDir = new File(thirdPartyDir, "libwebp_prebuilt/android")
 def thirdPartyOrtDir = new File(thirdPartyDir, "onnxruntime_prebuilt/android")
 
 def hasAllFfmpegLibs = {
@@ -80,6 +84,42 @@ def hasFfmpegHeaders = {
 
 def hasLibarchiveHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/libarchive/archive.h").exists()
+}
+
+def hasAllLibwebpLibs = {
+  for (abi in requiredAbis) {
+    def dir = new File(jniLibsDir, abi)
+    if (!dir.exists()) return false
+    for (soName in requiredLibwebpSoFiles) {
+      if (!new File(dir, soName).exists()) return false
+    }
+  }
+  return true
+}
+
+def hasLibwebpHeaders = {
+  return new File(project.projectDir, "src/main/cpp/include/webp/webp/decode.h").exists() ||
+      new File(project.projectDir, "src/main/cpp/include/webp/decode.h").exists()
+}
+
+/** Resolve libwebp .so dir for one ABI: jni/<abi>/ (release layout) or <abi>/lib/ (build script output). */
+def libwebpThirdPartySoDirForAbi = { File webpBase, String abi ->
+  def jniDir = new File(webpBase, "jni/${abi}")
+  if (jniDir.exists()) return jniDir
+  def abiLibDir = new File(webpBase, "${abi}/lib")
+  if (abiLibDir.exists()) return abiLibDir
+  return null
+}
+
+def hasLibwebpThirdPartyLibs = {
+  for (abi in requiredAbis) {
+    def soDir = libwebpThirdPartySoDirForAbi(thirdPartyLibwebpDir, abi)
+    if (!soDir) return false
+    for (soName in requiredLibwebpSoFiles) {
+      if (!new File(soDir, soName).exists()) return false
+    }
+  }
+  return true
 }
 
 def hasOnnxruntimeHeaders = {
@@ -219,11 +259,19 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def libarchiveHdrsOk = hasLibarchiveHeaders()
     def libarchiveNeedsUpdate = !libarchiveLibsOk || !libarchiveHdrsOk || storedLibarchiveVersion == null || storedLibarchiveVersion != currentLibarchiveVersion
 
+    def currentLibwebpVersion = project.ext.libwebpVersion
+    def libwebpVersionFile = new File(downloadDir, "libwebp-version.txt")
+    def storedLibwebpVersion = (libwebpVersionFile.exists() ? libwebpVersionFile.text.trim() : null)
+    def libwebpLibsOk = hasAllLibwebpLibs()
+    def libwebpHdrsOk = hasLibwebpHeaders()
+    def libwebpNeedsUpdate = !libwebpLibsOk || !libwebpHdrsOk || storedLibwebpVersion == null || storedLibwebpVersion != currentLibwebpVersion
+
     println "[prebuilt] THIRD_PARTY → LOCAL_SDK → MAVEN_AAR → GITHUB_RELEASE"
 
     def sherpaResolved = false
     def ffmpegResolved = false
     def libarchiveResolved = false
+    def libwebpResolved = false
 
     // =====================================================================
     // sherpa-onnx: JNI (.so) + C headers
@@ -422,6 +470,75 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
+    // libwebp: JNI (.so) + C headers (ImageBuffer WebP decode)
+    // =====================================================================
+    if (sherpaOnnxDisableLibwebp) {
+      libwebpResolved = true
+      logPrebuilt("libwebp", "skipped", "disabled", "sherpaOnnxDisableLibwebp=true")
+    } else if (libwebpNeedsUpdate) {
+      // Stage 1: THIRD_PARTY (jni/<abi>/ or <abi>/lib/)
+      def tpHdr = new File(thirdPartyLibwebpDir, "include/webp/decode.h").exists()
+      if (hasLibwebpThirdPartyLibs() && tpHdr) {
+        requiredAbis.each { abi ->
+          def soDir = libwebpThirdPartySoDirForAbi(thirdPartyLibwebpDir, abi)
+          if (soDir) {
+            copy { from soDir; into new File(jniLibsDir, abi); include '*.so' }
+          }
+        }
+        def libwebpIncludeDir = file("${project.projectDir}/src/main/cpp/include/webp")
+        libwebpIncludeDir.mkdirs()
+        copy { from new File(thirdPartyLibwebpDir, "include"); into libwebpIncludeDir }
+        downloadDir.mkdirs()
+        libwebpVersionFile.text = currentLibwebpVersion
+        libwebpResolved = true
+        logPrebuilt("libwebp", "native", "THIRD_PARTY", currentLibwebpVersion)
+      }
+
+      // Stage 3: MAVEN_AAR
+      if (!libwebpResolved) {
+        try {
+          def aarFiles = project.configurations.libwebpAar.files
+          if (!aarFiles.isEmpty()) {
+            downloadDir.mkdirs()
+            def aar = aarFiles.iterator().next()
+            def aarExtractDir = new File(downloadDir, "libwebp-aar-extract")
+            if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+            aarExtractDir.mkdirs()
+            copy { from zipTree(aar); into aarExtractDir }
+            requiredAbis.each { abi ->
+              def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+              if (aarJniDir.exists()) {
+                copy { from aarJniDir; into new File(jniLibsDir, abi) }
+              }
+            }
+            def libwebpIncludeDir = file("${project.projectDir}/src/main/cpp/include/webp")
+            def aarIncludeDir = new File(aarExtractDir, "include")
+            def copiedHdr = false
+            if (aarIncludeDir.exists()) {
+              libwebpIncludeDir.mkdirs()
+              copy { from aarIncludeDir; into libwebpIncludeDir }
+              copiedHdr = true
+            }
+            downloadDir.mkdirs()
+            libwebpVersionFile.text = currentLibwebpVersion
+            libwebpResolved = true
+            logPrebuilt("libwebp", "native", "MAVEN_AAR", aar.name)
+            if (!copiedHdr) {
+              logPrebuilt("libwebp", "headers", "unchanged", "no include/ in AAR")
+            }
+          } else {
+            println "[libwebp] MAVEN_AAR: libwebpAar empty --> trying GITHUB_RELEASE"
+          }
+        } catch (Exception e) {
+          println "[libwebp] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
+        }
+      }
+    } else {
+      libwebpResolved = true
+      logPrebuilt("libwebp", "native", "LOCAL_SDK", currentLibwebpVersion)
+    }
+
+    // =====================================================================
     // onnxruntime: libonnxruntime.so + libonnxruntime4j_jni.so (same ORT build)
     //
     // Java OrtEnvironment loads libonnxruntime4j_jni.so, which dlopen's libonnxruntime.so.
@@ -568,31 +685,35 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
-    // Stage 4: GITHUB_RELEASE fallback for sherpa / FFmpeg / libarchive
+    // Stage 4: GITHUB_RELEASE fallback for sherpa / FFmpeg / libarchive / libwebp
     // =====================================================================
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && !ffmpegResolved
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
+      def needLibwebp = !sherpaOnnxDisableLibwebp && !libwebpResolved
       def needSherpa = !sherpaResolved
-      if (needFfmpeg || needLibarchive || needSherpa) {
+      if (needFfmpeg || needLibarchive || needLibwebp || needSherpa) {
         println "[prebuilt] GITHUB_RELEASE: skipped (no repo). Set -PprebuiltGitHubRepo=owner/repo or git remote origin --> github.com"
-        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}"
+        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}, libwebp=${needLibwebp}"
         def diag = [
           "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
           "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
           "sherpaOnnxDisableFfmpeg=${sherpaOnnxDisableFfmpeg}",
           "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
+          "sherpaOnnxDisableLibwebp=${sherpaOnnxDisableLibwebp}",
           "sherpaResolved=${sherpaResolved}",
           "ffmpegResolved=${ffmpegResolved}",
           "libarchiveResolved=${libarchiveResolved}",
+          "libwebpResolved=${libwebpResolved}",
         ].join(", ")
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. " +
           "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
+          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / libwebp), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
+          (sherpaOnnxDisableLibwebp ? "(libwebp disabled via sherpaOnnxDisableLibwebp=true.) " : "") +
           "Diagnostics: [${diag}]"
         )
       }
@@ -600,7 +721,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
     def willUseGithub = !sherpaResolved ||
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
-        (!sherpaOnnxDisableLibarchive && !libarchiveResolved)
+        (!sherpaOnnxDisableLibarchive && !libarchiveResolved) ||
+        (!sherpaOnnxDisableLibwebp && !libwebpResolved)
     if (willUseGithub) {
       println "[prebuilt] GITHUB_RELEASE repo=${repo}"
     }
@@ -668,6 +790,40 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       downloadDir.mkdirs()
       libarchiveVersionFile.text = currentLibarchiveVersion
       logPrebuilt("libarchive", "native", "GITHUB_RELEASE", tag)
+    }
+
+    if (!sherpaOnnxDisableLibwebp && !libwebpResolved) {
+      def tagFile = file("${project.projectDir.parent}/third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG")
+      def tag = readReleaseTag(tagFile)
+      if (!tag) throw new RuntimeException("Missing or empty third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG")
+      def zipFile = new File(downloadDir, "libwebp-android.zip")
+      def url = "${baseUrl}/${tag}/libwebp-android.zip"
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+      def zipMagicWebp = new byte[2]
+      zipFile.withInputStream { it.read(zipMagicWebp) }
+      if (zipMagicWebp[0] != (byte) 0x50 || zipMagicWebp[1] != (byte) 0x4B) {
+        zipFile.delete()
+        throw new RuntimeException(
+            "Download is not a ZIP (got ${zipFile.length()} bytes). Release asset missing? ${url} — publish via build-libwebp-android-release workflow or use THIRD_PARTY under third_party/libwebp_prebuilt/android.")
+      }
+      def libwebpExtractDir = new File(downloadDir, "libwebp-extract")
+      if (libwebpExtractDir.exists()) libwebpExtractDir.deleteDir()
+      libwebpExtractDir.mkdirs()
+      copy { from zipTree(zipFile); into libwebpExtractDir }
+      copy {
+        from fileTree(libwebpExtractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
+        into jniLibsDir
+      }
+      def libwebpIncludeDir = file("${project.projectDir}/src/main/cpp/include/webp")
+      def libwebpIncludeInZip = new File(libwebpExtractDir, "include")
+      if (libwebpIncludeInZip.exists()) {
+        libwebpIncludeDir.mkdirs()
+        copy { from libwebpIncludeInZip; into libwebpIncludeDir }
+      }
+      downloadDir.mkdirs()
+      libwebpVersionFile.text = currentLibwebpVersion
+      logPrebuilt("libwebp", "native", "GITHUB_RELEASE", tag)
     }
 
     if (!sherpaResolved) {
@@ -738,6 +894,14 @@ project.tasks.register("checkJniLibs") {
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
             throw new RuntimeException("Missing required libarchive library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libarchive resolves. Or set sherpaOnnxDisableLibarchive=true in gradle.properties (see docs/disable-libarchive.md).")
+          }
+        }
+      }
+      if (!sherpaOnnxDisableLibwebp) {
+        requiredLibwebpSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required libwebp library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libwebp resolves. Or set sherpaOnnxDisableLibwebp=true in gradle.properties.")
           }
         }
       }

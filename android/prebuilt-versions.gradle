@@ -50,6 +50,15 @@ if (!libarchiveVersion) {
 project.ext.libarchiveVersion = libarchiveVersion
 println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libarchiveVersion}"
 
+// libwebp: 1. LIBWEBP_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def libwebpVersion = System.getenv('LIBWEBP_VERSION')
+if (!libwebpVersion) {
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG'), 'libwebp-android-v')
+  libwebpVersion = v ?: (project.hasProperty('libwebpVersion') ? project.libwebpVersion : '1.5.0')
+}
+project.ext.libwebpVersion = libwebpVersion
+println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpVersion}"
+
 // onnxruntime (ORT Java bridge): 1. ORT_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def ortVersion = System.getenv('ORT_VERSION')
 if (!ortVersion) {
