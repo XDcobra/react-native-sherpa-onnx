@@ -54,7 +54,7 @@ println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libar
 def libwebpVersion = System.getenv('LIBWEBP_VERSION')
 if (!libwebpVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG'), 'libwebp-android-v')
-  libwebpVersion = v ?: (project.hasProperty('libwebpVersion') ? project.libwebpVersion : '1.5.0')
+  libwebpVersion = v ?: (project.hasProperty('libwebpVersion') ? project.libwebpVersion : '1.6.0')
 }
 project.ext.libwebpVersion = libwebpVersion
 println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpVersion}"
