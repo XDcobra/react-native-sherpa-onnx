@@ -57,4 +57,5 @@ jobs:
 
       - name: Run CTest (audio, model_detect, CTC alignment host)
         working-directory: ${{ github.workspace }}
-        run: cd test/cpp/build && ctest --output-on-failure
+        # OCR golden needs ppocrv6-tiny — covered by test-ocr-host.yml
+        run: cd test/cpp/build && ctest --output-on-failure -E ppocr_host_test

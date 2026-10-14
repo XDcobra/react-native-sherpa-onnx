@@ -1,0 +1,73 @@
+# Host OCR tests: unit (CTC/DB/factory) + real PpocrBackend golden with ppocrv6-tiny.
+# Pack is downloaded from the ocr-models release (not committed to git).
+
+name: Test – OCR host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/ocr/**'
+      - 'test/cpp/ocr/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/ocr/**'
+      - '.github/workflows/test-ocr-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/ocr/**'
+      - 'test/cpp/ocr/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/ocr/**'
+      - '.github/workflows/test-ocr-host.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-ocr-host
+  cancel-in-progress: true
+
+jobs:
+  ocr-host:
+    name: OCR PpocrBackend host tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Cache ppocrv6-tiny pack
+        id: cache-ocr-tiny
+        uses: actions/cache@v4
+        with:
+          path: build/ocr-models/ppocrv6-tiny
+          key: ocr-models-ppocrv6-tiny-v1
+
+      - name: Download and extract ppocrv6-tiny
+        if: steps.cache-ocr-tiny.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/ocr-models dist/ocr-models
+          curl -fsSL -o dist/ocr-models/ppocrv6-tiny.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/ppocrv6-tiny.tar.bz2"
+          tar xjf dist/ocr-models/ppocrv6-tiny.tar.bz2 -C build/ocr-models
+          test -f build/ocr-models/ppocrv6-tiny/det.onnx
+          test -f build/ocr-models/ppocrv6-tiny/rec.onnx
+          test -f build/ocr-models/ppocrv6-tiny/rec_inference.yml
+
+      - name: Configure and build ppocr_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target ppocr_host_test
+
+      - name: Run OCR host tests
+        working-directory: ${{ github.workspace }}
+        env:
+          PPOCR_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/ppocrv6-tiny
+        run: |
+          ctest --test-dir test/cpp/build -R ppocr_host_test --output-on-failure
