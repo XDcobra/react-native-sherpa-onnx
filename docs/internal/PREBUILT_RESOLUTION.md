@@ -12,7 +12,7 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 | **4** | `GITHUB_RELEASE` | `curl` from `https://github.com/<repo>/releases/download/<tag>/<asset>.zip`. The tag is read from `third_party/*/ANDROID_RELEASE_TAG`. |
 | **5** | `ERROR` | `RuntimeException` / failed build when a required artifact is still missing after all applicable stages. |
 
-**Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md).
+**Optional skips:** FFmpeg, libarchive, and libwebp are skipped entirely when `sherpaOnnxDisableFfmpeg`, `sherpaOnnxDisableLibarchive`, or `sherpaOnnxDisableLibwebp` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md). Libwebp disable has no separate doc yet — property only (WebP decode returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
 
 ## Artifact matrix
 
@@ -40,7 +40,7 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 
 | Task | Responsibility |
 |------|---------------|
-| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all four packages. Runs stages 1-->2-->3-->4 per package. |
+| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all packages (sherpa-onnx, FFmpeg, libarchive, libwebp, ORT as applicable). Runs stages 1-->2-->3-->4 per package. |
 | `checkJniLibs` | Hard-fails if any required `.so` is missing after `downloadNativeLibsIfNeeded`. Depends on it. |
 | `extractSherpaOnnxClasses` | Sherpa `classes.jar` into `build/sherpa-onnx-classes`. Resolution: THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT. |
 | `extractOnnxruntimeClasses` | ORT `classes.jar` into `build/onnxruntime-classes`. Currently Maven only. |

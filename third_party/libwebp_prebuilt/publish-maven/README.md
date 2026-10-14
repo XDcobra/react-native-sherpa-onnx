@@ -1,6 +1,6 @@
 # Maven publish helper for libwebp Android AAR
 
-Used by **`.github/workflows/build-libwebp-android-release.yml`** to publish the built libwebp AAR to GitHub Pages Maven (XDcobra/maven) as `com.xdcobra.sherpa:libwebp:<version>`.
+Used by **`.github/workflows/build-libwebp-android-release.yml`** to publish the built libwebp AAR to GitHub Pages Maven ([XDcobra/maven](https://github.com/XDcobra/maven) → https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:libwebp:<version>` (current: **1.6.0**).
 
 **AAR contents:** `jni/arm64-v8a/`, `jni/armeabi-v7a/`, `jni/x86/`, `jni/x86_64/` (`libwebp.so`, `libsharpyuv.so`) and `include/` (headers).
 

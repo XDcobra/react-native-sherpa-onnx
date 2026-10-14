@@ -24,7 +24,7 @@ Live / streaming ImageBuffer is **not** implemented yet (types may be reserved).
 | Format | Decoder |
 | --- | --- |
 | JPEG / PNG / BMP / GIF | C++ `stb_image` |
-| WebP | C++ **libwebp** (prebuilt; see `third_party/libwebp_prebuilt`) |
+| WebP | C++ **libwebp** (prebuilt; Maven `com.xdcobra.sherpa:libwebp`, see `third_party/libwebp_prebuilt`) |
 | HEIC / HEIF | Platform only (iOS ImageIO, Android `ImageDecoder` API 28+) |
 
 EXIF orientation is applied for JPEG in C++. HEIC orientation comes from the platform decoder. Optional **`maxSide`** downscales the longest edge (default **4096**; `<= 0` disables).
