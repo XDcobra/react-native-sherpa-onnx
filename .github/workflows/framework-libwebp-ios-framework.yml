@@ -9,6 +9,7 @@ name: Framework - libwebp (iOS) Release
 
 on:
   workflow_dispatch:
+  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
