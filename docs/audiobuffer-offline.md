@@ -319,6 +319,28 @@ Android unit tests cover the buffer rate matrix with committed mono WAV fixtures
 
 Assertions check output sample rate, sample count (exact `Resampler` length formula), and duration. **Not** covered here: FFmpeg file decode / ingest, or real microphone capture (those need instrumented / device tests).
 
+## JS Events
+
+Create-time callbacks on `createOfflineAudioBufferFromFile` only (not `FromSamples` / empty / from-live / from-offline).
+
+| Callback / control | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `DecodeProgressEvent` | during file decode | `percent`, frame estimates, source rate/channels |
+| `signal` | `AbortSignal` | caller aborts | rejects with `DECODE_CANCELLED` |
+
+```ts
+const controller = new AbortController();
+const offline = await createOfflineAudioBufferFromFile(
+  { kind: 'fs', path: '/tmp/input.flac' },
+  {
+    targetSampleRateHz: 16000,
+    onProgress: (e) => console.log(e.percent, e.framesDecoded),
+    signal: controller.signal,
+  }
+);
+// controller.abort();
+```
+
 ## Types and constants
 
 ```ts
