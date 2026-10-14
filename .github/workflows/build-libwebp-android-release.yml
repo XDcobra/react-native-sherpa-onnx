@@ -128,11 +128,24 @@ jobs:
           name: libwebp Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt libwebp for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
-            - **libwebp-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libwebp.so`, `libsharpyuv.so`) and `include/` (headers).
+            ## Archive Structure
+            Prebuilt **libwebp** for Android (arm64-v8a, armeabi-v7a, x86, x86_64), including `libsharpyuv`. Used by Offline ImageBuffer WebP decode in `react-native-sherpa-onnx`.
+            - **libwebp-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libwebp.so`, `libsharpyuv.so`) and `include/` (C headers under `webp/`).
             - **libwebp-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:libwebp`.
 
-            **Maven:** The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:libwebp` when MAVEN_REPO_PAT is set.
+            ## Maven
+            The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:libwebp` when `MAVEN_REPO_PAT` is set.
+
+            ```gradle
+            repositories {
+                maven { url 'https://xdcobra.github.io/maven/' }
+            }
+            dependencies {
+                implementation 'com.xdcobra.sherpa:libwebp:${{ steps.tag.outputs.maven_version }}'
+            }
+            ```
+
+            Optional: disable linking with Gradle property `sherpaOnnxDisableLibwebp=true` (WebP decode then returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
           files: |
             libwebp-android.zip
             libwebp-${{ steps.tag.outputs.maven_version }}.aar

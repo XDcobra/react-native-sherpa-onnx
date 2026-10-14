@@ -79,8 +79,31 @@ jobs:
           name: libwebp iOS ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt libwebp XCFramework for iOS.
-            - **libwebp-ios.zip** – Contains `libwebp.xcframework` (arm64 device + universal simulator; sharpyuv merged).
+            ## Archive Structure
+            Prebuilt **libwebp** XCFramework for iOS (device + simulator). Used by Offline ImageBuffer WebP decode in `react-native-sherpa-onnx`.
+            - **libwebp-ios.zip** – Contains `libwebp.xcframework` (arm64 device; arm64 + x86_64 simulator; `sharpyuv` merged into the framework).
+
+            ## Automatic Installation
+
+            If you're using the `react-native-sherpa-onnx` SDK, the libwebp XCFramework is downloaded by `scripts/setup-ios-framework.sh` during `pod install` (tag from `third_party/libwebp_prebuilt/IOS_RELEASE_TAG`). No manual setup required when that path succeeds.
+
+            ## Manual Installation
+
+            1. Download `libwebp-ios.zip` from the Assets below
+            2. Extract and install:
+               ```bash
+               unzip libwebp-ios.zip
+               cp -R libwebp.xcframework /path/to/react-native-sherpa-onnx/ios/Frameworks/
+               ```
+            3. Run `pod install`
+
+            ## Framework Details
+
+            - **Version:** ${{ steps.tag.outputs.release_tag }}
+            - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
+            - **Contents:** libwebp (+ sharpyuv), headers under the XCFramework slices
+
+            Optional: set `SHERPA_ONNX_DISABLE_LIBWEBP=1` so the podspec skips vendoring libwebp (WebP decode then returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
           files: libwebp-ios.zip
           draft: false
           prerelease: false
