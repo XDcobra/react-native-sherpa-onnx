@@ -1,11 +1,6 @@
 name: Publish OCR model assets
 
 on:
-  # Temporary: keep a path-filtered push so GitHub re-indexes this workflow
-  # while it only exists on a feature branch. Remove after the file is on main.
-  push:
-    paths:
-      - '.github/workflows/models-publish-ocr.yml'
   workflow_dispatch:
     inputs:
       csv_path:
@@ -72,7 +67,7 @@ jobs:
           node scripts/ocr-models/build_and_upload.js "${args[@]}"
 
       - name: Sync OCR model license status CSVs
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run != true }}
+        if: ${{ inputs.dry_run != true }}
         run: |
           set -euo pipefail
           CSV_PATH="${{ inputs.csv_path }}"
@@ -80,7 +75,7 @@ jobs:
           node scripts/ocr-models/sync_ocr_license_status.js "$CSV_PATH"
 
       - name: Commit license status updates
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run != true }}
+        if: ${{ inputs.dry_run != true }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
