@@ -1,0 +1,2 @@
+stb_image.h — public domain / MIT (Sean Barrett et al.)
+https://github.com/nothings/stb

@@ -329,6 +329,49 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
   )
   message(STATUS "CTC alignment host test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR PpocrBackend host tests (unit + real ppocrv6-tiny golden) ---
+  set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
+  set(OCR_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ocr")
+  add_executable(ppocr_host_test
+    "${OCR_TEST_DIR}/ppocr_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrImageOps.cpp"
+  )
+  target_include_directories(ppocr_host_test PRIVATE
+    "${OCR_CPP_ROOT}"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  # Homebrew ORT nests headers under include/onnxruntime/
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(ppocr_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(ppocr_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(ppocr_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(ppocr_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(ppocr_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(ppocr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(ppocr_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME ppocr_host_test COMMAND $<TARGET_FILE:ppocr_host_test>)
+  set_tests_properties(ppocr_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "OCR ppocr_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
 else()
-  message(STATUS "CTC alignment host test skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
+  message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()
