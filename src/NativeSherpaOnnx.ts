@@ -918,8 +918,9 @@ export interface Spec extends TurboModule {
 
   /**
    * Decode one or more images from serialized {@link FileSource} maps into an offline ImageBuffer.
-   * Options: `{ maxSide?: number, operationId?: string }`.
+   * Native options: `{ maxSide?: number, operationId?: string }`.
    * Progress events: `SherpaOnnxImageProgress` with `{ operationId, done, total, phase }`.
+   * Public JS API wraps this with `onProgress` / `AbortSignal`.
    */
   createOfflineImageBufferFromFiles(
     sources: Object[],
@@ -935,7 +936,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Decode image blobs (base64 strings) into an offline ImageBuffer.
-   * Options: `{ maxSide?: number, operationId?: string }`.
+   * Native options: `{ maxSide?: number, operationId?: string }`.
    */
   createOfflineImageBufferFromBase64(
     base64List: string[],
@@ -971,7 +972,7 @@ export interface Spec extends TurboModule {
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
 
-  /** Cancel an in-flight create (matched by options.operationId). */
+  /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */
   cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
 
   /**

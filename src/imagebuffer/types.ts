@@ -45,15 +45,24 @@ export type OfflineImageBufferIdSource =
   | OfflineImageBufferInfo
   | string;
 
+/** Options for offline image create. */
 export interface CreateOfflineImageBufferOptions {
   /** Longest edge cap after decode (default 4096). <= 0 disables. */
   maxSide?: number;
-  /** Correlate with SherpaOnnxImageProgress / cancelOfflineImageBufferCreate. */
-  operationId?: string;
+  /**
+   * Cancel the create operation. When aborted, the create promise rejects with
+   * `ERR_IMAGE_CANCELLED` and any partial buffer is released.
+   */
+  signal?: AbortSignal;
+  /**
+   * Progress during multi-file / multi-blob create.
+   * `done`/`total` count sources; `phase` is e.g. `decode` or `done`.
+   */
+  onProgress?: (event: ImageProgressEvent) => void;
 }
 
+/** Progress event for offline image create (public; no operationId). */
 export interface ImageProgressEvent {
-  operationId: string;
   done: number;
   total: number;
   phase: string;

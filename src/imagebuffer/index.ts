@@ -28,6 +28,10 @@ import type {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
+type NativeSubscription = { remove: () => void };
+
+let opIdCounter = 0;
+
 const IMAGE_BUFFER_ID_PATTERN =
   /^img_off_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -81,6 +85,81 @@ function toRef(info: OfflineImageBufferInfo): OfflineImageBufferRef {
   return { info, bufferId: asHandle(info.bufferId) };
 }
 
+function cancelledError(): Error {
+  return Object.assign(new Error(`${ImageErrorCode.CANCELLED}: cancelled`), {
+    code: ImageErrorCode.CANCELLED,
+  });
+}
+
+/** Wire onProgress / AbortSignal; returns native `{ maxSide?, operationId }` plus cleanup. */
+function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
+  nativeOptions: { maxSide?: number; operationId: string };
+  cleanup: () => void;
+} {
+  const operationId = `img_create_${Date.now()}_${++opIdCounter}`;
+  const nativeOptions: { maxSide?: number; operationId: string } = {
+    operationId,
+  };
+  if (options?.maxSide !== undefined) {
+    nativeOptions.maxSide = options.maxSide;
+  }
+
+  let progressSubscription: NativeSubscription | null = null;
+  let abortHandler: (() => void) | null = null;
+
+  if (options?.onProgress) {
+    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+    const onProgress = options.onProgress;
+    progressSubscription = emitter.addListener(
+      'SherpaOnnxImageProgress',
+      (event: any) => {
+        if (event?.operationId === operationId) {
+          onProgress({
+            done: event.done,
+            total: event.total,
+            phase: event.phase,
+          });
+        }
+      }
+    );
+  }
+
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      progressSubscription?.remove();
+      throw cancelledError();
+    }
+    abortHandler = () => {
+      getNative()
+        .cancelOfflineImageBufferCreate(operationId)
+        .catch(() => {});
+    };
+    options.signal.addEventListener('abort', abortHandler);
+  }
+
+  return {
+    nativeOptions,
+    cleanup: () => {
+      progressSubscription?.remove();
+      if (abortHandler && options?.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+    },
+  };
+}
+
+function mapCreateError(err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.includes('ERR_IMAGE_CANCELLED') ||
+    msg.includes(ImageErrorCode.CANCELLED) ||
+    /\bcancelled\b/i.test(msg)
+  ) {
+    throw cancelledError();
+  }
+  throw err;
+}
+
 export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBufferRef> {
   const raw = await getNative().createEmptyOfflineImageBuffer();
   const info = mapInfo(raw);
@@ -93,6 +172,7 @@ export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBuffe
 
 /**
  * Decode one or more images from {@link FileSource}(s) into an offline ImageBuffer.
+ * Pass `onProgress` and/or `signal` in options for create progress and cancellation.
  */
 export async function createOfflineImageBufferFromFiles(
   sources: FileSource | FileSource[],
@@ -113,25 +193,33 @@ export async function createOfflineImageBufferFromFiles(
       );
     }
   }
-  const raw = await getNative().createOfflineImageBufferFromFiles(
-    list as Object[],
-    options ?? {}
-  );
-  const info = mapInfo(raw);
-  assertImageBufferId(info.bufferId);
-  if (__DEV__) {
-    console.log(
-      '[SherpaOnnx:image] createFromFiles',
-      info.bufferId,
-      'frames=',
-      info.frameCount,
-      'storage=',
-      info.storageKind,
-      'sources=',
-      list.length
+
+  const { nativeOptions, cleanup } = beginCreateProgressCancel(options);
+  try {
+    const raw = await getNative().createOfflineImageBufferFromFiles(
+      list as Object[],
+      nativeOptions
     );
+    const info = mapInfo(raw);
+    assertImageBufferId(info.bufferId);
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:image] createFromFiles',
+        info.bufferId,
+        'frames=',
+        info.frameCount,
+        'storage=',
+        info.storageKind,
+        'sources=',
+        list.length
+      );
+    }
+    return toRef(info);
+  } catch (err) {
+    mapCreateError(err);
+  } finally {
+    cleanup();
   }
-  return toRef(info);
 }
 
 export async function createOfflineImageBufferFromBase64(
@@ -141,13 +229,21 @@ export async function createOfflineImageBufferFromBase64(
   if (!Array.isArray(base64List) || base64List.length === 0) {
     throw new Error(`${ImageErrorCode.INVALID_ARGUMENT}: base64List required`);
   }
-  const raw = await getNative().createOfflineImageBufferFromBase64(
-    base64List,
-    options ?? {}
-  );
-  const info = mapInfo(raw);
-  assertImageBufferId(info.bufferId);
-  return toRef(info);
+
+  const { nativeOptions, cleanup } = beginCreateProgressCancel(options);
+  try {
+    const raw = await getNative().createOfflineImageBufferFromBase64(
+      base64List,
+      nativeOptions
+    );
+    const info = mapInfo(raw);
+    assertImageBufferId(info.bufferId);
+    return toRef(info);
+  } catch (err) {
+    mapCreateError(err);
+  } finally {
+    cleanup();
+  }
 }
 
 export async function getOfflineImageBufferInfo(
@@ -183,26 +279,6 @@ export async function releaseOfflineImageBuffer(
   if (__DEV__) {
     console.log('[SherpaOnnx:image] release', id);
   }
-}
-
-export async function cancelOfflineImageBufferCreate(
-  operationId: string
-): Promise<void> {
-  if (!operationId) {
-    throw new Error(`${ImageErrorCode.INVALID_ARGUMENT}: operationId required`);
-  }
-  await getNative().cancelOfflineImageBufferCreate(operationId);
-}
-
-/** Subscribe to create progress (`SherpaOnnxImageProgress`). */
-export function addImageProgressListener(
-  listener: (event: ImageProgressEvent) => void
-): () => void {
-  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
-  const sub = emitter.addListener('SherpaOnnxImageProgress', (event: any) => {
-    listener(event as ImageProgressEvent);
-  });
-  return () => sub.remove();
 }
 
 export type {
