@@ -1,0 +1,79 @@
+# Host CTC alignment tests including real EN golden (wav2vec2-base-960h-int8).
+# Pack is downloaded from the alignment-models release (not committed to git).
+
+name: Test – Alignment host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/alignment/**'
+      - 'test/cpp/alignment/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/alignment/**'
+      - 'third_party/onnxruntime_prebuilt/VERSIONS'
+      - '.github/workflows/test-alignment-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/alignment/**'
+      - 'test/cpp/alignment/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/alignment/**'
+      - 'third_party/onnxruntime_prebuilt/VERSIONS'
+      - '.github/workflows/test-alignment-host.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-alignment-host
+  cancel-in-progress: true
+
+jobs:
+  alignment-host:
+    name: CTC alignment host tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Read ORT version pin
+        id: ort
+        run: |
+          ver=$(grep -E '^ONNXRUNTIME_VERSION=' third_party/onnxruntime_prebuilt/VERSIONS | cut -d= -f2 | tr -d '[:space:]')
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wav2vec2-base-960h-int8 pack
+        id: cache-align-int8
+        uses: actions/cache@v4
+        with:
+          path: build/alignment-models/wav2vec2-base-960h-int8
+          key: alignment-wav2vec2-base-960h-int8-v1-ort-${{ steps.ort.outputs.version }}
+
+      - name: Download and extract wav2vec2-base-960h-int8
+        if: steps.cache-align-int8.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/alignment-models dist/alignment-models
+          curl -fsSL -o dist/alignment-models/wav2vec2-base-960h-int8.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/alignment-models/wav2vec2-base-960h-int8.tar.bz2"
+          tar xjf dist/alignment-models/wav2vec2-base-960h-int8.tar.bz2 -C build/alignment-models
+          test -f build/alignment-models/wav2vec2-base-960h-int8/model.onnx
+
+      - name: Configure and build ctc_alignment_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target ctc_alignment_host_test
+
+      - name: Run alignment host tests (including EN golden)
+        working-directory: ${{ github.workspace }}
+        env:
+          ALIGNMENT_MODEL_DIR: ${{ github.workspace }}/build/alignment-models/wav2vec2-base-960h-int8
+        run: |
+          ctest --test-dir test/cpp/build -R ctc_alignment_host_test --output-on-failure
