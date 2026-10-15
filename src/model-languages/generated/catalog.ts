@@ -2052,6 +2052,12 @@ export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly stri
     "en",
     "fr"
   ],
+  "docvlm-granite-258m": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
+  ],
   "ppocrv6-medium": [
     "zh",
     "en",
@@ -2226,6 +2232,12 @@ export const OCR_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, readonly st
   "doctr-mobile": [
     "en",
     "fr"
+  ],
+  "docvlm-granite-258m": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
   ],
   "ppocrv6-medium": [
     "zh",

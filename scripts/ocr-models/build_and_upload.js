@@ -8,6 +8,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { fileURLToPath } = require('node:url');
 
 const DEFAULT_CSV = 'scripts/ocr-models/sources.csv';
@@ -28,8 +30,51 @@ const EXPECTED_HEADER = [
   'license_type',
   'commercial_use',
   'languages',
+  'hf_repo',
 ];
-const VALID_FAMILIES = new Set(['ppocr', 'doctr']);
+const VALID_FAMILIES = new Set(['ppocr', 'doctr', 'doc_vlm']);
+const DOC_VLM_HF_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const GIT_LFS_POINTER_FIRST_LINE = 'version https://git-lfs.github.com/spec/v1';
+const MIB = 1024 * 1024;
+/** fp32 Granite Docling only. A later variant gets its own table. */
+const DOC_VLM_GRANITE_FP32_FILES = [
+  { repoPath: 'onnx/vision_encoder.onnx', name: 'vision_encoder.onnx' },
+  {
+    repoPath: 'onnx/vision_encoder.onnx_data',
+    name: 'vision_encoder.onnx_data',
+  },
+  { repoPath: 'onnx/embed_tokens.onnx', name: 'embed_tokens.onnx' },
+  { repoPath: 'onnx/embed_tokens.onnx_data', name: 'embed_tokens.onnx_data' },
+  {
+    repoPath: 'onnx/decoder_model_merged.onnx',
+    name: 'decoder_model_merged.onnx',
+  },
+  {
+    repoPath: 'onnx/decoder_model_merged.onnx_data',
+    name: 'decoder_model_merged.onnx_data',
+  },
+  { repoPath: 'tokenizer.json', name: 'tokenizer.json' },
+  { repoPath: 'tokenizer_config.json', name: 'tokenizer_config.json' },
+  { repoPath: 'vocab.json', name: 'vocab.json' },
+  { repoPath: 'merges.txt', name: 'merges.txt' },
+  { repoPath: 'added_tokens.json', name: 'added_tokens.json' },
+  { repoPath: 'special_tokens_map.json', name: 'special_tokens_map.json' },
+  { repoPath: 'chat_template.jinja', name: 'chat_template.jinja' },
+  { repoPath: 'config.json', name: 'config.json' },
+  { repoPath: 'generation_config.json', name: 'generation_config.json' },
+  { repoPath: 'preprocessor_config.json', name: 'preprocessor_config.json' },
+  { repoPath: 'processor_config.json', name: 'processor_config.json' },
+];
+const DOC_VLM_MIN_BYTES = new Map([
+  ['vision_encoder.onnx_data', 300 * MIB],
+  ['embed_tokens.onnx_data', 200 * MIB],
+  ['decoder_model_merged.onnx_data', 600 * MIB],
+  ['tokenizer.json', 1 * MIB],
+]);
+const DOC_VLM_IMAGE_TOKEN = '<image>';
+const DOC_VLM_IMAGE_TOKEN_ID = 100270;
+const DOC_VLM_BOS_TOKEN_ID = 100264;
+const DOC_VLM_EOS_TOKEN_ID = 100257;
 const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
 const VALID_ISO6391_RE = /^[a-z]{2,3}(-[a-z0-9]+)?$/i;
@@ -266,6 +311,7 @@ async function readSources(csvPath) {
     const licenseType = normalizeCell(row[9]);
     const commercialUse = normalizeCell(row[10]).toLowerCase();
     const languages = parseLanguagesCell(normalizeCell(row[11]), lineNumber);
+    const hfRepo = normalizeCell(row[12]);
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -277,14 +323,21 @@ async function readSources(csvPath) {
     }
     if (!VALID_FAMILIES.has(family)) {
       throw new Error(
-        `Line ${lineNumber}: family must be "ppocr" or "doctr" (got "${row[1]}")`
+        `Line ${lineNumber}: family must be "ppocr", "doctr", or "doc_vlm" (got "${row[1]}")`
       );
     }
-    if (!detUrl) {
-      throw new Error(`Line ${lineNumber}: det_url is required`);
-    }
-    if (!recUrl) {
-      throw new Error(`Line ${lineNumber}: rec_url is required`);
+    if (family === 'ppocr' || family === 'doctr') {
+      if (!detUrl) {
+        throw new Error(`Line ${lineNumber}: det_url is required`);
+      }
+      if (!recUrl) {
+        throw new Error(`Line ${lineNumber}: rec_url is required`);
+      }
+      if (hfRepo) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo must be empty for ${family}`
+        );
+      }
     }
     if (family === 'ppocr') {
       if (!clsUrl) {
@@ -316,6 +369,27 @@ async function readSources(csvPath) {
           `Line ${lineNumber}: rec_config_url is required for doctr`
         );
       }
+    } else if (family === 'doc_vlm') {
+      if (
+        detUrl ||
+        recUrl ||
+        clsUrl ||
+        recYmlUrl ||
+        detConfigUrl ||
+        recConfigUrl
+      ) {
+        throw new Error(
+          `Line ${lineNumber}: det_url, rec_url, cls_url, rec_yml_url, det_config_url, and rec_config_url must be empty for doc_vlm`
+        );
+      }
+      if (!hfRepo) {
+        throw new Error(`Line ${lineNumber}: hf_repo is required for doc_vlm`);
+      }
+      if (!DOC_VLM_HF_REPO_RE.test(hfRepo)) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo must be owner/name with no scheme (got "${hfRepo}")`
+        );
+      }
     }
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
@@ -343,6 +417,7 @@ async function readSources(csvPath) {
       licenseType,
       commercialUse,
       languages,
+      hfRepo,
     });
   }
 
@@ -422,6 +497,7 @@ async function downloadFile(url, destination) {
 
   const response = await fetch(url, {
     headers: headersForDownloadUrl(url),
+    redirect: 'follow',
   });
 
   if (!response.ok) {
@@ -431,8 +507,18 @@ async function downloadFile(url, destination) {
     );
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  await fsp.writeFile(destination, Buffer.from(arrayBuffer));
+  if (!response.body) {
+    throw new Error(`Empty body while downloading ${url}`);
+  }
+
+  const fileStream = fs.createWriteStream(destination);
+  try {
+    await pipeline(Readable.fromWeb(response.body), fileStream);
+  } catch (error) {
+    fileStream.destroy();
+    await fsp.rm(destination, { force: true });
+    throw error;
+  }
 }
 
 function runCommand(command, args, options = {}) {
@@ -456,7 +542,9 @@ function createArchive(modelId, buildDir, archivePath) {
     fs.rmSync(archivePath, { force: true });
   }
 
-  runCommand('tar', ['-cjf', archivePath, '-C', buildDir, modelId]);
+  // macOS bsdtar stores AppleDouble `._*` members when files have xattrs.
+  const env = { ...process.env, COPYFILE_DISABLE: '1' };
+  runCommand('tar', ['-cjf', archivePath, '-C', buildDir, modelId], { env });
 }
 
 function resolveToken() {
@@ -752,6 +840,426 @@ async function buildDoctrPack(source, modelDir) {
   await fsp.rm(recConfigPath, { force: true });
 }
 
+/**
+ * @param {string} filePath
+ */
+async function assertNotGitLfsPointer(filePath) {
+  const fh = await fsp.open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(256);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    const firstLine = buf
+      .subarray(0, bytesRead)
+      .toString('utf8')
+      .split(/\r?\n/, 1)[0];
+    if (firstLine === GIT_LFS_POINTER_FIRST_LINE) {
+      throw new Error(
+        `${path.basename(filePath)} is a Git LFS pointer, not file contents`
+      );
+    }
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @param {number} minBytes
+ */
+async function assertMinBytes(filePath, minBytes) {
+  const stat = await fsp.stat(filePath);
+  if (stat.size < minBytes) {
+    throw new Error(
+      `${path.basename(filePath)} is ${
+        stat.size
+      } bytes; expected at least ${minBytes}`
+    );
+  }
+  return stat.size;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} label
+ */
+function expectObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+}
+
+/**
+ * @param {Record<string, unknown>} obj
+ * @param {string} key
+ * @param {string} label
+ */
+function expectFiniteNumber(obj, key, label) {
+  const value = obj[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label}.${key} must be a finite number`);
+  }
+  return value;
+}
+
+/**
+ * @param {Record<string, unknown>} obj
+ * @param {string} key
+ * @param {string} label
+ */
+function expectNonEmptyString(obj, key, label) {
+  const value = obj[key];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${label}.${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+/**
+ * @param {Record<string, unknown>} obj
+ * @param {string} key
+ * @param {string} label
+ */
+function expectBoolean(obj, key, label) {
+  const value = obj[key];
+  if (typeof value !== 'boolean') {
+    throw new Error(`${label}.${key} must be a boolean`);
+  }
+  return value;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} label
+ */
+function expectNumberArray(value, label) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((item) => typeof item !== 'number' || !Number.isFinite(item))
+  ) {
+    throw new Error(`${label} must be a non-empty array of finite numbers`);
+  }
+  return value;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} label
+ */
+function expectTokenContent(value, label) {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const content = /** @type {{ content?: unknown }} */ (value).content;
+    if (typeof content === 'string' && content.length > 0) {
+      return content;
+    }
+  }
+  throw new Error(`${label} must be a string or an object with content`);
+}
+
+/**
+ * @param {string} hfRepo
+ * @param {string} repoRelativePath
+ */
+function docVlmFileUrl(hfRepo, repoRelativePath) {
+  if (!DOC_VLM_HF_REPO_RE.test(hfRepo)) {
+    throw new Error(`Invalid hf_repo '${hfRepo}'`);
+  }
+  return `https://huggingface.co/${hfRepo}/resolve/main/${repoRelativePath}`;
+}
+
+/**
+ * @param {string} modelDir
+ * @param {string} name
+ */
+async function readPackJson(modelDir, name) {
+  const filePath = path.join(modelDir, name);
+  let text;
+  try {
+    text = await fsp.readFile(filePath, 'utf8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not read ${name}: ${message}`);
+  }
+  try {
+    return expectObject(JSON.parse(text), name);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`${name} is not valid JSON`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Build a doc_vlm pack: flattened fp32 ONNX graphs plus tokenizer files.
+ * @param {object} source
+ * @param {string} modelDir
+ */
+async function buildDocVlmPack(source, modelDir) {
+  for (const file of DOC_VLM_GRANITE_FP32_FILES) {
+    const destination = path.join(modelDir, file.name);
+    const url = docVlmFileUrl(source.hfRepo, file.repoPath);
+    console.log(`[download] ${source.modelId}: ${file.name}`);
+    await downloadFile(url, destination);
+    await assertNotGitLfsPointer(destination);
+    const minBytes = DOC_VLM_MIN_BYTES.get(file.name);
+    const size = minBytes
+      ? await assertMinBytes(destination, minBytes)
+      : (await fsp.stat(destination)).size;
+    if (size <= 0) {
+      throw new Error(`${source.modelId}: ${file.name} is empty`);
+    }
+  }
+
+  const manifestFiles = {
+    vision_encoder: 'vision_encoder.onnx',
+    vision_encoder_data: 'vision_encoder.onnx_data',
+    embed_tokens: 'embed_tokens.onnx',
+    embed_tokens_data: 'embed_tokens.onnx_data',
+    decoder: 'decoder_model_merged.onnx',
+    decoder_data: 'decoder_model_merged.onnx_data',
+    tokenizer: 'tokenizer.json',
+    tokenizer_config: 'tokenizer_config.json',
+    vocab: 'vocab.json',
+    merges: 'merges.txt',
+    added_tokens: 'added_tokens.json',
+    special_tokens_map: 'special_tokens_map.json',
+    chat_template: 'chat_template.jinja',
+    config: 'config.json',
+    generation_config: 'generation_config.json',
+    preprocessor_config: 'preprocessor_config.json',
+    processor_config: 'processor_config.json',
+  };
+  for (const packName of Object.values(manifestFiles)) {
+    const stat = await fsp.stat(path.join(modelDir, packName));
+    if (stat.size <= 0) {
+      throw new Error(`${source.modelId}: ${packName} is missing or empty`);
+    }
+  }
+
+  const config = await readPackJson(modelDir, 'config.json');
+  const preprocessor = await readPackJson(modelDir, 'preprocessor_config.json');
+  const processor = await readPackJson(modelDir, 'processor_config.json');
+  const tokenizerConfig = await readPackJson(modelDir, 'tokenizer_config.json');
+  const specialTokens = await readPackJson(modelDir, 'special_tokens_map.json');
+
+  const arch = expectNonEmptyString(config, 'model_type', 'config.json');
+  if (arch !== 'idefics3') {
+    throw new Error(
+      `${source.modelId}: config.json model_type must be idefics3 (got "${arch}")`
+    );
+  }
+  const configDtype = expectNonEmptyString(config, 'dtype', 'config.json');
+  const visionConfig = expectObject(
+    config.vision_config,
+    'config.json.vision_config'
+  );
+  const textConfig = expectObject(
+    config.text_config,
+    'config.json.text_config'
+  );
+
+  const imageTokenId = expectFiniteNumber(
+    config,
+    'image_token_id',
+    'config.json'
+  );
+  if (imageTokenId !== DOC_VLM_IMAGE_TOKEN_ID) {
+    throw new Error(
+      `${source.modelId}: config.json image_token_id must be ${DOC_VLM_IMAGE_TOKEN_ID} (got ${imageTokenId})`
+    );
+  }
+  const bosTokenId = expectFiniteNumber(config, 'bos_token_id', 'config.json');
+  if (bosTokenId !== DOC_VLM_BOS_TOKEN_ID) {
+    throw new Error(
+      `${source.modelId}: config.json bos_token_id must be ${DOC_VLM_BOS_TOKEN_ID} (got ${bosTokenId})`
+    );
+  }
+  const eosTokenId = expectFiniteNumber(config, 'eos_token_id', 'config.json');
+  if (eosTokenId !== DOC_VLM_EOS_TOKEN_ID) {
+    throw new Error(
+      `${source.modelId}: config.json eos_token_id must be ${DOC_VLM_EOS_TOKEN_ID} (got ${eosTokenId})`
+    );
+  }
+  const padTokenId = expectFiniteNumber(config, 'pad_token_id', 'config.json');
+
+  const addedDecoder = expectObject(
+    tokenizerConfig.added_tokens_decoder,
+    'tokenizer_config.json.added_tokens_decoder'
+  );
+  const imageTokenEntry = addedDecoder[String(DOC_VLM_IMAGE_TOKEN_ID)];
+  const imageToken = expectTokenContent(
+    imageTokenEntry,
+    `tokenizer_config.json.added_tokens_decoder.${DOC_VLM_IMAGE_TOKEN_ID}`
+  );
+  if (imageToken !== DOC_VLM_IMAGE_TOKEN) {
+    throw new Error(
+      `${source.modelId}: image token must be ${DOC_VLM_IMAGE_TOKEN} (got "${imageToken}")`
+    );
+  }
+
+  const bosToken = expectTokenContent(
+    specialTokens.bos_token,
+    'special_tokens_map.json.bos_token'
+  );
+  const eosToken = expectTokenContent(
+    specialTokens.eos_token,
+    'special_tokens_map.json.eos_token'
+  );
+  const padToken = expectTokenContent(
+    specialTokens.pad_token,
+    'special_tokens_map.json.pad_token'
+  );
+
+  const maxImageSize = expectObject(
+    preprocessor.max_image_size,
+    'preprocessor_config.json.max_image_size'
+  );
+  const imageSize = expectObject(
+    preprocessor.size,
+    'preprocessor_config.json.size'
+  );
+
+  const manifest = {
+    schema: 1,
+    family: 'doc_vlm',
+    id: source.modelId,
+    arch,
+    onnx_dtype: 'fp32',
+    source: {
+      repo: source.hfRepo,
+      subfolder: 'onnx',
+      config_dtype: configDtype,
+    },
+    files: manifestFiles,
+    vision: {
+      image_size: expectFiniteNumber(
+        visionConfig,
+        'image_size',
+        'config.json.vision_config'
+      ),
+      patch_size: expectFiniteNumber(
+        visionConfig,
+        'patch_size',
+        'config.json.vision_config'
+      ),
+      num_channels: expectFiniteNumber(
+        visionConfig,
+        'num_channels',
+        'config.json.vision_config'
+      ),
+      scale_factor: expectFiniteNumber(config, 'scale_factor', 'config.json'),
+      image_seq_len: expectFiniteNumber(
+        processor,
+        'image_seq_len',
+        'processor_config.json'
+      ),
+      do_image_splitting: expectBoolean(
+        preprocessor,
+        'do_image_splitting',
+        'preprocessor_config.json'
+      ),
+      do_normalize: expectBoolean(
+        preprocessor,
+        'do_normalize',
+        'preprocessor_config.json'
+      ),
+      max_image_size_longest_edge: expectFiniteNumber(
+        maxImageSize,
+        'longest_edge',
+        'preprocessor_config.json.max_image_size'
+      ),
+      size_longest_edge: expectFiniteNumber(
+        imageSize,
+        'longest_edge',
+        'preprocessor_config.json.size'
+      ),
+      mean: expectNumberArray(
+        preprocessor.image_mean,
+        'preprocessor_config.json.image_mean'
+      ),
+      std: expectNumberArray(
+        preprocessor.image_std,
+        'preprocessor_config.json.image_std'
+      ),
+      rescale_factor: expectFiniteNumber(
+        preprocessor,
+        'rescale_factor',
+        'preprocessor_config.json'
+      ),
+    },
+    text: {
+      hidden_size: expectFiniteNumber(
+        textConfig,
+        'hidden_size',
+        'config.json.text_config'
+      ),
+      num_hidden_layers: expectFiniteNumber(
+        textConfig,
+        'num_hidden_layers',
+        'config.json.text_config'
+      ),
+      num_attention_heads: expectFiniteNumber(
+        textConfig,
+        'num_attention_heads',
+        'config.json.text_config'
+      ),
+      num_key_value_heads: expectFiniteNumber(
+        textConfig,
+        'num_key_value_heads',
+        'config.json.text_config'
+      ),
+      head_dim: expectFiniteNumber(
+        textConfig,
+        'head_dim',
+        'config.json.text_config'
+      ),
+      vocab_size: expectFiniteNumber(
+        textConfig,
+        'vocab_size',
+        'config.json.text_config'
+      ),
+      max_position_embeddings: expectFiniteNumber(
+        textConfig,
+        'max_position_embeddings',
+        'config.json.text_config'
+      ),
+      rope_theta: expectFiniteNumber(
+        textConfig,
+        'rope_theta',
+        'config.json.text_config'
+      ),
+      model_type: expectNonEmptyString(
+        textConfig,
+        'model_type',
+        'config.json.text_config'
+      ),
+    },
+    special_tokens: {
+      bos_token_id: bosTokenId,
+      eos_token_id: eosTokenId,
+      pad_token_id: padTokenId,
+      image_token_id: imageTokenId,
+      bos_token: bosToken,
+      eos_token: eosToken,
+      pad_token: padToken,
+      image_token: imageToken,
+    },
+  };
+
+  const manifestPath = path.join(modelDir, 'ocr_manifest.json');
+  await fsp.writeFile(
+    manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'utf8'
+  );
+  console.log(`[manifest] ${source.modelId}: ocr_manifest.json`);
+}
+
 async function buildArchives(sources, buildDir, distDir) {
   await fsp.mkdir(buildDir, { recursive: true });
   await fsp.mkdir(distDir, { recursive: true });
@@ -766,6 +1274,8 @@ async function buildArchives(sources, buildDir, distDir) {
       await buildPpocrPack(source, modelDir);
     } else if (source.family === 'doctr') {
       await buildDoctrPack(source, modelDir);
+    } else if (source.family === 'doc_vlm') {
+      await buildDocVlmPack(source, modelDir);
     } else {
       throw new Error(`Unknown family for ${source.modelId}: ${source.family}`);
     }

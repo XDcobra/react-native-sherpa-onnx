@@ -12,22 +12,23 @@ File: `scripts/ocr-models/sources.csv`
 
 - Delimiter: semicolon (`;`)
 - Required header (exact):
-  `id;family;det_url;rec_url;cls_url;rec_yml_url;det_config_url;rec_config_url;license;license_type;commercial_use;languages`
+  `id;family;det_url;rec_url;cls_url;rec_yml_url;det_config_url;rec_config_url;license;license_type;commercial_use;languages;hf_repo`
 
 | Column | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
-| `family` | yes | `ppocr` or `doctr` — drives archive layout and which URL columns apply |
-| `det_url` | yes | Direct URL to detection ONNX → stored as `det.onnx` |
-| `rec_url` | yes | Direct URL to recognition ONNX → stored as `rec.onnx` |
-| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr v1) |
-| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr) |
-| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`) |
-| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`) |
+| `family` | yes | `ppocr`, `doctr`, or `doc_vlm` — drives archive layout and which columns apply |
+| `det_url` | ppocr, doctr | Direct URL to detection ONNX → stored as `det.onnx`. Empty for `doc_vlm` |
+| `rec_url` | ppocr, doctr | Direct URL to recognition ONNX → stored as `rec.onnx`. Empty for `doc_vlm` |
+| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr and `doc_vlm`) |
+| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr and `doc_vlm`) |
+| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`). Empty for `doc_vlm` |
+| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`). Empty for `doc_vlm` |
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE` |
 | `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) |
 | `commercial_use` | yes | `yes` or `no` |
 | `languages` | no | Comma-separated ISO codes for catalog hints. Empty = not curated. |
+| `hf_repo` | doc_vlm | Hugging Face `owner/name` (no scheme). The script owns the file list and flattens `onnx/` into the pack root. Must be empty for `ppocr` and `doctr` |
 
 ## Archive layouts (detect contract)
 
@@ -62,6 +63,41 @@ Packs:
 | `doctr-default` | `db_resnet50` | `parseq` (multilingual-v1) | Latin European set in CSV |
 
 `ocr_manifest.json` is the family discriminator for detect (`family: "doctr"`). Do **not** ship `rec_inference.yml` in doctr packs.
+
+### `doc_vlm` (Granite Docling)
+
+```text
+<id>/
+  vision_encoder.onnx
+  vision_encoder.onnx_data
+  embed_tokens.onnx
+  embed_tokens.onnx_data
+  decoder_model_merged.onnx
+  decoder_model_merged.onnx_data
+  tokenizer.json
+  tokenizer_config.json
+  vocab.json
+  merges.txt
+  added_tokens.json
+  special_tokens_map.json
+  chat_template.jinja
+  config.json
+  generation_config.json
+  preprocessor_config.json
+  processor_config.json
+  ocr_manifest.json   # family: "doc_vlm", schema 1, arch, vision/text, special tokens
+  LICENSE
+```
+
+No `det.onnx`, `rec.onnx`, `cls.onnx`, or `rec_inference.yml`, and no nested `onnx/` directory. Each `.onnx` graph stays next to its `.onnx_data` file because external-data locations are basenames.
+
+Packs:
+
+| ID | Repo (`hf_repo`) | Weights | Languages (hints) |
+| --- | --- | --- | --- |
+| `docvlm-granite-258m` | `onnx-community/granite-docling-258M-ONNX` | Unsuffixed fp32 graphs under `onnx/` | `en` plus experimental `ja`, `ar`, `zh` |
+
+`en` is the only non-experimental language on the IBM Granite Docling card. Japanese, Arabic, and Chinese are included because IBM names them as experimental. Uncompressed weights are about 1.18 GiB. The `.tar.bz2` is about 420 MiB. Quantized siblings (`q4`, `q4f16`, `fp16`, `int8`, and the rest) are not in this release.
 
 ### `checksum.txt`
 
