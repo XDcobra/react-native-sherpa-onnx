@@ -120,6 +120,64 @@ describe('buildCatalogHintsMap — OCR', () => {
       { assetName: 'ppocrv6-tiny' },
     ]);
   });
+
+  it('merges name-only unified detect language hints for doctr packs', async () => {
+    mockDetectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        category: ModelCategory.Ocr,
+        modelType: 'doctr',
+        languages: ['en', 'fr'],
+        quantization: 'unknown',
+        sizeTier: 'unknown',
+        isStreaming: false,
+      },
+    ]);
+
+    const hints = await buildCatalogHintsMap(ModelCategory.Ocr, [
+      'doctr-mobile',
+    ]);
+
+    expect(hints.get('doctr-mobile')).toEqual({
+      modelType: 'doctr',
+      languages: ['en', 'fr'],
+      quantization: 'unknown',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+    expect(mockDetectModelsBatch).toHaveBeenCalledWith([
+      { assetName: 'doctr-mobile' },
+    ]);
+  });
+
+  it('merges name-only unified detect language hints for doc_vlm packs', async () => {
+    mockDetectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        category: ModelCategory.Ocr,
+        modelType: 'doc_vlm',
+        languages: ['en', 'ja', 'ar', 'zh'],
+        quantization: 'unknown',
+        sizeTier: 'unknown',
+        isStreaming: false,
+      },
+    ]);
+
+    const hints = await buildCatalogHintsMap(ModelCategory.Ocr, [
+      'docvlm-granite-258m',
+    ]);
+
+    expect(hints.get('docvlm-granite-258m')).toEqual({
+      modelType: 'doc_vlm',
+      languages: ['en', 'ja', 'ar', 'zh'],
+      quantization: 'unknown',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+    expect(mockDetectModelsBatch).toHaveBeenCalledWith([
+      { assetName: 'docvlm-granite-258m' },
+    ]);
+  });
 });
 
 describe('categoryUsesCatalogDetect', () => {

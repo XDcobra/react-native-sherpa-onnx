@@ -69,6 +69,14 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("maxSideLen")) options.getDouble("maxSideLen").toInt() else 960
       val useOrientationCls =
         if (options.hasKey("useOrientationCls")) options.getBoolean("useOrientationCls") else true
+      val detBoxThresh =
+        if (options.hasKey("detBoxThresh")) options.getDouble("detBoxThresh").toFloat() else 0.3f
+      val detBoxScoreThresh =
+        if (options.hasKey("detBoxScoreThresh")) options.getDouble("detBoxScoreThresh").toFloat() else 0.5f
+      val detUnclipRatio =
+        if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
+      val maxNewTokens =
+        if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
 
       val sentinel = Any()
       instances[instanceId] = sentinel
@@ -81,6 +89,10 @@ class SherpaOnnxOcrHelper(
           provider,
           maxSideLen,
           useOrientationCls,
+          detBoxThresh,
+          detBoxScoreThresh,
+          detUnclipRatio,
+          maxNewTokens,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
@@ -208,6 +220,18 @@ class SherpaOnnxOcrHelper(
       val spanMaps = raw["spans"] as? ArrayList<HashMap<String, Any>> ?: arrayListOf()
       val spans = spanMaps.map { mapNativeSpan(it, imageBufferId) }
 
+      val family = raw["family"] as? String
+      if (family.isNullOrBlank()) {
+        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing family")
+        return
+      }
+      val doctags = raw["doctags"] as? String
+      val markdown = raw["markdown"] as? String
+      if (doctags == null || markdown == null) {
+        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
+        return
+      }
+
       try {
         textEntry.populate(
           text = text,
@@ -226,9 +250,14 @@ class SherpaOnnxOcrHelper(
 
       Log.i(
         TAG,
-        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length}",
+        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} doctagsLen=${doctags.length} markdownLen=${markdown.length}",
       )
-      promise.resolve(null)
+      val result = Arguments.createMap()
+      result.putString("family", family)
+      result.putInt("spanCount", spans.size)
+      result.putString("doctags", doctags)
+      result.putString("markdown", markdown)
+      promise.resolve(result)
     } catch (e: Exception) {
       Log.e(TAG, "ocrRecognize failed", e)
       promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, e.message, e)
@@ -300,6 +329,18 @@ class SherpaOnnxOcrHelper(
 
     @Suppress("UNCHECKED_CAST")
     val pathsRaw = raw["paths"] as? HashMap<String, Any>
+    @Suppress("UNCHECKED_CAST")
+    val filesRaw = raw["files"] as? HashMap<String, Any>
+    val docVlmKeys = arrayOf(
+      "vision_encoder",
+      "vision_encoder_data",
+      "embed_tokens",
+      "embed_tokens_data",
+      "decoder",
+      "decoder_data",
+      "tokenizer",
+      "manifest",
+    )
     val paths = Arguments.createMap()
     fun putPath(key: String, value: Any?) {
       val s = value as? String
@@ -309,12 +350,15 @@ class SherpaOnnxOcrHelper(
     putPath("rec", pathsRaw?.get("rec") ?: raw["recPath"])
     putPath("cls", pathsRaw?.get("cls") ?: raw["clsPath"])
     putPath("rec_dict", pathsRaw?.get("rec_dict") ?: raw["recDictPath"])
+    putPath("manifest", pathsRaw?.get("manifest") ?: raw["manifestPath"])
+    for (key in docVlmKeys) {
+      if (key == "manifest") continue
+      putPath(key, pathsRaw?.get(key) ?: filesRaw?.get(key))
+    }
     if (paths.toHashMap().isNotEmpty()) {
       map.putMap("paths", paths)
     }
 
-    @Suppress("UNCHECKED_CAST")
-    val filesRaw = raw["files"] as? HashMap<String, Any>
     val files = Arguments.createMap()
     val detPath = (filesRaw?.get("det") as? String) ?: (pathsRaw?.get("det") as? String)
     val recPath = (filesRaw?.get("rec") as? String) ?: (pathsRaw?.get("rec") as? String)
@@ -326,6 +370,10 @@ class SherpaOnnxOcrHelper(
     if (!recPath.isNullOrBlank()) files.putString("rec", recPath)
     if (!clsPath.isNullOrBlank()) files.putString("cls", clsPath)
     if (!dictPath.isNullOrBlank()) files.putString("recInferenceYml", dictPath)
+    for (key in docVlmKeys) {
+      val value = (filesRaw?.get(key) as? String) ?: (pathsRaw?.get(key) as? String)
+      if (!value.isNullOrBlank()) files.putString(key, value)
+    }
     if (files.toHashMap().isNotEmpty()) {
       map.putMap("files", files)
     }

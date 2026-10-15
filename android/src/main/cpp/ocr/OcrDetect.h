@@ -30,6 +30,16 @@ struct OcrDetectResult {
   std::string recPath;
   std::string clsPath;
   std::string recDictPath;
+  /** `ocr_manifest.json` — doctr and doc_vlm. */
+  std::string manifestPath;
+  /** doc_vlm octet. Empty for ppocr and doctr. */
+  std::string visionEncoderPath;
+  std::string visionEncoderDataPath;
+  std::string embedTokensPath;
+  std::string embedTokensDataPath;
+  std::string decoderPath;
+  std::string decoderDataPath;
+  std::string tokenizerPath;
   /** DetectionSource literals (fileListing, fallbackOrder, …). */
   std::vector<std::string> detectionSources;
   std::vector<OcrDetectedModelEntry> detectedModels;

@@ -18,6 +18,10 @@ internal object OcrNative {
     provider: String?,
     maxSideLen: Int,
     useOrientationCls: Boolean,
+    detBoxThresh: Float = 0.3f,
+    detBoxScoreThresh: Float = 0.5f,
+    detUnclipRatio: Float = 1.5f,
+    maxNewTokens: Int = 0,
   )
 
   @JvmStatic external fun nativeUnload(instanceId: String)

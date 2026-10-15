@@ -47,6 +47,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -781,10 +782,88 @@ TEST(ModelDetectTest, DetectOcrFromFileListMatchesExpected) {
             << "Asset " << block.assetName
             << " expected " << expectedType
             << " but got " << model_detect_test::OcrKindToString(result.selectedKind);
-        EXPECT_FALSE(result.paths.det.empty()) << block.assetName;
-        EXPECT_FALSE(result.paths.rec.empty()) << block.assetName;
-        EXPECT_FALSE(result.paths.rec_dict.empty()) << block.assetName;
+        if (expectedKind == sherpaonnx::OcrModelKind::kPpocr) {
+            EXPECT_FALSE(result.paths.det.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.rec.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.rec_dict.empty()) << block.assetName;
+        } else if (expectedKind == sherpaonnx::OcrModelKind::kDoctr) {
+            EXPECT_FALSE(result.paths.det.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.rec.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.manifest.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.rec_dict.empty()) << block.assetName;
+        } else if (expectedKind == sherpaonnx::OcrModelKind::kDocVlm) {
+            EXPECT_FALSE(result.paths.vision_encoder.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.vision_encoder_data.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.embed_tokens.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.embed_tokens_data.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.decoder.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.decoder_data.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.tokenizer.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.manifest.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.det.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.rec.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.cls.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.rec_dict.empty()) << block.assetName;
+        }
     }
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrFromFileList) {
+    const std::string root = "doctr-test-pack";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+        root + "/ocr_manifest.json",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_FALSE(result.paths.det.empty());
+    EXPECT_FALSE(result.paths.rec.empty());
+    EXPECT_FALSE(result.paths.manifest.empty());
+    EXPECT_TRUE(result.paths.rec_dict.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrExplicitDoctrType) {
+    const std::string root = "onnxtr-pack";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+        root + "/ocr_manifest.json",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "doctr");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrFailsWithoutManifest) {
+    const std::string root = "doctr-no-manifest";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "doctr");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrNameOnly) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "doctr-mobile", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_GE(result.detectionSources.size(), 2u);
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kNameOnly),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kDirName),
+              result.detectionSources.end());
 }
 
 TEST(ModelDetectTest, DetectOcrAcceptsAlternateFilenames) {
@@ -817,6 +896,218 @@ TEST(ModelDetectTest, DetectOcrFailsWithoutRecDict) {
     auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kUnknown);
+}
+
+TEST(ModelDetectTest, OcrKindStringsMapDocVlmAliases) {
+    using sherpaonnx::OcrModelKind;
+    EXPECT_EQ(model_detect_test::OcrKindFromString("doc_vlm"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("docvlm"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("doc-vlm"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("granite-docling"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("docling"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("DocVlm"), OcrModelKind::kDocVlm);
+    EXPECT_EQ(model_detect_test::OcrKindToString(OcrModelKind::kDocVlm), "doc_vlm");
+    EXPECT_EQ(model_detect_test::OcrKindFromString("doctr"), OcrModelKind::kDoctr);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("doc-tr"), OcrModelKind::kDoctr);
+    EXPECT_NE(model_detect_test::OcrKindFromString("docvlm"), OcrModelKind::kDoctr);
+}
+
+std::vector<std::string> DocVlmFileLines(const std::string& root,
+                                        bool includeDecoderData,
+                                        bool useTokenizerJson) {
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/vision_encoder.onnx",
+        root + "/vision_encoder.onnx_data",
+        root + "/embed_tokens.onnx",
+        root + "/embed_tokens.onnx_data",
+        root + "/decoder_model_merged.onnx",
+    };
+    if (includeDecoderData) {
+        lines.push_back(root + "/decoder_model_merged.onnx_data");
+    }
+    lines.push_back(root + (useTokenizerJson ? "/tokenizer.json"
+                                             : "/tokenizer_config.json"));
+    lines.push_back(root + "/ocr_manifest.json");
+    return lines;
+}
+
+void ExpectDocVlmPathsFilled(const sherpaonnx::OcrDetectResult& result) {
+    EXPECT_FALSE(result.paths.vision_encoder.empty());
+    EXPECT_FALSE(result.paths.vision_encoder_data.empty());
+    EXPECT_FALSE(result.paths.embed_tokens.empty());
+    EXPECT_FALSE(result.paths.embed_tokens_data.empty());
+    EXPECT_FALSE(result.paths.decoder.empty());
+    EXPECT_FALSE(result.paths.decoder_data.empty());
+    EXPECT_FALSE(result.paths.tokenizer.empty());
+    EXPECT_FALSE(result.paths.manifest.empty());
+    EXPECT_TRUE(result.paths.det.empty());
+    EXPECT_TRUE(result.paths.rec.empty());
+    EXPECT_TRUE(result.paths.rec_dict.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmFromFileList) {
+    const std::string root = "docvlm-granite-258m";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmFileLines(root, true, true));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    ExpectDocVlmPathsFilled(result);
+}
+
+TEST(ModelDetectTest, DetectOcrExplicitDocVlmAlias) {
+    const std::string root = "docvlm-granite-258m";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmFileLines(root, true, true));
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "granite-docling");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+
+    auto cased = sherpaonnx::DetectOcrModelFromFileList(files, root, "DocVlm");
+    ASSERT_TRUE(cased.ok) << cased.error;
+    EXPECT_EQ(cased.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmFailsWithoutDecoderData) {
+    const std::string root = "docvlm-missing-decoder-data";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmFileLines(root, false, true));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "doc_vlm");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmTokenizerConfigIsNotTokenizer) {
+    const std::string root = "docvlm-tokenizer-config";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmFileLines(root, true, false));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kUnknown);
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmNameOnly) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "docvlm-granite-258m", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kNameOnly),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kDirName),
+              result.detectionSources.end());
+}
+
+TEST(ModelDetectTest, DetectOcrDoclingNameOnlyIsDocVlm) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList({}, "docling", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrNameOnlyUnchanged) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList({}, "doctr-mobile", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+}
+
+struct ScopedOcrDir {
+    std::string path;
+    explicit ScopedOcrDir(const std::string& leaf) {
+        path = std::string(::testing::TempDir()) + "ocr-doc-vlm-" + leaf;
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+        std::filesystem::create_directories(path, ec);
+    }
+    ~ScopedOcrDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    ScopedOcrDir(const ScopedOcrDir&) = delete;
+    ScopedOcrDir& operator=(const ScopedOcrDir&) = delete;
+    void Touch(const std::string& name) const {
+        std::ofstream out(path + "/" + name, std::ios::binary);
+    }
+    void Write(const std::string& name, const std::string& body) const {
+        std::ofstream out(path + "/" + name, std::ios::binary);
+        out << body;
+    }
+};
+
+void TouchDocVlmOctet(const ScopedOcrDir& dir) {
+    dir.Touch("vision_encoder.onnx");
+    dir.Touch("vision_encoder.onnx_data");
+    dir.Touch("embed_tokens.onnx");
+    dir.Touch("embed_tokens.onnx_data");
+    dir.Touch("decoder_model_merged.onnx");
+    dir.Touch("decoder_model_merged.onnx_data");
+    dir.Touch("tokenizer.json");
+    dir.Touch("ocr_manifest.json");
+}
+
+TEST(ModelDetectTest, DetectOcrManifestFamilyDocVlmWinsOverDetRec) {
+    ScopedOcrDir dir("family-doc-vlm");
+    TouchDocVlmOctet(dir);
+    dir.Touch("det.onnx");
+    dir.Touch("rec.onnx");
+    dir.Write("ocr_manifest.json", "{\"family\":\"doc_vlm\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    EXPECT_TRUE(result.paths.det.empty());
+    EXPECT_TRUE(result.paths.rec.empty());
+    EXPECT_FALSE(result.paths.vision_encoder.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrManifestFamilyDoctrKeepsDoctrLayout) {
+    ScopedOcrDir dir("family-doctr");
+    TouchDocVlmOctet(dir);
+    dir.Touch("det.onnx");
+    dir.Touch("rec.onnx");
+    dir.Write("ocr_manifest.json", "{\"family\":\"doctr\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_TRUE(result.paths.vision_encoder.empty());
+    EXPECT_FALSE(result.paths.det.empty());
+    EXPECT_FALSE(result.paths.rec.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrManifestFamilyDoctrDoesNotFallThrough) {
+    ScopedOcrDir dir("family-doctr-no-det");
+    TouchDocVlmOctet(dir);
+    dir.Write("ocr_manifest.json", "{\"family\":\"doctr\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+}
+
+TEST(ModelDetectTest, DetectOcrNoFamilyKeyUsesDocVlmLayout) {
+    ScopedOcrDir dir("no-family");
+    TouchDocVlmOctet(dir);
+    dir.Write("ocr_manifest.json", "{\"arch\":\"granite-docling\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+}
+
+TEST(UnifiedModelDetectTest, DocVlmDirectoryIsOcrNotStt) {
+    ScopedOcrDir dir("unified");
+    TouchDocVlmOctet(dir);
+    dir.Touch("vocab.json");
+    dir.Touch("merges.txt");
+    auto result = sherpaonnx::DetectModel(
+        std::optional<std::string>(dir.path), std::nullopt);
+    EXPECT_TRUE(result.matched) << result.error << " category=" << result.category
+                                << " type=" << result.modelType;
+    EXPECT_EQ(result.category, "ocr");
+    EXPECT_EQ(result.modelType, "doc_vlm");
 }
 
 TEST(ModelDetectTest, DetectVadFromAsrFileListMatchesExpected) {

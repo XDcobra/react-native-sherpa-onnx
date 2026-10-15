@@ -5,6 +5,7 @@
 #include "model_language_catalog.h"
 
 #include <algorithm>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,6 +26,14 @@ sherpaonnx::OcrModelKind ParseOcrModelTypeStrict(const std::string& modelType) {
     if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
         return sherpaonnx::OcrModelKind::kPpocr;
     }
+    // doc_vlm aliases before doctr so "docvlm" / "docling" cannot fall through.
+    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
+        t == "granite-docling" || t == "docling") {
+        return sherpaonnx::OcrModelKind::kDocVlm;
+    }
+    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
+        return sherpaonnx::OcrModelKind::kDoctr;
+    }
     if (t == "auto") return sherpaonnx::OcrModelKind::kUnknown;
     return sherpaonnx::OcrModelKind::kUnknown;
 }
@@ -33,6 +42,10 @@ const char* OcrKindToTag(sherpaonnx::OcrModelKind kind) {
     switch (kind) {
         case sherpaonnx::OcrModelKind::kPpocr:
             return "ppocr";
+        case sherpaonnx::OcrModelKind::kDoctr:
+            return "doctr";
+        case sherpaonnx::OcrModelKind::kDocVlm:
+            return "doc_vlm";
         default:
             return "unknown";
     }
@@ -130,6 +143,15 @@ std::string FindRecDict(const std::vector<FileEntry>& files) {
     return "";
 }
 
+bool InferDocVlmNameOnly(const std::string& nameHint) {
+    const std::string lower = ToLower(nameHint);
+    return lower.find("docvlm") != std::string::npos ||
+           lower.find("doc-vlm") != std::string::npos ||
+           lower.find("doc_vlm") != std::string::npos ||
+           lower.find("granite-docling") != std::string::npos ||
+           lower.find("docling") != std::string::npos;
+}
+
 bool InferPpocrNameOnly(const std::string& nameHint) {
     const std::string lower = ToLower(nameHint);
     return lower.find("ppocr") != std::string::npos ||
@@ -137,12 +159,199 @@ bool InferPpocrNameOnly(const std::string& nameHint) {
            lower.find("pp-ocr") != std::string::npos;
 }
 
+bool InferDoctrNameOnly(const std::string& nameHint) {
+    const std::string lower = ToLower(nameHint);
+    return lower.find("doctr") != std::string::npos ||
+           lower.find("onnxtr") != std::string::npos ||
+           lower.find("doc-tr") != std::string::npos ||
+           lower.find("doc_tr") != std::string::npos;
+}
+
+std::string FindOcrManifest(const std::vector<FileEntry>& files) {
+    return FindFileByName(files, "ocr_manifest.json");
+}
+
 /**
- * Future family hook (docTR / OnnxTR): different file co-occurrence.
- * Keep false until a DoctrBackend + pack layout exists.
+ * DocTR / OnnxTR layout: det + rec ONNX plus ocr_manifest.json (family discriminator).
+ * Distinct from ppocr which requires rec_inference.yml / dict.
  */
-bool CanDoctrLayout(const std::vector<FileEntry>& /*files*/) {
-    return false;
+bool CanDoctrLayout(const std::vector<FileEntry>& files) {
+    const std::string det = FindDetOnnx(files, "");
+    const std::string rec = FindRecOnnx(files, "");
+    const std::string manifest = FindOcrManifest(files);
+    return !det.empty() && !rec.empty() && !manifest.empty();
+}
+
+/** Granite-docling octet. Exact basenames; no int8/fp16 twin in v1. */
+bool CanDocVlmLayout(const std::vector<FileEntry>& files) {
+    return !FindFileByName(files, "vision_encoder.onnx").empty() &&
+           !FindFileByName(files, "vision_encoder.onnx_data").empty() &&
+           !FindFileByName(files, "embed_tokens.onnx").empty() &&
+           !FindFileByName(files, "embed_tokens.onnx_data").empty() &&
+           !FindFileByName(files, "decoder_model_merged.onnx").empty() &&
+           !FindFileByName(files, "decoder_model_merged.onnx_data").empty() &&
+           !FindFileByName(files, "tokenizer.json").empty() &&
+           !FindFileByName(files, "ocr_manifest.json").empty();
+}
+
+size_t SkipJsonWs(const std::string& s, size_t pos) {
+    while (pos < s.size() &&
+           (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r')) {
+        ++pos;
+    }
+    return pos;
+}
+
+bool ParseJsonString(const std::string& s, size_t& pos, std::string& out) {
+    if (pos >= s.size() || s[pos] != '"') return false;
+    ++pos;
+    out.clear();
+    while (pos < s.size() && s[pos] != '"') {
+        if (s[pos] == '\\' && pos + 1 < s.size()) {
+            ++pos;
+            out.push_back(s[pos]);
+        } else {
+            out.push_back(s[pos]);
+        }
+        ++pos;
+    }
+    if (pos >= s.size() || s[pos] != '"') return false;
+    ++pos;
+    return true;
+}
+
+bool SkipJsonValue(const std::string& s, size_t& pos) {
+    pos = SkipJsonWs(s, pos);
+    if (pos >= s.size()) return false;
+    if (s[pos] == '"') {
+        std::string ignored;
+        return ParseJsonString(s, pos, ignored);
+    }
+    if (s[pos] == '{' || s[pos] == '[') {
+        int depth = 0;
+        do {
+            if (s[pos] == '"') {
+                std::string ignored;
+                if (!ParseJsonString(s, pos, ignored)) return false;
+                continue;
+            }
+            if (s[pos] == '{' || s[pos] == '[') {
+                ++depth;
+            } else if (s[pos] == '}' || s[pos] == ']') {
+                --depth;
+            }
+            ++pos;
+        } while (pos < s.size() && depth > 0);
+        return depth == 0;
+    }
+    while (pos < s.size() && s[pos] != ',' && s[pos] != '}' && s[pos] != ']' &&
+           s[pos] != ' ' && s[pos] != '\n' && s[pos] != '\r' && s[pos] != '\t') {
+        ++pos;
+    }
+    return true;
+}
+
+enum class ManifestFamilyStatus {
+    kUnavailable,
+    kKnown,
+    kUnsupported
+};
+
+struct ManifestFamilyRead {
+    ManifestFamilyStatus status = ManifestFamilyStatus::kUnavailable;
+    sherpaonnx::OcrModelKind kind = sherpaonnx::OcrModelKind::kUnknown;
+};
+
+/**
+ * Read `"family"` from ocr_manifest.json when the path is a real file.
+ * Missing file, files over 1 MiB, and JSON with no family string are unavailable
+ * so fixture listings still resolve by layout. A present but unknown family string
+ * is unsupported and must not fall through to filename guessing.
+ */
+ManifestFamilyRead ReadManifestFamily(const std::string& manifestPath) {
+    ManifestFamilyRead out;
+    if (manifestPath.empty() || !FileExists(manifestPath)) return out;
+
+    std::ifstream in(manifestPath, std::ios::binary | std::ios::ate);
+    if (!in) return out;
+    const std::streamoff len = static_cast<std::streamoff>(in.tellg());
+    constexpr std::streamoff kMaxBytes = 1024 * 1024;
+    if (len < 0 || len > kMaxBytes) return out;
+    in.seekg(0);
+    std::string json(static_cast<std::size_t>(len), '\0');
+    if (len > 0 && !in.read(&json[0], static_cast<std::streamsize>(len))) {
+        return out;
+    }
+
+    size_t pos = SkipJsonWs(json, 0);
+    if (pos >= json.size() || json[pos] != '{') return out;
+    ++pos;
+
+    bool sawFamily = false;
+    std::string family;
+    while (true) {
+        pos = SkipJsonWs(json, pos);
+        if (pos >= json.size() || json[pos] == '}') break;
+        std::string key;
+        if (!ParseJsonString(json, pos, key)) return out;
+        pos = SkipJsonWs(json, pos);
+        if (pos >= json.size() || json[pos] != ':') return out;
+        ++pos;
+        pos = SkipJsonWs(json, pos);
+        if (key == "family") {
+            if (pos >= json.size() || json[pos] != '"') return out;
+            if (!ParseJsonString(json, pos, family)) return out;
+            sawFamily = true;
+            break;
+        }
+        if (!SkipJsonValue(json, pos)) return out;
+        pos = SkipJsonWs(json, pos);
+        if (pos < json.size() && json[pos] == ',') ++pos;
+    }
+    if (!sawFamily) return out;
+
+    const auto kind = ParseOcrModelTypeStrict(family);
+    if (kind == sherpaonnx::OcrModelKind::kUnknown) {
+        out.status = ManifestFamilyStatus::kUnsupported;
+        return out;
+    }
+    out.status = ManifestFamilyStatus::kKnown;
+    out.kind = kind;
+    return out;
+}
+
+void FillDocVlmPaths(sherpaonnx::OcrModelPaths& paths,
+                     const std::vector<FileEntry>& files,
+                     const std::string& manifest) {
+    paths.vision_encoder = FindFileByName(files, "vision_encoder.onnx");
+    paths.vision_encoder_data = FindFileByName(files, "vision_encoder.onnx_data");
+    paths.embed_tokens = FindFileByName(files, "embed_tokens.onnx");
+    paths.embed_tokens_data = FindFileByName(files, "embed_tokens.onnx_data");
+    paths.decoder = FindFileByName(files, "decoder_model_merged.onnx");
+    paths.decoder_data = FindFileByName(files, "decoder_model_merged.onnx_data");
+    paths.tokenizer = FindFileByName(files, "tokenizer.json");
+    paths.manifest =
+        manifest.empty() ? FindFileByName(files, "ocr_manifest.json") : manifest;
+}
+
+bool LayoutPresent(sherpaonnx::OcrModelKind kind, bool canDocVlm, bool canPpocr,
+                   bool canDoctr) {
+    switch (kind) {
+        case sherpaonnx::OcrModelKind::kDocVlm:
+            return canDocVlm;
+        case sherpaonnx::OcrModelKind::kPpocr:
+            return canPpocr;
+        case sherpaonnx::OcrModelKind::kDoctr:
+            return canDoctr;
+        default:
+            return false;
+    }
+}
+
+std::string LayoutMissingError(sherpaonnx::OcrModelKind kind,
+                               const std::string& modelDir) {
+    return std::string("OCR: ") + OcrKindToTag(kind) + " layout not found in " +
+           modelDir;
 }
 
 sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
@@ -179,14 +388,21 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             result.error = kNameOnlyErr;
             return result;
         }
-        if (!InferPpocrNameOnly(modelDir)) {
+        if (InferDocVlmNameOnly(modelDir)) {
+            result.selectedKind = OK::kDocVlm;
+            result.detectedModels.push_back({"doc_vlm", modelDir});
+        } else if (InferPpocrNameOnly(modelDir)) {
+            result.selectedKind = OK::kPpocr;
+            result.detectedModels.push_back({"ppocr", modelDir});
+        } else if (InferDoctrNameOnly(modelDir)) {
+            result.selectedKind = OK::kDoctr;
+            result.detectedModels.push_back({"doctr", modelDir});
+        } else {
             result.error =
                 "OCR: no model type inferred from directory/asset name "
                 "(name-only mode).";
             return result;
         }
-        result.selectedKind = OK::kPpocr;
-        result.detectedModels.push_back({"ppocr", modelDir});
         AppendUniqueSource(result.detectionSources, DS::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
@@ -199,10 +415,15 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
     const std::string rec = FindRecOnnx(files, quantization);
     const std::string cls = FindClsOnnx(files, quantization);
     const std::string recDict = FindRecDict(files);
+    const std::string manifest = FindOcrManifest(files);
 
+    const bool canDocVlm = CanDocVlmLayout(files);
     const bool canPpocr = !det.empty() && !rec.empty() && !recDict.empty();
-    const bool canDoctr = CanDoctrLayout(files);
+    const bool canDoctr = CanDoctrLayout(files) && !manifest.empty();
 
+    if (canDocVlm) {
+        result.detectedModels.push_back({"doc_vlm", modelDir});
+    }
     if (canPpocr) {
         result.detectedModels.push_back({"ppocr", modelDir});
     }
@@ -210,43 +431,67 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         result.detectedModels.push_back({"doctr", modelDir});
     }
 
-    if (!canPpocr && !canDoctr) {
-        result.error =
-            "OCR: unrecognized pack layout (need det + rec ONNX and a "
-            "rec dictionary yml/txt) in " +
-            modelDir;
-        return result;
-    }
-
     OK selected = OK::kUnknown;
-    if (isAuto) {
-        if (canPpocr) {
-            selected = OK::kPpocr;
-            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
-        } else {
-            // canDoctr only (future)
-            result.error = "OCR: no supported family detected in " + modelDir;
-            return result;
-        }
-    } else {
+    if (!isAuto) {
         if (requestedExplicit == OK::kUnknown) {
             result.error = "OCR: unknown model type: " + reqRaw;
             return result;
         }
         selected = requestedExplicit;
         AppendUniqueSource(result.detectionSources, DS::kExplicitModelType);
-        if (selected == OK::kPpocr && !canPpocr) {
-            result.error = "OCR: ppocr layout not found in " + modelDir;
+        if (!LayoutPresent(selected, canDocVlm, canPpocr, canDoctr)) {
+            result.error = LayoutMissingError(selected, modelDir);
+            return result;
+        }
+    } else {
+        const ManifestFamilyRead family = ReadManifestFamily(manifest);
+        if (family.status == ManifestFamilyStatus::kUnsupported) {
+            result.error =
+                "OCR: ocr_manifest.json family is not a supported OCR family";
+            return result;
+        }
+        if (family.status == ManifestFamilyStatus::kKnown) {
+            selected = family.kind;
+            if (!LayoutPresent(selected, canDocVlm, canPpocr, canDoctr)) {
+                result.error = LayoutMissingError(selected, modelDir);
+                return result;
+            }
+        } else if (canDocVlm) {
+            selected = OK::kDocVlm;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
+        } else if (canPpocr) {
+            selected = OK::kPpocr;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
+        } else if (canDoctr) {
+            selected = OK::kDoctr;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
+        } else {
+            result.error =
+                "OCR: unrecognized pack layout (need the doc_vlm octet "
+                "vision_encoder.onnx, vision_encoder.onnx_data, "
+                "embed_tokens.onnx, embed_tokens.onnx_data, "
+                "decoder_model_merged.onnx, decoder_model_merged.onnx_data, "
+                "tokenizer.json, and ocr_manifest.json, or det + rec ONNX and "
+                "either a rec dictionary yml/txt for ppocr, or "
+                "ocr_manifest.json for doctr) in " +
+                modelDir;
             return result;
         }
     }
 
     result.selectedKind = selected;
-    if (selected == OK::kPpocr) {
+    if (selected == OK::kDocVlm) {
+        FillDocVlmPaths(result.paths, files, manifest);
+    } else if (selected == OK::kPpocr) {
         result.paths.det = det;
         result.paths.rec = rec;
         result.paths.cls = cls;
         result.paths.rec_dict = recDict;
+    } else if (selected == OK::kDoctr) {
+        result.paths.det = det;
+        result.paths.rec = rec;
+        result.paths.cls = cls;
+        result.paths.manifest = manifest;
     }
 
     auto validation =

@@ -299,8 +299,22 @@ export type OcrInitBridgeOptions = {
   modelType: string;
   numThreads?: number;
   provider?: string;
+  // ppocr
   maxSideLen?: number;
   useOrientationCls?: boolean;
+  // doctr
+  detBoxThresh?: number;
+  detBoxScoreThresh?: number;
+  detUnclipRatio?: number;
+  /** doc_vlm generation cap. Omit → native 0 → backend default 8192. */
+  maxNewTokens?: number;
+};
+
+export type OcrRecognizeNativeResult = {
+  family: string;
+  spanCount: number;
+  doctags: string;
+  markdown: string;
 };
 
 /** `ocrRecognize(..., options)`. */
@@ -326,6 +340,15 @@ export type OcrDetectNativeResult = {
     rec?: string;
     cls?: string;
     rec_dict?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
   };
   /** Legacy path map (string values). */
   files?: {
@@ -333,6 +356,15 @@ export type OcrDetectNativeResult = {
     rec?: string;
     cls?: string;
     recInferenceYml?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
   };
   detectionSources?: string[];
   /** Curated / heuristic language rows from native detect. */
@@ -347,6 +379,8 @@ export type OcrDetectNativeResult = {
   recPath?: string;
   clsPath?: string;
   recDictPath?: string;
+  /** `ocr_manifest.json` path — doctr family (top-level legacy). */
+  manifestPath?: string;
 };
 
 /** Structured language row from native detect bridge. */
@@ -1062,7 +1096,7 @@ export interface Spec extends TurboModule {
     imageBufferId: string,
     textOutBufferId: string,
     options?: OcrRecognizeBridgeOptions
-  ): Promise<void>;
+  ): Promise<OcrRecognizeNativeResult>;
 
   /** Cancel an in-flight OCR recognize by native operationId. */
   cancelOcrRecognize(operationId: string): Promise<void>;

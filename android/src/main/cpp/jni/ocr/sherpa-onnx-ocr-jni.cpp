@@ -114,7 +114,8 @@ JNIEXPORT void JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring modelDir,
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
-    jboolean useOrientationCls) {
+    jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
+    jfloat detUnclipRatio, jint maxNewTokens) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -124,6 +125,10 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.num_threads = numThreads > 0 ? numThreads : 4;
     opts.max_side_len = maxSideLen > 0 ? maxSideLen : 960;
     opts.use_orientation_cls = useOrientationCls == JNI_TRUE;
+    opts.det_box_thresh = detBoxThresh;
+    opts.det_box_score_thresh = detBoxScoreThresh;
+    opts.det_unclip_ratio = detUnclipRatio;
+    opts.max_new_tokens = maxNewTokens;
     opts.provider = JstringToStd(env, provider);
     engine.Load(type.empty() ? "auto" : type, dir, opts);
   } catch (const std::exception& e) {
@@ -191,6 +196,33 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     if (!detect.recDictPath.empty()) {
       PutString(env, pathsMap, pathsPut, "rec_dict", detect.recDictPath);
     }
+    if (!detect.manifestPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "manifest", detect.manifestPath);
+    }
+    if (!detect.visionEncoderPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "vision_encoder",
+                detect.visionEncoderPath);
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "vision_encoder_data",
+                detect.visionEncoderDataPath);
+    }
+    if (!detect.embedTokensPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embed_tokens", detect.embedTokensPath);
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embed_tokens_data",
+                detect.embedTokensDataPath);
+    }
+    if (!detect.decoderPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "decoder", detect.decoderPath);
+    }
+    if (!detect.decoderDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "decoder_data", detect.decoderDataPath);
+    }
+    if (!detect.tokenizerPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "tokenizer", detect.tokenizerPath);
+    }
     jstring key = env->NewStringUTF("paths");
     if (key) {
       env->CallObjectMethod(map, put, key, pathsMap);
@@ -213,6 +245,33 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     }
     if (!detect.recDictPath.empty()) {
       PutString(env, filesMap, filesPut, "recInferenceYml", detect.recDictPath);
+    }
+    if (!detect.manifestPath.empty()) {
+      PutString(env, filesMap, filesPut, "manifest", detect.manifestPath);
+    }
+    if (!detect.visionEncoderPath.empty()) {
+      PutString(env, filesMap, filesPut, "vision_encoder",
+                detect.visionEncoderPath);
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "vision_encoder_data",
+                detect.visionEncoderDataPath);
+    }
+    if (!detect.embedTokensPath.empty()) {
+      PutString(env, filesMap, filesPut, "embed_tokens", detect.embedTokensPath);
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "embed_tokens_data",
+                detect.embedTokensDataPath);
+    }
+    if (!detect.decoderPath.empty()) {
+      PutString(env, filesMap, filesPut, "decoder", detect.decoderPath);
+    }
+    if (!detect.decoderDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "decoder_data", detect.decoderDataPath);
+    }
+    if (!detect.tokenizerPath.empty()) {
+      PutString(env, filesMap, filesPut, "tokenizer", detect.tokenizerPath);
     }
     jstring key = env->NewStringUTF("files");
     if (key) {
@@ -376,6 +435,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   PutString(env, map, put, "errorMessage", outcome.errorMessage);
   PutString(env, map, put, "family", outcome.family);
   PutString(env, map, put, "text", outcome.result.text_utf8);
+  PutString(env, map, put, "doctags", outcome.result.doctags_utf8);
+  PutString(env, map, put, "markdown", outcome.result.markdown_utf8);
 
   jclass arrayListClass = env->FindClass("java/util/ArrayList");
   jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");

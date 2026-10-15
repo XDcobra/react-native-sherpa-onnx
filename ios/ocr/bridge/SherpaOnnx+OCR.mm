@@ -119,6 +119,52 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       files[@"recInferenceYml"] = p;
       paths[@"rec_dict"] = p;
     }
+    if (!detect.manifestPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.manifestPath.c_str()];
+      files[@"manifest"] = p;
+      paths[@"manifest"] = p;
+    }
+    if (!detect.visionEncoderPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.visionEncoderPath.c_str()];
+      files[@"vision_encoder"] = p;
+      paths[@"vision_encoder"] = p;
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.visionEncoderDataPath.c_str()];
+      files[@"vision_encoder_data"] = p;
+      paths[@"vision_encoder_data"] = p;
+    }
+    if (!detect.embedTokensPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embedTokensPath.c_str()];
+      files[@"embed_tokens"] = p;
+      paths[@"embed_tokens"] = p;
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embedTokensDataPath.c_str()];
+      files[@"embed_tokens_data"] = p;
+      paths[@"embed_tokens_data"] = p;
+    }
+    if (!detect.decoderPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.decoderPath.c_str()];
+      files[@"decoder"] = p;
+      paths[@"decoder"] = p;
+    }
+    if (!detect.decoderDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.decoderDataPath.c_str()];
+      files[@"decoder_data"] = p;
+      paths[@"decoder_data"] = p;
+    }
+    if (!detect.tokenizerPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.tokenizerPath.c_str()];
+      files[@"tokenizer"] = p;
+      paths[@"tokenizer"] = p;
+    }
     NSMutableArray *sources = [NSMutableArray array];
     for (const auto &src : detect.detectionSources) {
       [sources addObject:[NSString stringWithUTF8String:src.c_str()] ?: @""];
@@ -200,6 +246,14 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       BOOL useCls = options[@"useOrientationCls"]
                         ? [options[@"useOrientationCls"] boolValue]
                         : YES;
+      float detBoxThresh =
+          options[@"detBoxThresh"] ? [options[@"detBoxThresh"] floatValue] : 0.3f;
+      float detBoxScoreThresh =
+          options[@"detBoxScoreThresh"] ? [options[@"detBoxScoreThresh"] floatValue] : 0.5f;
+      float detUnclipRatio =
+          options[@"detUnclipRatio"] ? [options[@"detUnclipRatio"] floatValue] : 1.5f;
+      int maxNewTokens =
+          options[@"maxNewTokens"] ? [options[@"maxNewTokens"] intValue] : 0;
 
       std::string idStr = instanceId ? [instanceId UTF8String] : "";
       auto &engine = OcrEngineRegistry::Instance().Create(idStr);
@@ -207,6 +261,10 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.num_threads = numThreads > 0 ? numThreads : 4;
       opts.max_side_len = maxSideLen > 0 ? maxSideLen : 960;
       opts.use_orientation_cls = useCls;
+      opts.det_box_thresh = detBoxThresh;
+      opts.det_box_score_thresh = detBoxScoreThresh;
+      opts.det_unclip_ratio = detUnclipRatio;
+      opts.max_new_tokens = maxNewTokens;
       opts.provider = provider ? [provider UTF8String] : "cpu";
       engine.Load(modelType ? [modelType UTF8String] : "auto",
                   [modelDir UTF8String], opts);
@@ -311,7 +369,18 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
                nil);
         return;
       }
-      resolve(nil);
+      if (outcome.family.empty()) {
+        reject(kOcrInternal, @"recognize result missing family", nil);
+        return;
+      }
+      resolve(@{
+        @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
+        @"spanCount" : @(static_cast<NSInteger>(spans.size())),
+        @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
+            ?: @"",
+        @"markdown" :
+            [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
+      });
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
     }

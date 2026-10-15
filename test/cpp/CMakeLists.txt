@@ -344,9 +344,23 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrBackend.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrManifest.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrRecDecode.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
   )
   target_include_directories(ppocr_host_test PRIVATE
     "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doctr"
+    "${OCR_CPP_ROOT}/doc_vlm"
     "${OCR_TEST_DIR}"
     "${OCR_TEST_DIR}/vendor"
     "${_ORT_API_WRAPPER}"
@@ -375,6 +389,104 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
   )
   message(STATUS "OCR ppocr_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR DoctrBackend host tests (unit + real doctr-mobile golden) ---
+  add_executable(doctr_host_test
+    "${OCR_TEST_DIR}/doctr_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrBackend.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrManifest.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrRecDecode.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+  )
+  target_include_directories(doctr_host_test PRIVATE
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doctr"
+    "${OCR_CPP_ROOT}/doc_vlm"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(doctr_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(doctr_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(doctr_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(doctr_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(doctr_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(doctr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(doctr_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME doctr_host_test COMMAND $<TARGET_FILE:doctr_host_test>)
+  set_tests_properties(doctr_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "OCR doctr_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR DocVlmBackend host tests (unit + granite-docling smoke) ---
+  add_executable(doc_vlm_host_test
+    "${OCR_TEST_DIR}/doc_vlm_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+  )
+  target_include_directories(doc_vlm_host_test PRIVATE
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doc_vlm"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(doc_vlm_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(doc_vlm_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(doc_vlm_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(doc_vlm_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(doc_vlm_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(doc_vlm_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(doc_vlm_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME doc_vlm_host_test COMMAND $<TARGET_FILE:doc_vlm_host_test>)
+  set_tests_properties(doc_vlm_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 300
+  )
+  message(STATUS "OCR doc_vlm_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
 else()
   message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()

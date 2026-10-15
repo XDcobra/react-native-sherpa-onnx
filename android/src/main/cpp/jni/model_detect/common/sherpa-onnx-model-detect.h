@@ -111,10 +111,14 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
-/** Offline OCR families. v1: ppocr only; doctr reserved for future backends. */
+/** Offline OCR families: ppocr (PP-OCR Det/Rec/Cls), doctr (OnnxTR Det/Rec), and doc_vlm (granite-docling). */
 enum class OcrModelKind {
     kUnknown,
-    kPpocr
+    kPpocr,
+    /** docTR / OnnxTR Det+Rec packs (`ocr_manifest.json`). */
+    kDoctr,
+    /** Granite-Docling packs: vision encoder, embed tokens, merged decoder, tokenizer, manifest. */
+    kDocVlm
 };
 
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
@@ -346,8 +350,24 @@ struct OcrModelPaths {
     std::string rec;
     /** Optional orientation / angle classifier ONNX. */
     std::string cls;
-    /** Recognition dictionary / character list (yml or txt). */
+    /** Recognition dictionary / character list (yml or txt) — ppocr. */
     std::string rec_dict;
+    /** Family/vocab/preprocess manifest (`ocr_manifest.json`) — doctr and doc_vlm. */
+    std::string manifest;
+    /** doc_vlm: `vision_encoder.onnx`. */
+    std::string vision_encoder;
+    /** doc_vlm: `vision_encoder.onnx_data` (underscore, not `.onnx.data`). */
+    std::string vision_encoder_data;
+    /** doc_vlm: `embed_tokens.onnx`. */
+    std::string embed_tokens;
+    /** doc_vlm: `embed_tokens.onnx_data`. */
+    std::string embed_tokens_data;
+    /** doc_vlm: `decoder_model_merged.onnx`. Key name is `decoder`. */
+    std::string decoder;
+    /** doc_vlm: `decoder_model_merged.onnx_data`. */
+    std::string decoder_data;
+    /** doc_vlm: `tokenizer.json`. */
+    std::string tokenizer;
 };
 
 struct LanguageIdModelPaths {

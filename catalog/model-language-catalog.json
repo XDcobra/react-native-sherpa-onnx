@@ -1309,6 +1309,87 @@
     }
   },
   "ocr": {
+    "doctr": {
+      "hints": [
+        "en",
+        "fr",
+        "pt",
+        "es",
+        "de",
+        "it",
+        "cs",
+        "pl",
+        "da",
+        "no",
+        "sv",
+        "fi",
+        "nl",
+        "hu",
+        "ro"
+      ],
+      "entries": [
+        {
+          "id": "en",
+          "name": "english"
+        },
+        {
+          "id": "fr",
+          "name": "french"
+        },
+        {
+          "id": "pt",
+          "name": "portuguese"
+        },
+        {
+          "id": "es",
+          "name": "spanish"
+        },
+        {
+          "id": "de",
+          "name": "german"
+        },
+        {
+          "id": "it",
+          "name": "italian"
+        },
+        {
+          "id": "cs",
+          "name": "czech"
+        },
+        {
+          "id": "pl",
+          "name": "polish"
+        },
+        {
+          "id": "da",
+          "name": "danish"
+        },
+        {
+          "id": "no",
+          "name": "norwegian"
+        },
+        {
+          "id": "sv",
+          "name": "swedish"
+        },
+        {
+          "id": "fi",
+          "name": "finnish"
+        },
+        {
+          "id": "nl",
+          "name": "dutch"
+        },
+        {
+          "id": "hu",
+          "name": "hungarian"
+        },
+        {
+          "id": "ro",
+          "name": "romanian"
+        }
+      ]
+    },
     "ppocr": {
       "hints": [
         "zh",
@@ -1558,6 +1639,14 @@
           "id": "vi",
           "name": "vietnamese"
         }
+      ]
+    },
+    "doc_vlm": {
+      "hints": [
+        "en",
+        "ja",
+        "ar",
+        "zh"
       ]
     }
   }

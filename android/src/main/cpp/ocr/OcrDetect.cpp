@@ -13,6 +13,10 @@ const char* KindToFamily(sherpaonnx::OcrModelKind kind) {
   switch (kind) {
     case sherpaonnx::OcrModelKind::kPpocr:
       return "ppocr";
+    case sherpaonnx::OcrModelKind::kDoctr:
+      return "doctr";
+    case sherpaonnx::OcrModelKind::kDocVlm:
+      return "doc_vlm";
     default:
       return "";
   }
@@ -43,6 +47,14 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
   out.recPath = native.paths.rec;
   out.clsPath = native.paths.cls;
   out.recDictPath = native.paths.rec_dict;
+  out.manifestPath = native.paths.manifest;
+  out.visionEncoderPath = native.paths.vision_encoder;
+  out.visionEncoderDataPath = native.paths.vision_encoder_data;
+  out.embedTokensPath = native.paths.embed_tokens;
+  out.embedTokensDataPath = native.paths.embed_tokens_data;
+  out.decoderPath = native.paths.decoder;
+  out.decoderDataPath = native.paths.decoder_data;
+  out.tokenizerPath = native.paths.tokenizer;
   out.hasDet = !out.detPath.empty();
   out.hasRec = !out.recPath.empty();
   out.hasCls = !out.clsPath.empty();

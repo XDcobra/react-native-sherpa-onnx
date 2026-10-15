@@ -152,13 +152,24 @@ TEST(OcrFactory, UnknownBackendThrows) {
   EXPECT_THROW(
       {
         try {
-          CreateOcrBackend("doctr");
+          CreateOcrBackend("easyocr");
         } catch (const std::invalid_argument& e) {
           EXPECT_NE(std::string(e.what()).find("Unknown OCR"), std::string::npos);
+          EXPECT_NE(std::string(e.what()).find("doc_vlm"), std::string::npos);
           throw;
         }
       },
       std::invalid_argument);
+  EXPECT_THROW(CreateOcrBackend("DocVlm"), std::invalid_argument);
+}
+
+TEST(OcrFactory, DocVlmAndAliasesCreate) {
+  for (const char* id :
+       {"doc_vlm", "docvlm", "doc-vlm", "granite-docling", "docling"}) {
+    auto backend = CreateOcrBackend(id);
+    ASSERT_NE(backend, nullptr) << id;
+    EXPECT_STREQ(backend->Family(), "doc_vlm") << id;
+  }
 }
 
 TEST(PpocrCtcUnit, LoadDictAndGreedyDecode) {
