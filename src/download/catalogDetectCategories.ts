@@ -11,6 +11,7 @@ export const CATALOG_DETECT_CATEGORIES = new Set<ModelCategory>([
   ModelCategory.SpeakerEmbedding,
   ModelCategory.Diarization,
   ModelCategory.Alignment,
+  ModelCategory.Ocr,
   ModelCategory.LanguageId,
   ModelCategory.Kws,
   ModelCategory.AudioTagging,
@@ -27,6 +28,7 @@ export type CatalogDetectCategory =
   | ModelCategory.SpeakerEmbedding
   | ModelCategory.Diarization
   | ModelCategory.Alignment
+  | ModelCategory.Ocr
   | ModelCategory.LanguageId
   | ModelCategory.Kws
   | ModelCategory.AudioTagging;

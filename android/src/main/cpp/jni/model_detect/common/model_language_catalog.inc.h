@@ -85,6 +85,67 @@ inline const std::vector<PublicLanguageRow>& AlignmentRowsForModelType(
     return it == kMap.end() ? kEmpty : it->second;
 }
 
+inline const std::vector<PublicLanguageRow>& OcrRowsForModelType(
+    const std::string& modelType) {
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kMap = {
+        {"ppocr", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"ja", "ja"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+    };
+    static const std::vector<PublicLanguageRow> kEmpty;
+    const auto it = kMap.find(modelType);
+    return it == kMap.end() ? kEmpty : it->second;
+}
+
+inline std::string OcrPackLanguageStem(const std::string& modelKey) {
+    std::string stem = modelKey;
+    for (char& c : stem) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const std::string suffixes[] = {".tar.bz2", ".tar.gz", ".tar.zst"};
+    for (const auto& suf : suffixes) {
+        if (stem.size() >= suf.size() &&
+            stem.compare(stem.size() - suf.size(), suf.size(), suf) == 0) {
+            stem.resize(stem.size() - suf.size());
+            break;
+        }
+    }
+    static const char* kQuant[] = {
+        "-int8", "-fp16", "-fp32", "-q4f16", "-q4", "-uint8", "-bnb4", "-quantized"};
+    for (const char* q : kQuant) {
+        const std::size_t qlen = std::char_traits<char>::length(q);
+        if (stem.size() >= qlen &&
+            stem.compare(stem.size() - qlen, qlen, q) == 0) {
+            stem.resize(stem.size() - qlen);
+            break;
+        }
+    }
+    return stem;
+}
+
+inline const std::vector<PublicLanguageRow>& OcrPackRowsForModelKey(
+    const std::string& modelKey) {
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {
+        {"ppocrv6-medium", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"ja", "ja"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+        {"ppocrv6-small", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"ja", "ja"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+        {"ppocrv6-tiny", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+    };
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kByStem = {
+        {"ppocrv6-medium", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"ja", "ja"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+        {"ppocrv6-small", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"ja", "ja"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+        {"ppocrv6-tiny", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}, PublicLanguageRow{"af", "af"}, PublicLanguageRow{"az", "az"}, PublicLanguageRow{"bs", "bs"}, PublicLanguageRow{"ca", "ca"}, PublicLanguageRow{"cs", "cs"}, PublicLanguageRow{"cy", "cy"}, PublicLanguageRow{"da", "da"}, PublicLanguageRow{"de", "de"}, PublicLanguageRow{"es", "es"}, PublicLanguageRow{"et", "et"}, PublicLanguageRow{"eu", "eu"}, PublicLanguageRow{"fi", "fi"}, PublicLanguageRow{"fr", "fr"}, PublicLanguageRow{"ga", "ga"}, PublicLanguageRow{"gl", "gl"}, PublicLanguageRow{"hr", "hr"}, PublicLanguageRow{"hu", "hu"}, PublicLanguageRow{"id", "id"}, PublicLanguageRow{"is", "is"}, PublicLanguageRow{"it", "it"}, PublicLanguageRow{"ku", "ku"}, PublicLanguageRow{"la", "la"}, PublicLanguageRow{"lb", "lb"}, PublicLanguageRow{"lt", "lt"}, PublicLanguageRow{"lv", "lv"}, PublicLanguageRow{"mi", "mi"}, PublicLanguageRow{"ms", "ms"}, PublicLanguageRow{"mt", "mt"}, PublicLanguageRow{"nl", "nl"}, PublicLanguageRow{"no", "no"}, PublicLanguageRow{"oc", "oc"}, PublicLanguageRow{"pl", "pl"}, PublicLanguageRow{"pt", "pt"}, PublicLanguageRow{"qu", "qu"}, PublicLanguageRow{"rm", "rm"}, PublicLanguageRow{"ro", "ro"}, PublicLanguageRow{"sk", "sk"}, PublicLanguageRow{"sl", "sl"}, PublicLanguageRow{"sq", "sq"}, PublicLanguageRow{"sr", "sr"}, PublicLanguageRow{"sv", "sv"}, PublicLanguageRow{"sw", "sw"}, PublicLanguageRow{"tl", "tl"}, PublicLanguageRow{"tr", "tr"}, PublicLanguageRow{"uz", "uz"}, PublicLanguageRow{"vi", "vi"}}},
+    };
+    static const std::vector<PublicLanguageRow> kEmpty;
+    if (modelKey.empty()) return kEmpty;
+    std::string lower = modelKey;
+    for (char& c : lower) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const auto byId = kById.find(lower);
+    if (byId != kById.end()) return byId->second;
+    const auto byStem = kByStem.find(OcrPackLanguageStem(lower));
+    if (byStem != kByStem.end()) return byStem->second;
+    return kEmpty;
+}
+
 inline std::string ModelOptionIdForHint(
     const std::string& modelType,
     const std::string& hint) {

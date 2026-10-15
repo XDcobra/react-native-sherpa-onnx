@@ -25,7 +25,9 @@ export const githubK2FsaProvider: SourceProvider = {
   id: 'github_k2_fsa',
   label: 'GitHub · k2-fsa/sherpa-onnx',
   supportsCategory(category) {
-    return category !== ModelCategory.Alignment;
+    return (
+      category !== ModelCategory.Alignment && category !== ModelCategory.Ocr
+    );
   },
   async listModels(category, ctx) {
     const tag = getCategoryTag(category);

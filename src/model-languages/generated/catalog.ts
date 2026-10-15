@@ -1758,6 +1758,562 @@ export function iso6391HintsForAlignmentModelType(
   return undefined;
 }
 
+export const PPOCR_LANGUAGES: readonly ModelLanguage[] = [
+  {
+    "id": "zh",
+    "name": "chinese"
+  },
+  {
+    "id": "en",
+    "name": "english"
+  },
+  {
+    "id": "ja",
+    "name": "japanese"
+  },
+  {
+    "id": "af",
+    "name": "afrikaans"
+  },
+  {
+    "id": "az",
+    "name": "azerbaijani"
+  },
+  {
+    "id": "bs",
+    "name": "bosnian"
+  },
+  {
+    "id": "ca",
+    "name": "catalan"
+  },
+  {
+    "id": "cs",
+    "name": "czech"
+  },
+  {
+    "id": "cy",
+    "name": "welsh"
+  },
+  {
+    "id": "da",
+    "name": "danish"
+  },
+  {
+    "id": "de",
+    "name": "german"
+  },
+  {
+    "id": "es",
+    "name": "spanish"
+  },
+  {
+    "id": "et",
+    "name": "estonian"
+  },
+  {
+    "id": "eu",
+    "name": "basque"
+  },
+  {
+    "id": "fi",
+    "name": "finnish"
+  },
+  {
+    "id": "fr",
+    "name": "french"
+  },
+  {
+    "id": "ga",
+    "name": "irish"
+  },
+  {
+    "id": "gl",
+    "name": "galician"
+  },
+  {
+    "id": "hr",
+    "name": "croatian"
+  },
+  {
+    "id": "hu",
+    "name": "hungarian"
+  },
+  {
+    "id": "id",
+    "name": "indonesian"
+  },
+  {
+    "id": "is",
+    "name": "icelandic"
+  },
+  {
+    "id": "it",
+    "name": "italian"
+  },
+  {
+    "id": "ku",
+    "name": "kurdish"
+  },
+  {
+    "id": "la",
+    "name": "latin"
+  },
+  {
+    "id": "lb",
+    "name": "luxembourgish"
+  },
+  {
+    "id": "lt",
+    "name": "lithuanian"
+  },
+  {
+    "id": "lv",
+    "name": "latvian"
+  },
+  {
+    "id": "mi",
+    "name": "maori"
+  },
+  {
+    "id": "ms",
+    "name": "malay"
+  },
+  {
+    "id": "mt",
+    "name": "maltese"
+  },
+  {
+    "id": "nl",
+    "name": "dutch"
+  },
+  {
+    "id": "no",
+    "name": "norwegian"
+  },
+  {
+    "id": "oc",
+    "name": "occitan"
+  },
+  {
+    "id": "pl",
+    "name": "polish"
+  },
+  {
+    "id": "pt",
+    "name": "portuguese"
+  },
+  {
+    "id": "qu",
+    "name": "quechua"
+  },
+  {
+    "id": "rm",
+    "name": "romansh"
+  },
+  {
+    "id": "ro",
+    "name": "romanian"
+  },
+  {
+    "id": "sk",
+    "name": "slovak"
+  },
+  {
+    "id": "sl",
+    "name": "slovenian"
+  },
+  {
+    "id": "sq",
+    "name": "albanian"
+  },
+  {
+    "id": "sr",
+    "name": "serbian"
+  },
+  {
+    "id": "sv",
+    "name": "swedish"
+  },
+  {
+    "id": "sw",
+    "name": "swahili"
+  },
+  {
+    "id": "tl",
+    "name": "tagalog"
+  },
+  {
+    "id": "tr",
+    "name": "turkish"
+  },
+  {
+    "id": "uz",
+    "name": "uzbek"
+  },
+  {
+    "id": "vi",
+    "name": "vietnamese"
+  }
+] as const;
+
+export function getPpocrLanguages(): readonly ModelLanguage[] {
+  return PPOCR_LANGUAGES;
+}
+
+export const PPOCR_ISO6391_HINTS = ["zh","en","ja","af","az","bs","ca","cs","cy","da","de","es","et","eu","fi","fr","ga","gl","hr","hu","id","is","it","ku","la","lb","lt","lv","mi","ms","mt","nl","no","oc","pl","pt","qu","rm","ro","sk","sl","sq","sr","sv","sw","tl","tr","uz","vi"] as const;
+export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
+  "ppocrv6-medium": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-small": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-tiny": [
+    "zh",
+    "en",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ]
+} as const;
+export const OCR_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, readonly string[]>> = {
+  "ppocrv6-medium": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-small": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-tiny": [
+    "zh",
+    "en",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ]
+} as const;
+
+const OCR_PACK_QUANT_SUFFIX_RE =
+  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/;
+
+/** Strip archive / quant suffixes for OCR pack language lookup. */
+export function ocrPackLanguageStem(modelKey: string): string {
+  let stem = (modelKey ?? '').trim().toLowerCase();
+  stem = stem.replace(/\.tar\.(bz2|gz|zst)$/i, '');
+  stem = stem.replace(OCR_PACK_QUANT_SUFFIX_RE, '');
+  return stem;
+}
+
+export function iso6391HintsForOcrModelType(
+  modelType: string | undefined,
+  modelKey?: string
+): string[] | undefined {
+  const type = (modelType ?? '').trim().toLowerCase();
+  const key = (modelKey ?? '').trim().toLowerCase();
+
+  // 1–2) Pack-first from ocr sources.csv (exact id, then stem).
+  if (key) {
+    const byId = OCR_PACK_ISO6391_HINTS_BY_ID[key];
+    if (byId && byId.length > 0) {
+      return [...byId];
+    }
+    const stem = ocrPackLanguageStem(key);
+    const byStem = OCR_PACK_ISO6391_HINTS_BY_STEM[stem];
+    if (byStem && byStem.length > 0) {
+      return [...byStem];
+    }
+  }
+
+  // 3) Family fallback for ppocr / auto / type-only queries.
+  if (!key || type === 'ppocr' || type === 'auto' || type === '') {
+    if (type === 'ppocr' || type === 'auto' || (!type && !key)) {
+      return [...PPOCR_ISO6391_HINTS];
+    }
+  }
+  if (type === 'ppocr') {
+    return [...PPOCR_ISO6391_HINTS];
+  }
+  return undefined;
+}
+
 const STT_ENTRIES: Readonly<Record<string, readonly ModelLanguage[]>> = {
   "whisper": WHISPER_LANGUAGES,
   "sense_voice": SENSEVOICE_LANGUAGES,

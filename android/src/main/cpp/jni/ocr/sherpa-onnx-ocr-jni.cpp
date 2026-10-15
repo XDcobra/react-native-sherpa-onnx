@@ -1,6 +1,8 @@
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
+#include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-model-detect.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -148,11 +150,15 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeCancelRecognize(JNIEnv* env,
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
-                                               jstring modelDir) {
-  auto detect = sherpa_onnx::ocr::DetectOcrModel(JstringToStd(env, modelDir));
+                                               jstring modelDir,
+                                               jstring modelType) {
+  const std::string type = JstringToStd(env, modelType);
+  auto detect = sherpa_onnx::ocr::DetectOcrModel(
+      JstringToStd(env, modelDir), type.empty() ? "auto" : type);
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
+  PutBool(env, map, put, "success", detect.ok ? JNI_TRUE : JNI_FALSE);
   PutBool(env, map, put, "ok", detect.ok ? JNI_TRUE : JNI_FALSE);
   PutString(env, map, put, "modelType", detect.modelType);
   PutString(env, map, put, "family", detect.family);
@@ -160,6 +166,128 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
   PutBool(env, map, put, "hasRec", detect.hasRec ? JNI_TRUE : JNI_FALSE);
   PutBool(env, map, put, "hasCls", detect.hasCls ? JNI_TRUE : JNI_FALSE);
   PutBool(env, map, put, "hasRecYml", detect.hasRecYml ? JNI_TRUE : JNI_FALSE);
+  if (!detect.quantization.empty()) {
+    PutString(env, map, put, "quantization", detect.quantization);
+  }
+  if (!detect.sizeTier.empty()) {
+    PutString(env, map, put, "sizeTier", detect.sizeTier);
+  }
+  if (!detect.errorMessage.empty()) {
+    PutString(env, map, put, "error", detect.errorMessage);
+  }
+
+  jmethodID pathsPut = nullptr;
+  jobject pathsMap = NewHashMap(env, &pathsPut);
+  if (pathsMap) {
+    if (!detect.detPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "det", detect.detPath);
+    }
+    if (!detect.recPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "rec", detect.recPath);
+    }
+    if (!detect.clsPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "cls", detect.clsPath);
+    }
+    if (!detect.recDictPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "rec_dict", detect.recDictPath);
+    }
+    jstring key = env->NewStringUTF("paths");
+    if (key) {
+      env->CallObjectMethod(map, put, key, pathsMap);
+      env->DeleteLocalRef(key);
+    }
+  }
+
+  // Legacy files map with path strings (same keys as before).
+  jmethodID filesPut = nullptr;
+  jobject filesMap = NewHashMap(env, &filesPut);
+  if (filesMap) {
+    if (!detect.detPath.empty()) {
+      PutString(env, filesMap, filesPut, "det", detect.detPath);
+    }
+    if (!detect.recPath.empty()) {
+      PutString(env, filesMap, filesPut, "rec", detect.recPath);
+    }
+    if (!detect.clsPath.empty()) {
+      PutString(env, filesMap, filesPut, "cls", detect.clsPath);
+    }
+    if (!detect.recDictPath.empty()) {
+      PutString(env, filesMap, filesPut, "recInferenceYml", detect.recDictPath);
+    }
+    jstring key = env->NewStringUTF("files");
+    if (key) {
+      env->CallObjectMethod(map, put, key, filesMap);
+      env->DeleteLocalRef(key);
+    }
+  }
+
+  jclass arrayListClass = env->FindClass("java/util/ArrayList");
+  jmethodID arrayListCtor =
+      arrayListClass ? env->GetMethodID(arrayListClass, "<init>", "()V")
+                     : nullptr;
+  jmethodID arrayListAdd =
+      arrayListClass
+          ? env->GetMethodID(arrayListClass, "add", "(Ljava/lang/Object;)Z")
+          : nullptr;
+
+  if (!detect.detectionSources.empty() && arrayListClass && arrayListCtor &&
+      arrayListAdd) {
+    jobject sources = env->NewObject(arrayListClass, arrayListCtor);
+    if (sources) {
+      for (const auto& src : detect.detectionSources) {
+        jstring s = env->NewStringUTF(src.c_str());
+        if (s) {
+          env->CallBooleanMethod(sources, arrayListAdd, s);
+          env->DeleteLocalRef(s);
+        }
+      }
+      jstring key = env->NewStringUTF("detectionSources");
+      if (key) {
+        env->CallObjectMethod(map, put, key, sources);
+        env->DeleteLocalRef(key);
+      }
+    }
+  }
+
+  if (arrayListClass && arrayListCtor && arrayListAdd) {
+    jobject models = env->NewObject(arrayListClass, arrayListCtor);
+    if (models) {
+      for (const auto& m : detect.detectedModels) {
+        jmethodID entryPut = nullptr;
+        jobject entry = NewHashMap(env, &entryPut);
+        if (!entry) continue;
+        PutString(env, entry, entryPut, "type", m.type);
+        PutString(env, entry, entryPut, "modelDir", m.modelDir);
+        env->CallBooleanMethod(models, arrayListAdd, entry);
+      }
+      jstring key = env->NewStringUTF("detectedModels");
+      if (key) {
+        env->CallObjectMethod(map, put, key, models);
+        env->DeleteLocalRef(key);
+      }
+    }
+  }
+  if (arrayListClass) env->DeleteLocalRef(arrayListClass);
+
+  if (!detect.languages.empty()) {
+    std::vector<sherpaonnx::PublicLanguageRow> rows;
+    rows.reserve(detect.languages.size());
+    for (const auto& lang : detect.languages) {
+      rows.push_back(
+          sherpaonnx::PublicLanguageRow{lang.iso6391Hint, lang.id});
+    }
+    jobject derivedLangs =
+        sherpaonnx::BuildPublicLanguageRowList(env, rows);
+    if (derivedLangs) {
+      jstring keyLang = env->NewStringUTF("languages");
+      if (keyLang) {
+        env->CallObjectMethod(map, put, keyLang, derivedLangs);
+        env->DeleteLocalRef(keyLang);
+      }
+      env->DeleteLocalRef(derivedLangs);
+    }
+  }
+
   PutString(env, map, put, "errorCode", detect.errorCode);
   PutString(env, map, put, "errorMessage", detect.errorMessage);
   return map;

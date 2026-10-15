@@ -29,6 +29,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   const kwsPath = 'model_licenses/kws-models-license-status.csv';
   const audioTaggingPath =
     'model_licenses/audio-tagging-models-license-status.csv';
+  const ocrPath = 'model_licenses/ocr-models-license-status.csv';
 
   const results = await Promise.allSettled([
     SherpaOnnx.readAssetFileAsUtf8(asrPath),
@@ -43,6 +44,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     SherpaOnnx.readAssetFileAsUtf8(diarizationModelsPath),
     SherpaOnnx.readAssetFileAsUtf8(kwsPath),
     SherpaOnnx.readAssetFileAsUtf8(audioTaggingPath),
+    SherpaOnnx.readAssetFileAsUtf8(ocrPath),
   ]);
 
   const [
@@ -58,6 +60,7 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
     diarizationModelsResult,
     kwsResult,
     audioTaggingResult,
+    ocrResult,
   ] = results;
 
   const licenses: ModelLicense[] = [];
@@ -155,6 +158,14 @@ export async function getModelLicenses(): Promise<ModelLicense[]> {
   } else {
     console.warn(
       `[SherpaOnnx] Failed to load audio tagging model licenses: ${audioTaggingResult.reason}`
+    );
+  }
+
+  if (ocrResult.status === 'fulfilled') {
+    licenses.push(...parseCsv(ocrResult.value));
+  } else {
+    console.warn(
+      `[SherpaOnnx] Failed to load OCR model licenses: ${ocrResult.reason}`
     );
   }
 

@@ -1,0 +1,13 @@
+{
+  "repo": "XDcobra/react-native-sherpa-onnx",
+  "streams": [
+    {
+      "id": "ocr-models",
+      "release_tag": "ocr-models",
+      "tree_cache_dir": "tree-cache/ocr-models",
+      "structure_file": "test/fixtures/ocr-models-structure.txt",
+      "expected_csv": "test/fixtures/ocr-models-expected.csv",
+      "license_csv": "android/src/main/assets/model_licenses/ocr-models-license-status.csv"
+    }
+  ]
+}

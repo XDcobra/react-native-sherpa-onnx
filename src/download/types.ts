@@ -12,6 +12,7 @@ export enum ModelCategory {
   SpeakerEmbedding = 'speakerEmbedding',
   Qnn = 'qnn',
   Alignment = 'alignment',
+  Ocr = 'ocr',
   LanguageId = 'languageId',
   Kws = 'kws',
   AudioTagging = 'audioTagging',

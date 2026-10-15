@@ -135,6 +135,16 @@ void FillAlignmentModelPathsFromStringMap(
     SetPathFromMap(paths, "vocab", out.vocab);
 }
 
+void FillOcrModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    OcrModelPaths& out
+) {
+    SetPathFromMap(paths, "det", out.det);
+    SetPathFromMap(paths, "rec", out.rec);
+    SetPathFromMap(paths, "cls", out.cls);
+    SetPathFromMap(paths, "rec_dict", out.rec_dict);
+}
+
 void FillLanguageIdModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     LanguageIdModelPaths& out
@@ -296,6 +306,16 @@ std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
     PutPathIfNonEmpty(out, "vocab", paths.vocab);
+    return out;
+}
+
+std::map<std::string, std::string> OcrModelPathsToStringMap(
+    const OcrModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "det", paths.det);
+    PutPathIfNonEmpty(out, "rec", paths.rec);
+    PutPathIfNonEmpty(out, "cls", paths.cls);
+    PutPathIfNonEmpty(out, "rec_dict", paths.rec_dict);
     return out;
 }
 

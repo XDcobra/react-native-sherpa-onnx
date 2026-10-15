@@ -7,6 +7,8 @@ export type {
   AudioTaggingInitBridgeOptions,
   EnhancementInitBridgeOptions,
   LanguageIdInitBridgeOptions,
+  OcrInitBridgeOptions,
+  OcrRecognizeBridgeOptions,
   OnlineSttInitBridgeOptions,
   PunctuationInitBridgeOptions,
   SeparationInitBridgeOptions,

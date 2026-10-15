@@ -61,6 +61,11 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'alignment-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/alignment`,
   },
+  [ModelCategory.Ocr]: {
+    tag: 'ocr-models',
+    cacheFile: 'ocr-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/ocr`,
+  },
   [ModelCategory.LanguageId]: {
     tag: 'asr-models',
     cacheFile: 'language-id-models.json',

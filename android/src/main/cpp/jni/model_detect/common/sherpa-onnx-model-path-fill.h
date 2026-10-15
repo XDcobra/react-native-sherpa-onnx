@@ -53,6 +53,11 @@ void FillAlignmentModelPathsFromStringMap(
     AlignmentModelPaths& out
 );
 
+void FillOcrModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    OcrModelPaths& out
+);
+
 void FillLanguageIdModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     LanguageIdModelPaths& out
@@ -88,6 +93,8 @@ std::map<std::string, std::string> PunctuationModelPathsToStringMap(
     const PunctuationModelPaths& paths);
 std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     const AlignmentModelPaths& paths);
+std::map<std::string, std::string> OcrModelPathsToStringMap(
+    const OcrModelPaths& paths);
 std::map<std::string, std::string> LanguageIdModelPathsToStringMap(
     const LanguageIdModelPaths& paths);
 std::map<std::string, std::string> KwsModelPathsToStringMap(

@@ -83,7 +83,7 @@ await releaseOfflineImageBuffer(fromFiles);
 await releaseOfflineImageBuffer(one);
 ```
 
-The common pattern is: decode once, pass refs/ids to batch feature APIs (OCR later), then release buffers explicitly.
+The common pattern is: decode once, pass refs/ids to batch feature APIs (e.g. [offline OCR](ocr-offline.md)), then release buffers explicitly.
 
 ---
 
@@ -290,6 +290,7 @@ Optional disable of libwebp: `sherpaOnnxDisableLibwebp=true` (Gradle) / `SHERPA_
 
 ## See also
 
+- [Offline OCR](ocr-offline.md) (typical **consumer** of image frames)
 - [File I/O (`FileSource`)](fileio.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [Pipeline text buffers — offline](textbuffer-offline.md)
@@ -311,7 +312,7 @@ const pages = await createOfflineImageBufferFromFiles(
   { maxSide: 2048 }
 );
 
-// Reuse `pages` for multiple offline OCR passes once createOCR lands.
+// Reuse `pages` for multiple offline OCR passes (createOCR / recognize).
 // Release once all consumers are finished.
 await releaseOfflineImageBuffer(pages);
 ```

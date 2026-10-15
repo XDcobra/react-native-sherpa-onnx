@@ -12,6 +12,7 @@ enum class ModelLanguageDomain {
     kTts,
     kStt,
     kAlignment,
+    kOcr,
 };
 
 /**
@@ -43,6 +44,10 @@ void AppendCuratedSttLanguageRowsIfEmpty(
 
 void AppendCuratedAlignmentLanguageRowsIfEmpty(
     AlignmentDetectResult& result,
+    const std::string& modelKey);
+
+void AppendCuratedOcrLanguageRowsIfEmpty(
+    OcrDetectResult& result,
     const std::string& modelKey);
 
 } // namespace sherpaonnx

@@ -1,0 +1,24 @@
+# Asset: ppocrv6-medium.tar.bz2
+# updated_at: 2026-10-14T09:05:51Z
+ppocrv6-medium/
+ppocrv6-medium/det.onnx
+ppocrv6-medium/cls.onnx
+ppocrv6-medium/LICENSE
+ppocrv6-medium/rec.onnx
+ppocrv6-medium/rec_inference.yml
+# Asset: ppocrv6-small.tar.bz2
+# updated_at: 2026-10-14T09:00:30Z
+ppocrv6-small/
+ppocrv6-small/det.onnx
+ppocrv6-small/cls.onnx
+ppocrv6-small/LICENSE
+ppocrv6-small/rec.onnx
+ppocrv6-small/rec_inference.yml
+# Asset: ppocrv6-tiny.tar.bz2
+# updated_at: 2026-10-14T09:00:32Z
+ppocrv6-tiny/
+ppocrv6-tiny/det.onnx
+ppocrv6-tiny/cls.onnx
+ppocrv6-tiny/LICENSE
+ppocrv6-tiny/rec.onnx
+ppocrv6-tiny/rec_inference.yml

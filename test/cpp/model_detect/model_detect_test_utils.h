@@ -23,6 +23,7 @@ enum class SeparationModelKind;
 enum class SpeakerEmbeddingModelKind;
 enum class DiarizationModelKind;
 enum class PunctuationModelKind;
+enum class OcrModelKind;
 enum class VadModelKind;
 enum class AudioTaggingModelKind;
 }
@@ -77,6 +78,10 @@ std::string VadKindToString(sherpaonnx::VadModelKind kind);
 sherpaonnx::PunctuationModelKind PunctuationKindFromString(const std::string& modelType);
 
 std::string PunctuationKindToString(sherpaonnx::PunctuationModelKind kind);
+
+sherpaonnx::OcrModelKind OcrKindFromString(const std::string& modelType);
+
+std::string OcrKindToString(sherpaonnx::OcrModelKind kind);
 
 sherpaonnx::AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType);
 

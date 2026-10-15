@@ -747,6 +747,78 @@ TEST(ModelDetectTest, DetectPunctuationFromFileListMatchesExpected) {
     }
 }
 
+TEST(ModelDetectTest, DetectOcrFromFileListMatchesExpected) {
+    std::string dir = GetFixturesDir();
+    std::string structurePath = dir + "/ocr-models-structure.txt";
+    std::string csvPath = dir + "/ocr-models-expected.csv";
+
+    std::string err;
+    auto blocks = model_detect_test::ParseAsrStructureFile(structurePath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+    ASSERT_FALSE(blocks.empty()) << "No asset blocks in " << structurePath;
+
+    auto expectedMap = model_detect_test::ParseAsrExpectedCsv(csvPath, &err);
+    ASSERT_TRUE(err.empty()) << err;
+
+    for (const auto& block : blocks) {
+        auto it = expectedMap.find(block.assetName);
+        if (it == expectedMap.end())
+            continue;
+
+        const std::string& expectedType = it->second;
+        sherpaonnx::OcrModelKind expectedKind =
+            model_detect_test::OcrKindFromString(expectedType);
+        if (expectedKind == sherpaonnx::OcrModelKind::kUnknown)
+            continue;
+
+        auto files = model_detect_test::BuildFileEntriesFromPathLines(
+            block.modelDir, block.pathLines);
+        auto result =
+            sherpaonnx::DetectOcrModelFromFileList(files, block.modelDir, "auto");
+
+        ASSERT_TRUE(result.ok) << "Asset " << block.assetName << ": " << result.error;
+        EXPECT_EQ(static_cast<int>(result.selectedKind), static_cast<int>(expectedKind))
+            << "Asset " << block.assetName
+            << " expected " << expectedType
+            << " but got " << model_detect_test::OcrKindToString(result.selectedKind);
+        EXPECT_FALSE(result.paths.det.empty()) << block.assetName;
+        EXPECT_FALSE(result.paths.rec.empty()) << block.assetName;
+        EXPECT_FALSE(result.paths.rec_dict.empty()) << block.assetName;
+    }
+}
+
+TEST(ModelDetectTest, DetectOcrAcceptsAlternateFilenames) {
+    const std::string root = "alt-ppocr-pack";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/detection.onnx",
+        root + "/recognition.onnx",
+        root + "/orientation.onnx",
+        root + "/inference.yml",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPpocr);
+    EXPECT_NE(result.paths.det.find("detection.onnx"), std::string::npos);
+    EXPECT_NE(result.paths.rec.find("recognition.onnx"), std::string::npos);
+    EXPECT_NE(result.paths.rec_dict.find("inference.yml"), std::string::npos);
+    EXPECT_NE(result.paths.cls.find("orientation.onnx"), std::string::npos);
+}
+
+TEST(ModelDetectTest, DetectOcrFailsWithoutRecDict) {
+    const std::string root = "incomplete-ppocr";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kUnknown);
+}
+
 TEST(ModelDetectTest, DetectVadFromAsrFileListMatchesExpected) {
     std::string dir = GetFixturesDir();
     std::string structurePath = dir + "/asr-models-structure.txt";

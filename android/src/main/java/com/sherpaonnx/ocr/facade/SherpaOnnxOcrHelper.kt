@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.SherpaOnnxModule
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.ocr.OcrNative
 import com.sherpaonnx.ocr.core.OcrErrorCodes
@@ -34,9 +35,9 @@ class SherpaOnnxOcrHelper(
     }
   }
 
-  fun detectOcrModel(modelDir: String, promise: Promise) {
+  fun detectOcrModel(modelDir: String, modelType: String?, promise: Promise) {
     try {
-      val raw = OcrNative.nativeDetect(modelDir)
+      val raw = OcrNative.nativeDetect(modelDir, modelType)
         ?: run {
           promise.reject(OcrErrorCodes.DETECT_FAILED, "detectOcrModel returned null")
           return
@@ -274,23 +275,93 @@ class SherpaOnnxOcrHelper(
 
   private fun detectMapToWritable(raw: HashMap<String, Any>): WritableMap {
     val map = Arguments.createMap()
-    map.putBoolean("ok", raw["ok"] as? Boolean ?: false)
-    map.putString("modelType", raw["modelType"] as? String ?: "")
-    map.putString("family", raw["family"] as? String ?: "")
+    val success = raw["success"] as? Boolean ?: (raw["ok"] as? Boolean ?: false)
+    map.putBoolean("success", success)
+    map.putBoolean("ok", success)
+    val modelType = raw["modelType"] as? String
+    if (!modelType.isNullOrBlank()) map.putString("modelType", modelType)
+    val family = raw["family"] as? String
+    if (!family.isNullOrBlank()) map.putString("family", family)
     map.putBoolean("hasDet", raw["hasDet"] as? Boolean ?: false)
     map.putBoolean("hasRec", raw["hasRec"] as? Boolean ?: false)
     map.putBoolean("hasCls", raw["hasCls"] as? Boolean ?: false)
     map.putBoolean("hasRecYml", raw["hasRecYml"] as? Boolean ?: false)
+    val quantization = raw["quantization"] as? String
+    if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+    val sizeTier = raw["sizeTier"] as? String
+    if (!sizeTier.isNullOrBlank()) map.putString("sizeTier", sizeTier)
     val errCode = raw["errorCode"] as? String
     if (!errCode.isNullOrBlank()) map.putString("errorCode", errCode)
-    val errMsg = raw["errorMessage"] as? String
-    if (!errMsg.isNullOrBlank()) map.putString("errorMessage", errMsg)
+    val errMsg = raw["errorMessage"] as? String ?: raw["error"] as? String
+    if (!errMsg.isNullOrBlank()) {
+      map.putString("errorMessage", errMsg)
+      map.putString("error", errMsg)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val pathsRaw = raw["paths"] as? HashMap<String, Any>
+    val paths = Arguments.createMap()
+    fun putPath(key: String, value: Any?) {
+      val s = value as? String
+      if (!s.isNullOrBlank()) paths.putString(key, s)
+    }
+    putPath("det", pathsRaw?.get("det") ?: raw["detPath"])
+    putPath("rec", pathsRaw?.get("rec") ?: raw["recPath"])
+    putPath("cls", pathsRaw?.get("cls") ?: raw["clsPath"])
+    putPath("rec_dict", pathsRaw?.get("rec_dict") ?: raw["recDictPath"])
+    if (paths.toHashMap().isNotEmpty()) {
+      map.putMap("paths", paths)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val filesRaw = raw["files"] as? HashMap<String, Any>
     val files = Arguments.createMap()
-    files.putBoolean("det", raw["hasDet"] as? Boolean ?: false)
-    files.putBoolean("rec", raw["hasRec"] as? Boolean ?: false)
-    files.putBoolean("cls", raw["hasCls"] as? Boolean ?: false)
-    files.putBoolean("recInferenceYml", raw["hasRecYml"] as? Boolean ?: false)
-    map.putMap("files", files)
+    val detPath = (filesRaw?.get("det") as? String) ?: (pathsRaw?.get("det") as? String)
+    val recPath = (filesRaw?.get("rec") as? String) ?: (pathsRaw?.get("rec") as? String)
+    val clsPath = (filesRaw?.get("cls") as? String) ?: (pathsRaw?.get("cls") as? String)
+    val dictPath =
+      (filesRaw?.get("recInferenceYml") as? String)
+        ?: (pathsRaw?.get("rec_dict") as? String)
+    if (!detPath.isNullOrBlank()) files.putString("det", detPath)
+    if (!recPath.isNullOrBlank()) files.putString("rec", recPath)
+    if (!clsPath.isNullOrBlank()) files.putString("cls", clsPath)
+    if (!dictPath.isNullOrBlank()) files.putString("recInferenceYml", dictPath)
+    if (files.toHashMap().isNotEmpty()) {
+      map.putMap("files", files)
+    }
+
+    val sourcesArr = Arguments.createArray()
+    @Suppress("UNCHECKED_CAST")
+    val sources = raw["detectionSources"] as? ArrayList<*>
+    sources?.forEach { entry ->
+      val s = entry as? String
+      if (!s.isNullOrBlank()) sourcesArr.pushString(s)
+    }
+    if (sourcesArr.size() > 0) {
+      map.putArray("detectionSources", sourcesArr)
+    }
+
+    val modelsArr = Arguments.createArray()
+    @Suppress("UNCHECKED_CAST")
+    val models = raw["detectedModels"] as? ArrayList<*>
+    models?.forEach { entry ->
+      @Suppress("UNCHECKED_CAST")
+      val m = entry as? HashMap<String, Any> ?: return@forEach
+      val row = Arguments.createMap()
+      val type = m["type"] as? String
+      val dir = m["modelDir"] as? String
+      if (!type.isNullOrBlank()) row.putString("type", type)
+      if (!dir.isNullOrBlank()) row.putString("modelDir", dir)
+      modelsArr.pushMap(row)
+    }
+    map.putArray("detectedModels", modelsArr)
+
+    SherpaOnnxModule.publicLanguageRowsToWritableArray(
+      raw["languages"] as? ArrayList<*>
+    )?.let { rows ->
+      map.putArray("languages", rows)
+    }
+
     return map
   }
 }

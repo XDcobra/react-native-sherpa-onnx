@@ -44,6 +44,10 @@ function installBuiltinDefaults(): void {
     ModelCategory.Alignment,
     BUILTIN_SOURCE_IDS.GITHUB_XDCOBRA
   );
+  defaultSourceByCategory.set(
+    ModelCategory.Ocr,
+    BUILTIN_SOURCE_IDS.GITHUB_XDCOBRA
+  );
 }
 
 export function ensureBuiltinSourcesRegistered(): void {

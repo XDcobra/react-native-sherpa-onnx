@@ -4,6 +4,8 @@
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
+#include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include <map>
@@ -87,32 +89,90 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
 @implementation SherpaOnnx (OCR)
 
 - (void)detectOcrModel:(NSString *)modelDir
+             modelType:(NSString *)modelType
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject {
   @try {
-    auto detect = DetectOcrModel(modelDir ? [modelDir UTF8String] : "");
-    NSMutableDictionary *files = [@{
-      @"det" : @(detect.hasDet),
-      @"rec" : @(detect.hasRec),
-      @"cls" : @(detect.hasCls),
-      @"recInferenceYml" : @(detect.hasRecYml),
-    } mutableCopy];
+    const std::string type =
+        modelType.length > 0 ? [modelType UTF8String] : "auto";
+    auto detect =
+        DetectOcrModel(modelDir ? [modelDir UTF8String] : "", type);
+    NSMutableDictionary *files = [NSMutableDictionary dictionary];
+    NSMutableDictionary *paths = [NSMutableDictionary dictionary];
+    if (!detect.detPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.detPath.c_str()];
+      files[@"det"] = p;
+      paths[@"det"] = p;
+    }
+    if (!detect.recPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.recPath.c_str()];
+      files[@"rec"] = p;
+      paths[@"rec"] = p;
+    }
+    if (!detect.clsPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.clsPath.c_str()];
+      files[@"cls"] = p;
+      paths[@"cls"] = p;
+    }
+    if (!detect.recDictPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.recDictPath.c_str()];
+      files[@"recInferenceYml"] = p;
+      paths[@"rec_dict"] = p;
+    }
+    NSMutableArray *sources = [NSMutableArray array];
+    for (const auto &src : detect.detectionSources) {
+      [sources addObject:[NSString stringWithUTF8String:src.c_str()] ?: @""];
+    }
+    NSMutableArray *detectedModels = [NSMutableArray array];
+    for (const auto &m : detect.detectedModels) {
+      [detectedModels addObject:@{
+        @"type" : [NSString stringWithUTF8String:m.type.c_str()] ?: @"",
+        @"modelDir" : [NSString stringWithUTF8String:m.modelDir.c_str()] ?: @"",
+      }];
+    }
     NSMutableDictionary *out = [@{
+      @"success" : @(detect.ok),
       @"ok" : @(detect.ok),
-      @"modelType" : [NSString stringWithUTF8String:detect.modelType.c_str()] ?: @"",
-      @"family" : [NSString stringWithUTF8String:detect.family.c_str()] ?: @"",
       @"hasDet" : @(detect.hasDet),
       @"hasRec" : @(detect.hasRec),
       @"hasCls" : @(detect.hasCls),
       @"hasRecYml" : @(detect.hasRecYml),
       @"files" : files,
+      @"paths" : paths,
+      @"detectionSources" : sources,
+      @"detectedModels" : detectedModels,
     } mutableCopy];
+    if (!detect.modelType.empty()) {
+      out[@"modelType"] =
+          [NSString stringWithUTF8String:detect.modelType.c_str()];
+      out[@"family"] = [NSString stringWithUTF8String:detect.family.c_str()];
+    }
+    if (!detect.quantization.empty()) {
+      out[@"quantization"] =
+          [NSString stringWithUTF8String:detect.quantization.c_str()];
+    }
+    if (!detect.sizeTier.empty()) {
+      out[@"sizeTier"] =
+          [NSString stringWithUTF8String:detect.sizeTier.c_str()];
+    }
+    if (!detect.languages.empty()) {
+      std::vector<sherpaonnx::PublicLanguageRow> rows;
+      rows.reserve(detect.languages.size());
+      for (const auto &lang : detect.languages) {
+        rows.push_back(
+            sherpaonnx::PublicLanguageRow{lang.iso6391Hint, lang.id});
+      }
+      out[@"languages"] =
+          sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(rows);
+    }
     if (!detect.errorCode.empty()) {
       out[@"errorCode"] = [NSString stringWithUTF8String:detect.errorCode.c_str()];
     }
     if (!detect.errorMessage.empty()) {
-      out[@"errorMessage"] =
+      NSString *msg =
           [NSString stringWithUTF8String:detect.errorMessage.c_str()];
+      out[@"errorMessage"] = msg;
+      out[@"error"] = msg;
     }
     resolve(out);
   } @catch (NSException *ex) {

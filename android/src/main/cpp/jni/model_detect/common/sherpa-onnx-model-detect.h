@@ -111,6 +111,12 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
+/** Offline OCR families. v1: ppocr only; doctr reserved for future backends. */
+enum class OcrModelKind {
+    kUnknown,
+    kPpocr
+};
+
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
 enum class SeparationModelKind {
     kUnknown,
@@ -333,6 +339,17 @@ struct AlignmentModelPaths {
     std::string vocab;
 };
 
+struct OcrModelPaths {
+    /** Text-detection ONNX (DB/DB++ style). */
+    std::string det;
+    /** Text-recognition ONNX (CRNN/SVTR style). */
+    std::string rec;
+    /** Optional orientation / angle classifier ONNX. */
+    std::string cls;
+    /** Recognition dictionary / character list (yml or txt). */
+    std::string rec_dict;
+};
+
 struct LanguageIdModelPaths {
     std::string encoder;
     std::string decoder;
@@ -472,6 +489,19 @@ struct AlignmentDetectResult {
     std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
     std::string quantization;
+};
+
+struct OcrDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    OcrModelKind selectedKind = OcrModelKind::kUnknown;
+    OcrModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+    /** tiny / small / medium / large / unknown — from pack basename heuristics. */
+    std::string sizeTier;
 };
 
 struct LanguageIdDetectResult {
@@ -672,6 +702,18 @@ AlignmentDetectResult DetectAlignmentModel(
     const std::string& quantization = ""
 );
 
+/**
+ * OCR pack detection. Pass at least one of `model_dir` or `asset_name`.
+ * v1 family: ppocr via Det+Rec+dict co-occurrence (dynamic filename tokens).
+ * No ORT online-guard (offline multi-file layout; same rationale as Alignment).
+ */
+OcrDetectResult DetectOcrModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
 LanguageIdDetectResult DetectLanguageIdModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
@@ -746,6 +788,14 @@ PunctuationDetectResult DetectPunctuationModelFromFileList(
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 AlignmentDetectResult DetectAlignmentModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: Like DetectOcrModel but takes a pre-built file list; no filesystem access. */
+OcrDetectResult DetectOcrModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",
