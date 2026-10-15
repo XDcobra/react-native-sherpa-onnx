@@ -155,6 +155,11 @@
       "types": "./lib/typescript/src/imagebuffer/index.d.ts",
       "default": "./lib/module/imagebuffer/index.js"
     },
+    "./ocr": {
+      "source": "./src/ocr/index.ts",
+      "types": "./lib/typescript/src/ocr/index.d.ts",
+      "default": "./lib/module/ocr/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",

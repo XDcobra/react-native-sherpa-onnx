@@ -271,6 +271,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       Companion.nativeDetectPunctuationModel(modelDir, assetName, modelType, quantization)
     }
   )
+  private val ocrHelper = com.sherpaonnx.ocr.facade.SherpaOnnxOcrHelper(
+    emitProgress = { operationId, done, total, phase ->
+      emitOcrProgress(operationId, done, total, phase)
+    }
+  )
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType, quantization ->
@@ -482,6 +487,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     audioTaggingHelper.shutdown()
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
+    ocrHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -3547,6 +3553,47 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         .emit("SherpaOnnxImageProgress", event)
     } catch (_: Exception) {
     }
+  }
+
+  private fun emitOcrProgress(operationId: String?, done: Int, total: Int, phase: String) {
+    if (operationId.isNullOrEmpty()) return
+    try {
+      val event = Arguments.createMap()
+      event.putString("operationId", operationId)
+      event.putInt("done", done)
+      event.putInt("total", total)
+      event.putString("phase", phase)
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("SherpaOnnxOcrProgress", event)
+    } catch (_: Exception) {
+    }
+  }
+
+  override fun detectOcrModel(modelDir: String, promise: Promise) {
+    ocrHelper.detectOcrModel(modelDir, promise)
+  }
+
+  override fun initializeOcr(instanceId: String, options: ReadableMap, promise: Promise) {
+    ocrHelper.initializeOcr(instanceId, options, promise)
+  }
+
+  override fun ocrRecognize(
+    instanceId: String,
+    imageBufferId: String,
+    textOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    ocrHelper.ocrRecognize(instanceId, imageBufferId, textOutBufferId, options, promise)
+  }
+
+  override fun cancelOcrRecognize(operationId: String, promise: Promise) {
+    ocrHelper.cancelOcrRecognize(operationId, promise)
+  }
+
+  override fun unloadOcr(instanceId: String, promise: Promise) {
+    ocrHelper.unloadOcr(instanceId, promise)
   }
 
   override fun createEmptyOfflineImageBuffer(promise: Promise) {

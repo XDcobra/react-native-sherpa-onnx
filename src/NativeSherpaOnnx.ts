@@ -983,6 +983,45 @@ export interface Spec extends TurboModule {
   /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */
   cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
 
+  // ==================== Offline OCR ====================
+
+  /** Lightweight layout detect (ppocr pack files). */
+  detectOcrModel(modelDir: string): Promise<{
+    ok: boolean;
+    modelType: string;
+    family: string;
+    hasDet?: boolean;
+    hasRec?: boolean;
+    hasCls?: boolean;
+    hasRecYml?: boolean;
+    files?: Object;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  /** Load an OCR engine instance (Cpp OcrEngine + backend). */
+  initializeOcr(
+    instanceId: string,
+    options: Object
+  ): Promise<{ instanceId: string; modelType: string }>;
+
+  /**
+   * Recognize frames from an offline ImageBuffer into an empty OfflineTextBuffer.
+   * Options may include `{ frames?: number[], granularity?: string, operationId?: string }`.
+   * Progress events: `SherpaOnnxOcrProgress` with `{ operationId, done, total, phase }`.
+   */
+  ocrRecognize(
+    instanceId: string,
+    imageBufferId: string,
+    textOutBufferId: string,
+    options?: Object
+  ): Promise<void>;
+
+  /** Cancel an in-flight OCR recognize by native operationId. */
+  cancelOcrRecognize(operationId: string): Promise<void>;
+
+  unloadOcr(instanceId: string): Promise<void>;
+
   /**
    * Get a slice of hypothesis text from an offline text buffer.
    */

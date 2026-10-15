@@ -188,6 +188,15 @@ set(SOURCES
     image/ImageRegistry.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
+    ocr/OcrFactory.cpp
+    ocr/OcrDetect.cpp
+    ocr/OcrTextUtils.cpp
+    ocr/OcrEngine.cpp
+    ocr/ppocr/PpocrBackend.cpp
+    ocr/ppocr/PpocrCtcDecoder.cpp
+    ocr/ppocr/PpocrDbPostprocess.cpp
+    ocr/ppocr/PpocrImageOps.cpp
+    jni/ocr/sherpa-onnx-ocr-jni.cpp
 )
 
 if(USE_LIBARCHIVE)
@@ -345,6 +354,8 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/image
     ${CMAKE_CURRENT_SOURCE_DIR}/image/decode
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)

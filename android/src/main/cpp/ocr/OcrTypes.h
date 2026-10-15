@@ -52,6 +52,17 @@ struct OcrLoadOptions {
   float det_box_thresh = 0.3f;
   float det_box_score_thresh = 0.5f;
   float det_unclip_ratio = 1.5f;
+  /**
+   * ORT execution provider id (e.g. "cpu"). Empty → cpu.
+   * Unknown providers fall back to cpu with a warning log.
+   */
+  std::string provider;
+};
+
+enum class OcrGranularity : uint8_t {
+  kLine = 0,
+  kWord = 1,
+  kBlock = 2,
 };
 
 }  // namespace ocr
