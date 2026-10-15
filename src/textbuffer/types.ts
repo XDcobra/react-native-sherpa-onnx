@@ -70,6 +70,37 @@ export interface LiveTextBufferSpoolInfo {
   path?: string;
 }
 
+// ========== Spatial Spans (OCR / text-layer provenance) ==========
+
+/** Granularity of a spatial span over the hypothesis text. */
+export type TextSpatialSpanLevel = 'line' | 'word' | 'block';
+
+/**
+ * Provenance of a spatial span.
+ * - `ocr`: produced by an OCR engine from image pixels
+ * - `textLayer`: native PDF text layer (no OCR)
+ * - `markup`: EPUB / HTML markup extraction
+ */
+export type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
+
+/**
+ * Optional spatial metadata linking a UTF-16 range of offline text to
+ * pixel coordinates on a source image frame (OCR, PDF text layer, EPUB).
+ */
+export interface TextSpatialSpan {
+  utf16Start: number;
+  utf16End: number;
+  level: TextSpatialSpanLevel;
+  sourceImageBufferId: string;
+  frameIndex: number;
+  /** Pixel coords of the frame: x0,y0,x1,y1,x2,y2,x3,y3 */
+  quad: [number, number, number, number, number, number, number, number];
+  confidence?: number;
+  origin: TextSpatialSpanOrigin;
+  pageNumber?: number;
+  ptsMs?: number;
+}
+
 // ========== Info Types ==========
 
 /** Metadata for an offline text buffer (after STT population or import). */
@@ -82,9 +113,13 @@ export interface OfflineTextBufferInfo {
   tokenCount: number;
   timestampCount: number;
   durationCount: number;
+  /** Number of spatial spans (OCR / text-layer). Zero when absent. */
+  spatialSpanCount: number;
   hasLang: boolean;
   hasEmotion: boolean;
   hasEvent: boolean;
+  /** True when `spatialSpanCount > 0`. */
+  hasSpatialSpans: boolean;
 }
 
 /** Metadata for a live text buffer (streaming STT, incremental). */
