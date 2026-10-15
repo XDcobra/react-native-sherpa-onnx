@@ -50,11 +50,13 @@ import type { OcrDetectModelResult } from '../../types/modelDetect';
 import {
   createOCR,
   detectOcrModel,
-  isOcrPpocrDetectSuccess,
+  isOcrDocVlmDetectSuccess,
   isOcrDoctrDetectSuccess,
   isOcrModelType,
+  isOcrPpocrDetectSuccess,
   OCR_MODEL_TYPES,
 } from '../index';
+import type { OcrInitializeOptions } from '../types';
 
 const mockNative = (
   TurboModuleRegistry.getEnforcing as unknown as () => {
@@ -73,7 +75,12 @@ describe('ocr offline API', () => {
       instanceId: 'ocr_1',
       modelType: 'ppocr',
     });
-    mockNative.ocrRecognize.mockResolvedValue(undefined);
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'ppocr',
+      spanCount: 1,
+      doctags: '',
+      markdown: '',
+    });
     mockNative.unloadOcr.mockResolvedValue(undefined);
     mockNative.cancelOcrRecognize.mockResolvedValue(undefined);
     mockNative.detectOcrModel.mockResolvedValue({
@@ -342,15 +349,22 @@ describe('ocr offline API', () => {
   it('isOcrModelType recognizes valid types', () => {
     expect(isOcrModelType('ppocr')).toBe(true);
     expect(isOcrModelType('doctr')).toBe(true);
+    expect(isOcrModelType('doc_vlm')).toBe(true);
     expect(isOcrModelType('auto')).toBe(true);
     expect(isOcrModelType('tessaract')).toBe(false);
+    expect(isOcrModelType('docvlm')).toBe(false);
+    expect(isOcrModelType('doc-vlm')).toBe(false);
+    expect(isOcrModelType('granite-docling')).toBe(false);
+    expect(isOcrModelType('docling')).toBe(false);
   });
 
   it('OCR_MODEL_TYPES contains all expected entries', () => {
     expect(OCR_MODEL_TYPES).toContain('ppocr');
     expect(OCR_MODEL_TYPES).toContain('doctr');
+    expect(OCR_MODEL_TYPES).toContain('doc_vlm');
     expect(OCR_MODEL_TYPES).toContain('auto');
-    expect(OCR_MODEL_TYPES).toHaveLength(3);
+    expect(OCR_MODEL_TYPES).toHaveLength(4);
+    expect(OCR_MODEL_TYPES[OCR_MODEL_TYPES.length - 1]).toBe('auto');
   });
 
   // ──── Phase 5: doctr round-trip tests ─────────────────────────────────
@@ -422,5 +436,308 @@ describe('ocr offline API', () => {
         'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
       )
     ).rejects.toMatchObject({ code: 'OCR_INSTANCE_NOT_FOUND' });
+    expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
+  });
+
+  const docVlmPaths = {
+    vision_encoder: '/models/docvlm/vision_encoder.onnx',
+    vision_encoder_data: '/models/docvlm/vision_encoder.onnx_data',
+    embed_tokens: '/models/docvlm/embed_tokens.onnx',
+    embed_tokens_data: '/models/docvlm/embed_tokens.onnx_data',
+    decoder: '/models/docvlm/decoder_model_merged.onnx',
+    decoder_data: '/models/docvlm/decoder_model_merged.onnx_data',
+    tokenizer: '/models/docvlm/tokenizer.json',
+    manifest: '/models/docvlm/ocr_manifest.json',
+  };
+
+  it('createOCR doc_vlm forwards maxNewTokens', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+      docVlm: { maxNewTokens: 512 },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelType: 'doc_vlm',
+        maxNewTokens: 512,
+      })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR doc_vlm omits maxNewTokens when docVlm is absent', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+    });
+    const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as {
+      maxNewTokens?: number;
+    };
+    expect(bridge).not.toHaveProperty('maxNewTokens');
+    await ocr.destroy();
+  });
+
+  it('createOCR doc_vlm forwards maxNewTokens 0', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+      docVlm: { maxNewTokens: 0 },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({ maxNewTokens: 0 })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR rewrites doc_vlm aliases before native init', async () => {
+    for (const alias of ['docling', 'docvlm'] as const) {
+      mockNative.initializeOcr.mockClear();
+      const ocr = await createOCR({
+        modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+        modelType: alias,
+      } as unknown as OcrInitializeOptions);
+      expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+        expect.stringMatching(/^ocr_/),
+        expect.objectContaining({ modelType: 'doc_vlm' })
+      );
+      await ocr.destroy();
+    }
+  });
+
+  it('createOCR rejects a non-integer or negative maxNewTokens', async () => {
+    for (const maxNewTokens of [-1, 1.5, Number.NaN]) {
+      mockNative.initializeOcr.mockClear();
+      await expect(
+        createOCR({
+          modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+          modelType: 'doc_vlm',
+          docVlm: { maxNewTokens },
+        })
+      ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+      expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+    }
+  });
+
+  it('ppocr recognize resolves empty doctags and markdown', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(mockNative.ocrRecognize).toHaveBeenCalled();
+    expect(page).toEqual({
+      family: 'ppocr',
+      spanCount: 1,
+      doctags: '',
+      markdown: '',
+    });
+    await ocr.destroy();
+  });
+
+  it('doctr recognize resolves empty doctags and markdown', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doctr',
+      spanCount: 2,
+      doctags: '',
+      markdown: '',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/onnxtr-default' },
+      modelType: 'doctr',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(page).toEqual({
+      family: 'doctr',
+      spanCount: 2,
+      doctags: '',
+      markdown: '',
+    });
+    await ocr.destroy();
+  });
+
+  it('doc_vlm recognize returns doctags and markdown', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 3,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(page).toEqual({
+      family: 'doc_vlm',
+      spanCount: 3,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+    await ocr.destroy();
+  });
+
+  it('recognize rejects when extras are missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('recognize rejects when family is missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      spanCount: 0,
+      doctags: '',
+      markdown: '',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('recognize rejects a non-finite spanCount', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'ppocr',
+      spanCount: Number.NaN,
+      doctags: '',
+      markdown: '',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('isOcrDocVlmDetectSuccess narrows a complete pack', () => {
+    const result: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'doc_vlm', modelDir: '/models/docvlm' }],
+      modelType: 'doc_vlm',
+      paths: docVlmPaths,
+    };
+    expect(isOcrDocVlmDetectSuccess(result)).toBe(true);
+    if (isOcrDocVlmDetectSuccess(result)) {
+      expect(typeof result.paths.decoder).toBe('string');
+    }
+  });
+
+  it('isOcrDocVlmDetectSuccess rejects other families', () => {
+    const ppocr: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'ppocr', modelDir: '/m' }],
+      modelType: 'ppocr',
+      paths: {
+        det: '/m/det.onnx',
+        rec: '/m/rec.onnx',
+        rec_dict: '/m/dict.yml',
+      },
+    };
+    const doctr: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'doctr', modelDir: '/m' }],
+      modelType: 'doctr',
+      paths: {
+        det: '/m/det.onnx',
+        rec: '/m/rec.onnx',
+        manifest: '/m/ocr_manifest.json',
+      },
+    };
+    expect(isOcrDocVlmDetectSuccess(ppocr)).toBe(false);
+    expect(isOcrDocVlmDetectSuccess(doctr)).toBe(false);
+  });
+
+  it('isOcrDocVlmDetectSuccess rejects a pack missing decoder_data', () => {
+    const shortPaths = {
+      vision_encoder: docVlmPaths.vision_encoder,
+      vision_encoder_data: docVlmPaths.vision_encoder_data,
+      embed_tokens: docVlmPaths.embed_tokens,
+      embed_tokens_data: docVlmPaths.embed_tokens_data,
+      decoder: docVlmPaths.decoder,
+      tokenizer: docVlmPaths.tokenizer,
+      manifest: docVlmPaths.manifest,
+    };
+    const result: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'doc_vlm', modelDir: '/models/docvlm' }],
+      modelType: 'doc_vlm',
+      paths: shortPaths,
+    };
+    expect(isOcrDocVlmDetectSuccess(result)).toBe(false);
+  });
+
+  it('detectOcrModel accepts a mocked doc_vlm payload', async () => {
+    mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
+      ok: true,
+      modelType: 'doc_vlm',
+      paths: docVlmPaths,
+      detectedModels: [
+        { type: 'doc_vlm', modelDir: '/models/docvlm-granite-258m' },
+      ],
+    });
+    const result = await detectOcrModel({
+      kind: 'fs',
+      path: '/models/docvlm-granite-258m',
+    });
+    expect(result.success).toBe(true);
+    expect(isOcrDocVlmDetectSuccess(result)).toBe(true);
+    expect(result.paths?.rec_dict).toBeUndefined();
+    expect(result.paths?.vision_encoder).toContain('vision_encoder.onnx');
+  });
+
+  it('detectOcrModel marks an incomplete doc_vlm pack failed', async () => {
+    mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
+      ok: true,
+      modelType: 'doc_vlm',
+      paths: { vision_encoder: '/models/docvlm/vision_encoder.onnx' },
+      detectedModels: [],
+    });
+    const result = await detectOcrModel({
+      kind: 'fs',
+      path: '/models/docvlm',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/required paths/i);
   });
 });
