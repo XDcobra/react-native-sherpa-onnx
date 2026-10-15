@@ -106,6 +106,16 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## OCR
+
+| Guide | Description |
+|-------|-------------|
+| [ocr-offline.md](./ocr-offline.md) | Offline OCR — `createOCR` / `recognize` (ImageBuffer → TextBuffer + spatial spans); family `ppocr` |
+
+> Streaming / live OCR is not yet available. `ocr-offline.md` is the sole OCR surface.
+
+---
+
 ## Speaker Identification & Diarization
 
 | Guide | Description |
@@ -138,6 +148,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [textbuffer-streaming.md](./textbuffer-streaming.md) | Live text buffer — streaming segment production/consumption |
 | [segmentbuffer-offline.md](./segmentbuffer-offline.md) | Offline segment buffer — segment links, maps |
 | [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
+| [imagebuffer-offline.md](./imagebuffer-offline.md) | Offline image buffer — decode files, multi-frame, spatial OCR input |
 
 ---
 

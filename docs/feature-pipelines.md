@@ -21,6 +21,7 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 - [Separation live overload patterns](#separation-live-overload-patterns)
 - [Punctuation offline patterns](#punctuation-offline-patterns)
 - [Punctuation streaming patterns](#punctuation-streaming-patterns)
+- [OCR offline patterns](#ocr-offline-patterns)
 - [VAD streaming patterns](#vad-streaming-patterns)
 - [Speaker identification offline patterns](#speaker-identification-offline-patterns)
 - [Speaker identification live patterns](#speaker-identification-live-patterns)
@@ -33,7 +34,8 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 | --- | --- | --- | --- |
 | `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createSeparation().separate`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
 | `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, `labelLiveSegments`, PCM player | Continuous stream; supports running pipelines |
-| `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff |
+| `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output, offline OCR output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff; OCR also writes spatial spans |
+| `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` | `createOCR().recognize` | Decoded frames for offline OCR |
 | `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
 | `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs, SID `labelOfflineSegments` | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
 | `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments, SID `labelLiveSegments` | gating, timeline UI, downstream orchestration | Event-driven segment stream |
@@ -226,6 +228,26 @@ When to use:
 Related docs:
 - [punctuation-streaming.md](punctuation-streaming.md)
 - [tts-offline.md](tts-offline.md)
+
+## OCR offline patterns
+
+```mermaid
+flowchart LR
+  A[FileSource images] --> B[OfflineImageBuffer]
+  B --> C["createOCR().recognize"]
+  C --> D[OfflineTextBuffer text + spatial spans]
+  D --> E[UI overlay or offline TTS]
+```
+
+When to use:
+- Batch page/document OCR with deterministic completion.
+- Reuse a multi-frame image buffer and select `frames` subsets.
+- Consume `origin: 'ocr'` spatial spans for box overlays.
+
+Related docs:
+- [ocr-offline.md](ocr-offline.md)
+- [imagebuffer-offline.md](imagebuffer-offline.md)
+- [textbuffer-offline.md](textbuffer-offline.md)
 
 ## VAD streaming patterns
 

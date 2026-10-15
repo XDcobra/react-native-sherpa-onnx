@@ -318,7 +318,9 @@ The following codes are the relevant runtime outcomes for offline text-buffer re
 
 - [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Offline STT](stt-offline.md)
+- [Offline OCR](ocr-offline.md) (writes plain text + `origin: 'ocr'` spatial spans)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
+- [Offline ImageBuffer](imagebuffer-offline.md)
 
 ## Use case examples
 

@@ -80,15 +80,17 @@ Static tables for building pickers (generated from the JSON catalog). Each retur
 | `getCohereTranscribeLanguages()` | Cohere Transcribe | |
 | `getQwen3AsrLanguages()` | Qwen3 ASR | |
 | `getDolphinInfoLanguages()` | Dolphin (informational) | |
+| `getPpocrLanguages()` | PP-OCR (OCR) | PP-OCRv6 family set (~49 ISO: `zh`/`en`/`ja` + 46 Latin) |
 
-TTS / alignment hint helpers (ISO 639-1 strings only; for UI labels — runtime rows come from native detect):
+TTS / alignment / OCR hint helpers (ISO 639-1 strings only; for UI labels — runtime rows come from native detect):
 
 | Function | Scope |
 | --- | --- |
 | `iso6391HintsForTtsModelType(modelType?, modelKey?)` | TTS families |
 | `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment — **pack-first** from `scripts/alignment-models/sources.csv` `languages` column (via generator); family fallbacks only for explicit multilingual markers (`multilingual-56`, MMS FA), never bare `xlsr` |
+| `iso6391HintsForOcrModelType(modelType?, modelKey?)` | OCR — **pack-first** from `scripts/ocr-models/sources.csv` `languages`; family fallback `ppocr` |
 
-Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
+Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, `PPOCR_LANGUAGES`, …) mirror the getters — import when you need the raw array without a function call.
 
 ---
 
@@ -147,18 +149,22 @@ Static tables — suitable for dropdown / chip pickers. Does not validate on-dis
 
 ---
 
-### TTS and alignment hint helpers
+### TTS, alignment, and OCR hint helpers
 
 ```typescript
 function iso6391HintsForTtsModelType(modelType?: string, modelKey?: string): readonly string[];
 function iso6391HintsForAlignmentModelType(modelType?: string, modelKey?: string): readonly string[];
+function getPpocrLanguages(): readonly ModelLanguage[];
+function iso6391HintsForOcrModelType(modelType?: string, modelKey?: string): readonly string[];
 ```
 
 ```typescript
 const hints = iso6391HintsForAlignmentModelType('wav2vec2');
+const ocrPack = iso6391HintsForOcrModelType('ppocr', 'ppocrv6-tiny'); // zh, en
+const ocrPicker = getPpocrLanguages();
 ```
 
-Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation.
+Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation. OCR detect prefers basename heuristics, then pack CSV, then the `ppocr` family list (same order as Alignment packs + STT family pickers).
 
 ---
 
@@ -179,4 +185,5 @@ import type {
 - [STT offline](stt-offline.md) — `modelOptions` per family
 - [TTS offline](tts-offline.md) — lexicon languages from `detectTtsModel`
 - [Alignment offline](alignment-offline.md)
+- [OCR offline](ocr-offline.md) — pack language hints + `getPpocrLanguages`
 - [Model detection](model-detect.md) — `languages` field on unified detect results

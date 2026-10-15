@@ -77,6 +77,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - ✅ Source separation: [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-live.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
+- ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
@@ -89,7 +90,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 ### Pipeline & orchestration
 
-- ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md)
+- ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md) · [Image](./docs/imagebuffer-offline.md)
 - ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md)
 - ✅ Native chaining & recipes: [Feature pipelines](./docs/feature-pipelines.md) · [Streaming pipeline lifecycle](./docs/streaming-pipelines-overview.md)
 - ✅ Long audio & OOM mitigation: [Segmentation engine](./docs/segmentation-engine.md)
