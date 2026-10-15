@@ -798,6 +798,24 @@ if (require.main === module) {
   });
 }
 
+const OCR_PACK_QUANT_SUFFIX_RE =
+  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/i;
+
+/**
+ * Strip archive extension and common quant suffixes for pack language lookup.
+ * @param {string} modelId
+ * @returns {string}
+ */
+function ocrPackStem(modelId) {
+  let stem = String(modelId ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.tar\.(bz2|gz|zst)$/i, '');
+  stem = stem.replace(OCR_PACK_QUANT_SUFFIX_RE, '');
+  return stem;
+}
+
 module.exports = {
   readSources,
+  ocrPackStem,
 };

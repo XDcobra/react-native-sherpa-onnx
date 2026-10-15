@@ -24,7 +24,7 @@ File: `scripts/ocr-models/sources.csv`
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE` |
 | `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) |
 | `commercial_use` | yes | `yes` or `no` |
-| `languages` | no | Comma-separated ISO codes for catalog hints. Empty = multilingual pack |
+| `languages` | no | Comma-separated ISO codes for catalog hints (feeds `generate:model-language-catalog`). Empty = not curated / unknown — do **not** treat as “all languages”. |
 
 ## Archive layout (detect contract)
 
@@ -39,10 +39,13 @@ Each generated archive contains exactly one model directory:
   LICENSE             # only if license column is non-empty
 ```
 
-v1 packs (`ppocrv6-medium`, `ppocrv6-small`, `ppocrv6-tiny`) are Apache-2.0 full
-packs (det + rec + shared textline orientation cls). Empty `languages` means
-multilingual PP-OCRv6 coverage (zh / Latin / ja for medium/small; tiny drops
-Japanese — see PaddleOCR docs). Medium is the accuracy-oriented / flagship tier.
+Packs (`ppocrv6-medium`, `ppocrv6-small`, `ppocrv6-tiny`) are Apache-2.0 full
+packs (det + rec + shared textline orientation cls). Curated `languages` follow
+upstream PP-OCRv6 coverage (~50 named languages): Simplified + Traditional
+Chinese, English, Japanese, and 46 Latin-script languages for medium/small
+(ISO list in `sources.csv`; both Chinese variants map to `zh`). Tiny omits
+Japanese (smaller charset / output layer). Medium is the accuracy-oriented /
+flagship tier.
 
 v5 per-script recognizer packs are out of scope for this initial catalog.
 

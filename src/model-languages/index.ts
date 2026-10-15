@@ -11,3 +11,4 @@ export {
 } from './resolvePublicLanguageHints';
 export * from './generated/catalog';
 export * from './alignment';
+export * from './ocr';

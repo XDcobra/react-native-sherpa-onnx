@@ -1297,15 +1297,268 @@
       "hints": [
         "en"
       ],
-    "packHints": {
-      "voxpopuliFamilyFallback": [
+      "packHints": {
+        "voxpopuliFamilyFallback": [
+          "de",
+          "es",
+          "fr",
+          "it"
+        ],
+        "mmsFamilyFallback": []
+      }
+    }
+  },
+  "ocr": {
+    "ppocr": {
+      "hints": [
+        "zh",
+        "en",
+        "ja",
+        "af",
+        "az",
+        "bs",
+        "ca",
+        "cs",
+        "cy",
+        "da",
         "de",
         "es",
+        "et",
+        "eu",
+        "fi",
         "fr",
-        "it"
+        "ga",
+        "gl",
+        "hr",
+        "hu",
+        "id",
+        "is",
+        "it",
+        "ku",
+        "la",
+        "lb",
+        "lt",
+        "lv",
+        "mi",
+        "ms",
+        "mt",
+        "nl",
+        "no",
+        "oc",
+        "pl",
+        "pt",
+        "qu",
+        "rm",
+        "ro",
+        "sk",
+        "sl",
+        "sq",
+        "sr",
+        "sv",
+        "sw",
+        "tl",
+        "tr",
+        "uz",
+        "vi"
       ],
-      "mmsFamilyFallback": []
-    }
+      "entries": [
+        {
+          "id": "zh",
+          "name": "chinese"
+        },
+        {
+          "id": "en",
+          "name": "english"
+        },
+        {
+          "id": "ja",
+          "name": "japanese"
+        },
+        {
+          "id": "af",
+          "name": "afrikaans"
+        },
+        {
+          "id": "az",
+          "name": "azerbaijani"
+        },
+        {
+          "id": "bs",
+          "name": "bosnian"
+        },
+        {
+          "id": "ca",
+          "name": "catalan"
+        },
+        {
+          "id": "cs",
+          "name": "czech"
+        },
+        {
+          "id": "cy",
+          "name": "welsh"
+        },
+        {
+          "id": "da",
+          "name": "danish"
+        },
+        {
+          "id": "de",
+          "name": "german"
+        },
+        {
+          "id": "es",
+          "name": "spanish"
+        },
+        {
+          "id": "et",
+          "name": "estonian"
+        },
+        {
+          "id": "eu",
+          "name": "basque"
+        },
+        {
+          "id": "fi",
+          "name": "finnish"
+        },
+        {
+          "id": "fr",
+          "name": "french"
+        },
+        {
+          "id": "ga",
+          "name": "irish"
+        },
+        {
+          "id": "gl",
+          "name": "galician"
+        },
+        {
+          "id": "hr",
+          "name": "croatian"
+        },
+        {
+          "id": "hu",
+          "name": "hungarian"
+        },
+        {
+          "id": "id",
+          "name": "indonesian"
+        },
+        {
+          "id": "is",
+          "name": "icelandic"
+        },
+        {
+          "id": "it",
+          "name": "italian"
+        },
+        {
+          "id": "ku",
+          "name": "kurdish"
+        },
+        {
+          "id": "la",
+          "name": "latin"
+        },
+        {
+          "id": "lb",
+          "name": "luxembourgish"
+        },
+        {
+          "id": "lt",
+          "name": "lithuanian"
+        },
+        {
+          "id": "lv",
+          "name": "latvian"
+        },
+        {
+          "id": "mi",
+          "name": "maori"
+        },
+        {
+          "id": "ms",
+          "name": "malay"
+        },
+        {
+          "id": "mt",
+          "name": "maltese"
+        },
+        {
+          "id": "nl",
+          "name": "dutch"
+        },
+        {
+          "id": "no",
+          "name": "norwegian"
+        },
+        {
+          "id": "oc",
+          "name": "occitan"
+        },
+        {
+          "id": "pl",
+          "name": "polish"
+        },
+        {
+          "id": "pt",
+          "name": "portuguese"
+        },
+        {
+          "id": "qu",
+          "name": "quechua"
+        },
+        {
+          "id": "rm",
+          "name": "romansh"
+        },
+        {
+          "id": "ro",
+          "name": "romanian"
+        },
+        {
+          "id": "sk",
+          "name": "slovak"
+        },
+        {
+          "id": "sl",
+          "name": "slovenian"
+        },
+        {
+          "id": "sq",
+          "name": "albanian"
+        },
+        {
+          "id": "sr",
+          "name": "serbian"
+        },
+        {
+          "id": "sv",
+          "name": "swedish"
+        },
+        {
+          "id": "sw",
+          "name": "swahili"
+        },
+        {
+          "id": "tl",
+          "name": "tagalog"
+        },
+        {
+          "id": "tr",
+          "name": "turkish"
+        },
+        {
+          "id": "uz",
+          "name": "uzbek"
+        },
+        {
+          "id": "vi",
+          "name": "vietnamese"
+        }
+      ]
     }
   }
 }
