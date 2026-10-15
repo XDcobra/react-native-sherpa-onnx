@@ -12,6 +12,28 @@ doctr-mobile/det.onnx
 doctr-mobile/LICENSE
 doctr-mobile/rec.onnx
 doctr-mobile/ocr_manifest.json
+# Asset: docvlm-granite-258m.tar.bz2
+# updated_at: 2026-10-15T12:34:41Z
+docvlm-granite-258m/
+docvlm-granite-258m/tokenizer.json
+docvlm-granite-258m/chat_template.jinja
+docvlm-granite-258m/vision_encoder.onnx
+docvlm-granite-258m/preprocessor_config.json
+docvlm-granite-258m/special_tokens_map.json
+docvlm-granite-258m/added_tokens.json
+docvlm-granite-258m/vision_encoder.onnx_data
+docvlm-granite-258m/LICENSE
+docvlm-granite-258m/embed_tokens.onnx_data
+docvlm-granite-258m/merges.txt
+docvlm-granite-258m/config.json
+docvlm-granite-258m/processor_config.json
+docvlm-granite-258m/decoder_model_merged.onnx_data
+docvlm-granite-258m/embed_tokens.onnx
+docvlm-granite-258m/ocr_manifest.json
+docvlm-granite-258m/tokenizer_config.json
+docvlm-granite-258m/generation_config.json
+docvlm-granite-258m/vocab.json
+docvlm-granite-258m/decoder_model_merged.onnx
 # Asset: ppocrv6-medium.tar.bz2
 # updated_at: 2026-10-14T09:05:51Z
 ppocrv6-medium/
