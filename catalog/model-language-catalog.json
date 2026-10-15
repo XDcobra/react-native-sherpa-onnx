@@ -1640,6 +1640,14 @@
           "name": "vietnamese"
         }
       ]
+    },
+    "doc_vlm": {
+      "hints": [
+        "en",
+        "ja",
+        "ar",
+        "zh"
+      ]
     }
   }
 }

@@ -84,6 +84,10 @@ OcrModelKind ParseOcrModelTypeLocal(const std::string& modelType) {
     if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
         return OcrModelKind::kPpocr;
     }
+    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
+        t == "granite-docling" || t == "docling") {
+        return OcrModelKind::kDocVlm;
+    }
     if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
         return OcrModelKind::kDoctr;
     }

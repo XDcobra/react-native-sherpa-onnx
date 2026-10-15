@@ -329,6 +329,18 @@ class SherpaOnnxOcrHelper(
 
     @Suppress("UNCHECKED_CAST")
     val pathsRaw = raw["paths"] as? HashMap<String, Any>
+    @Suppress("UNCHECKED_CAST")
+    val filesRaw = raw["files"] as? HashMap<String, Any>
+    val docVlmKeys = arrayOf(
+      "vision_encoder",
+      "vision_encoder_data",
+      "embed_tokens",
+      "embed_tokens_data",
+      "decoder",
+      "decoder_data",
+      "tokenizer",
+      "manifest",
+    )
     val paths = Arguments.createMap()
     fun putPath(key: String, value: Any?) {
       val s = value as? String
@@ -339,12 +351,14 @@ class SherpaOnnxOcrHelper(
     putPath("cls", pathsRaw?.get("cls") ?: raw["clsPath"])
     putPath("rec_dict", pathsRaw?.get("rec_dict") ?: raw["recDictPath"])
     putPath("manifest", pathsRaw?.get("manifest") ?: raw["manifestPath"])
+    for (key in docVlmKeys) {
+      if (key == "manifest") continue
+      putPath(key, pathsRaw?.get(key) ?: filesRaw?.get(key))
+    }
     if (paths.toHashMap().isNotEmpty()) {
       map.putMap("paths", paths)
     }
 
-    @Suppress("UNCHECKED_CAST")
-    val filesRaw = raw["files"] as? HashMap<String, Any>
     val files = Arguments.createMap()
     val detPath = (filesRaw?.get("det") as? String) ?: (pathsRaw?.get("det") as? String)
     val recPath = (filesRaw?.get("rec") as? String) ?: (pathsRaw?.get("rec") as? String)
@@ -356,10 +370,10 @@ class SherpaOnnxOcrHelper(
     if (!recPath.isNullOrBlank()) files.putString("rec", recPath)
     if (!clsPath.isNullOrBlank()) files.putString("cls", clsPath)
     if (!dictPath.isNullOrBlank()) files.putString("recInferenceYml", dictPath)
-    val manifestPath =
-      (filesRaw?.get("manifest") as? String)
-        ?: (pathsRaw?.get("manifest") as? String)
-    if (!manifestPath.isNullOrBlank()) files.putString("manifest", manifestPath)
+    for (key in docVlmKeys) {
+      val value = (filesRaw?.get(key) as? String) ?: (pathsRaw?.get(key) as? String)
+      if (!value.isNullOrBlank()) files.putString(key, value)
+    }
     if (files.toHashMap().isNotEmpty()) {
       map.putMap("files", files)
     }

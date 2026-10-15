@@ -47,6 +47,7 @@ const char* OcrKindToModelType(OcrModelKind kind) {
     switch (kind) {
         case OcrModelKind::kPpocr: return "ppocr";
         case OcrModelKind::kDoctr: return "doctr";
+        case OcrModelKind::kDocVlm: return "doc_vlm";
         default: return "";
     }
 }
@@ -59,6 +60,13 @@ std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
     lower.reserve(modelKey.size());
     for (unsigned char c : modelKey) {
         lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (lower.find("docvlm") != std::string::npos ||
+        lower.find("doc-vlm") != std::string::npos ||
+        lower.find("doc_vlm") != std::string::npos ||
+        lower.find("granite-docling") != std::string::npos ||
+        lower.find("docling") != std::string::npos) {
+        return "doc_vlm";
     }
     if (lower.find("ppocr") != std::string::npos ||
         lower.find("paddleocr") != std::string::npos ||

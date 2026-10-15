@@ -20,6 +20,17 @@ static const OcrFieldRequirement kDoctrReqs[] = {
     {"rec_dict", &OcrModelPaths::rec_dict, false},
 };
 
+static const OcrFieldRequirement kDocVlmReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, true},
+    {"embed_tokens", &OcrModelPaths::embed_tokens, true},
+    {"embed_tokens_data", &OcrModelPaths::embed_tokens_data, true},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, true},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+};
+
 static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& count) {
     switch (kind) {
         case OcrModelKind::kPpocr:
@@ -28,6 +39,9 @@ static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& cou
         case OcrModelKind::kDoctr:
             count = std::size(kDoctrReqs);
             return kDoctrReqs;
+        case OcrModelKind::kDocVlm:
+            count = std::size(kDocVlmReqs);
+            return kDocVlmReqs;
         default:
             count = 0;
             return nullptr;
@@ -40,6 +54,8 @@ static const char* OcrKindToName(OcrModelKind kind) {
             return "ppocr";
         case OcrModelKind::kDoctr:
             return "doctr";
+        case OcrModelKind::kDocVlm:
+            return "doc_vlm";
         default:
             return "unknown";
     }

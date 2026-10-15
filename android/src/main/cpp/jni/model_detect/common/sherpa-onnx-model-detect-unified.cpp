@@ -81,6 +81,7 @@ const char* OcrModelKindToString(OcrModelKind k) {
     switch (k) {
         case OcrModelKind::kPpocr: return "ppocr";
         case OcrModelKind::kDoctr: return "doctr";
+        case OcrModelKind::kDocVlm: return "doc_vlm";
         default: return "unknown";
     }
 }
@@ -222,10 +223,37 @@ UnifiedModelDetectResult DetectModelInternal(
 
     const std::string modelType = kModelTypeAuto;
 
+    // `decoder_model_merged.onnx` contains the token "model", so enhancement
+    // (gtcrn) and speaker embedding accept a granite octet as a generic ONNX.
+    // A successful doc_vlm detect wins over that hit. Packs without the octet
+    // stay on the detector that matched. Same rule as the phase-4 STT override.
+    auto preferDocVlm = [&](UnifiedModelDetectResult hit) {
+        if (hit.category == "ocr") {
+            return hit;
+        }
+        OcrDetectResult ocr =
+            DetectOcrModel(model_dir, asset_name, modelType, quantization);
+        if (!ocr.ok || ocr.selectedKind != OcrModelKind::kDocVlm) {
+            return hit;
+        }
+        return MakeHit(
+            "ocr",
+            OcrModelKindToString(ocr.selectedKind),
+            ocr.derivedLanguages,
+            ocr.quantization,
+            ocr.sizeTier,
+            false,
+            false,
+            ocr.detectedModels,
+            ocr.detectionSources,
+            OcrModelPathsToStringMap(ocr.paths),
+            ocr.error);
+    };
+
     TtsDetectResult tts = DetectTtsModel(model_dir, asset_name, modelType, quantization);
     const std::string ttsType = TtsModelKindToString(tts.selectedKind);
     if (IsCatalogDetectHit(tts.ok, ttsType, tts.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "tts",
             ttsType,
             tts.derivedLanguages,
@@ -236,7 +264,7 @@ UnifiedModelDetectResult DetectModelInternal(
             tts.detectedModels,
             tts.detectionSources,
             TtsModelPathsToStringMap(tts.paths),
-            tts.error);
+            tts.error));
     }
 
     // KWS is structurally an online transducer, so it must claim keyword packs
@@ -245,7 +273,7 @@ UnifiedModelDetectResult DetectModelInternal(
         DetectKwsModel(model_dir, asset_name, modelType, quantization);
     const std::string kwsType = KwsModelKindToString(kws.selectedKind);
     if (IsCatalogDetectHit(kws.ok, kwsType, kws.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "kws",
             kwsType,
             kws.derivedLanguages,
@@ -256,7 +284,7 @@ UnifiedModelDetectResult DetectModelInternal(
             kws.detectedModels,
             kws.detectionSources,
             KwsModelPathsToStringMap(kws.paths),
-            kws.error);
+            kws.error));
     }
 
     // Audio tagging zipformer packs include "zipformer" in the folder name and
@@ -267,7 +295,7 @@ UnifiedModelDetectResult DetectModelInternal(
         AudioTaggingModelKindToString(audioTagging.selectedKind);
     if (IsCatalogDetectHit(
             audioTagging.ok, audioTaggingType, audioTagging.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "audiotagging",
             audioTaggingType,
             audioTagging.derivedLanguages,
@@ -278,14 +306,14 @@ UnifiedModelDetectResult DetectModelInternal(
             audioTagging.detectedModels,
             audioTagging.detectionSources,
             AudioTaggingModelPathsToStringMap(audioTagging.paths),
-            audioTagging.error);
+            audioTagging.error));
     }
 
     SttDetectResult stt = DetectSttModel(
         model_dir, asset_name, modelType, quantization, false);
     const std::string sttType = SttModelKindToString(stt.selectedKind);
     if (IsCatalogDetectHit(stt.ok, sttType, stt.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "stt",
             sttType,
             stt.derivedLanguages,
@@ -296,13 +324,13 @@ UnifiedModelDetectResult DetectModelInternal(
             stt.detectedModels,
             stt.detectionSources,
             SttModelPathsToStringMap(stt.paths),
-            stt.error);
+            stt.error));
     }
 
     VadDetectResult vad = DetectVadModel(model_dir, asset_name, modelType, quantization);
     const std::string vadType = VadModelKindToString(vad.selectedKind);
     if (IsCatalogDetectHit(vad.ok, vadType, vad.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "vad",
             vadType,
             vad.derivedLanguages,
@@ -313,7 +341,7 @@ UnifiedModelDetectResult DetectModelInternal(
             vad.detectedModels,
             vad.detectionSources,
             VadModelPathsToStringMap(vad.paths),
-            vad.error);
+            vad.error));
     }
 
     PunctuationDetectResult punctuation =
@@ -322,7 +350,7 @@ UnifiedModelDetectResult DetectModelInternal(
         PunctuationModelKindToString(punctuation.selectedKind);
     if (IsCatalogDetectHit(
             punctuation.ok, punctuationType, punctuation.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "punctuation",
             punctuationType,
             punctuation.derivedLanguages,
@@ -333,7 +361,7 @@ UnifiedModelDetectResult DetectModelInternal(
             punctuation.detectedModels,
             punctuation.detectionSources,
             PunctuationModelPathsToStringMap(punctuation.paths),
-            punctuation.error);
+            punctuation.error));
     }
 
     EnhancementDetectResult enhancement =
@@ -342,7 +370,7 @@ UnifiedModelDetectResult DetectModelInternal(
         EnhancementModelKindToString(enhancement.selectedKind);
     if (IsCatalogDetectHit(
             enhancement.ok, enhancementType, enhancement.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "enhancement",
             enhancementType,
             enhancement.derivedLanguages,
@@ -353,7 +381,7 @@ UnifiedModelDetectResult DetectModelInternal(
             enhancement.detectedModels,
             enhancement.detectionSources,
             EnhancementModelPathsToStringMap(enhancement.paths),
-            enhancement.error);
+            enhancement.error));
     }
 
     SeparationDetectResult separation =
@@ -362,7 +390,7 @@ UnifiedModelDetectResult DetectModelInternal(
         SeparationModelKindToString(separation.selectedKind);
     if (IsCatalogDetectHit(
             separation.ok, separationType, separation.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "separation",
             separationType,
             separation.derivedLanguages,
@@ -373,7 +401,7 @@ UnifiedModelDetectResult DetectModelInternal(
             separation.detectedModels,
             separation.detectionSources,
             SeparationModelPathsToStringMap(separation.paths),
-            separation.error);
+            separation.error));
     }
 
     SpeakerEmbeddingDetectResult speakerEmbedding =
@@ -384,7 +412,7 @@ UnifiedModelDetectResult DetectModelInternal(
             speakerEmbedding.ok,
             speakerEmbeddingType,
             speakerEmbedding.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "speakerEmbedding",
             speakerEmbeddingType,
             speakerEmbedding.derivedLanguages,
@@ -395,7 +423,7 @@ UnifiedModelDetectResult DetectModelInternal(
             speakerEmbedding.detectedModels,
             speakerEmbedding.detectionSources,
             SpeakerEmbeddingModelPathsToStringMap(speakerEmbedding.paths),
-            speakerEmbedding.error);
+            speakerEmbedding.error));
     }
 
     DiarizationDetectResult diarization =
@@ -404,7 +432,7 @@ UnifiedModelDetectResult DetectModelInternal(
         DiarizationModelKindToString(diarization.selectedKind);
     if (IsCatalogDetectHit(
             diarization.ok, diarizationType, diarization.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "diarization",
             diarizationType,
             diarization.derivedLanguages,
@@ -415,7 +443,7 @@ UnifiedModelDetectResult DetectModelInternal(
             diarization.detectedModels,
             diarization.detectionSources,
             DiarizationModelPathsToStringMap(diarization.paths),
-            diarization.error);
+            diarization.error));
     }
 
     std::string alignmentKey;
@@ -431,7 +459,7 @@ UnifiedModelDetectResult DetectModelInternal(
             AlignmentModelKindToString(alignment.selectedKind);
         if (IsCatalogDetectHit(
                 alignment.ok, alignmentType, alignment.detectionSources)) {
-            return MakeHit(
+            return preferDocVlm(MakeHit(
                 "alignment",
                 alignmentType,
                 alignment.derivedLanguages,
@@ -442,7 +470,7 @@ UnifiedModelDetectResult DetectModelInternal(
                 alignment.detectedModels,
                 alignment.detectionSources,
                 AlignmentModelPathsToStringMap(alignment.paths),
-                alignment.error);
+                alignment.error));
         }
     }
 
@@ -450,7 +478,7 @@ UnifiedModelDetectResult DetectModelInternal(
         DetectOcrModel(model_dir, asset_name, modelType, quantization);
     const std::string ocrType = OcrModelKindToString(ocr.selectedKind);
     if (IsCatalogDetectHit(ocr.ok, ocrType, ocr.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "ocr",
             ocrType,
             ocr.derivedLanguages,
@@ -461,7 +489,7 @@ UnifiedModelDetectResult DetectModelInternal(
             ocr.detectedModels,
             ocr.detectionSources,
             OcrModelPathsToStringMap(ocr.paths),
-            ocr.error);
+            ocr.error));
     }
 
     LanguageIdDetectResult languageId =
@@ -470,7 +498,7 @@ UnifiedModelDetectResult DetectModelInternal(
         LanguageIdModelKindToString(languageId.selectedKind);
     if (IsCatalogDetectHit(
             languageId.ok, languageIdType, languageId.detectionSources)) {
-        return MakeHit(
+        return preferDocVlm(MakeHit(
             "languageId",
             languageIdType,
             languageId.derivedLanguages,
@@ -481,7 +509,7 @@ UnifiedModelDetectResult DetectModelInternal(
             languageId.detectedModels,
             languageId.detectionSources,
             LanguageIdModelPathsToStringMap(languageId.paths),
-            languageId.error);
+            languageId.error));
     }
 
     return miss;

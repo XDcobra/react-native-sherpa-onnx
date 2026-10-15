@@ -356,6 +356,15 @@ export type OcrDetectNativeResult = {
     rec?: string;
     cls?: string;
     recInferenceYml?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
   };
   detectionSources?: string[];
   /** Curated / heuristic language rows from native detect. */

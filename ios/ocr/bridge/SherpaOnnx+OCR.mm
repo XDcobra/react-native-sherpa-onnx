@@ -124,6 +124,47 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       files[@"manifest"] = p;
       paths[@"manifest"] = p;
     }
+    if (!detect.visionEncoderPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.visionEncoderPath.c_str()];
+      files[@"vision_encoder"] = p;
+      paths[@"vision_encoder"] = p;
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.visionEncoderDataPath.c_str()];
+      files[@"vision_encoder_data"] = p;
+      paths[@"vision_encoder_data"] = p;
+    }
+    if (!detect.embedTokensPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embedTokensPath.c_str()];
+      files[@"embed_tokens"] = p;
+      paths[@"embed_tokens"] = p;
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embedTokensDataPath.c_str()];
+      files[@"embed_tokens_data"] = p;
+      paths[@"embed_tokens_data"] = p;
+    }
+    if (!detect.decoderPath.empty()) {
+      NSString *p = [NSString stringWithUTF8String:detect.decoderPath.c_str()];
+      files[@"decoder"] = p;
+      paths[@"decoder"] = p;
+    }
+    if (!detect.decoderDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.decoderDataPath.c_str()];
+      files[@"decoder_data"] = p;
+      paths[@"decoder_data"] = p;
+    }
+    if (!detect.tokenizerPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.tokenizerPath.c_str()];
+      files[@"tokenizer"] = p;
+      paths[@"tokenizer"] = p;
+    }
     NSMutableArray *sources = [NSMutableArray array];
     for (const auto &src : detect.detectionSources) {
       [sources addObject:[NSString stringWithUTF8String:src.c_str()] ?: @""];

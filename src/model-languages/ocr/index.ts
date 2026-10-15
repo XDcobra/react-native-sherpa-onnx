@@ -1,4 +1,5 @@
 export {
+  DOC_VLM_ISO6391_HINTS,
   DOCTR_ISO6391_HINTS,
   DOCTR_LANGUAGES,
   getDoctrLanguages,

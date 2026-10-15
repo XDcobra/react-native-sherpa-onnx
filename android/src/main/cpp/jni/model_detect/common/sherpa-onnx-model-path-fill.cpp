@@ -144,6 +144,13 @@ void FillOcrModelPathsFromStringMap(
     SetPathFromMap(paths, "cls", out.cls);
     SetPathFromMap(paths, "rec_dict", out.rec_dict);
     SetPathFromMap(paths, "manifest", out.manifest);
+    SetPathFromMap(paths, "vision_encoder", out.vision_encoder);
+    SetPathFromMap(paths, "vision_encoder_data", out.vision_encoder_data);
+    SetPathFromMap(paths, "embed_tokens", out.embed_tokens);
+    SetPathFromMap(paths, "embed_tokens_data", out.embed_tokens_data);
+    SetPathFromMap(paths, "decoder", out.decoder);
+    SetPathFromMap(paths, "decoder_data", out.decoder_data);
+    SetPathFromMap(paths, "tokenizer", out.tokenizer);
 }
 
 void FillLanguageIdModelPathsFromStringMap(
@@ -318,6 +325,13 @@ std::map<std::string, std::string> OcrModelPathsToStringMap(
     PutPathIfNonEmpty(out, "cls", paths.cls);
     PutPathIfNonEmpty(out, "rec_dict", paths.rec_dict);
     PutPathIfNonEmpty(out, "manifest", paths.manifest);
+    PutPathIfNonEmpty(out, "vision_encoder", paths.vision_encoder);
+    PutPathIfNonEmpty(out, "vision_encoder_data", paths.vision_encoder_data);
+    PutPathIfNonEmpty(out, "embed_tokens", paths.embed_tokens);
+    PutPathIfNonEmpty(out, "embed_tokens_data", paths.embed_tokens_data);
+    PutPathIfNonEmpty(out, "decoder", paths.decoder);
+    PutPathIfNonEmpty(out, "decoder_data", paths.decoder_data);
+    PutPathIfNonEmpty(out, "tokenizer", paths.tokenizer);
     return out;
 }
 

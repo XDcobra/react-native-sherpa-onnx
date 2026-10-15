@@ -1,4 +1,5 @@
 import { ModelCategory } from '../../../download/types';
+import { DOC_VLM_ISO6391_HINTS } from '..';
 import {
   DOCTR_ISO6391_HINTS,
   DOCTR_LANGUAGES,
@@ -123,16 +124,49 @@ describe('doctr language hints', () => {
 });
 
 describe('doc_vlm pack language hints', () => {
-  it('returns en/ja/ar/zh for docvlm-granite-258m and no family fallback', () => {
-    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m']).toEqual([
-      'en',
-      'ja',
-      'ar',
-      'zh',
-    ]);
+  const graniteHints = ['en', 'ja', 'ar', 'zh'];
+
+  it('returns en/ja/ar/zh for the pack and the doc_vlm family', () => {
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m']).toEqual(
+      graniteHints
+    );
+    expect(iso6391HintsForOcrModelType('doc_vlm')).toEqual(graniteHints);
     expect(
       iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m')
-    ).toEqual(['en', 'ja', 'ar', 'zh']);
-    expect(iso6391HintsForOcrModelType('doc_vlm')).toBeUndefined();
+    ).toEqual(graniteHints);
+    expect(DOC_VLM_ISO6391_HINTS).toEqual(graniteHints);
+  });
+
+  it('keeps doctr, ppocr, and auto family hints', () => {
+    expect(iso6391HintsForOcrModelType('doctr')).toEqual([
+      ...DOCTR_ISO6391_HINTS,
+    ]);
+    expect(iso6391HintsForOcrModelType('ppocr')).toEqual([
+      ...PPOCR_ISO6391_HINTS,
+    ]);
+    expect(iso6391HintsForOcrModelType('auto')).toEqual([
+      ...PPOCR_ISO6391_HINTS,
+    ]);
+  });
+
+  it('publicLanguageHintsFromNative returns native doc_vlm rows', () => {
+    expect(
+      publicLanguageHintsFromNative({
+        domain: ModelCategory.Ocr,
+        modelType: 'doc_vlm',
+        modelKey: 'docvlm-granite-258m',
+        rawRows: [
+          { iso6391Hint: 'en', id: 'en' },
+          { iso6391Hint: 'ja', id: 'ja' },
+          { iso6391Hint: 'ar', id: 'ar' },
+          { iso6391Hint: 'zh', id: 'zh' },
+        ],
+      })
+    ).toEqual([
+      { iso6391Hint: 'en', id: 'en' },
+      { iso6391Hint: 'ja', id: 'ja' },
+      { iso6391Hint: 'ar', id: 'ar' },
+      { iso6391Hint: 'zh', id: 'zh' },
+    ]);
   });
 });

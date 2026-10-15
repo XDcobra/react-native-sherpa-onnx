@@ -2030,6 +2030,7 @@ export function getDoctrLanguages(): readonly ModelLanguage[] {
 }
 
 export const DOCTR_ISO6391_HINTS = ["en","fr","pt","es","de","it","cs","pl","da","no","sv","fi","nl","hu","ro"] as const;
+export const DOC_VLM_ISO6391_HINTS = ["en","ja","ar","zh"] as const;
 export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
   "doctr-default": [
     "en",
@@ -2427,6 +2428,10 @@ export function iso6391HintsForOcrModelType(
   // 3a) doctr family fallback
   if (type === 'doctr') {
     return [...DOCTR_ISO6391_HINTS];
+  }
+  // 3a) doc_vlm family fallback
+  if (type === 'doc_vlm') {
+    return [...DOC_VLM_ISO6391_HINTS];
   }
   // 3b) ppocr / auto / type-only fallback.
   if (!key || type === 'ppocr' || type === 'auto' || type === '') {

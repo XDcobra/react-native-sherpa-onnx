@@ -199,6 +199,30 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     if (!detect.manifestPath.empty()) {
       PutString(env, pathsMap, pathsPut, "manifest", detect.manifestPath);
     }
+    if (!detect.visionEncoderPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "vision_encoder",
+                detect.visionEncoderPath);
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "vision_encoder_data",
+                detect.visionEncoderDataPath);
+    }
+    if (!detect.embedTokensPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embed_tokens", detect.embedTokensPath);
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embed_tokens_data",
+                detect.embedTokensDataPath);
+    }
+    if (!detect.decoderPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "decoder", detect.decoderPath);
+    }
+    if (!detect.decoderDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "decoder_data", detect.decoderDataPath);
+    }
+    if (!detect.tokenizerPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "tokenizer", detect.tokenizerPath);
+    }
     jstring key = env->NewStringUTF("paths");
     if (key) {
       env->CallObjectMethod(map, put, key, pathsMap);
@@ -224,6 +248,30 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     }
     if (!detect.manifestPath.empty()) {
       PutString(env, filesMap, filesPut, "manifest", detect.manifestPath);
+    }
+    if (!detect.visionEncoderPath.empty()) {
+      PutString(env, filesMap, filesPut, "vision_encoder",
+                detect.visionEncoderPath);
+    }
+    if (!detect.visionEncoderDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "vision_encoder_data",
+                detect.visionEncoderDataPath);
+    }
+    if (!detect.embedTokensPath.empty()) {
+      PutString(env, filesMap, filesPut, "embed_tokens", detect.embedTokensPath);
+    }
+    if (!detect.embedTokensDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "embed_tokens_data",
+                detect.embedTokensDataPath);
+    }
+    if (!detect.decoderPath.empty()) {
+      PutString(env, filesMap, filesPut, "decoder", detect.decoderPath);
+    }
+    if (!detect.decoderDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "decoder_data", detect.decoderDataPath);
+    }
+    if (!detect.tokenizerPath.empty()) {
+      PutString(env, filesMap, filesPut, "tokenizer", detect.tokenizerPath);
     }
     jstring key = env->NewStringUTF("files");
     if (key) {
