@@ -55,6 +55,13 @@ function resolveImageBufferId(source: OfflineImageBufferIdSource): string {
   );
 }
 
+/** Resolve ref/handle/string to a native offline image buffer id. */
+export function resolveOfflineImageBufferId(
+  source: OfflineImageBufferIdSource
+): string {
+  return resolveImageBufferId(source);
+}
+
 function assertImageBufferId(id: string): void {
   if (!IMAGE_BUFFER_ID_PATTERN.test(id)) {
     throw new Error(
