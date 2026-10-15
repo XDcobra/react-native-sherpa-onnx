@@ -59,6 +59,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/speaker-embedding/*.h",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
+    # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
+    "android/src/main/cpp/ocr/**/*.{h,cpp}",
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -78,6 +80,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp",
     "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
+    "android/src/main/cpp/jni/ocr/**/*",
     # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
     "android/src/main/cpp/image/decode/vendor/**/*"
   ]
@@ -188,7 +191,11 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/android/src/main/cpp/image\"",
     "\"#{pod_root}/android/src/main/cpp/image/decode\"",
+    "\"#{pod_root}/android/src/main/cpp/ocr\"",
+    "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
+    "\"#{pod_root}/ios/ocr\"",
+    "\"#{pod_root}/ios/ocr/bridge\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",

@@ -72,6 +72,15 @@ void PpocrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
+  // Provider: v1 defaults to CPU. Non-empty non-cpu ids are accepted for forward
+  // compatibility but currently fall back to CPU (mobile ORT builds vary).
+  const std::string provider =
+      options_.provider.empty() ? "cpu" : options_.provider;
+  if (provider != "cpu") {
+    // Keep CPU sessions; EP plugins are not wired for OCR in this build.
+    // Callers may still pass provider for parity with other features.
+  }
+
   det_session_ =
       std::make_unique<Ort::Session>(*env_, det_path.c_str(), *session_options_);
   rec_session_ =
