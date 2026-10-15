@@ -125,9 +125,11 @@ describe('offline orchestrator', () => {
         tokenCount: 0,
         timestampCount: 0,
         durationCount: 0,
+        spatialSpanCount: 0,
         hasLang: false,
         hasEmotion: false,
         hasEvent: false,
+        hasSpatialSpans: false,
       },
     });
     text.createOfflineTextBufferFromText.mockResolvedValue({
@@ -140,9 +142,11 @@ describe('offline orchestrator', () => {
         tokenCount: 0,
         timestampCount: 0,
         durationCount: 0,
+        spatialSpanCount: 0,
         hasLang: false,
         hasEmotion: false,
         hasEvent: false,
+        hasSpatialSpans: false,
       },
     });
     text.getPipelineTextBufferInfo.mockResolvedValue({
@@ -712,9 +716,11 @@ describe('offline orchestrator', () => {
           tokenCount: 0,
           timestampCount: 0,
           durationCount: 0,
+          spatialSpanCount: 0,
           hasLang: false,
           hasEmotion: false,
           hasEvent: false,
+          hasSpatialSpans: false,
         });
       }
       return Promise.resolve({
@@ -725,9 +731,11 @@ describe('offline orchestrator', () => {
         tokenCount: 0,
         timestampCount: 0,
         durationCount: 0,
+        spatialSpanCount: 0,
         hasLang: false,
         hasEmotion: false,
         hasEvent: false,
+        hasSpatialSpans: false,
       });
     });
     text.getOfflineTextBufferTextSlice.mockResolvedValue('test');

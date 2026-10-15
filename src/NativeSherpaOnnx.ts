@@ -769,9 +769,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -790,9 +792,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -812,9 +816,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -886,9 +892,11 @@ export interface Spec extends TurboModule {
     tokenCount?: number;
     timestampCount?: number;
     durationCount?: number;
+    spatialSpanCount?: number;
     hasLang?: boolean;
     hasEmotion?: boolean;
     hasEvent?: boolean;
+    hasSpatialSpans?: boolean;
     totalCharsWritten?: number;
     revision?: number;
     segmentCount?: number;
@@ -1010,6 +1018,29 @@ export interface Spec extends TurboModule {
     start: number,
     maxCount: number
   ): Promise<number[]>;
+
+  /**
+   * Get a slice of spatial spans from an offline text buffer (OCR / text-layer).
+   * Each element is a Fabric-safe map matching {@link TextSpatialSpan}.
+   */
+  getOfflineTextBufferSpatialSpansSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<
+    Array<{
+      utf16Start: number;
+      utf16End: number;
+      level: string;
+      sourceImageBufferId: string;
+      frameIndex: number;
+      quad: number[];
+      confidence?: number;
+      origin: string;
+      pageNumber?: number;
+      ptsMs?: number;
+    }>
+  >;
 
   /**
    * Get the language string from an offline text buffer.

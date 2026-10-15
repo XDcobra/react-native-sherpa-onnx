@@ -52,6 +52,9 @@ import type {
   LiveTextSegment,
   TextBufferSpoolingMode,
   LiveTextBufferSpoolInfo,
+  TextSpatialSpan,
+  TextSpatialSpanLevel,
+  TextSpatialSpanOrigin,
 } from './types';
 
 const DEFAULT_TEXT_SEGMENTATION_POLICY = {
@@ -519,9 +522,11 @@ export async function createEmptyOfflineTextBuffer(): Promise<OfflineTextBufferR
     tokenCount: raw.tokenCount ?? 0,
     timestampCount: raw.timestampCount ?? 0,
     durationCount: raw.durationCount ?? 0,
+    spatialSpanCount: raw.spatialSpanCount ?? 0,
     hasLang: raw.hasLang ?? false,
     hasEmotion: raw.hasEmotion ?? false,
     hasEvent: raw.hasEvent ?? false,
+    hasSpatialSpans: raw.hasSpatialSpans ?? false,
   };
   return {
     info,
@@ -546,9 +551,11 @@ export async function createOfflineTextBufferFromLive(
     tokenCount: raw.tokenCount ?? 0,
     timestampCount: raw.timestampCount ?? 0,
     durationCount: raw.durationCount ?? 0,
+    spatialSpanCount: raw.spatialSpanCount ?? 0,
     hasLang: raw.hasLang ?? false,
     hasEmotion: raw.hasEmotion ?? false,
     hasEvent: raw.hasEvent ?? false,
+    hasSpatialSpans: raw.hasSpatialSpans ?? false,
   };
   return {
     info,
@@ -579,9 +586,11 @@ export async function createOfflineTextBufferFromText(
     tokenCount: raw.tokenCount ?? 0,
     timestampCount: raw.timestampCount ?? 0,
     durationCount: raw.durationCount ?? 0,
+    spatialSpanCount: raw.spatialSpanCount ?? 0,
     hasLang: raw.hasLang ?? false,
     hasEmotion: raw.hasEmotion ?? false,
     hasEvent: raw.hasEvent ?? false,
+    hasSpatialSpans: raw.hasSpatialSpans ?? false,
   };
   return {
     info,
@@ -781,9 +790,11 @@ export async function getPipelineTextBufferInfo(
     tokenCount: raw.tokenCount ?? 0,
     timestampCount: raw.timestampCount ?? 0,
     durationCount: raw.durationCount ?? 0,
+    spatialSpanCount: raw.spatialSpanCount ?? 0,
     hasLang: raw.hasLang ?? false,
     hasEmotion: raw.hasEmotion ?? false,
     hasEvent: raw.hasEvent ?? false,
+    hasSpatialSpans: raw.hasSpatialSpans ?? false,
   } as OfflineTextBufferInfo;
 }
 
@@ -898,6 +909,98 @@ async function readOfflineNumberArraySliceUsingNativeChunks(
   return result;
 }
 
+async function readOfflineObjectArraySliceUsingNativeChunks<T>(
+  readChunk: (id: string, start: number, maxCount: number) => Promise<T[]>,
+  nativeId: string,
+  start: number,
+  maxCount: number
+): Promise<T[]> {
+  const chunkCap = TEXT_MAX_SLICE_COUNT;
+  if (maxCount <= chunkCap) {
+    return readChunk(nativeId, start, maxCount);
+  }
+  const result: T[] = [];
+  let offset = start;
+  let remaining = maxCount;
+  while (remaining > 0) {
+    const requestLen = Math.min(remaining, chunkCap);
+    const piece = await readChunk(nativeId, offset, requestLen);
+    result.push(...piece);
+    const taken = piece.length;
+    offset += taken;
+    remaining -= taken;
+    if (taken < requestLen) {
+      break;
+    }
+  }
+  return result;
+}
+
+const SPATIAL_SPAN_LEVELS = new Set<TextSpatialSpanLevel>([
+  'line',
+  'word',
+  'block',
+]);
+const SPATIAL_SPAN_ORIGINS = new Set<TextSpatialSpanOrigin>([
+  'ocr',
+  'textLayer',
+  'markup',
+]);
+
+function mapNativeSpatialSpan(raw: {
+  utf16Start: number;
+  utf16End: number;
+  level: string;
+  sourceImageBufferId: string;
+  frameIndex: number;
+  quad: number[];
+  confidence?: number;
+  origin: string;
+  pageNumber?: number;
+  ptsMs?: number;
+}): TextSpatialSpan {
+  const level: TextSpatialSpanLevel = SPATIAL_SPAN_LEVELS.has(
+    raw.level as TextSpatialSpanLevel
+  )
+    ? (raw.level as TextSpatialSpanLevel)
+    : 'line';
+  const origin: TextSpatialSpanOrigin = SPATIAL_SPAN_ORIGINS.has(
+    raw.origin as TextSpatialSpanOrigin
+  )
+    ? (raw.origin as TextSpatialSpanOrigin)
+    : 'ocr';
+  const q = Array.isArray(raw.quad) ? raw.quad : [];
+  const quad: TextSpatialSpan['quad'] = [
+    Number(q[0] ?? 0),
+    Number(q[1] ?? 0),
+    Number(q[2] ?? 0),
+    Number(q[3] ?? 0),
+    Number(q[4] ?? 0),
+    Number(q[5] ?? 0),
+    Number(q[6] ?? 0),
+    Number(q[7] ?? 0),
+  ];
+  const span: TextSpatialSpan = {
+    utf16Start: Math.trunc(raw.utf16Start),
+    utf16End: Math.trunc(raw.utf16End),
+    level,
+    sourceImageBufferId: String(raw.sourceImageBufferId ?? ''),
+    frameIndex: Math.trunc(raw.frameIndex),
+    quad,
+    origin,
+  };
+  if (raw.confidence != null && Number.isFinite(raw.confidence)) {
+    span.confidence = raw.confidence;
+  }
+  if (raw.pageNumber != null && Number.isFinite(raw.pageNumber)) {
+    span.pageNumber = Math.trunc(raw.pageNumber);
+  }
+  if (raw.ptsMs != null && Number.isFinite(raw.ptsMs)) {
+    span.ptsMs = raw.ptsMs;
+  }
+  return span;
+}
+
 /**
  * Get a slice of the hypothesis text from an offline text buffer.
  */
@@ -965,6 +1068,26 @@ export async function getOfflineTextBufferDurationsSlice(
     Math.trunc(start),
     Math.trunc(maxCount)
   );
+}
+
+/**
+ * Get a slice of spatial spans from an offline text buffer (OCR / text-layer).
+ * Empty when the buffer has no spatial metadata (typical for STT results).
+ */
+export async function getOfflineTextBufferSpatialSpansSlice(
+  bufferId: OfflineTextBufferIdSource,
+  start: number,
+  maxCount: number
+): Promise<TextSpatialSpan[]> {
+  const id = resolveOfflineTextBufferId(bufferId);
+  const raw = await readOfflineObjectArraySliceUsingNativeChunks(
+    (buffer, s, m) =>
+      getNative().getOfflineTextBufferSpatialSpansSlice(buffer, s, m),
+    id,
+    Math.trunc(start),
+    Math.trunc(maxCount)
+  );
+  return raw.map(mapNativeSpatialSpan);
 }
 
 /**
@@ -1133,6 +1256,9 @@ export type {
   TextSegmentationConfig,
   OfflineTextBufferFromLiveMode,
   PipelineTextErrorCodeValue,
+  TextSpatialSpan,
+  TextSpatialSpanLevel,
+  TextSpatialSpanOrigin,
 } from './types';
 
 export type { StreamEventSpec } from '../pipeline/streamEvents';

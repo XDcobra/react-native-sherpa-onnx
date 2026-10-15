@@ -90,6 +90,7 @@ struct TxtOfflineEntry {
     std::vector<std::string> tokens;
     std::vector<float> timestamps;
     std::vector<float> durations;
+    std::vector<TxtSpatialSpan> spatialSpans;
     std::string lang;
     std::string emotion;
     std::string event;
@@ -103,22 +104,53 @@ struct TxtOfflineEntry {
     int tokenCount() const { return (int)tokens.size(); }
     int timestampCount() const { return (int)timestamps.size(); }
     int durationCount() const { return (int)durations.size(); }
+    int spatialSpanCount() const { return (int)spatialSpans.size(); }
     bool hasLang() const { return !lang.empty(); }
     bool hasEmotion() const { return !emotion.empty(); }
     bool hasEvent() const { return !event.empty(); }
+    bool hasSpatialSpans() const { return !spatialSpans.empty(); }
 
     void populate(const std::string &t, const std::vector<std::string> &tok,
                   const std::vector<float> &ts, const std::vector<float> &dur,
-                  const std::string &l, const std::string &em, const std::string &ev) {
+                  const std::string &l, const std::string &em, const std::string &ev,
+                  const std::vector<TxtSpatialSpan> &spans = {}) {
         if (populated) return; // already populated, no-op (or could throw)
         text = t;
         tokens = tok;
         timestamps = ts;
         durations = dur;
+        spatialSpans = spans;
         lang = l;
         emotion = em;
         event = ev;
         populated = true;
+    }
+
+    static NSDictionary *spatialSpanToDict(const TxtSpatialSpan &span) {
+        NSMutableArray *quad = [NSMutableArray arrayWithCapacity:8];
+        for (int i = 0; i < 8; i++) {
+            [quad addObject:@(span.quad[i])];
+        }
+        NSMutableDictionary *map = [@{
+            @"utf16Start": @(span.utf16Start),
+            @"utf16End": @(span.utf16End),
+            @"level": [NSString stringWithUTF8String:span.level.c_str()] ?: @"line",
+            @"sourceImageBufferId":
+                [NSString stringWithUTF8String:span.sourceImageBufferId.c_str()] ?: @"",
+            @"frameIndex": @(span.frameIndex),
+            @"quad": quad,
+            @"origin": [NSString stringWithUTF8String:span.origin.c_str()] ?: @"ocr",
+        } mutableCopy];
+        if (span.hasConfidence) {
+            map[@"confidence"] = @(span.confidence);
+        }
+        if (span.hasPageNumber) {
+            map[@"pageNumber"] = @(span.pageNumber);
+        }
+        if (span.hasPtsMs) {
+            map[@"ptsMs"] = @(span.ptsMs);
+        }
+        return map;
     }
 
     NSDictionary *toDict() const {
@@ -130,9 +162,11 @@ struct TxtOfflineEntry {
             @"tokenCount": @(tokenCount()),
             @"timestampCount": @(timestampCount()),
             @"durationCount": @(durationCount()),
+            @"spatialSpanCount": @(spatialSpanCount()),
             @"hasLang": @(hasLang()),
             @"hasEmotion": @(hasEmotion()),
             @"hasEvent": @(hasEvent()),
+            @"hasSpatialSpans": @(hasSpatialSpans()),
         };
     }
 };
@@ -382,6 +416,23 @@ bool txt_populate_offline_if_empty(
     const std::string &event,
     std::string *error
 ) {
+    return txt_populate_offline_if_empty(
+        bufferId, text, tokens, timestamps, durations, lang, emotion, event,
+        std::vector<TxtSpatialSpan>{}, error);
+}
+
+bool txt_populate_offline_if_empty(
+    const std::string &bufferId,
+    const std::string &text,
+    const std::vector<std::string> &tokens,
+    const std::vector<float> &timestamps,
+    const std::vector<float> &durations,
+    const std::string &lang,
+    const std::string &emotion,
+    const std::string &event,
+    const std::vector<TxtSpatialSpan> &spatialSpans,
+    std::string *error
+) {
     std::lock_guard<std::mutex> lock(g_txt_mutex);
     auto it = g_txt_offline.find(bufferId);
     if (it == g_txt_offline.end() || !it->second) {
@@ -392,7 +443,7 @@ bool txt_populate_offline_if_empty(
         if (error) *error = "Text buffer already populated";
         return false;
     }
-    it->second->populate(text, tokens, timestamps, durations, lang, emotion, event);
+    it->second->populate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans);
     return true;
 }
 
@@ -1004,6 +1055,51 @@ static std::string txt_generateId(const char *prefix) {
         NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
         for (int i = s; i < end; i++) {
             [arr addObject:@(durations[i])];
+        }
+        resolve(arr);
+    } @catch (NSException *exception) {
+        reject(kTxtErrInternalError, exception.reason, nil);
+    }
+}
+
+- (void)getOfflineTextBufferSpatialSpansSlice:(NSString *)bufferId
+                                        start:(double)start
+                                     maxCount:(double)maxCount
+                                      resolve:(RCTPromiseResolveBlock)resolve
+                                       reject:(RCTPromiseRejectBlock)reject
+{
+    @try {
+        std::string bid = [bufferId UTF8String] ?: "";
+        int s = (int)start;
+        int m = (int)maxCount;
+
+        if (s < 0 || m <= 0) {
+            reject(kTxtErrSliceInvalid, @"Invalid slice args", nil);
+            return;
+        }
+        if (m > kTxtMaxSliceCount) {
+            reject(kTxtErrSliceTooLarge, @"maxCount exceeds max", nil);
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(g_txt_mutex);
+        auto it = g_txt_offline.find(bid);
+        if (it == g_txt_offline.end()) {
+            reject(kTxtErrBufferNotFound,
+                   [NSString stringWithFormat:@"Offline text buffer not found: %@", bufferId], nil);
+            return;
+        }
+
+        auto &spans = it->second->spatialSpans;
+        int total = (int)spans.size();
+        if (s >= total) {
+            resolve([NSArray array]);
+            return;
+        }
+        int end = MIN(s + m, total);
+        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
+        for (int i = s; i < end; i++) {
+            [arr addObject:TxtOfflineEntry::spatialSpanToDict(spans[i])];
         }
         resolve(arr);
     } @catch (NSException *exception) {
