@@ -23,6 +23,7 @@ const DEFAULTS: Partial<Record<ModelCategory, HuggingFaceRepoSpec[]>> = {
   [ModelCategory.SpeakerEmbedding]: [],
   [ModelCategory.Qnn]: [],
   [ModelCategory.Alignment]: [],
+  [ModelCategory.Ocr]: [],
   [ModelCategory.LanguageId]: [],
   [ModelCategory.Kws]: [],
   [ModelCategory.AudioTagging]: [],

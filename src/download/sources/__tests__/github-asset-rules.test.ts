@@ -172,3 +172,18 @@ describe('github-asset-rules — STT vs AudioTagging', () => {
     ).toBe(true);
   });
 });
+
+describe('github-asset-rules — OCR', () => {
+  it('accepts ocr-models tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'ppocrv6-tiny.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(ModelCategory.Ocr, 'det.onnx', 'onnx')
+    ).toBe(false);
+  });
+});

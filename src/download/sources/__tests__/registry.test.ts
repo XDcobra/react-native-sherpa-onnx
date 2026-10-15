@@ -45,6 +45,9 @@ describe('source registry', () => {
     expect(getDefaultSourceForCategory(ModelCategory.Alignment)).toBe(
       BUILTIN_SOURCE_IDS.GITHUB_XDCOBRA
     );
+    expect(getDefaultSourceForCategory(ModelCategory.Ocr)).toBe(
+      BUILTIN_SOURCE_IDS.GITHUB_XDCOBRA
+    );
   });
 
   it('supports registering a custom source and configuring headers', () => {

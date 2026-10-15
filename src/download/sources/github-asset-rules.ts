@@ -53,6 +53,8 @@ export function isAssetSupportedForCategory(
       );
     case ModelCategory.Alignment:
       return ext === 'tar.bz2';
+    case ModelCategory.Ocr:
+      return ext === 'tar.bz2';
     case ModelCategory.LanguageId:
       return (
         ext === 'tar.bz2' &&

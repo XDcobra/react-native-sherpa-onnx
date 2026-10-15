@@ -101,6 +101,7 @@ describe('categoryUsesCatalogDetect', () => {
     );
     expect(categoryUsesCatalogDetect(ModelCategory.Diarization)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.Alignment)).toBe(true);
+    expect(categoryUsesCatalogDetect(ModelCategory.Ocr)).toBe(true);
     expect(categoryUsesCatalogDetect(ModelCategory.LanguageId)).toBe(true);
   });
 });
