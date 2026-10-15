@@ -203,6 +203,12 @@ set(SOURCES
     ocr/doctr/DoctrImageOps.cpp
     ocr/doctr/DoctrManifest.cpp
     ocr/doctr/DoctrRecDecode.cpp
+    ocr/doc_vlm/DocVlmBackend.cpp
+    ocr/doc_vlm/DocVlmDocTags.cpp
+    ocr/doc_vlm/DocVlmImageOps.cpp
+    ocr/doc_vlm/DocVlmManifest.cpp
+    ocr/doc_vlm/DocVlmPrompt.cpp
+    ocr/doc_vlm/DocVlmTokenizer.cpp
     jni/ocr/sherpa-onnx-ocr-jni.cpp
 )
 
@@ -365,6 +371,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)

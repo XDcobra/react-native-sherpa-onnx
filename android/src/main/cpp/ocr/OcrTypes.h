@@ -42,6 +42,10 @@ struct OcrSpan {
 struct OcrResult {
   std::string text_utf8;
   std::vector<OcrSpan> spans;
+  /** doc_vlm: raw DocTags after ASCII lstrip. Empty for ppocr/doctr. */
+  std::string doctags_utf8;
+  /** doc_vlm: lossy markdown from DocTags. Empty for ppocr/doctr. */
+  std::string markdown_utf8;
 };
 
 struct OcrLoadOptions {
@@ -57,6 +61,11 @@ struct OcrLoadOptions {
    * Unknown providers fall back to cpu with a warning log.
    */
   std::string provider;
+  /**
+   * doc_vlm generation cap. 0 → 8192. Ignored by ppocr/doctr.
+   * Phase 3 maps TS `docVlm.maxNewTokens` here.
+   */
+  int max_new_tokens = 0;
 };
 
 enum class OcrGranularity : uint8_t {
