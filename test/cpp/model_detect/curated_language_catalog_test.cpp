@@ -180,3 +180,25 @@ TEST(CuratedLanguageCatalog, OcrPpocrv6TinyGetsPackHints) {
     EXPECT_TRUE(HasHint(small.derivedLanguages, "ja"));
     EXPECT_TRUE(HasHint(small.derivedLanguages, "fr"));
 }
+
+TEST(CuratedLanguageCatalog, OcrDoctrFamilyRowsNonEmpty) {
+    using namespace sherpaonnx::model_language_catalog;
+    const auto& rows = OcrRowsForModelType("doctr");
+    ASSERT_FALSE(rows.empty()) << "OcrRowsForModelType(\"doctr\") should return family hints";
+    bool hasEn = false;
+    for (const auto& r : rows) {
+        if (r.iso6391Hint == "en") hasEn = true;
+    }
+    EXPECT_TRUE(hasEn);
+}
+
+TEST(CuratedLanguageCatalog, OcrDoctrPackRowsForKnownIds) {
+    using namespace sherpaonnx::model_language_catalog;
+    const auto& mobile = OcrPackRowsForModelKey("doctr-mobile");
+    ASSERT_FALSE(mobile.empty());
+    EXPECT_EQ(mobile.size(), 2u);
+
+    const auto& dflt = OcrPackRowsForModelKey("doctr-default");
+    ASSERT_FALSE(dflt.empty());
+    EXPECT_EQ(dflt.size(), 15u);
+}

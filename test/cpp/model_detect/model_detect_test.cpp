@@ -792,6 +792,64 @@ TEST(ModelDetectTest, DetectOcrFromFileListMatchesExpected) {
     }
 }
 
+TEST(ModelDetectTest, DetectOcrDoctrFromFileList) {
+    const std::string root = "doctr-test-pack";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+        root + "/ocr_manifest.json",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_FALSE(result.paths.det.empty());
+    EXPECT_FALSE(result.paths.rec.empty());
+    EXPECT_FALSE(result.paths.manifest.empty());
+    EXPECT_TRUE(result.paths.rec_dict.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrExplicitDoctrType) {
+    const std::string root = "onnxtr-pack";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+        root + "/ocr_manifest.json",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "doctr");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrFailsWithoutManifest) {
+    const std::string root = "doctr-no-manifest";
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/det.onnx",
+        root + "/rec.onnx",
+    };
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "doctr");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(ModelDetectTest, DetectOcrDoctrNameOnly) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "doctr-mobile", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
+    EXPECT_GE(result.detectionSources.size(), 2u);
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kNameOnly),
+              result.detectionSources.end());
+    EXPECT_NE(std::find(result.detectionSources.begin(), result.detectionSources.end(),
+                        sherpaonnx::DetectionSource::kDirName),
+              result.detectionSources.end());
+}
+
 TEST(ModelDetectTest, DetectOcrAcceptsAlternateFilenames) {
     const std::string root = "alt-ppocr-pack";
     std::vector<std::string> lines = {

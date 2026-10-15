@@ -1309,6 +1309,9 @@
     }
   },
   "ocr": {
+    "doctr": {
+      "hints": ["en", "fr", "pt", "es", "de", "it", "cs", "pl", "da", "no", "sv", "fi", "nl", "hu", "ro"]
+    },
     "ppocr": {
       "hints": [
         "zh",

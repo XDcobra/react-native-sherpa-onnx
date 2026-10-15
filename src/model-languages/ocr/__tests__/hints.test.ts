@@ -1,5 +1,6 @@
 import { ModelCategory } from '../../../download/types';
 import {
+  DOCTR_ISO6391_HINTS,
   getPpocrLanguages,
   iso6391HintsForOcrModelType,
   OCR_PACK_ISO6391_HINTS_BY_ID,
@@ -58,5 +59,51 @@ describe('ocr language hints', () => {
         rawRows: [{ iso6391Hint: 'ZH', id: 'zh' }],
       })
     ).toEqual([{ iso6391Hint: 'zh', id: 'zh' }]);
+  });
+});
+
+describe('doctr language hints', () => {
+  it('iso6391HintsForOcrModelType returns doctr family hints', () => {
+    const hints = iso6391HintsForOcrModelType('doctr');
+    expect(hints).toBeDefined();
+    expect(hints).toContain('en');
+    expect(hints).toContain('fr');
+    expect(hints!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('iso6391HintsForOcrModelType prefers doctr-mobile pack over family', () => {
+    const mobile = iso6391HintsForOcrModelType('doctr', 'doctr-mobile');
+    expect(mobile).toEqual(['en', 'fr']);
+  });
+
+  it('iso6391HintsForOcrModelType prefers doctr-default pack over family', () => {
+    const dflt = iso6391HintsForOcrModelType('doctr', 'doctr-default');
+    expect(dflt).toContain('en');
+    expect(dflt).toContain('pt');
+    expect(dflt).toContain('ro');
+    expect(dflt!.length).toBe(15);
+  });
+
+  it('DOCTR_ISO6391_HINTS contains family-level hints', () => {
+    expect(DOCTR_ISO6391_HINTS).toBeDefined();
+    expect(DOCTR_ISO6391_HINTS.length).toBeGreaterThanOrEqual(2);
+    expect(DOCTR_ISO6391_HINTS).toContain('en');
+    expect(DOCTR_ISO6391_HINTS).toContain('fr');
+  });
+
+  it('publicLanguageHintsFromNative resolves doctr family hints from native rows', () => {
+    const resolved = publicLanguageHintsFromNative({
+      domain: ModelCategory.Ocr,
+      modelType: 'doctr',
+      modelKey: 'doctr-mobile',
+      rawRows: [
+        { iso6391Hint: 'en', id: 'en' },
+        { iso6391Hint: 'fr', id: 'fr' },
+      ],
+    });
+    expect(resolved).toEqual([
+      { iso6391Hint: 'en', id: 'en' },
+      { iso6391Hint: 'fr', id: 'fr' },
+    ]);
   });
 });

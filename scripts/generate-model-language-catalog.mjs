@@ -200,6 +200,9 @@ function validateCatalog(catalog) {
   if (!catalog.ocr.ppocr?.entries?.length) {
     throw new Error('ocr.ppocr.entries must be a non-empty array');
   }
+  if (!catalog.ocr.doctr?.hints?.length) {
+    throw new Error('ocr.doctr.hints must be a non-empty array');
+  }
   const funasr = catalog.stt.funasr_nano;
   if (funasr?.entries) {
     validateFunasrPickerVariants(funasr);
@@ -752,6 +755,16 @@ function emitTs(catalog, sttHintsByType, alignmentPackLangs, ocrPackLangs) {
   lines.push(
     `export const PPOCR_ISO6391_HINTS = ${JSON.stringify(ppocrHints)} as const;`
   );
+  // Emit family-level hints for each OCR family with hints (excluding ppocr, already emitted).
+  for (const [family, spec] of Object.entries(catalog.ocr)) {
+    if (family === 'ppocr') continue;
+    if (spec.hints) {
+      const constName = `${family.toUpperCase()}_ISO6391_HINTS`;
+      lines.push(
+        `export const ${constName} = ${JSON.stringify(spec.hints)} as const;`
+      );
+    }
+  }
   lines.push(
     `export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(ocrPackLangs.byId, null, 2)} as const;`
   );
@@ -792,7 +805,18 @@ function emitTs(catalog, sttHintsByType, alignmentPackLangs, ocrPackLangs) {
   lines.push('    }');
   lines.push('  }');
   lines.push('');
-  lines.push("  // 3) Family fallback for ppocr / auto / type-only queries.");
+  // Emit family fallback branches for each OCR family with hints (excluding ppocr).
+  for (const [family, spec] of Object.entries(catalog.ocr)) {
+    if (family === 'ppocr') continue;
+    if (spec.hints) {
+      const constName = `${family.toUpperCase()}_ISO6391_HINTS`;
+      lines.push(`  // 3a) ${family} family fallback`);
+      lines.push(`  if (type === '${family}') {`);
+      lines.push(`    return [...${constName}];`);
+      lines.push('  }');
+    }
+  }
+  lines.push("  // 3b) ppocr / auto / type-only fallback.");
   lines.push("  if (!key || type === 'ppocr' || type === 'auto' || type === '') {");
   lines.push('    if (type === \'ppocr\' || type === \'auto\' || (!type && !key)) {');
   lines.push('      return [...PPOCR_ISO6391_HINTS];');

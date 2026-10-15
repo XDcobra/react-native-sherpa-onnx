@@ -120,6 +120,35 @@ describe('buildCatalogHintsMap — OCR', () => {
       { assetName: 'ppocrv6-tiny' },
     ]);
   });
+
+  it('merges name-only unified detect language hints for doctr packs', async () => {
+    mockDetectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        category: ModelCategory.Ocr,
+        modelType: 'doctr',
+        languages: ['en', 'fr'],
+        quantization: 'unknown',
+        sizeTier: 'unknown',
+        isStreaming: false,
+      },
+    ]);
+
+    const hints = await buildCatalogHintsMap(ModelCategory.Ocr, [
+      'doctr-mobile',
+    ]);
+
+    expect(hints.get('doctr-mobile')).toEqual({
+      modelType: 'doctr',
+      languages: ['en', 'fr'],
+      quantization: 'unknown',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+    expect(mockDetectModelsBatch).toHaveBeenCalledWith([
+      { assetName: 'doctr-mobile' },
+    ]);
+  });
 });
 
 describe('categoryUsesCatalogDetect', () => {

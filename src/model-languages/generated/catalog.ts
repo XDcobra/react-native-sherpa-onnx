@@ -1962,6 +1962,7 @@ export function getPpocrLanguages(): readonly ModelLanguage[] {
 }
 
 export const PPOCR_ISO6391_HINTS = ["zh","en","ja","af","az","bs","ca","cs","cy","da","de","es","et","eu","fi","fr","ga","gl","hr","hu","id","is","it","ku","la","lb","lt","lv","mi","ms","mt","nl","no","oc","pl","pt","qu","rm","ro","sk","sl","sq","sr","sv","sw","tl","tr","uz","vi"] as const;
+export const DOCTR_ISO6391_HINTS = ["en","fr","pt","es","de","it","cs","pl","da","no","sv","fi","nl","hu","ro"] as const;
 export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
   "doctr-default": [
     "en",
@@ -2344,7 +2345,11 @@ export function iso6391HintsForOcrModelType(
     }
   }
 
-  // 3) Family fallback for ppocr / auto / type-only queries.
+  // 3a) doctr family fallback
+  if (type === 'doctr') {
+    return [...DOCTR_ISO6391_HINTS];
+  }
+  // 3b) ppocr / auto / type-only fallback.
   if (!key || type === 'ppocr' || type === 'auto' || type === '') {
     if (type === 'ppocr' || type === 'auto' || (!type && !key)) {
       return [...PPOCR_ISO6391_HINTS];
