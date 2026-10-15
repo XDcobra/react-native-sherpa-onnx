@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls) and **`doctr`** (OnnxTR Det/Rec/manifest). `modelType: 'auto' | 'ppocr' | 'doctr'`.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`.
 
 ---
 
@@ -61,7 +61,7 @@ const textOut = await createEmptyOfflineTextBuffer();
 
 try {
   // Step 4: recognize (line spans; text is always filled)
-  await ocr.recognize(image, textOut, { granularity: 'line' });
+  const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 
   // Step 5: read text + optional spatial spans
   const info = (await getPipelineTextBufferInfo(
@@ -75,7 +75,7 @@ try {
         info.spatialSpanCount
       )
     : [];
-  console.log(text, spans.length);
+  console.log(text, spans.length, page.spanCount);
 } finally {
   // Step 6: release buffers + engine
   await releaseOfflineImageBuffer(image);
@@ -83,6 +83,8 @@ try {
   await ocr.destroy();
 }
 ```
+
+For ppocr, `page.doctags` and `page.markdown` are `""`. Text and spans stay on `textOut`.
 
 ### Single image → text + spatial spans (doctr)
 
@@ -110,7 +112,38 @@ const ocr = await createOCR({
 await ocr.destroy();
 ```
 
-> For both families, `modelType: 'auto'` resolves the family from the pack directory layout. Use `isOcrPpocrDetectSuccess` or `isOcrDoctrDetectSuccess` to narrow the detected paths to family-specific shapes.
+> `ppocr`, `doctr`, and `doc_vlm` share `createOCR` → `recognize`. `modelType: 'auto'` resolves the family from the manifest `family` string, then from pack layout. Use `isOcrPpocrDetectSuccess`, `isOcrDoctrDetectSuccess`, or `isOcrDocVlmDetectSuccess` to narrow the detected paths.
+
+### Single image → DocTags + markdown (`doc_vlm`)
+
+```ts
+import {
+  createOCR,
+  detectOcrModel,
+  isOcrDocVlmDetectSuccess,
+} from 'react-native-sherpa-onnx/ocr';
+
+const modelDir = {
+  kind: 'fs' as const,
+  path: '/absolute/path/to/docvlm-granite-258m',
+};
+
+const det = await detectOcrModel(modelDir, { modelType: 'auto' });
+if (!isOcrDocVlmDetectSuccess(det)) {
+  throw new Error(det.error ?? 'doc_vlm detection failed');
+}
+
+const ocr = await createOCR({
+  modelSource: modelDir,
+  modelType: 'doc_vlm',
+  docVlm: { maxNewTokens: 512 },
+});
+
+// image + textOut: same allocation as the ppocr example.
+const page = await ocr.recognize(image, textOut, { granularity: 'line' });
+console.log(page.family, page.doctags, page.markdown);
+await ocr.destroy();
+```
 
 ### Multi-frame + progress + cancel
 
@@ -124,11 +157,12 @@ const textOut = await createEmptyOfflineTextBuffer();
 const ac = new AbortController();
 
 try {
-  await ocr.recognize(pages, textOut, {
+  const page = await ocr.recognize(pages, textOut, {
     frames: [0, 2], // subset of frame indices; default = all
     onProgress: ({ done, total, phase }) => console.log(phase, done, '/', total),
     signal: ac.signal, // abort between frames → OCR_CANCELLED
   });
+  console.log(page.family, page.spanCount);
 } finally {
   await releaseOfflineImageBuffer(pages);
   await releasePipelineTextBuffer(textOut);
@@ -143,7 +177,7 @@ try {
 | --- | --- | --- |
 | **Image in** | [`OfflineImageBuffer`](imagebuffer-offline.md) | Populated frames (`img_off_*`); decode once, reuse across recognizes |
 | **Text out** | [`OfflineTextBuffer`](textbuffer-offline.md) | Empty before the call; filled once with plain text + spatial spans |
-| **Engine** | `OcrEngine` via `createOCR` | `recognize`, `destroy`; readonly `instanceId` |
+| **Engine** | `OcrEngine` via `createOCR` | `recognize` resolves `OcrRecognizeResult` (extras are not on the text buffer); `destroy`; readonly `instanceId` |
 
 ---
 
@@ -153,9 +187,12 @@ try {
 | --- | --- | --- |
 | `ppocr` | Det ONNX + Rec ONNX + recognition dictionary (`paths.rec_dict`) | Cls / orientation ONNX (`paths.cls`) |
 | `doctr` | Det ONNX + Rec ONNX + `ocr_manifest.json` (`paths.manifest`) | — |
-| `auto` | Same — resolves family from pack layout (manifest → `doctr`; rec_dict → `ppocr`) | — |
+| `doc_vlm` | Eight paths: `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — |
+| `auto` | Manifest `"family"` wins when `ocr_manifest.json` has that string (detect does not fall through). Otherwise: eight-file layout → `doc_vlm`, then det+rec+dictionary → `ppocr`, then det+rec+manifest → `doctr` | — |
 
-Canonical names — ppocr: `det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`. Doctr: `det.onnx`, `rec.onnx`, `ocr_manifest.json`.
+A doctr manifest stays doctr even if a `vision_encoder.onnx` is dropped beside it.
+
+Canonical names — ppocr: `det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`. Doctr: `det.onnx`, `rec.onnx`, `ocr_manifest.json`. `doc_vlm`: `vision_encoder.onnx`, `vision_encoder.onnx_data`, `embed_tokens.onnx`, `embed_tokens.onnx_data`, `decoder_model_merged.onnx`, `decoder_model_merged.onnx_data`, `tokenizer.json`, `ocr_manifest.json`. The detect key for the decoder file is `decoder`, not the basename. `vision_encoder.onnx.data` (dot before `data`) does not satisfy `vision_encoder_data`. `tokenizer_config.json`, `vocab.json`, `merges.txt`, and `config.json` ship in the pack and are not required paths.
 
 ### Official packs (verified)
 
@@ -176,7 +213,15 @@ Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/r
 | `doctr-mobile.tar.bz2` | tiny/small | `en`, `fr` | OnnxTR CRNN-based; fast, Latin-only |
 | `doctr-default.tar.bz2` | medium | 15 Latin-European (`en`, `fr`, `pt`, `es`, `de`, `it`, `cs`, `pl`, `da`, `no`, `sv`, `fi`, `nl`, `hu`, `ro`) | OnnxTR PARSeq or CRNN; broader Latin coverage |
 
-Validate category: **`ocr`**. Language pickers: [`getPpocrLanguages()`](model-languages.md) (ppocr) · [`getDoctrLanguages()`](model-languages.md) (doctr). Per-pack hints: `iso6391HintsForOcrModelType('doctr', 'doctr-mobile')`. Downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
+#### doc_vlm family
+
+| Archive | Tier | Language hints | Notes |
+| --- | --- | --- | --- |
+| `docvlm-granite-258m.tar.bz2` | — | `en`, plus experimental `ja`, `ar`, `zh` | Unpacked weights about **1.18 GiB**. Archive about **420 MiB**. A loaded session is on the order of **4 GiB RSS** (weights mmap'd, plus arenas). Not the phone default (`ppocrv6-tiny` stays that). Quantized siblings are not in this release. |
+
+`decoder_model_merged.onnx` (opset 21, domain `com.microsoft`) uses the contrib op `GroupQueryAttention`. The host ONNX Runtime zip this repo uses (1.28.x under `third_party/onnxruntime_prebuilt`) includes it. A mobile ONNX Runtime built without Microsoft contrib ops fails when the decoder `Ort::Session` is created, inside `createOCR`, not on the first generated token. That load failure surfaces as `OCR_INTERNAL_ERROR`. There is no `supportsDocVlm` probe and no separate error code. `provider: 'coreml' | 'nnapi' | 'qnn'` does not move this family onto the GPU: `DocVlmBackend` logs a warning and stays on CPU.
+
+Validate category: **`ocr`**. Language pickers: [`getPpocrLanguages()`](model-languages.md) (ppocr) · [`getDoctrLanguages()`](model-languages.md) (doctr). There is no `getDocVlmLanguages()` picker. `doc_vlm` hints are `DOC_VLM_ISO6391_HINTS` and `iso6391HintsForOcrModelType('doc_vlm')`. Per-pack: `iso6391HintsForOcrModelType('doctr', 'doctr-mobile')`; `iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m')` returns the same four codes today. Downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
 #### Download + detect + init (ppocr)
 
@@ -202,6 +247,19 @@ const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source, { modelType: 'auto' });
 if (!isOcrDoctrDetectSuccess(det)) throw new Error(det.error ?? 'bad DocTR pack');
 const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
+```
+
+#### Download + detect + init (`doc_vlm`)
+
+```ts
+import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
+import { createOCR, detectOcrModel, isOcrDocVlmDetectSuccess } from 'react-native-sherpa-onnx/ocr';
+
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
+const source = { kind: 'fs' as const, path: model.modelDir };
+const det = await detectOcrModel(source, { modelType: 'auto' });
+if (!isOcrDocVlmDetectSuccess(det)) throw new Error(det.error ?? 'bad doc_vlm pack');
+const ocr = await createOCR({ modelSource: source, modelType: 'doc_vlm' });
 ```
 
 ---
@@ -230,12 +288,18 @@ const pre = await detectOcrModel(
   { kind: 'fs', path: '/data/models/doctr-mobile' },
   { modelType: 'auto' }
 );
+// doc_vlm
+const pre = await detectOcrModel(
+  { kind: 'fs', path: '/data/models/docvlm-granite-258m' },
+  { modelType: 'auto' }
+);
 ```
 
 File-based detection without loading the engine. On success:
 
 - `isOcrPpocrDetectSuccess(pre)` narrows `paths` to `{ det, rec, rec_dict }` (`cls` optional).
 - `isOcrDoctrDetectSuccess(pre)` narrows `paths` to `{ det, rec, manifest }`.
+- `isOcrDocVlmDetectSuccess(pre)` narrows `paths` to the eight keys (`vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest`). `cls` and `rec_dict` are not part of a `doc_vlm` success. `det` and `rec` stay empty.
 
 May include `languages`, `sizeTier`, `detectionSources`. See [model-detect.md](model-detect.md).
 
@@ -259,12 +323,29 @@ const ocr = await createOCR({
   modelType: 'auto',
   doctr: { detBoxThresh: 0.15, detBoxScoreThresh: 0.15, detUnclipRatio: 1.5 },
 });
+
+// doc_vlm
+const ocr = await createOCR({
+  modelSource: { kind: 'fs', path: '/abs/path/to/docvlm-granite-258m' },
+  modelType: 'doc_vlm',
+  docVlm: { maxNewTokens: 512 },
+});
 ```
 
-Creates an `OcrEngine`. Pass `modelSource` plus optional `modelType` / `provider` / `numThreads`. Family-specific options:
+Creates an `OcrEngine`. Pass `modelSource` plus optional `modelType` / `provider` / `numThreads`. `OcrInitializeOptions` is a discriminated union:
+
+- `modelType: 'ppocr'` allows `ppocr?` only (`doctr?` and `docVlm?` are `never`).
+- `modelType: 'doctr'` allows `doctr?` only.
+- `modelType: 'doc_vlm'` allows `docVlm?` only (`ppocr?` and `doctr?` are `never`).
+- `modelType` omitted or `'auto'` may pass all three bags; the backend that loads reads its own.
+
+Family bags:
 
 - **ppocr**: `ppocr: { maxSideLen?, useOrientationCls? }`
 - **doctr**: `doctr: { detBoxThresh?, detBoxScoreThresh?, detUnclipRatio? }`
+- **doc_vlm**: `docVlm: { maxNewTokens?: number }` — init-time only, not a field of `OcrRecognizeOptions`. Omit or `0` → backend default 8192. A non-integer or a negative value is `OCR_INVALID_ARGUMENT` at `createOCR`, before native load.
+
+Aliases `docvlm`, `doc-vlm`, `granite-docling`, and `docling` are accepted by `createOCR` and rewritten to `'doc_vlm'`. They are not members of `OcrModelType`. `isOcrModelType('docling')` is false.
 
 ### `engine.recognize(imageBuffer, textOut, options?)`
 
@@ -273,11 +354,11 @@ recognize(
   imageBuffer: OfflineImageBufferIdSource,
   textOut: OfflineTextBufferIdSource,
   options?: OcrRecognizeOptions
-): Promise<void>;
+): Promise<OcrRecognizeResult>;
 ```
 
 ```ts
-await ocr.recognize(image, textOut, {
+const page = await ocr.recognize(image, textOut, {
   granularity: 'line',
   frames: [0],
   onProgress: (p) => console.log(p.done, p.total),
@@ -285,7 +366,22 @@ await ocr.recognize(image, textOut, {
 });
 ```
 
-Reads populated `imageBuffer`, writes text (+ spatial spans, `origin: 'ocr'`) into empty `textOut`. Options: `granularity` (`'line'` recommended — backends emit line spans; `word`/`block` may yield empty span lists but text is still filled), `frames`, `onProgress`, `signal` (cancel between frames → `OCR_CANCELLED`).
+Reads populated `imageBuffer`, writes text (+ spatial spans, `origin: 'ocr'`) into empty `textOut`. DocTags and markdown are **not** written into that buffer. They come back on the promise:
+
+| Field | Meaning |
+| --- | --- |
+| `family` | Concrete `OcrBackend::Family()`: `'ppocr' \| 'doctr' \| 'doc_vlm'`. `createOCR({ modelType: 'auto' })` still echoes `'auto'` from `initializeOcr`. This field is the family that actually ran. |
+| `spanCount` | Spans written to `textOut` after the granularity filter. |
+| `doctags` | Raw DocTags after ASCII lstrip. `""` for ppocr and doctr. For `doc_vlm`, the decoded generation with specials kept (`<doctag>` … `</doctag>`). |
+| `markdown` | Lossy markdown from the same DocTags walk. `""` for ppocr and doctr. For `doc_vlm`, empty only when the plain text is empty. |
+
+`""` is a valid extra. Failures still reject (`OCR_CANCELLED`, `OCR_RECOGNIZE_FAILED`, …). A native payload missing `family`, `doctags`, `markdown`, or a finite `spanCount` rejects `OCR_INTERNAL_ERROR`.
+
+Default `granularity` is `'line'`. Backends emit `line` spans. `doc_vlm` also emits `block` for `title` / `section_header_level_*`. The default filter drops those title quads from `textOut`; their text is still inside the buffer text, `doctags`, and `markdown`. `'block'` keeps titles and drops lines. `'word'` can yield an empty span list while text is still filled.
+
+Multi-frame: non-empty `doctags` / `markdown` chunks are joined with one `\n`. That newline does not shift span UTF-16 offsets. The newline between non-empty plain-text chunks does.
+
+Options: `granularity`, `frames`, `onProgress`, `signal` (cancel between frames → `OCR_CANCELLED`). `maxNewTokens` is not a recognize option.
 
 ### `engine.destroy()`
 
@@ -338,6 +434,8 @@ flowchart LR
   C --> D[UI overlay or TTS]
 ```
 
+`doc_vlm` also returns `doctags` and `markdown` on the promise.
+
 More end-to-end patterns: [feature-pipelines.md#ocr-offline-patterns](feature-pipelines.md#ocr-offline-patterns).
 
 ---
@@ -349,7 +447,7 @@ More end-to-end patterns: [feature-pipelines.md#ocr-offline-patterns](feature-pi
 | `onProgress` | `{ done, total, phase }` | Per frame during `recognize` | Native event `SherpaOnnxOcrProgress` filtered by `operationId` |
 
 ```ts
-await ocr.recognize(image, textOut, {
+const page = await ocr.recognize(image, textOut, {
   onProgress: (p) => console.log(p.phase, p.done, p.total),
 });
 ```
@@ -362,20 +460,23 @@ await ocr.recognize(image, textOut, {
 
 | Type | Description |
 | --- | --- |
-| `OcrModelType` | `'auto' \| 'ppocr' \| 'doctr'` |
-| `OcrConcreteModelType` | `'ppocr' \| 'doctr'` |
-| `OcrFamily` | `'ppocr' \| 'doctr'` |
+| `OcrModelType` | `'auto' \| 'ppocr' \| 'doctr' \| 'doc_vlm'` |
+| `OcrConcreteModelType` | `'ppocr' \| 'doctr' \| 'doc_vlm'` |
+| `OcrFamily` | `'ppocr' \| 'doctr' \| 'doc_vlm'` |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` (alias of `TextSpatialSpanLevel`) |
-| `OcrInitializeOptions` | `modelSource`, `modelType?`, `provider?`, `numThreads?`, `ppocr?`, `doctr?` |
+| `OcrInitializeOptions` | Discriminated union: `modelSource`, `modelType?`, `provider?`, `numThreads?`, and `ppocr?` / `doctr?` / `docVlm?` as allowed by `modelType` |
 | `OcrPpocrOptions` | `{ maxSideLen?, useOrientationCls? }` |
 | `OcrDoctrOptions` | `{ detBoxThresh?, detBoxScoreThresh?, detUnclipRatio? }` |
+| `OcrDocVlmOptions` | `{ maxNewTokens? }` — init-time generation cap |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
+| `OcrRecognizeResult` | `{ family, spanCount, doctags, markdown }` resolved by `recognize` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrProgressNativeEvent` | Progress + `operationId` from native |
 | `OcrDetectModelResult` | Return of `detectOcrModel()` — shared `ModelDetectResultBase` |
 | `OcrPpocrSuccessPaths` | `{ det, rec, rec_dict, cls? }` after `isOcrPpocrDetectSuccess` |
 | `OcrDoctrSuccessPaths` | `{ det, rec, manifest }` after `isOcrDoctrDetectSuccess` |
-| `OcrEngine` | `recognize`, `destroy`; readonly `instanceId` |
+| `OcrDocVlmSuccessPaths` | Eight keys: `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` |
+| `OcrEngine` | `recognize` → `Promise<OcrRecognizeResult>`, `destroy`; readonly `instanceId` |
 | `OcrErrorCode` / `OcrErrorCodeValue` | Error code constants |
 
 ### Detect narrowing guards
@@ -384,6 +485,7 @@ await ocr.recognize(image, textOut, {
 | --- | --- |
 | `isOcrPpocrDetectSuccess(result)` | `{ success: true, modelType: 'ppocr', paths: OcrPpocrSuccessPaths }` |
 | `isOcrDoctrDetectSuccess(result)` | `{ success: true, modelType: 'doctr', paths: OcrDoctrSuccessPaths }` |
+| `isOcrDocVlmDetectSuccess(result)` | `{ success: true, modelType: 'doc_vlm', paths: OcrDocVlmSuccessPaths }` |
 
 ### Related buffer types
 
@@ -405,7 +507,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_MODEL_NOT_FOUND` | Pack / ONNX paths missing at init. |
 | `OCR_NOT_INITIALIZED` | Native engine not ready. |
 | `OCR_INSTANCE_NOT_FOUND` | `instanceId` missing or already **destroyed**. |
-| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index). |
+| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index, or a non-integer / negative `docVlm.maxNewTokens`). |
 | `OCR_IMAGE_BUFFER_NOT_FOUND` | Image buffer id missing from registry. |
 | `OCR_IMAGE_BUFFER_EMPTY` | Image buffer has no frames. |
 | `OCR_FRAME_READ_FAILED` | Could not read a requested frame. |
@@ -413,7 +515,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
 | `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
-| `OCR_INTERNAL_ERROR` | Unexpected native failure. |
+| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family`, `doctags`, `markdown`, or a finite `spanCount`, and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
@@ -469,6 +571,35 @@ await ocr.destroy();
 </details>
 
 <details>
+<summary>Download pack, detect, then read DocTags (doc_vlm)</summary>
+
+```ts
+import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
+import {
+  createOCR,
+  detectOcrModel,
+  isOcrDocVlmDetectSuccess,
+} from 'react-native-sherpa-onnx/ocr';
+
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
+const source = { kind: 'fs' as const, path: model.modelDir };
+const det = await detectOcrModel(source);
+if (!isOcrDocVlmDetectSuccess(det)) {
+  throw new Error(det.error ?? 'bad doc_vlm pack');
+}
+const ocr = await createOCR({
+  modelSource: source,
+  modelType: 'doc_vlm',
+  docVlm: { maxNewTokens: 512 },
+});
+const page = await ocr.recognize(image, textOut, { granularity: 'line' });
+console.log(page.doctags, page.markdown);
+await ocr.destroy();
+```
+
+</details>
+
+<details>
 <summary>Multi-page buffer, OCR selected frames only</summary>
 
 ```ts
@@ -477,7 +608,11 @@ const pages = await createOfflineImageBufferFromFiles([
   { kind: 'fs', path: '/tmp/p2.png' },
 ]);
 const textOut = await createEmptyOfflineTextBuffer();
-await ocr.recognize(pages, textOut, { frames: [1], granularity: 'line' });
+const page = await ocr.recognize(pages, textOut, {
+  frames: [1],
+  granularity: 'line',
+});
+console.log(page.spanCount);
 ```
 
 </details>
@@ -510,7 +645,7 @@ if (info.hasSpatialSpans) {
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)
 - [Model setup](model-setup.md)
 - [Model detection](model-detect.md)
-- [Model languages](model-languages.md) (`getPpocrLanguages`, `getDoctrLanguages`, `iso6391HintsForOcrModelType`)
+- [Model languages](model-languages.md) (`getPpocrLanguages`, `getDoctrLanguages`, `DOC_VLM_ISO6391_HINTS`, `iso6391HintsForOcrModelType('doc_vlm')`)
 - [Download manager](download-manager.md) (`ModelCategory.Ocr`)
 - [Execution providers](execution-providers.md)
 - [Native diagnostics](native-diagnostics.md)

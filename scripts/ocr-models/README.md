@@ -137,7 +137,8 @@ Useful flags: `--csv`, `--repo`, `--tag`, `--build-dir` / `--dist-dir`, `--dry-r
 Existing assets are never overwritten by this script. If an archive name already
 exists on the release, that id is skipped.
 
-## Host GTests (PpocrBackend / DoctrBackend)
+## Host GTests (PpocrBackend / DoctrBackend / DocVlmBackend)
 
-Unpack packs under `build/ocr-models/<id>/` (or set env vars) for host OCR tests.
-See `test/cpp/ocr/` and CI collect stream `ocr`.
+- `ppocr_host_test` and `doctr_host_test` run in `.github/workflows/test-ocr-host.yml` with their packs downloaded.
+- `doc_vlm_host_test` unit tests (grid math, DocTags, `Family`, empty extras) run in that same job **without** the granite pack. Tokenizer, prompt, and `DocVlmSmoke.EnHello` skip until `DOCVLM_MODEL_DIR` or `build/ocr-models/docvlm-granite-258m` exists.
+- The smoke is not on pull requests. Dispatch the workflow with `run_doc_vlm_golden`, or unpack locally with the `curl` / `tar` already printed by the skip message.
