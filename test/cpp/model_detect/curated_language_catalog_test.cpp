@@ -202,3 +202,51 @@ TEST(CuratedLanguageCatalog, OcrDoctrPackRowsForKnownIds) {
     ASSERT_FALSE(dflt.empty());
     EXPECT_EQ(dflt.size(), 15u);
 }
+
+TEST(CuratedLanguageCatalog, OcrDocVlmFamilyRows) {
+    using namespace sherpaonnx::model_language_catalog;
+    const auto& rows = OcrRowsForModelType("doc_vlm");
+    ASSERT_EQ(rows.size(), 4u);
+    EXPECT_EQ(rows[0].iso6391Hint, "en");
+    EXPECT_EQ(rows[1].iso6391Hint, "ja");
+    EXPECT_EQ(rows[2].iso6391Hint, "ar");
+    EXPECT_EQ(rows[3].iso6391Hint, "zh");
+}
+
+TEST(CuratedLanguageCatalog, OcrDocVlmPackRows) {
+    using namespace sherpaonnx::model_language_catalog;
+    const auto& rows = OcrPackRowsForModelKey("docvlm-granite-258m");
+    ASSERT_EQ(rows.size(), 4u);
+    EXPECT_EQ(rows[0].iso6391Hint, "en");
+    EXPECT_EQ(rows[1].iso6391Hint, "ja");
+    EXPECT_EQ(rows[2].iso6391Hint, "ar");
+    EXPECT_EQ(rows[3].iso6391Hint, "zh");
+}
+
+TEST(CuratedLanguageCatalog, OcrDocVlmNameOnlyPackLanguages) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "docvlm-granite-258m", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    ASSERT_EQ(result.derivedLanguages.size(), 4u);
+    EXPECT_EQ(result.derivedLanguages[0].iso6391Hint, "en");
+    EXPECT_EQ(result.derivedLanguages[1].iso6391Hint, "ja");
+    EXPECT_EQ(result.derivedLanguages[2].iso6391Hint, "ar");
+    EXPECT_EQ(result.derivedLanguages[3].iso6391Hint, "zh");
+    ASSERT_FALSE(result.detectionSources.empty());
+    EXPECT_EQ(result.detectionSources.back(), DetectionSource::kCuratedCatalog);
+}
+
+TEST(CuratedLanguageCatalog, OcrDocVlmUnknownPackUsesFamilyRows) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "future-doc-vlm-pack", "doc_vlm");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    ASSERT_EQ(result.derivedLanguages.size(), 4u);
+    EXPECT_EQ(result.derivedLanguages[0].iso6391Hint, "en");
+    EXPECT_EQ(result.derivedLanguages[1].iso6391Hint, "ja");
+    EXPECT_EQ(result.derivedLanguages[2].iso6391Hint, "ar");
+    EXPECT_EQ(result.derivedLanguages[3].iso6391Hint, "zh");
+    ASSERT_FALSE(sherpaonnx::model_language_catalog::OcrRowsForModelType("doctr").empty());
+    ASSERT_FALSE(sherpaonnx::model_language_catalog::OcrRowsForModelType("ppocr").empty());
+}

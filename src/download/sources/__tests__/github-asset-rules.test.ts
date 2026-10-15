@@ -203,4 +203,17 @@ describe('github-asset-rules — OCR', () => {
       )
     ).toBe(true);
   });
+
+  it('accepts doc_vlm tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'docvlm-granite-258m.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(ModelCategory.Ocr, 'det.onnx', 'onnx')
+    ).toBe(false);
+  });
 });

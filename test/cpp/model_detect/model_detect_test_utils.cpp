@@ -325,6 +325,10 @@ OcrModelKind OcrKindFromString(const std::string& modelType) {
     if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
         return OcrModelKind::kPpocr;
     }
+    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
+        t == "granite-docling" || t == "docling") {
+        return OcrModelKind::kDocVlm;
+    }
     if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
         return OcrModelKind::kDoctr;
     }
@@ -337,6 +341,8 @@ std::string OcrKindToString(OcrModelKind kind) {
             return "ppocr";
         case OcrModelKind::kDoctr:
             return "doctr";
+        case OcrModelKind::kDocVlm:
+            return "doc_vlm";
         default:
             return "unknown";
     }

@@ -149,6 +149,35 @@ describe('buildCatalogHintsMap — OCR', () => {
       { assetName: 'doctr-mobile' },
     ]);
   });
+
+  it('merges name-only unified detect language hints for doc_vlm packs', async () => {
+    mockDetectModelsBatch.mockResolvedValue([
+      {
+        matched: true,
+        category: ModelCategory.Ocr,
+        modelType: 'doc_vlm',
+        languages: ['en', 'ja', 'ar', 'zh'],
+        quantization: 'unknown',
+        sizeTier: 'unknown',
+        isStreaming: false,
+      },
+    ]);
+
+    const hints = await buildCatalogHintsMap(ModelCategory.Ocr, [
+      'docvlm-granite-258m',
+    ]);
+
+    expect(hints.get('docvlm-granite-258m')).toEqual({
+      modelType: 'doc_vlm',
+      languages: ['en', 'ja', 'ar', 'zh'],
+      quantization: 'unknown',
+      sizeTier: 'unknown',
+      isStreaming: false,
+    });
+    expect(mockDetectModelsBatch).toHaveBeenCalledWith([
+      { assetName: 'docvlm-granite-258m' },
+    ]);
+  });
 });
 
 describe('categoryUsesCatalogDetect', () => {
