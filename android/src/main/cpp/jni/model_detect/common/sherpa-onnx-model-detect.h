@@ -111,7 +111,7 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
-/** Offline OCR families. v1: ppocr only; doctr reserved for future backends. */
+/** Offline OCR families: ppocr (PP-OCR Det/Rec/Cls) and doctr (OnnxTR Det/Rec). */
 enum class OcrModelKind {
     kUnknown,
     kPpocr,
