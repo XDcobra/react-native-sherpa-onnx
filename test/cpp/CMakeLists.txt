@@ -375,3 +375,70 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
 else()
   message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()
+
+# --- Offline ImageBuffer host tests (decode / registry / mmap) ---
+set(IMAGE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
+set(IMAGEBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imagebuffer")
+if(GTest_FOUND)
+  set(IMAGEBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(IMAGEBUFFER_GTEST_LIBS gtest gtest_main)
+endif()
+
+add_executable(imagebuffer_host_test
+  "${IMAGEBUFFER_TEST_DIR}/image_test_utils.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_decode_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_registry_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_mmap_test.cpp"
+  "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
+  "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+  "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+)
+target_include_directories(imagebuffer_host_test PRIVATE
+  "${IMAGE_CPP_ROOT}"
+  "${IMAGE_CPP_ROOT}/decode"
+  "${IMAGEBUFFER_TEST_DIR}"
+)
+target_link_libraries(imagebuffer_host_test PRIVATE ${IMAGEBUFFER_GTEST_LIBS})
+
+# Optional libwebp for WebP decode tests
+find_package(PkgConfig QUIET)
+set(_IMAGEBUFFER_HAS_LIBWEBP OFF)
+if(PkgConfig_FOUND)
+  pkg_check_modules(LIBWEBP IMPORTED_TARGET libwebp)
+  if(TARGET PkgConfig::LIBWEBP)
+    target_link_libraries(imagebuffer_host_test PRIVATE PkgConfig::LIBWEBP)
+    target_compile_definitions(imagebuffer_host_test PRIVATE HAVE_LIBWEBP=1)
+    set(_IMAGEBUFFER_HAS_LIBWEBP ON)
+  endif()
+endif()
+if(NOT _IMAGEBUFFER_HAS_LIBWEBP)
+  # Homebrew / manual fallback
+  find_path(LIBWEBP_INCLUDE_DIR webp/decode.h
+    HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  find_library(LIBWEBP_LIBRARY webp
+    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  if(LIBWEBP_INCLUDE_DIR AND LIBWEBP_LIBRARY)
+    target_include_directories(imagebuffer_host_test PRIVATE "${LIBWEBP_INCLUDE_DIR}")
+    target_link_libraries(imagebuffer_host_test PRIVATE "${LIBWEBP_LIBRARY}")
+    # libwebp often needs sharpyuv on modern builds
+    find_library(LIBSHARPYUV_LIBRARY sharpyuv
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+    if(LIBSHARPYUV_LIBRARY)
+      target_link_libraries(imagebuffer_host_test PRIVATE "${LIBSHARPYUV_LIBRARY}")
+    endif()
+    target_compile_definitions(imagebuffer_host_test PRIVATE HAVE_LIBWEBP=1)
+    set(_IMAGEBUFFER_HAS_LIBWEBP ON)
+  endif()
+endif()
+if(_IMAGEBUFFER_HAS_LIBWEBP)
+  message(STATUS "imagebuffer_host_test: libwebp enabled")
+else()
+  message(STATUS "imagebuffer_host_test: libwebp not found (WebP cases will GTEST_SKIP)")
+endif()
+
+add_test(NAME imagebuffer_host_test COMMAND $<TARGET_FILE:imagebuffer_host_test>)
+set_tests_properties(imagebuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+

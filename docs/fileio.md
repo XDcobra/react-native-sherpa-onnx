@@ -219,12 +219,14 @@ Error codes thrown by file I/O operations:
 `FileSource` and `FileDestination` are also accepted by:
 
 - [`createOfflineAudioBufferFromFile(source)`](audiobuffer-offline.md) — decode audio from any source
+- [`createOfflineImageBufferFromFiles(sources)`](imagebuffer-offline.md) — decode one or more images from `FileSource` / `FileSource[]`
 - [`saveAudioAsFile(input, output, format, options?)`](audio-conversion.md) — save audio to any destination
 
 ## Related
 
 - [Audio conversion](audio-conversion.md) (`react-native-sherpa-onnx/audio`)
 - [Offline audio buffers](audiobuffer-offline.md) (`react-native-sherpa-onnx/audiobuffer`)
+- [Offline image buffers](imagebuffer-offline.md) (`react-native-sherpa-onnx/imagebuffer`)
 
 ## Use case examples
 
