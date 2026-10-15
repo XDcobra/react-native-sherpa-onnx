@@ -2,7 +2,7 @@
 
 ## Introduction
 
-**Immutable offline text payloads** with optional metadata (tokens, timestamps, durations, lang, emotion, event). Used for **batch** STT outputs and consumers like alignment or offline TTS.
+**Immutable offline text payloads** with optional metadata (tokens, timestamps, durations, spatial spans, lang, emotion, event). Used for **batch** STT outputs, OCR results, and consumers like alignment or offline TTS.
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
 
@@ -187,6 +187,53 @@ function getOfflineTextBufferDurationsSlice(
 const durations = await getOfflineTextBufferDurationsSlice(out, 0, 128);
 ```
 
+#### `getOfflineTextBufferSpatialSpansSlice(buffer, start, maxCount)`
+
+Optional spatial provenance for OCR / PDF text-layer / EPUB markup. Each span links a UTF-16 range of the hypothesis to a pixel quad on a source image frame.
+
+STT populate leaves spans empty (`spatialSpanCount === 0`, `hasSpatialSpans === false`). OCR (and later PDF/EPUB paths) fill them at populate time.
+
+```ts
+function getOfflineTextBufferSpatialSpansSlice(
+  buffer: OfflineTextBufferIdSource,
+  start: number,
+  maxCount: number
+): Promise<TextSpatialSpan[]>;
+```
+
+```ts
+type TextSpatialSpanLevel = 'line' | 'word' | 'block';
+type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
+
+interface TextSpatialSpan {
+  utf16Start: number;
+  utf16End: number;
+  level: TextSpatialSpanLevel;
+  sourceImageBufferId: string;
+  frameIndex: number;
+  /** Pixel coords: x0,y0,x1,y1,x2,y2,x3,y3 */
+  quad: [number, number, number, number, number, number, number, number];
+  confidence?: number;
+  origin: TextSpatialSpanOrigin;
+  pageNumber?: number;
+  ptsMs?: number;
+}
+```
+
+```ts
+const info = (await getPipelineTextBufferInfo(out)) as OfflineTextBufferInfo;
+if (info.hasSpatialSpans) {
+  const spans = await getOfflineTextBufferSpatialSpansSlice(
+    out,
+    0,
+    info.spatialSpanCount
+  );
+  console.log(spans[0]?.quad);
+}
+```
+
+**Known limit:** Text-to-text transforms (e.g. punctuation) currently drop spatial spans (same class of issue as timestamp loss). Offset-mapping will come later.
+
 #### `getOfflineTextBufferLang(buffer)` / `getOfflineTextBufferEmotion(buffer)` / `getOfflineTextBufferEvent(buffer)`
 
 ```ts
@@ -233,6 +280,7 @@ import type {
   OfflineTextBufferInfo, // metadata for immutable offline text payload
   OfflineTextBufferIdSource, // ref/handle/id accepted by offline text APIs
   OfflineTextBufferFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  TextSpatialSpan, // OCR / text-layer spatial provenance
   PipelineTextBufferInfo, // offline/live info union for shared info APIs
   PipelineTextBufferIdSource, // ref/info/handle/id accepted by shared APIs
   PipelineTextErrorCodeValue, // string union of textbuffer error codes
