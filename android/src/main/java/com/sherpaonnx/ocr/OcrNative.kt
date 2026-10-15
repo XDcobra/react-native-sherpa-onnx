@@ -33,7 +33,8 @@ internal object OcrNative {
 
   @JvmStatic external fun nativeCancelRecognize(operationId: String)
 
-  @JvmStatic external fun nativeDetect(modelDir: String): HashMap<String, Any>?
+  @JvmStatic
+  external fun nativeDetect(modelDir: String, modelType: String?): HashMap<String, Any>?
 
   /** Called from JNI during multi-frame recognize. */
   @JvmStatic

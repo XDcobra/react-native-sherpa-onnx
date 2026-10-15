@@ -266,7 +266,16 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         {"accompaniment", true, std::nullopt},
     });
     ExpectRequirementsMatch("separation", "uvr", {{"model", true, std::nullopt}});
-    ExpectRequirementsMatch("alignment", "wav2vec2", {{"model", true, std::nullopt}});
+    ExpectRequirementsMatch("alignment", "wav2vec2", {
+        {"model", true, std::nullopt},
+        {"vocab", false, std::nullopt},
+    });
+    ExpectRequirementsMatch("ocr", "ppocr", {
+        {"det", true, std::nullopt},
+        {"rec", true, std::nullopt},
+        {"rec_dict", true, std::nullopt},
+        {"cls", false, std::nullopt},
+    });
     ExpectRequirementsMatch("punctuation", "ct_transformer", {{"ct_transformer", true, std::nullopt}});
     ExpectRequirementsMatch("punctuation", "cnn_bilstm", {
         {"cnn_bilstm", true, std::nullopt},

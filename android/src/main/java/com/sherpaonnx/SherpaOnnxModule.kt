@@ -3570,8 +3570,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun detectOcrModel(modelDir: String, promise: Promise) {
-    ocrHelper.detectOcrModel(modelDir, promise)
+  override fun detectOcrModel(modelDir: String, modelType: String?, promise: Promise) {
+    ocrHelper.detectOcrModel(modelDir, modelType, promise)
   }
 
   override fun initializeOcr(instanceId: String, options: ReadableMap, promise: Promise) {

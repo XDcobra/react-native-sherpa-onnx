@@ -184,6 +184,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/alignment\"",
+    "\"#{pod_root}/android/src/main/cpp/jni/model_detect/ocr\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/kws\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/slid\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/audio_tagging\"",

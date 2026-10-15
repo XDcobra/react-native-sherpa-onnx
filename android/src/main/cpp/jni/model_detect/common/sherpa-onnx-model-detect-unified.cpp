@@ -77,6 +77,13 @@ const char* VadModelKindToString(VadModelKind k) {
     }
 }
 
+const char* OcrModelKindToString(OcrModelKind k) {
+    switch (k) {
+        case OcrModelKind::kPpocr: return "ppocr";
+        default: return "unknown";
+    }
+}
+
 const char* PunctuationModelKindToString(PunctuationModelKind k) {
     switch (k) {
         case PunctuationModelKind::kCtTransformer: return "ct_transformer";
@@ -436,6 +443,24 @@ UnifiedModelDetectResult DetectModelInternal(
                 AlignmentModelPathsToStringMap(alignment.paths),
                 alignment.error);
         }
+    }
+
+    OcrDetectResult ocr =
+        DetectOcrModel(model_dir, asset_name, modelType, quantization);
+    const std::string ocrType = OcrModelKindToString(ocr.selectedKind);
+    if (IsCatalogDetectHit(ocr.ok, ocrType, ocr.detectionSources)) {
+        return MakeHit(
+            "ocr",
+            ocrType,
+            ocr.derivedLanguages,
+            ocr.quantization,
+            ocr.sizeTier,
+            false,
+            false,
+            ocr.detectedModels,
+            ocr.detectionSources,
+            OcrModelPathsToStringMap(ocr.paths),
+            ocr.error);
     }
 
     LanguageIdDetectResult languageId =

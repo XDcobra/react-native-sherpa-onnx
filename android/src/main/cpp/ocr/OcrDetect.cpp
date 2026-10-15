@@ -1,42 +1,81 @@
 #include "OcrDetect.h"
 
-#include <filesystem>
+#include "sherpa-onnx-model-detect.h"
 
-namespace fs = std::filesystem;
+#include <optional>
 
 namespace sherpa_onnx {
 namespace ocr {
 
-OcrDetectResult DetectOcrModel(const std::string& model_dir) {
+namespace {
+
+const char* KindToFamily(sherpaonnx::OcrModelKind kind) {
+  switch (kind) {
+    case sherpaonnx::OcrModelKind::kPpocr:
+      return "ppocr";
+    default:
+      return "";
+  }
+}
+
+}  // namespace
+
+OcrDetectResult DetectOcrModel(const std::string& model_dir,
+                               const std::string& model_type) {
   OcrDetectResult out;
   if (model_dir.empty()) {
     out.errorCode = "OCR_INVALID_ARGUMENT";
     out.errorMessage = "modelDir is empty";
     return out;
   }
-  if (!fs::is_directory(model_dir)) {
-    out.errorCode = "OCR_MODEL_NOT_FOUND";
-    out.errorMessage = "modelDir is not a directory: " + model_dir;
-    return out;
+
+  const std::string requested =
+      model_type.empty() ? std::string("auto") : model_type;
+
+  auto native = sherpaonnx::DetectOcrModel(
+      std::optional<std::string>(model_dir), std::nullopt, requested, "");
+
+  for (const auto src : native.detectionSources) {
+    out.detectionSources.push_back(sherpaonnx::DetectionSourceToLiteral(src));
   }
 
-  const fs::path root(model_dir);
-  out.hasDet = fs::exists(root / "det.onnx");
-  out.hasRec = fs::exists(root / "rec.onnx");
-  out.hasCls = fs::exists(root / "cls.onnx");
-  out.hasRecYml = fs::exists(root / "rec_inference.yml");
+  out.detPath = native.paths.det;
+  out.recPath = native.paths.rec;
+  out.clsPath = native.paths.cls;
+  out.recDictPath = native.paths.rec_dict;
+  out.hasDet = !out.detPath.empty();
+  out.hasRec = !out.recPath.empty();
+  out.hasCls = !out.clsPath.empty();
+  out.hasRecYml = !out.recDictPath.empty();
+  out.quantization = native.quantization;
+  out.sizeTier = native.sizeTier;
 
-  if (out.hasDet && out.hasRec && out.hasRecYml) {
+  for (const auto& m : native.detectedModels) {
+    out.detectedModels.push_back({m.type, m.modelDir});
+  }
+
+  if (native.ok) {
     out.ok = true;
-    out.modelType = "ppocr";
-    out.family = "ppocr";
+    out.modelType = KindToFamily(native.selectedKind);
+    out.family = out.modelType;
+    if (out.detectedModels.empty() && !out.modelType.empty()) {
+      out.detectedModels.push_back({out.modelType, model_dir});
+    }
     return out;
   }
 
   out.errorCode = "OCR_DETECT_FAILED";
   out.errorMessage =
-      "Unrecognized OCR pack layout (need det.onnx, rec.onnx, rec_inference.yml): " +
-      model_dir;
+      native.error.empty()
+          ? ("Unrecognized OCR pack layout in " + model_dir)
+          : native.error;
+  if (native.selectedKind != sherpaonnx::OcrModelKind::kUnknown) {
+    out.modelType = KindToFamily(native.selectedKind);
+    out.family = out.modelType;
+  }
+  if (out.detectedModels.empty() && !out.modelType.empty()) {
+    out.detectedModels.push_back({out.modelType, model_dir});
+  }
   return out;
 }
 

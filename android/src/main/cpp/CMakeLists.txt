@@ -160,6 +160,8 @@ set(SOURCES
     jni/model_detect/alignment/sherpa-onnx-model-detect-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-validate-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
+    jni/model_detect/ocr/sherpa-onnx-model-detect-ocr.cpp
+    jni/model_detect/ocr/sherpa-onnx-validate-ocr.cpp
     jni/model_detect/slid/sherpa-onnx-model-detect-slid.cpp
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
@@ -348,6 +350,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/slid
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/kws
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/audio_tagging

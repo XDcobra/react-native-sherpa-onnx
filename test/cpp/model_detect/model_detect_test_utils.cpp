@@ -320,6 +320,23 @@ std::string PunctuationKindToString(PunctuationModelKind kind) {
     }
 }
 
+OcrModelKind OcrKindFromString(const std::string& modelType) {
+    std::string t = ToLower(Trim(modelType));
+    if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
+        return OcrModelKind::kPpocr;
+    }
+    return OcrModelKind::kUnknown;
+}
+
+std::string OcrKindToString(OcrModelKind kind) {
+    switch (kind) {
+        case OcrModelKind::kPpocr:
+            return "ppocr";
+        default:
+            return "unknown";
+    }
+}
+
 AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "ced") return AudioTaggingModelKind::kCed;
