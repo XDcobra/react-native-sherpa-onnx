@@ -3816,6 +3816,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun getOfflineTextBufferSpatialSpansSlice(bufferId: String, start: Double, maxCount: Double, promise: Promise) {
+    try {
+      val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)
+      if (entry == null) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $bufferId")
+        return
+      }
+      val s = start.toInt()
+      val m = maxCount.toInt()
+      if (s < 0 || m <= 0) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
+        return
+      }
+      if (m > com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT) {
+        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxCount exceeds max")
+        return
+      }
+      promise.resolve(entry.spatialSpansSlice(s, m))
+    } catch (e: Exception) {
+      promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
+    }
+  }
+
   override fun getOfflineTextBufferLang(bufferId: String, promise: Promise) {
     try {
       val entry = com.sherpaonnx.text.pipeline.TextPipelineRegistry.getOffline(bufferId)

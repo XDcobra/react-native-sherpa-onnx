@@ -46,6 +46,23 @@ void txt_set_partial_event_module(SherpaOnnx *module);
 // Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
 struct TxtOfflineEntry;
 
+/** Spatial span linking UTF-16 text range to pixel coords on a source image frame. */
+struct TxtSpatialSpan {
+	int utf16Start = 0;
+	int utf16End = 0;
+	std::string level; // "line" | "word" | "block"
+	std::string sourceImageBufferId;
+	int frameIndex = 0;
+	float quad[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	bool hasConfidence = false;
+	float confidence = 0.f;
+	std::string origin; // "ocr" | "textLayer" | "markup"
+	bool hasPageNumber = false;
+	int pageNumber = 0;
+	bool hasPtsMs = false;
+	double ptsMs = 0;
+};
+
 // Shared live text buffer types used by the text pipeline workers.
 struct TextSegment {
 	std::string text;
@@ -954,6 +971,20 @@ bool txt_populate_offline_if_empty(
 	const std::string &lang,
 	const std::string &emotion,
 	const std::string &event,
+	std::string *error = nullptr
+);
+
+/** Like txt_populate_offline_if_empty, also storing spatial spans (OCR / text-layer). */
+bool txt_populate_offline_if_empty(
+	const std::string &bufferId,
+	const std::string &text,
+	const std::vector<std::string> &tokens,
+	const std::vector<float> &timestamps,
+	const std::vector<float> &durations,
+	const std::string &lang,
+	const std::string &emotion,
+	const std::string &event,
+	const std::vector<TxtSpatialSpan> &spatialSpans,
 	std::string *error = nullptr
 );
 
