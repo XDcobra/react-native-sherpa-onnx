@@ -121,3 +121,18 @@ describe('doctr language hints', () => {
     ]);
   });
 });
+
+describe('doc_vlm pack language hints', () => {
+  it('returns en/ja/ar/zh for docvlm-granite-258m and no family fallback', () => {
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m']).toEqual([
+      'en',
+      'ja',
+      'ar',
+      'zh',
+    ]);
+    expect(
+      iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m')
+    ).toEqual(['en', 'ja', 'ar', 'zh']);
+    expect(iso6391HintsForOcrModelType('doc_vlm')).toBeUndefined();
+  });
+});
