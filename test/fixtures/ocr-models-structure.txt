@@ -1,3 +1,17 @@
+# Asset: doctr-default.tar.bz2
+# updated_at: 2026-10-15T10:59:12Z
+doctr-default/
+doctr-default/det.onnx
+doctr-default/LICENSE
+doctr-default/rec.onnx
+doctr-default/ocr_manifest.json
+# Asset: doctr-mobile.tar.bz2
+# updated_at: 2026-10-15T10:59:07Z
+doctr-mobile/
+doctr-mobile/det.onnx
+doctr-mobile/LICENSE
+doctr-mobile/rec.onnx
+doctr-mobile/ocr_manifest.json
 # Asset: ppocrv6-medium.tar.bz2
 # updated_at: 2026-10-14T09:05:51Z
 ppocrv6-medium/
@@ -22,17 +36,3 @@ ppocrv6-tiny/cls.onnx
 ppocrv6-tiny/LICENSE
 ppocrv6-tiny/rec.onnx
 ppocrv6-tiny/rec_inference.yml
-# Asset: doctr-mobile.tar.bz2
-# updated_at: placeholder
-doctr-mobile/
-doctr-mobile/det.onnx
-doctr-mobile/rec.onnx
-doctr-mobile/ocr_manifest.json
-doctr-mobile/LICENSE
-# Asset: doctr-default.tar.bz2
-# updated_at: placeholder
-doctr-default/
-doctr-default/det.onnx
-doctr-default/rec.onnx
-doctr-default/ocr_manifest.json
-doctr-default/LICENSE
