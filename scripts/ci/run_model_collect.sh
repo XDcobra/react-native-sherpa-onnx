@@ -15,6 +15,7 @@
 #   diarization  — Speaker diarization / segmentation
 #   kws          — Keyword spotting
 #   audio-tagging — Audio tagging
+#   ocr          — OCR (XDcobra ocr-models)
 #
 # Env: ASSET_LIMIT (0 = no limit), COLLECT_JOBS (parallel download+tar-list workers, default 4),
 set -euo pipefail
