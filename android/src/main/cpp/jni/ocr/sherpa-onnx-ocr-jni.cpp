@@ -114,7 +114,8 @@ JNIEXPORT void JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring modelDir,
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
-    jboolean useOrientationCls) {
+    jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
+    jfloat detUnclipRatio) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -124,6 +125,9 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.num_threads = numThreads > 0 ? numThreads : 4;
     opts.max_side_len = maxSideLen > 0 ? maxSideLen : 960;
     opts.use_orientation_cls = useOrientationCls == JNI_TRUE;
+    opts.det_box_thresh = detBoxThresh;
+    opts.det_box_score_thresh = detBoxScoreThresh;
+    opts.det_unclip_ratio = detUnclipRatio;
     opts.provider = JstringToStd(env, provider);
     engine.Load(type.empty() ? "auto" : type, dir, opts);
   } catch (const std::exception& e) {
@@ -191,6 +195,9 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     if (!detect.recDictPath.empty()) {
       PutString(env, pathsMap, pathsPut, "rec_dict", detect.recDictPath);
     }
+    if (!detect.manifestPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "manifest", detect.manifestPath);
+    }
     jstring key = env->NewStringUTF("paths");
     if (key) {
       env->CallObjectMethod(map, put, key, pathsMap);
@@ -213,6 +220,9 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     }
     if (!detect.recDictPath.empty()) {
       PutString(env, filesMap, filesPut, "recInferenceYml", detect.recDictPath);
+    }
+    if (!detect.manifestPath.empty()) {
+      PutString(env, filesMap, filesPut, "manifest", detect.manifestPath);
     }
     jstring key = env->NewStringUTF("files");
     if (key) {

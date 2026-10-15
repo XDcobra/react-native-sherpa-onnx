@@ -69,6 +69,12 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("maxSideLen")) options.getDouble("maxSideLen").toInt() else 960
       val useOrientationCls =
         if (options.hasKey("useOrientationCls")) options.getBoolean("useOrientationCls") else true
+      val detBoxThresh =
+        if (options.hasKey("detBoxThresh")) options.getDouble("detBoxThresh").toFloat() else 0.3f
+      val detBoxScoreThresh =
+        if (options.hasKey("detBoxScoreThresh")) options.getDouble("detBoxScoreThresh").toFloat() else 0.5f
+      val detUnclipRatio =
+        if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
 
       val sentinel = Any()
       instances[instanceId] = sentinel
@@ -81,6 +87,9 @@ class SherpaOnnxOcrHelper(
           provider,
           maxSideLen,
           useOrientationCls,
+          detBoxThresh,
+          detBoxScoreThresh,
+          detUnclipRatio,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
@@ -309,6 +318,7 @@ class SherpaOnnxOcrHelper(
     putPath("rec", pathsRaw?.get("rec") ?: raw["recPath"])
     putPath("cls", pathsRaw?.get("cls") ?: raw["clsPath"])
     putPath("rec_dict", pathsRaw?.get("rec_dict") ?: raw["recDictPath"])
+    putPath("manifest", pathsRaw?.get("manifest") ?: raw["manifestPath"])
     if (paths.toHashMap().isNotEmpty()) {
       map.putMap("paths", paths)
     }
@@ -326,6 +336,10 @@ class SherpaOnnxOcrHelper(
     if (!recPath.isNullOrBlank()) files.putString("rec", recPath)
     if (!clsPath.isNullOrBlank()) files.putString("cls", clsPath)
     if (!dictPath.isNullOrBlank()) files.putString("recInferenceYml", dictPath)
+    val manifestPath =
+      (filesRaw?.get("manifest") as? String)
+        ?: (pathsRaw?.get("manifest") as? String)
+    if (!manifestPath.isNullOrBlank()) files.putString("manifest", manifestPath)
     if (files.toHashMap().isNotEmpty()) {
       map.putMap("files", files)
     }

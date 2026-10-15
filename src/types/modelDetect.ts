@@ -171,6 +171,15 @@ export type OcrPpocrSuccessPaths = {
   cls?: string;
 };
 
+/** Required paths when OCR detect succeeds for doctr (ocr_manifest.json). */
+export type OcrDoctrSuccessPaths = {
+  det: string;
+  rec: string;
+  /** `ocr_manifest.json` containing vocab, mean/std, input shapes. */
+  manifest: string;
+  cls?: string;
+};
+
 export interface OcrDetectModelResult extends ModelDetectResultBase {
   /**
    * Always `false` — OCR packs are offline multi-file layouts (no streaming
@@ -185,6 +194,8 @@ export interface OcrDetectModelResult extends ModelDetectResultBase {
     cls?: string;
     /** Recognition dictionary (yml/txt); native key `rec_dict`. */
     rec_dict?: string;
+    /** `ocr_manifest.json` — doctr family. */
+    manifest?: string;
   };
 }
 

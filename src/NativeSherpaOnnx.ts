@@ -299,8 +299,13 @@ export type OcrInitBridgeOptions = {
   modelType: string;
   numThreads?: number;
   provider?: string;
+  // ppocr
   maxSideLen?: number;
   useOrientationCls?: boolean;
+  // doctr
+  detBoxThresh?: number;
+  detBoxScoreThresh?: number;
+  detUnclipRatio?: number;
 };
 
 /** `ocrRecognize(..., options)`. */
@@ -326,6 +331,8 @@ export type OcrDetectNativeResult = {
     rec?: string;
     cls?: string;
     rec_dict?: string;
+    /** `ocr_manifest.json` — doctr family. */
+    manifest?: string;
   };
   /** Legacy path map (string values). */
   files?: {
@@ -347,6 +354,8 @@ export type OcrDetectNativeResult = {
   recPath?: string;
   clsPath?: string;
   recDictPath?: string;
+  /** `ocr_manifest.json` path — doctr family (top-level legacy). */
+  manifestPath?: string;
 };
 
 /** Structured language row from native detect bridge. */

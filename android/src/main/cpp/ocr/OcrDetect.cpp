@@ -45,6 +45,7 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
   out.recPath = native.paths.rec;
   out.clsPath = native.paths.cls;
   out.recDictPath = native.paths.rec_dict;
+  out.manifestPath = native.paths.manifest;
   out.hasDet = !out.detPath.empty();
   out.hasRec = !out.recPath.empty();
   out.hasCls = !out.clsPath.empty();

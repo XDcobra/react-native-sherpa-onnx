@@ -222,19 +222,31 @@ export async function detectOcrModel(
     pathFromRaw(filesRaw.recInferenceYml) ??
     pathFromRaw(filesRaw.rec_dict) ??
     pathFromRaw(raw.recDictPath);
+  const manifest =
+    pathFromRaw(pathsRaw.manifest) ??
+    pathFromRaw(filesRaw.manifest) ??
+    pathFromRaw(raw.manifestPath);
 
   const paths =
-    det || rec || cls || recDict
+    det || rec || cls || recDict || manifest
       ? {
           ...(det ? { det } : {}),
           ...(rec ? { rec } : {}),
           ...(cls ? { cls } : {}),
           ...(recDict ? { rec_dict: recDict } : {}),
+          ...(manifest ? { manifest } : {}),
         }
       : undefined;
 
-  // ValidateOcrPaths contract: success requires det + rec + rec_dict.
-  const pathsComplete = Boolean(det && rec && recDict);
+  // Family-aware completeness: ppocr needs det+rec+rec_dict; doctr needs det+rec+manifest.
+  const family = typeof raw.modelType === 'string' ? raw.modelType : '';
+  let pathsComplete: boolean;
+  if (family === 'doctr') {
+    pathsComplete = Boolean(det && rec && manifest);
+  } else {
+    // ppocr or unknown — original contract
+    pathsComplete = Boolean(det && rec && recDict);
+  }
   const success = successFlag && pathsComplete;
 
   return {
@@ -246,6 +258,8 @@ export async function detectOcrModel(
           error:
             err.length > 0
               ? err
+              : family === 'doctr'
+              ? 'OCR detect reported success but required paths (det/rec/manifest) were missing'
               : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing',
         }
       : {}),
@@ -324,6 +338,7 @@ export type {
   OcrProgress,
   OcrProgressNativeEvent,
   OcrPpocrOptions,
+  OcrDoctrOptions,
   OcrInitializeOptions,
   OcrRecognizeOptions,
   OcrDetectResult,
@@ -334,6 +349,13 @@ export type {
 export type {
   OcrDetectModelResult,
   OcrPpocrSuccessPaths,
+  OcrDoctrSuccessPaths,
 } from '../types/modelDetect';
 
-export { OcrErrorCode, isOcrPpocrDetectSuccess } from './types';
+export {
+  OcrErrorCode,
+  isOcrPpocrDetectSuccess,
+  isOcrDoctrDetectSuccess,
+  OCR_MODEL_TYPES,
+  isOcrModelType,
+} from './types';

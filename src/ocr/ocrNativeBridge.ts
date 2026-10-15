@@ -22,5 +22,15 @@ export async function buildOcrInitBridgeOptions(
     ...(options.ppocr?.useOrientationCls !== undefined
       ? { useOrientationCls: options.ppocr.useOrientationCls }
       : {}),
+    // doctr
+    ...(options.doctr?.detBoxThresh !== undefined
+      ? { detBoxThresh: options.doctr.detBoxThresh }
+      : {}),
+    ...(options.doctr?.detBoxScoreThresh !== undefined
+      ? { detBoxScoreThresh: options.doctr.detBoxScoreThresh }
+      : {}),
+    ...(options.doctr?.detUnclipRatio !== undefined
+      ? { detUnclipRatio: options.doctr.detUnclipRatio }
+      : {}),
   };
 }

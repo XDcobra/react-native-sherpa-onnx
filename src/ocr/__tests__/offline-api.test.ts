@@ -46,7 +46,15 @@ jest.mock('../../textbuffer', () => ({
 }));
 
 import { TurboModuleRegistry } from 'react-native';
-import { createOCR, detectOcrModel, isOcrPpocrDetectSuccess } from '../index';
+import type { OcrDetectModelResult } from '../../types/modelDetect';
+import {
+  createOCR,
+  detectOcrModel,
+  isOcrPpocrDetectSuccess,
+  isOcrDoctrDetectSuccess,
+  isOcrModelType,
+  OCR_MODEL_TYPES,
+} from '../index';
 
 const mockNative = (
   TurboModuleRegistry.getEnforcing as unknown as () => {
@@ -232,5 +240,116 @@ describe('ocr offline API', () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/required paths/i);
+  });
+
+  // ──── Phase 3: doctr tests ────────────────────────────────────────────
+
+  it('createOCR with doctr modelType passes doctr options to native', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/onnxtr-default' },
+      modelType: 'doctr',
+      doctr: { detBoxThresh: 0.2, detBoxScoreThresh: 0.2 },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/onnxtr-default',
+        modelType: 'doctr',
+        detBoxThresh: 0.2,
+        detBoxScoreThresh: 0.2,
+      })
+    );
+    await ocr.destroy();
+  });
+
+  it('detectOcrModel returns doctr paths with manifest', async () => {
+    mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
+      ok: true,
+      modelType: 'doctr',
+      family: 'doctr',
+      detectedModels: [{ type: 'doctr', modelDir: '/models/onnxtr-default' }],
+      paths: {
+        det: '/models/onnxtr-default/det.onnx',
+        rec: '/models/onnxtr-default/rec.onnx',
+        manifest: '/models/onnxtr-default/ocr_manifest.json',
+      },
+      detectionSources: ['fileListing', 'fallbackOrder'],
+      sizeTier: 'medium',
+      languages: [
+        { iso6391Hint: 'en', id: 'en' },
+        { iso6391Hint: 'fr', id: 'fr' },
+      ],
+    });
+    const result = await detectOcrModel({
+      kind: 'fs',
+      path: '/models/onnxtr-default',
+    });
+    expect(result.success).toBe(true);
+    expect(result.modelType).toBe('doctr');
+    expect(result.paths?.manifest).toContain('ocr_manifest.json');
+    expect(result.paths?.det).toContain('det.onnx');
+    expect(result.paths?.rec).toContain('rec.onnx');
+    expect(result.paths?.rec_dict).toBeUndefined();
+  });
+
+  it('isOcrDoctrDetectSuccess narrows doctr paths', () => {
+    const result: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'doctr', modelDir: '/m' }],
+      modelType: 'doctr',
+      paths: {
+        det: '/m/det.onnx',
+        rec: '/m/rec.onnx',
+        manifest: '/m/ocr_manifest.json',
+      },
+    };
+    expect(isOcrDoctrDetectSuccess(result)).toBe(true);
+    if (isOcrDoctrDetectSuccess(result)) {
+      expect(result.paths.manifest.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('isOcrDoctrDetectSuccess rejects ppocr result', () => {
+    const result: OcrDetectModelResult = {
+      success: true,
+      isStreaming: false,
+      detectedModels: [{ type: 'ppocr', modelDir: '/m' }],
+      modelType: 'ppocr',
+      paths: {
+        det: '/m/det.onnx',
+        rec: '/m/rec.onnx',
+        rec_dict: '/m/dict.yml',
+      },
+    };
+    expect(isOcrDoctrDetectSuccess(result)).toBe(false);
+  });
+
+  it('detectOcrModel fails for doctr when manifest is missing', async () => {
+    mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
+      ok: true,
+      modelType: 'doctr',
+      paths: { det: '/m/det.onnx', rec: '/m/rec.onnx' },
+      detectedModels: [],
+    });
+    const result = await detectOcrModel({ kind: 'fs', path: '/m' });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/required paths/i);
+  });
+
+  it('isOcrModelType recognizes valid types', () => {
+    expect(isOcrModelType('ppocr')).toBe(true);
+    expect(isOcrModelType('doctr')).toBe(true);
+    expect(isOcrModelType('auto')).toBe(true);
+    expect(isOcrModelType('tessaract')).toBe(false);
+  });
+
+  it('OCR_MODEL_TYPES contains all expected entries', () => {
+    expect(OCR_MODEL_TYPES).toContain('ppocr');
+    expect(OCR_MODEL_TYPES).toContain('doctr');
+    expect(OCR_MODEL_TYPES).toContain('auto');
+    expect(OCR_MODEL_TYPES).toHaveLength(3);
   });
 });

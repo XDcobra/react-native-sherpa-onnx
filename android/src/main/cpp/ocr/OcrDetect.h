@@ -30,6 +30,8 @@ struct OcrDetectResult {
   std::string recPath;
   std::string clsPath;
   std::string recDictPath;
+  /** `ocr_manifest.json` — doctr family. */
+  std::string manifestPath;
   /** DetectionSource literals (fileListing, fallbackOrder, …). */
   std::vector<std::string> detectionSources;
   std::vector<OcrDetectedModelEntry> detectedModels;

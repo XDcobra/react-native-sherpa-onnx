@@ -6,15 +6,27 @@ import type {
 } from '../textbuffer/types';
 import type {
   OcrDetectModelResult,
+  OcrDoctrSuccessPaths,
   OcrPpocrSuccessPaths,
 } from '../types/modelDetect';
 
-/** Public OCR model types. v1: ppocr only; `auto` resolves via layout detect. */
-export type OcrModelType = 'auto' | 'ppocr';
+/** Public OCR model types. `auto` resolves via layout detect. */
+export type OcrModelType = 'auto' | 'ppocr' | 'doctr';
 export type OcrConcreteModelType = Exclude<OcrModelType, 'auto'>;
 
-/** OCR backend family (v1: ppocr only). */
-export type OcrFamily = 'ppocr';
+/** OCR backend family. */
+export type OcrFamily = 'ppocr' | 'doctr';
+
+/** Runtime model-type array + guard (parallel TTS pattern). */
+export const OCR_MODEL_TYPES: readonly OcrModelType[] = [
+  'ppocr',
+  'doctr',
+  'auto',
+] as const;
+
+export function isOcrModelType(s: string): s is OcrModelType {
+  return (OCR_MODEL_TYPES as readonly string[]).includes(s);
+}
 
 /** Span granularity requested at recognize time. v1 backends produce `line`. */
 export type OcrGranularity = TextSpatialSpanLevel;
@@ -38,14 +50,32 @@ export type OcrPpocrOptions = {
   useOrientationCls?: boolean;
 };
 
+export type OcrDoctrOptions = {
+  /**
+   * Detection box binary-threshold (doctr default: 0.15).
+   * DoctrBackend auto-lowers ppocr-range values; set explicitly to override.
+   */
+  detBoxThresh?: number;
+  /**
+   * Detection box score threshold (doctr default: 0.15).
+   */
+  detBoxScoreThresh?: number;
+  /**
+   * Unclip ratio for DB postprocessing (default: 1.5).
+   */
+  detUnclipRatio?: number;
+};
+
 export type OcrInitializeOptions = {
   modelSource: FileSource;
   /** Default: `'auto'`. */
   modelType?: OcrModelType;
   provider?: string;
   numThreads?: number;
-  /** Family-specific options (only `ppocr` applies in v1). */
+  /** ppocr family-specific options. */
   ppocr?: OcrPpocrOptions;
+  /** doctr family-specific options. */
+  doctr?: OcrDoctrOptions;
 };
 
 export type OcrRecognizeOptions = {
@@ -95,6 +125,31 @@ export const OcrErrorCode = {
 
 export type OcrErrorCodeValue =
   (typeof OcrErrorCode)[keyof typeof OcrErrorCode];
+
+/**
+ * Narrows a successful doctr detect result to required Det/Rec/manifest paths.
+ * Use after {@link detectOcrModel} when callers need typed pack paths.
+ */
+export function isOcrDoctrDetectSuccess(
+  result: OcrDetectModelResult
+): result is OcrDetectModelResult & {
+  success: true;
+  modelType: 'doctr';
+  paths: OcrDoctrSuccessPaths;
+} {
+  if (!result.success || result.modelType !== 'doctr' || result.paths == null) {
+    return false;
+  }
+  const { det, rec, manifest } = result.paths;
+  return (
+    typeof det === 'string' &&
+    det.length > 0 &&
+    typeof rec === 'string' &&
+    rec.length > 0 &&
+    typeof manifest === 'string' &&
+    manifest.length > 0
+  );
+}
 
 /**
  * Narrows a successful ppocr detect result to required Det/Rec/dict paths.
