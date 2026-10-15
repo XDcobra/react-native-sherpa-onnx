@@ -110,9 +110,11 @@ describe('stt segmented transcribe', () => {
           tokenCount: 0,
           timestampCount: 0,
           durationCount: 0,
+          spatialSpanCount: 0,
           hasLang: false,
           hasEmotion: false,
           hasEvent: false,
+          hasSpatialSpans: false,
         },
       },
       segmentMappings: [
