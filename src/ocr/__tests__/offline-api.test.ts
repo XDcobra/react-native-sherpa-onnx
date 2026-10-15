@@ -439,6 +439,82 @@ describe('ocr offline API', () => {
     expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
   });
 
+  it('createOCR doc_vlm + recognize round-trip returns extras then destroy', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doc_vlm_rt',
+      modelType: 'doc_vlm',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 3,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+      docVlm: { maxNewTokens: 512 },
+    });
+
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/docvlm-granite-258m',
+        modelType: 'doc_vlm',
+        maxNewTokens: 512,
+      })
+    );
+
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { granularity: 'line' }
+    );
+
+    expect(mockNative.ocrRecognize).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      expect.objectContaining({
+        operationId: expect.stringMatching(/^ocr_rec_/),
+        granularity: 'line',
+      })
+    );
+    expect(page).toEqual({
+      family: 'doc_vlm',
+      spanCount: 3,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+
+    await ocr.destroy();
+    expect(mockNative.unloadOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/)
+    );
+  });
+
+  it('recognize after destroy throws OCR_INSTANCE_NOT_FOUND for doc_vlm', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doc_vlm_2',
+      modelType: 'doc_vlm',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+    });
+    await ocr.destroy();
+
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INSTANCE_NOT_FOUND' });
+    expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
+  });
+
   const docVlmPaths = {
     vision_encoder: '/models/docvlm/vision_encoder.onnx',
     vision_encoder_data: '/models/docvlm/vision_encoder.onnx_data',
