@@ -143,6 +143,7 @@ void FillOcrModelPathsFromStringMap(
     SetPathFromMap(paths, "rec", out.rec);
     SetPathFromMap(paths, "cls", out.cls);
     SetPathFromMap(paths, "rec_dict", out.rec_dict);
+    SetPathFromMap(paths, "manifest", out.manifest);
 }
 
 void FillLanguageIdModelPathsFromStringMap(
@@ -316,6 +317,7 @@ std::map<std::string, std::string> OcrModelPathsToStringMap(
     PutPathIfNonEmpty(out, "rec", paths.rec);
     PutPathIfNonEmpty(out, "cls", paths.cls);
     PutPathIfNonEmpty(out, "rec_dict", paths.rec_dict);
+    PutPathIfNonEmpty(out, "manifest", paths.manifest);
     return out;
 }
 

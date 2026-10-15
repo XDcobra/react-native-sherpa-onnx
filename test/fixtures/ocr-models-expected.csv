@@ -1,4 +1,6 @@
 asset_name,model_type
+doctr-default.tar.bz2,doctr
+doctr-mobile.tar.bz2,doctr
 ppocrv6-medium.tar.bz2,ppocr
 ppocrv6-small.tar.bz2,ppocr
 ppocrv6-tiny.tar.bz2,ppocr

@@ -46,6 +46,7 @@ const char* AlignmentKindToModelType(AlignmentModelKind kind) {
 const char* OcrKindToModelType(OcrModelKind kind) {
     switch (kind) {
         case OcrModelKind::kPpocr: return "ppocr";
+        case OcrModelKind::kDoctr: return "doctr";
         default: return "";
     }
 }
@@ -63,6 +64,12 @@ std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
         lower.find("paddleocr") != std::string::npos ||
         lower.find("pp-ocr") != std::string::npos) {
         return "ppocr";
+    }
+    if (lower.find("doctr") != std::string::npos ||
+        lower.find("onnxtr") != std::string::npos ||
+        lower.find("doc-tr") != std::string::npos ||
+        lower.find("doc_tr") != std::string::npos) {
+        return "doctr";
     }
     return {};
 }

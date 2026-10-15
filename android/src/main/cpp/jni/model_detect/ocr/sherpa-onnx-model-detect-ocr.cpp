@@ -25,6 +25,9 @@ sherpaonnx::OcrModelKind ParseOcrModelTypeStrict(const std::string& modelType) {
     if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
         return sherpaonnx::OcrModelKind::kPpocr;
     }
+    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
+        return sherpaonnx::OcrModelKind::kDoctr;
+    }
     if (t == "auto") return sherpaonnx::OcrModelKind::kUnknown;
     return sherpaonnx::OcrModelKind::kUnknown;
 }
@@ -33,6 +36,8 @@ const char* OcrKindToTag(sherpaonnx::OcrModelKind kind) {
     switch (kind) {
         case sherpaonnx::OcrModelKind::kPpocr:
             return "ppocr";
+        case sherpaonnx::OcrModelKind::kDoctr:
+            return "doctr";
         default:
             return "unknown";
     }
@@ -137,12 +142,27 @@ bool InferPpocrNameOnly(const std::string& nameHint) {
            lower.find("pp-ocr") != std::string::npos;
 }
 
+bool InferDoctrNameOnly(const std::string& nameHint) {
+    const std::string lower = ToLower(nameHint);
+    return lower.find("doctr") != std::string::npos ||
+           lower.find("onnxtr") != std::string::npos ||
+           lower.find("doc-tr") != std::string::npos ||
+           lower.find("doc_tr") != std::string::npos;
+}
+
+std::string FindOcrManifest(const std::vector<FileEntry>& files) {
+    return FindFileByName(files, "ocr_manifest.json");
+}
+
 /**
- * Future family hook (docTR / OnnxTR): different file co-occurrence.
- * Keep false until a DoctrBackend + pack layout exists.
+ * DocTR / OnnxTR layout: det + rec ONNX plus ocr_manifest.json (family discriminator).
+ * Distinct from ppocr which requires rec_inference.yml / dict.
  */
-bool CanDoctrLayout(const std::vector<FileEntry>& /*files*/) {
-    return false;
+bool CanDoctrLayout(const std::vector<FileEntry>& files) {
+    const std::string det = FindDetOnnx(files, "");
+    const std::string rec = FindRecOnnx(files, "");
+    const std::string manifest = FindOcrManifest(files);
+    return !det.empty() && !rec.empty() && !manifest.empty();
 }
 
 sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
@@ -179,14 +199,18 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             result.error = kNameOnlyErr;
             return result;
         }
-        if (!InferPpocrNameOnly(modelDir)) {
+        if (InferPpocrNameOnly(modelDir)) {
+            result.selectedKind = OK::kPpocr;
+            result.detectedModels.push_back({"ppocr", modelDir});
+        } else if (InferDoctrNameOnly(modelDir)) {
+            result.selectedKind = OK::kDoctr;
+            result.detectedModels.push_back({"doctr", modelDir});
+        } else {
             result.error =
                 "OCR: no model type inferred from directory/asset name "
                 "(name-only mode).";
             return result;
         }
-        result.selectedKind = OK::kPpocr;
-        result.detectedModels.push_back({"ppocr", modelDir});
         AppendUniqueSource(result.detectionSources, DS::kDirName);
         result.ok = false;
         result.error = kNameOnlyErr;
@@ -199,9 +223,10 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
     const std::string rec = FindRecOnnx(files, quantization);
     const std::string cls = FindClsOnnx(files, quantization);
     const std::string recDict = FindRecDict(files);
+    const std::string manifest = FindOcrManifest(files);
 
     const bool canPpocr = !det.empty() && !rec.empty() && !recDict.empty();
-    const bool canDoctr = CanDoctrLayout(files);
+    const bool canDoctr = CanDoctrLayout(files) && !manifest.empty();
 
     if (canPpocr) {
         result.detectedModels.push_back({"ppocr", modelDir});
@@ -212,19 +237,24 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
 
     if (!canPpocr && !canDoctr) {
         result.error =
-            "OCR: unrecognized pack layout (need det + rec ONNX and a "
-            "rec dictionary yml/txt) in " +
+            "OCR: unrecognized pack layout (need det + rec ONNX and either "
+            "rec dictionary yml/txt for ppocr, or ocr_manifest.json for "
+            "doctr) in " +
             modelDir;
         return result;
     }
 
     OK selected = OK::kUnknown;
     if (isAuto) {
+        // Prefer ppocr when both could match (should not happen with
+        // distinct meta files); otherwise pick the only capable family.
         if (canPpocr) {
             selected = OK::kPpocr;
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
+        } else if (canDoctr) {
+            selected = OK::kDoctr;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else {
-            // canDoctr only (future)
             result.error = "OCR: no supported family detected in " + modelDir;
             return result;
         }
@@ -239,6 +269,10 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             result.error = "OCR: ppocr layout not found in " + modelDir;
             return result;
         }
+        if (selected == OK::kDoctr && !canDoctr) {
+            result.error = "OCR: doctr layout not found in " + modelDir;
+            return result;
+        }
     }
 
     result.selectedKind = selected;
@@ -247,6 +281,11 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         result.paths.rec = rec;
         result.paths.cls = cls;
         result.paths.rec_dict = recDict;
+    } else if (selected == OK::kDoctr) {
+        result.paths.det = det;
+        result.paths.rec = rec;
+        result.paths.cls = cls;
+        result.paths.manifest = manifest;
     }
 
     auto validation =

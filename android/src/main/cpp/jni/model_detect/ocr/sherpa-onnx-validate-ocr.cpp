@@ -12,11 +12,22 @@ static const OcrFieldRequirement kPpocrReqs[] = {
     {"cls", &OcrModelPaths::cls, false},
 };
 
+static const OcrFieldRequirement kDoctrReqs[] = {
+    {"det", &OcrModelPaths::det, true},
+    {"rec", &OcrModelPaths::rec, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+    {"cls", &OcrModelPaths::cls, false},
+    {"rec_dict", &OcrModelPaths::rec_dict, false},
+};
+
 static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& count) {
     switch (kind) {
         case OcrModelKind::kPpocr:
             count = std::size(kPpocrReqs);
             return kPpocrReqs;
+        case OcrModelKind::kDoctr:
+            count = std::size(kDoctrReqs);
+            return kDoctrReqs;
         default:
             count = 0;
             return nullptr;
@@ -27,6 +38,8 @@ static const char* OcrKindToName(OcrModelKind kind) {
     switch (kind) {
         case OcrModelKind::kPpocr:
             return "ppocr";
+        case OcrModelKind::kDoctr:
+            return "doctr";
         default:
             return "unknown";
     }

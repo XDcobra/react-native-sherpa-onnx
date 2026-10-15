@@ -13,6 +13,8 @@ const char* KindToFamily(sherpaonnx::OcrModelKind kind) {
   switch (kind) {
     case sherpaonnx::OcrModelKind::kPpocr:
       return "ppocr";
+    case sherpaonnx::OcrModelKind::kDoctr:
+      return "doctr";
     default:
       return "";
   }

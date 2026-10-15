@@ -17,15 +17,19 @@ const DEFAULT_REPO = 'XDcobra/react-native-sherpa-onnx';
 const DEFAULT_TAG = 'ocr-models';
 const EXPECTED_HEADER = [
   'id',
+  'family',
   'det_url',
   'rec_url',
   'cls_url',
   'rec_yml_url',
+  'det_config_url',
+  'rec_config_url',
   'license',
   'license_type',
   'commercial_use',
   'languages',
 ];
+const VALID_FAMILIES = new Set(['ppocr', 'doctr']);
 const CHECKSUM_ASSET_NAME = 'checksum.txt';
 const VALID_ID_RE = /^[A-Za-z0-9._-]+$/;
 const VALID_ISO6391_RE = /^[a-z]{2,3}(-[a-z0-9]+)?$/i;
@@ -251,14 +255,17 @@ async function readSources(csvPath) {
     }
 
     const modelId = normalizeCell(row[0]);
-    const detUrl = normalizeCell(row[1]);
-    const recUrl = normalizeCell(row[2]);
-    const clsUrl = normalizeCell(row[3]);
-    const recYmlUrl = normalizeCell(row[4]);
-    const licenseUrl = normalizeCell(row[5]);
-    const licenseType = normalizeCell(row[6]);
-    const commercialUse = normalizeCell(row[7]).toLowerCase();
-    const languages = parseLanguagesCell(normalizeCell(row[8]), lineNumber);
+    const family = normalizeCell(row[1]).toLowerCase();
+    const detUrl = normalizeCell(row[2]);
+    const recUrl = normalizeCell(row[3]);
+    const clsUrl = normalizeCell(row[4]);
+    const recYmlUrl = normalizeCell(row[5]);
+    const detConfigUrl = normalizeCell(row[6]);
+    const recConfigUrl = normalizeCell(row[7]);
+    const licenseUrl = normalizeCell(row[8]);
+    const licenseType = normalizeCell(row[9]);
+    const commercialUse = normalizeCell(row[10]).toLowerCase();
+    const languages = parseLanguagesCell(normalizeCell(row[11]), lineNumber);
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -268,24 +275,54 @@ async function readSources(csvPath) {
         `Line ${lineNumber}: invalid id '${modelId}'. Allowed characters: A-Z a-z 0-9 . _ -`
       );
     }
+    if (!VALID_FAMILIES.has(family)) {
+      throw new Error(
+        `Line ${lineNumber}: family must be "ppocr" or "doctr" (got "${row[1]}")`
+      );
+    }
     if (!detUrl) {
       throw new Error(`Line ${lineNumber}: det_url is required`);
     }
     if (!recUrl) {
       throw new Error(`Line ${lineNumber}: rec_url is required`);
     }
-    if (!clsUrl) {
-      throw new Error(`Line ${lineNumber}: cls_url is required`);
-    }
-    if (!recYmlUrl) {
-      throw new Error(`Line ${lineNumber}: rec_yml_url is required`);
+    if (family === 'ppocr') {
+      if (!clsUrl) {
+        throw new Error(`Line ${lineNumber}: cls_url is required for ppocr`);
+      }
+      if (!recYmlUrl) {
+        throw new Error(
+          `Line ${lineNumber}: rec_yml_url is required for ppocr`
+        );
+      }
+      if (detConfigUrl || recConfigUrl) {
+        throw new Error(
+          `Line ${lineNumber}: det_config_url/rec_config_url must be empty for ppocr`
+        );
+      }
+    } else if (family === 'doctr') {
+      if (recYmlUrl) {
+        throw new Error(
+          `Line ${lineNumber}: rec_yml_url must be empty for doctr`
+        );
+      }
+      if (!detConfigUrl) {
+        throw new Error(
+          `Line ${lineNumber}: det_config_url is required for doctr`
+        );
+      }
+      if (!recConfigUrl) {
+        throw new Error(
+          `Line ${lineNumber}: rec_config_url is required for doctr`
+        );
+      }
     }
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
     }
     if (commercialUse !== 'yes' && commercialUse !== 'no') {
       throw new Error(
-        `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[7]}")`
+        `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[10]}")`
       );
     }
     if (seen.has(modelId)) {
@@ -295,10 +332,13 @@ async function readSources(csvPath) {
     seen.add(modelId);
     sources.push({
       modelId,
+      family,
       detUrl,
       recUrl,
       clsUrl,
       recYmlUrl,
+      detConfigUrl,
+      recConfigUrl,
       licenseUrl,
       licenseType,
       commercialUse,
@@ -628,6 +668,90 @@ function uploadArchive(repo, tag, archivePath, token) {
   });
 }
 
+/**
+ * @param {object} source
+ * @param {string} modelDir
+ */
+async function buildPpocrPack(source, modelDir) {
+  const files = [
+    { url: source.detUrl, name: 'det.onnx' },
+    { url: source.recUrl, name: 'rec.onnx' },
+    { url: source.clsUrl, name: 'cls.onnx' },
+    { url: source.recYmlUrl, name: 'rec_inference.yml' },
+  ];
+  for (const file of files) {
+    console.log(`[download] ${source.modelId}: ${file.name}`);
+    await downloadFile(file.url, path.join(modelDir, file.name));
+  }
+}
+
+/**
+ * Build doctr (OnnxTR) pack: det/rec ONNX + merged ocr_manifest.json from configs.
+ * @param {object} source
+ * @param {string} modelDir
+ */
+async function buildDoctrPack(source, modelDir) {
+  console.log(`[download] ${source.modelId}: det.onnx`);
+  await downloadFile(source.detUrl, path.join(modelDir, 'det.onnx'));
+  console.log(`[download] ${source.modelId}: rec.onnx`);
+  await downloadFile(source.recUrl, path.join(modelDir, 'rec.onnx'));
+
+  const detConfigPath = path.join(modelDir, '_det_config.json');
+  const recConfigPath = path.join(modelDir, '_rec_config.json');
+  console.log(`[download] ${source.modelId}: det config.json`);
+  await downloadFile(source.detConfigUrl, detConfigPath);
+  console.log(`[download] ${source.modelId}: rec config.json`);
+  await downloadFile(source.recConfigUrl, recConfigPath);
+
+  const detCfg = JSON.parse(await fsp.readFile(detConfigPath, 'utf8'));
+  const recCfg = JSON.parse(await fsp.readFile(recConfigPath, 'utf8'));
+  if (
+    !detCfg.arch ||
+    !Array.isArray(detCfg.mean) ||
+    !Array.isArray(detCfg.std)
+  ) {
+    throw new Error(`${source.modelId}: det config.json missing arch/mean/std`);
+  }
+  if (
+    !recCfg.arch ||
+    typeof recCfg.vocab !== 'string' ||
+    recCfg.vocab.length === 0 ||
+    !Array.isArray(recCfg.mean) ||
+    !Array.isArray(recCfg.std)
+  ) {
+    throw new Error(
+      `${source.modelId}: rec config.json missing arch/vocab/mean/std`
+    );
+  }
+
+  const manifest = {
+    family: 'doctr',
+    det: {
+      arch: detCfg.arch,
+      input_shape: detCfg.input_shape,
+      mean: detCfg.mean,
+      std: detCfg.std,
+    },
+    rec: {
+      arch: recCfg.arch,
+      input_shape: recCfg.input_shape,
+      mean: recCfg.mean,
+      std: recCfg.std,
+      vocab: recCfg.vocab,
+    },
+  };
+  const manifestPath = path.join(modelDir, 'ocr_manifest.json');
+  await fsp.writeFile(
+    manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'utf8'
+  );
+  console.log(`[manifest] ${source.modelId}: ocr_manifest.json`);
+
+  await fsp.rm(detConfigPath, { force: true });
+  await fsp.rm(recConfigPath, { force: true });
+}
+
 async function buildArchives(sources, buildDir, distDir) {
   await fsp.mkdir(buildDir, { recursive: true });
   await fsp.mkdir(distDir, { recursive: true });
@@ -638,17 +762,12 @@ async function buildArchives(sources, buildDir, distDir) {
     const modelDir = path.join(buildDir, source.modelId);
     await ensureCleanDir(modelDir);
 
-    const files = [
-      { url: source.detUrl, name: 'det.onnx' },
-      { url: source.recUrl, name: 'rec.onnx' },
-      { url: source.clsUrl, name: 'cls.onnx' },
-      { url: source.recYmlUrl, name: 'rec_inference.yml' },
-    ];
-
-    for (const file of files) {
-      const targetPath = path.join(modelDir, file.name);
-      console.log(`[download] ${source.modelId}: ${file.name}`);
-      await downloadFile(file.url, targetPath);
+    if (source.family === 'ppocr') {
+      await buildPpocrPack(source, modelDir);
+    } else if (source.family === 'doctr') {
+      await buildDoctrPack(source, modelDir);
+    } else {
+      throw new Error(`Unknown family for ${source.modelId}: ${source.family}`);
     }
 
     if (source.licenseUrl) {

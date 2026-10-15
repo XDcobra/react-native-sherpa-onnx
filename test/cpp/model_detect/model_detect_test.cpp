@@ -783,7 +783,12 @@ TEST(ModelDetectTest, DetectOcrFromFileListMatchesExpected) {
             << " but got " << model_detect_test::OcrKindToString(result.selectedKind);
         EXPECT_FALSE(result.paths.det.empty()) << block.assetName;
         EXPECT_FALSE(result.paths.rec.empty()) << block.assetName;
-        EXPECT_FALSE(result.paths.rec_dict.empty()) << block.assetName;
+        if (expectedKind == sherpaonnx::OcrModelKind::kPpocr) {
+            EXPECT_FALSE(result.paths.rec_dict.empty()) << block.assetName;
+        } else if (expectedKind == sherpaonnx::OcrModelKind::kDoctr) {
+            EXPECT_FALSE(result.paths.manifest.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.rec_dict.empty()) << block.assetName;
+        }
     }
 }
 

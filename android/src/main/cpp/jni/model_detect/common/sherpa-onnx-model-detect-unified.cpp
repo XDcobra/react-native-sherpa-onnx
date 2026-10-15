@@ -80,6 +80,7 @@ const char* VadModelKindToString(VadModelKind k) {
 const char* OcrModelKindToString(OcrModelKind k) {
     switch (k) {
         case OcrModelKind::kPpocr: return "ppocr";
+        case OcrModelKind::kDoctr: return "doctr";
         default: return "unknown";
     }
 }

@@ -114,7 +114,9 @@ enum class AlignmentModelKind {
 /** Offline OCR families. v1: ppocr only; doctr reserved for future backends. */
 enum class OcrModelKind {
     kUnknown,
-    kPpocr
+    kPpocr,
+    /** docTR / OnnxTR Det+Rec packs (`ocr_manifest.json`). */
+    kDoctr
 };
 
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
@@ -346,8 +348,10 @@ struct OcrModelPaths {
     std::string rec;
     /** Optional orientation / angle classifier ONNX. */
     std::string cls;
-    /** Recognition dictionary / character list (yml or txt). */
+    /** Recognition dictionary / character list (yml or txt) — ppocr. */
     std::string rec_dict;
+    /** Family/vocab/preprocess manifest (`ocr_manifest.json`) — doctr. */
+    std::string manifest;
 };
 
 struct LanguageIdModelPaths {
