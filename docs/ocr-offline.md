@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Family: **`ppocr`** (PP-OCR Det/Rec/optional Cls). `modelType: 'auto' | 'ppocr'`.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls) and **`doctr`** (OnnxTR Det/Rec/manifest). `modelType: 'auto' | 'ppocr' | 'doctr'`.
 
 ---
 
@@ -14,7 +14,7 @@ Family: **`ppocr`** (PP-OCR Det/Rec/optional Cls). `modelType: 'auto' | 'ppocr'`
 
 `image` is a **populated** offline image buffer; `textOut` is **empty** before the call (populate-once). Raw string ids that are not offline image/text buffers are rejected with **`OCR_*`** / buffer error codes.
 
-### Single image → text + spatial spans
+### Single image → text + spatial spans (ppocr)
 
 ```ts
 import {
@@ -84,6 +84,34 @@ try {
 }
 ```
 
+### Single image → text + spatial spans (doctr)
+
+```ts
+import {
+  createOCR,
+  detectOcrModel,
+  isOcrDoctrDetectSuccess,
+} from 'react-native-sherpa-onnx/ocr';
+
+const modelDir = { kind: 'fs' as const, path: '/absolute/path/to/doctr-mobile' };
+
+const det = await detectOcrModel(modelDir, { modelType: 'auto' });
+if (!isOcrDoctrDetectSuccess(det)) {
+  throw new Error(det.error ?? 'DocTR detection failed');
+}
+
+const ocr = await createOCR({
+  modelSource: modelDir,
+  modelType: 'auto',
+  doctr: { detBoxThresh: 0.15, detBoxScoreThresh: 0.15 },
+});
+
+// … recognize as in ppocr example above …
+await ocr.destroy();
+```
+
+> For both families, `modelType: 'auto'` resolves the family from the pack directory layout. Use `isOcrPpocrDetectSuccess` or `isOcrDoctrDetectSuccess` to narrow the detected paths to family-specific shapes.
+
 ### Multi-frame + progress + cancel
 
 ```ts
@@ -124,13 +152,16 @@ try {
 | `modelType` | Required files (directory detect) | Optional |
 | --- | --- | --- |
 | `ppocr` | Det ONNX + Rec ONNX + recognition dictionary (`paths.rec_dict`) | Cls / orientation ONNX (`paths.cls`) |
-| `auto` | Same — only known families | — |
+| `doctr` | Det ONNX + Rec ONNX + `ocr_manifest.json` (`paths.manifest`) | — |
+| `auto` | Same — resolves family from pack layout (manifest → `doctr`; rec_dict → `ppocr`) | — |
 
-Canonical names: `det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`.
+Canonical names — ppocr: `det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`. Doctr: `det.onnx`, `rec.onnx`, `ocr_manifest.json`.
 
 ### Official packs (verified)
 
 Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) (`github_xdcobra`):
+
+#### ppocr family
 
 | Archive | Tier | Language hints | Notes |
 | --- | --- | --- | --- |
@@ -138,15 +169,38 @@ Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/r
 | `ppocrv6-small.tar.bz2` | small | ~49 ISO (`zh`, `en`, `ja` + 46 Latin) | Higher quality |
 | `ppocrv6-medium.tar.bz2` | medium | same as small | Best quality, larger download |
 
-Validate category: **`ocr`**. Language picker: [`getPpocrLanguages()`](model-languages.md). Downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
+#### doctr family
+
+| Archive | Tier | Language hints | Notes |
+| --- | --- | --- | --- |
+| `doctr-mobile.tar.bz2` | tiny/small | `en`, `fr` | OnnxTR CRNN-based; fast, Latin-only |
+| `doctr-default.tar.bz2` | medium | 15 Latin-European (`en`, `fr`, `pt`, `es`, `de`, `it`, `cs`, `pl`, `da`, `no`, `sv`, `fi`, `nl`, `hu`, `ro`) | OnnxTR PARSeq or CRNN; broader Latin coverage |
+
+Validate category: **`ocr`**. Language pickers: [`getPpocrLanguages()`](model-languages.md) (ppocr) · [`getDoctrLanguages()`](model-languages.md) (doctr). Per-pack hints: `iso6391HintsForOcrModelType('doctr', 'doctr-mobile')`. Downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
+
+#### Download + detect + init (ppocr)
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
-import { createOCR, detectOcrModel } from 'react-native-sherpa-onnx/ocr';
+import { createOCR, detectOcrModel, isOcrPpocrDetectSuccess } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'ppocrv6-tiny');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source, { modelType: 'auto' });
+if (!isOcrPpocrDetectSuccess(det)) throw new Error(det.error ?? 'bad OCR pack');
+const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
+```
+
+#### Download + detect + init (doctr)
+
+```ts
+import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
+import { createOCR, detectOcrModel, isOcrDoctrDetectSuccess } from 'react-native-sherpa-onnx/ocr';
+
+const model = await ensureModel(ModelCategory.Ocr, 'doctr-mobile');
+const source = { kind: 'fs' as const, path: model.modelDir };
+const det = await detectOcrModel(source, { modelType: 'auto' });
+if (!isOcrDoctrDetectSuccess(det)) throw new Error(det.error ?? 'bad DocTR pack');
 const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
 ```
 
@@ -166,13 +220,24 @@ function detectOcrModel(
 ```
 
 ```ts
+// ppocr
 const pre = await detectOcrModel(
   { kind: 'fs', path: '/data/models/ppocrv6-tiny' },
   { modelType: 'auto' }
 );
+// doctr
+const pre = await detectOcrModel(
+  { kind: 'fs', path: '/data/models/doctr-mobile' },
+  { modelType: 'auto' }
+);
 ```
 
-File-based detection without loading the engine. On success, `isOcrPpocrDetectSuccess(pre)` narrows `paths` to `{ det, rec, rec_dict }` (`cls` optional). May include `languages`, `sizeTier`, `detectionSources`. See [model-detect.md](model-detect.md).
+File-based detection without loading the engine. On success:
+
+- `isOcrPpocrDetectSuccess(pre)` narrows `paths` to `{ det, rec, rec_dict }` (`cls` optional).
+- `isOcrDoctrDetectSuccess(pre)` narrows `paths` to `{ det, rec, manifest }`.
+
+May include `languages`, `sizeTier`, `detectionSources`. See [model-detect.md](model-detect.md).
 
 ### `createOCR(options)`
 
@@ -181,14 +246,25 @@ function createOCR(options: OcrInitializeOptions): Promise<OcrEngine>;
 ```
 
 ```ts
+// ppocr
 const ocr = await createOCR({
   modelSource: { kind: 'fs', path: '/abs/path/to/ppocrv6-tiny' },
   modelType: 'auto',
   ppocr: { maxSideLen: 960, useOrientationCls: true },
 });
+
+// doctr
+const ocr = await createOCR({
+  modelSource: { kind: 'fs', path: '/abs/path/to/doctr-mobile' },
+  modelType: 'auto',
+  doctr: { detBoxThresh: 0.15, detBoxScoreThresh: 0.15, detUnclipRatio: 1.5 },
+});
 ```
 
-Creates an `OcrEngine`. Pass `modelSource` plus optional `modelType` / `provider` / `numThreads` / `ppocr` (`maxSideLen`, `useOrientationCls`).
+Creates an `OcrEngine`. Pass `modelSource` plus optional `modelType` / `provider` / `numThreads`. Family-specific options:
+
+- **ppocr**: `ppocr: { maxSideLen?, useOrientationCls? }`
+- **doctr**: `doctr: { detBoxThresh?, detBoxScoreThresh?, detUnclipRatio? }`
 
 ### `engine.recognize(imageBuffer, textOut, options?)`
 
@@ -209,7 +285,7 @@ await ocr.recognize(image, textOut, {
 });
 ```
 
-Reads populated `imageBuffer`, writes text (+ spatial spans, `origin: 'ocr'`) into empty `textOut`. Options: `granularity` (`'line'` recommended — backend emits line spans; `word`/`block` may yield empty span lists but text is still filled), `frames`, `onProgress`, `signal` (cancel between frames → `OCR_CANCELLED`).
+Reads populated `imageBuffer`, writes text (+ spatial spans, `origin: 'ocr'`) into empty `textOut`. Options: `granularity` (`'line'` recommended — backends emit line spans; `word`/`block` may yield empty span lists but text is still filled), `frames`, `onProgress`, `signal` (cancel between frames → `OCR_CANCELLED`).
 
 ### `engine.destroy()`
 
@@ -286,19 +362,28 @@ await ocr.recognize(image, textOut, {
 
 | Type | Description |
 | --- | --- |
-| `OcrModelType` | `'auto' \| 'ppocr'` |
-| `OcrConcreteModelType` | `'ppocr'` |
-| `OcrFamily` | `'ppocr'` |
+| `OcrModelType` | `'auto' \| 'ppocr' \| 'doctr'` |
+| `OcrConcreteModelType` | `'ppocr' \| 'doctr'` |
+| `OcrFamily` | `'ppocr' \| 'doctr'` |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` (alias of `TextSpatialSpanLevel`) |
-| `OcrInitializeOptions` | `modelSource`, `modelType?`, `provider?`, `numThreads?`, `ppocr?` |
+| `OcrInitializeOptions` | `modelSource`, `modelType?`, `provider?`, `numThreads?`, `ppocr?`, `doctr?` |
 | `OcrPpocrOptions` | `{ maxSideLen?, useOrientationCls? }` |
+| `OcrDoctrOptions` | `{ detBoxThresh?, detBoxScoreThresh?, detUnclipRatio? }` |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrProgressNativeEvent` | Progress + `operationId` from native |
 | `OcrDetectModelResult` | Return of `detectOcrModel()` — shared `ModelDetectResultBase` |
 | `OcrPpocrSuccessPaths` | `{ det, rec, rec_dict, cls? }` after `isOcrPpocrDetectSuccess` |
+| `OcrDoctrSuccessPaths` | `{ det, rec, manifest }` after `isOcrDoctrDetectSuccess` |
 | `OcrEngine` | `recognize`, `destroy`; readonly `instanceId` |
 | `OcrErrorCode` / `OcrErrorCodeValue` | Error code constants |
+
+### Detect narrowing guards
+
+| Guard | Narrows to |
+| --- | --- |
+| `isOcrPpocrDetectSuccess(result)` | `{ success: true, modelType: 'ppocr', paths: OcrPpocrSuccessPaths }` |
+| `isOcrDoctrDetectSuccess(result)` | `{ success: true, modelType: 'doctr', paths: OcrDoctrSuccessPaths }` |
 
 ### Related buffer types
 
@@ -316,7 +401,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 
 | Error code | Explanation |
 | --- | --- |
-| `OCR_DETECT_FAILED` | `detectOcrModel` failed or success without required ppocr paths. |
+| `OCR_DETECT_FAILED` | `detectOcrModel` failed or success without required paths. |
 | `OCR_MODEL_NOT_FOUND` | Pack / ONNX paths missing at init. |
 | `OCR_NOT_INITIALIZED` | Native engine not ready. |
 | `OCR_INSTANCE_NOT_FOUND` | `instanceId` missing or already **destroyed**. |
@@ -336,7 +421,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 ## Use case examples
 
 <details>
-<summary>Download pack, detect, then OCR a page</summary>
+<summary>Download pack, detect, then OCR a page (ppocr)</summary>
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
@@ -353,6 +438,30 @@ if (!isOcrPpocrDetectSuccess(det)) {
   throw new Error(det.error ?? 'bad OCR pack');
 }
 const ocr = await createOCR({ modelSource: source, modelType: 'ppocr' });
+// … recognize as in Quick start …
+await ocr.destroy();
+```
+
+</details>
+
+<details>
+<summary>Download pack, detect, then OCR a page (doctr)</summary>
+
+```ts
+import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
+import {
+  createOCR,
+  detectOcrModel,
+  isOcrDoctrDetectSuccess,
+} from 'react-native-sherpa-onnx/ocr';
+
+const model = await ensureModel(ModelCategory.Ocr, 'doctr-mobile');
+const source = { kind: 'fs' as const, path: model.modelDir };
+const det = await detectOcrModel(source);
+if (!isOcrDoctrDetectSuccess(det)) {
+  throw new Error(det.error ?? 'bad DocTR pack');
+}
+const ocr = await createOCR({ modelSource: source, modelType: 'doctr' });
 // … recognize as in Quick start …
 await ocr.destroy();
 ```
@@ -401,7 +510,7 @@ if (info.hasSpatialSpans) {
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)
 - [Model setup](model-setup.md)
 - [Model detection](model-detect.md)
-- [Model languages](model-languages.md) (`getPpocrLanguages`)
+- [Model languages](model-languages.md) (`getPpocrLanguages`, `getDoctrLanguages`, `iso6391HintsForOcrModelType`)
 - [Download manager](download-manager.md) (`ModelCategory.Ocr`)
 - [Execution providers](execution-providers.md)
 - [Native diagnostics](native-diagnostics.md)

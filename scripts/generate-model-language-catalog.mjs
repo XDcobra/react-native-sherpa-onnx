@@ -203,6 +203,9 @@ function validateCatalog(catalog) {
   if (!catalog.ocr.doctr?.hints?.length) {
     throw new Error('ocr.doctr.hints must be a non-empty array');
   }
+  if (!catalog.ocr.doctr?.entries?.length) {
+    throw new Error('ocr.doctr.entries must be a non-empty array');
+  }
   const funasr = catalog.stt.funasr_nano;
   if (funasr?.entries) {
     validateFunasrPickerVariants(funasr);
@@ -755,9 +758,21 @@ function emitTs(catalog, sttHintsByType, alignmentPackLangs, ocrPackLangs) {
   lines.push(
     `export const PPOCR_ISO6391_HINTS = ${JSON.stringify(ppocrHints)} as const;`
   );
-  // Emit family-level hints for each OCR family with hints (excluding ppocr, already emitted).
+  // Emit family-level entries, getter, and hints for each OCR family (excluding ppocr, already emitted).
   for (const [family, spec] of Object.entries(catalog.ocr)) {
     if (family === 'ppocr') continue;
+    if (spec.entries) {
+      const upper = family.toUpperCase();
+      const camel = family.charAt(0).toUpperCase() + family.slice(1);
+      lines.push(
+        `export const ${upper}_LANGUAGES: readonly ModelLanguage[] = ${JSON.stringify(spec.entries, null, 2)} as const;`
+      );
+      lines.push('');
+      lines.push(`export function get${camel}Languages(): readonly ModelLanguage[] {`);
+      lines.push(`  return ${upper}_LANGUAGES;`);
+      lines.push('}');
+      lines.push('');
+    }
     if (spec.hints) {
       const constName = `${family.toUpperCase()}_ISO6391_HINTS`;
       lines.push(

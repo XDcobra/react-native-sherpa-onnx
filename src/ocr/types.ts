@@ -28,7 +28,7 @@ export function isOcrModelType(s: string): s is OcrModelType {
   return (OCR_MODEL_TYPES as readonly string[]).includes(s);
 }
 
-/** Span granularity requested at recognize time. v1 backends produce `line`. */
+/** Span granularity requested at recognize time. Backends produce `line` spans. */
 export type OcrGranularity = TextSpatialSpanLevel;
 
 export type OcrProgress = {

@@ -305,7 +305,7 @@ TEST_P(DoctrGolden, RecognizeMatchesExpected) {
 INSTANTIATE_TEST_SUITE_P(
     Fixtures,
     DoctrGolden,
-    ::testing::Values("en_hello", "de_guten_tag"),
+    ::testing::Values("en_hello", "de_guten_tag", "zh_nihao"),
     [](const ::testing::TestParamInfo<const char*>& info) {
       return std::string(info.param);
     });

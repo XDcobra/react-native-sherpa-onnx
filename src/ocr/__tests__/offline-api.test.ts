@@ -352,4 +352,75 @@ describe('ocr offline API', () => {
     expect(OCR_MODEL_TYPES).toContain('auto');
     expect(OCR_MODEL_TYPES).toHaveLength(3);
   });
+
+  // ──── Phase 5: doctr round-trip tests ─────────────────────────────────
+
+  it('createOCR doctr + recognize round-trip passes doctr bridge options', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doctr_1',
+      modelType: 'doctr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/doctr-mobile' },
+      modelType: 'doctr',
+      doctr: {
+        detBoxThresh: 0.15,
+        detBoxScoreThresh: 0.15,
+        detUnclipRatio: 1.5,
+      },
+    });
+
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/doctr-mobile',
+        modelType: 'doctr',
+        detBoxThresh: 0.15,
+        detBoxScoreThresh: 0.15,
+        detUnclipRatio: 1.5,
+      })
+    );
+
+    await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { granularity: 'line' }
+    );
+
+    expect(mockNative.ocrRecognize).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      expect.objectContaining({
+        operationId: expect.stringMatching(/^ocr_rec_/),
+        granularity: 'line',
+      })
+    );
+
+    await ocr.destroy();
+    expect(mockNative.unloadOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/)
+    );
+  });
+
+  it('recognize after destroy throws OCR_INSTANCE_NOT_FOUND for doctr', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doctr_2',
+      modelType: 'doctr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/doctr-mobile' },
+      modelType: 'doctr',
+    });
+    await ocr.destroy();
+
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INSTANCE_NOT_FOUND' });
+  });
 });

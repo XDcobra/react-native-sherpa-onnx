@@ -1,6 +1,8 @@
 import { ModelCategory } from '../../../download/types';
 import {
   DOCTR_ISO6391_HINTS,
+  DOCTR_LANGUAGES,
+  getDoctrLanguages,
   getPpocrLanguages,
   iso6391HintsForOcrModelType,
   OCR_PACK_ISO6391_HINTS_BY_ID,
@@ -63,6 +65,18 @@ describe('ocr language hints', () => {
 });
 
 describe('doctr language hints', () => {
+  it('getDoctrLanguages returns ModelLanguage[] with en/fr and at least 2 entries', () => {
+    const rows = getDoctrLanguages();
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain('en');
+    expect(ids).toContain('fr');
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    for (const row of rows) {
+      expect(row.name.length).toBeGreaterThan(0);
+    }
+    expect(DOCTR_LANGUAGES).toEqual(rows);
+  });
+
   it('iso6391HintsForOcrModelType returns doctr family hints', () => {
     const hints = iso6391HintsForOcrModelType('doctr');
     expect(hints).toBeDefined();

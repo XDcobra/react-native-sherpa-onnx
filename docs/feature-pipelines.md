@@ -239,6 +239,8 @@ flowchart LR
   D --> E[UI overlay or offline TTS]
 ```
 
+Both `ppocr` and `doctr` families use the same `createOCR` → `recognize` pipeline; `modelType: 'auto'` resolves from pack layout.
+
 When to use:
 - Batch page/document OCR with deterministic completion.
 - Reuse a multi-frame image buffer and select `frames` subsets.

@@ -1962,6 +1962,73 @@ export function getPpocrLanguages(): readonly ModelLanguage[] {
 }
 
 export const PPOCR_ISO6391_HINTS = ["zh","en","ja","af","az","bs","ca","cs","cy","da","de","es","et","eu","fi","fr","ga","gl","hr","hu","id","is","it","ku","la","lb","lt","lv","mi","ms","mt","nl","no","oc","pl","pt","qu","rm","ro","sk","sl","sq","sr","sv","sw","tl","tr","uz","vi"] as const;
+export const DOCTR_LANGUAGES: readonly ModelLanguage[] = [
+  {
+    "id": "en",
+    "name": "english"
+  },
+  {
+    "id": "fr",
+    "name": "french"
+  },
+  {
+    "id": "pt",
+    "name": "portuguese"
+  },
+  {
+    "id": "es",
+    "name": "spanish"
+  },
+  {
+    "id": "de",
+    "name": "german"
+  },
+  {
+    "id": "it",
+    "name": "italian"
+  },
+  {
+    "id": "cs",
+    "name": "czech"
+  },
+  {
+    "id": "pl",
+    "name": "polish"
+  },
+  {
+    "id": "da",
+    "name": "danish"
+  },
+  {
+    "id": "no",
+    "name": "norwegian"
+  },
+  {
+    "id": "sv",
+    "name": "swedish"
+  },
+  {
+    "id": "fi",
+    "name": "finnish"
+  },
+  {
+    "id": "nl",
+    "name": "dutch"
+  },
+  {
+    "id": "hu",
+    "name": "hungarian"
+  },
+  {
+    "id": "ro",
+    "name": "romanian"
+  }
+] as const;
+
+export function getDoctrLanguages(): readonly ModelLanguage[] {
+  return DOCTR_LANGUAGES;
+}
+
 export const DOCTR_ISO6391_HINTS = ["en","fr","pt","es","de","it","cs","pl","da","no","sv","fi","nl","hu","ro"] as const;
 export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
   "doctr-default": [

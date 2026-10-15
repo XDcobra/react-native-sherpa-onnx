@@ -110,7 +110,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 | Guide | Description |
 |-------|-------------|
-| [ocr-offline.md](./ocr-offline.md) | Offline OCR — `createOCR` / `recognize` (ImageBuffer → TextBuffer + spatial spans); family `ppocr` |
+| [ocr-offline.md](./ocr-offline.md) | Offline OCR — `createOCR` / `recognize` (ImageBuffer → TextBuffer + spatial spans); family `ppocr` · `doctr` |
 
 > Streaming / live OCR is not yet available. `ocr-offline.md` is the sole OCR surface.
 

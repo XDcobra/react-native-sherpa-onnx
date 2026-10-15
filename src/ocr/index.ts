@@ -1,7 +1,7 @@
 /**
  * Offline OCR — public API for react-native-sherpa-onnx/ocr.
  *
- * ImageBuffer → TextBuffer (+ TextSpatialSpans). v1 backend: ppocr.
+ * ImageBuffer → TextBuffer (+ TextSpatialSpans). Backends: ppocr, doctr.
  */
 
 import {
