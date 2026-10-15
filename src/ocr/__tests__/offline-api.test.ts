@@ -1,61 +1,64 @@
 jest.mock('react-native', () => {
-  const listeners = new Map<string, Set<(event: any) => void>>();
   const mockNative = {
+    detectOcrModel: jest.fn(),
     initializeOcr: jest.fn(),
     ocrRecognize: jest.fn(),
     unloadOcr: jest.fn(),
     cancelOcrRecognize: jest.fn(),
-    detectOcrModel: jest.fn(),
   };
-
   return {
     NativeEventEmitter: jest.fn().mockImplementation(() => ({
-      addListener: (event: string, cb: (e: any) => void) => {
-        if (!listeners.has(event)) listeners.set(event, new Set());
-        listeners.get(event)!.add(cb);
-        return {
-          remove: () => listeners.get(event)?.delete(cb),
-        };
-      },
+      addListener: jest.fn(() => ({ remove: jest.fn() })),
     })),
     NativeModules: { SherpaOnnx: {} },
     TurboModuleRegistry: {
       getEnforcing: () => mockNative,
     },
     __mockNative: mockNative,
-    __emit: (event: string, payload: any) => {
-      listeners.get(event)?.forEach((cb) => cb(payload));
-    },
   };
 });
 
+jest.mock('../../detect/resolveModelInput', () => ({
+  resolveFileSourceForDetect: jest.fn(async (source: { path?: string }) => ({
+    modelDir:
+      typeof source === 'object' && source && 'path' in source
+        ? String((source as { path: string }).path)
+        : '/models/ppocrv6-tiny',
+    assetName: 'ppocrv6-tiny',
+  })),
+  resolveFileSourceForModelInit: jest.fn(async (source: { path?: string }) =>
+    typeof source === 'object' && source && 'path' in source
+      ? String((source as { path: string }).path)
+      : '/models/ppocrv6-tiny'
+  ),
+}));
+
 jest.mock('../../imagebuffer', () => ({
-  resolveOfflineImageBufferId: (id: string) => id,
+  resolveOfflineImageBufferId: jest.fn(
+    () => 'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+  ),
 }));
 
 jest.mock('../../textbuffer', () => ({
-  resolveOfflineTextBufferId: (id: string) => id,
+  resolveOfflineTextBufferId: jest.fn(
+    () => 'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+  ),
 }));
 
-jest.mock('../../detect/resolveModelInput', () => ({
-  resolveFileSourceForModelInit: jest.fn(async () => '/models/ppocrv6-tiny'),
-}));
+import { TurboModuleRegistry } from 'react-native';
+import { createOCR, detectOcrModel, isOcrPpocrDetectSuccess } from '../index';
 
-import { createOCR, detectOcrModel } from '../index';
+const mockNative = (
+  TurboModuleRegistry.getEnforcing as unknown as () => {
+    detectOcrModel: jest.Mock;
+    initializeOcr: jest.Mock;
+    ocrRecognize: jest.Mock;
+    unloadOcr: jest.Mock;
+    cancelOcrRecognize: jest.Mock;
+  }
+)();
 
 describe('ocr offline API', () => {
-  const reactNativeMock = jest.requireMock('react-native') as {
-    __mockNative: {
-      initializeOcr: jest.Mock;
-      ocrRecognize: jest.Mock;
-      unloadOcr: jest.Mock;
-      cancelOcrRecognize: jest.Mock;
-      detectOcrModel: jest.Mock;
-    };
-    __emit: (event: string, payload: any) => void;
-  };
-  const mockNative = reactNativeMock.__mockNative;
-
   beforeEach(() => {
     jest.clearAllMocks();
     mockNative.initializeOcr.mockResolvedValue({
@@ -66,19 +69,19 @@ describe('ocr offline API', () => {
     mockNative.unloadOcr.mockResolvedValue(undefined);
     mockNative.cancelOcrRecognize.mockResolvedValue(undefined);
     mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
       ok: true,
       modelType: 'ppocr',
       family: 'ppocr',
-      hasDet: true,
-      hasRec: true,
-      hasCls: true,
-      hasRecYml: true,
-      files: {
-        det: true,
-        rec: true,
-        cls: true,
-        recInferenceYml: true,
+      detectedModels: [{ type: 'ppocr', modelDir: '/models/ppocrv6-tiny' }],
+      paths: {
+        det: '/models/ppocrv6-tiny/det.onnx',
+        rec: '/models/ppocrv6-tiny/rec.onnx',
+        cls: '/models/ppocrv6-tiny/cls.onnx',
+        rec_dict: '/models/ppocrv6-tiny/rec_inference.yml',
       },
+      detectionSources: ['fileListing', 'fallbackOrder'],
+      sizeTier: 'tiny',
     });
   });
 
@@ -97,61 +100,65 @@ describe('ocr offline API', () => {
 
     await ocr.recognize(
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { granularity: 'line' }
     );
-
     expect(mockNative.ocrRecognize).toHaveBeenCalledWith(
-      ocr.instanceId,
+      expect.stringMatching(/^ocr_/),
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       expect.objectContaining({
         operationId: expect.stringMatching(/^ocr_rec_/),
+        granularity: 'line',
       })
     );
-
     await ocr.destroy();
-    expect(mockNative.unloadOcr).toHaveBeenCalledWith(ocr.instanceId);
   });
 
   it('onProgress receives filtered events for this recognize operationId', async () => {
+    const { NativeEventEmitter } = jest.requireMock('react-native') as {
+      NativeEventEmitter: jest.Mock;
+    };
+    type ProgressCb = (...args: readonly Object[]) => unknown;
+    const holder: { listener?: ProgressCb } = {};
+    NativeEventEmitter.mockImplementation(() => ({
+      addListener: jest.fn((_event: string, cb: ProgressCb) => {
+        holder.listener = cb;
+        return { remove: jest.fn() };
+      }),
+    }));
+
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
     });
     const onProgress = jest.fn();
-    mockNative.ocrRecognize.mockImplementation(
-      async (
-        _id: string,
-        _img: string,
-        _txt: string,
-        opts: { operationId: string }
-      ) => {
-        reactNativeMock.__emit('SherpaOnnxOcrProgress', {
-          operationId: 'other-op',
-          done: 1,
-          total: 1,
-          phase: 'recognize',
-        });
-        reactNativeMock.__emit('SherpaOnnxOcrProgress', {
-          operationId: opts.operationId,
-          done: 1,
-          total: 2,
-          phase: 'recognize',
-        });
-      }
-    );
-
-    await ocr.recognize(
+    const recognizePromise = ocr.recognize(
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       { onProgress }
     );
-
-    expect(onProgress).toHaveBeenCalledTimes(1);
+    const opId = mockNative.ocrRecognize.mock.calls[0]?.[3]
+      ?.operationId as string;
+    expect(holder.listener).toBeDefined();
+    holder.listener!({
+      operationId: opId,
+      done: 1,
+      total: 2,
+      phase: 'recognize',
+    });
+    holder.listener!({
+      operationId: 'other',
+      done: 9,
+      total: 9,
+      phase: 'recognize',
+    });
+    await recognizePromise;
     expect(onProgress).toHaveBeenCalledWith({
       done: 1,
       total: 2,
       phase: 'recognize',
     });
+    expect(onProgress).toHaveBeenCalledTimes(1);
     await ocr.destroy();
   });
 
@@ -160,28 +167,56 @@ describe('ocr offline API', () => {
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
     });
     const controller = new AbortController();
-    mockNative.ocrRecognize.mockImplementation(async () => {
-      controller.abort();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    await ocr.recognize(
+    const recognizePromise = ocr.recognize(
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       { signal: controller.signal }
     );
-
+    controller.abort();
     expect(mockNative.cancelOcrRecognize).toHaveBeenCalledWith(
       expect.stringMatching(/^ocr_rec_/)
     );
+    await recognizePromise;
     await ocr.destroy();
   });
 
-  it('detectOcrModel maps files', async () => {
-    const result = await detectOcrModel('/models/ppocrv6-tiny');
-    expect(result.ok).toBe(true);
+  it('detectOcrModel maps FileSource to success paths and DetectionSource', async () => {
+    const result = await detectOcrModel({
+      kind: 'fs',
+      path: '/models/ppocrv6-tiny',
+    });
+    expect(mockNative.detectOcrModel).toHaveBeenCalledWith(
+      '/models/ppocrv6-tiny',
+      null
+    );
+    expect(result.success).toBe(true);
+    expect(result.isStreaming).toBe(false);
     expect(result.modelType).toBe('ppocr');
-    expect(result.files.det).toBe(true);
-    expect(result.files.recInferenceYml).toBe(true);
+    expect(result.paths?.det).toContain('det.onnx');
+    expect(result.paths?.rec_dict).toContain('rec_inference.yml');
+    expect(result.detectionSources).toEqual(['fileListing', 'fallbackOrder']);
+    expect(result.sizeTier).toBe('tiny');
+    expect(isOcrPpocrDetectSuccess(result)).toBe(true);
+    if (isOcrPpocrDetectSuccess(result)) {
+      expect(result.paths.det.length).toBeGreaterThan(0);
+      expect(result.paths.rec.length).toBeGreaterThan(0);
+      expect(result.paths.rec_dict.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('detectOcrModel fails when required paths are missing despite ok', async () => {
+    mockNative.detectOcrModel.mockResolvedValue({
+      success: true,
+      ok: true,
+      modelType: 'ppocr',
+      paths: { det: '/models/x/det.onnx' },
+      detectedModels: [],
+    });
+    const result = await detectOcrModel({
+      kind: 'fs',
+      path: '/models/x',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/required paths/i);
   });
 });

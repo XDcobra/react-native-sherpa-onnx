@@ -10,14 +10,27 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
+import {
+  readDetectedModels,
+  readDetectionSources,
+} from '../detect/detectModelOutput';
+import type { FileSource } from '../fileio/types';
 import { resolveOfflineImageBufferId } from '../imagebuffer';
 import { resolveOfflineTextBufferId } from '../textbuffer';
+import type { SizeTier } from '../download/types';
+import {
+  normalizeQuantization,
+  type DetectedModelEntry,
+  type OcrDetectModelResult,
+} from '../types/modelDetect';
 import { buildOcrInitBridgeOptions } from './ocrNativeBridge';
 import type {
-  OcrDetectResult,
   OcrEngine,
+  OcrGranularity,
   OcrInitializeOptions,
-  OcrProgress,
+  OcrModelType,
+  OcrProgressNativeEvent,
   OcrRecognizeOptions,
 } from './types';
 import { OcrErrorCode } from './types';
@@ -30,18 +43,31 @@ const getNative = (): Spec =>
 let ocrInstanceCounter = 0;
 let opIdCounter = 0;
 
-function cancelledError(): Error {
+function cancelledError(): Error & { code: typeof OcrErrorCode.CANCELLED } {
   const err = new Error('OCR recognize cancelled') as Error & {
-    code?: string;
+    code: typeof OcrErrorCode.CANCELLED;
   };
   err.code = OcrErrorCode.CANCELLED;
   return err;
 }
 
+function normalizeSizeTier(raw: string | undefined): SizeTier | undefined {
+  if (
+    raw === 'tiny' ||
+    raw === 'small' ||
+    raw === 'medium' ||
+    raw === 'large' ||
+    raw === 'unknown'
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
 function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   nativeOptions: {
     frames?: number[];
-    granularity?: string;
+    granularity?: OcrGranularity;
     operationId: string;
   };
   cleanup: () => void;
@@ -49,7 +75,7 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   const operationId = `ocr_rec_${Date.now()}_${++opIdCounter}`;
   const nativeOptions: {
     frames?: number[];
-    granularity?: string;
+    granularity?: OcrGranularity;
     operationId: string;
   } = { operationId };
 
@@ -64,18 +90,23 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   let abortHandler: (() => void) | null = null;
 
   if (options?.onProgress) {
-    const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+    const emitter = new NativeEventEmitter(
+      NativeModules.SherpaOnnx as {
+        addListener: (eventType: string) => void;
+        removeListeners: (count: number) => void;
+      }
+    );
     const onProgress = options.onProgress;
     progressSubscription = emitter.addListener(
       'SherpaOnnxOcrProgress',
-      (event: any) => {
+      (...args: readonly Object[]) => {
+        const event = args[0] as OcrProgressNativeEvent;
         if (event?.operationId === operationId) {
-          const progress: OcrProgress = {
+          onProgress({
             done: event.done,
             total: event.total,
             phase: event.phase,
-          };
-          onProgress(progress);
+          });
         }
       }
     );
@@ -105,27 +136,114 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   };
 }
 
+function pathFromRaw(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+  return undefined;
+}
+
 /**
- * Lightweight OCR pack layout detect (ppocr files).
- * Does not download models — pass a resolved local model directory.
+ * Family-aware OCR pack detect (ppocr Det+Rec+dict co-occurrence).
+ * Accepts a {@link FileSource} like alignment/punctuation detect.
  */
 export async function detectOcrModel(
-  modelDir: string
-): Promise<OcrDetectResult> {
-  const raw = await getNative().detectOcrModel(modelDir);
+  source: FileSource,
+  options?: { modelType?: OcrModelType }
+): Promise<OcrDetectModelResult> {
+  const resolved = await resolveFileSourceForDetect(source);
+  const modelDir = resolved.modelDir;
+  if (!modelDir) {
+    return {
+      success: false,
+      isStreaming: false,
+      detectedModels: [],
+      error: 'OCR: model directory could not be resolved from FileSource',
+    };
+  }
+
+  const raw = await getNative().detectOcrModel(
+    modelDir,
+    options?.modelType ?? null
+  );
+
+  const successFlag = Boolean(raw.success ?? raw.ok);
+  const err =
+    typeof raw.error === 'string' && raw.error.trim().length > 0
+      ? raw.error.trim()
+      : typeof raw.errorMessage === 'string' &&
+        raw.errorMessage.trim().length > 0
+      ? raw.errorMessage.trim()
+      : '';
+
+  let detectedModels: DetectedModelEntry[] = readDetectedModels(
+    raw.detectedModels
+  );
+  const modelType =
+    typeof raw.modelType === 'string' && raw.modelType.length > 0
+      ? raw.modelType
+      : undefined;
+  if (detectedModels.length === 0 && modelType) {
+    detectedModels = [{ type: modelType, modelDir }];
+  }
+
+  const detectionSources = readDetectionSources(raw.detectionSources);
+  const quantization = normalizeQuantization(raw.quantization);
+  const sizeTier = normalizeSizeTier(
+    typeof raw.sizeTier === 'string' ? raw.sizeTier : undefined
+  );
+
+  const pathsRaw = raw.paths ?? {};
   const filesRaw = (raw.files ?? {}) as Record<string, unknown>;
+  const det =
+    pathFromRaw(pathsRaw.det) ??
+    pathFromRaw(filesRaw.det) ??
+    pathFromRaw(raw.detPath);
+  const rec =
+    pathFromRaw(pathsRaw.rec) ??
+    pathFromRaw(filesRaw.rec) ??
+    pathFromRaw(raw.recPath);
+  const cls =
+    pathFromRaw(pathsRaw.cls) ??
+    pathFromRaw(filesRaw.cls) ??
+    pathFromRaw(raw.clsPath);
+  const recDict =
+    pathFromRaw(pathsRaw.rec_dict) ??
+    pathFromRaw(filesRaw.recInferenceYml) ??
+    pathFromRaw(filesRaw.rec_dict) ??
+    pathFromRaw(raw.recDictPath);
+
+  const paths =
+    det || rec || cls || recDict
+      ? {
+          ...(det ? { det } : {}),
+          ...(rec ? { rec } : {}),
+          ...(cls ? { cls } : {}),
+          ...(recDict ? { rec_dict: recDict } : {}),
+        }
+      : undefined;
+
+  // ValidateOcrPaths contract: success requires det + rec + rec_dict.
+  const pathsComplete = Boolean(det && rec && recDict);
+  const success = successFlag && pathsComplete;
+
   return {
-    ok: Boolean(raw.ok),
-    modelType: raw.modelType || '',
-    family: raw.family || '',
-    files: {
-      det: Boolean(filesRaw.det ?? raw.hasDet),
-      rec: Boolean(filesRaw.rec ?? raw.hasRec),
-      cls: Boolean(filesRaw.cls ?? raw.hasCls),
-      recInferenceYml: Boolean(filesRaw.recInferenceYml ?? raw.hasRecYml),
-    },
-    ...(raw.errorCode ? { errorCode: raw.errorCode } : {}),
-    ...(raw.errorMessage ? { errorMessage: raw.errorMessage } : {}),
+    success,
+    isStreaming: false,
+    detectedModels,
+    ...(err.length > 0 || (successFlag && !pathsComplete)
+      ? {
+          error:
+            err.length > 0
+              ? err
+              : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing',
+        }
+      : {}),
+    ...(modelType != null ? { modelType } : {}),
+    ...(quantization != null ? { quantization } : {}),
+    ...(sizeTier != null ? { sizeTier } : {}),
+    ...(detectionSources.length > 0 ? { detectionSources } : {}),
+    ...(paths != null ? { paths } : {}),
   };
 }
 
@@ -154,8 +272,8 @@ export async function createOCR(
           code: OcrErrorCode.INSTANCE_NOT_FOUND,
         });
       }
-      const imageId = resolveOfflineImageBufferId(imageBuffer as any);
-      const textId = resolveOfflineTextBufferId(textOut as any);
+      const imageId = resolveOfflineImageBufferId(imageBuffer);
+      const textId = resolveOfflineTextBufferId(textOut);
       const { nativeOptions, cleanup } =
         beginRecognizeProgressCancel(recognizeOptions);
       try {
@@ -190,8 +308,10 @@ export async function createOCR(
 export type {
   OcrModelType,
   OcrConcreteModelType,
+  OcrFamily,
   OcrGranularity,
   OcrProgress,
+  OcrProgressNativeEvent,
   OcrPpocrOptions,
   OcrInitializeOptions,
   OcrRecognizeOptions,
@@ -200,4 +320,9 @@ export type {
   OcrErrorCodeValue,
 } from './types';
 
-export { OcrErrorCode } from './types';
+export type {
+  OcrDetectModelResult,
+  OcrPpocrSuccessPaths,
+} from '../types/modelDetect';
+
+export { OcrErrorCode, isOcrPpocrDetectSuccess } from './types';

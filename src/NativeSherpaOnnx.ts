@@ -293,6 +293,60 @@ export type PunctuationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeOcr(instanceId, options)`. */
+export type OcrInitBridgeOptions = {
+  modelDir: string;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  maxSideLen?: number;
+  useOrientationCls?: boolean;
+};
+
+/** `ocrRecognize(..., options)`. */
+export type OcrRecognizeBridgeOptions = {
+  frames?: number[];
+  granularity?: string;
+  operationId?: string;
+};
+
+/** Native result from `detectOcrModel`. */
+export type OcrDetectNativeResult = {
+  success: boolean;
+  /** @deprecated Prefer `success`; kept for older native bridges. */
+  ok?: boolean;
+  error?: string;
+  errorMessage?: string;
+  errorCode?: string;
+  modelType?: string;
+  family?: string;
+  detectedModels?: Array<{ type: string; modelDir: string }>;
+  paths?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    rec_dict?: string;
+  };
+  /** Legacy path map (string values). */
+  files?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    recInferenceYml?: string;
+  };
+  detectionSources?: string[];
+  quantization?: string;
+  sizeTier?: string;
+  hasDet?: boolean;
+  hasRec?: boolean;
+  hasCls?: boolean;
+  hasRecYml?: boolean;
+  detPath?: string;
+  recPath?: string;
+  clsPath?: string;
+  recDictPath?: string;
+};
+
 /** Structured language row from native detect bridge. */
 export type NativePublicLanguageRow = {
   iso6391Hint: string;
@@ -985,36 +1039,27 @@ export interface Spec extends TurboModule {
 
   // ==================== Offline OCR ====================
 
-  /** Lightweight layout detect (ppocr pack files). */
-  detectOcrModel(modelDir: string): Promise<{
-    ok: boolean;
-    modelType: string;
-    family: string;
-    hasDet?: boolean;
-    hasRec?: boolean;
-    hasCls?: boolean;
-    hasRecYml?: boolean;
-    files?: Object;
-    errorCode?: string;
-    errorMessage?: string;
-  }>;
+  /** Family-aware OCR pack detect (ppocr Det+Rec+dict). */
+  detectOcrModel(
+    modelDir: string,
+    modelType?: string | null
+  ): Promise<OcrDetectNativeResult>;
 
   /** Load an OCR engine instance (Cpp OcrEngine + backend). */
   initializeOcr(
     instanceId: string,
-    options: Object
+    options: OcrInitBridgeOptions
   ): Promise<{ instanceId: string; modelType: string }>;
 
   /**
    * Recognize frames from an offline ImageBuffer into an empty OfflineTextBuffer.
-   * Options may include `{ frames?: number[], granularity?: string, operationId?: string }`.
    * Progress events: `SherpaOnnxOcrProgress` with `{ operationId, done, total, phase }`.
    */
   ocrRecognize(
     instanceId: string,
     imageBufferId: string,
     textOutBufferId: string,
-    options?: Object
+    options?: OcrRecognizeBridgeOptions
   ): Promise<void>;
 
   /** Cancel an in-flight OCR recognize by native operationId. */

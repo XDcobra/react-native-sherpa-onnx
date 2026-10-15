@@ -1,22 +1,17 @@
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
-import type { OcrInitializeOptions } from './types';
+import type { OcrInitBridgeOptions } from '../NativeSherpaOnnx';
+import type { OcrInitializeOptions, OcrModelType } from './types';
 
-export type OcrInitBridgeOptions = {
-  modelDir: string;
-  modelType: string;
-  numThreads?: number;
-  provider?: string;
-  maxSideLen?: number;
-  useOrientationCls?: boolean;
-};
+export type { OcrInitBridgeOptions };
 
 export async function buildOcrInitBridgeOptions(
   options: OcrInitializeOptions
 ): Promise<OcrInitBridgeOptions> {
   const modelDir = await resolveFileSourceForModelInit(options.modelSource);
+  const modelType: OcrModelType = options.modelType ?? 'auto';
   return {
     modelDir,
-    modelType: options.modelType ?? 'auto',
+    modelType,
     ...(options.numThreads !== undefined
       ? { numThreads: options.numThreads }
       : {}),

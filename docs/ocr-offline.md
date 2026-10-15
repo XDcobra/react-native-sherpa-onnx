@@ -75,7 +75,7 @@ createOCR({
 }): Promise<OcrEngine>
 ```
 
-`modelType: 'auto'` runs a lightweight pack-layout detect (`det.onnx` + `rec.onnx` + `rec_inference.yml` → `ppocr`). Full download/catalog integration comes later.
+`modelType: 'auto'` runs family-aware pack detect (see [Detect](#detect)).
 
 ### `ocr.recognize(imageBuffer, textOut, options?)`
 
@@ -96,9 +96,47 @@ ocr.recognize(imageBuffer, textOut, {
 
 Releases the native engine (idempotent).
 
-### `detectOcrModel(modelDir)`
+### `detectOcrModel(source, options?)`
 
-Returns `{ ok, modelType, family, files: { det, rec, cls, recInferenceYml }, … }` for a local directory. No downloads.
+```ts
+detectOcrModel(
+  source: FileSource,
+  options?: { modelType?: OcrModelType }
+): Promise<OcrDetectModelResult>
+```
+
+Returns the shared detect contract (`ModelDetectResultBase`): `success`, `isStreaming: false`, `detectedModels`, optional `modelType` / `paths` / `detectionSources` / `quantization` / `sizeTier`.
+
+On success for ppocr, use `isOcrPpocrDetectSuccess(result)` to narrow `paths` to required `{ det, rec, rec_dict }` (`cls` optional). No downloads.
+
+---
+
+## Detect
+
+Detect lives under `jni/model_detect/ocr/` (same pattern as punctuation / alignment): recursive file listing → capability co-occurrence → `DetectionSource` trace. Public API accepts `FileSource` like `detectAlignmentModel`.
+
+**ppocr (v1)** requires Det ONNX + Rec ONNX + recognition dictionary (`paths.rec_dict`). Prefer canonical names (`det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`), but fall back to filename tokens (`detection` / `dbnet`, `recognition` / `crnn` / `svtr`, `inference.yml` / `dict.txt` / `ppocr_keys*`, optional `cls` / `ori` / `orientation`).
+
+`auto` only selects known families. Unknown layouts → detect `success: false`. A `doctr` capability hook is reserved for a future backend.
+
+**No ORT online-guard** for OCR: packs are offline multi-file layouts. Guards in this repo exist where they discriminate streaming/online contracts (punctuation CNN-BiLSTM, enhancement, STT-online). OCR follows alignment: file co-occurrence is the signal. A weak “session opens” check would not discriminate meaningfully.
+
+---
+
+## Download
+
+- **Category:** `ModelCategory.Ocr`
+- **Release tag:** `ocr-models` on `XDcobra/react-native-sherpa-onnx` (default source `github_xdcobra`)
+- **Assets:** `.tar.bz2` packs (`ppocrv6-tiny` / `small` / `medium`, …)
+- Catalog refresh uses unified name-only detect (`ppocr` from asset basename heuristics)
+
+```ts
+import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
+
+const model = await ensureModel(ModelCategory.Ocr, 'ppocrv6-tiny');
+```
+
+Collect stream `ocr` in `collect-model-structures` refreshes `test/fixtures/ocr-models-structure.txt` + expected CSV for host detect tests.
 
 ---
 
@@ -115,14 +153,14 @@ Same DX as offline ImageBuffer create:
 
 1. Implement `OcrBackend` (`Load` / `Recognize` / `Release` / `Family`) under `android/src/main/cpp/ocr/<family>/`.
 2. Register in `OcrFactory::CreateOcrBackend`.
-3. Extend layout detect in `OcrDetect` (and later Download `ModelCategory.Ocr`).
-4. Add `modelType` to the TS `OcrModelType` union and optional family options map.
+3. Add a detect capability rule in `jni/model_detect/ocr/` (co-occurrence / tokens; optional ORT guard only if it discriminates).
+4. Publish pack layout docs + collect fixtures; extend `OcrModelType` and optional family options.
 5. Do **not** change ImageBuffer, `TextSpatialSpan`, or `recognize(image → text)` signatures.
 
 ---
 
-## See also
+## Related
 
-- [Offline ImageBuffer](imagebuffer-offline.md)
-- [Offline TextBuffer](textbuffer-offline.md) (spatial spans)
+- [ImageBuffer offline](imagebuffer-offline.md)
+- [TextBuffer spatial spans](textbuffer-offline.md)
 - [Execution providers](execution-providers.md)

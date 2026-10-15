@@ -1,7 +1,11 @@
 import type { PublicLanguageHint } from '../model-languages';
-import type { Quantization, QuantizationPreference } from '../download/types';
+import type {
+  Quantization,
+  QuantizationPreference,
+  SizeTier,
+} from '../download/types';
 
-export type { Quantization, QuantizationPreference };
+export type { Quantization, QuantizationPreference, SizeTier };
 
 export function normalizeQuantization(raw: unknown): Quantization | undefined {
   if (typeof raw !== 'string' || raw.trim().length === 0) return undefined;
@@ -154,6 +158,33 @@ export interface AlignmentDetectModelResult extends ModelDetectResultBase {
   paths?: {
     model?: string;
     vocab?: string;
+  };
+}
+
+// ─── OCR extension ──────────────────────────────────────────────────────
+
+/** Required paths when OCR detect succeeds for ppocr (cls remains optional). */
+export type OcrPpocrSuccessPaths = {
+  det: string;
+  rec: string;
+  rec_dict: string;
+  cls?: string;
+};
+
+export interface OcrDetectModelResult extends ModelDetectResultBase {
+  /**
+   * Always `false` — OCR packs are offline multi-file layouts (no streaming
+   * session contract; no ORT online-guard).
+   */
+  // isStreaming from base
+  /** tiny / small / medium / large / unknown — from pack basename heuristics. */
+  sizeTier?: SizeTier;
+  paths?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    /** Recognition dictionary (yml/txt); native key `rec_dict`. */
+    rec_dict?: string;
   };
 }
 
