@@ -1,9 +1,10 @@
 /**
  * Host GTests for DocVlmBackend.
  *
- * Grid math and DocTags always run. Tokenizer / prompt tests skip when the
- * granite-docling pack is absent. The ORT smoke skips with an unpack hint
- * (this pack is not on the PR workflow). Strict golden is opt-in.
+ * Grid math, DocTags, Family, and empty extras always run. Those unit tests
+ * run on the PR job without the granite pack. Tokenizer / prompt tests and
+ * DocVlmSmoke.EnHello run only when the pack is present (local unpack or
+ * workflow_dispatch); otherwise they skip. Strict golden is opt-in.
  *
  * Pack: DOCVLM_MODEL_DIR, else build/ocr-models/docvlm-granite-258m,
  * else dist/ocr-models/docvlm-granite-258m.

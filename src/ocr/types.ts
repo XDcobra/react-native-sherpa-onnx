@@ -70,7 +70,7 @@ export type OcrDoctrOptions = {
 
 /**
  * doc_vlm generation options. Applied only when the loaded family is `doc_vlm`
- * (`modelType: 'doc_vlm'`, or `auto` once Phase 4 detect can resolve this pack).
+ * (`modelType: 'doc_vlm'`, or `auto`, which resolves a granite directory through detect).
  * Ignored by ppocr and doctr. Decode is greedy; this object does not grow
  * sampling fields in v1.
  */
@@ -130,8 +130,9 @@ export type OcrRecognizeOptions = {
   /** Frame indices to run; default = all frames in the image buffer. */
   frames?: number[];
   /**
-   * Requested span level. v1 PpocrBackend emits `line` only;
-   * other values filter spans (may yield an empty span list).
+   * Requested span level. Backends emit `line`. `doc_vlm` also emits `block`
+   * for titles. Other granularity values filter spans and may leave the span
+   * list empty; text is still filled.
    */
   granularity?: OcrGranularity;
   onProgress?: (progress: OcrProgress) => void;
@@ -161,7 +162,7 @@ export type OcrRecognizeResult = {
   doctags: string;
   /**
    * Lossy markdown from the same DocTags walk. `""` for ppocr and doctr.
-   * doc_vlm: empty only when the plain text is empty (Phase 2 §7.2).
+   * doc_vlm: empty only when the plain text is empty.
    */
   markdown: string;
 };
