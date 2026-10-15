@@ -152,7 +152,7 @@ TEST(OcrFactory, UnknownBackendThrows) {
   EXPECT_THROW(
       {
         try {
-          CreateOcrBackend("doctr");
+          CreateOcrBackend("easyocr");
         } catch (const std::invalid_argument& e) {
           EXPECT_NE(std::string(e.what()).find("Unknown OCR"), std::string::npos);
           throw;
