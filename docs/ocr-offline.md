@@ -126,11 +126,11 @@ try {
 | `ppocr` | Det ONNX + Rec ONNX + recognition dictionary (`paths.rec_dict`) | Cls / orientation ONNX (`paths.cls`) |
 | `auto` | Same — only known families | — |
 
-Prefer canonical names (`det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`). Detect also accepts filename tokens (`detection` / `dbnet`, `recognition` / `crnn` / `svtr`, `inference.yml` / `dict.txt` / `ppocr_keys*`, optional `cls` / `ori` / `orientation`). Layout detect only (no ORT online-guard) — same stance as Alignment.
+Canonical names: `det.onnx`, `rec.onnx`, `rec_inference.yml`, optional `cls.onnx`.
 
 ### Official packs (verified)
 
-Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) on `XDcobra/react-native-sherpa-onnx` (default source `github_xdcobra`):
+Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) (`github_xdcobra`):
 
 | Archive | Tier | Language hints | Notes |
 | --- | --- | --- | --- |
@@ -138,9 +138,7 @@ Release tag [`ocr-models`](https://github.com/XDcobra/react-native-sherpa-onnx/r
 | `ppocrv6-small.tar.bz2` | small | ~49 ISO (`zh`, `en`, `ja` + 46 Latin) | Higher quality |
 | `ppocrv6-medium.tar.bz2` | medium | same as small | Best quality, larger download |
 
-Upstream PP-OCRv6 covers ~50 named languages (Simplified + Traditional Chinese counted separately; both map to ISO `zh` in our catalog). Detect hints: basename heuristics → pack CSV (`scripts/ocr-models/sources.csv`) → family `ppocr`. Picker: `getPpocrLanguages()` / `iso6391HintsForOcrModelType` from [`model-languages`](model-languages.md).
-
-Licenses: `apache-2.0` / commercial `yes` via `getModelLicenses()`. Validate category: **`ocr`**. Overview: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
+Validate category: **`ocr`**. Language picker: [`getPpocrLanguages()`](model-languages.md). Downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
