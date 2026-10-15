@@ -53,6 +53,9 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
   for (const auto& m : native.detectedModels) {
     out.detectedModels.push_back({m.type, m.modelDir});
   }
+  for (const auto& row : native.derivedLanguages) {
+    out.languages.push_back({row.iso6391Hint, row.id});
+  }
 
   if (native.ok) {
     out.ok = true;

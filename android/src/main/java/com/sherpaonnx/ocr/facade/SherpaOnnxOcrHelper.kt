@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import com.sherpaonnx.SherpaOnnxModule
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.ocr.OcrNative
 import com.sherpaonnx.ocr.core.OcrErrorCodes
@@ -354,6 +355,13 @@ class SherpaOnnxOcrHelper(
       modelsArr.pushMap(row)
     }
     map.putArray("detectedModels", modelsArr)
+
+    SherpaOnnxModule.publicLanguageRowsToWritableArray(
+      raw["languages"] as? ArrayList<*>
+    )?.let { rows ->
+      map.putArray("languages", rows)
+    }
+
     return map
   }
 }

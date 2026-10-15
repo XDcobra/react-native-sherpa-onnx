@@ -18,7 +18,11 @@ import {
 import type { FileSource } from '../fileio/types';
 import { resolveOfflineImageBufferId } from '../imagebuffer';
 import { resolveOfflineTextBufferId } from '../textbuffer';
-import type { SizeTier } from '../download/types';
+import { ModelCategory, type SizeTier } from '../download/types';
+import {
+  publicLanguageHintsFromNative,
+  readPublicLanguageRows,
+} from '../model-languages';
 import {
   normalizeQuantization,
   type DetectedModelEntry,
@@ -192,6 +196,12 @@ export async function detectOcrModel(
   const sizeTier = normalizeSizeTier(
     typeof raw.sizeTier === 'string' ? raw.sizeTier : undefined
   );
+  const resolvedLanguages = publicLanguageHintsFromNative({
+    domain: ModelCategory.Ocr,
+    modelType,
+    modelKey: modelDir,
+    rawRows: readPublicLanguageRows(raw.languages),
+  });
 
   const pathsRaw = raw.paths ?? {};
   const filesRaw = (raw.files ?? {}) as Record<string, unknown>;
@@ -240,6 +250,7 @@ export async function detectOcrModel(
         }
       : {}),
     ...(modelType != null ? { modelType } : {}),
+    ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(sizeTier != null ? { sizeTier } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),

@@ -335,6 +335,8 @@ export type OcrDetectNativeResult = {
     recInferenceYml?: string;
   };
   detectionSources?: string[];
+  /** Curated / heuristic language rows from native detect. */
+  languages?: NativePublicLanguageRow[];
   quantization?: string;
   sizeTier?: string;
   hasDet?: boolean;

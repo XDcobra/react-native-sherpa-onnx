@@ -11,6 +11,12 @@ struct OcrDetectedModelEntry {
   std::string modelDir;
 };
 
+/** Public language row mirrored from native detect (`iso6391Hint` + `id`). */
+struct OcrLanguageRow {
+  std::string iso6391Hint;
+  std::string id;
+};
+
 struct OcrDetectResult {
   bool ok = false;
   std::string modelType;  // concrete, e.g. "ppocr"
@@ -27,6 +33,8 @@ struct OcrDetectResult {
   /** DetectionSource literals (fileListing, fallbackOrder, …). */
   std::vector<std::string> detectionSources;
   std::vector<OcrDetectedModelEntry> detectedModels;
+  /** Basename heuristics and/or curated pack/family language hints. */
+  std::vector<OcrLanguageRow> languages;
   std::string quantization;
   std::string sizeTier;
   std::string errorCode;

@@ -4,6 +4,8 @@
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
+#include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
+#include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include <map>
@@ -152,6 +154,16 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
     if (!detect.sizeTier.empty()) {
       out[@"sizeTier"] =
           [NSString stringWithUTF8String:detect.sizeTier.c_str()];
+    }
+    if (!detect.languages.empty()) {
+      std::vector<sherpaonnx::PublicLanguageRow> rows;
+      rows.reserve(detect.languages.size());
+      for (const auto &lang : detect.languages) {
+        rows.push_back(
+            sherpaonnx::PublicLanguageRow{lang.iso6391Hint, lang.id});
+      }
+      out[@"languages"] =
+          sherpaonnx::detect::bridge::PublicLanguageRowsToNSArray(rows);
     }
     if (!detect.errorCode.empty()) {
       out[@"errorCode"] = [NSString stringWithUTF8String:detect.errorCode.c_str()];

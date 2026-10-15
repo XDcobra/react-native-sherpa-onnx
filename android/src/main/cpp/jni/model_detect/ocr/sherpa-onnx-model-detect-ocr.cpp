@@ -2,6 +2,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-catalog-metadata.h"
 #include "sherpa-onnx-validate-ocr.h"
+#include "model_language_catalog.h"
 
 #include <algorithm>
 #include <optional>
@@ -272,6 +273,8 @@ void FillOcrCatalogHeuristics(sherpaonnx::OcrDetectResult& result,
             result.quantization = fileQuant;
         }
     }
+    // Basename heuristics first; curated pack/family rows only when empty.
+    sherpaonnx::AppendCuratedOcrLanguageRowsIfEmpty(result, BaseName(nameHint));
 }
 
 }  // namespace

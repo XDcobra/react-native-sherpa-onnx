@@ -1,6 +1,8 @@
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
+#include "sherpa-onnx-detect-jni-common.h"
+#include "sherpa-onnx-model-detect.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -266,6 +268,25 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     }
   }
   if (arrayListClass) env->DeleteLocalRef(arrayListClass);
+
+  if (!detect.languages.empty()) {
+    std::vector<sherpaonnx::PublicLanguageRow> rows;
+    rows.reserve(detect.languages.size());
+    for (const auto& lang : detect.languages) {
+      rows.push_back(
+          sherpaonnx::PublicLanguageRow{lang.iso6391Hint, lang.id});
+    }
+    jobject derivedLangs =
+        sherpaonnx::BuildPublicLanguageRowList(env, rows);
+    if (derivedLangs) {
+      jstring keyLang = env->NewStringUTF("languages");
+      if (keyLang) {
+        env->CallObjectMethod(map, put, keyLang, derivedLangs);
+        env->DeleteLocalRef(keyLang);
+      }
+      env->DeleteLocalRef(derivedLangs);
+    }
+  }
 
   PutString(env, map, put, "errorCode", detect.errorCode);
   PutString(env, map, put, "errorMessage", detect.errorMessage);
