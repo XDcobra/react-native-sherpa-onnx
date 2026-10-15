@@ -75,6 +75,8 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("detBoxScoreThresh")) options.getDouble("detBoxScoreThresh").toFloat() else 0.5f
       val detUnclipRatio =
         if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
+      val maxNewTokens =
+        if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
 
       val sentinel = Any()
       instances[instanceId] = sentinel
@@ -90,6 +92,7 @@ class SherpaOnnxOcrHelper(
           detBoxThresh,
           detBoxScoreThresh,
           detUnclipRatio,
+          maxNewTokens,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
@@ -217,6 +220,18 @@ class SherpaOnnxOcrHelper(
       val spanMaps = raw["spans"] as? ArrayList<HashMap<String, Any>> ?: arrayListOf()
       val spans = spanMaps.map { mapNativeSpan(it, imageBufferId) }
 
+      val family = raw["family"] as? String
+      if (family.isNullOrBlank()) {
+        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing family")
+        return
+      }
+      val doctags = raw["doctags"] as? String
+      val markdown = raw["markdown"] as? String
+      if (doctags == null || markdown == null) {
+        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
+        return
+      }
+
       try {
         textEntry.populate(
           text = text,
@@ -235,9 +250,14 @@ class SherpaOnnxOcrHelper(
 
       Log.i(
         TAG,
-        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length}",
+        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} doctagsLen=${doctags.length} markdownLen=${markdown.length}",
       )
-      promise.resolve(null)
+      val result = Arguments.createMap()
+      result.putString("family", family)
+      result.putInt("spanCount", spans.size)
+      result.putString("doctags", doctags)
+      result.putString("markdown", markdown)
+      promise.resolve(result)
     } catch (e: Exception) {
       Log.e(TAG, "ocrRecognize failed", e)
       promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, e.message, e)

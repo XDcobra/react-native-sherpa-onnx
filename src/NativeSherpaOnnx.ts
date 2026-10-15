@@ -306,6 +306,15 @@ export type OcrInitBridgeOptions = {
   detBoxThresh?: number;
   detBoxScoreThresh?: number;
   detUnclipRatio?: number;
+  /** doc_vlm generation cap. Omit → native 0 → backend default 8192. */
+  maxNewTokens?: number;
+};
+
+export type OcrRecognizeNativeResult = {
+  family: string;
+  spanCount: number;
+  doctags: string;
+  markdown: string;
 };
 
 /** `ocrRecognize(..., options)`. */
@@ -331,8 +340,15 @@ export type OcrDetectNativeResult = {
     rec?: string;
     cls?: string;
     rec_dict?: string;
-    /** `ocr_manifest.json` — doctr family. */
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
     manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
   };
   /** Legacy path map (string values). */
   files?: {
@@ -1071,7 +1087,7 @@ export interface Spec extends TurboModule {
     imageBufferId: string,
     textOutBufferId: string,
     options?: OcrRecognizeBridgeOptions
-  ): Promise<void>;
+  ): Promise<OcrRecognizeNativeResult>;
 
   /** Cancel an in-flight OCR recognize by native operationId. */
   cancelOcrRecognize(operationId: string): Promise<void>;

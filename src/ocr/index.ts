@@ -1,7 +1,7 @@
 /**
  * Offline OCR — public API for react-native-sherpa-onnx/ocr.
  *
- * ImageBuffer → TextBuffer (+ TextSpatialSpans). Backends: ppocr, doctr.
+ * ImageBuffer → TextBuffer (+ TextSpatialSpans). Backends: ppocr, doctr, doc_vlm.
  */
 
 import {
@@ -9,7 +9,7 @@ import {
   NativeModules,
   TurboModuleRegistry,
 } from 'react-native';
-import type { Spec } from '../NativeSherpaOnnx';
+import type { OcrRecognizeNativeResult, Spec } from '../NativeSherpaOnnx';
 import { resolveFileSourceForDetect } from '../detect/resolveModelInput';
 import {
   readDetectedModels,
@@ -36,6 +36,7 @@ import type {
   OcrModelType,
   OcrProgressNativeEvent,
   OcrRecognizeOptions,
+  OcrRecognizeResult,
 } from './types';
 import { OcrErrorCode } from './types';
 
@@ -226,28 +227,82 @@ export async function detectOcrModel(
     pathFromRaw(pathsRaw.manifest) ??
     pathFromRaw(filesRaw.manifest) ??
     pathFromRaw(raw.manifestPath);
+  const visionEncoder =
+    pathFromRaw(pathsRaw.vision_encoder) ??
+    pathFromRaw(filesRaw.vision_encoder);
+  const visionEncoderData =
+    pathFromRaw(pathsRaw.vision_encoder_data) ??
+    pathFromRaw(filesRaw.vision_encoder_data);
+  const embedTokens =
+    pathFromRaw(pathsRaw.embed_tokens) ?? pathFromRaw(filesRaw.embed_tokens);
+  const embedTokensData =
+    pathFromRaw(pathsRaw.embed_tokens_data) ??
+    pathFromRaw(filesRaw.embed_tokens_data);
+  const decoder =
+    pathFromRaw(pathsRaw.decoder) ?? pathFromRaw(filesRaw.decoder);
+  const decoderData =
+    pathFromRaw(pathsRaw.decoder_data) ?? pathFromRaw(filesRaw.decoder_data);
+  const tokenizer =
+    pathFromRaw(pathsRaw.tokenizer) ?? pathFromRaw(filesRaw.tokenizer);
 
   const paths =
-    det || rec || cls || recDict || manifest
+    det ||
+    rec ||
+    cls ||
+    recDict ||
+    manifest ||
+    visionEncoder ||
+    visionEncoderData ||
+    embedTokens ||
+    embedTokensData ||
+    decoder ||
+    decoderData ||
+    tokenizer
       ? {
           ...(det ? { det } : {}),
           ...(rec ? { rec } : {}),
           ...(cls ? { cls } : {}),
           ...(recDict ? { rec_dict: recDict } : {}),
           ...(manifest ? { manifest } : {}),
+          ...(visionEncoder ? { vision_encoder: visionEncoder } : {}),
+          ...(visionEncoderData
+            ? { vision_encoder_data: visionEncoderData }
+            : {}),
+          ...(embedTokens ? { embed_tokens: embedTokens } : {}),
+          ...(embedTokensData ? { embed_tokens_data: embedTokensData } : {}),
+          ...(decoder ? { decoder } : {}),
+          ...(decoderData ? { decoder_data: decoderData } : {}),
+          ...(tokenizer ? { tokenizer } : {}),
         }
       : undefined;
 
-  // Family-aware completeness: ppocr needs det+rec+rec_dict; doctr needs det+rec+manifest.
+  // Family-aware completeness: ppocr det+rec+rec_dict; doctr det+rec+manifest;
+  // doc_vlm vision/embed/decoder (+ .onnx_data), tokenizer, and manifest.
   const family = typeof raw.modelType === 'string' ? raw.modelType : '';
   let pathsComplete: boolean;
   if (family === 'doctr') {
     pathsComplete = Boolean(det && rec && manifest);
+  } else if (family === 'doc_vlm') {
+    pathsComplete = Boolean(
+      visionEncoder &&
+        visionEncoderData &&
+        embedTokens &&
+        embedTokensData &&
+        decoder &&
+        decoderData &&
+        tokenizer &&
+        manifest
+    );
   } else {
-    // ppocr or unknown — original contract
     pathsComplete = Boolean(det && rec && recDict);
   }
   const success = successFlag && pathsComplete;
+  const missingPathsError =
+    family === 'doctr'
+      ? 'OCR detect reported success but required paths (det/rec/manifest) were missing'
+      : family === 'doc_vlm'
+      ? 'OCR detect reported success but required paths (vision_encoder/embed_tokens/decoder/tokenizer/manifest and .onnx_data) were missing'
+      : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing';
 
   return {
     success,
@@ -255,12 +310,7 @@ export async function detectOcrModel(
     detectedModels,
     ...(err.length > 0 || (successFlag && !pathsComplete)
       ? {
-          error:
-            err.length > 0
-              ? err
-              : family === 'doctr'
-              ? 'OCR detect reported success but required paths (det/rec/manifest) were missing'
-              : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing',
+          error: err.length > 0 ? err : missingPathsError,
         }
       : {}),
     ...(modelType != null ? { modelType } : {}),
@@ -269,6 +319,33 @@ export async function detectOcrModel(
     ...(sizeTier != null ? { sizeTier } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
     ...(paths != null ? { paths } : {}),
+  };
+}
+
+function readRecognizeResult(
+  raw: OcrRecognizeNativeResult
+): OcrRecognizeResult {
+  const family = raw?.family;
+  if (family !== 'ppocr' && family !== 'doctr' && family !== 'doc_vlm') {
+    throw Object.assign(new Error('OCR recognize result missing family'), {
+      code: OcrErrorCode.INTERNAL_ERROR,
+    });
+  }
+  if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
+    throw Object.assign(new Error('OCR recognize result missing extras'), {
+      code: OcrErrorCode.INTERNAL_ERROR,
+    });
+  }
+  if (typeof raw.spanCount !== 'number' || !Number.isFinite(raw.spanCount)) {
+    throw Object.assign(new Error('OCR recognize result missing spanCount'), {
+      code: OcrErrorCode.INTERNAL_ERROR,
+    });
+  }
+  return {
+    family,
+    spanCount: raw.spanCount,
+    doctags: raw.doctags,
+    markdown: raw.markdown,
   };
 }
 
@@ -307,12 +384,13 @@ export async function createOCR(
             `[SherpaOnnx:ocr] recognize instance=${instanceId} image=${imageId} textOut=${textId}`
           );
         }
-        await getNative().ocrRecognize(
+        const raw = await getNative().ocrRecognize(
           instanceId,
           imageId,
           textId,
           nativeOptions
         );
+        return readRecognizeResult(raw);
       } finally {
         cleanup();
       }
@@ -339,8 +417,14 @@ export type {
   OcrProgressNativeEvent,
   OcrPpocrOptions,
   OcrDoctrOptions,
+  OcrDocVlmOptions,
   OcrInitializeOptions,
+  OcrInitializeOptionsAuto,
+  OcrInitializeOptionsPpocr,
+  OcrInitializeOptionsDoctr,
+  OcrInitializeOptionsDocVlm,
   OcrRecognizeOptions,
+  OcrRecognizeResult,
   OcrDetectResult,
   OcrEngine,
   OcrErrorCodeValue,
@@ -350,12 +434,14 @@ export type {
   OcrDetectModelResult,
   OcrPpocrSuccessPaths,
   OcrDoctrSuccessPaths,
+  OcrDocVlmSuccessPaths,
 } from '../types/modelDetect';
 
 export {
   OcrErrorCode,
   isOcrPpocrDetectSuccess,
   isOcrDoctrDetectSuccess,
+  isOcrDocVlmDetectSuccess,
   OCR_MODEL_TYPES,
   isOcrModelType,
 } from './types';

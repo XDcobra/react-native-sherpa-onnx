@@ -2,7 +2,6 @@
  * OcrBackend for granite-docling ONNX packs (vision encoder + embed + decoder).
  *
  * Recognize is not thread-safe. KV cache lives only inside one Recognize call.
- * CreateOcrBackend does not construct this type; host tests do.
  */
 #pragma once
 

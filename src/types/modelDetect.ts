@@ -180,6 +180,26 @@ export type OcrDoctrSuccessPaths = {
   cls?: string;
 };
 
+/** Required paths when OCR detect succeeds for doc_vlm (granite-docling pack). */
+export type OcrDocVlmSuccessPaths = {
+  /** `vision_encoder.onnx` */
+  vision_encoder: string;
+  /** `vision_encoder.onnx_data` */
+  vision_encoder_data: string;
+  /** `embed_tokens.onnx` */
+  embed_tokens: string;
+  /** `embed_tokens.onnx_data` */
+  embed_tokens_data: string;
+  /** `decoder_model_merged.onnx` */
+  decoder: string;
+  /** `decoder_model_merged.onnx_data` */
+  decoder_data: string;
+  /** `tokenizer.json` */
+  tokenizer: string;
+  /** `ocr_manifest.json` */
+  manifest: string;
+};
+
 export interface OcrDetectModelResult extends ModelDetectResultBase {
   /**
    * Always `false` — OCR packs are offline multi-file layouts (no streaming
@@ -194,8 +214,22 @@ export interface OcrDetectModelResult extends ModelDetectResultBase {
     cls?: string;
     /** Recognition dictionary (yml/txt); native key `rec_dict`. */
     rec_dict?: string;
-    /** `ocr_manifest.json` — doctr family. */
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
     manifest?: string;
+    /** `vision_encoder.onnx` — doc_vlm. */
+    vision_encoder?: string;
+    /** `vision_encoder.onnx_data` — doc_vlm. */
+    vision_encoder_data?: string;
+    /** `embed_tokens.onnx` — doc_vlm. */
+    embed_tokens?: string;
+    /** `embed_tokens.onnx_data` — doc_vlm. */
+    embed_tokens_data?: string;
+    /** `decoder_model_merged.onnx` — doc_vlm. */
+    decoder?: string;
+    /** `decoder_model_merged.onnx_data` — doc_vlm. */
+    decoder_data?: string;
+    /** `tokenizer.json` — doc_vlm. */
+    tokenizer?: string;
   };
 }
 

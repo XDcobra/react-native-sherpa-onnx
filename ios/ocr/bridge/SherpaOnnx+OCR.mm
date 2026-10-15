@@ -211,6 +211,8 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
           options[@"detBoxScoreThresh"] ? [options[@"detBoxScoreThresh"] floatValue] : 0.5f;
       float detUnclipRatio =
           options[@"detUnclipRatio"] ? [options[@"detUnclipRatio"] floatValue] : 1.5f;
+      int maxNewTokens =
+          options[@"maxNewTokens"] ? [options[@"maxNewTokens"] intValue] : 0;
 
       std::string idStr = instanceId ? [instanceId UTF8String] : "";
       auto &engine = OcrEngineRegistry::Instance().Create(idStr);
@@ -221,6 +223,7 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.det_box_thresh = detBoxThresh;
       opts.det_box_score_thresh = detBoxScoreThresh;
       opts.det_unclip_ratio = detUnclipRatio;
+      opts.max_new_tokens = maxNewTokens;
       opts.provider = provider ? [provider UTF8String] : "cpu";
       engine.Load(modelType ? [modelType UTF8String] : "auto",
                   [modelDir UTF8String], opts);
@@ -325,7 +328,18 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
                nil);
         return;
       }
-      resolve(nil);
+      if (outcome.family.empty()) {
+        reject(kOcrInternal, @"recognize result missing family", nil);
+        return;
+      }
+      resolve(@{
+        @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
+        @"spanCount" : @(static_cast<NSInteger>(spans.size())),
+        @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
+            ?: @"",
+        @"markdown" :
+            [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
+      });
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
     }

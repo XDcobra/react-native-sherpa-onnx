@@ -78,10 +78,11 @@ void OcrEngine::Load(const std::string& model_type, const std::string& model_dir
 
   backend_ = CreateOcrBackend(resolved);
   backend_->Load(model_dir, options_);
-  OCR_LOGI("loaded family=%s provider=%s threads=%d maxSide=%d dir=%s",
+  OCR_LOGI("loaded family=%s provider=%s threads=%d maxSide=%d maxNew=%d dir=%s",
            backend_->Family(),
            options_.provider.empty() ? "cpu" : options_.provider.c_str(),
-           options_.num_threads, options_.max_side_len, model_dir.c_str());
+           options_.num_threads, options_.max_side_len, options_.max_new_tokens,
+           model_dir.c_str());
 }
 
 const char* OcrEngine::Family() const {
@@ -134,6 +135,12 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   OcrResult merged;
   int utf16_cursor = 0;
   int done = 0;
+
+  auto appendField = [](std::string& dest, const std::string& chunk) {
+    if (chunk.empty()) return;
+    if (!dest.empty()) dest.push_back('\n');
+    dest += chunk;
+  };
 
   for (int frame_index : frames) {
     if (options.cancel && options.cancel()) {
@@ -193,6 +200,8 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     }
     merged.text_utf8 += frame_result.text_utf8;
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
+    appendField(merged.doctags_utf8, frame_result.doctags_utf8);
+    appendField(merged.markdown_utf8, frame_result.markdown_utf8);
 
     ++done;
     if (options.progress) {
@@ -203,8 +212,10 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   FilterSpansByGranularity(merged, options.granularity);
   out.ok = true;
   out.result = std::move(merged);
-  OCR_LOGI("recognize done buffer=%s spans=%zu textUtf16≈%d", image_buffer_id.c_str(),
-           out.result.spans.size(), utf16_cursor);
+  OCR_LOGI(
+      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu",
+      image_buffer_id.c_str(), out.result.spans.size(), utf16_cursor,
+      out.result.doctags_utf8.size(), out.result.markdown_utf8.size());
   return out;
 }
 
