@@ -80,8 +80,13 @@ describe('ocr offline API', () => {
         cls: '/models/ppocrv6-tiny/cls.onnx',
         rec_dict: '/models/ppocrv6-tiny/rec_inference.yml',
       },
-      detectionSources: ['fileListing', 'fallbackOrder'],
+      detectionSources: ['fileListing', 'fallbackOrder', 'curatedCatalog'],
       sizeTier: 'tiny',
+      languages: [
+        { iso6391Hint: 'zh', id: 'zh' },
+        { iso6391Hint: 'en', id: 'en' },
+        { iso6391Hint: 'de', id: 'de' },
+      ],
     });
   });
 
@@ -194,8 +199,17 @@ describe('ocr offline API', () => {
     expect(result.modelType).toBe('ppocr');
     expect(result.paths?.det).toContain('det.onnx');
     expect(result.paths?.rec_dict).toContain('rec_inference.yml');
-    expect(result.detectionSources).toEqual(['fileListing', 'fallbackOrder']);
+    expect(result.detectionSources).toEqual([
+      'fileListing',
+      'fallbackOrder',
+      'curatedCatalog',
+    ]);
     expect(result.sizeTier).toBe('tiny');
+    expect(result.languages).toEqual([
+      { iso6391Hint: 'zh', id: 'zh' },
+      { iso6391Hint: 'en', id: 'en' },
+      { iso6391Hint: 'de', id: 'de' },
+    ]);
     expect(isOcrPpocrDetectSuccess(result)).toBe(true);
     if (isOcrPpocrDetectSuccess(result)) {
       expect(result.paths.det.length).toBeGreaterThan(0);
