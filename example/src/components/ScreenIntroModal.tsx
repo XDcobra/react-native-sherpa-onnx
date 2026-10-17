@@ -125,6 +125,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Runtime capability dashboard',
     body: 'This screen is for checking execution-provider support and other runtime capabilities. It helps you verify what the current build and device can actually use.',
   },
+  OCR: {
+    title: 'Offline OCR demo',
+    body: 'Showcase for createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, or doc_vlm packs, pick bundled or own images, run with progress/cancel, and inspect plain text plus spatial span.quad overlays (and Markdown/DocTags for doc_vlm).',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;
