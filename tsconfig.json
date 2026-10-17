@@ -32,7 +32,9 @@
       "react-native-sherpa-onnx/audio-tagging": ["./src/audio-tagging/index.ts"],
       "react-native-sherpa-onnx/kws": ["./src/kws/index.ts"],
       "react-native-sherpa-onnx/extraction": ["./src/extraction/index.ts"],
-      "react-native-sherpa-onnx/alignment": ["./src/alignment/index.ts"]
+      "react-native-sherpa-onnx/alignment": ["./src/alignment/index.ts"],
+      "react-native-sherpa-onnx/imagebuffer": ["./src/imagebuffer/index.ts"],
+      "react-native-sherpa-onnx/ocr": ["./src/ocr/index.ts"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
