@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -39,6 +39,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Models** | `android/app/src/main/assets/models/<model-id>/` | `ios/sherpa_models/models/<model-id>/` |
 | **Test audio WAVs** | `android/app/src/main/assets/test_wavs/` | `ios/sherpa_models/test_wavs/` |
 | **Codec samples** | `android/app/src/main/assets/test_codec/` | `ios/sherpa_models/test_codec/` |
+| **Test images (OCR)** | `android/app/src/main/assets/test_images/` | `ios/sherpa_models/test_images/` |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 > - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
@@ -54,7 +55,11 @@ If you do not want to download models at runtime via the **Download Manager Show
 |     |     |     |
 
 
-This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD feature screens.
+This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD/OCR feature screens.
+
+## OCR (offline)
+
+Home → **Vision** → **OCR**. Developer showcase for [docs/ocr-offline.md](../docs/ocr-offline.md): download an OCR pack (`ModelCategory.Ocr`), initialize `createOCR` (`auto` / `ppocr` / `doctr` / `doc_vlm`), load a bundled `test_images/` sample or pick your own file into an `OfflineImageBuffer`, run `recognize` with progress/cancel, then inspect plain text, spatial `span.quad` overlays on the image, and (for `doc_vlm`) Markdown / DocTags extras. Shared UI: `OfflineImageBufferWidget` (mirrors the offline audio picker).
 
 ## Speech-to-Text (offline)
 

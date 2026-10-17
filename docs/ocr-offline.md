@@ -638,6 +638,12 @@ if (info.hasSpatialSpans) {
 
 ---
 
+## Example app
+
+The monorepo example exposes **Home → Vision → OCR** (`example/src/screens/ocr/OCRScreen.tsx`). It is a developer showcase (not a production UI): download an OCR pack, `createOCR` / `detectOcrModel`, load bundled `test_images/` or a picked file via shared `OfflineImageBufferWidget`, run `recognize` with progress/cancel, then show plain text, **spatial `quad` overlays** on the image, and Markdown/DocTags for `doc_vlm`. See [example/README.md](../example/README.md).
+
+---
+
 ## See also
 
 - [ImageBuffer offline](imagebuffer-offline.md) (typical **source** of frames)
