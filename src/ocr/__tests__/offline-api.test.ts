@@ -559,7 +559,7 @@ describe('ocr offline API', () => {
     }
   });
 
-  it('ppocr recognize resolves empty doctags and markdown', async () => {
+  it('ppocr recognize omits doctags and markdown', async () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
       modelType: 'ppocr',
@@ -572,13 +572,13 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'ppocr',
       spanCount: 1,
-      doctags: '',
-      markdown: '',
     });
+    expect(page).not.toHaveProperty('doctags');
+    expect(page).not.toHaveProperty('markdown');
     await ocr.destroy();
   });
 
-  it('doctr recognize resolves empty doctags and markdown', async () => {
+  it('doctr recognize omits doctags and markdown', async () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doctr',
       spanCount: 2,
@@ -596,9 +596,9 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'doctr',
       spanCount: 2,
-      doctags: '',
-      markdown: '',
     });
+    expect(page).not.toHaveProperty('doctags');
+    expect(page).not.toHaveProperty('markdown');
     await ocr.destroy();
   });
 

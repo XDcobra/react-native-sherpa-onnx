@@ -358,9 +358,10 @@ export default function OCRScreen() {
         )
       : null;
 
+  const docVlmExtras = resultMeta?.family === 'doc_vlm' ? resultMeta : null;
   const showDocVlmTabs =
-    resultMeta?.family === 'doc_vlm' &&
-    (resultMeta.markdown.length > 0 || resultMeta.doctags.length > 0);
+    docVlmExtras != null &&
+    (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -618,10 +619,10 @@ export default function OCRScreen() {
 
             <View style={styles.card}>
               <Text style={styles.resultText}>
-                {resultTab === 'markdown'
-                  ? resultMeta.markdown || '(empty markdown)'
-                  : resultTab === 'doctags'
-                  ? resultMeta.doctags || '(empty doctags)'
+                {resultTab === 'markdown' && docVlmExtras
+                  ? docVlmExtras.markdown || '(empty markdown)'
+                  : resultTab === 'doctags' && docVlmExtras
+                  ? docVlmExtras.doctags || '(empty doctags)'
                   : resultText || '(empty text)'}
               </Text>
               {selectedSpanText != null ? (
@@ -633,10 +634,10 @@ export default function OCRScreen() {
                 style={[styles.primaryButton, { marginTop: 12 }]}
                 onPress={() => {
                   const payload =
-                    resultTab === 'markdown'
-                      ? resultMeta.markdown
-                      : resultTab === 'doctags'
-                      ? resultMeta.doctags
+                    resultTab === 'markdown' && docVlmExtras
+                      ? docVlmExtras.markdown
+                      : resultTab === 'doctags' && docVlmExtras
+                      ? docVlmExtras.doctags
                       : resultText;
                   Clipboard.setString(payload);
                 }}

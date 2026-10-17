@@ -148,10 +148,7 @@ function pathFromRaw(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Family-aware OCR pack detect (ppocr Det+Rec+dict co-occurrence).
- * Accepts a {@link FileSource} like alignment/punctuation detect.
- */
+/** Detect OCR pack layout without loading the engine. */
 export async function detectOcrModel(
   source: FileSource,
   options?: { modelType?: OcrModelType }
@@ -299,22 +296,26 @@ function readRecognizeResult(
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
-    throw Object.assign(new Error('OCR recognize result missing extras'), {
-      code: OcrErrorCode.INTERNAL_ERROR,
-    });
-  }
   if (typeof raw.spanCount !== 'number' || !Number.isFinite(raw.spanCount)) {
     throw Object.assign(new Error('OCR recognize result missing spanCount'), {
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  return {
-    family,
-    spanCount: raw.spanCount,
-    doctags: raw.doctags,
-    markdown: raw.markdown,
-  };
+  if (family === 'doc_vlm') {
+    if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
+    return {
+      family,
+      spanCount: raw.spanCount,
+      doctags: raw.doctags,
+      markdown: raw.markdown,
+    };
+  }
+  // ppocr / doctr: DocTags are unsupported — omit fields (ignore native "").
+  return { family, spanCount: raw.spanCount };
 }
 
 /**

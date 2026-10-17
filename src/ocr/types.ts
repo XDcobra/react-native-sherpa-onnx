@@ -48,35 +48,19 @@ export type OcrPpocrOptions = {
 };
 
 export type OcrDoctrOptions = {
-  /**
-   * Detection box binary-threshold (doctr default: 0.15).
-   * DoctrBackend auto-lowers ppocr-range values; set explicitly to override.
-   */
+  /** Detection box binary threshold (default 0.15). */
   detBoxThresh?: number;
-  /**
-   * Detection box score threshold (doctr default: 0.15).
-   */
+  /** Detection box score threshold (default 0.15). */
   detBoxScoreThresh?: number;
-  /**
-   * Unclip ratio for DB postprocessing (default: 1.5).
-   */
+  /** Unclip ratio for DB postprocessing (default 1.5). */
   detUnclipRatio?: number;
 };
 
-/**
- * doc_vlm generation options. Applied only when the loaded family is `doc_vlm`
- * (`modelType: 'doc_vlm'`, or `auto`, which resolves a granite directory through detect).
- * Ignored by ppocr and doctr. Decode is greedy; this object does not grow
- * sampling fields in v1.
- */
+/** `doc_vlm` generation options (ignored by ppocr / doctr). */
 export type OcrDocVlmOptions = {
   /**
-   * Cap on newly generated token ids.
-   * Omit or `0` → 8192 (Docling granite preset, also `text.max_position_embeddings`).
-   * The backend lowers the cap when `prompt_length + maxNewTokens` would pass 8192
-   * and logs the clamp under `[SherpaOnnx:ocr]`.
-   * A positive value is forwarded as-is. Non-integers and negatives are
-   * `OCR_INVALID_ARGUMENT` at `createOCR`, before native load.
+   * Cap on newly generated token ids. Omit or `0` → backend default (8192).
+   * Non-integers and negatives reject with `OCR_INVALID_ARGUMENT` at `createOCR`.
    */
   maxNewTokens?: number;
 };
@@ -124,54 +108,38 @@ export type OcrInitializeOptions =
 export type OcrRecognizeOptions = {
   /** Frame indices to run; default = all frames in the image buffer. */
   frames?: number[];
-  /**
-   * Requested span level. Backends emit `line`. `doc_vlm` also emits `block`
-   * for titles. Other granularity values filter spans and may leave the span
-   * list empty; text is still filled.
-   */
+  /** Span level filter (default `'line'`). */
   granularity?: OcrGranularity;
   onProgress?: (progress: OcrProgress) => void;
+  /** Abort between frames → `OCR_CANCELLED`. */
   signal?: AbortSignal;
 };
 
 /**
- * Resolved value of `OcrEngine.recognize`.
- * Plain text and spatial spans are on `textOut` (`origin: 'ocr'`).
- * This object is the structured extras channel plus a family tag.
- * Failures still reject (`OCR_CANCELLED`, `OCR_RECOGNIZE_FAILED`, …);
- * they do not come back as `status: 'failed'`.
+ * Result of `OcrEngine.recognize`. Plain text and spans live on `textOut`.
+ * Discriminated on `family`: `doctags` / `markdown` only for `doc_vlm`.
  */
-export type OcrRecognizeResult = {
-  /**
-   * `OcrBackend::Family()` of the loaded engine.
-   * `createOCR({ modelType: 'auto' })` still echoes `'auto'` from `initializeOcr`.
-   * This field is the concrete family.
-   */
-  family: OcrFamily;
-  /** Spans written to `textOut` after the granularity filter. */
-  spanCount: number;
-  /**
-   * Raw DocTags after ASCII lstrip. `""` for ppocr and doctr.
-   * doc_vlm: the decoded generation, specials kept (`<doctag>` … `</doctag>`).
-   */
-  doctags: string;
-  /**
-   * Lossy markdown from the same DocTags walk. `""` for ppocr and doctr.
-   * doc_vlm: empty only when the plain text is empty.
-   */
-  markdown: string;
-};
+export type OcrRecognizeResult =
+  | {
+      family: 'ppocr' | 'doctr';
+      /** Spans written to `textOut` after the granularity filter. */
+      spanCount: number;
+    }
+  | {
+      family: 'doc_vlm';
+      spanCount: number;
+      /** Raw DocTags (`""` = empty generation). */
+      doctags: string;
+      /** Lossy markdown from the DocTags walk (`""` when plain text is empty). */
+      markdown: string;
+    };
 
 /** @deprecated Use {@link OcrDetectModelResult} from `../types/modelDetect`. */
 export type OcrDetectResult = OcrDetectModelResult;
 
 export type OcrEngine = {
   readonly instanceId: string;
-  /**
-   * Run OCR on an offline ImageBuffer and populate an empty OfflineTextBuffer
-   * (text + spatial spans with `origin: 'ocr'`).
-   * DocTags and markdown are on the returned result, not the text buffer.
-   */
+  /** OCR image → empty text buffer (text + spatial spans). */
   recognize(
     imageBuffer: OfflineImageBufferIdSource,
     textOut: OfflineTextBufferIdSource,
