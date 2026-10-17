@@ -163,43 +163,6 @@ export interface AlignmentDetectModelResult extends ModelDetectResultBase {
 
 // ─── OCR extension ──────────────────────────────────────────────────────
 
-/** Required paths when OCR detect succeeds for ppocr (cls remains optional). */
-export type OcrPpocrSuccessPaths = {
-  det: string;
-  rec: string;
-  rec_dict: string;
-  cls?: string;
-};
-
-/** Required paths when OCR detect succeeds for doctr (ocr_manifest.json). */
-export type OcrDoctrSuccessPaths = {
-  det: string;
-  rec: string;
-  /** `ocr_manifest.json` containing vocab, mean/std, input shapes. */
-  manifest: string;
-  cls?: string;
-};
-
-/** Required paths when OCR detect succeeds for doc_vlm (granite-docling pack). */
-export type OcrDocVlmSuccessPaths = {
-  /** `vision_encoder.onnx` */
-  vision_encoder: string;
-  /** `vision_encoder.onnx_data` */
-  vision_encoder_data: string;
-  /** `embed_tokens.onnx` */
-  embed_tokens: string;
-  /** `embed_tokens.onnx_data` */
-  embed_tokens_data: string;
-  /** `decoder_model_merged.onnx` */
-  decoder: string;
-  /** `decoder_model_merged.onnx_data` */
-  decoder_data: string;
-  /** `tokenizer.json` */
-  tokenizer: string;
-  /** `ocr_manifest.json` */
-  manifest: string;
-};
-
 export interface OcrDetectModelResult extends ModelDetectResultBase {
   /**
    * Always `false` — OCR packs are offline multi-file layouts (no streaming

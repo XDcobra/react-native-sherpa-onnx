@@ -20,7 +20,6 @@ Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec
 import {
   createOCR,
   detectOcrModel,
-  isOcrPpocrDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 import {
   createOfflineImageBufferFromFiles,
@@ -39,9 +38,9 @@ import {
 // Optional: await ensureModel(ModelCategory.Ocr, 'ppocrv6-tiny') then use model.modelDir.
 const modelDir = { kind: 'fs' as const, path: '/absolute/path/to/ppocrv6-tiny' };
 
-// Step 1: pre-flight detect (Det+Rec+dict co-occurrence; narrow required paths)
+// Step 1: pre-flight detect (native ValidateOcrPaths; check result.success)
 const det = await detectOcrModel(modelDir, { modelType: 'auto' });
-if (!isOcrPpocrDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'OCR detection failed');
 }
 
@@ -92,13 +91,12 @@ For ppocr, `page.doctags` and `page.markdown` are `""`. Text and spans stay on `
 import {
   createOCR,
   detectOcrModel,
-  isOcrDoctrDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 
 const modelDir = { kind: 'fs' as const, path: '/absolute/path/to/doctr-mobile' };
 
 const det = await detectOcrModel(modelDir, { modelType: 'auto' });
-if (!isOcrDoctrDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'DocTR detection failed');
 }
 
@@ -112,7 +110,7 @@ const ocr = await createOCR({
 await ocr.destroy();
 ```
 
-> `ppocr`, `doctr`, and `doc_vlm` share `createOCR` → `recognize`. `modelType: 'auto'` resolves the family from the manifest `family` string, then from pack layout. Use `isOcrPpocrDetectSuccess`, `isOcrDoctrDetectSuccess`, or `isOcrDocVlmDetectSuccess` to narrow the detected paths.
+> `ppocr`, `doctr`, and `doc_vlm` share `createOCR` → `recognize`. `modelType: 'auto'` resolves the family from the manifest `family` string, then from pack layout. Check `det.success` (and optionally `det.modelType`) after detect — same pattern as STT/TTS.
 
 ### Single image → DocTags + markdown (`doc_vlm`)
 
@@ -120,7 +118,6 @@ await ocr.destroy();
 import {
   createOCR,
   detectOcrModel,
-  isOcrDocVlmDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 
 const modelDir = {
@@ -129,7 +126,7 @@ const modelDir = {
 };
 
 const det = await detectOcrModel(modelDir, { modelType: 'auto' });
-if (!isOcrDocVlmDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'doc_vlm detection failed');
 }
 
@@ -227,12 +224,12 @@ Validate category: **`ocr`**. Language pickers: [`getPpocrLanguages()`](model-la
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
-import { createOCR, detectOcrModel, isOcrPpocrDetectSuccess } from 'react-native-sherpa-onnx/ocr';
+import { createOCR, detectOcrModel } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'ppocrv6-tiny');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source, { modelType: 'auto' });
-if (!isOcrPpocrDetectSuccess(det)) throw new Error(det.error ?? 'bad OCR pack');
+if (!det.success) throw new Error(det.error ?? 'bad OCR pack');
 const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
 ```
 
@@ -240,12 +237,12 @@ const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
-import { createOCR, detectOcrModel, isOcrDoctrDetectSuccess } from 'react-native-sherpa-onnx/ocr';
+import { createOCR, detectOcrModel } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'doctr-mobile');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source, { modelType: 'auto' });
-if (!isOcrDoctrDetectSuccess(det)) throw new Error(det.error ?? 'bad DocTR pack');
+if (!det.success) throw new Error(det.error ?? 'bad DocTR pack');
 const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
 ```
 
@@ -253,12 +250,12 @@ const ocr = await createOCR({ modelSource: source, modelType: 'auto' });
 
 ```ts
 import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
-import { createOCR, detectOcrModel, isOcrDocVlmDetectSuccess } from 'react-native-sherpa-onnx/ocr';
+import { createOCR, detectOcrModel } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source, { modelType: 'auto' });
-if (!isOcrDocVlmDetectSuccess(det)) throw new Error(det.error ?? 'bad doc_vlm pack');
+if (!det.success) throw new Error(det.error ?? 'bad doc_vlm pack');
 const ocr = await createOCR({ modelSource: source, modelType: 'doc_vlm' });
 ```
 
@@ -295,11 +292,11 @@ const pre = await detectOcrModel(
 );
 ```
 
-File-based detection without loading the engine. On success:
+File-based detection without loading the engine. Completeness is decided natively (`ValidateOcrPaths`); TS mirrors `success` / `error` like STT/TTS. On success, check `pre.success` and optionally `pre.modelType`:
 
-- `isOcrPpocrDetectSuccess(pre)` narrows `paths` to `{ det, rec, rec_dict }` (`cls` optional).
-- `isOcrDoctrDetectSuccess(pre)` narrows `paths` to `{ det, rec, manifest }`.
-- `isOcrDocVlmDetectSuccess(pre)` narrows `paths` to the eight keys (`vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest`). `cls` and `rec_dict` are not part of a `doc_vlm` success. `det` and `rec` stay empty.
+- `ppocr` — `paths` typically include `{ det, rec, rec_dict }` (`cls` optional).
+- `doctr` — `paths` typically include `{ det, rec, manifest }`.
+- `doc_vlm` — `paths` typically include the eight keys (`vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest`). `cls` and `rec_dict` are unused; `det` and `rec` stay empty.
 
 May include `languages`, `sizeTier`, `detectionSources`. See [model-detect.md](model-detect.md).
 
@@ -472,20 +469,9 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrRecognizeResult` | `{ family, spanCount, doctags, markdown }` resolved by `recognize` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrProgressNativeEvent` | Progress + `operationId` from native |
-| `OcrDetectModelResult` | Return of `detectOcrModel()` — shared `ModelDetectResultBase` |
-| `OcrPpocrSuccessPaths` | `{ det, rec, rec_dict, cls? }` after `isOcrPpocrDetectSuccess` |
-| `OcrDoctrSuccessPaths` | `{ det, rec, manifest }` after `isOcrDoctrDetectSuccess` |
-| `OcrDocVlmSuccessPaths` | Eight keys: `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` |
+| `OcrDetectModelResult` | Return of `detectOcrModel()` — shared `ModelDetectResultBase`; check `success` / optional `modelType` |
 | `OcrEngine` | `recognize` → `Promise<OcrRecognizeResult>`, `destroy`; readonly `instanceId` |
 | `OcrErrorCode` / `OcrErrorCodeValue` | Error code constants |
-
-### Detect narrowing guards
-
-| Guard | Narrows to |
-| --- | --- |
-| `isOcrPpocrDetectSuccess(result)` | `{ success: true, modelType: 'ppocr', paths: OcrPpocrSuccessPaths }` |
-| `isOcrDoctrDetectSuccess(result)` | `{ success: true, modelType: 'doctr', paths: OcrDoctrSuccessPaths }` |
-| `isOcrDocVlmDetectSuccess(result)` | `{ success: true, modelType: 'doc_vlm', paths: OcrDocVlmSuccessPaths }` |
 
 ### Related buffer types
 
@@ -503,7 +489,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 
 | Error code | Explanation |
 | --- | --- |
-| `OCR_DETECT_FAILED` | `detectOcrModel` failed or success without required paths. |
+| `OCR_DETECT_FAILED` | `detectOcrModel` failed (native validation / layout). |
 | `OCR_MODEL_NOT_FOUND` | Pack / ONNX paths missing at init. |
 | `OCR_NOT_INITIALIZED` | Native engine not ready. |
 | `OCR_INSTANCE_NOT_FOUND` | `instanceId` missing or already **destroyed**. |
@@ -530,13 +516,12 @@ import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
 import {
   createOCR,
   detectOcrModel,
-  isOcrPpocrDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'ppocrv6-tiny');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
-if (!isOcrPpocrDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'bad OCR pack');
 }
 const ocr = await createOCR({ modelSource: source, modelType: 'ppocr' });
@@ -554,13 +539,12 @@ import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
 import {
   createOCR,
   detectOcrModel,
-  isOcrDoctrDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'doctr-mobile');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
-if (!isOcrDoctrDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'bad DocTR pack');
 }
 const ocr = await createOCR({ modelSource: source, modelType: 'doctr' });
@@ -578,13 +562,12 @@ import { ModelCategory, ensureModel } from 'react-native-sherpa-onnx/download';
 import {
   createOCR,
   detectOcrModel,
-  isOcrDocVlmDetectSuccess,
 } from 'react-native-sherpa-onnx/ocr';
 
 const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
-if (!isOcrDocVlmDetectSuccess(det)) {
+if (!det.success) {
   throw new Error(det.error ?? 'bad doc_vlm pack');
 }
 const ocr = await createOCR({

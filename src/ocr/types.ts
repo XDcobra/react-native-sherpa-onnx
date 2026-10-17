@@ -4,12 +4,7 @@ import type {
   OfflineTextBufferIdSource,
   TextSpatialSpanLevel,
 } from '../textbuffer/types';
-import type {
-  OcrDetectModelResult,
-  OcrDocVlmSuccessPaths,
-  OcrDoctrSuccessPaths,
-  OcrPpocrSuccessPaths,
-} from '../types/modelDetect';
+import type { OcrDetectModelResult } from '../types/modelDetect';
 
 /** Public OCR model types. `auto` resolves via layout detect. */
 export type OcrModelType = 'auto' | 'ppocr' | 'doctr' | 'doc_vlm';
@@ -203,85 +198,3 @@ export const OcrErrorCode = {
 
 export type OcrErrorCodeValue =
   (typeof OcrErrorCode)[keyof typeof OcrErrorCode];
-
-/**
- * Narrows a successful doctr detect result to required Det/Rec/manifest paths.
- * Use after {@link detectOcrModel} when callers need typed pack paths.
- */
-export function isOcrDoctrDetectSuccess(
-  result: OcrDetectModelResult
-): result is OcrDetectModelResult & {
-  success: true;
-  modelType: 'doctr';
-  paths: OcrDoctrSuccessPaths;
-} {
-  if (!result.success || result.modelType !== 'doctr' || result.paths == null) {
-    return false;
-  }
-  const { det, rec, manifest } = result.paths;
-  return (
-    typeof det === 'string' &&
-    det.length > 0 &&
-    typeof rec === 'string' &&
-    rec.length > 0 &&
-    typeof manifest === 'string' &&
-    manifest.length > 0
-  );
-}
-
-/**
- * Narrows a successful ppocr detect result to required Det/Rec/dict paths.
- * Use after {@link detectOcrModel} when callers need typed pack paths.
- */
-export function isOcrPpocrDetectSuccess(
-  result: OcrDetectModelResult
-): result is OcrDetectModelResult & {
-  success: true;
-  modelType: 'ppocr';
-  paths: OcrPpocrSuccessPaths;
-} {
-  if (!result.success || result.modelType !== 'ppocr' || result.paths == null) {
-    return false;
-  }
-  const { det, rec, rec_dict: recDict } = result.paths;
-  return (
-    typeof det === 'string' &&
-    det.length > 0 &&
-    typeof rec === 'string' &&
-    rec.length > 0 &&
-    typeof recDict === 'string' &&
-    recDict.length > 0
-  );
-}
-
-const DOC_VLM_PATH_KEYS = [
-  'vision_encoder',
-  'vision_encoder_data',
-  'embed_tokens',
-  'embed_tokens_data',
-  'decoder',
-  'decoder_data',
-  'tokenizer',
-  'manifest',
-] as const;
-
-export function isOcrDocVlmDetectSuccess(
-  result: OcrDetectModelResult
-): result is OcrDetectModelResult & {
-  success: true;
-  modelType: 'doc_vlm';
-  paths: OcrDocVlmSuccessPaths;
-} {
-  if (
-    !result.success ||
-    result.modelType !== 'doc_vlm' ||
-    result.paths == null
-  ) {
-    return false;
-  }
-  const paths = result.paths;
-  return DOC_VLM_PATH_KEYS.every((key) => {
-    const value = paths[key];
-    return typeof value === 'string' && value.length > 0;
-  });
-}

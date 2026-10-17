@@ -276,43 +276,11 @@ export async function detectOcrModel(
         }
       : undefined;
 
-  // Family-aware completeness: ppocr det+rec+rec_dict; doctr det+rec+manifest;
-  // doc_vlm vision/embed/decoder (+ .onnx_data), tokenizer, and manifest.
-  const family = typeof raw.modelType === 'string' ? raw.modelType : '';
-  let pathsComplete: boolean;
-  if (family === 'doctr') {
-    pathsComplete = Boolean(det && rec && manifest);
-  } else if (family === 'doc_vlm') {
-    pathsComplete = Boolean(
-      visionEncoder &&
-        visionEncoderData &&
-        embedTokens &&
-        embedTokensData &&
-        decoder &&
-        decoderData &&
-        tokenizer &&
-        manifest
-    );
-  } else {
-    pathsComplete = Boolean(det && rec && recDict);
-  }
-  const success = successFlag && pathsComplete;
-  const missingPathsError =
-    family === 'doctr'
-      ? 'OCR detect reported success but required paths (det/rec/manifest) were missing'
-      : family === 'doc_vlm'
-      ? 'OCR detect reported success but required paths (vision_encoder/embed_tokens/decoder/tokenizer/manifest and .onnx_data) were missing'
-      : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing';
-
   return {
-    success,
+    success: successFlag,
     isStreaming: false,
     detectedModels,
-    ...(err.length > 0 || (successFlag && !pathsComplete)
-      ? {
-          error: err.length > 0 ? err : missingPathsError,
-        }
-      : {}),
+    ...(err.length > 0 ? { error: err } : {}),
     ...(modelType != null ? { modelType } : {}),
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
@@ -430,18 +398,6 @@ export type {
   OcrErrorCodeValue,
 } from './types';
 
-export type {
-  OcrDetectModelResult,
-  OcrPpocrSuccessPaths,
-  OcrDoctrSuccessPaths,
-  OcrDocVlmSuccessPaths,
-} from '../types/modelDetect';
+export type { OcrDetectModelResult } from '../types/modelDetect';
 
-export {
-  OcrErrorCode,
-  isOcrPpocrDetectSuccess,
-  isOcrDoctrDetectSuccess,
-  isOcrDocVlmDetectSuccess,
-  OCR_MODEL_TYPES,
-  isOcrModelType,
-} from './types';
+export { OcrErrorCode, OCR_MODEL_TYPES, isOcrModelType } from './types';

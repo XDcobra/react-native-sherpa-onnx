@@ -19,9 +19,6 @@ import {
 import {
   createOCR,
   detectOcrModel,
-  isOcrDocVlmDetectSuccess,
-  isOcrDoctrDetectSuccess,
-  isOcrPpocrDetectSuccess,
   type OcrEngine,
   type OcrInitializeOptions,
   type OcrModelType,
@@ -163,14 +160,9 @@ export default function OCRScreen() {
   const runDetect = useCallback(async (folder: string) => {
     const modelSource = getFileModelPath(folder, ModelCategory.Ocr);
     const det = await detectOcrModel(modelSource, { modelType: 'auto' });
-    const guard =
-      (isOcrPpocrDetectSuccess(det) && 'ppocr paths OK') ||
-      (isOcrDoctrDetectSuccess(det) && 'doctr paths OK') ||
-      (isOcrDocVlmDetectSuccess(det) && 'doc_vlm paths OK') ||
-      'paths incomplete / failed';
     setDetectSummary(
       det.success
-        ? `detect: modelType=${det.modelType ?? '?'} · ${guard}`
+        ? `detect: modelType=${det.modelType ?? '?'}`
         : `detect failed: ${det.error ?? 'unknown'}`
     );
     return det;
