@@ -51,6 +51,7 @@ struct TxtSpatialSpan {
 	int utf16Start = 0;
 	int utf16End = 0;
 	std::string level; // "line" | "word" | "block"
+	/** Empty when origin is textLayer (no ImageBuffer). */
 	std::string sourceImageBufferId;
 	int frameIndex = 0;
 	float quad[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -61,6 +62,10 @@ struct TxtSpatialSpan {
 	int pageNumber = 0;
 	bool hasPtsMs = false;
 	double ptsMs = 0;
+	bool hasPageWidth = false;
+	float pageWidth = 0.f;
+	bool hasPageHeight = false;
+	float pageHeight = 0.f;
 };
 
 // Shared live text buffer types used by the text pipeline workers.

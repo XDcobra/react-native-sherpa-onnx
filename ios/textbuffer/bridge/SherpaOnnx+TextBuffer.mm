@@ -150,6 +150,12 @@ struct TxtOfflineEntry {
         if (span.hasPtsMs) {
             map[@"ptsMs"] = @(span.ptsMs);
         }
+        if (span.hasPageWidth) {
+            map[@"pageWidth"] = @(span.pageWidth);
+        }
+        if (span.hasPageHeight) {
+            map[@"pageHeight"] = @(span.pageHeight);
+        }
         return map;
     }
 

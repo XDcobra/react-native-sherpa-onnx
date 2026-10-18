@@ -166,4 +166,31 @@ describe('offline textbuffer slice chunking', () => {
       mockNative.getOfflineTextBufferSpatialSpansSlice
     ).toHaveBeenCalledWith(bufferId, 0, 10);
   });
+
+  it('maps textLayer spans without image id and with page size', async () => {
+    mockNative.getOfflineTextBufferSpatialSpansSlice.mockResolvedValue([
+      {
+        utf16Start: 0,
+        utf16End: 4,
+        level: 'line',
+        sourceImageBufferId: '',
+        frameIndex: 0,
+        quad: [10, 20, 110, 20, 110, 40, 10, 40],
+        origin: 'textLayer',
+        pageNumber: 1,
+        pageWidth: 612,
+        pageHeight: 792,
+      },
+    ]);
+    const out = await getOfflineTextBufferSpatialSpansSlice(bufferId, 0, 1);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      origin: 'textLayer',
+      pageNumber: 1,
+      pageWidth: 612,
+      pageHeight: 792,
+      quad: [10, 20, 110, 20, 110, 40, 10, 40],
+    });
+    expect(out[0]?.sourceImageBufferId).toBeUndefined();
+  });
 });
