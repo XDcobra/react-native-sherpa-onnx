@@ -1,0 +1,83 @@
+# Package PDFium as an iOS XCFramework and publish a GitHub Release.
+# Tag from third_party/pdfium_prebuilt/IOS_RELEASE_TAG.
+#
+name: Prebuilt - PDFium (iOS) XCFramework
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'feat/add-ocr-support-pdfium*'
+    paths:
+      - '.github/workflows/framework-pdfium-ios-framework.yml'
+      - 'third_party/pdfium_prebuilt/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pdfium-ios:
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/pdfium_prebuilt/IOS_RELEASE_TAG
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$RELEASE_TAG" | sed 's/^pdfium-ios-v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Fetch pdfium-binaries (ios device + simulators)
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          BASE="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${VERSION}"
+          mkdir -p third_party/pdfium_prebuilt/ios-build
+          cd third_party/pdfium_prebuilt/ios-build
+          # Asset names as of chromium/8100
+          curl -sSL -o device.tgz "$BASE/pdfium-ios-device-arm64.tgz"
+          curl -sSL -o sim-arm64.tgz "$BASE/pdfium-ios-simulator-arm64.tgz"
+          curl -sSL -o sim-x64.tgz "$BASE/pdfium-ios-simulator-x64.tgz"
+          mkdir -p device sim-arm64 sim-x64
+          tar -xzf device.tgz -C device
+          tar -xzf sim-arm64.tgz -C sim-arm64
+          tar -xzf sim-x64.tgz -C sim-x64
+          ls -la device sim-arm64 sim-x64
+
+      - name: Assemble XCFramework stub layout
+        run: |
+          # Minimal packaging: headers + libs. Unpack into ios/Frameworks/pdfium.xcframework locally.
+          OUT=pdfium-ios-layout
+          rm -rf "$OUT"
+          mkdir -p "$OUT/Headers" "$OUT/device" "$OUT/simulator-arm64" "$OUT/simulator-x64"
+          DEV=third_party/pdfium_prebuilt/ios-build/device
+          SIMA=third_party/pdfium_prebuilt/ios-build/sim-arm64
+          SIMX=third_party/pdfium_prebuilt/ios-build/sim-x64
+          if [ -d "$DEV/include" ]; then cp -R "$DEV/include/." "$OUT/Headers/"; fi
+          find "$DEV" -name 'libpdfium*' -exec cp {} "$OUT/device/" \; || true
+          find "$SIMA" -name 'libpdfium*' -exec cp {} "$OUT/simulator-arm64/" \; || true
+          find "$SIMX" -name 'libpdfium*' -exec cp {} "$OUT/simulator-x64/" \; || true
+          cd "$OUT" && zip -r ../pdfium-ios.zip .
+          ls -la pdfium-ios.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: pdfium iOS ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            Prebuilt **PDFium** for iOS. Opt-in: `SHERPA_ONNX_ENABLE_PDFIUM=1`.
+            Unpack into `ios/Frameworks/pdfium.xcframework` (or follow setup-ios-framework.sh when wired).
+          files: |
+            pdfium-ios.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

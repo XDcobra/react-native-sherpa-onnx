@@ -15,6 +15,8 @@
 def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
 def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
 def sherpaOnnxDisableLibwebp = (project.findProperty("sherpaOnnxDisableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
+// Opt-in (default false). When false, skip all PDFium download/link requirements.
+def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
 
 def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def requiredFfmpegSoFiles = [
@@ -25,6 +27,7 @@ def requiredSherpaOnnxSoFiles = [
 ]
 def requiredLibarchiveSoFiles = ['libarchive.so', 'libzstd.so']
 def requiredLibwebpSoFiles = ['libwebp.so', 'libsharpyuv.so']
+def requiredPdfiumSoFiles = ['libpdfium.so']
 def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
 /** Both from the same onnxruntime release (AAR or third_party); required for Java ORT + symbol consistency. */
 def requiredOnnxruntimeBundleSoFiles = ['libonnxruntime4j_jni.so', 'libonnxruntime.so']
@@ -39,6 +42,7 @@ def thirdPartyFfmpegDir = new File(thirdPartyDir, "ffmpeg_prebuilt/android")
 def thirdPartyShineDir = new File(thirdPartyDir, "shine_prebuilt/android")
 def thirdPartyLibarchiveDir = new File(thirdPartyDir, "libarchive_prebuilt/android")
 def thirdPartyLibwebpDir = new File(thirdPartyDir, "libwebp_prebuilt/android")
+def thirdPartyPdfiumDir = new File(thirdPartyDir, "pdfium_prebuilt/android")
 def thirdPartyOrtDir = new File(thirdPartyDir, "onnxruntime_prebuilt/android")
 
 def hasAllFfmpegLibs = {
@@ -100,6 +104,40 @@ def hasAllLibwebpLibs = {
 def hasLibwebpHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/webp/webp/decode.h").exists() ||
       new File(project.projectDir, "src/main/cpp/include/webp/decode.h").exists()
+}
+
+def hasAllPdfiumLibs = {
+  for (abi in requiredAbis) {
+    def dir = new File(jniLibsDir, abi)
+    if (!dir.exists()) return false
+    for (soName in requiredPdfiumSoFiles) {
+      if (!new File(dir, soName).exists()) return false
+    }
+  }
+  return true
+}
+
+def hasPdfiumHeaders = {
+  return new File(project.projectDir, "src/main/cpp/include/pdfium/fpdfview.h").exists()
+}
+
+def pdfiumThirdPartySoDirForAbi = { File base, String abi ->
+  def jniDir = new File(base, "jni/${abi}")
+  if (jniDir.exists()) return jniDir
+  def abiLibDir = new File(base, "${abi}/lib")
+  if (abiLibDir.exists()) return abiLibDir
+  return null
+}
+
+def hasPdfiumThirdPartyLibs = {
+  for (abi in requiredAbis) {
+    def soDir = pdfiumThirdPartySoDirForAbi(thirdPartyPdfiumDir, abi)
+    if (!soDir) return false
+    for (soName in requiredPdfiumSoFiles) {
+      if (!new File(soDir, soName).exists()) return false
+    }
+  }
+  return true
 }
 
 /** Resolve libwebp .so dir for one ABI: jni/<abi>/ (release layout) or <abi>/lib/ (build script output). */
@@ -539,6 +577,75 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
+    // pdfium: JNI (.so) + C headers (PDF text-layer extract) — opt-in only
+    // =====================================================================
+    def pdfiumResolved = !sherpaOnnxEnablePdfium
+    if (sherpaOnnxEnablePdfium) {
+      def currentPdfiumVersion = project.ext.pdfiumVersion
+      def pdfiumVersionFile = new File(downloadDir, "pdfium-version.txt")
+      def storedPdfiumVersion = (pdfiumVersionFile.exists() ? pdfiumVersionFile.text.trim() : null)
+      def pdfiumNeedsUpdate = !hasAllPdfiumLibs() || !hasPdfiumHeaders() ||
+          storedPdfiumVersion == null || storedPdfiumVersion != currentPdfiumVersion
+
+      if (pdfiumNeedsUpdate) {
+        def tpHdr = new File(thirdPartyPdfiumDir, "include/fpdfview.h").exists()
+        if (hasPdfiumThirdPartyLibs() && tpHdr) {
+          requiredAbis.each { abi ->
+            def soDir = pdfiumThirdPartySoDirForAbi(thirdPartyPdfiumDir, abi)
+            if (soDir) {
+              copy { from soDir; into new File(jniLibsDir, abi); include '*.so' }
+            }
+          }
+          def pdfiumIncludeDir = file("${project.projectDir}/src/main/cpp/include/pdfium")
+          pdfiumIncludeDir.mkdirs()
+          copy { from new File(thirdPartyPdfiumDir, "include"); into pdfiumIncludeDir }
+          downloadDir.mkdirs()
+          pdfiumVersionFile.text = currentPdfiumVersion
+          pdfiumResolved = true
+          logPrebuilt("pdfium", "native", "THIRD_PARTY", currentPdfiumVersion)
+        }
+
+        if (!pdfiumResolved) {
+          try {
+            def aarFiles = project.configurations.pdfiumAar.files
+            if (aarFiles && !aarFiles.isEmpty()) {
+              def aar = aarFiles.iterator().next()
+              def extractDir = new File(downloadDir, "pdfium-aar-extract")
+              if (extractDir.exists()) extractDir.deleteDir()
+              extractDir.mkdirs()
+              copy { from zipTree(aar); into extractDir }
+              requiredAbis.each { abi ->
+                def jni = new File(extractDir, "jni/${abi}")
+                if (jni.exists()) {
+                  copy { from jni; into new File(jniLibsDir, abi); include '*.so' }
+                }
+              }
+              def hdrSrc = new File(extractDir, "include")
+              if (hdrSrc.exists()) {
+                def pdfiumIncludeDir = file("${project.projectDir}/src/main/cpp/include/pdfium")
+                pdfiumIncludeDir.mkdirs()
+                copy { from hdrSrc; into pdfiumIncludeDir }
+              }
+              downloadDir.mkdirs()
+              pdfiumVersionFile.text = currentPdfiumVersion
+              pdfiumResolved = true
+              logPrebuilt("pdfium", "native", "MAVEN_AAR", currentPdfiumVersion)
+            }
+          } catch (Exception e) {
+            println "[pdfium] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
+          }
+        }
+
+        // GITHUB_RELEASE deferred to shared download section below (needs baseUrl).
+      } else {
+        pdfiumResolved = true
+        logPrebuilt("pdfium", "native", "LOCAL_SDK", currentPdfiumVersion)
+      }
+    } else {
+      logPrebuilt("pdfium", "skipped", "disabled", "sherpaOnnxEnablePdfium=false (default)")
+    }
+
+    // =====================================================================
     // onnxruntime: libonnxruntime.so + libonnxruntime4j_jni.so (same ORT build)
     //
     // Java OrtEnvironment loads libonnxruntime4j_jni.so, which dlopen's libonnxruntime.so.
@@ -692,28 +799,32 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && !ffmpegResolved
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
       def needLibwebp = !sherpaOnnxDisableLibwebp && !libwebpResolved
+      def needPdfium = sherpaOnnxEnablePdfium && !pdfiumResolved
       def needSherpa = !sherpaResolved
-      if (needFfmpeg || needLibarchive || needLibwebp || needSherpa) {
+      if (needFfmpeg || needLibarchive || needLibwebp || needPdfium || needSherpa) {
         println "[prebuilt] GITHUB_RELEASE: skipped (no repo). Set -PprebuiltGitHubRepo=owner/repo or git remote origin --> github.com"
-        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}, libwebp=${needLibwebp}"
+        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}, libwebp=${needLibwebp}, pdfium=${needPdfium}"
         def diag = [
           "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
           "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
           "sherpaOnnxDisableFfmpeg=${sherpaOnnxDisableFfmpeg}",
           "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
           "sherpaOnnxDisableLibwebp=${sherpaOnnxDisableLibwebp}",
+          "sherpaOnnxEnablePdfium=${sherpaOnnxEnablePdfium}",
           "sherpaResolved=${sherpaResolved}",
           "ffmpegResolved=${ffmpegResolved}",
           "libarchiveResolved=${libarchiveResolved}",
           "libwebpResolved=${libwebpResolved}",
+          "pdfiumResolved=${pdfiumResolved}",
         ].join(", ")
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. " +
           "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / libwebp), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
+          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / libwebp / pdfium), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
           (sherpaOnnxDisableLibwebp ? "(libwebp disabled via sherpaOnnxDisableLibwebp=true.) " : "") +
+          (!sherpaOnnxEnablePdfium ? "(pdfium disabled via sherpaOnnxEnablePdfium=false.) " : "") +
           "Diagnostics: [${diag}]"
         )
       }
@@ -722,7 +833,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def willUseGithub = !sherpaResolved ||
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
         (!sherpaOnnxDisableLibarchive && !libarchiveResolved) ||
-        (!sherpaOnnxDisableLibwebp && !libwebpResolved)
+        (!sherpaOnnxDisableLibwebp && !libwebpResolved) ||
+        (sherpaOnnxEnablePdfium && !pdfiumResolved)
     if (willUseGithub) {
       println "[prebuilt] GITHUB_RELEASE repo=${repo}"
     }
@@ -826,6 +938,40 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       logPrebuilt("libwebp", "native", "GITHUB_RELEASE", tag)
     }
 
+    if (sherpaOnnxEnablePdfium && !pdfiumResolved) {
+      def tagFile = file("${project.projectDir.parent}/third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG")
+      def tag = readReleaseTag(tagFile)
+      if (!tag) {
+        throw new RuntimeException(
+            "sherpaOnnxEnablePdfium=true but missing third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG. " +
+            "Publish via build-pdfium-android-release (gh workflow run … --ref <feature-branch>).")
+      }
+      def zipFile = new File(downloadDir, "pdfium-android.zip")
+      def url = "${baseUrl}/${tag}/pdfium-android.zip"
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      if (!zipFile.exists() || zipFile.length() == 0) {
+        throw new RuntimeException("PDFium download failed: ${url}")
+      }
+      def extractDir = new File(downloadDir, "pdfium-extract")
+      if (extractDir.exists()) extractDir.deleteDir()
+      extractDir.mkdirs()
+      copy { from zipTree(zipFile); into extractDir }
+      copy {
+        from fileTree(extractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
+        into jniLibsDir
+      }
+      def includeInZip = new File(extractDir, "include")
+      if (includeInZip.exists()) {
+        def pdfiumIncludeDir = file("${project.projectDir}/src/main/cpp/include/pdfium")
+        pdfiumIncludeDir.mkdirs()
+        copy { from includeInZip; into pdfiumIncludeDir }
+      }
+      def pdfiumVersionFile = new File(downloadDir, "pdfium-version.txt")
+      downloadDir.mkdirs()
+      pdfiumVersionFile.text = project.ext.pdfiumVersion
+      logPrebuilt("pdfium", "native", "GITHUB_RELEASE", tag)
+    }
+
     if (!sherpaResolved) {
       def tagFile = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
@@ -902,6 +1048,14 @@ project.tasks.register("checkJniLibs") {
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
             throw new RuntimeException("Missing required libwebp library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libwebp resolves. Or set sherpaOnnxDisableLibwebp=true in gradle.properties.")
+          }
+        }
+      }
+      if (sherpaOnnxEnablePdfium) {
+        requiredPdfiumSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required pdfium library '${soName}' for ABI ${abi}. sherpaOnnxEnablePdfium=true requires prebuilts (see third_party/pdfium_prebuilt/README.md).")
           }
         }
       }

@@ -61,6 +61,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
     "android/src/main/cpp/ocr/**/*.{h,cpp}",
+    # Shared PDF text-layer core (JNI excluded below).
+    "android/src/main/cpp/pdf/**/*.{h,cpp}",
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -81,6 +83,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/ocr/**/*",
+    "android/src/main/cpp/jni/pdf/**/*",
     # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
     "android/src/main/cpp/image/decode/vendor/**/*"
   ]
@@ -98,7 +101,8 @@ Pod::Spec.new do |s|
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
   libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
   libwebp_xcframework = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
-  
+  pdfium_xcframework = File.join(pod_root, "ios", "Frameworks", "pdfium.xcframework")
+
   has_ffmpeg = false
   disable_ffmpeg = ENV['SHERPA_ONNX_DISABLE_FFMPEG']
   if (!disable_ffmpeg || disable_ffmpeg == '0' || disable_ffmpeg == 'false') && File.exist?(ffmpeg_xcframework)
@@ -117,10 +121,18 @@ Pod::Spec.new do |s|
     has_libwebp = true
   end
 
+  # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_PDFIUM=1 and xcframework present.
+  has_pdfium = false
+  enable_pdfium = ENV['SHERPA_ONNX_ENABLE_PDFIUM']
+  if (enable_pdfium == '1' || enable_pdfium == 'true') && File.exist?(pdfium_xcframework)
+    has_pdfium = true
+  end
+
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
   vendored << "ios/Frameworks/libarchive.xcframework" if has_libarchive
   vendored << "ios/Frameworks/libwebp.xcframework" if has_libwebp
+  vendored << "ios/Frameworks/pdfium.xcframework" if has_pdfium
   
   s.vendored_frameworks = vendored
   # Absolute paths so headers are found regardless of PODS_TARGET_SRCROOT (e.g. when building via React Native CLI).
@@ -144,6 +156,12 @@ Pod::Spec.new do |s|
   libwebp_simulator_slice = File.join(libwebp_xcframework_root, "ios-arm64_x86_64-simulator")
   libwebp_device_slice = File.join(libwebp_xcframework_root, "ios-arm64")
 
+  pdfium_xcframework_root = File.join(pod_root, "ios", "Frameworks", "pdfium.xcframework")
+  pdfium_simulator_headers = File.join(pdfium_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  pdfium_device_headers = File.join(pdfium_xcframework_root, "ios-arm64", "Headers")
+  pdfium_simulator_slice = File.join(pdfium_xcframework_root, "ios-arm64_x86_64-simulator")
+  pdfium_device_slice = File.join(pdfium_xcframework_root, "ios-arm64")
+
   ffmpeg_simulator_headers = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator", "Headers")
   ffmpeg_device_headers = File.join(ffmpeg_xcframework, "ios-arm64", "Headers")
   ffmpeg_simulator_slice = File.join(ffmpeg_xcframework, "ios-arm64_x86_64-simulator")
@@ -153,6 +171,7 @@ Pod::Spec.new do |s|
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
   gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp
+  gcc_defs += ' HAVE_PDFIUM=1' if has_pdfium
 
   ld_flags_base = '$(inherited)'
   if has_ffmpeg
@@ -163,6 +182,9 @@ Pod::Spec.new do |s|
   end
   if has_libwebp
     ld_flags_base += ' -lwebp'
+  end
+  if has_pdfium
+    ld_flags_base += ' -lpdfium'
   end
   ld_flags_ios = "#{ld_flags_base} -force_load \"#{device_sherpa_binary}\""
   ld_flags_sim = "#{ld_flags_base} -force_load \"#{simulator_sherpa_binary}\""
@@ -196,9 +218,13 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doctr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doc_vlm\"",
+    "\"#{pod_root}/android/src/main/cpp\"",
+    "\"#{pod_root}/android/src/main/cpp/pdf\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios/ocr\"",
     "\"#{pod_root}/ios/ocr/bridge\"",
+    "\"#{pod_root}/ios/pdf\"",
+    "\"#{pod_root}/ios/pdf/bridge\"",
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",
@@ -231,6 +257,10 @@ Pod::Spec.new do |s|
     header_search_paths << "\"#{libwebp_device_headers}\""
     header_search_paths << "\"#{libwebp_simulator_headers}\""
   end
+  if has_pdfium
+    header_search_paths << "\"#{pdfium_device_headers}\""
+    header_search_paths << "\"#{pdfium_simulator_headers}\""
+  end
   if has_ffmpeg
     header_search_paths << "\"#{ffmpeg_device_headers}\""
     header_search_paths << "\"#{ffmpeg_simulator_headers}\""
@@ -249,6 +279,10 @@ Pod::Spec.new do |s|
   if has_libwebp
     library_search_paths_ios << "\"#{libwebp_device_slice}\""
     library_search_paths_sim << "\"#{libwebp_simulator_slice}\""
+  end
+  if has_pdfium
+    library_search_paths_ios << "\"#{pdfium_device_slice}\""
+    library_search_paths_sim << "\"#{pdfium_simulator_slice}\""
   end
 
   s.pod_target_xcconfig = {

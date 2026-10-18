@@ -1,0 +1,117 @@
+# Build/package PDFium for Android and publish as GitHub Release + Maven.
+# Tag from third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG.
+#
+name: Prebuilt - PDFium (Android) Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'feat/add-ocr-support-pdfium*'
+    paths:
+      - '.github/workflows/build-pdfium-android-release.yml'
+      - 'third_party/pdfium_prebuilt/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pdfium-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          MAVEN_VERSION=$(echo "$RELEASE_TAG" | sed 's/^pdfium-android-v//')
+          echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
+
+      - name: Fetch pdfium-binaries
+        run: |
+          cd third_party/pdfium_prebuilt
+          chmod +x fetch_pdfium_android.sh
+          ./fetch_pdfium_android.sh "${{ steps.tag.outputs.maven_version }}"
+
+      - name: Package jniLibs layout
+        run: |
+          LAYOUT=pdfium-android-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          for abi in $ABIS; do
+            mkdir -p "$LAYOUT/$abi"
+            SRC="third_party/pdfium_prebuilt/android/jni/$abi"
+            if [ -d "$SRC" ]; then
+              cp "$SRC"/*.so "$LAYOUT/$abi/" 2>/dev/null || true
+            fi
+          done
+          if [ -d "third_party/pdfium_prebuilt/android/include" ]; then
+            mkdir -p "$LAYOUT/include"
+            cp -R third_party/pdfium_prebuilt/android/include/* "$LAYOUT/include/"
+          fi
+          find "$LAYOUT" -type f | head -40
+
+      - name: Create release zip
+        run: |
+          cd pdfium-android-layout
+          zip -r ../pdfium-android.zip .
+          cd ..
+          ls -la pdfium-android.zip
+
+      - name: Create pdfium AAR
+        run: |
+          chmod +x third_party/pdfium_prebuilt/create_pdfium_aar.sh
+          VER="${{ steps.tag.outputs.maven_version }}"
+          third_party/pdfium_prebuilt/create_pdfium_aar.sh pdfium-android-layout "$VER" "pdfium-${VER}.aar"
+          ls -la "pdfium-${VER}.aar"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: pdfium Android ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            Prebuilt **PDFium** for Android (text-layer extract in react-native-sherpa-onnx).
+            Opt-in: `sherpaOnnxEnablePdfium=true`.
+
+            - **pdfium-android.zip** – ABI folders + `include/`
+            - **pdfium-${{ steps.tag.outputs.maven_version }}.aar** – Maven `com.xdcobra.sherpa:pdfium`
+          files: |
+            pdfium-android.zip
+            pdfium-${{ steps.tag.outputs.maven_version }}.aar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish AAR to GitHub Pages Maven
+        if: success()
+        env:
+          MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
+          MAVEN_VERSION: ${{ steps.tag.outputs.maven_version }}
+          AAR_SRC: pdfium-${{ steps.tag.outputs.maven_version }}.aar
+        run: |
+          if [ -z "${MAVEN_REPO_PAT}" ]; then
+            echo "MAVEN_REPO_PAT not set, skipping Maven publish."
+            exit 0
+          fi
+          chmod +x third_party/pdfium_prebuilt/publish-maven/publish-to-github-pages.sh
+          third_party/pdfium_prebuilt/publish-maven/publish-to-github-pages.sh
