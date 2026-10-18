@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PdfDocument.h"
 #include "PdfTypes.h"
 
 #include "ImageTypes.h"
@@ -30,6 +31,20 @@ struct PdfRasterResult {
   int page_count = 0;
   std::vector<image::RgbFrame> frames;
 };
+
+/**
+ * Rasterize a single 1-based page from an open document into packed RGB8.
+ * Sets pageNumber / dpi on the frame. Thread-safe w.r.t. other pages if caller
+ * serializes access to the same FPDF_DOCUMENT (PdfLazySession holds a mutex).
+ */
+bool RasterizePdfPage(
+    const PdfDocument& doc,
+    int page_1based,
+    int dpi,
+    int max_side,
+    image::RgbFrame* out,
+    std::string* err_code,
+    std::string* err_message);
 
 /**
  * Rasterize PDF pages to packed RGB8 frames (top-left, y-down).

@@ -59,6 +59,87 @@ void ComputePixelSize(
   *out_h = h;
 }
 
+bool RasterizePageUnlocked(
+    FPDF_DOCUMENT raw,
+    int page_1based,
+    int page_count,
+    int dpi,
+    int max_side,
+    image::RgbFrame* out,
+    std::string* err_code,
+    std::string* err_message) {
+  if (!out) {
+    if (err_code) *err_code = kErrInvalidArgument;
+    if (err_message) *err_message = "out frame required";
+    return false;
+  }
+  if (dpi <= 0) {
+    if (err_code) *err_code = kErrInvalidArgument;
+    if (err_message) *err_message = "dpi must be > 0";
+    return false;
+  }
+  if (!raw || page_1based < 1 || page_1based > page_count) {
+    if (err_code) *err_code = kErrInvalidArgument;
+    if (err_message) *err_message = "page index out of range (1-based)";
+    return false;
+  }
+
+  const int page_index = page_1based - 1;
+  FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
+  if (!page) {
+    if (err_code) *err_code = kErrRenderFailed;
+    if (err_message) *err_message = "FPDF_LoadPage failed";
+    return false;
+  }
+
+  const double page_width = FPDF_GetPageWidth(page);
+  const double page_height = FPDF_GetPageHeight(page);
+  int bw = 0;
+  int bh = 0;
+  ComputePixelSize(page_width, page_height, dpi, max_side, &bw, &bh);
+
+  FPDF_BITMAP bitmap = FPDFBitmap_Create(bw, bh, 1 /* alpha */);
+  if (!bitmap) {
+    FPDF_ClosePage(page);
+    if (err_code) *err_code = kErrRenderFailed;
+    if (err_message) *err_message = "FPDFBitmap_Create failed";
+    return false;
+  }
+
+  // Opaque white background (BGRA).
+  FPDFBitmap_FillRect(bitmap, 0, 0, bw, bh, 0xFFFFFFFF);
+  FPDF_RenderPageBitmap(bitmap, page, 0, 0, bw, bh, 0, FPDF_ANNOT);
+
+  void* buffer = FPDFBitmap_GetBuffer(bitmap);
+  const int stride = FPDFBitmap_GetStride(bitmap);
+  if (!buffer || stride <= 0) {
+    FPDFBitmap_Destroy(bitmap);
+    FPDF_ClosePage(page);
+    if (err_code) *err_code = kErrRenderFailed;
+    if (err_message) *err_message = "FPDFBitmap buffer unavailable";
+    return false;
+  }
+
+  image::RgbFrame frame;
+  frame.width = bw;
+  frame.height = bh;
+  frame.pageNumber = page_1based;
+  frame.dpi = dpi;
+  BgraToRgb(static_cast<const uint8_t*>(buffer), bw, bh, stride, &frame.rgb);
+
+  FPDFBitmap_Destroy(bitmap);
+  FPDF_ClosePage(page);
+
+  if (!frame.valid()) {
+    if (err_code) *err_code = kErrRenderFailed;
+    if (err_message) *err_message = "invalid RGB frame after raster";
+    return false;
+  }
+
+  *out = std::move(frame);
+  return true;
+}
+
 PdfRasterResult RasterizeWithPdfium(
     const uint8_t* pdf_bytes,
     size_t pdf_size,
@@ -117,7 +198,6 @@ PdfRasterResult RasterizeWithPdfium(
     options.on_progress(0, total, "raster");
   }
 
-  FPDF_DOCUMENT raw = doc.handle();
   result.frames.reserve(static_cast<size_t>(total));
 
   for (int page_1based : pages) {
@@ -128,60 +208,14 @@ PdfRasterResult RasterizeWithPdfium(
       return result;
     }
 
-    const int page_index = page_1based - 1;
-    FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
-    if (!page) {
-      result.error_code = kErrRenderFailed;
-      result.error_message = "FPDF_LoadPage failed";
-      result.frames.clear();
-      return result;
-    }
-
-    const double page_width = FPDF_GetPageWidth(page);
-    const double page_height = FPDF_GetPageHeight(page);
-    int bw = 0;
-    int bh = 0;
-    ComputePixelSize(
-        page_width, page_height, options.dpi, options.max_side, &bw, &bh);
-
-    FPDF_BITMAP bitmap = FPDFBitmap_Create(bw, bh, 1 /* alpha */);
-    if (!bitmap) {
-      FPDF_ClosePage(page);
-      result.error_code = kErrRenderFailed;
-      result.error_message = "FPDFBitmap_Create failed";
-      result.frames.clear();
-      return result;
-    }
-
-    // Opaque white background (BGRA).
-    FPDFBitmap_FillRect(bitmap, 0, 0, bw, bh, 0xFFFFFFFF);
-    FPDF_RenderPageBitmap(bitmap, page, 0, 0, bw, bh, 0, FPDF_ANNOT);
-
-    void* buffer = FPDFBitmap_GetBuffer(bitmap);
-    const int stride = FPDFBitmap_GetStride(bitmap);
-    if (!buffer || stride <= 0) {
-      FPDFBitmap_Destroy(bitmap);
-      FPDF_ClosePage(page);
-      result.error_code = kErrRenderFailed;
-      result.error_message = "FPDFBitmap buffer unavailable";
-      result.frames.clear();
-      return result;
-    }
-
     image::RgbFrame frame;
-    frame.width = bw;
-    frame.height = bh;
-    frame.pageNumber = page_1based;
-    frame.dpi = options.dpi;
-    BgraToRgb(
-        static_cast<const uint8_t*>(buffer), bw, bh, stride, &frame.rgb);
-
-    FPDFBitmap_Destroy(bitmap);
-    FPDF_ClosePage(page);
-
-    if (!frame.valid()) {
-      result.error_code = kErrRenderFailed;
-      result.error_message = "invalid RGB frame after raster";
+    std::string err_code;
+    std::string err_msg;
+    if (!RasterizePageUnlocked(
+            doc.handle(), page_1based, page_count, options.dpi, options.max_side,
+            &frame, &err_code, &err_msg)) {
+      result.error_code = err_code.empty() ? kErrRenderFailed : err_code;
+      result.error_message = err_msg.empty() ? "render failed" : err_msg;
       result.frames.clear();
       return result;
     }
@@ -215,6 +249,40 @@ PdfRasterResult RasterizeDisabled() {
 #endif
 
 }  // namespace
+
+bool RasterizePdfPage(
+    const PdfDocument& doc,
+    int page_1based,
+    int dpi,
+    int max_side,
+    image::RgbFrame* out,
+    std::string* err_code,
+    std::string* err_message) {
+#if defined(HAVE_PDFIUM) && HAVE_PDFIUM
+  if (!doc.ok()) {
+    if (err_code) *err_code = kErrOpenFailed;
+    if (err_message) *err_message = "PDF document not open";
+    return false;
+  }
+  return RasterizePageUnlocked(
+      doc.handle(), page_1based, doc.page_count(), dpi, max_side, out, err_code,
+      err_message);
+#else
+  (void)doc;
+  (void)page_1based;
+  (void)dpi;
+  (void)max_side;
+  (void)out;
+  if (err_code) *err_code = kErrDisabled;
+  if (err_message) {
+    *err_message =
+        "PDFium is not linked. Rebuild with sherpaOnnxEnablePdfium=true "
+        "(Android) or SHERPA_ONNX_ENABLE_PDFIUM=1 (iOS) and ensure pdfium "
+        "prebuilts resolve.";
+  }
+  return false;
+#endif
+}
 
 PdfRasterResult RasterizePdfPages(
     const uint8_t* pdf_bytes,

@@ -223,6 +223,7 @@ set(SOURCES
     pdf/PdfDocument.cpp
     pdf/PdfTextLayerExtractor.cpp
     pdf/PdfPageRasterizer.cpp
+    pdf/PdfLazySession.cpp
     jni/pdf/sherpa-onnx-pdf-jni.cpp
 )
 
