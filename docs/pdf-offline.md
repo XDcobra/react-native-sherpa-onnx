@@ -1,8 +1,11 @@
-# Offline PDF text layer (`react-native-sherpa-onnx/pdf`)
+# Offline PDF (`react-native-sherpa-onnx/pdf`)
 
-Extract **digital PDF text** (native glyph layer) into an `OfflineTextBuffer` with spatial spans (`origin: 'textLayer'`).
+Two opt-in PDFium APIs:
 
-This is **not** OCR and **not** page rasterization. Scan-only PDFs reject with `ERR_PDF_NO_TEXT_LAYER`. There is no automatic OCR fallback.
+1. **`extractPdfTextLayer`** — digital glyph text → `OfflineTextBuffer` (`origin: 'textLayer'`).
+2. **`rasterizePdfPages`** — page bitmaps → `OfflineImageBuffer` (RGB8 frames with `pageNumber` / `dpi`).
+
+Neither runs OCR. Scan-only PDFs reject text extract with `ERR_PDF_NO_TEXT_LAYER`; raster still succeeds so you can call `createOCR().recognize` **explicitly**.
 
 ## Opt-in PDFium (default OFF)
 
@@ -15,19 +18,18 @@ PDFium is large. Default SDK builds do **not** link it.
 
 Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuilt/README.md). Resolution mirrors libwebp (THIRD_PARTY → Maven → GitHub), but **only when enable is true**.
 
-If you call the API without enable:
+If you call either API without enable:
 
 - Code: `ERR_PDF_PDFIUM_DISABLED`
 - Message tells you to rebuild with the enable flags and resolve prebuilts.
 
-## Quick start
+## Quick start — text layer
 
 ```ts
 import { createEmptyOfflineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 import {
   extractPdfTextLayer,
   isPdfiumEnabled,
-  PdfErrorCode,
 } from 'react-native-sherpa-onnx/pdf';
 
 if (!(await isPdfiumEnabled())) {
@@ -43,7 +45,36 @@ const result = await extractPdfTextLayer(
 console.log(result.pageCount, result.spatialSpanCount);
 ```
 
-## Spans and coordinates
+## Quick start — page raster
+
+```ts
+import {
+  getOfflineImageBufferFrameInfo,
+  releaseOfflineImageBuffer,
+} from 'react-native-sherpa-onnx/imagebuffer';
+import { rasterizePdfPages, isPdfiumEnabled } from 'react-native-sherpa-onnx/pdf';
+
+if (!(await isPdfiumEnabled())) {
+  throw new Error('Rebuild with sherpaOnnxEnablePdfium=true / SHERPA_ONNX_ENABLE_PDFIUM=1');
+}
+
+const pages = await rasterizePdfPages(
+  { kind: 'fs', path: '/path/to/doc.pdf' },
+  { pages: 'all', dpi: 144, maxSide: 4096 }
+);
+const f0 = await getOfflineImageBufferFrameInfo(pages, 0);
+console.log(f0.width, f0.height, f0.pageNumber, f0.dpi);
+
+// Optional: OCR on the rasterized frames
+// const engine = await createOCR({ ... });
+// await engine.recognize(pages, textOut);
+
+await releaseOfflineImageBuffer(pages);
+```
+
+Defaults: `dpi = 144`, `maxSide = 4096` (longest-edge clamp after DPI scale; `<= 0` disables).
+
+## Spans and coordinates (text layer)
 
 - `origin: 'textLayer'`
 - `pageNumber` — 1-based
@@ -51,26 +82,32 @@ console.log(result.pageCount, result.spatialSpanCount);
 - `sourceImageBufferId` — empty (no ImageBuffer)
 - `quad` — top-left origin, y-down, PDF user-space (native normalizes PDFium’s bottom-left)
 
-See [textbuffer-offline.md](./textbuffer-offline.md).
+Raster bitmaps use the same top-left / y-down convention so overlays can map user-space quads onto frame pixels via `pageWidth`/`pageHeight` and frame size.
+
+See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md](./imagebuffer-offline.md).
 
 ## Errors
 
 | Code | Meaning |
 |------|---------|
 | `ERR_PDF_PDFIUM_DISABLED` | Binary built without PDFium |
-| `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / populated text buffer |
+| `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / populated text buffer |
 | `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF |
 | `ERR_PDF_ENCRYPTED` | Password-protected (no silent decrypt) |
-| `ERR_PDF_NO_TEXT_LAYER` | Selected pages have no extractable text |
+| `ERR_PDF_NO_TEXT_LAYER` | Selected pages have no extractable text (extract only) |
+| `ERR_PDF_RENDER_FAILED` | Page bitmap create/render failed (raster only) |
 | `ERR_PDF_CANCELLED` | AbortSignal / cancel |
 
 ## Example app
 
 Bundled fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example turns PDFium **on** (`example/android/gradle.properties` + `example/ios/Podfile`); consumer apps should keep the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
 
-## Next
+Picker / preview / overlay UI for PDF is a follow-up (not in this API slice).
 
-Page raster → ImageBuffer (then explicit OCR) is tracked in [future-work/pdfium-raster-future-work.md](./future-work/pdfium-raster-future-work.md).
+## Follow-ups
+
+- Page-at-a-time / LRU memory policy: [imagebuffer-perf-future-work.md](./future-work/imagebuffer-perf-future-work.md)
+- Example screen wiring (later)
 
 ## See also
 

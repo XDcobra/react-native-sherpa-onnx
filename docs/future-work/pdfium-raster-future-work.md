@@ -1,27 +1,15 @@
-# Future work: PDFium page raster → ImageBuffer
+# PDFium page raster — status
 
-Follow-on to [pdf-offline.md](../pdf-offline.md) text-layer extract.
+**Shipped** on `feat/add-ocr-support-pdfium-raster` as `rasterizePdfPages` → `OfflineImageBuffer` (see [pdf-offline.md](../pdf-offline.md)).
 
-## Goal
+## Done
 
-Deterministic API to rasterize PDF pages into an `OfflineImageBuffer` (RGB8 frames with `pageNumber`), then let the app call `createOCR().recognize` **explicitly**. No auto-OCR inside PDF APIs.
+- Opt-in `HAVE_PDFIUM` path: `FPDF_RenderPageBitmap` → RGB8 frames with `pageNumber` + `dpi`
+- Frame metadata on `getOfflineImageBufferFrameInfo`
+- No auto-OCR; apps call `createOCR().recognize` explicitly
+- No silent text-layer → raster fallback
 
-## Prerequisites
+## Remaining follow-ups
 
-- PDFium opt-in prebuilts already linked (`sherpaOnnxEnablePdfium` / `SHERPA_ONNX_ENABLE_PDFIUM`)
-- ImageBuffer frame metadata: `pageNumber` (and possibly DPI)
-- Memory policy: full document raster vs page-at-a-time / LRU — see [imagebuffer-perf-future-work.md](./imagebuffer-perf-future-work.md)
-
-## Non-goals
-
-- Silent fallback from text-layer extract to raster/OCR
-- Dual-path `mode: 'auto'`
-
-## Suggested API sketch
-
-```ts
-rasterizePdfPages(source, options?: { pages?, dpi?, maxSide? })
-  → OfflineImageBufferRef
-```
-
-Branch name suggestion: `feat/add-ocr-support-pdfium-raster`.
+- Example app: PDF picker + preview + span overlays (separate slice)
+- Page-at-a-time / LRU when rasterizing large documents — [imagebuffer-perf-future-work.md](./imagebuffer-perf-future-work.md)
