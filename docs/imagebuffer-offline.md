@@ -77,6 +77,7 @@ console.log(info.frameCount, info.storageKind, info.totalBytes);
 
 const f0 = await getOfflineImageBufferFrameInfo(fromFiles, 0);
 console.log(f0.width, f0.height, f0.byteSize);
+// PDF rasters (rasterizePdfPages) may also set f0.pageNumber / f0.dpi.
 
 // 3) Release when done.
 await releaseOfflineImageBuffer(fromFiles);
@@ -205,9 +206,10 @@ function getOfflineImageBufferFrameInfo(
 ```ts
 const frame = await getOfflineImageBufferFrameInfo(offline, 0);
 console.log(frame.width, frame.height, frame.byteSize, frame.storageKind);
+// Optional (PDF raster only): frame.pageNumber, frame.dpi
 ```
 
-Returns metadata for a single frame (no pixel copy into JS). Engine/OCR access uses native `GetFrameRgbPtr` later.
+Returns metadata for a single frame (no pixel copy into JS). Engine/OCR access uses native `GetFrameRgbPtr` later. Frames from [`rasterizePdfPages`](pdf-offline.md) include 1-based `pageNumber` and the requested `dpi`.
 
 #### `releaseOfflineImageBuffer(buffer)`
 
@@ -258,7 +260,7 @@ import type {
   OfflineImageBufferInfo, // metadata for immutable offline RGB buffer
   OfflineImageBufferIdSource, // ref/handle/info/id accepted by offline APIs
   OfflineImageBufferHandle, // branded img_off_* id
-  OfflineImageFrameInfo, // per-frame width/height/byteSize/storageKind
+  OfflineImageFrameInfo, // per-frame width/height/byteSize/storageKind (+ optional pageNumber/dpi)
   CreateOfflineImageBufferOptions, // maxSide + onProgress + signal
   ImageProgressEvent, // { done, total, phase }
   ImageStorageKind, // 'ram' | 'mmap'

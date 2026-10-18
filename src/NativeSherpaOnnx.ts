@@ -1070,6 +1070,8 @@ export interface Spec extends TurboModule {
     height: number;
     byteSize: number;
     storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;

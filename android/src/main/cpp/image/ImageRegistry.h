@@ -101,6 +101,8 @@ class ImageRegistry {
     ImageStorageKind kind = ImageStorageKind::Ram;
     std::vector<uint8_t> ram;  // empty when mmap
     MmapFrame mmap;
+    int pageNumber = 0;
+    int dpi = 0;
   };
 
   struct Entry {

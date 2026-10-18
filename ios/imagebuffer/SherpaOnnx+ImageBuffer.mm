@@ -360,14 +360,21 @@ int MaxSideFromOptions(NSDictionary *options) {
     reject(@"ERR_IMAGE_BUFFER_NOT_FOUND", @"Frame not found", nil);
     return;
   }
-  resolve(@{
+  NSMutableDictionary *dict = [@{
     @"index" : @(info.index),
     @"width" : @(info.width),
     @"height" : @(info.height),
     @"byteSize" : @(info.byteSize),
     @"storageKind" :
         [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
-  });
+  } mutableCopy];
+  if (info.pageNumber > 0) {
+    dict[@"pageNumber"] = @(info.pageNumber);
+  }
+  if (info.dpi > 0) {
+    dict[@"dpi"] = @(info.dpi);
+  }
+  resolve(dict);
 }
 
 - (void)releaseOfflineImageBuffer:(NSString *)bufferId

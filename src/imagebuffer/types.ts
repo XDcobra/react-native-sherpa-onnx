@@ -27,6 +27,10 @@ export interface OfflineImageFrameInfo {
   height: number;
   byteSize: number;
   storageKind: ImageStorageKind;
+  /** 1-based PDF page number when frame came from rasterizePdfPages. */
+  pageNumber?: number;
+  /** Raster DPI when frame came from rasterizePdfPages. */
+  dpi?: number;
 }
 
 /** Branded handle for an offline image buffer. */

@@ -273,6 +273,12 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   PutLong(env, map, put, "byteSize", info.byteSize);
   PutString(env, map, put, "storageKind",
             sherpa_onnx::image::StorageKindName(info.storageKind));
+  if (info.pageNumber > 0) {
+    PutInt(env, map, put, "pageNumber", info.pageNumber);
+  }
+  if (info.dpi > 0) {
+    PutInt(env, map, put, "dpi", info.dpi);
+  }
   return map;
 }
 

@@ -268,13 +268,24 @@ export async function getOfflineImageBufferFrameInfo(
   const id = resolveImageBufferId(buffer);
   assertImageBufferId(id);
   const raw = await getNative().getOfflineImageBufferFrameInfo(id, frameIndex);
-  return {
+  const frame: OfflineImageFrameInfo = {
     index: raw.index,
     width: raw.width,
     height: raw.height,
     byteSize: raw.byteSize,
     storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
   };
+  if (
+    raw.pageNumber != null &&
+    Number.isFinite(raw.pageNumber) &&
+    raw.pageNumber > 0
+  ) {
+    frame.pageNumber = Math.trunc(raw.pageNumber);
+  }
+  if (raw.dpi != null && Number.isFinite(raw.dpi) && raw.dpi > 0) {
+    frame.dpi = Math.trunc(raw.dpi);
+  }
+  return frame;
 }
 
 export async function releaseOfflineImageBuffer(

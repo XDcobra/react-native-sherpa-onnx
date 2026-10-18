@@ -3731,6 +3731,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       m.putInt("height", (info["height"] as? Number)?.toInt() ?: 0)
       m.putDouble("byteSize", (info["byteSize"] as? Number)?.toDouble() ?: 0.0)
       m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+      (info["pageNumber"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+        m.putInt("pageNumber", it)
+      }
+      (info["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+        m.putInt("dpi", it)
+      }
       promise.resolve(m)
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)

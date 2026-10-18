@@ -257,6 +257,8 @@ bool ImageRegistry::AppendRgbFrame(const std::string& bufferId, RgbFrame frame,
   f.height = frame.height;
   f.kind = ImageStorageKind::Ram;
   f.ram = std::move(frame.rgb);
+  f.pageNumber = frame.pageNumber;
+  f.dpi = frame.dpi;
   it->second.pathType = pathType;
   it->second.frames.push_back(std::move(f));
   UpgradeEntryLocked(it->second);
@@ -286,6 +288,8 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromRgbFrames(
     f.height = rf.height;
     f.kind = ImageStorageKind::Ram;
     f.ram = std::move(rf.rgb);
+    f.pageNumber = rf.pageNumber;
+    f.dpi = rf.dpi;
     e.frames.push_back(std::move(f));
   }
   return FinishCreateLocked(std::move(e));
@@ -407,6 +411,8 @@ bool ImageRegistry::GetFrameInfo(const std::string& bufferId, int frameIndex,
   out.height = f.height;
   out.byteSize = static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
   out.storageKind = f.kind;
+  out.pageNumber = f.pageNumber;
+  out.dpi = f.dpi;
   return true;
 }
 

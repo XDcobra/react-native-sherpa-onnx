@@ -12,6 +12,10 @@ struct RgbFrame {
   int width = 0;
   int height = 0;
   std::vector<uint8_t> rgb;
+  /** 1-based PDF page number; 0 = unset (file/base64 creates). */
+  int pageNumber = 0;
+  /** Raster DPI used when producing this frame; 0 = unset. */
+  int dpi = 0;
 
   size_t byteSize() const {
     return static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
@@ -37,6 +41,10 @@ struct ImageFrameInfo {
   int height = 0;
   int64_t byteSize = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
+  /** 1-based PDF page number; 0 = unset. */
+  int pageNumber = 0;
+  /** Raster DPI; 0 = unset. */
+  int dpi = 0;
 };
 
 struct ImageBufferInfo {
