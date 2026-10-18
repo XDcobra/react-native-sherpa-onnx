@@ -276,6 +276,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       emitOcrProgress(operationId, done, total, phase)
     }
   )
+  private val pdfHelper = com.sherpaonnx.pdf.facade.SherpaOnnxPdfHelper(reactApplicationContext)
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType, quantization ->
@@ -488,6 +489,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     punctuationHelper.shutdown()
     onlinePunctuationHelper.shutdown()
     ocrHelper.shutdown()
+    pdfHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -3594,6 +3596,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun unloadOcr(instanceId: String, promise: Promise) {
     ocrHelper.unloadOcr(instanceId, promise)
+  }
+
+  override fun isPdfiumEnabled(promise: Promise) {
+    pdfHelper.isPdfiumEnabled(promise)
+  }
+
+  override fun extractPdfTextLayer(
+    source: ReadableMap,
+    textOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    pdfHelper.extractPdfTextLayer(source, textOutBufferId, options, promise)
   }
 
   override fun createEmptyOfflineImageBuffer(promise: Promise) {
