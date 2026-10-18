@@ -15,7 +15,7 @@
 namespace sherpa_onnx {
 
 namespace pdf {
-class PdfLazySession;
+class PdfLazyBackend;
 }  // namespace pdf
 
 namespace image {
@@ -23,7 +23,7 @@ namespace image {
 /**
  * Offline ImageBuffer registry (C++ source of truth).
  * Buffer ids: img_off_<uuid>. Per-frame backing: RAM or mmap (.rgb8 temp file).
- * Lazy-lru PDF buffers: placeholder slots + retained PdfLazySession; at most
+ * Lazy-lru PDF buffers: placeholder slots + retained PdfLazyBackend; at most
  * hotFrames hold decoded RGB.
  */
 class ImageRegistry {
@@ -76,7 +76,7 @@ class ImageRegistry {
    * pages_1based empty = all document pages. hotFrames clamped to 1..32.
    */
   CreateResult CreateLazyPdfSlots(
-      std::unique_ptr<pdf::PdfLazySession> session,
+      std::unique_ptr<pdf::PdfLazyBackend> backend,
       const std::vector<int>& pages_1based,
       int hotFrames);
 
@@ -151,7 +151,7 @@ class ImageRegistry {
     int hotFramesLimit = 0;
     uint64_t lruClock = 0;
     uint64_t generation = 0;
-    std::unique_ptr<pdf::PdfLazySession> pdfLazy;
+    std::unique_ptr<pdf::PdfLazyBackend> pdfLazy;
 
     Entry();
     ~Entry();

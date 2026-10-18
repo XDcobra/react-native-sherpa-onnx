@@ -500,21 +500,33 @@ else()
   set(IMAGEBUFFER_GTEST_LIBS gtest gtest_main)
 endif()
 
+set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
+
 add_executable(imagebuffer_host_test
   "${IMAGEBUFFER_TEST_DIR}/image_test_utils.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_decode_test.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_registry_test.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_mmap_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_lazy_lru_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_export_test.cpp"
   "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
   "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
   "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
 )
 target_include_directories(imagebuffer_host_test PRIVATE
   "${IMAGE_CPP_ROOT}"
   "${IMAGE_CPP_ROOT}/decode"
+  "${PDF_CPP_ROOT}"
   "${IMAGEBUFFER_TEST_DIR}"
 )
 target_link_libraries(imagebuffer_host_test PRIVATE ${IMAGEBUFFER_GTEST_LIBS})
+# Threads for ImageRegistry neighbor prefetch (std::thread).
+find_package(Threads REQUIRED)
+target_link_libraries(imagebuffer_host_test PRIVATE Threads::Threads)
 
 # Optional libwebp for WebP decode tests
 find_package(PkgConfig QUIET)
@@ -558,7 +570,6 @@ set_tests_properties(imagebuffer_host_test PROPERTIES
 )
 
 # PDF text-layer host test (disabled path by default; no PDFium required)
-set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
   set(PDF_GTEST_LIBS gtest gtest_main)
@@ -576,6 +587,7 @@ add_executable(pdf_text_layer_host_test
   "${PDF_CPP_ROOT}/PdfDocument.cpp"
   "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
   "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
 )
 target_include_directories(pdf_text_layer_host_test PRIVATE
   "${PDF_CPP_ROOT}"

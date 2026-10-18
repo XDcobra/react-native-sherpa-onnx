@@ -1,6 +1,6 @@
 #include "ImageRegistry.h"
 
-#include "PdfLazySession.h"
+#include "PdfLazyBackend.h"
 
 #include <chrono>
 #include <climits>
@@ -371,18 +371,18 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromRgbFrames(
 }
 
 ImageRegistry::CreateResult ImageRegistry::CreateLazyPdfSlots(
-    std::unique_ptr<pdf::PdfLazySession> session,
+    std::unique_ptr<pdf::PdfLazyBackend> backend,
     const std::vector<int>& pages_1based,
     int hotFrames) {
   CreateResult r;
-  if (!session) {
+  if (!backend) {
     r.errorCode = "ERR_PDF_INTERNAL";
-    r.errorMessage = "PdfLazySession required";
+    r.errorMessage = "PdfLazyBackend required";
     return r;
   }
 
-  const int page_count = session->page_count();
-  const int dpi = session->dpi();
+  const int page_count = backend->page_count();
+  const int dpi = backend->dpi();
   std::vector<int> pages = pages_1based;
   if (pages.empty()) {
     pages.reserve(static_cast<size_t>(page_count));
@@ -411,7 +411,7 @@ ImageRegistry::CreateResult ImageRegistry::CreateLazyPdfSlots(
   e.pathType = ImageThresholdPathType::FileOrigin;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.pdfLazy = std::move(session);
+  e.pdfLazy = std::move(backend);
   e.frames.reserve(pages.size());
   for (int page : pages) {
     Frame f;
@@ -492,7 +492,7 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
                                                        int frameIndex) {
   EnsureResult r;
 
-  pdf::PdfLazySession* session = nullptr;
+  pdf::PdfLazyBackend* session = nullptr;
   int pageNumber = 0;
   uint64_t generation = 0;
   int frameCount = 0;

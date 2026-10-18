@@ -1,4 +1,5 @@
 #include "PdfFeatureGuard.h"
+#include "PdfLazySession.h"
 #include "PdfPageRasterizer.h"
 #include "PdfTextLayerExtractor.h"
 #include "PdfTypes.h"
@@ -35,4 +36,18 @@ TEST(PdfRasterHost, DisabledBuildReturnsPdfiumDisabled) {
   EXPECT_FALSE(r.ok);
   EXPECT_EQ(r.error_code, sherpa_onnx::pdf::kErrDisabled);
   EXPECT_TRUE(r.frames.empty());
+}
+
+TEST(PdfLazySessionHost, DisabledBuildOpenReturnsPdfiumDisabled) {
+  if (sherpa_onnx::pdf::IsPdfiumCompiledIn()) {
+    GTEST_SKIP() << "PDFium linked; disabled-path test skipped";
+  }
+  const uint8_t fake[] = {'%', 'P', 'D', 'F', '-', '1', '.', '4'};
+  std::string err_code;
+  std::string err_msg;
+  auto session = sherpa_onnx::pdf::PdfLazySession::Open(
+      fake, sizeof(fake), 144, 4096, &err_code, &err_msg);
+  EXPECT_EQ(session, nullptr);
+  EXPECT_EQ(err_code, sherpa_onnx::pdf::kErrDisabled);
+  EXPECT_NE(err_msg.find("sherpaOnnxEnablePdfium"), std::string::npos);
 }

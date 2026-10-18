@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PdfDocument.h"
+#include "PdfLazyBackend.h"
 #include "PdfTypes.h"
 
 #include "ImageTypes.h"
@@ -19,13 +20,13 @@ namespace pdf {
  * Owns PDF bytes (FPDF_LoadMemDocument requires lifetime) + open doc.
  * Thread-safe single-page rasterize.
  */
-class PdfLazySession {
+class PdfLazySession final : public PdfLazyBackend {
  public:
   PdfLazySession(const PdfLazySession&) = delete;
   PdfLazySession& operator=(const PdfLazySession&) = delete;
   PdfLazySession(PdfLazySession&&) = delete;
   PdfLazySession& operator=(PdfLazySession&&) = delete;
-  ~PdfLazySession();
+  ~PdfLazySession() override;
 
   /**
    * Open PDF from bytes. Copies bytes into owned storage.
@@ -39,19 +40,15 @@ class PdfLazySession {
       std::string* err_code,
       std::string* err_message);
 
-  int page_count() const { return page_count_; }
-  int dpi() const { return dpi_; }
-  int max_side() const { return max_side_; }
+  int page_count() const override { return page_count_; }
+  int dpi() const override { return dpi_; }
+  int max_side() const override { return max_side_; }
 
-  /**
-   * Rasterize one 1-based page into packed RGB8.
-   * Sets pageNumber / dpi on the frame.
-   */
   bool RasterizePage(
       int page_1based,
       image::RgbFrame* out,
       std::string* err_code,
-      std::string* err_message);
+      std::string* err_message) override;
 
  private:
   PdfLazySession(
