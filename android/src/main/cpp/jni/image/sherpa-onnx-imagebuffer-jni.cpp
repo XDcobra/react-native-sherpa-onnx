@@ -91,7 +91,8 @@ jobject InfoToMap(JNIEnv* env, const sherpa_onnx::image::ImageBufferInfo& info) 
   if (!map) return nullptr;
   PutString(env, map, put, "bufferId", info.bufferId);
   PutString(env, map, put, "kind", "offlineImageBuffer");
-  PutString(env, map, put, "state", "immutable");
+  PutString(env, map, put, "state",
+            sherpa_onnx::image::BufferStateName(info.state));
   PutInt(env, map, put, "frameCount", info.frameCount);
   PutLong(env, map, put, "totalBytes", info.totalBytes);
   PutString(env, map, put, "storageKind",
@@ -337,6 +338,35 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
   if (!result.ok) {
     PutString(env, map, put, "errorCode", result.errorCode);
     PutString(env, map, put, "errorMessage", result.errorMessage);
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
+    JNIEnv* env, jclass, jstring jBufferId, jint frameIndex) {
+  auto ensured = sherpa_onnx::image::ImageRegistry::Instance().EnsureFrame(
+      JstringToStd(env, jBufferId), frameIndex);
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
+  PutBool(env, map, put, "ok", ensured.ok ? JNI_TRUE : JNI_FALSE);
+  if (!ensured.ok) {
+    PutString(env, map, put, "errorCode", ensured.errorCode);
+    PutString(env, map, put, "errorMessage", ensured.errorMessage);
+    return map;
+  }
+  PutInt(env, map, put, "index", ensured.info.index);
+  PutInt(env, map, put, "width", ensured.info.width);
+  PutInt(env, map, put, "height", ensured.info.height);
+  PutLong(env, map, put, "byteSize", ensured.info.byteSize);
+  PutString(env, map, put, "storageKind",
+            sherpa_onnx::image::StorageKindName(ensured.info.storageKind));
+  if (ensured.info.pageNumber > 0) {
+    PutInt(env, map, put, "pageNumber", ensured.info.pageNumber);
+  }
+  if (ensured.info.dpi > 0) {
+    PutInt(env, map, put, "dpi", ensured.info.dpi);
   }
   return map;
 }

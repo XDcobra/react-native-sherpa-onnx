@@ -35,6 +35,16 @@ inline const char* StorageKindName(ImageStorageKind kind) {
   return kind == ImageStorageKind::Mmap ? "mmap" : "ram";
 }
 
+/** Buffer lifecycle state exposed to JS. */
+enum class ImageBufferState {
+  Immutable,
+  Lazy,
+};
+
+inline const char* BufferStateName(ImageBufferState state) {
+  return state == ImageBufferState::Lazy ? "lazy" : "immutable";
+}
+
 struct ImageFrameInfo {
   int index = 0;
   int width = 0;
@@ -52,6 +62,7 @@ struct ImageBufferInfo {
   int frameCount = 0;
   int64_t totalBytes = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
+  ImageBufferState state = ImageBufferState::Immutable;
 };
 
 /** Decode options. maxSide <= 0 means no downscale. Default 4096. */

@@ -1,12 +1,17 @@
 #include "ImageRegistry.h"
 
+#include "PdfLazySession.h"
+
 #include <chrono>
+#include <climits>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <sstream>
+#include <thread>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -21,12 +26,17 @@
   __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:image", __VA_ARGS__)
 #define IMG_LOGW(...) \
   __android_log_print(ANDROID_LOG_WARN, "SherpaOnnx:image", __VA_ARGS__)
+#define PDF_LAZY_LOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:pdf.lazy", __VA_ARGS__)
 #else
 #define IMG_LOGI(...) \
   do {                \
   } while (0)
 #define IMG_LOGW(...) \
   do {                \
+  } while (0)
+#define PDF_LAZY_LOGI(...) \
+  do {                     \
   } while (0)
 #endif
 
@@ -36,6 +46,10 @@ namespace image {
 namespace fs = std::filesystem;
 
 namespace {
+
+constexpr int kHotFramesDefault = 8;
+constexpr int kHotFramesMin = 1;
+constexpr int kHotFramesMax = 32;
 
 std::string FormatUuidV4() {
   static thread_local std::mt19937_64 rng{std::random_device{}()};
@@ -52,6 +66,13 @@ std::string FormatUuidV4() {
       static_cast<unsigned>(0x8000u | ((b >> 48) & 0x3fffu)),
       static_cast<unsigned long long>(b & 0xffffffffffffull));
   return buf;
+}
+
+int ClampHotFrames(int hotFrames) {
+  if (hotFrames <= 0) return kHotFramesDefault;
+  if (hotFrames < kHotFramesMin) return kHotFramesMin;
+  if (hotFrames > kHotFramesMax) return kHotFramesMax;
+  return hotFrames;
 }
 
 }  // namespace
@@ -79,9 +100,33 @@ void ImageRegistry::MmapFrame::unlinkFile() {
   }
 }
 
+ImageRegistry::Entry::Entry() = default;
+ImageRegistry::Entry::~Entry() = default;
+ImageRegistry::Entry::Entry(Entry&&) noexcept = default;
+ImageRegistry::Entry& ImageRegistry::Entry::operator=(Entry&&) noexcept = default;
+
+bool ImageRegistry::Entry::isHot(size_t index) const {
+  if (index >= frames.size()) return false;
+  const auto& f = frames[index];
+  if (f.width <= 0 || f.height <= 0) return false;
+  if (f.kind == ImageStorageKind::Mmap) return f.mmap.valid();
+  return f.ram.size() ==
+         static_cast<size_t>(f.width) * static_cast<size_t>(f.height) * 3u;
+}
+
+int ImageRegistry::Entry::hotCount() const {
+  int n = 0;
+  for (size_t i = 0; i < frames.size(); ++i) {
+    if (isHot(i)) ++n;
+  }
+  return n;
+}
+
 int64_t ImageRegistry::Entry::totalBytes() const {
   int64_t sum = 0;
-  for (const auto& f : frames) {
+  for (size_t i = 0; i < frames.size(); ++i) {
+    if (!isHot(i)) continue;
+    const auto& f = frames[i];
     sum += static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
   }
   return sum;
@@ -89,10 +134,13 @@ int64_t ImageRegistry::Entry::totalBytes() const {
 
 ImageStorageKind ImageRegistry::Entry::storageKind() const {
   if (frames.empty()) return ImageStorageKind::Ram;
-  for (const auto& f : frames) {
-    if (f.kind == ImageStorageKind::Ram) return ImageStorageKind::Ram;
+  bool anyHot = false;
+  for (size_t i = 0; i < frames.size(); ++i) {
+    if (!isHot(i)) continue;
+    anyHot = true;
+    if (frames[i].kind == ImageStorageKind::Ram) return ImageStorageKind::Ram;
   }
-  return ImageStorageKind::Mmap;
+  return anyHot ? ImageStorageKind::Mmap : ImageStorageKind::Ram;
 }
 
 ImageRegistry& ImageRegistry::Instance() {
@@ -129,6 +177,30 @@ int64_t ImageRegistry::ThresholdFor(ImageThresholdPathType pathType) const {
   const ImageRamClass rc =
       thresholdConfigured_ ? ramClass_ : ImageRamClass::Mid;
   return ImageMmapThreshold::ThresholdBytes(platform_, rc, pathType);
+}
+
+void ImageRegistry::ClearFrameRgbLocked(Frame& frame) {
+  if (frame.kind == ImageStorageKind::Mmap) {
+    frame.mmap.unmap();
+    frame.mmap.unlinkFile();
+  }
+  frame.ram.clear();
+  frame.ram.shrink_to_fit();
+  frame.width = 0;
+  frame.height = 0;
+  frame.kind = ImageStorageKind::Ram;
+  frame.lruTick = 0;
+}
+
+void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
+                                        ImageFrameInfo& out) const {
+  out.index = frameIndex;
+  out.width = f.width;
+  out.height = f.height;
+  out.byteSize = static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
+  out.storageKind = f.kind;
+  out.pageNumber = f.pageNumber;
+  out.dpi = f.dpi;
 }
 
 bool ImageRegistry::WriteFrameToMmap(Frame& frame, const std::string& bufferId,
@@ -229,6 +301,7 @@ ImageRegistry::CreateResult ImageRegistry::FinishCreateLocked(Entry entry) {
   r.info.frameCount = static_cast<int>(entry.frames.size());
   r.info.totalBytes = entry.totalBytes();
   r.info.storageKind = entry.storageKind();
+  r.info.state = entry.state;
   r.bufferId = entry.bufferId;
   r.ok = true;
   entries_[entry.bufferId] = std::move(entry);
@@ -252,6 +325,7 @@ bool ImageRegistry::AppendRgbFrame(const std::string& bufferId, RgbFrame frame,
   std::lock_guard<std::mutex> lock(mu_);
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
+  if (it->second.state == ImageBufferState::Lazy) return false;
   Frame f;
   f.width = frame.width;
   f.height = frame.height;
@@ -277,6 +351,7 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromRgbFrames(
   Entry e;
   e.bufferId = NewBufferId();
   e.pathType = pathType;
+  e.state = ImageBufferState::Immutable;
   for (auto& rf : frames) {
     if (!rf.valid()) {
       r.errorCode = "ERR_IMAGE_DECODE_FAILED";
@@ -293,6 +368,269 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromRgbFrames(
     e.frames.push_back(std::move(f));
   }
   return FinishCreateLocked(std::move(e));
+}
+
+ImageRegistry::CreateResult ImageRegistry::CreateLazyPdfSlots(
+    std::unique_ptr<pdf::PdfLazySession> session,
+    const std::vector<int>& pages_1based,
+    int hotFrames) {
+  CreateResult r;
+  if (!session) {
+    r.errorCode = "ERR_PDF_INTERNAL";
+    r.errorMessage = "PdfLazySession required";
+    return r;
+  }
+
+  const int page_count = session->page_count();
+  const int dpi = session->dpi();
+  std::vector<int> pages = pages_1based;
+  if (pages.empty()) {
+    pages.reserve(static_cast<size_t>(page_count));
+    for (int p = 1; p <= page_count; ++p) {
+      pages.push_back(p);
+    }
+  }
+  for (int p : pages) {
+    if (p < 1 || p > page_count) {
+      r.errorCode = "ERR_PDF_INVALID_ARGUMENT";
+      r.errorMessage = "page index out of range (1-based)";
+      return r;
+    }
+  }
+  if (pages.empty()) {
+    r.errorCode = "ERR_PDF_INVALID_ARGUMENT";
+    r.errorMessage = "no pages to rasterize";
+    return r;
+  }
+
+  const int limit = ClampHotFrames(hotFrames);
+
+  std::lock_guard<std::mutex> lock(mu_);
+  Entry e;
+  e.bufferId = NewBufferId();
+  e.pathType = ImageThresholdPathType::FileOrigin;
+  e.state = ImageBufferState::Lazy;
+  e.hotFramesLimit = limit;
+  e.pdfLazy = std::move(session);
+  e.frames.reserve(pages.size());
+  for (int page : pages) {
+    Frame f;
+    f.pageNumber = page;
+    f.dpi = dpi;
+    e.frames.push_back(std::move(f));
+  }
+
+  PDF_LAZY_LOGI(
+      "createLazy bufferId=%s frames=%zu hotFrames=%d pageCount=%d",
+      e.bufferId.c_str(), e.frames.size(), limit, page_count);
+
+  r.info.bufferId = e.bufferId;
+  r.info.frameCount = static_cast<int>(e.frames.size());
+  r.info.totalBytes = 0;
+  r.info.storageKind = ImageStorageKind::Ram;
+  r.info.state = ImageBufferState::Lazy;
+  r.bufferId = e.bufferId;
+  r.ok = true;
+  entries_[e.bufferId] = std::move(e);
+  return r;
+}
+
+void ImageRegistry::TouchLruLocked(Entry& entry, int frameIndex) {
+  entry.lruClock += 1;
+  entry.frames[static_cast<size_t>(frameIndex)].lruTick = entry.lruClock;
+}
+
+void ImageRegistry::EvictUntilUnderLimitLocked(Entry& entry) {
+  if (entry.state != ImageBufferState::Lazy || entry.hotFramesLimit <= 0) return;
+  while (entry.hotCount() > entry.hotFramesLimit) {
+    int victim = -1;
+    uint64_t oldest = UINT64_MAX;
+    for (size_t i = 0; i < entry.frames.size(); ++i) {
+      if (!entry.isHot(i)) continue;
+      const uint64_t tick = entry.frames[i].lruTick;
+      if (tick < oldest) {
+        oldest = tick;
+        victim = static_cast<int>(i);
+      }
+    }
+    if (victim < 0) break;
+    PDF_LAZY_LOGI(
+        "evict bufferId=%s frame=%d hot=%d limit=%d", entry.bufferId.c_str(),
+        victim, entry.hotCount(), entry.hotFramesLimit);
+    ClearFrameRgbLocked(entry.frames[static_cast<size_t>(victim)]);
+  }
+}
+
+void ImageRegistry::ScheduleNeighborPrefetch(const std::string& bufferId,
+                                             int frameIndex, uint64_t generation,
+                                             int frameCount) {
+  auto enqueue = [this](std::string id, int idx, uint64_t gen) {
+    std::thread([this, id = std::move(id), idx, gen]() {
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = entries_.find(id);
+        if (it == entries_.end()) return;
+        if (it->second.generation != gen) return;
+        if (it->second.state != ImageBufferState::Lazy) return;
+        if (idx < 0 || idx >= static_cast<int>(it->second.frames.size())) return;
+        if (it->second.isHot(static_cast<size_t>(idx))) return;
+      }
+      PDF_LAZY_LOGI("prefetch bufferId=%s frame=%d", id.c_str(), idx);
+      (void)EnsureFrame(id, idx);
+    }).detach();
+  };
+
+  if (frameIndex - 1 >= 0) {
+    enqueue(bufferId, frameIndex - 1, generation);
+  }
+  if (frameIndex + 1 < frameCount) {
+    enqueue(bufferId, frameIndex + 1, generation);
+  }
+}
+
+ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& bufferId,
+                                                       int frameIndex) {
+  EnsureResult r;
+
+  pdf::PdfLazySession* session = nullptr;
+  int pageNumber = 0;
+  uint64_t generation = 0;
+  int frameCount = 0;
+  bool alreadyHot = false;
+  ImageFrameInfo hotInfo;
+
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(bufferId);
+    if (it == entries_.end()) {
+      r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+      r.errorMessage = "unknown bufferId";
+      return r;
+    }
+    Entry& entry = it->second;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(entry.frames.size())) {
+      r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+      r.errorMessage = "frameIndex out of range";
+      return r;
+    }
+
+    if (entry.state != ImageBufferState::Lazy) {
+      FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
+                          r.info);
+      r.ok = true;
+      return r;
+    }
+
+    if (entry.isHot(static_cast<size_t>(frameIndex))) {
+      TouchLruLocked(entry, frameIndex);
+      FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
+                          hotInfo);
+      alreadyHot = true;
+      generation = entry.generation;
+      frameCount = static_cast<int>(entry.frames.size());
+    } else {
+      if (!entry.pdfLazy) {
+        r.errorCode = "ERR_PDF_INTERNAL";
+        r.errorMessage = "lazy session missing";
+        return r;
+      }
+      session = entry.pdfLazy.get();
+      pageNumber = entry.frames[static_cast<size_t>(frameIndex)].pageNumber;
+      generation = entry.generation;
+      frameCount = static_cast<int>(entry.frames.size());
+    }
+  }
+
+  if (alreadyHot) {
+    r.ok = true;
+    r.info = hotInfo;
+    // Need room for current + neighbor so prefetch cannot evict the frame
+    // GetFrameRgbPtr / caller is about to read.
+    int hotLimit = 0;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = entries_.find(bufferId);
+      if (it != entries_.end()) hotLimit = it->second.hotFramesLimit;
+    }
+    if (hotLimit >= 2) {
+      ScheduleNeighborPrefetch(bufferId, frameIndex, generation, frameCount);
+    }
+    return r;
+  }
+
+  RgbFrame rgb;
+  std::string errCode;
+  std::string errMsg;
+  if (!session->RasterizePage(pageNumber, &rgb, &errCode, &errMsg)) {
+    r.errorCode = errCode.empty() ? "ERR_PDF_RENDER_FAILED" : errCode;
+    r.errorMessage = errMsg.empty() ? "lazy rasterize failed" : errMsg;
+    return r;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(bufferId);
+    if (it == entries_.end() || it->second.generation != generation) {
+      r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+      r.errorMessage = "buffer released during ensure";
+      return r;
+    }
+    Entry& entry = it->second;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(entry.frames.size())) {
+      r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+      r.errorMessage = "frameIndex out of range";
+      return r;
+    }
+
+    if (entry.isHot(static_cast<size_t>(frameIndex))) {
+      TouchLruLocked(entry, frameIndex);
+      FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
+                          r.info);
+      r.ok = true;
+    } else {
+      Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
+      f.width = rgb.width;
+      f.height = rgb.height;
+      f.kind = ImageStorageKind::Ram;
+      f.ram = std::move(rgb.rgb);
+      f.pageNumber = rgb.pageNumber;
+      f.dpi = rgb.dpi;
+      TouchLruLocked(entry, frameIndex);
+      UpgradeEntryLocked(entry);
+      EvictUntilUnderLimitLocked(entry);
+      FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
+                          r.info);
+      r.ok = true;
+      PDF_LAZY_LOGI(
+          "ensure bufferId=%s frame=%d page=%d %dx%d hot=%d/%d",
+          bufferId.c_str(), frameIndex, r.info.pageNumber, r.info.width,
+          r.info.height, entry.hotCount(), entry.hotFramesLimit);
+    }
+  }
+
+  int hotLimit = 0;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(bufferId);
+    if (it != entries_.end()) hotLimit = it->second.hotFramesLimit;
+  }
+  if (hotLimit >= 2) {
+    ScheduleNeighborPrefetch(bufferId, frameIndex, generation, frameCount);
+  }
+  return r;
+}
+
+bool ImageRegistry::EvictFrame(const std::string& bufferId, int frameIndex) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = entries_.find(bufferId);
+  if (it == entries_.end()) return false;
+  if (frameIndex < 0 || frameIndex >= static_cast<int>(it->second.frames.size())) {
+    return false;
+  }
+  if (!it->second.isHot(static_cast<size_t>(frameIndex))) return true;
+  PDF_LAZY_LOGI("evictFrame bufferId=%s frame=%d", bufferId.c_str(), frameIndex);
+  ClearFrameRgbLocked(it->second.frames[static_cast<size_t>(frameIndex)]);
+  return true;
 }
 
 ImageRegistry::CreateResult ImageRegistry::CreateFromFiles(
@@ -394,6 +732,7 @@ bool ImageRegistry::GetInfo(const std::string& bufferId, ImageBufferInfo& out) c
   out.frameCount = static_cast<int>(it->second.frames.size());
   out.totalBytes = it->second.totalBytes();
   out.storageKind = it->second.storageKind();
+  out.state = it->second.state;
   return true;
 }
 
@@ -405,19 +744,40 @@ bool ImageRegistry::GetFrameInfo(const std::string& bufferId, int frameIndex,
   if (frameIndex < 0 || frameIndex >= static_cast<int>(it->second.frames.size())) {
     return false;
   }
-  const auto& f = it->second.frames[static_cast<size_t>(frameIndex)];
-  out.index = frameIndex;
-  out.width = f.width;
-  out.height = f.height;
-  out.byteSize = static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
-  out.storageKind = f.kind;
-  out.pageNumber = f.pageNumber;
-  out.dpi = f.dpi;
+  FillFrameInfoLocked(it->second.frames[static_cast<size_t>(frameIndex)], frameIndex, out);
   return true;
 }
 
 const uint8_t* ImageRegistry::GetFrameRgbPtr(const std::string& bufferId, int frameIndex,
-                                             int* outWidth, int* outHeight) const {
+                                             int* outWidth, int* outHeight) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(bufferId);
+    if (it == entries_.end()) return nullptr;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(it->second.frames.size())) {
+      return nullptr;
+    }
+    if (it->second.state == ImageBufferState::Lazy &&
+        !it->second.isHot(static_cast<size_t>(frameIndex))) {
+      // Fall through to EnsureFrame below (must not hold lock).
+    } else {
+      const auto& f = it->second.frames[static_cast<size_t>(frameIndex)];
+      if (outWidth) *outWidth = f.width;
+      if (outHeight) *outHeight = f.height;
+      if (f.kind == ImageStorageKind::Mmap) {
+        return f.mmap.rgbPtr();
+      }
+      if (f.ram.size() ==
+          static_cast<size_t>(f.width) * static_cast<size_t>(f.height) * 3u) {
+        return f.ram.data();
+      }
+      return nullptr;
+    }
+  }
+
+  auto ensured = EnsureFrame(bufferId, frameIndex);
+  if (!ensured.ok) return nullptr;
+
   std::lock_guard<std::mutex> lock(mu_);
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return nullptr;
@@ -441,13 +801,11 @@ bool ImageRegistry::Release(const std::string& bufferId) {
   std::lock_guard<std::mutex> lock(mu_);
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
+  it->second.generation += 1;  // invalidate in-flight prefetch / ensure
   for (auto& f : it->second.frames) {
-    if (f.kind == ImageStorageKind::Mmap) {
-      f.mmap.unmap();
-      f.mmap.unlinkFile();
-    }
-    f.ram.clear();
+    ClearFrameRgbLocked(f);
   }
+  it->second.pdfLazy.reset();
   entries_.erase(it);
   IMG_LOGI("[SherpaOnnx:image] release bufferId=%s", bufferId.c_str());
   return true;

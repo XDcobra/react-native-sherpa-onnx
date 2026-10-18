@@ -30,6 +30,7 @@ import type {
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
   OfflineImageBufferRef,
+  OfflineImageBufferState,
   OfflineImageFrameInfo,
 } from './types';
 import {
@@ -93,11 +94,40 @@ function mapInfo(raw: {
   return {
     bufferId: raw.bufferId,
     kind: 'offlineImageBuffer',
-    state: 'immutable',
+    state: raw.state === 'lazy' ? 'lazy' : 'immutable',
     frameCount: raw.frameCount,
     totalBytes: raw.totalBytes,
     storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
   };
+}
+
+function mapFrameInfo(raw: {
+  index: number;
+  width: number;
+  height: number;
+  byteSize: number;
+  storageKind: string;
+  pageNumber?: number;
+  dpi?: number;
+}): OfflineImageFrameInfo {
+  const frame: OfflineImageFrameInfo = {
+    index: raw.index,
+    width: raw.width,
+    height: raw.height,
+    byteSize: raw.byteSize,
+    storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
+  };
+  if (
+    raw.pageNumber != null &&
+    Number.isFinite(raw.pageNumber) &&
+    raw.pageNumber > 0
+  ) {
+    frame.pageNumber = Math.trunc(raw.pageNumber);
+  }
+  if (raw.dpi != null && Number.isFinite(raw.dpi) && raw.dpi > 0) {
+    frame.dpi = Math.trunc(raw.dpi);
+  }
+  return frame;
 }
 
 function toRef(info: OfflineImageBufferInfo): OfflineImageBufferRef {
@@ -279,25 +309,37 @@ export async function getOfflineImageBufferFrameInfo(
 ): Promise<OfflineImageFrameInfo> {
   const id = resolveImageBufferId(buffer);
   assertImageBufferId(id);
-  const raw = await getNative().getOfflineImageBufferFrameInfo(id, frameIndex);
-  const frame: OfflineImageFrameInfo = {
-    index: raw.index,
-    width: raw.width,
-    height: raw.height,
-    byteSize: raw.byteSize,
-    storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
-  };
-  if (
-    raw.pageNumber != null &&
-    Number.isFinite(raw.pageNumber) &&
-    raw.pageNumber > 0
-  ) {
-    frame.pageNumber = Math.trunc(raw.pageNumber);
+  return mapFrameInfo(
+    await getNative().getOfflineImageBufferFrameInfo(id, frameIndex)
+  );
+}
+
+/**
+ * Ensure frame RGB is resident. No-op (returns frame info) for immutable buffers.
+ * For lazy-lru PDF buffers: rasterize cold slots, update LRU, may prefetch ±1.
+ */
+export async function ensureOfflineImageBufferFrame(
+  buffer: OfflineImageBufferIdSource,
+  frameIndex: number
+): Promise<OfflineImageFrameInfo> {
+  const id = resolveImageBufferId(buffer);
+  assertImageBufferId(id);
+  if (!Number.isFinite(frameIndex) || frameIndex < 0) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: frameIndex must be a non-negative integer`
+    );
   }
-  if (raw.dpi != null && Number.isFinite(raw.dpi) && raw.dpi > 0) {
-    frame.dpi = Math.trunc(raw.dpi);
+  const raw = await getNative().ensureOfflineImageBufferFrame(
+    id,
+    Math.trunc(frameIndex)
+  );
+  if (__DEV__) {
+    console.log('[SherpaOnnx:image] ensureFrame', id, frameIndex, {
+      width: raw.width,
+      height: raw.height,
+    });
   }
-  return frame;
+  return mapFrameInfo(raw);
 }
 
 export async function releaseOfflineImageBuffer(
@@ -386,6 +428,7 @@ export type {
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
   OfflineImageBufferRef,
+  OfflineImageBufferState,
   OfflineImageFrameInfo,
   LiveImageBufferInfo,
   ImageStorageKind,

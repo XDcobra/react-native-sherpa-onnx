@@ -6,17 +6,25 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace sherpa_onnx {
+
+namespace pdf {
+class PdfLazySession;
+}  // namespace pdf
+
 namespace image {
 
 /**
  * Offline ImageBuffer registry (C++ source of truth).
  * Buffer ids: img_off_<uuid>. Per-frame backing: RAM or mmap (.rgb8 temp file).
+ * Lazy-lru PDF buffers: placeholder slots + retained PdfLazySession; at most
+ * hotFrames hold decoded RGB.
  */
 class ImageRegistry {
  public:
@@ -63,13 +71,42 @@ class ImageRegistry {
   CreateResult CreateFromRgbFrames(std::vector<RgbFrame> frames,
                                    ImageThresholdPathType pathType);
 
+  /**
+   * Create a lazy-lru PDF buffer: frameCount placeholders (cold), retain session.
+   * pages_1based empty = all document pages. hotFrames clamped to 1..32.
+   */
+  CreateResult CreateLazyPdfSlots(
+      std::unique_ptr<pdf::PdfLazySession> session,
+      const std::vector<int>& pages_1based,
+      int hotFrames);
+
+  struct EnsureResult {
+    bool ok = false;
+    std::string errorCode;
+    std::string errorMessage;
+    ImageFrameInfo info;
+  };
+
+  /**
+   * Ensure frame RGB is resident (rasterize if cold lazy slot).
+   * Updates LRU; may evict coldest hot frame; schedules ±1 prefetch.
+   * No-op success for already-hot / non-lazy frames (returns frame info).
+   */
+  EnsureResult EnsureFrame(const std::string& bufferId, int frameIndex);
+
+  /** Drop RGB for a hot frame; keep pageNumber/dpi metadata. */
+  bool EvictFrame(const std::string& bufferId, int frameIndex);
+
   bool GetInfo(const std::string& bufferId, ImageBufferInfo& out) const;
   bool GetFrameInfo(const std::string& bufferId, int frameIndex,
                     ImageFrameInfo& out) const;
 
-  /** Zero-copy RGB pointer for OCR (mmap or RAM). Valid until Release/upgrade. */
+  /**
+   * Zero-copy RGB pointer for OCR (mmap or RAM). Valid until Release/evict.
+   * On cold lazy frames: sync EnsureFrame first.
+   */
   const uint8_t* GetFrameRgbPtr(const std::string& bufferId, int frameIndex,
-                                int* outWidth, int* outHeight) const;
+                                int* outWidth, int* outHeight);
 
   bool Release(const std::string& bufferId);
 
@@ -99,19 +136,34 @@ class ImageRegistry {
     int width = 0;
     int height = 0;
     ImageStorageKind kind = ImageStorageKind::Ram;
-    std::vector<uint8_t> ram;  // empty when mmap
+    std::vector<uint8_t> ram;  // empty when mmap or cold
     MmapFrame mmap;
     int pageNumber = 0;
     int dpi = 0;
+    uint64_t lruTick = 0;
   };
 
   struct Entry {
     std::string bufferId;
     std::vector<Frame> frames;
     ImageThresholdPathType pathType = ImageThresholdPathType::HeapOrigin;
+    ImageBufferState state = ImageBufferState::Immutable;
+    int hotFramesLimit = 0;
+    uint64_t lruClock = 0;
+    uint64_t generation = 0;
+    std::unique_ptr<pdf::PdfLazySession> pdfLazy;
+
+    Entry();
+    ~Entry();
+    Entry(Entry&&) noexcept;
+    Entry& operator=(Entry&&) noexcept;
+    Entry(const Entry&) = delete;
+    Entry& operator=(const Entry&) = delete;
 
     int64_t totalBytes() const;
     ImageStorageKind storageKind() const;
+    int hotCount() const;
+    bool isHot(size_t index) const;
   };
 
   mutable std::mutex mu_;
@@ -126,6 +178,12 @@ class ImageRegistry {
   bool WriteFrameToMmap(Frame& frame, const std::string& bufferId, int frameIndex);
   bool UpgradeEntryLocked(Entry& entry);
   CreateResult FinishCreateLocked(Entry entry);
+  void ClearFrameRgbLocked(Frame& frame);
+  void TouchLruLocked(Entry& entry, int frameIndex);
+  void EvictUntilUnderLimitLocked(Entry& entry);
+  void FillFrameInfoLocked(const Frame& f, int frameIndex, ImageFrameInfo& out) const;
+  void ScheduleNeighborPrefetch(const std::string& bufferId, int frameIndex,
+                                uint64_t generation, int frameCount);
 };
 
 }  // namespace image

@@ -63,12 +63,31 @@ NSDictionary *InfoDict(const sherpa_onnx::image::ImageBufferInfo &info) {
   return @{
     @"bufferId" : [NSString stringWithUTF8String:info.bufferId.c_str()],
     @"kind" : @"offlineImageBuffer",
-    @"state" : @"immutable",
+    @"state" : [NSString
+        stringWithUTF8String:sherpa_onnx::image::BufferStateName(info.state)],
     @"frameCount" : @(info.frameCount),
     @"totalBytes" : @(info.totalBytes),
     @"storageKind" :
         [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
   };
+}
+
+NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
+  NSMutableDictionary *dict = [@{
+    @"index" : @(info.index),
+    @"width" : @(info.width),
+    @"height" : @(info.height),
+    @"byteSize" : @(info.byteSize),
+    @"storageKind" :
+        [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
+  } mutableCopy];
+  if (info.pageNumber > 0) {
+    dict[@"pageNumber"] = @(info.pageNumber);
+  }
+  if (info.dpi > 0) {
+    dict[@"dpi"] = @(info.dpi);
+  }
+  return dict;
 }
 
 void EmitProgress(SherpaOnnx *bridge, NSString *operationId, int done, int total,
@@ -361,21 +380,29 @@ int MaxSideFromOptions(NSDictionary *options) {
     reject(@"ERR_IMAGE_BUFFER_NOT_FOUND", @"Frame not found", nil);
     return;
   }
-  NSMutableDictionary *dict = [@{
-    @"index" : @(info.index),
-    @"width" : @(info.width),
-    @"height" : @(info.height),
-    @"byteSize" : @(info.byteSize),
-    @"storageKind" :
-        [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
-  } mutableCopy];
-  if (info.pageNumber > 0) {
-    dict[@"pageNumber"] = @(info.pageNumber);
-  }
-  if (info.dpi > 0) {
-    dict[@"dpi"] = @(info.dpi);
-  }
-  resolve(dict);
+  resolve(FrameInfoDict(info));
+}
+
+- (void)ensureOfflineImageBufferFrame:(NSString *)bufferId
+                           frameIndex:(double)frameIndex
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    auto ensured = ImageRegistry::Instance().EnsureFrame(
+        [bufferId UTF8String], (int)frameIndex);
+    if (!ensured.ok) {
+      NSString *code = ensured.errorCode.empty()
+                           ? @"ERR_IMAGE_INTERNAL"
+                           : [NSString stringWithUTF8String:ensured.errorCode.c_str()];
+      NSString *msg = ensured.errorMessage.empty()
+                          ? @"ensure frame failed"
+                          : [NSString stringWithUTF8String:ensured.errorMessage.c_str()];
+      reject(code, msg, nil);
+      return;
+    }
+    resolve(FrameInfoDict(ensured.info));
+  });
 }
 
 - (void)releaseOfflineImageBuffer:(NSString *)bufferId

@@ -12,7 +12,8 @@ import type {
 
 export type { FileDestination, FileSource, ResolvedFileRef };
 
-export type OfflineImageBufferState = 'immutable';
+/** `lazy` = PDF lazy-lru slots (RGB may be cold until ensure). */
+export type OfflineImageBufferState = 'immutable' | 'lazy';
 
 export type ImageStorageKind = 'ram' | 'mmap';
 

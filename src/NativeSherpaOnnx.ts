@@ -1074,6 +1074,23 @@ export interface Spec extends TurboModule {
     dpi?: number;
   }>;
 
+  /**
+   * Ensure a frame's RGB is resident (no-op info for non-lazy buffers).
+   * For lazy-lru PDF buffers: rasterize cold slot, update LRU, may prefetch ±1.
+   */
+  ensureOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number
+  ): Promise<{
+    index: number;
+    width: number;
+    height: number;
+    byteSize: number;
+    storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
+  }>;
+
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
 
   /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */

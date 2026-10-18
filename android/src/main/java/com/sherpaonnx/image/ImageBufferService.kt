@@ -73,6 +73,35 @@ internal object ImageBufferService {
     ImageBufferNative.nativeGetFrameInfo(bufferId, frameIndex)
 
   /**
+   * Ensure frame RGB is resident. For non-lazy buffers returns current frame info.
+   * @return frame info map on success; map with errorCode/errorMessage on failure; null if JNI null.
+   */
+  fun ensureFrame(bufferId: String, frameIndex: Int): Map<String, Any>? {
+    val result = ImageBufferNative.nativeEnsureFrame(bufferId, frameIndex) ?: return null
+    val ok = result["ok"] as? Boolean ?: false
+    if (!ok) {
+      return mapOf(
+        "errorCode" to (result["errorCode"] as? String ?: "ERR_IMAGE_INTERNAL"),
+        "errorMessage" to (result["errorMessage"] as? String ?: "ensure frame failed"),
+      )
+    }
+    val out = mutableMapOf<String, Any>(
+      "index" to ((result["index"] as? Number)?.toInt() ?: frameIndex),
+      "width" to ((result["width"] as? Number)?.toInt() ?: 0),
+      "height" to ((result["height"] as? Number)?.toInt() ?: 0),
+      "byteSize" to ((result["byteSize"] as? Number)?.toLong() ?: 0L),
+      "storageKind" to (result["storageKind"] as? String ?: "ram"),
+    )
+    (result["pageNumber"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+      out["pageNumber"] = it
+    }
+    (result["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+      out["dpi"] = it
+    }
+    return out
+  }
+
+  /**
    * Encode [frameIndex] to an absolute filesystem path (caller owns FileDestination).
    * @return null on success; otherwise a map with errorCode/errorMessage.
    */

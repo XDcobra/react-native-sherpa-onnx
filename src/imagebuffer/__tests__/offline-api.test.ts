@@ -6,6 +6,7 @@ jest.mock('react-native', () => {
     createOfflineImageBufferFromBase64: jest.fn(),
     getOfflineImageBufferInfo: jest.fn(),
     getOfflineImageBufferFrameInfo: jest.fn(),
+    ensureOfflineImageBufferFrame: jest.fn(),
     releaseOfflineImageBuffer: jest.fn(),
     cancelOfflineImageBufferCreate: jest.fn(),
     exportOfflineImageBufferFrame: jest.fn(),
@@ -53,6 +54,7 @@ import {
   createEmptyOfflineImageBuffer,
   createOfflineImageBufferFromBase64,
   createOfflineImageBufferFromFiles,
+  ensureOfflineImageBufferFrame,
   exportOfflineImageBufferFrame,
   getOfflineImageBufferFrameInfo,
   getOfflineImageBufferInfo,
@@ -68,6 +70,7 @@ describe('offline ImageBuffer public API', () => {
       createOfflineImageBufferFromBase64: jest.Mock;
       getOfflineImageBufferInfo: jest.Mock;
       getOfflineImageBufferFrameInfo: jest.Mock;
+      ensureOfflineImageBufferFrame: jest.Mock;
       releaseOfflineImageBuffer: jest.Mock;
       cancelOfflineImageBufferCreate: jest.Mock;
       exportOfflineImageBufferFrame: jest.Mock;
@@ -263,5 +266,42 @@ describe('offline ImageBuffer public API', () => {
       { format: 'jpeg', quality: 90, maxSide: 0 }
     );
     expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.jpg' });
+  });
+
+  it('ensureOfflineImageBufferFrame forwards to native and maps frame info', async () => {
+    mockNative.ensureOfflineImageBufferFrame.mockResolvedValue({
+      index: 1,
+      width: 800,
+      height: 600,
+      byteSize: 800 * 600 * 3,
+      storageKind: 'ram',
+      pageNumber: 2,
+      dpi: 144,
+    });
+
+    const frame = await ensureOfflineImageBufferFrame(bufferId, 1);
+    expect(mockNative.ensureOfflineImageBufferFrame).toHaveBeenCalledWith(
+      bufferId,
+      1
+    );
+    expect(frame).toEqual({
+      index: 1,
+      width: 800,
+      height: 600,
+      byteSize: 800 * 600 * 3,
+      storageKind: 'ram',
+      pageNumber: 2,
+      dpi: 144,
+    });
+  });
+
+  it('mapInfo preserves lazy state from native', async () => {
+    mockNative.getOfflineImageBufferInfo.mockResolvedValue({
+      ...infoPayload,
+      state: 'lazy',
+      totalBytes: 0,
+    });
+    const info = await getOfflineImageBufferInfo(bufferId);
+    expect(info.state).toBe('lazy');
   });
 });
