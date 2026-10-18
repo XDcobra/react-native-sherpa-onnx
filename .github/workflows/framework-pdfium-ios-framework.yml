@@ -7,12 +7,6 @@ name: Prebuilt - PDFium (iOS) XCFramework
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'feat/add-ocr-support-pdfium*'
-    paths:
-      - '.github/workflows/framework-pdfium-ios-framework.yml'
-      - 'third_party/pdfium_prebuilt/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

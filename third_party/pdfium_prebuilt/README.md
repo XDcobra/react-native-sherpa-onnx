@@ -44,20 +44,16 @@ Release asset `pdfium-ios.zip` contains that XCFramework. With `SHERPA_ONNX_ENAB
 
 Upstream source of truth: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) tags `chromium/<N>` (latest checked: `chromium/8100`). Our tag files use `pdfium-android-v<N>` / `pdfium-ios-v<N>` so Maven/GitHub Release pins stay aligned.
 
-## CI from a feature branch (not yet on main)
+## CI
 
-New workflow YAMLs are not registered on `main` until merge. Use the established workaround:
-
-1. Push workflows on `feat/add-ocr-support-pdfium-textlayer` (or your branch).
-2. Workflows use `on: push` (paths filter) **and** `workflow_dispatch`.
-3. Run explicitly:
+Workflows are `workflow_dispatch` only (like libwebp/FFmpeg). Run explicitly:
 
 ```sh
 gh workflow run build-pdfium-android-release.yml --ref feat/add-ocr-support-pdfium-textlayer
 gh workflow run framework-pdfium-ios-framework.yml --ref feat/add-ocr-support-pdfium-textlayer
 ```
 
-After the first successful push that registers the workflow on that ref, `--ref` dispatch works.
+Until the workflow YAML exists on the default branch, `--ref` to a branch that contains the YAML is required.
 
 ## Pin
 

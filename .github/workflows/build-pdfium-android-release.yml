@@ -5,12 +5,6 @@ name: Prebuilt - PDFium (Android) Release
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'feat/add-ocr-support-pdfium*'
-    paths:
-      - '.github/workflows/build-pdfium-android-release.yml'
-      - 'third_party/pdfium_prebuilt/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
