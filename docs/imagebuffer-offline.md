@@ -2,11 +2,11 @@
 
 ## Introduction
 
-**Immutable offline image clips** (decoded RGB8 on the native side): one or more frames per buffer. Used as input for **batch OCR** and PDF page rasters ([`rasterizePdfPages`](pdf-offline.md)).
+Offline image buffers hold one or more image frames for batch OCR and PDF page rasters ([`rasterizePdfPages`](pdf-offline.md)).
 
 **Import path:** `react-native-sherpa-onnx/imagebuffer`
 
-Live / streaming ImageBuffer is **not** implemented yet (types may be reserved). For file resolution shared with other buffers, see [fileio.md](fileio.md).
+Live / streaming ImageBuffer is not implemented yet (types may be reserved). File sources use [fileio.md](fileio.md).
 
 ---
 
@@ -14,52 +14,49 @@ Live / streaming ImageBuffer is **not** implemented yet (types may be reserved).
 
 | Kind | What it is | Typical use |
 | --- | --- | --- |
-| **[Offline image buffer](imagebuffer-offline.md)** | Multi-frame RGB8, **immutable** after create. Small buffers stay on the heap (`storageKind: 'ram'`); larger ones upgrade to per-frame mmap temp files (`storageKind: 'mmap'`). | Batch OCR `recognize`, multi-page prep. |
+| **Offline image buffer** | Multi-frame buffer after create. Usually `state: 'immutable'` (all frames ready). PDF [`lazy-lru`](pdf-offline.md#raster-strategies) uses `state: 'lazy'`: call [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) before using a cold frame; at most `hotFrames` stay decoded. | Batch OCR `recognize`, multi-page prep / PDF slider. |
 | **Live image buffer** | Reserved (`liveImageBuffer` types only). | Future camera / streaming OCR. |
-
-**Why this is fast:** apps orchestrate with **ids and small control calls**; decoded pixels stay on the native side. Native code owns decode, orientation, optional `maxSide` downscale, and RAM|mmap backing. OCR reads frames via C++ `GetFrameRgbPtr` without shuttling full bitmaps through the JS bridge.
 
 **Supported formats**
 
 | Format | Notes |
 | --- | --- |
 | JPEG / PNG / BMP / GIF | Via `createOfflineImageBufferFromFiles` / `FromBase64`. EXIF orientation applied for JPEG. |
-| WebP | Same create APIs. Requires libwebp linked (default SDK prebuilt path). |
-| HEIC / HEIF | Same create APIs. Platform decode only. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
-| PDF (page raster) | Not via image create APIs. Opt-in [`rasterizePdfPages`](pdf-offline.md) → same OfflineImageBuffer (`pageNumber` / `dpi` on frames). |
+| WebP | Same create APIs (libwebp; default SDK prebuilt). |
+| HEIC / HEIF | Same create APIs. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
+| PDF (page raster) | Not via image create APIs — use [`rasterizePdfPages`](pdf-offline.md). Frames may include `pageNumber` / `dpi`. |
 
-Optional **`maxSide`** downscales the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` options — see [pdf-offline.md](pdf-offline.md).
+Optional **`maxSide`** caps the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` — see [pdf-offline.md](pdf-offline.md).
 
 ---
 
 ## Main API (summary)
-
-### Offline buffer
 
 - `createEmptyOfflineImageBuffer`
 - `createOfflineImageBufferFromFiles`
 - `createOfflineImageBufferFromBase64`
 - `getOfflineImageBufferInfo`
 - `getOfflineImageBufferFrameInfo`
+- `ensureOfflineImageBufferFrame` — ensure a frame is ready (`lazy` PDF buffers; no-op for `immutable`)
 - `releaseOfflineImageBuffer`
-- `exportOfflineImageBufferFrame` — encode one frame to a [`FileDestination`](fileio.md) → `ResolvedFileRef` (same write model as [`saveAudioAsFile`](audio-conversion.md))
-- `OfflineImageBufferFrameView` — native in-app preview of one frame (no file materialize)
+- `exportOfflineImageBufferFrame` — write one frame to a [`FileDestination`](fileio.md) → `ResolvedFileRef`
+- `OfflineImageBufferFrameView` — in-app preview of one frame
 
-Types: see [`src/imagebuffer/types.ts`](../src/imagebuffer/types.ts). Create helpers return **`OfflineImageBufferRef`** (`info` + `OfflineImageBufferHandle`). Buffer parameters use **`OfflineImageBufferIdSource`**: pass the ref, last **`OfflineImageBufferInfo`**, a branded handle, or a raw string id.
+Create helpers return **`OfflineImageBufferRef`** (`info` + `OfflineImageBufferHandle`). Buffer parameters accept **`OfflineImageBufferIdSource`**: ref, `OfflineImageBufferInfo`, branded handle, or string id.
 
 ---
 
 ## Quick start
 
-```ts
+```tsx
 import {
   createOfflineImageBufferFromFiles,
   getOfflineImageBufferInfo,
   getOfflineImageBufferFrameInfo,
+  OfflineImageBufferFrameView,
   releaseOfflineImageBuffer,
 } from 'react-native-sherpa-onnx/imagebuffer';
 
-// 1) Decode one or more images once on the native side (optional maxSide).
 const fromFiles = await createOfflineImageBufferFromFiles(
   [
     { kind: 'fs', path: '/tmp/page1.jpg' },
@@ -68,34 +65,37 @@ const fromFiles = await createOfflineImageBufferFromFiles(
   { maxSide: 2048 }
 );
 
-// Single FileSource also works:
 const one = await createOfflineImageBufferFromFiles({
   kind: 'contentUri',
   uri: 'content://…',
 });
 
-// 2) Inspect metadata and a frame without copying pixels into JS.
 const info = await getOfflineImageBufferInfo(fromFiles);
 console.log(info.frameCount, info.storageKind, info.totalBytes);
 
 const f0 = await getOfflineImageBufferFrameInfo(fromFiles, 0);
 console.log(f0.width, f0.height, f0.byteSize);
-// PDF rasters (rasterizePdfPages) may also set f0.pageNumber / f0.dpi.
 
-// 3) Release when done.
+// In-app preview (native RGB; no file materialize)
+<OfflineImageBufferFrameView
+  buffer={fromFiles}
+  frameIndex={0}
+  resizeMode="contain"
+  maxSide={1024}
+  style={{ width: '100%', height: 240 }}
+/>
+
 await releaseOfflineImageBuffer(fromFiles);
 await releaseOfflineImageBuffer(one);
 ```
 
-The common pattern is: decode once, pass refs/ids to batch feature APIs (e.g. [offline OCR](ocr-offline.md)), then release buffers explicitly.
+Typical flow: create once → preview and/or pass to [offline OCR](ocr-offline.md) → `releaseOfflineImageBuffer`.
 
 ---
 
 ## API reference
 
-All signatures below are exported from `react-native-sherpa-onnx/imagebuffer`. Unless noted, buffer arguments accept **`OfflineImageBufferIdSource`** (ref, info snapshot, handle, or string).
-
-Ref-first usage is recommended: pass the buffer ref directly. Raw string ids are optional; malformed ids are rejected early with `ERR_IMAGE_INVALID_ARGUMENT`.
+Exported from `react-native-sherpa-onnx/imagebuffer`. Buffer arguments accept **`OfflineImageBufferIdSource`** unless noted. Prefer the buffer ref; malformed string ids reject with `ERR_IMAGE_INVALID_ARGUMENT`.
 
 ### Offline buffer creation
 
@@ -111,7 +111,7 @@ console.log(empty.info.frameCount); // 0
 console.log(empty.bufferId); // img_off_<uuid>
 ```
 
-Creates an empty offline image buffer (`img_off_*`) that can later be populated by native producers (for example HEIC append / OCR paths). The buffer starts with `frameCount = 0` and remains immutable once create-from-files/base64 completes for a populated buffer.
+Empty buffer (`frameCount = 0`) for native producers that append frames later.
 
 #### `createOfflineImageBufferFromFiles(sources, options?)`
 
@@ -127,15 +127,12 @@ const offline = await createOfflineImageBufferFromFiles(
   { kind: 'fs', path: '/tmp/page.jpg' },
   { maxSide: 2048 }
 );
-console.log(offline.info.frameCount, offline.info.storageKind);
 
-// From a content URI (Android):
 const fromUri = await createOfflineImageBufferFromFiles({
   kind: 'contentUri',
   uri: pickedUri,
 });
 
-// Multi-file with progress + cancellation:
 const controller = new AbortController();
 const pages = await createOfflineImageBufferFromFiles(
   [
@@ -148,17 +145,17 @@ const pages = await createOfflineImageBufferFromFiles(
     signal: controller.signal,
   }
 );
-console.log(pages.info.frameCount);
-// Cancel later with: controller.abort();
 ```
 
-`FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules. See [fileio.md](fileio.md).
+`FileSource` kinds (`fs`, `app`, `contentUri`, `securityScoped`, `pad`) follow [fileio.md](fileio.md).
 
 Options (`CreateOfflineImageBufferOptions`):
 
-- `maxSide`: longest-edge cap after decode; default `4096`; `<= 0` disables
-- `onProgress`: receives `ImageProgressEvent` (`done`, `total`, `phase`) during create
-- `signal`: aborts create and rejects with `ERR_IMAGE_CANCELLED`
+| Option | Notes |
+|--------|--------|
+| `maxSide` | Longest-edge cap after decode; default `4096`; `<= 0` disables |
+| `onProgress` | `ImageProgressEvent` (`done`, `total`, `phase`) during create |
+| `signal` | Abort → `ERR_IMAGE_CANCELLED` |
 
 #### `createOfflineImageBufferFromBase64(base64List, options?)`
 
@@ -175,7 +172,7 @@ const offline = await createOfflineImageBufferFromBase64([jpegBase64, webpBase64
 });
 ```
 
-Decodes one or more image blobs (base64 strings) into a multi-frame offline buffer. Uses the **heap-origin** mmap threshold (same idea as audio samples import vs file decode).
+Same options as create-from-files.
 
 ### Inspect / release
 
@@ -192,10 +189,14 @@ const info = await getOfflineImageBufferInfo(offline);
 console.log(info.kind, info.state, info.frameCount, info.storageKind);
 ```
 
-`OfflineImageBufferInfo` always includes `storageKind: 'ram' | 'mmap'`:
-
-- `'ram'` — frames held in process memory
-- `'mmap'` — one or more frames upgraded to per-frame temp files under the cache (`img_off_<uuid>_f<N>.rgb8`)
+| Field | Values | Notes |
+|-------|--------|--------|
+| `bufferId` | `img_off_…` | Buffer id |
+| `kind` | `'offlineImageBuffer'` | Discriminator |
+| `state` | `'immutable'` \| `'lazy'` | `'lazy'` from PDF [`rasterizePdfPages({ strategy: 'lazy-lru' })`](pdf-offline.md) |
+| `frameCount` | number | Number of frames (lazy includes not-yet-ensured frames) |
+| `totalBytes` | number | Approximate decoded size; for `'lazy'`, currently ensured frames only |
+| `storageKind` | `'ram'` \| `'mmap'` | How decoded frames are held |
 
 #### `getOfflineImageBufferFrameInfo(buffer, frameIndex)`
 
@@ -209,10 +210,26 @@ function getOfflineImageBufferFrameInfo(
 ```ts
 const frame = await getOfflineImageBufferFrameInfo(offline, 0);
 console.log(frame.width, frame.height, frame.byteSize, frame.storageKind);
-// Optional (PDF raster only): frame.pageNumber, frame.dpi
+// PDF rasters may also set frame.pageNumber, frame.dpi
 ```
 
-Returns metadata for a single frame (no pixel copy into JS). Engines (OCR) and [`OfflineImageBufferFrameView`](#offlineimagebufferframeview) read pixels via native `GetFrameRgbPtr`. Frames from [`rasterizePdfPages`](pdf-offline.md) include 1-based `pageNumber` and the requested `dpi`.
+Per-frame metadata. For `'lazy'` buffers, `width` / `height` may be `0` until [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) has run for that index.
+
+#### `ensureOfflineImageBufferFrame(buffer, frameIndex)`
+
+```ts
+function ensureOfflineImageBufferFrame(
+  buffer: OfflineImageBufferIdSource,
+  frameIndex: number
+): Promise<OfflineImageFrameInfo>;
+```
+
+```ts
+const frame = await ensureOfflineImageBufferFrame(offline, 0);
+console.log(frame.width, frame.height);
+```
+
+Makes frame `frameIndex` ready and returns its info. For `'immutable'` buffers this is a no-op (returns current info). For PDF `'lazy'` buffers, ensures that page is decoded (may drop older decoded pages when over `hotFrames`). Optional before `recognize` if you want explicit control; FrameView and OCR also ensure on access.
 
 #### `releaseOfflineImageBuffer(buffer)`
 
@@ -226,11 +243,11 @@ function releaseOfflineImageBuffer(
 await releaseOfflineImageBuffer(offline);
 ```
 
-Unmaps and unlinks any frame temp files, then removes the buffer from the registry.
+Releases the buffer. Call when finished.
 
 #### `exportOfflineImageBufferFrame(buffer, frameIndex, output, options?)`
 
-Encode one frame to a caller-chosen write location — same **`FileDestination`** model as [`saveAudioAsFile`](audio-conversion.md) (not a hidden SDK cache path).
+Writes one frame to a [`FileDestination`](fileio.md) (same model as [`saveAudioAsFile`](audio-conversion.md)).
 
 ```ts
 function exportOfflineImageBufferFrame(
@@ -240,7 +257,7 @@ function exportOfflineImageBufferFrame(
   options?: {
     format?: 'jpeg' | 'png' | 'webp'; // default jpeg
     quality?: number; // 1..100, jpeg/webp
-    maxSide?: number; // export-only downsample; does not mutate buffer
+    maxSide?: number; // export-only downsample; does not change the buffer
   }
 ): Promise<ResolvedFileRef>;
 ```
@@ -257,7 +274,7 @@ const ref = await exportOfflineImageBufferFrame(
 
 #### `OfflineImageBufferFrameView`
 
-Native RN view that paints one frame from registry RGB (`GetFrameRgbPtr`) — **no file encode** for preview.
+React Native view that shows one buffer frame.
 
 ```tsx
 import { OfflineImageBufferFrameView } from 'react-native-sherpa-onnx/imagebuffer';
@@ -271,30 +288,34 @@ import { OfflineImageBufferFrameView } from 'react-native-sherpa-onnx/imagebuffe
 />
 ```
 
+| Prop | Notes |
+|------|--------|
+| `buffer` | `OfflineImageBufferIdSource` |
+| `frameIndex` | Frame to show (default `0`) |
+| `resizeMode` | `'contain'` \| `'cover'` \| `'stretch'` |
+| `maxSide` | Optional preview downscale |
+| `style` | View style |
+
+For `'lazy'` PDF buffers, changing `buffer` / `frameIndex` ensures that frame before display.
+
 ---
 
 ## JS Events
 
-Create-time callbacks on `createOfflineImageBufferFromFiles` / `createOfflineImageBufferFromBase64` (not `createEmptyOfflineImageBuffer`).
+Create-time only (`createOfflineImageBufferFromFiles` / `FromBase64`):
 
-| Callback / control | Payload | Fires when | Notes |
-| --- | --- | --- | --- |
-| `onProgress` | `ImageProgressEvent` | per source during create | `{ done, total, phase }` (`decode` / `done`) |
-| `signal` | `AbortSignal` | caller aborts | rejects with `ERR_IMAGE_CANCELLED` |
+| Callback / control | Payload | Notes |
+| --- | --- | --- |
+| `onProgress` | `ImageProgressEvent` | `{ done, total, phase }` (`decode` / `done`) |
+| `signal` | `AbortSignal` | Rejects with `ERR_IMAGE_CANCELLED` |
 
 ```ts
 const controller = new AbortController();
-const pages = await createOfflineImageBufferFromFiles(
-  [
-    { kind: 'fs', path: '/tmp/page1.jpg' },
-    { kind: 'fs', path: '/tmp/page2.png' },
-  ],
-  {
-    maxSide: 2048,
-    onProgress: (e) => console.log(e.phase, e.done, '/', e.total),
-    signal: controller.signal,
-  }
-);
+const pages = await createOfflineImageBufferFromFiles(manySources, {
+  maxSide: 2048,
+  onProgress: (e) => console.log(e.phase, e.done, '/', e.total),
+  signal: controller.signal,
+});
 // controller.abort();
 ```
 
@@ -302,21 +323,22 @@ const pages = await createOfflineImageBufferFromFiles(
 
 ```ts
 import type {
-  OfflineImageBufferRef, // created offline buffer ref { info, bufferId }
-  OfflineImageBufferInfo, // metadata for immutable offline RGB buffer
-  OfflineImageBufferIdSource, // ref/handle/info/id accepted by offline APIs
-  OfflineImageBufferHandle, // branded img_off_* id
-  OfflineImageFrameInfo, // per-frame width/height/byteSize/storageKind (+ optional pageNumber/dpi)
-  CreateOfflineImageBufferOptions, // maxSide + onProgress + signal
-  ImageProgressEvent, // { done, total, phase }
+  OfflineImageBufferRef,
+  OfflineImageBufferInfo,
+  OfflineImageBufferState, // 'immutable' | 'lazy'
+  OfflineImageBufferIdSource,
+  OfflineImageBufferHandle,
+  OfflineImageFrameInfo,
+  CreateOfflineImageBufferOptions,
+  ImageProgressEvent,
   ImageStorageKind, // 'ram' | 'mmap'
-  LiveImageBufferInfo, // reserved live type
-  FileSource, // re-exported from fileio
+  LiveImageBufferInfo, // reserved
+  FileSource,
+  FileDestination,
+  ResolvedFileRef,
 } from 'react-native-sherpa-onnx/imagebuffer';
 
-import {
-  ImageErrorCode, // runtime constants for error-code checks
-} from 'react-native-sherpa-onnx/imagebuffer';
+import { ImageErrorCode } from 'react-native-sherpa-onnx/imagebuffer';
 ```
 
 ---
@@ -327,23 +349,22 @@ import {
 | --- | --- |
 | `ERR_IMAGE_INVALID_ARGUMENT` | Invalid buffer id, empty sources, or bad argument |
 | `ERR_IMAGE_DECODE_FAILED` | Decode / I/O failure while reading an image |
-| `ERR_IMAGE_FORMAT_UNSUPPORTED` | HEIC without platform support, or WebP with libwebp disabled |
-| `ERR_IMAGE_BUFFER_NOT_FOUND` | Referenced image buffer id or frame does not exist |
+| `ERR_IMAGE_FORMAT_UNSUPPORTED` | HEIC without platform support, or WebP disabled |
+| `ERR_IMAGE_BUFFER_NOT_FOUND` | Unknown buffer id or frame |
 | `ERR_IMAGE_CANCELLED` | Create cancelled via `AbortSignal` |
-| `ERR_IMAGE_INTERNAL` | Generic native image buffer failure |
+| `ERR_IMAGE_INTERNAL` | Generic failure |
 
-Optional disable of libwebp: `sherpaOnnxDisableLibwebp=true` (Gradle) / `SHERPA_ONNX_DISABLE_LIBWEBP=1` (iOS). WebP then fails with `ERR_IMAGE_FORMAT_UNSUPPORTED`.
+Optional: disable WebP with `sherpaOnnxDisableLibwebp=true` (Gradle) / `SHERPA_ONNX_DISABLE_LIBWEBP=1` (iOS) → `ERR_IMAGE_FORMAT_UNSUPPORTED` for WebP.
 
 ---
 
 ## See also
 
-- [Offline OCR](ocr-offline.md) (typical **consumer** of image frames)
-- [File I/O (`FileSource`)](fileio.md)
+- [Offline OCR](ocr-offline.md)
+- [Offline PDF](pdf-offline.md)
+- [File I/O (`FileSource` / `FileDestination`)](fileio.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [Pipeline text buffers — offline](textbuffer-offline.md)
-- Prebuilt resolution (libwebp): [`docs/internal/PREBUILT_RESOLUTION.md`](internal/PREBUILT_RESOLUTION.md)
-- Storage internals: [`docs/internal/imagebuffer-storage.md`](internal/imagebuffer-storage.md)
 
 ## Use case examples
 
@@ -359,8 +380,7 @@ const pages = await createOfflineImageBufferFromFiles(
   { maxSide: 2048 }
 );
 
-// Reuse `pages` for multiple offline OCR passes (createOCR / recognize).
-// Release once all consumers are finished.
+// Reuse `pages` for offline OCR (createOCR / recognize), then:
 await releaseOfflineImageBuffer(pages);
 ```
 
@@ -378,7 +398,6 @@ const createPromise = createOfflineImageBufferFromFiles(manySources, {
   signal: controller.signal,
 });
 
-// Later (e.g. user cancel):
 controller.abort();
 
 try {
@@ -390,6 +409,22 @@ try {
 
 </details>
 
-## Native crash diagnostics
+<details>
+<summary>Large PDF page slider (lazy-lru)</summary>
 
-If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
+Use PDF [`strategy: 'lazy-lru'`](pdf-offline.md#raster-strategies) so only a few pages stay decoded while the user pages through a document. Full example: [pdf-offline.md — page slider](pdf-offline.md#use-case-examples).
+
+```tsx
+const pages = await rasterizePdfPages(pdfSource, {
+  strategy: 'lazy-lru',
+  hotFrames: 4,
+});
+
+<OfflineImageBufferFrameView
+  buffer={pages}
+  frameIndex={currentPage}
+  resizeMode="contain"
+/>
+```
+
+</details>

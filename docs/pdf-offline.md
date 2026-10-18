@@ -1,27 +1,24 @@
 # Offline PDF (`react-native-sherpa-onnx/pdf`)
 
-Two opt-in PDFium APIs:
+Two opt-in APIs:
 
-1. **`extractPdfTextLayer`** — digital glyph text → `OfflineTextBuffer` (`origin: 'textLayer'`).
-2. **`rasterizePdfPages`** — page bitmaps → `OfflineImageBuffer` (RGB8 frames with `pageNumber` / `dpi`).
+1. **`extractPdfTextLayer`** — digital text → `OfflineTextBuffer` (`origin: 'textLayer'`).
+2. **`rasterizePdfPages`** — pages → `OfflineImageBuffer` (frames may include `pageNumber` / `dpi`).
 
-Neither runs OCR. Scan-only PDFs reject text extract with `ERR_PDF_NO_TEXT_LAYER`; raster still succeeds so you can call `createOCR().recognize` **explicitly**.
+Neither runs OCR. Scan-only PDFs reject text extract with `ERR_PDF_NO_TEXT_LAYER`; raster still works so you can call `createOCR().recognize` explicitly.
 
 ## Opt-in PDFium (default OFF)
 
-PDFium is large. Default SDK builds do **not** link it.
+Default SDK builds do **not** include PDFium.
 
 | Platform | Enable |
 |----------|--------|
 | Android | `sherpaOnnxEnablePdfium=true` in the app (or library) `gradle.properties` |
 | iOS | `SHERPA_ONNX_ENABLE_PDFIUM=1` when installing pods / building |
 
-Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuilt/README.md). Resolution mirrors libwebp (THIRD_PARTY → Maven → GitHub), but **only when enable is true**.
+Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuilt/README.md).
 
-If you call either API without enable:
-
-- Code: `ERR_PDF_PDFIUM_DISABLED`
-- Message tells you to rebuild with the enable flags and resolve prebuilts.
+Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.
 
 ## Quick start — text layer
 
@@ -47,9 +44,10 @@ console.log(result.pageCount, result.spatialSpanCount);
 
 ## Quick start — page raster
 
-```ts
+```tsx
 import {
   getOfflineImageBufferFrameInfo,
+  OfflineImageBufferFrameView,
   releaseOfflineImageBuffer,
 } from 'react-native-sherpa-onnx/imagebuffer';
 import { rasterizePdfPages, isPdfiumEnabled } from 'react-native-sherpa-onnx/pdf';
@@ -65,14 +63,66 @@ const pages = await rasterizePdfPages(
 const f0 = await getOfflineImageBufferFrameInfo(pages, 0);
 console.log(f0.width, f0.height, f0.pageNumber, f0.dpi);
 
-// Optional: OCR on the rasterized frames
+// In-app preview (native RGB; no file materialize)
+<OfflineImageBufferFrameView
+  buffer={pages}
+  frameIndex={0}
+  resizeMode="contain"
+  maxSide={1024}
+  style={{ width: '100%', height: 240 }}
+/>
+
+// Optional OCR:
 // const engine = await createOCR({ ... });
 // await engine.recognize(pages, textOut);
 
 await releaseOfflineImageBuffer(pages);
 ```
 
-Defaults: `dpi = 144`, `maxSide = 4096` (longest-edge clamp after DPI scale; `<= 0` disables).
+Large PDFs — limit how many pages stay decoded (`state: 'lazy'`):
+
+```tsx
+import {
+  ensureOfflineImageBufferFrame,
+  OfflineImageBufferFrameView,
+} from 'react-native-sherpa-onnx/imagebuffer';
+
+const pages = await rasterizePdfPages(pdfSource, {
+  strategy: 'lazy-lru',
+  hotFrames: 8, // default 8, clamped 1..32
+  dpi: 144,
+  maxSide: 2048,
+});
+console.log(pages.info.state); // 'lazy'
+
+await ensureOfflineImageBufferFrame(pages, 0);
+// Or preview — FrameView ensures the visible frame:
+<OfflineImageBufferFrameView buffer={pages} frameIndex={0} />
+```
+
+Defaults: `dpi = 144`, `maxSide = 4096` (`<= 0` disables), `strategy = 'rasterize-all'`.
+
+## Raster strategies
+
+`rasterizePdfPages` chooses how pages become OfflineImageBuffer frames via `strategy` (+ `hotFrames` for lazy).
+
+| Strategy | `info.state` | When pages are decoded | Memory | Typical use |
+|----------|-------------|------------------------|--------|-------------|
+| `'rasterize-all'` (default) | `'immutable'` | All selected pages up front | Grows with page count × resolution | Small PDFs, one-shot OCR of every page |
+| `'lazy-lru'` | `'lazy'` | On demand (ensureOfflineImageBufferFrame / FrameView / OCR) | At most `hotFrames` decoded pages (default **8**, clamped **1..32**) | Large PDFs, page slider / swipe viewer |
+
+Effects of `'lazy-lru'`:
+
+| Observable | Behavior |
+|------------|----------|
+| `frameCount` | Equals selected page count (slots exist immediately) |
+| Cold frame info | `width` / `height` may be `0` until that frame is ensured |
+| `ensureOfflineImageBufferFrame` | Decodes that page; returns full frame info |
+| `OfflineImageBufferFrameView` | Ensures the visible `frameIndex` when it changes |
+| Over `hotFrames` | Least-recently used decoded page is dropped; ensure again to bring it back |
+| `releaseOfflineImageBuffer` | Releases the buffer (and the open PDF session) |
+
+Prefer `'rasterize-all'` when every page will be used soon and the document is small. Prefer `'lazy-lru'` when the user browses pages (slider) or only a subset is OCR’d.
 
 ## API reference
 
@@ -88,8 +138,6 @@ function isPdfiumEnabled(): Promise<boolean>;
 const on = await isPdfiumEnabled();
 ```
 
-Whether PDFium is linked in this binary.
-
 #### `extractPdfTextLayer(source, textOut, options?)`
 
 ```ts
@@ -104,7 +152,7 @@ function extractPdfTextLayer(
 const r = await extractPdfTextLayer(pdfSource, textOut, { pages: [1] });
 ```
 
-Digital text → empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `signal`, `onProgress`.
+Writes digital text into an empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `signal`, `onProgress`.
 
 #### `rasterizePdfPages(source, options?)`
 
@@ -117,19 +165,36 @@ function rasterizePdfPages(
 
 ```ts
 const pages = await rasterizePdfPages(pdfSource, { dpi: 144, maxSide: 2048 });
+const lazy = await rasterizePdfPages(pdfSource, {
+  strategy: 'lazy-lru',
+  hotFrames: 10,
+});
 ```
 
-PDF pages → new OfflineImageBuffer (no OCR). Options: `pages`, `dpi` (default 144), `maxSide` (default 4096), `signal`, `onProgress`.
+Returns a new OfflineImageBuffer (no OCR). See [Raster strategies](#raster-strategies). Options:
+
+| Option | Default | Notes |
+|--------|---------|--------|
+| `pages` | `'all'` | 1-based indices or `'all'` |
+| `dpi` | `144` | must be `> 0` |
+| `maxSide` | `4096` | longest-edge cap; `<= 0` disables |
+| `strategy` | `'rasterize-all'` | `'lazy-lru'` → on-demand decode; see table above |
+| `hotFrames` | `8` | `lazy-lru` only; clamped **1..32** |
+| `signal` / `onProgress` | — | cancel / progress |
 
 ## Spans and coordinates (text layer)
 
-- `origin: 'textLayer'`
-- `pageNumber` — 1-based
-- `pageWidth` / `pageHeight` — PDF user-space page size
-- `sourceImageBufferId` — empty (no ImageBuffer)
-- `quad` — top-left origin, y-down, PDF user-space (native normalizes PDFium’s bottom-left)
+Text-layer spans on the TextBuffer:
 
-Raster bitmaps use the same top-left / y-down convention so overlays can map user-space quads onto frame pixels via `pageWidth`/`pageHeight` and frame size.
+| Field | Notes |
+|-------|--------|
+| `origin` | `'textLayer'` |
+| `pageNumber` | 1-based |
+| `pageWidth` / `pageHeight` | Page size in PDF user space |
+| `sourceImageBufferId` | Empty (no ImageBuffer) |
+| `quad` | Top-left origin, y-down, PDF user space |
+
+Raster frames use the same top-left / y-down convention, so overlays can map quads onto frame pixels via page size and frame size.
 
 See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md](./imagebuffer-offline.md).
 
@@ -140,20 +205,95 @@ See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md
 | `ERR_PDF_PDFIUM_DISABLED` | Binary built without PDFium |
 | `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / populated text buffer |
 | `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF |
-| `ERR_PDF_ENCRYPTED` | Password-protected (no silent decrypt) |
-| `ERR_PDF_NO_TEXT_LAYER` | Selected pages have no extractable text (extract only) |
-| `ERR_PDF_RENDER_FAILED` | Page bitmap create/render failed (raster only) |
+| `ERR_PDF_ENCRYPTED` | Password-protected |
+| `ERR_PDF_NO_TEXT_LAYER` | No extractable text (extract only) |
+| `ERR_PDF_RENDER_FAILED` | Page raster failed |
 | `ERR_PDF_CANCELLED` | AbortSignal / cancel |
+
+## Use case examples
+
+<details>
+<summary>Page slider / swipe viewer for a large PDF (lazy-lru)</summary>
+
+Keep memory bounded while the user flips through pages. FrameView ensures the visible page; older pages drop out of the hot set automatically.
+
+```tsx
+import { useState } from 'react';
+import { Button, Text, View } from 'react-native';
+import {
+  OfflineImageBufferFrameView,
+  releaseOfflineImageBuffer,
+  type OfflineImageBufferRef,
+} from 'react-native-sherpa-onnx/imagebuffer';
+import { rasterizePdfPages } from 'react-native-sherpa-onnx/pdf';
+
+const [pages, setPages] = useState<OfflineImageBufferRef | null>(null);
+const [index, setIndex] = useState(0);
+
+// Once, when the PDF is opened:
+const buffer = await rasterizePdfPages(
+  { kind: 'fs', path: '/path/to/large.pdf' },
+  { strategy: 'lazy-lru', hotFrames: 4, dpi: 144, maxSide: 2048 }
+);
+setPages(buffer);
+setIndex(0);
+
+// UI: one FrameView + prev/next (or a pager that sets frameIndex)
+{pages ? (
+  <View>
+    <OfflineImageBufferFrameView
+      buffer={pages}
+      frameIndex={index}
+      resizeMode="contain"
+      maxSide={1280}
+      style={{ width: '100%', height: 400 }}
+    />
+    <Text>
+      Page {index + 1} / {pages.info.frameCount}
+    </Text>
+    <Button
+      title="Previous"
+      disabled={index <= 0}
+      onPress={() => setIndex((i) => Math.max(0, i - 1))}
+    />
+    <Button
+      title="Next"
+      disabled={index >= pages.info.frameCount - 1}
+      onPress={() => setIndex((i) => Math.min(pages.info.frameCount - 1, i + 1))}
+    />
+  </View>
+) : null}
+
+// When leaving the screen:
+await releaseOfflineImageBuffer(pages);
+```
+
+</details>
+
+<details>
+<summary>Rasterize once, then OCR every page (rasterize-all)</summary>
+
+```ts
+const pages = await rasterizePdfPages(pdfSource, {
+  strategy: 'rasterize-all', // default
+  dpi: 144,
+  maxSide: 2048,
+});
+// const engine = await createOCR({ ... });
+// await engine.recognize(pages, textOut);
+await releaseOfflineImageBuffer(pages);
+```
+
+</details>
 
 ## Example app
 
-Bundled fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example turns PDFium **on** (`example/android/gradle.properties` + `example/ios/Podfile`); consumer apps should keep the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
+Fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example enables PDFium (`example/android/gradle.properties` + `example/ios/Podfile`); apps should leave the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
 
-In-app preview of raster frames: [`OfflineImageBufferFrameView`](./imagebuffer-offline.md) (no file materialize). Share/save: `exportOfflineImageBufferFrame` with a [`FileDestination`](./fileio.md).
+Preview: [`OfflineImageBufferFrameView`](./imagebuffer-offline.md). Export: `exportOfflineImageBufferFrame` with a [`FileDestination`](./fileio.md).
 
 ## See also
 
 - [ocr-offline.md](./ocr-offline.md)
 - [imagebuffer-offline.md](./imagebuffer-offline.md)
 - [textbuffer-offline.md](./textbuffer-offline.md)
-- [PREBUILT_RESOLUTION.md](./internal/PREBUILT_RESOLUTION.md)
