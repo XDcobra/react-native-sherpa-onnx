@@ -7,6 +7,7 @@
 #include "ImageMmapThreshold.h"
 #include "ImageRegistry.h"
 #include "pdf/PdfFeatureGuard.h"
+#include "pdf/PdfLazySession.h"
 #include "pdf/PdfPageRasterizer.h"
 #include "pdf/PdfTextLayerExtractor.h"
 #include "pdf/PdfTypes.h"
@@ -215,6 +216,8 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
 
 /**
  * Rasterize PDF pages into a new OfflineImageBuffer.
+ * strategy: "rasterize-all" (default) or "lazy-lru".
+ * hotFrames: only for lazy-lru (clamped in registry).
  * Returns HashMap:
  *   ok (Boolean), errorCode?, errorMessage?,
  *   bufferId, kind, state, frameCount, totalBytes, storageKind, pageCount
@@ -226,7 +229,9 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
     jbyteArray pdfBytes,
     jintArray pagesOrNull,
     jint dpi,
-    jint maxSide) {
+    jint maxSide,
+    jstring strategyOrNull,
+    jint hotFrames) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
@@ -245,16 +250,70 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
         pdfBytes, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
   }
 
-  sherpa_onnx::pdf::RasterOptions opts;
-  opts.dpi = dpi > 0 ? dpi : 144;
-  opts.max_side = maxSide;
+  std::vector<int> pages;
   if (pagesOrNull != nullptr) {
     const jsize pn = env->GetArrayLength(pagesOrNull);
-    opts.pages.resize(static_cast<size_t>(pn));
+    pages.resize(static_cast<size_t>(pn));
     if (pn > 0) {
-      env->GetIntArrayRegion(pagesOrNull, 0, pn, opts.pages.data());
+      env->GetIntArrayRegion(pagesOrNull, 0, pn, pages.data());
     }
   }
+
+  const int useDpi = dpi > 0 ? dpi : 144;
+  bool lazy = false;
+  if (strategyOrNull != nullptr) {
+    const char* raw = env->GetStringUTFChars(strategyOrNull, nullptr);
+    if (raw) {
+      lazy = std::string(raw) == "lazy-lru";
+      env->ReleaseStringUTFChars(strategyOrNull, raw);
+    }
+  }
+
+  if (lazy) {
+    std::string err_code;
+    std::string err_msg;
+    auto session = sherpa_onnx::pdf::PdfLazySession::Open(
+        bytes.data(), bytes.size(), useDpi, maxSide, &err_code, &err_msg);
+    if (!session) {
+      PutBool(env, map, put, "ok", JNI_FALSE);
+      PutString(
+          env, map, put, "errorCode",
+          err_code.empty() ? sherpa_onnx::pdf::kErrInternal : err_code);
+      PutString(env, map, put, "errorMessage", err_msg);
+      return map;
+    }
+    const int page_count = session->page_count();
+    auto created =
+        sherpa_onnx::image::ImageRegistry::Instance().CreateLazyPdfSlots(
+            std::move(session), pages, hotFrames);
+    if (!created.ok) {
+      PutBool(env, map, put, "ok", JNI_FALSE);
+      PutString(
+          env, map, put, "errorCode",
+          created.errorCode.empty() ? sherpa_onnx::pdf::kErrInternal
+                                    : created.errorCode);
+      PutString(env, map, put, "errorMessage", created.errorMessage);
+      return map;
+    }
+    PutBool(env, map, put, "ok", JNI_TRUE);
+    PutString(env, map, put, "bufferId", created.info.bufferId);
+    PutString(env, map, put, "kind", "offlineImageBuffer");
+    PutString(
+        env, map, put, "state",
+        sherpa_onnx::image::BufferStateName(created.info.state));
+    PutInt(env, map, put, "frameCount", created.info.frameCount);
+    PutLong(env, map, put, "totalBytes", created.info.totalBytes);
+    PutString(
+        env, map, put, "storageKind",
+        sherpa_onnx::image::StorageKindName(created.info.storageKind));
+    PutInt(env, map, put, "pageCount", page_count);
+    return map;
+  }
+
+  sherpa_onnx::pdf::RasterOptions opts;
+  opts.dpi = useDpi;
+  opts.max_side = maxSide;
+  opts.pages = std::move(pages);
 
   auto raster = sherpa_onnx::pdf::RasterizePdfPages(
       bytes.data(), bytes.size(), opts);
@@ -285,7 +344,9 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
   PutBool(env, map, put, "ok", JNI_TRUE);
   PutString(env, map, put, "bufferId", created.info.bufferId);
   PutString(env, map, put, "kind", "offlineImageBuffer");
-  PutString(env, map, put, "state", "immutable");
+  PutString(
+      env, map, put, "state",
+      sherpa_onnx::image::BufferStateName(created.info.state));
   PutInt(env, map, put, "frameCount", created.info.frameCount);
   PutLong(env, map, put, "totalBytes", created.info.totalBytes);
   PutString(

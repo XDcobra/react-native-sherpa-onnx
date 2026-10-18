@@ -100,10 +100,11 @@ describe('pdf offline api', () => {
     );
     expect(r.bufferId).toBe('img_off_00000000-0000-0000-0000-0000000000aa');
     expect(r.info.frameCount).toBe(1);
+    expect(r.info.state).toBe('immutable');
     expect(r.pageCount).toBe(1);
     expect(mockNative.rasterizePdfPages).toHaveBeenCalledWith(
       { kind: 'fs', path: '/tmp/a.pdf' },
-      { pages: [1], dpi: 144, maxSide: 2048 }
+      { pages: [1], dpi: 144, maxSide: 2048, strategy: 'rasterize-all' }
     );
   });
 
@@ -111,6 +112,38 @@ describe('pdf offline api', () => {
     await expect(
       rasterizePdfPages({ kind: 'fs', path: '/tmp/a.pdf' }, { dpi: 0 })
     ).rejects.toThrow(/dpi must be > 0/);
+    expect(mockNative.rasterizePdfPages).not.toHaveBeenCalled();
+  });
+
+  it('rasterizePdfPages passes lazy-lru strategy and hotFrames', async () => {
+    mockNative.rasterizePdfPages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000bb',
+      kind: 'offlineImageBuffer',
+      state: 'lazy',
+      frameCount: 5,
+      totalBytes: 0,
+      storageKind: 'ram',
+      pageCount: 5,
+    });
+    const r = await rasterizePdfPages(
+      { kind: 'fs', path: '/tmp/big.pdf' },
+      { strategy: 'lazy-lru', hotFrames: 2, dpi: 144 }
+    );
+    expect(r.info.state).toBe('lazy');
+    expect(r.info.frameCount).toBe(5);
+    expect(mockNative.rasterizePdfPages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/big.pdf' },
+      { strategy: 'lazy-lru', hotFrames: 2, dpi: 144 }
+    );
+  });
+
+  it('rasterizePdfPages rejects invalid strategy', async () => {
+    await expect(
+      rasterizePdfPages(
+        { kind: 'fs', path: '/tmp/a.pdf' },
+        { strategy: 'nope' as 'lazy-lru' }
+      )
+    ).rejects.toThrow(/strategy must be/);
     expect(mockNative.rasterizePdfPages).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@
 
 #include "ImageRegistry.h"
 #include "pdf/PdfFeatureGuard.h"
+#include "pdf/PdfLazySession.h"
 #include "pdf/PdfPageRasterizer.h"
 #include "pdf/PdfTextLayerExtractor.h"
 
@@ -210,31 +211,102 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
     return;
   }
 
-  sherpa_onnx::pdf::RasterOptions opts;
+  std::vector<int> pages;
   id pagesVal = options[@"pages"];
   if ([pagesVal isKindOfClass:[NSArray class]]) {
     for (id p in (NSArray *)pagesVal) {
       if ([p respondsToSelector:@selector(intValue)]) {
-        opts.pages.push_back([p intValue]);
+        pages.push_back([p intValue]);
       }
     }
   }
+
+  int dpi = 144;
   id dpiVal = options[@"dpi"];
   if ([dpiVal respondsToSelector:@selector(intValue)]) {
-    int dpi = [dpiVal intValue];
-    if (dpi > 0) {
-      opts.dpi = dpi;
+    int d = [dpiVal intValue];
+    if (d > 0) {
+      dpi = d;
     }
   }
+  int maxSide = 4096;
   id maxSideVal = options[@"maxSide"];
   if ([maxSideVal respondsToSelector:@selector(intValue)]) {
-    opts.max_side = [maxSideVal intValue];
+    maxSide = [maxSideVal intValue];
   }
+
+  NSString *strategy = @"rasterize-all";
+  id strategyVal = options[@"strategy"];
+  if ([strategyVal isKindOfClass:[NSString class]] &&
+      [(NSString *)strategyVal length] > 0) {
+    strategy = (NSString *)strategyVal;
+  }
+  int hotFrames = 0;
+  id hotFramesVal = options[@"hotFrames"];
+  if ([hotFramesVal respondsToSelector:@selector(intValue)]) {
+    hotFrames = [hotFramesVal intValue];
+  }
+
+  const BOOL lazy = [strategy isEqualToString:@"lazy-lru"];
 
   if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
     [self sendEventWithName:@"SherpaOnnxPdfProgress"
                        body:@{@"done" : @0, @"total" : @1, @"phase" : @"raster"}];
   }
+
+  if (lazy) {
+    std::string err_code;
+    std::string err_msg;
+    auto session = sherpa_onnx::pdf::PdfLazySession::Open(
+        static_cast<const uint8_t *>(data.bytes), data.length, dpi, maxSide,
+        &err_code, &err_msg);
+    if (!session) {
+      NSString *code = err_code.empty()
+                           ? @"ERR_PDF_INTERNAL"
+                           : [NSString stringWithUTF8String:err_code.c_str()];
+      NSString *msg = err_msg.empty()
+                          ? @"Failed to open PDF for lazy-lru"
+                          : [NSString stringWithUTF8String:err_msg.c_str()];
+      reject(code, msg, nil);
+      return;
+    }
+    const int page_count = session->page_count();
+    auto created = ImageRegistry::Instance().CreateLazyPdfSlots(
+        std::move(session), pages, hotFrames);
+    if (!created.ok) {
+      NSString *code = created.errorCode.empty()
+                           ? @"ERR_PDF_INTERNAL"
+                           : [NSString stringWithUTF8String:created.errorCode.c_str()];
+      NSString *msg =
+          created.errorMessage.empty()
+              ? @"Failed to create lazy ImageBuffer from PDF"
+              : [NSString stringWithUTF8String:created.errorMessage.c_str()];
+      reject(code, msg, nil);
+      return;
+    }
+    if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
+      [self sendEventWithName:@"SherpaOnnxPdfProgress"
+                         body:@{@"done" : @1, @"total" : @1, @"phase" : @"done"}];
+    }
+    resolve(@{
+      @"bufferId" : [NSString stringWithUTF8String:created.info.bufferId.c_str()],
+      @"kind" : @"offlineImageBuffer",
+      @"state" : [NSString
+          stringWithUTF8String:sherpa_onnx::image::BufferStateName(created.info.state)],
+      @"frameCount" : @(created.info.frameCount),
+      @"totalBytes" : @(created.info.totalBytes),
+      @"storageKind" : [NSString
+          stringWithUTF8String:sherpa_onnx::image::StorageKindName(
+                                   created.info.storageKind)],
+      @"pageCount" : @(page_count),
+    });
+    return;
+  }
+
+  sherpa_onnx::pdf::RasterOptions opts;
+  opts.pages = std::move(pages);
+  opts.dpi = dpi;
+  opts.max_side = maxSide;
 
   auto raster = sherpa_onnx::pdf::RasterizePdfPages(
       static_cast<const uint8_t *>(data.bytes), data.length, opts);
@@ -271,7 +343,8 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
   resolve(@{
     @"bufferId" : [NSString stringWithUTF8String:created.info.bufferId.c_str()],
     @"kind" : @"offlineImageBuffer",
-    @"state" : @"immutable",
+    @"state" : [NSString
+        stringWithUTF8String:sherpa_onnx::image::BufferStateName(created.info.state)],
     @"frameCount" : @(created.info.frameCount),
     @"totalBytes" : @(created.info.totalBytes),
     @"storageKind" : [NSString

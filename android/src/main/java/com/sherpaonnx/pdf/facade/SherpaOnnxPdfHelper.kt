@@ -191,9 +191,22 @@ class SherpaOnnxPdfHelper(
       } else {
         4096
       }
+    val strategy =
+      if (options != null && options.hasKey("strategy") && !options.isNull("strategy")) {
+        options.getString("strategy")
+      } else {
+        "rasterize-all"
+      }
+    val hotFrames =
+      if (options != null && options.hasKey("hotFrames") && !options.isNull("hotFrames")) {
+        options.getDouble("hotFrames").toInt()
+      } else {
+        0 // native default 8 for lazy-lru
+      }
 
     emitProgress(0, 1, "raster")
-    val raw = PdfNative.nativeRasterizePages(bytes, pages, dpi, maxSide)
+    val raw =
+      PdfNative.nativeRasterizePages(bytes, pages, dpi, maxSide, strategy, hotFrames)
     val ok = raw["ok"] as? Boolean ?: false
     if (!ok) {
       val code = raw["errorCode"] as? String ?: ERR_INTERNAL
@@ -211,7 +224,8 @@ class SherpaOnnxPdfHelper(
 
     Log.i(
       TAG,
-      "rasterize ok bufferId=$bufferId frames=${raw["frameCount"]} pageCount=${raw["pageCount"]}",
+      "rasterize ok bufferId=$bufferId strategy=$strategy frames=${raw["frameCount"]} " +
+        "pageCount=${raw["pageCount"]} state=${raw["state"]}",
     )
 
     val result: WritableMap = Arguments.createMap()

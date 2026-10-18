@@ -34,6 +34,9 @@ export type ExtractPdfTextLayerResult = {
   spatialSpanCount: number;
 };
 
+/** How PDF pages become OfflineImageBuffer frames. */
+export type RasterizePdfStrategy = 'rasterize-all' | 'lazy-lru';
+
 export type RasterizePdfPagesOptions = {
   /** 1-based page indices. Omit or `'all'` for every page. */
   pages?: 'all' | number[];
@@ -41,6 +44,16 @@ export type RasterizePdfPagesOptions = {
   dpi?: number;
   /** Longest-edge cap after DPI scale (default 4096). <= 0 disables. */
   maxSide?: number;
+  /**
+   * `rasterize-all` (default): decode all selected pages up front (`state: 'immutable'`).
+   * `lazy-lru`: cold slots + retained PDFium doc; at most `hotFrames` RGB pages (`state: 'lazy'`).
+   */
+  strategy?: RasterizePdfStrategy;
+  /**
+   * Max decoded RGB pages retained for `lazy-lru` (default 8, clamped 1..32).
+   * Ignored for `rasterize-all`.
+   */
+  hotFrames?: number;
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };

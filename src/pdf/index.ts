@@ -169,11 +169,20 @@ export async function rasterizePdfPages(
     });
   }
 
+  const strategy = options?.strategy ?? 'rasterize-all';
+  if (strategy !== 'rasterize-all' && strategy !== 'lazy-lru') {
+    throw new Error(
+      `${PdfErrorCode.INVALID_ARGUMENT}: strategy must be 'rasterize-all' or 'lazy-lru'`
+    );
+  }
+
   const nativeOptions: {
     pages?: number[];
     dpi?: number;
     maxSide?: number;
-  } = {};
+    strategy?: string;
+    hotFrames?: number;
+  } = { strategy };
   const pages = buildPagesOption(options?.pages);
   if (pages) {
     nativeOptions.pages = pages;
@@ -188,6 +197,9 @@ export async function rasterizePdfPages(
   if (options?.maxSide != null) {
     nativeOptions.maxSide = Math.trunc(options.maxSide);
   }
+  if (strategy === 'lazy-lru' && options?.hotFrames != null) {
+    nativeOptions.hotFrames = Math.trunc(options.hotFrames);
+  }
 
   const progressSub = subscribePdfProgress(options?.onProgress);
 
@@ -198,6 +210,8 @@ export async function rasterizePdfPages(
         pages: nativeOptions.pages ?? 'all',
         dpi: nativeOptions.dpi ?? 144,
         maxSide: nativeOptions.maxSide ?? 4096,
+        strategy,
+        hotFrames: nativeOptions.hotFrames,
       });
     }
     const raw = await getNative().rasterizePdfPages(
@@ -215,7 +229,7 @@ export async function rasterizePdfPages(
       info: {
         bufferId,
         kind: 'offlineImageBuffer',
-        state: 'immutable',
+        state: raw.state === 'lazy' ? 'lazy' : 'immutable',
         frameCount: Number(raw.frameCount ?? 0),
         totalBytes: Number(raw.totalBytes ?? 0),
         storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
@@ -238,6 +252,7 @@ export type {
   PdfErrorCodeValue,
   RasterizePdfPagesOptions,
   RasterizePdfPagesResult,
+  RasterizePdfStrategy,
 } from './types';
 
 export { PdfErrorCode } from './types';

@@ -19,6 +19,8 @@ internal object PdfNative {
 
   /**
    * Rasterize pages into a new OfflineImageBuffer.
+   * [strategy]: `"rasterize-all"` (default) or `"lazy-lru"`.
+   * [hotFrames]: only for lazy-lru (native clamps 1..32; default 8 when <= 0).
    * Returns HashMap: ok, errorCode?, errorMessage?, bufferId, frameCount, …
    */
   external fun nativeRasterizePages(
@@ -26,5 +28,7 @@ internal object PdfNative {
     pages: IntArray?,
     dpi: Int,
     maxSide: Int,
+    strategy: String?,
+    hotFrames: Int,
   ): HashMap<String, Any>
 }
