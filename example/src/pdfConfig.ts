@@ -1,5 +1,5 @@
 /**
- * Bundled PDF fixtures for a future PDF text-layer screen.
+ * Bundled PDF fixtures for the OCR example (text-layer vs scan-only paths).
  * - Android: example/android/app/src/main/assets/test_pdfs/
  * - iOS: example/ios/sherpa_models/test_pdfs/ (copied into the app bundle at build time)
  */

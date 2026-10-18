@@ -30,12 +30,22 @@ import {
 } from 'react-native-sherpa-onnx/imagebuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { ImageFileInfo } from '../imageConfig';
+import type { PdfFileInfo } from '../pdfConfig';
 import {
   fileSourceFromBundledPath,
   toFileSource as toFileSourceWithHint,
 } from '../utils/fileSourceFromUri';
 import { resolveImageDisplayUri } from '../utils/imageDisplayUri';
 import { widgetStyles as s } from './OfflineImageBufferWidget.styles';
+
+/** Bundled fixture row for image or PDF pickers. */
+export type ExampleBundledFileInfo = {
+  id: string;
+  name: string;
+  description: string;
+  section?: string;
+  kind?: 'image' | 'pdf';
+};
 
 export type OfflineImageBufferInfo = {
   bufferId: string;
@@ -47,14 +57,26 @@ export type OfflineImageBufferInfo = {
   frameCount: number;
 };
 
+export type PdfSourceSelection = {
+  label: string;
+  source: FileSource;
+  /** Bundled fixture id when picked from examples. */
+  fixtureId?: string;
+};
+
 export type OfflineImageBufferWidgetHandle = {
   clear: () => Promise<void>;
 };
 
 type Props = {
   imageFiles: ImageFileInfo[];
+  /** Optional PDF fixtures listed alongside images. */
+  pdfFiles?: PdfFileInfo[];
   onBufferReady: (info: OfflineImageBufferInfo) => void;
   onBufferReleased: () => void;
+  /** PDF selected (bundled or document picker) — parent runs extract/raster. */
+  onPdfSelected?: (selection: PdfSourceSelection) => void;
+  onPdfCleared?: () => void;
   disabled?: boolean;
   visible?: boolean;
   externalError?: string | null;
@@ -72,6 +94,20 @@ const IMAGE_PICKER_TYPES = [
   'image/bmp',
   'image/gif',
 ] as const;
+
+const FILE_PICKER_TYPES = [
+  ...IMAGE_PICKER_TYPES,
+  DocumentPicker.types.pdf,
+  'com.adobe.pdf',
+  'application/pdf',
+] as const;
+
+function looksLikePdf(nameOrUri: string, mime?: string | null): boolean {
+  const mimeLower = (mime ?? '').toLowerCase();
+  if (mimeLower.includes('pdf')) return true;
+  const lower = nameOrUri.toLowerCase();
+  return lower.endsWith('.pdf') || lower.includes('.pdf?');
+}
 
 function toImageFileSource(
   pathOrUri: string,
@@ -111,9 +147,9 @@ export function ExampleImageFileList({
   onSelect,
   disabled = false,
 }: {
-  imageFiles: ImageFileInfo[];
+  imageFiles: ExampleBundledFileInfo[];
   selectedId?: string | null;
-  onSelect: (file: ImageFileInfo) => void;
+  onSelect: (file: ExampleBundledFileInfo) => void;
   disabled?: boolean;
 }) {
   const sections = useMemo(() => {
@@ -121,7 +157,8 @@ export function ExampleImageFileList({
     if (!hasSections) {
       return [{ title: null as string | null, files: imageFiles }];
     }
-    const groups: { title: string | null; files: ImageFileInfo[] }[] = [];
+    const groups: { title: string | null; files: ExampleBundledFileInfo[] }[] =
+      [];
     for (const file of imageFiles) {
       const title = file.section ?? null;
       const last = groups[groups.length - 1];
@@ -137,7 +174,7 @@ export function ExampleImageFileList({
   if (imageFiles.length === 0) {
     return (
       <Text style={{ color: '#666', marginBottom: 8 }}>
-        No example images available.
+        No example files available.
       </Text>
     );
   }
@@ -192,8 +229,11 @@ export const OfflineImageBufferWidget = forwardRef<
 >(function OfflineImageBufferWidget(
   {
     imageFiles,
+    pdfFiles = [],
     onBufferReady,
     onBufferReleased,
+    onPdfSelected,
+    onPdfCleared,
     disabled = false,
     visible = true,
     externalError = null,
@@ -205,6 +245,23 @@ export const OfflineImageBufferWidget = forwardRef<
   const [selectedExampleId, setSelectedExampleId] = useState<string | null>(
     null
   );
+  const [pdfActiveLabel, setPdfActiveLabel] = useState<string | null>(null);
+
+  const exampleFiles = useMemo((): ExampleBundledFileInfo[] => {
+    const images: ExampleBundledFileInfo[] = imageFiles.map((f) => ({
+      ...f,
+      kind: 'image' as const,
+      section: f.section ? `Images — ${f.section}` : 'Images',
+    }));
+    const pdfs: ExampleBundledFileInfo[] = pdfFiles.map((f) => ({
+      id: f.id,
+      name: f.name,
+      description: f.description,
+      kind: 'pdf' as const,
+      section: f.section ? `PDFs — ${f.section}` : 'PDFs',
+    }));
+    return [...images, ...pdfs];
+  }, [imageFiles, pdfFiles]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [loadStatus, setLoadStatus] = useState<string | null>(null);
@@ -243,6 +300,7 @@ export const OfflineImageBufferWidget = forwardRef<
       setLoadStatus(null);
       setLoadError(null);
       setSelectedExampleId(null);
+      setPdfActiveLabel(null);
       await releaseBuffer();
       if (!keepSourceChoice) {
         setSourceType(null);
@@ -257,9 +315,10 @@ export const OfflineImageBufferWidget = forwardRef<
       clear: async () => {
         await resetAll(false);
         onBufferReleased();
+        onPdfCleared?.();
       },
     }),
-    [resetAll, onBufferReleased]
+    [resetAll, onBufferReleased, onPdfCleared]
   );
 
   const loadSource = useCallback(
@@ -273,6 +332,7 @@ export const OfflineImageBufferWidget = forwardRef<
       setLoadError(null);
 
       try {
+        setPdfActiveLabel(null);
         const created = await createOfflineImageBufferFromFiles(source, {
           maxSide,
           onProgress: (event: { percent?: number; phase?: string }) => {
@@ -324,22 +384,61 @@ export const OfflineImageBufferWidget = forwardRef<
     [maxSide, onBufferReady, releaseBuffer]
   );
 
-  const handleExamplePick = useCallback(
-    async (imageFile: ImageFileInfo) => {
-      setSelectedExampleId(imageFile.id);
-      await loadSource(imageFile.name, toImageFileSource(imageFile.id));
+  const clearPdfUi = useCallback(() => {
+    setPdfActiveLabel(null);
+    onPdfCleared?.();
+  }, [onPdfCleared]);
+
+  const selectPdf = useCallback(
+    async (selection: PdfSourceSelection) => {
+      await releaseBuffer();
+      setBufferInfo(null);
+      onBufferReleased();
+      setPdfActiveLabel(selection.label);
+      setLoadError(null);
+      onPdfSelected?.(selection);
     },
-    [loadSource]
+    [onBufferReleased, onPdfSelected, releaseBuffer]
+  );
+
+  const handleExamplePick = useCallback(
+    async (file: ExampleBundledFileInfo) => {
+      setSelectedExampleId(file.id);
+      if (file.kind === 'pdf') {
+        await selectPdf({
+          label: file.name,
+          source: toImageFileSource(file.id),
+          fixtureId: file.id,
+        });
+        return;
+      }
+      clearPdfUi();
+      await loadSource(file.name, toImageFileSource(file.id));
+    },
+    [clearPdfUi, loadSource, selectPdf]
   );
 
   const handleOwnPick = useCallback(async () => {
     try {
       const [file] = await DocumentPicker.pick({
-        type: [...IMAGE_PICKER_TYPES],
+        type: onPdfSelected ? [...FILE_PICKER_TYPES] : [...IMAGE_PICKER_TYPES],
         allowMultiSelection: false,
       });
       if (!file?.uri) return;
-      const label = file.name?.trim() || 'Picked image';
+      const label = file.name?.trim() || 'Picked file';
+      const nameOrUri = file.name || file.uri;
+      if (
+        onPdfSelected &&
+        looksLikePdf(nameOrUri, (file as { type?: string }).type)
+      ) {
+        setSelectedExampleId(null);
+        await selectPdf({
+          label,
+          source: toImageFileSource(file.uri, file.name ?? undefined),
+        });
+        return;
+      }
+      clearPdfUi();
       await loadSource(
         label,
         toImageFileSource(file.uri, file.name ?? undefined)
@@ -348,7 +447,7 @@ export const OfflineImageBufferWidget = forwardRef<
       if (isPickerCancel(err)) return;
       setLoadError(err instanceof Error ? err.message : String(err));
     }
-  }, [loadSource]);
+  }, [clearPdfUi, loadSource, onPdfSelected, selectPdf]);
 
   if (!visible) {
     return null;
@@ -359,14 +458,16 @@ export const OfflineImageBufferWidget = forwardRef<
 
   return (
     <View style={s.root}>
-      {bufferInfo == null && sourceType == null ? (
+      {bufferInfo == null && pdfActiveLabel == null && sourceType == null ? (
         <View style={s.sourceChoiceRow}>
           <TouchableOpacity
             style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
             onPress={() => setSourceType('example')}
             disabled={busy}
           >
-            <Text style={s.sourceChoiceButtonText}>Example Image</Text>
+            <Text style={s.sourceChoiceButtonText}>
+              {pdfFiles.length > 0 ? 'Example file' : 'Example Image'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
@@ -376,16 +477,24 @@ export const OfflineImageBufferWidget = forwardRef<
             }}
             disabled={busy}
           >
-            <Text style={s.sourceChoiceButtonText}>Own Image</Text>
+            <Text style={s.sourceChoiceButtonText}>
+              {onPdfSelected ? 'Own file' : 'Own Image'}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}
 
-      {bufferInfo == null && sourceType === 'example' ? (
+      {bufferInfo == null &&
+      pdfActiveLabel == null &&
+      sourceType === 'example' ? (
         <View style={s.root}>
-          <Text style={s.subsectionTitle}>Choose an example image</Text>
+          <Text style={s.subsectionTitle}>
+            {pdfFiles.length > 0
+              ? 'Choose an example image or PDF'
+              : 'Choose an example image'}
+          </Text>
           <ExampleImageFileList
-            imageFiles={imageFiles}
+            imageFiles={exampleFiles}
             selectedId={selectedExampleId}
             onSelect={handleExamplePick}
             disabled={busy}
@@ -403,7 +512,10 @@ export const OfflineImageBufferWidget = forwardRef<
         </View>
       ) : null}
 
-      {bufferInfo == null && sourceType === 'own' && !loading ? (
+      {bufferInfo == null &&
+      pdfActiveLabel == null &&
+      sourceType === 'own' &&
+      !loading ? (
         <View style={s.root}>
           <TouchableOpacity
             style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
@@ -412,7 +524,9 @@ export const OfflineImageBufferWidget = forwardRef<
             }}
             disabled={busy}
           >
-            <Text style={s.sourceChoiceButtonText}>Pick image…</Text>
+            <Text style={s.sourceChoiceButtonText}>
+              {onPdfSelected ? 'Pick image or PDF…' : 'Pick image…'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.changeSourceButton}
@@ -421,6 +535,31 @@ export const OfflineImageBufferWidget = forwardRef<
           >
             <Text style={s.changeSourceButtonText}>Change source</Text>
           </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {pdfActiveLabel && bufferInfo == null ? (
+        <View style={s.readyCard}>
+          <View style={s.readyHeader}>
+            <Text style={s.readyTitle} numberOfLines={2}>
+              PDF: {pdfActiveLabel}
+            </Text>
+            <TouchableOpacity
+              style={s.deleteButton}
+              onPress={async () => {
+                await resetAll(false);
+                setSelectedExampleId(null);
+                setSourceType(null);
+                clearPdfUi();
+              }}
+              disabled={busy}
+            >
+              <Ionicons name="trash-outline" size={22} color="#c00" />
+            </TouchableOpacity>
+          </View>
+          <Text style={s.metaText}>
+            Text-layer extract next (or rasterize if no text layer).
+          </Text>
         </View>
       ) : null}
 

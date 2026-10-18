@@ -307,4 +307,9 @@ This screen demonstrates true real-time streaming speaker diarization powered by
 
 Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).
 
-Bundled PDF fixtures for a future PDF screen live under `test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example enables PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`); consumer apps keep the SDK default off. See [docs/pdf-offline.md](../docs/pdf-offline.md).
+The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`) or a custom PDF. The example **shows the app-dev switch** (no SDK auto):
+
+1. `extractPdfTextLayer` — digital PDFs → TextBuffer (`origin: textLayer`); **no OCR**.
+2. On `ERR_PDF_NO_TEXT_LAYER` — unlock `rasterizePdfPages` → `OfflineImageBuffer` → `recognize` like an image.
+
+A compact comparison table on the screen lists the two paths. PDFium is enabled in the example (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`); consumer apps keep the SDK default off. See [docs/pdf-offline.md](../docs/pdf-offline.md).

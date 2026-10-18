@@ -17,17 +17,18 @@ Live / streaming ImageBuffer is **not** implemented yet (types may be reserved).
 | **[Offline image buffer](imagebuffer-offline.md)** | Multi-frame RGB8, **immutable** after create. Small buffers stay on the heap (`storageKind: 'ram'`); larger ones upgrade to per-frame mmap temp files (`storageKind: 'mmap'`). | Batch OCR `recognize`, multi-page prep. |
 | **Live image buffer** | Reserved (`liveImageBuffer` types only). | Future camera / streaming OCR. |
 
-**Why this is fast:** apps orchestrate with **ids and small control calls**; decoded pixels stay on the native side. Native code owns decode, orientation, optional `maxSide` downscale, and RAM|mmap backing. OCR (later) reads frames via C++ `GetFrameRgbPtr` without shuttling full bitmaps through the JS bridge.
+**Why this is fast:** apps orchestrate with **ids and small control calls**; decoded pixels stay on the native side. Native code owns decode, orientation, optional `maxSide` downscale, and RAM|mmap backing. OCR reads frames via C++ `GetFrameRgbPtr` without shuttling full bitmaps through the JS bridge.
 
-**Decode path**
+**Supported formats**
 
-| Format | Decoder |
+| Format | Notes |
 | --- | --- |
-| JPEG / PNG / BMP / GIF | C++ `stb_image` |
-| WebP | C++ **libwebp** (prebuilt; Maven `com.xdcobra.sherpa:libwebp`, see `third_party/libwebp_prebuilt`) |
-| HEIC / HEIF | Platform only (iOS ImageIO, Android `ImageDecoder` API 28+) |
+| JPEG / PNG / BMP / GIF | Via `createOfflineImageBufferFromFiles` / `FromBase64`. EXIF orientation applied for JPEG. |
+| WebP | Same create APIs. Requires libwebp linked (default SDK prebuilt path). |
+| HEIC / HEIF | Same create APIs. Platform decode only. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
+| PDF (page raster) | Not via image create APIs. Opt-in [`rasterizePdfPages`](pdf-offline.md) → same OfflineImageBuffer (`pageNumber` / `dpi` on frames). |
 
-EXIF orientation is applied for JPEG in C++. HEIC orientation comes from the platform decoder. Optional **`maxSide`** downscales the longest edge (default **4096**; `<= 0` disables).
+Optional **`maxSide`** downscales the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` options — see [pdf-offline.md](pdf-offline.md).
 
 ---
 

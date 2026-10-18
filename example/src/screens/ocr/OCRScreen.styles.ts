@@ -31,6 +31,48 @@ export const styles = StyleSheet.create({
     marginBottom: 0,
     lineHeight: 18,
   },
+  compareFrame: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    gap: 8,
+  },
+  compareTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  compareTable: {
+    gap: 0,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  compareRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#fff',
+  },
+  compareHeaderRow: {
+    backgroundColor: '#e2e8f0',
+  },
+  compareCell: {
+    flex: 1,
+    fontSize: 11,
+    color: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    lineHeight: 14,
+  },
+  compareCellWide: {
+    flex: 1.2,
+    fontWeight: '600',
+  },
   sectionBody: {
     gap: 10,
   },

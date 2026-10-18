@@ -25,6 +25,16 @@ import {
   type OcrRecognizeResult,
 } from 'react-native-sherpa-onnx/ocr';
 import {
+  extractPdfTextLayer,
+  isPdfiumEnabled,
+  PdfErrorCode,
+  rasterizePdfPages,
+} from 'react-native-sherpa-onnx/pdf';
+import {
+  getOfflineImageBufferFrameInfo,
+  releaseOfflineImageBuffer,
+} from 'react-native-sherpa-onnx/imagebuffer';
+import {
   createEmptyOfflineTextBuffer,
   getOfflineTextBufferSpatialSpansSlice,
   getOfflineTextBufferTextSlice,
@@ -44,10 +54,12 @@ import {
   OfflineImageBufferWidget,
   type OfflineImageBufferInfo,
   type OfflineImageBufferWidgetHandle,
+  type PdfSourceSelection,
 } from '../../components/OfflineImageBufferWidget';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { useOcrModelCatalog } from '../../hooks/useOcrModelCatalog';
 import { IMAGE_FILES } from '../../imageConfig';
+import { PDF_FILES } from '../../pdfConfig';
 import { getModelDisplayName, toDetectSource } from '../../modelConfig';
 import { useDeviceProviders } from '../../providers/DeviceProvidersContext';
 import {
@@ -56,6 +68,8 @@ import {
 } from '../../utils/ocrCustomInitFill';
 import { OcrQuadOverlay } from './OcrQuadOverlay';
 import { styles } from './OCRScreen.styles';
+
+type PdfExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'error';
 
 const MIN_THREADS = 1;
 const MAX_THREADS = 8;
@@ -111,8 +125,20 @@ export default function OCRScreen() {
   const [imageInfo, setImageInfo] = useState<OfflineImageBufferInfo | null>(
     null
   );
+  const [pdfSelection, setPdfSelection] = useState<PdfSourceSelection | null>(
+    null
+  );
+  const [pdfExtractStatus, setPdfExtractStatus] =
+    useState<PdfExtractStatus>('idle');
+  const [pdfExtractMessage, setPdfExtractMessage] = useState<string | null>(
+    null
+  );
+  const [pdfiumOn, setPdfiumOn] = useState<boolean | null>(null);
   const [resultText, setResultText] = useState('');
   const [resultMeta, setResultMeta] = useState<OcrRecognizeResult | null>(null);
+  const [resultOrigin, setResultOrigin] = useState<'ocr' | 'textLayer' | null>(
+    null
+  );
   const [spans, setSpans] = useState<TextSpatialSpan[]>([]);
   const [selectedSpanIndex, setSelectedSpanIndex] = useState<number | null>(
     null
@@ -127,6 +153,8 @@ export default function OCRScreen() {
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const pdfTextBufferIdRef = useRef<string | null>(null);
+  const rasterBufferIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (selectedFolder && catalogEntries.some((e) => e.id === selectedFolder)) {
@@ -155,11 +183,27 @@ export default function OCRScreen() {
   }, [providerOptions]);
 
   useEffect(() => {
+    isPdfiumEnabled()
+      .then(setPdfiumOn)
+      .catch(() => setPdfiumOn(false));
+  }, []);
+
+  useEffect(() => {
     return () => {
       abortRef.current?.abort();
       const engine = engineRef.current;
       engineRef.current = null;
       engine?.destroy().catch(() => {});
+      const pdfTxt = pdfTextBufferIdRef.current;
+      pdfTextBufferIdRef.current = null;
+      if (pdfTxt) {
+        releasePipelineTextBuffer(pdfTxt).catch(() => {});
+      }
+      const rasterId = rasterBufferIdRef.current;
+      rasterBufferIdRef.current = null;
+      if (rasterId) {
+        releaseOfflineImageBuffer(rasterId).catch(() => {});
+      }
     };
   }, []);
 
@@ -377,6 +421,7 @@ export default function OCRScreen() {
   const clearResults = useCallback(() => {
     setResultText('');
     setResultMeta(null);
+    setResultOrigin(null);
     setSpans([]);
     setSelectedSpanIndex(null);
     setLastMs(null);
@@ -384,6 +429,159 @@ export default function OCRScreen() {
     setProgressPercent(null);
     setResultTab('text');
   }, []);
+
+  const releasePdfTextBuffer = useCallback(async () => {
+    const id = pdfTextBufferIdRef.current;
+    pdfTextBufferIdRef.current = null;
+    if (id) {
+      await releasePipelineTextBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const releaseRasterBuffer = useCallback(async () => {
+    const id = rasterBufferIdRef.current;
+    rasterBufferIdRef.current = null;
+    if (id) {
+      await releaseOfflineImageBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const clearPdfState = useCallback(async () => {
+    setPdfSelection(null);
+    setPdfExtractStatus('idle');
+    setPdfExtractMessage(null);
+    await releasePdfTextBuffer();
+    await releaseRasterBuffer();
+  }, [releasePdfTextBuffer, releaseRasterBuffer]);
+
+  const handlePdfSelected = useCallback(
+    (selection: PdfSourceSelection) => {
+      clearResults();
+      setImageInfo(null);
+      setPdfSelection(selection);
+      setPdfExtractStatus('idle');
+      setPdfExtractMessage(null);
+      releasePdfTextBuffer().catch(() => {});
+      releaseRasterBuffer().catch(() => {});
+    },
+    [clearResults, releasePdfTextBuffer, releaseRasterBuffer]
+  );
+
+  const handleExtractPdf = useCallback(async () => {
+    if (!pdfSelection) {
+      setError('Select a PDF first.');
+      return;
+    }
+    setRunBusy(true);
+    setError(null);
+    clearResults();
+    await releasePdfTextBuffer();
+    const t0 = Date.now();
+    try {
+      const enabled = await isPdfiumEnabled();
+      setPdfiumOn(enabled);
+      if (!enabled) {
+        setPdfExtractStatus('error');
+        setPdfExtractMessage(PdfErrorCode.PDFIUM_DISABLED);
+        setError(
+          `${PdfErrorCode.PDFIUM_DISABLED}: rebuild with sherpaOnnxEnablePdfium=true / SHERPA_ONNX_ENABLE_PDFIUM=1`
+        );
+        return;
+      }
+      const textOut = await createEmptyOfflineTextBuffer();
+      pdfTextBufferIdRef.current = textOut.bufferId;
+      const result = await extractPdfTextLayer(pdfSelection.source, textOut, {
+        pages: 'all',
+      });
+      const info = (await getPipelineTextBufferInfo(
+        textOut
+      )) as OfflineTextBufferInfo;
+      const text =
+        info.utf16Length > 0
+          ? await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length)
+          : '';
+      const spatial =
+        info.hasSpatialSpans && info.spatialSpanCount > 0
+          ? await getOfflineTextBufferSpatialSpansSlice(
+              textOut,
+              0,
+              info.spatialSpanCount
+            )
+          : [];
+      setResultText(text);
+      setResultMeta(null);
+      setResultOrigin('textLayer');
+      setSpans(spatial);
+      setLastMs(Date.now() - t0);
+      setPdfExtractStatus('ok');
+      setPdfExtractMessage(
+        `ok pages=${result.pageCount} withText=${result.pagesWithText} spans=${result.spatialSpanCount}`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await releasePdfTextBuffer();
+      if (msg.includes(PdfErrorCode.NO_TEXT_LAYER)) {
+        setPdfExtractStatus('noTextLayer');
+        setPdfExtractMessage(PdfErrorCode.NO_TEXT_LAYER);
+        setError(
+          `${PdfErrorCode.NO_TEXT_LAYER} — next: rasterizePdfPages, then Run OCR`
+        );
+      } else {
+        setPdfExtractStatus('error');
+        setPdfExtractMessage(msg);
+        setError(msg);
+      }
+    } finally {
+      setRunBusy(false);
+    }
+  }, [clearResults, pdfSelection, releasePdfTextBuffer]);
+
+  const handleRasterizePdf = useCallback(async () => {
+    if (!pdfSelection) {
+      setError('Select a PDF first.');
+      return;
+    }
+    setRunBusy(true);
+    setError(null);
+    clearResults();
+    await releaseRasterBuffer();
+    try {
+      const pages = await rasterizePdfPages(pdfSelection.source, {
+        pages: 'all',
+        dpi: 144,
+        maxSide: 2048,
+        onProgress: (p) => {
+          setProgressLabel(`${p.phase} (${p.done}/${p.total})`);
+          setProgressPercent(
+            p.total > 0 ? Math.round((100 * p.done) / p.total) : null
+          );
+        },
+      });
+      rasterBufferIdRef.current = pages.bufferId;
+      const frame = await getOfflineImageBufferFrameInfo(pages, 0);
+      setImageInfo({
+        bufferId: pages.bufferId,
+        sourceLabel: `Raster: ${pdfSelection.label}`,
+        previewUri: null,
+        width: frame.width,
+        height: frame.height,
+        frameCount: pages.info.frameCount,
+      });
+      setPdfExtractMessage(
+        (prev) =>
+          `${prev ?? PdfErrorCode.NO_TEXT_LAYER} → raster ok frames=${
+            pages.info.frameCount
+          } pageNumber=${frame.pageNumber ?? '?'} dpi=${frame.dpi ?? '?'}`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+    } finally {
+      setRunBusy(false);
+      setProgressLabel(null);
+      setProgressPercent(null);
+    }
+  }, [clearResults, pdfSelection, releaseRasterBuffer]);
 
   const handleRecognize = useCallback(async () => {
     const engine = engineRef.current;
@@ -433,6 +631,7 @@ export default function OCRScreen() {
 
       setResultText(text);
       setResultMeta(page);
+      setResultOrigin('ocr');
       setSpans(spatial);
       setLastMs(Date.now() - t0);
       if (page.family === 'doc_vlm' && page.markdown.trim().length > 0) {
@@ -473,6 +672,13 @@ export default function OCRScreen() {
   const showDocVlmTabs =
     docVlmExtras != null &&
     (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
+
+  const showPdfPipeline = pdfSelection != null;
+  const showRasterStep = pdfExtractStatus === 'noTextLayer';
+  const showRecognizeStep =
+    !showPdfPipeline || (showRasterStep && imageInfo != null);
+  const showResults =
+    resultOrigin === 'textLayer' || resultMeta != null || spans.length > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -714,18 +920,26 @@ export default function OCRScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. Image buffer</Text>
+          <Text style={styles.sectionTitle}>2. Input (image or PDF)</Text>
           <Text style={styles.sectionHint}>
-            Bundled test_images/ or pick your own. Creates an OfflineImageBuffer
-            (native RGB8) for recognize.
+            Images → OfflineImageBuffer → OCR. PDFs → extractPdfTextLayer first;
+            only on {PdfErrorCode.NO_TEXT_LAYER} offer rasterize + recognize
+            (app-dev switch, no SDK auto).
+            {pdfiumOn === false
+              ? ' PDFium disabled in this binary.'
+              : pdfiumOn
+              ? ' PDFium enabled.'
+              : ''}
           </Text>
           {initializedFolder ? (
             <OfflineImageBufferWidget
               ref={imageWidgetRef}
               imageFiles={IMAGE_FILES}
+              pdfFiles={PDF_FILES}
               visible
               disabled={runBusy || initBusy}
               onBufferReady={(info) => {
+                clearPdfState().catch(() => {});
                 setImageInfo(info);
                 clearResults();
               }}
@@ -733,75 +947,199 @@ export default function OCRScreen() {
                 setImageInfo(null);
                 clearResults();
               }}
+              onPdfSelected={handlePdfSelected}
+              onPdfCleared={() => {
+                clearPdfState().catch(() => {});
+                clearResults();
+              }}
             />
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>
-                Initialize an OCR engine above to enable the image picker.
+                Initialize an OCR engine above to enable the input picker.
               </Text>
             </View>
           )}
+
+          {showPdfPipeline ? (
+            <View style={styles.compareFrame}>
+              <Text style={styles.compareTitle}>PDF paths (developer)</Text>
+              <View style={styles.compareTable}>
+                <View style={[styles.compareRow, styles.compareHeaderRow]}>
+                  <Text style={[styles.compareCell, styles.compareCellWide]}>
+                    Fixture
+                  </Text>
+                  <Text style={styles.compareCell}>API</Text>
+                  <Text style={styles.compareCell}>Result</Text>
+                  <Text style={styles.compareCell}>Next</Text>
+                </View>
+                <View style={styles.compareRow}>
+                  <Text style={[styles.compareCell, styles.compareCellWide]}>
+                    Digital (text layer)
+                  </Text>
+                  <Text style={styles.compareCell}>extractPdfTextLayer</Text>
+                  <Text style={styles.compareCell}>
+                    TextBuffer origin=textLayer
+                  </Text>
+                  <Text style={styles.compareCell}>Done (no OCR)</Text>
+                </View>
+                <View style={styles.compareRow}>
+                  <Text style={[styles.compareCell, styles.compareCellWide]}>
+                    Scan-only
+                  </Text>
+                  <Text style={styles.compareCell}>
+                    → {PdfErrorCode.NO_TEXT_LAYER}
+                  </Text>
+                  <Text style={styles.compareCell}>empty text</Text>
+                  <Text style={styles.compareCell}>
+                    rasterizePdfPages → recognize
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. Recognize</Text>
-          <View style={styles.actionRow}>
+        {showPdfPipeline ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>2b. extractPdfTextLayer</Text>
+            <Text style={styles.sectionHint}>
+              Selected: {pdfSelection?.label}
+            </Text>
             <TouchableOpacity
               style={[
                 styles.primaryButton,
-                styles.actionButtonFlex,
-                (!initializedFolder || !imageInfo || runBusy) &&
-                  styles.primaryButtonDisabled,
+                (runBusy || !pdfSelection) && styles.primaryButtonDisabled,
               ]}
               onPress={() => {
-                handleRecognize().catch(() => {});
+                handleExtractPdf().catch(() => {});
               }}
-              disabled={!initializedFolder || !imageInfo || runBusy}
+              disabled={runBusy || !pdfSelection}
+            >
+              {runBusy && !showRasterStep && !imageInfo ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  Run extractPdfTextLayer
+                </Text>
+              )}
+            </TouchableOpacity>
+            {pdfExtractMessage ? (
+              <Text style={styles.mono}>status: {pdfExtractMessage}</Text>
+            ) : null}
+            {error && !showRecognizeStep ? (
+              <Text style={styles.errorText}>{error}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {showRasterStep ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>3. rasterizePdfPages</Text>
+            <Text style={styles.sectionHint}>
+              No text layer — raster selected pages into OfflineImageBuffer
+              (dpi=144), then OCR like an image.
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                (runBusy || !pdfSelection) && styles.primaryButtonDisabled,
+              ]}
+              onPress={() => {
+                handleRasterizePdf().catch(() => {});
+              }}
+              disabled={runBusy || !pdfSelection}
             >
               {runBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryButtonText}>Run OCR</Text>
+                <Text style={styles.primaryButtonText}>
+                  Run rasterizePdfPages
+                </Text>
               )}
             </TouchableOpacity>
-            {runBusy ? (
-              <TouchableOpacity
-                style={[styles.secondaryButton, styles.actionButtonFlex]}
-                onPress={handleCancel}
-              >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
-              </TouchableOpacity>
+            {imageInfo ? (
+              <Text style={styles.mono}>
+                buffer={imageInfo.bufferId}
+                {'\n'}
+                {imageInfo.width}×{imageInfo.height} · frames{' '}
+                {imageInfo.frameCount}
+              </Text>
             ) : null}
           </View>
-          {progressLabel ? (
-            <View style={styles.progressBox}>
-              <Text style={styles.progressLabel}>{progressLabel}</Text>
-              {progressPercent != null ? (
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${progressPercent}%` },
-                    ]}
-                  />
-                </View>
+        ) : null}
+
+        {showRecognizeStep ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              {showPdfPipeline ? '4. Recognize' : '3. Recognize'}
+            </Text>
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.actionButtonFlex,
+                  (!initializedFolder || !imageInfo || runBusy) &&
+                    styles.primaryButtonDisabled,
+                ]}
+                onPress={() => {
+                  handleRecognize().catch(() => {});
+                }}
+                disabled={!initializedFolder || !imageInfo || runBusy}
+              >
+                {runBusy && showRecognizeStep ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Run OCR</Text>
+                )}
+              </TouchableOpacity>
+              {runBusy ? (
+                <TouchableOpacity
+                  style={[styles.secondaryButton, styles.actionButtonFlex]}
+                  onPress={handleCancel}
+                >
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </TouchableOpacity>
               ) : null}
             </View>
-          ) : null}
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
+            {progressLabel ? (
+              <View style={styles.progressBox}>
+                <Text style={styles.progressLabel}>{progressLabel}</Text>
+                {progressPercent != null ? (
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${progressPercent}%` },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          </View>
+        ) : null}
 
-        {resultMeta ? (
+        {showResults ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>4. Results</Text>
+            <Text style={styles.sectionTitle}>
+              {showPdfPipeline
+                ? showRasterStep
+                  ? '5. Results'
+                  : '3. Results'
+                : '4. Results'}
+            </Text>
             <View style={styles.card}>
               <Text style={styles.mono}>
-                family={resultMeta.family}
-                {'\n'}
-                spanCount={resultMeta.spanCount}
+                origin={resultOrigin ?? 'ocr'}
+                {resultMeta
+                  ? `\nfamily=${resultMeta.family}\nspanCount=${resultMeta.spanCount}`
+                  : `\nspanCount=${spans.length}`}
                 {lastMs != null ? `\nwall=${lastMs}ms` : ''}
-                {'\n'}
-                frame={imageInfo?.width}×{imageInfo?.height}
+                {imageInfo
+                  ? `\nframe=${imageInfo.width}×${imageInfo.height}`
+                  : ''}
               </Text>
             </View>
 

@@ -74,6 +74,53 @@ await releaseOfflineImageBuffer(pages);
 
 Defaults: `dpi = 144`, `maxSide = 4096` (longest-edge clamp after DPI scale; `<= 0` disables).
 
+## API reference
+
+From `react-native-sherpa-onnx/pdf`.
+
+#### `isPdfiumEnabled()`
+
+```ts
+function isPdfiumEnabled(): Promise<boolean>;
+```
+
+```ts
+const on = await isPdfiumEnabled();
+```
+
+Whether PDFium is linked in this binary.
+
+#### `extractPdfTextLayer(source, textOut, options?)`
+
+```ts
+function extractPdfTextLayer(
+  source: FileSource,
+  textOut: OfflineTextBufferIdSource,
+  options?: ExtractPdfTextLayerOptions
+): Promise<ExtractPdfTextLayerResult>;
+```
+
+```ts
+const r = await extractPdfTextLayer(pdfSource, textOut, { pages: [1] });
+```
+
+Digital text → empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `signal`, `onProgress`.
+
+#### `rasterizePdfPages(source, options?)`
+
+```ts
+function rasterizePdfPages(
+  source: FileSource,
+  options?: RasterizePdfPagesOptions
+): Promise<RasterizePdfPagesResult>;
+```
+
+```ts
+const pages = await rasterizePdfPages(pdfSource, { dpi: 144, maxSide: 2048 });
+```
+
+PDF pages → new OfflineImageBuffer (no OCR). Options: `pages`, `dpi` (default 144), `maxSide` (default 4096), `signal`, `onProgress`.
+
 ## Spans and coordinates (text layer)
 
 - `origin: 'textLayer'`

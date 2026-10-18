@@ -434,6 +434,49 @@ if (info.hasSpatialSpans) {
 
 </details>
 
+<details>
+<summary>Scan-only PDF (no text layer) → rasterize → recognize</summary>
+
+```ts
+import { createEmptyOfflineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { releaseOfflineImageBuffer } from 'react-native-sherpa-onnx/imagebuffer';
+import {
+  extractPdfTextLayer,
+  PdfErrorCode,
+  rasterizePdfPages,
+} from 'react-native-sherpa-onnx/pdf';
+
+const pdf = { kind: 'fs' as const, path: '/tmp/scan.pdf' };
+
+// 1) Prefer digital text when present (app-owned switch; no SDK auto).
+const probeOut = await createEmptyOfflineTextBuffer();
+try {
+  await extractPdfTextLayer(pdf, probeOut);
+  // Digital PDF: text + spans already in probeOut — skip OCR.
+} catch (err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!msg.includes(PdfErrorCode.NO_TEXT_LAYER)) throw err;
+
+  // 2) No glyph layer → page bitmaps into OfflineImageBuffer.
+  const pages = await rasterizePdfPages(pdf, {
+    pages: 'all',
+    dpi: 144,
+    maxSide: 2048,
+  });
+
+  // 3) Same OCR path as a normal image buffer.
+  const textOut = await createEmptyOfflineTextBuffer();
+  const page = await ocr.recognize(pages, textOut, { granularity: 'line' });
+  console.log(page.spanCount);
+
+  await releaseOfflineImageBuffer(pages);
+}
+```
+
+Requires opt-in PDFium — see [pdf-offline.md](pdf-offline.md).
+
+</details>
+
 ---
 
 ## Example app
