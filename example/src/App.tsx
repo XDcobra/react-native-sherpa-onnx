@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { Platform, PermissionsAndroid, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './navigation/RootNavigator';
+import { DeviceProvidersProvider } from './providers/DeviceProvidersContext';
 
 async function requestAndroidPermissions() {
   if (Platform.OS !== 'android') return;
@@ -31,13 +32,15 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
+      <DeviceProvidersProvider>
+        <View style={styles.container}>
+          <View style={styles.content}>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+          </View>
         </View>
-      </View>
+      </DeviceProvidersProvider>
     </SafeAreaProvider>
   );
 }
