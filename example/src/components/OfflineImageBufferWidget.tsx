@@ -358,7 +358,7 @@ export const OfflineImageBufferWidget = forwardRef<
   const showError = loadError || externalError;
 
   return (
-    <View>
+    <View style={s.root}>
       {bufferInfo == null && sourceType == null ? (
         <View style={s.sourceChoiceRow}>
           <TouchableOpacity
@@ -382,7 +382,7 @@ export const OfflineImageBufferWidget = forwardRef<
       ) : null}
 
       {bufferInfo == null && sourceType === 'example' ? (
-        <View>
+        <View style={s.root}>
           <Text style={s.subsectionTitle}>Choose an example image</Text>
           <ExampleImageFileList
             imageFiles={imageFiles}
@@ -404,7 +404,7 @@ export const OfflineImageBufferWidget = forwardRef<
       ) : null}
 
       {bufferInfo == null && sourceType === 'own' && !loading ? (
-        <View>
+        <View style={s.root}>
           <TouchableOpacity
             style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
             onPress={() => {

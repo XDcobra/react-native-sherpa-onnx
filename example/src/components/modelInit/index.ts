@@ -62,3 +62,7 @@ export {
   AudioTaggingCustomInitForm,
   type AudioTaggingCustomInitFormState,
 } from './AudioTaggingCustomInitForm';
+export {
+  OcrCustomInitForm,
+  type OcrCustomInitFormState,
+} from './OcrCustomInitForm';
