@@ -5,6 +5,7 @@ import type {
   TextSpatialSpanLevel,
 } from '../textbuffer/types';
 import type { OcrDetectModelResult } from '../types/modelDetect';
+import type { OcrCustomConfig } from './customConfig';
 
 /** Public OCR model types. `auto` resolves via layout detect. */
 export type OcrModelType = 'auto' | 'ppocr' | 'doctr' | 'doc_vlm';
@@ -45,6 +46,11 @@ export type OcrProgressNativeEvent = {
 export type OcrPpocrOptions = {
   maxSideLen?: number;
   useOrientationCls?: boolean;
+  /**
+   * Unclip ratio for DB postprocessing (default 1.5).
+   * Lower values tighten detection boxes around glyphs.
+   */
+  detUnclipRatio?: number;
 };
 
 export type OcrDoctrOptions = {
@@ -66,36 +72,55 @@ export type OcrDocVlmOptions = {
 };
 
 type OcrInitShared = {
-  modelSource: FileSource;
   provider?: string;
   numThreads?: number;
 };
 
-export type OcrInitializeOptionsAuto = OcrInitShared & {
+type OcrInitFolderShared = OcrInitShared & {
+  modelSource: FileSource;
+};
+
+export type OcrInitializeOptionsAuto = OcrInitFolderShared & {
+  initMode?: 'auto';
   modelType?: 'auto';
   ppocr?: OcrPpocrOptions;
   doctr?: OcrDoctrOptions;
   docVlm?: OcrDocVlmOptions;
 };
 
-export type OcrInitializeOptionsPpocr = OcrInitShared & {
+export type OcrInitializeOptionsPpocr = OcrInitFolderShared & {
+  initMode?: 'auto';
   modelType: 'ppocr';
   ppocr?: OcrPpocrOptions;
   doctr?: never;
   docVlm?: never;
 };
 
-export type OcrInitializeOptionsDoctr = OcrInitShared & {
+export type OcrInitializeOptionsDoctr = OcrInitFolderShared & {
+  initMode?: 'auto';
   modelType: 'doctr';
   ppocr?: never;
   doctr?: OcrDoctrOptions;
   docVlm?: never;
 };
 
-export type OcrInitializeOptionsDocVlm = OcrInitShared & {
+export type OcrInitializeOptionsDocVlm = OcrInitFolderShared & {
+  initMode?: 'auto';
   modelType: 'doc_vlm';
   ppocr?: never;
   doctr?: never;
+  docVlm?: OcrDocVlmOptions;
+};
+
+export type OcrCustomInitializeOptions = OcrInitShared & {
+  initMode: 'custom';
+  modelType: OcrConcreteModelType;
+  customConfig: OcrCustomConfig;
+  /** Applied when `modelType` is `ppocr`. */
+  ppocr?: OcrPpocrOptions;
+  /** Applied when `modelType` is `doctr`. */
+  doctr?: OcrDoctrOptions;
+  /** Applied when `modelType` is `doc_vlm`. */
   docVlm?: OcrDocVlmOptions;
 };
 
@@ -103,7 +128,8 @@ export type OcrInitializeOptions =
   | OcrInitializeOptionsAuto
   | OcrInitializeOptionsPpocr
   | OcrInitializeOptionsDoctr
-  | OcrInitializeOptionsDocVlm;
+  | OcrInitializeOptionsDocVlm
+  | OcrCustomInitializeOptions;
 
 export type OcrRecognizeOptions = {
   /** Frame indices to run; default = all frames in the image buffer. */

@@ -1,8 +1,9 @@
-import type { FileSource } from '../fileio/types';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
 import type { OcrInitBridgeOptions } from '../NativeSherpaOnnx';
+import { resolveOcrCustomConfigPaths } from './customConfig';
 import { OcrErrorCode } from './types';
 import type {
+  OcrCustomInitializeOptions,
   OcrDocVlmOptions,
   OcrDoctrOptions,
   OcrInitializeOptions,
@@ -11,19 +12,6 @@ import type {
 } from './types';
 
 export type { OcrInitBridgeOptions };
-
-type OcrInitShared = {
-  modelSource: FileSource;
-  provider?: string;
-  numThreads?: number;
-};
-
-type OcrInitBags = OcrInitShared & {
-  modelType?: OcrModelType | string;
-  ppocr?: OcrPpocrOptions;
-  doctr?: OcrDoctrOptions;
-  docVlm?: OcrDocVlmOptions;
-};
 
 const OCR_MODEL_TYPE_ALIASES: Readonly<Record<string, OcrModelType>> = {
   'docvlm': 'doc_vlm',
@@ -36,13 +24,17 @@ function canonicalOcrModelType(raw: string): string {
   return OCR_MODEL_TYPE_ALIASES[raw] ?? raw;
 }
 
-export async function buildOcrInitBridgeOptions(
-  options: OcrInitializeOptions
-): Promise<OcrInitBridgeOptions> {
-  const bags = options as OcrInitBags;
-  const modelDir = await resolveFileSourceForModelInit(bags.modelSource);
-  const modelType = canonicalOcrModelType(bags.modelType ?? 'auto');
-  const maxNewTokens = bags.docVlm?.maxNewTokens;
+function appendOcrScalarBridgeFields(options: {
+  provider?: string;
+  numThreads?: number;
+  ppocr?: OcrPpocrOptions;
+  doctr?: OcrDoctrOptions;
+  docVlm?: OcrDocVlmOptions;
+}): Omit<
+  OcrInitBridgeOptions,
+  'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
+> {
+  const maxNewTokens = options.docVlm?.maxNewTokens;
   if (maxNewTokens !== undefined) {
     if (!Number.isInteger(maxNewTokens) || maxNewTokens < 0) {
       throw Object.assign(
@@ -51,26 +43,58 @@ export async function buildOcrInitBridgeOptions(
       );
     }
   }
+  const detUnclipRatio =
+    options.ppocr?.detUnclipRatio ?? options.doctr?.detUnclipRatio;
+
   return {
-    modelDir,
-    modelType,
-    ...(bags.numThreads !== undefined ? { numThreads: bags.numThreads } : {}),
-    ...(bags.provider !== undefined ? { provider: bags.provider } : {}),
-    ...(bags.ppocr?.maxSideLen !== undefined
-      ? { maxSideLen: bags.ppocr.maxSideLen }
+    ...(options.numThreads !== undefined
+      ? { numThreads: options.numThreads }
       : {}),
-    ...(bags.ppocr?.useOrientationCls !== undefined
-      ? { useOrientationCls: bags.ppocr.useOrientationCls }
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(options.ppocr?.maxSideLen !== undefined
+      ? { maxSideLen: options.ppocr.maxSideLen }
       : {}),
-    ...(bags.doctr?.detBoxThresh !== undefined
-      ? { detBoxThresh: bags.doctr.detBoxThresh }
+    ...(options.ppocr?.useOrientationCls !== undefined
+      ? { useOrientationCls: options.ppocr.useOrientationCls }
       : {}),
-    ...(bags.doctr?.detBoxScoreThresh !== undefined
-      ? { detBoxScoreThresh: bags.doctr.detBoxScoreThresh }
+    ...(options.doctr?.detBoxThresh !== undefined
+      ? { detBoxThresh: options.doctr.detBoxThresh }
       : {}),
-    ...(bags.doctr?.detUnclipRatio !== undefined
-      ? { detUnclipRatio: bags.doctr.detUnclipRatio }
+    ...(options.doctr?.detBoxScoreThresh !== undefined
+      ? { detBoxScoreThresh: options.doctr.detBoxScoreThresh }
       : {}),
+    ...(detUnclipRatio !== undefined ? { detUnclipRatio } : {}),
     ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
+  };
+}
+
+export async function buildOcrInitBridgeOptions(
+  options: OcrInitializeOptions
+): Promise<OcrInitBridgeOptions> {
+  const scalarFields = appendOcrScalarBridgeFields(options);
+
+  if (options.initMode === 'custom') {
+    const customOptions = options as OcrCustomInitializeOptions;
+    const modelType = canonicalOcrModelType(
+      customOptions.modelType
+    ) as OcrCustomInitializeOptions['modelType'];
+    const modelPaths = await resolveOcrCustomConfigPaths(
+      modelType,
+      customOptions.customConfig
+    );
+    return {
+      initMode: 'custom',
+      modelType,
+      modelPaths,
+      ...scalarFields,
+    };
+  }
+
+  const modelDir = await resolveFileSourceForModelInit(options.modelSource);
+  return {
+    initMode: 'auto',
+    modelDir,
+    modelType: canonicalOcrModelType(options.modelType ?? 'auto'),
+    ...scalarFields,
   };
 }

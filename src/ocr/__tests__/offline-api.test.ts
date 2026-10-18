@@ -332,6 +332,29 @@ describe('ocr offline API', () => {
 
   // ──── Phase 5: doctr round-trip tests ─────────────────────────────────
 
+  it('createOCR ppocr forwards detUnclipRatio from ppocr options', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_ppocr_unclip',
+      modelType: 'ppocr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+      ppocr: { detUnclipRatio: 1.2 },
+    });
+
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/ppocrv6-tiny',
+        modelType: 'ppocr',
+        detUnclipRatio: 1.2,
+      })
+    );
+    await ocr.destroy();
+  });
+
   it('createOCR doctr + recognize round-trip passes doctr bridge options', async () => {
     mockNative.initializeOcr.mockResolvedValue({
       instanceId: 'ocr_doctr_1',

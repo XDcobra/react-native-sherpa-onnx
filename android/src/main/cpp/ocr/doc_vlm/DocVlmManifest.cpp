@@ -178,9 +178,8 @@ void RequireEqInt(const std::string& field, int got, int expect) {
 
 }  // namespace
 
-DocVlmManifest ParseDocVlmManifest(const std::string& model_dir) {
-  const std::string path = (fs::path(model_dir) / "ocr_manifest.json").string();
-  const std::string json = ReadFile(path);
+DocVlmManifest ParseDocVlmManifestFile(const std::string& manifest_path) {
+  const std::string json = ReadFile(manifest_path);
 
   DocVlmManifest m;
   size_t pos = SkipWs(json, 0);
@@ -306,6 +305,11 @@ DocVlmManifest ParseDocVlmManifest(const std::string& model_dir) {
     throw std::runtime_error("DocVlmManifest: missing vision or text shape fields");
   }
   return m;
+}
+
+DocVlmManifest ParseDocVlmManifest(const std::string& model_dir) {
+  return ParseDocVlmManifestFile(
+      (fs::path(model_dir) / "ocr_manifest.json").string());
 }
 
 }  // namespace doc_vlm

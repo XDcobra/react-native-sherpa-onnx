@@ -162,9 +162,8 @@ bool DoctrManifest::IsCrnn() const {
   return rec_arch.find("crnn") != std::string::npos;
 }
 
-DoctrManifest ParseDoctrManifest(const std::string& model_dir) {
-  const std::string path = (fs::path(model_dir) / "ocr_manifest.json").string();
-  const std::string json = ReadFile(path);
+DoctrManifest ParseDoctrManifestFile(const std::string& manifest_path) {
+  const std::string json = ReadFile(manifest_path);
 
   DoctrManifest m;
   size_t pos = SkipWs(json, 0);
@@ -246,9 +245,15 @@ DoctrManifest ParseDoctrManifest(const std::string& model_dir) {
 
   if (m.family.empty()) m.family = "doctr";
   if (m.rec_vocab.empty()) {
-    throw std::runtime_error("DoctrManifest: rec.vocab is empty in " + path);
+    throw std::runtime_error("DoctrManifest: rec.vocab is empty in " +
+                             manifest_path);
   }
   return m;
+}
+
+DoctrManifest ParseDoctrManifest(const std::string& model_dir) {
+  return ParseDoctrManifestFile(
+      (fs::path(model_dir) / "ocr_manifest.json").string());
 }
 
 }  // namespace doctr

@@ -65,17 +65,19 @@ void DoctrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   Release();
   options_ = options;
 
-  const std::string det_path = JoinPath(model_dir, "det.onnx");
-  const std::string rec_path = JoinPath(model_dir, "rec.onnx");
-  const std::string manifest_path = JoinPath(model_dir, "ocr_manifest.json");
+  const std::string det_path =
+      OcrResolvePath(options.path_det, model_dir, "det.onnx");
+  const std::string rec_path =
+      OcrResolvePath(options.path_rec, model_dir, "rec.onnx");
+  const std::string manifest_path =
+      OcrResolvePath(options.path_manifest, model_dir, "ocr_manifest.json");
 
   if (!fs::exists(det_path) || !fs::exists(rec_path) || !fs::exists(manifest_path)) {
     throw std::runtime_error(
-        "DoctrBackend: model dir must contain det.onnx, rec.onnx, ocr_manifest.json: " +
-        model_dir);
+        "DoctrBackend: need det, rec, and manifest (or path overrides)");
   }
 
-  manifest_ = ParseDoctrManifest(model_dir);
+  manifest_ = ParseDoctrManifestFile(manifest_path);
   OCR_LOGI("doctr manifest: det=%s (%dx%d) rec=%s (%dx%d) vocab=%zu",
            manifest_.det_arch.c_str(), manifest_.det_h, manifest_.det_w,
            manifest_.rec_arch.c_str(), manifest_.rec_h, manifest_.rec_w,

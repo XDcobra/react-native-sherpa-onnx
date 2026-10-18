@@ -49,6 +49,9 @@ struct DocVlmManifest {
  */
 DocVlmManifest ParseDocVlmManifest(const std::string& model_dir);
 
+/** Parse an absolute path to ocr_manifest.json. */
+DocVlmManifest ParseDocVlmManifestFile(const std::string& manifest_path);
+
 }  // namespace doc_vlm
 }  // namespace ocr
 }  // namespace sherpa_onnx

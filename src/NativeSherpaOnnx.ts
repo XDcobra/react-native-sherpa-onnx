@@ -295,7 +295,11 @@ export type PunctuationInitBridgeOptions = {
 
 /** `initializeOcr(instanceId, options)`. */
 export type OcrInitBridgeOptions = {
-  modelDir: string;
+  initMode?: string;
+  /** Folder layout (auto). Optional for custom when `modelPaths` is set. */
+  modelDir?: string;
+  /** Resolved absolute path map for custom init. */
+  modelPaths?: Object;
   modelType: string;
   numThreads?: number;
   provider?: string;

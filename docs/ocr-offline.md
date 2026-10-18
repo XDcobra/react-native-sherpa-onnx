@@ -187,6 +187,8 @@ const ocr = await createOCR({
 
 Family option bags (`ppocr` / `doctr` / `docVlm`) are constrained by `modelType` on `OcrInitializeOptions`.
 
+`ppocr.detUnclipRatio` / `doctr.detUnclipRatio` (default `1.5`) control DB box expansion after detection — lower values tighten spatial quads around glyphs.
+
 ### `engine.recognize(imageBuffer, textOut, options?)`
 
 Reads a populated image buffer; writes text (+ spatial spans) into an empty text buffer. Resolves `OcrRecognizeResult` (discriminated on `family`).

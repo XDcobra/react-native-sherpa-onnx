@@ -106,6 +106,40 @@ sherpa_onnx::ocr::OcrGranularity ParseGranularity(const std::string& raw) {
   return sherpa_onnx::ocr::OcrGranularity::kLine;
 }
 
+void ApplyPathOverrides(JNIEnv* env, jobject pathOverrides,
+                        sherpa_onnx::ocr::OcrLoadOptions& opts) {
+  if (!pathOverrides) return;
+  jclass mapClass = env->GetObjectClass(pathOverrides);
+  jmethodID get = env->GetMethodID(
+      mapClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
+  if (!get) {
+    env->DeleteLocalRef(mapClass);
+    return;
+  }
+  auto readKey = [&](const char* key) -> std::string {
+    jstring jkey = env->NewStringUTF(key);
+    jobject val = env->CallObjectMethod(pathOverrides, get, jkey);
+    env->DeleteLocalRef(jkey);
+    if (!val) return {};
+    std::string out = JstringToStd(env, static_cast<jstring>(val));
+    env->DeleteLocalRef(val);
+    return out;
+  };
+  opts.path_det = readKey("det");
+  opts.path_rec = readKey("rec");
+  opts.path_cls = readKey("cls");
+  opts.path_rec_dict = readKey("rec_dict");
+  opts.path_manifest = readKey("manifest");
+  opts.path_vision_encoder = readKey("vision_encoder");
+  opts.path_vision_encoder_data = readKey("vision_encoder_data");
+  opts.path_embed_tokens = readKey("embed_tokens");
+  opts.path_embed_tokens_data = readKey("embed_tokens_data");
+  opts.path_decoder = readKey("decoder");
+  opts.path_decoder_data = readKey("decoder_data");
+  opts.path_tokenizer = readKey("tokenizer");
+  env->DeleteLocalRef(mapClass);
+}
+
 }  // namespace
 
 extern "C" {
@@ -115,7 +149,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring modelDir,
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
     jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
-    jfloat detUnclipRatio, jint maxNewTokens) {
+    jfloat detUnclipRatio, jint maxNewTokens, jobject pathOverrides) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -130,6 +164,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.det_unclip_ratio = detUnclipRatio;
     opts.max_new_tokens = maxNewTokens;
     opts.provider = JstringToStd(env, provider);
+    ApplyPathOverrides(env, pathOverrides, opts);
     engine.Load(type.empty() ? "auto" : type, dir, opts);
   } catch (const std::exception& e) {
     jclass ex = env->FindClass("java/lang/RuntimeException");

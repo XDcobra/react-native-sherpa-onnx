@@ -6,6 +6,7 @@
 #include "OcrTypes.h"
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
+#include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-validate-custom.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include <map>
@@ -232,12 +233,70 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
                reject:(RCTPromiseRejectBlock)reject {
   @try {
     try {
-      NSString *modelDir = options[@"modelDir"];
-      if (modelDir.length == 0) {
+      NSString *initMode = options[@"initMode"] ?: @"auto";
+      NSString *modelType = options[@"modelType"] ?: @"auto";
+      NSString *modelDir = options[@"modelDir"] ?: @"";
+      NSDictionary *modelPaths =
+          [options[@"modelPaths"] isKindOfClass:[NSDictionary class]]
+              ? options[@"modelPaths"]
+              : nil;
+
+      const BOOL isCustom = [initMode isEqualToString:@"custom"];
+      if (isCustom) {
+        if (modelType.length == 0 || [modelType isEqualToString:@"auto"] ||
+            (!([modelType isEqualToString:@"ppocr"] ||
+               [modelType isEqualToString:@"doctr"] ||
+               [modelType isEqualToString:@"doc_vlm"]))) {
+          reject(kOcrInvalidArg,
+                 @"custom init requires a concrete modelType (ppocr|doctr|doc_vlm)",
+                 nil);
+          return;
+        }
+        if (modelPaths == nil || modelPaths.count == 0) {
+          reject(kOcrInvalidArg, @"modelPaths is required for initMode custom",
+                 nil);
+          return;
+        }
+        std::map<std::string, std::string> pathMap;
+        for (NSString *key in modelPaths) {
+          id val = modelPaths[key];
+          if (![val isKindOfClass:[NSString class]]) continue;
+          NSString *s = [(NSString *)val stringByTrimmingCharactersInSet:
+                                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+          if (s.length == 0) continue;
+          pathMap[[key UTF8String]] = [s UTF8String];
+        }
+        auto validation = sherpaonnx::ValidateCustomModelPaths(
+            "ocr", [modelType UTF8String], pathMap, "custom");
+        if (!validation.ok) {
+          NSString *msg =
+              validation.error.empty()
+                  ? @"Invalid custom OCR model paths"
+                  : [NSString stringWithUTF8String:validation.error.c_str()];
+          reject(kOcrInvalidArg, msg, nil);
+          return;
+        }
+        if (modelDir.length == 0) {
+          for (NSString *prefer in @[ @"det", @"vision_encoder", @"manifest",
+                                      @"rec", @"tokenizer" ]) {
+            NSString *p = modelPaths[prefer];
+            if ([p isKindOfClass:[NSString class]] && p.length > 0) {
+              modelDir = [p stringByDeletingLastPathComponent];
+              break;
+            }
+          }
+          if (modelDir.length == 0) {
+            NSString *any = modelPaths.allValues.firstObject;
+            if ([any isKindOfClass:[NSString class]]) {
+              modelDir = [any stringByDeletingLastPathComponent];
+            }
+          }
+        }
+      } else if (modelDir.length == 0) {
         reject(kOcrInvalidArg, @"modelDir is required", nil);
         return;
       }
-      NSString *modelType = options[@"modelType"] ?: @"auto";
+
       int numThreads =
           options[@"numThreads"] ? [options[@"numThreads"] intValue] : 4;
       NSString *provider = options[@"provider"] ?: @"cpu";
@@ -266,6 +325,25 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.det_unclip_ratio = detUnclipRatio;
       opts.max_new_tokens = maxNewTokens;
       opts.provider = provider ? [provider UTF8String] : "cpu";
+      if (isCustom && modelPaths != nil) {
+        auto take = ^std::string(NSString *key) {
+          id v = modelPaths[key];
+          if (![v isKindOfClass:[NSString class]]) return {};
+          return [(NSString *)v UTF8String];
+        };
+        opts.path_det = take(@"det");
+        opts.path_rec = take(@"rec");
+        opts.path_cls = take(@"cls");
+        opts.path_rec_dict = take(@"rec_dict");
+        opts.path_manifest = take(@"manifest");
+        opts.path_vision_encoder = take(@"vision_encoder");
+        opts.path_vision_encoder_data = take(@"vision_encoder_data");
+        opts.path_embed_tokens = take(@"embed_tokens");
+        opts.path_embed_tokens_data = take(@"embed_tokens_data");
+        opts.path_decoder = take(@"decoder");
+        opts.path_decoder_data = take(@"decoder_data");
+        opts.path_tokenizer = take(@"tokenizer");
+      }
       engine.Load(modelType ? [modelType UTF8String] : "auto",
                   [modelDir UTF8String], opts);
       resolve(@{

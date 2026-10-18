@@ -328,7 +328,9 @@ export async function createOCR(
   const bridge = await buildOcrInitBridgeOptions(options);
   if (__DEV__) {
     console.log(
-      `[SherpaOnnx:ocr] createOCR instance=${instanceId} type=${bridge.modelType} dir=${bridge.modelDir}`
+      `[SherpaOnnx:ocr] createOCR instance=${instanceId} mode=${
+        bridge.initMode ?? 'auto'
+      } type=${bridge.modelType} dir=${bridge.modelDir ?? '(custom paths)'}`
     );
   }
   await getNative().initializeOcr(instanceId, bridge);
@@ -392,12 +394,27 @@ export type {
   OcrInitializeOptionsPpocr,
   OcrInitializeOptionsDoctr,
   OcrInitializeOptionsDocVlm,
+  OcrCustomInitializeOptions,
   OcrRecognizeOptions,
   OcrRecognizeResult,
   OcrDetectResult,
   OcrEngine,
   OcrErrorCodeValue,
 } from './types';
+
+export type {
+  OcrCustomPathKey,
+  OcrCustomConfig,
+  OcrPpocrCustomConfig,
+  OcrDoctrCustomConfig,
+  OcrDocVlmCustomConfig,
+  OcrCustomConfigByModelType,
+} from './customConfig';
+
+export {
+  assertOcrCustomConfig,
+  resolveOcrCustomConfigPaths,
+} from './customConfig';
 
 export type { OcrDetectModelResult } from '../types/modelDetect';
 
