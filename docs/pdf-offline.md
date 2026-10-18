@@ -149,12 +149,7 @@ See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md
 
 Bundled fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example turns PDFium **on** (`example/android/gradle.properties` + `example/ios/Podfile`); consumer apps should keep the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
 
-Picker / preview / overlay UI for PDF is a follow-up (not in this API slice).
-
-## Follow-ups
-
-- Page-at-a-time / LRU memory policy: [imagebuffer-perf-future-work.md](./future-work/imagebuffer-perf-future-work.md)
-- Example screen wiring (later)
+In-app preview of raster frames: [`OfflineImageBufferFrameView`](./imagebuffer-offline.md) (no file materialize). Share/save: `exportOfflineImageBufferFrame` with a [`FileDestination`](./fileio.md).
 
 ## See also
 

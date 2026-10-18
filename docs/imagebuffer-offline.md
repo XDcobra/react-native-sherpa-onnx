@@ -2,7 +2,7 @@
 
 ## Introduction
 
-**Immutable offline image clips** (decoded RGB8 on the native side): one or more frames per buffer. Used as input for **batch OCR** (and later PDF page ingestion).
+**Immutable offline image clips** (decoded RGB8 on the native side): one or more frames per buffer. Used as input for **batch OCR** and PDF page rasters ([`rasterizePdfPages`](pdf-offline.md)).
 
 **Import path:** `react-native-sherpa-onnx/imagebuffer`
 
@@ -42,6 +42,8 @@ Optional **`maxSide`** downscales the longest edge after image decode (default *
 - `getOfflineImageBufferInfo`
 - `getOfflineImageBufferFrameInfo`
 - `releaseOfflineImageBuffer`
+- `exportOfflineImageBufferFrame` — encode one frame to a [`FileDestination`](fileio.md) → `ResolvedFileRef` (same write model as [`saveAudioAsFile`](audio-conversion.md))
+- `OfflineImageBufferFrameView` — native in-app preview of one frame (no file materialize)
 
 Types: see [`src/imagebuffer/types.ts`](../src/imagebuffer/types.ts). Create helpers return **`OfflineImageBufferRef`** (`info` + `OfflineImageBufferHandle`). Buffer parameters use **`OfflineImageBufferIdSource`**: pass the ref, last **`OfflineImageBufferInfo`**, a branded handle, or a raw string id.
 
@@ -210,7 +212,7 @@ console.log(frame.width, frame.height, frame.byteSize, frame.storageKind);
 // Optional (PDF raster only): frame.pageNumber, frame.dpi
 ```
 
-Returns metadata for a single frame (no pixel copy into JS). Engine/OCR access uses native `GetFrameRgbPtr` later. Frames from [`rasterizePdfPages`](pdf-offline.md) include 1-based `pageNumber` and the requested `dpi`.
+Returns metadata for a single frame (no pixel copy into JS). Engines (OCR) and [`OfflineImageBufferFrameView`](#offlineimagebufferframeview) read pixels via native `GetFrameRgbPtr`. Frames from [`rasterizePdfPages`](pdf-offline.md) include 1-based `pageNumber` and the requested `dpi`.
 
 #### `releaseOfflineImageBuffer(buffer)`
 
@@ -225,6 +227,49 @@ await releaseOfflineImageBuffer(offline);
 ```
 
 Unmaps and unlinks any frame temp files, then removes the buffer from the registry.
+
+#### `exportOfflineImageBufferFrame(buffer, frameIndex, output, options?)`
+
+Encode one frame to a caller-chosen write location — same **`FileDestination`** model as [`saveAudioAsFile`](audio-conversion.md) (not a hidden SDK cache path).
+
+```ts
+function exportOfflineImageBufferFrame(
+  buffer: OfflineImageBufferIdSource,
+  frameIndex: number,
+  output: FileDestination,
+  options?: {
+    format?: 'jpeg' | 'png' | 'webp'; // default jpeg
+    quality?: number; // 1..100, jpeg/webp
+    maxSide?: number; // export-only downsample; does not mutate buffer
+  }
+): Promise<ResolvedFileRef>;
+```
+
+```ts
+const ref = await exportOfflineImageBufferFrame(
+  offline,
+  0,
+  { kind: 'app', base: 'cache', path: 'page0.jpg' },
+  { format: 'jpeg', quality: 90, maxSide: 1280 }
+);
+// ref: { kind: 'fs', path: '...' } or { kind: 'contentUri', uri: '...' }
+```
+
+#### `OfflineImageBufferFrameView`
+
+Native RN view that paints one frame from registry RGB (`GetFrameRgbPtr`) — **no file encode** for preview.
+
+```tsx
+import { OfflineImageBufferFrameView } from 'react-native-sherpa-onnx/imagebuffer';
+
+<OfflineImageBufferFrameView
+  buffer={offline}
+  frameIndex={0}
+  resizeMode="contain"
+  maxSide={1024}
+  style={{ width: '100%', height: 240 }}
+/>
+```
 
 ---
 
@@ -299,7 +344,6 @@ Optional disable of libwebp: `sherpaOnnxDisableLibwebp=true` (Gradle) / `SHERPA_
 - [Pipeline text buffers — offline](textbuffer-offline.md)
 - Prebuilt resolution (libwebp): [`docs/internal/PREBUILT_RESOLUTION.md`](internal/PREBUILT_RESOLUTION.md)
 - Storage internals: [`docs/internal/imagebuffer-storage.md`](internal/imagebuffer-storage.md)
-- Future perf ideas: [`docs/future-work/imagebuffer-perf-future-work.md`](future-work/imagebuffer-perf-future-work.md)
 
 ## Use case examples
 
