@@ -921,16 +921,50 @@ export default function OCRScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. Input (image or PDF)</Text>
-          <Text style={styles.sectionHint}>
-            Images → OfflineImageBuffer → OCR. PDFs → extractPdfTextLayer first;
-            only on {PdfErrorCode.NO_TEXT_LAYER} offer rasterize + recognize
-            (app-dev switch, no SDK auto).
-            {pdfiumOn === false
-              ? ' PDFium disabled in this binary.'
-              : pdfiumOn
-              ? ' PDFium enabled.'
-              : ''}
-          </Text>
+          <View style={styles.compareFrame}>
+            <Text style={styles.compareTitle}>
+              Input paths
+              {pdfiumOn === false
+                ? ' · PDFium off'
+                : pdfiumOn
+                ? ' · PDFium on'
+                : ''}
+            </Text>
+            <View style={styles.compareTable}>
+              <View style={[styles.compareRow, styles.compareHeaderRow]}>
+                <Text style={[styles.compareCell, styles.compareCellWide]}>
+                  Input
+                </Text>
+                <Text style={styles.compareCell}>Steps</Text>
+                <Text style={styles.compareCell}>Output</Text>
+              </View>
+              <View style={styles.compareRow}>
+                <Text style={[styles.compareCell, styles.compareCellWide]}>
+                  Image
+                </Text>
+                <Text style={styles.compareCell}>ImageBuffer → recognize</Text>
+                <Text style={styles.compareCell}>TextBuffer origin=ocr</Text>
+              </View>
+              <View style={styles.compareRow}>
+                <Text style={[styles.compareCell, styles.compareCellWide]}>
+                  PDF + text layer
+                </Text>
+                <Text style={styles.compareCell}>extractPdfTextLayer</Text>
+                <Text style={styles.compareCell}>
+                  TextBuffer origin=textLayer
+                </Text>
+              </View>
+              <View style={styles.compareRow}>
+                <Text style={[styles.compareCell, styles.compareCellWide]}>
+                  PDF scan-only
+                </Text>
+                <Text style={styles.compareCell}>
+                  {PdfErrorCode.NO_TEXT_LAYER} → rasterize → recognize
+                </Text>
+                <Text style={styles.compareCell}>TextBuffer origin=ocr</Text>
+              </View>
+            </View>
+          </View>
           {initializedFolder ? (
             <OfflineImageBufferWidget
               ref={imageWidgetRef}
@@ -960,44 +994,6 @@ export default function OCRScreen() {
               </Text>
             </View>
           )}
-
-          {showPdfPipeline ? (
-            <View style={styles.compareFrame}>
-              <Text style={styles.compareTitle}>PDF paths (developer)</Text>
-              <View style={styles.compareTable}>
-                <View style={[styles.compareRow, styles.compareHeaderRow]}>
-                  <Text style={[styles.compareCell, styles.compareCellWide]}>
-                    Fixture
-                  </Text>
-                  <Text style={styles.compareCell}>API</Text>
-                  <Text style={styles.compareCell}>Result</Text>
-                  <Text style={styles.compareCell}>Next</Text>
-                </View>
-                <View style={styles.compareRow}>
-                  <Text style={[styles.compareCell, styles.compareCellWide]}>
-                    Digital (text layer)
-                  </Text>
-                  <Text style={styles.compareCell}>extractPdfTextLayer</Text>
-                  <Text style={styles.compareCell}>
-                    TextBuffer origin=textLayer
-                  </Text>
-                  <Text style={styles.compareCell}>Done (no OCR)</Text>
-                </View>
-                <View style={styles.compareRow}>
-                  <Text style={[styles.compareCell, styles.compareCellWide]}>
-                    Scan-only
-                  </Text>
-                  <Text style={styles.compareCell}>
-                    → {PdfErrorCode.NO_TEXT_LAYER}
-                  </Text>
-                  <Text style={styles.compareCell}>empty text</Text>
-                  <Text style={styles.compareCell}>
-                    rasterizePdfPages → recognize
-                  </Text>
-                </View>
-              </View>
-            </View>
-          ) : null}
         </View>
 
         {showPdfPipeline ? (

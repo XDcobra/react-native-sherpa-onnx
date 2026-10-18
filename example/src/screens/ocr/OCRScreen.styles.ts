@@ -32,7 +32,6 @@ export const styles = StyleSheet.create({
     lineHeight: 18,
   },
   compareFrame: {
-    marginTop: 8,
     borderWidth: 1,
     borderColor: '#cbd5e1',
     borderRadius: 10,
