@@ -19,6 +19,16 @@ third_party/pdfium_prebuilt/android/
 
 Resolution (only when enable is true): THIRD_PARTY → LOCAL_SDK → Maven `com.xdcobra.sherpa:pdfium` → GitHub Release zip `pdfium-android.zip`.
 
+## Layout (iOS)
+
+```
+third_party/pdfium_prebuilt/pdfium.xcframework/
+  ios-arm64/libpdfium.dylib + Headers/
+  ios-arm64_x86_64-simulator/libpdfium.dylib + Headers/
+```
+
+Release asset `pdfium-ios.zip` contains that XCFramework. With `SHERPA_ONNX_ENABLE_PDFIUM=1`, `scripts/setup-ios-framework.sh` installs it under `ios/Frameworks/pdfium.xcframework`.
+
 ## Fetch / package scripts
 
 ```sh
@@ -27,6 +37,9 @@ Resolution (only when enable is true): THIRD_PARTY → LOCAL_SDK → Maven `com.
 
 # Build AAR for Maven publish
 ./create_pdfium_aar.sh ./pdfium-android-layout 8100 pdfium-8100.aar
+
+# Assemble a real iOS XCFramework (device + universal simulator) from pdfium-binaries
+./create_pdfium_ios_xcframework.sh 8100
 ```
 
 Upstream source of truth: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) tags `chromium/<N>` (latest checked: `chromium/8100`). Our tag files use `pdfium-android-v<N>` / `pdfium-ios-v<N>` so Maven/GitHub Release pins stay aligned.

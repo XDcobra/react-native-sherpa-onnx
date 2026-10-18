@@ -91,14 +91,31 @@ jobs:
           name: pdfium Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt **PDFium** for Android (text-layer extract in react-native-sherpa-onnx).
-            Opt-in: `sherpaOnnxEnablePdfium=true`.
+            ## Archive Structure
+            Prebuilt **PDFium** for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Used by offline PDF text-layer extract in `react-native-sherpa-onnx` (`react-native-sherpa-onnx/pdf`).
+            - **pdfium-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libpdfium.so`) and `include/` (C headers, e.g. `fpdfview.h`). Gradle extracts `.so` to jniLibs and headers to `android/src/main/cpp/include/pdfium`.
+            - **pdfium-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:pdfium`.
 
-            - **pdfium-android.zip** – ABI folders + `include/`
-            - **pdfium-${{ steps.tag.outputs.maven_version }}.aar** – Maven `com.xdcobra.sherpa:pdfium`
+            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.maven_version }}`.
+
+            ## Maven
+            The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:pdfium` when `MAVEN_REPO_PAT` is set.
+
+            ```gradle
+            repositories {
+                maven { url 'https://xdcobra.github.io/maven/' }
+            }
+            dependencies {
+                implementation 'com.xdcobra.sherpa:pdfium:${{ steps.tag.outputs.maven_version }}'
+            }
+            ```
+
+            Opt-in (default off): enable with Gradle property `sherpaOnnxEnablePdfium=true`. Without it, PDFium is not downloaded or linked and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`.
           files: |
             pdfium-android.zip
             pdfium-${{ steps.tag.outputs.maven_version }}.aar
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -115,3 +132,14 @@ jobs:
           fi
           chmod +x third_party/pdfium_prebuilt/publish-maven/publish-to-github-pages.sh
           third_party/pdfium_prebuilt/publish-maven/publish-to-github-pages.sh
+
+      - name: Summary
+        run: |
+          echo "## pdfium Android release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`pdfium-android.zip\` | Layout: ABIs with libpdfium.so and \`include/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`pdfium-${{ steps.tag.outputs.maven_version }}.aar\` | Android library; Maven \`com.xdcobra.sherpa:pdfium\` when MAVEN_REPO_PAT is set |" >> $GITHUB_STEP_SUMMARY
