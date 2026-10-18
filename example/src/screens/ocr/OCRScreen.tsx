@@ -25,11 +25,6 @@ import {
   type OcrRecognizeResult,
 } from 'react-native-sherpa-onnx/ocr';
 import {
-  extractPdfTextLayer,
-  isPdfiumEnabled,
-  PdfErrorCode,
-} from 'react-native-sherpa-onnx/pdf';
-import {
   createEmptyOfflineTextBuffer,
   getOfflineTextBufferSpatialSpansSlice,
   getOfflineTextBufferTextSlice,
@@ -129,9 +124,6 @@ export default function OCRScreen() {
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [lastMs, setLastMs] = useState<number | null>(null);
-  const [pdfProbeMessage, setPdfProbeMessage] = useState<string | null>(null);
-  const [pdfProbeBusy, setPdfProbeBusy] = useState(false);
-
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -466,39 +458,6 @@ export default function OCRScreen() {
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
-  }, []);
-
-  /** Surfaces ERR_PDF_PDFIUM_DISABLED on default builds (PDFium opt-in). */
-  const handlePdfProbe = useCallback(async () => {
-    setPdfProbeBusy(true);
-    setPdfProbeMessage(null);
-    let textOut: Awaited<
-      ReturnType<typeof createEmptyOfflineTextBuffer>
-    > | null = null;
-    try {
-      const enabled = await isPdfiumEnabled();
-      if (!enabled) {
-        setPdfProbeMessage(
-          `${PdfErrorCode.PDFIUM_DISABLED}: rebuild with sherpaOnnxEnablePdfium=true / SHERPA_ONNX_ENABLE_PDFIUM=1`
-        );
-        return;
-      }
-      textOut = await createEmptyOfflineTextBuffer();
-      // No bundled sample PDF yet — enabled builds still need a file path.
-      await extractPdfTextLayer(
-        { kind: 'fs', path: '/nonexistent-probe.pdf' },
-        textOut
-      );
-      setPdfProbeMessage('Unexpected success without a PDF file');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setPdfProbeMessage(msg);
-    } finally {
-      if (textOut) {
-        await releasePipelineTextBuffer(textOut).catch(() => {});
-      }
-      setPdfProbeBusy(false);
-    }
   }, []);
 
   const selectedSpanText =
@@ -963,36 +922,6 @@ export default function OCRScreen() {
             ) : null}
           </View>
         ) : null}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>PDF text layer</Text>
-          <Text style={styles.sectionHint}>
-            Example enables PDFium (`sherpaOnnxEnablePdfium` /
-            `SHERPA_ONNX_ENABLE_PDFIUM`). Probe checks `isPdfiumEnabled`;
-            without a real PDF file the next call fails open. Consumer apps
-            default off → {PdfErrorCode.PDFIUM_DISABLED}. See
-            docs/pdf-offline.md.
-          </Text>
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              pdfProbeBusy && styles.primaryButtonDisabled,
-            ]}
-            onPress={() => {
-              handlePdfProbe().catch(() => {});
-            }}
-            disabled={pdfProbeBusy}
-          >
-            <Text style={styles.primaryButtonText}>
-              {pdfProbeBusy ? 'Probing…' : 'Probe extractPdfTextLayer'}
-            </Text>
-          </TouchableOpacity>
-          {pdfProbeMessage ? (
-            <Text style={[styles.mono, { marginTop: 10 }]}>
-              {pdfProbeMessage}
-            </Text>
-          ) : null}
-        </View>
       </ScrollView>
 
       <Modal

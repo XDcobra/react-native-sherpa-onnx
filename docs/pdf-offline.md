@@ -66,7 +66,7 @@ See [textbuffer-offline.md](./textbuffer-offline.md).
 
 ## Example app
 
-OCR screen → **PDF text layer** → **Probe extractPdfTextLayer**. The example turns PDFium **on** (`example/android/gradle.properties` + `example/ios/Podfile`) so you can exercise the real extract path; consumer apps should keep the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
+Bundled fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example turns PDFium **on** (`example/android/gradle.properties` + `example/ios/Podfile`); consumer apps should keep the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
 
 ## Next
 

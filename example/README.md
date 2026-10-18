@@ -40,6 +40,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Test audio WAVs** | `android/app/src/main/assets/test_wavs/` | `ios/sherpa_models/test_wavs/` |
 | **Codec samples** | `android/app/src/main/assets/test_codec/` | `ios/sherpa_models/test_codec/` |
 | **Test images (OCR)** | `android/app/src/main/assets/test_images/` | `ios/sherpa_models/test_images/` |
+| **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/` | `ios/sherpa_models/test_pdfs/` |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 > - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
@@ -306,4 +307,4 @@ This screen demonstrates true real-time streaming speaker diarization powered by
 
 Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).
 
-The same screen includes a **PDF text layer** probe (`react-native-sherpa-onnx/pdf`). The example enables PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`); consumer apps keep the SDK default off. See [docs/pdf-offline.md](../docs/pdf-offline.md).
+Bundled PDF fixtures for a future PDF screen live under `test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example enables PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`); consumer apps keep the SDK default off. See [docs/pdf-offline.md](../docs/pdf-offline.md).
