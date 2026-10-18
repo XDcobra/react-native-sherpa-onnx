@@ -59,6 +59,15 @@ if (!libwebpVersion) {
 project.ext.libwebpVersion = libwebpVersion
 println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpVersion}"
 
+// pdfium: 1. PDFIUM_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def pdfiumVersion = System.getenv('PDFIUM_VERSION')
+if (!pdfiumVersion) {
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG'), 'pdfium-android-v')
+  pdfiumVersion = v ?: (project.hasProperty('pdfiumVersion') ? project.pdfiumVersion : '8100')
+}
+project.ext.pdfiumVersion = pdfiumVersion
+println "[react-native-sherpa-onnx] pdfium version (extracted/used): ${pdfiumVersion}"
+
 // onnxruntime (ORT Java bridge): 1. ORT_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def ortVersion = System.getenv('ORT_VERSION')
 if (!ortVersion) {

@@ -124,7 +124,6 @@ export default function OCRScreen() {
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [lastMs, setLastMs] = useState<number | null>(null);
-
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);

@@ -1107,6 +1107,26 @@ export interface Spec extends TurboModule {
 
   unloadOcr(instanceId: string): Promise<void>;
 
+  // ==================== Offline PDF (text layer; opt-in PDFium) ====================
+
+  /** True when this native binary was built with PDFium linked. */
+  isPdfiumEnabled(): Promise<boolean>;
+
+  /**
+   * Extract digital PDF text layer into an empty OfflineTextBuffer.
+   * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   */
+  extractPdfTextLayer(
+    source: Object,
+    textOutBufferId: string,
+    options?: Object | null
+  ): Promise<{
+    pageCount: number;
+    pagesWithText: number;
+    utf16Length: number;
+    spatialSpanCount: number;
+  }>;
+
   /**
    * Get a slice of hypothesis text from an offline text buffer.
    */
@@ -1156,13 +1176,15 @@ export interface Spec extends TurboModule {
       utf16Start: number;
       utf16End: number;
       level: string;
-      sourceImageBufferId: string;
+      sourceImageBufferId?: string;
       frameIndex: number;
       quad: number[];
       confidence?: number;
       origin: string;
       pageNumber?: number;
       ptsMs?: number;
+      pageWidth?: number;
+      pageHeight?: number;
     }>
   >;
 

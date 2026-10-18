@@ -84,6 +84,15 @@ if(SHERPA_ONNX_DISABLE_LIBWEBP)
     message(STATUS "libwebp disabled (SHERPA_ONNX_DISABLE_LIBWEBP=ON). WebP decode will return ERR_IMAGE_FORMAT_UNSUPPORTED at runtime.")
 endif()
 
+# Optional: enable PDFium (gradle.properties: sherpaOnnxEnablePdfium=true). Default OFF.
+set(USE_PDFIUM OFF)
+if(SHERPA_ONNX_ENABLE_PDFIUM)
+    set(USE_PDFIUM ON)
+    message(STATUS "PDFium enabled (SHERPA_ONNX_ENABLE_PDFIUM=ON).")
+else()
+    message(STATUS "PDFium disabled (default). Set sherpaOnnxEnablePdfium=true to link text-layer extract.")
+endif()
+
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
     alignment/sherpa_onnx_ctc_alignment.cpp
@@ -210,6 +219,9 @@ set(SOURCES
     ocr/doc_vlm/DocVlmPrompt.cpp
     ocr/doc_vlm/DocVlmTokenizer.cpp
     jni/ocr/sherpa-onnx-ocr-jni.cpp
+    pdf/PdfDocument.cpp
+    pdf/PdfTextLayerExtractor.cpp
+    jni/pdf/sherpa-onnx-pdf-jni.cpp
 )
 
 if(USE_LIBARCHIVE)
@@ -286,6 +298,38 @@ else()
                     "or let Gradle resolve Maven/GitHub release. Or set SHERPA_ONNX_DISABLE_LIBWEBP=ON.")
 endif()
 endif(USE_LIBWEBP)
+
+if(USE_PDFIUM)
+# PDFium: prebuilt only (third_party/pdfium_prebuilt or jniLibs + cpp/include/pdfium).
+set(PDFIUM_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/pdfium_prebuilt/android")
+set(PDFIUM_PREBUILT_LIB "${PDFIUM_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(PDFIUM_PREBUILT_JNI_ABI "${PDFIUM_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(PDFIUM_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(PDFIUM_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/pdfium")
+set(USE_PDFIUM_PREBUILT OFF)
+if(EXISTS "${PDFIUM_PREBUILT_LIB}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_PREBUILT_LIB}")
+elseif(EXISTS "${PDFIUM_PREBUILT_JNI_ABI}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${PDFIUM_JNILIBS}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_JNILIBS}")
+endif()
+if(EXISTS "${PDFIUM_PREBUILT_BASE}/include/fpdfview.h")
+    set(PDFIUM_INCLUDE_DIR "${PDFIUM_PREBUILT_BASE}/include")
+elseif(EXISTS "${PDFIUM_INCLUDE_CPP}/fpdfview.h")
+    set(PDFIUM_INCLUDE_DIR "${PDFIUM_INCLUDE_CPP}")
+endif()
+if(USE_PDFIUM_PREBUILT AND PDFIUM_INCLUDE_DIR)
+    message(STATUS "pdfium: using prebuilt (libs: ${PDFIUM_LIB_DIR}, include: ${PDFIUM_INCLUDE_DIR})")
+else()
+    message(WARNING "pdfium prebuilt not found for ${ANDROID_ABI}. "
+                    "Run third_party/pdfium_prebuilt/fetch_pdfium_android.sh or CI workflow, "
+                    "or unset sherpaOnnxEnablePdfium.")
+endif()
+endif(USE_PDFIUM)
 
 # Create shared library
 add_library(sherpaonnx SHARED
@@ -372,6 +416,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
+    ${CMAKE_CURRENT_SOURCE_DIR}/pdf
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -382,6 +427,9 @@ if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
 endif()
 if(USE_LIBWEBP AND LIBWEBP_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LIBWEBP_INCLUDE_DIR})
+endif()
+if(USE_PDFIUM AND PDFIUM_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${PDFIUM_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
 # in C++ and the stub (#else) branches are used — no FFmpeg headers needed.
@@ -395,6 +443,9 @@ endif()
 if(USE_LIBWEBP)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBWEBP=1)
 endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_INCLUDE_DIR)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_PDFIUM=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
@@ -405,6 +456,9 @@ if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
 endif()
 if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT AND LIBWEBP_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LIBWEBP_LIB_DIR})
+endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${PDFIUM_LIB_DIR})
 endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
@@ -435,6 +489,9 @@ if(USE_LIBARCHIVE)
 endif()
 if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT)
     target_link_libraries(sherpaonnx PRIVATE webp sharpyuv)
+endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
+    target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
 target_link_libraries(sherpaonnx PRIVATE log android)
 

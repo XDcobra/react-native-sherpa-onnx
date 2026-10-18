@@ -12,6 +12,7 @@ data class TextSpatialSpan(
   val utf16Start: Int,
   val utf16End: Int,
   val level: String,
+  /** Empty when origin is textLayer (no ImageBuffer). */
   val sourceImageBufferId: String,
   val frameIndex: Int,
   val quad: FloatArray,
@@ -19,6 +20,9 @@ data class TextSpatialSpan(
   val origin: String,
   val pageNumber: Int? = null,
   val ptsMs: Double? = null,
+  /** PDF user-space page size when origin is textLayer. */
+  val pageWidth: Float? = null,
+  val pageHeight: Float? = null,
 ) {
   fun toWritableMap(): WritableMap {
     val map = Arguments.createMap()
@@ -42,6 +46,12 @@ data class TextSpatialSpan(
     if (ptsMs != null) {
       map.putDouble("ptsMs", ptsMs)
     }
+    if (pageWidth != null) {
+      map.putDouble("pageWidth", pageWidth.toDouble())
+    }
+    if (pageHeight != null) {
+      map.putDouble("pageHeight", pageHeight.toDouble())
+    }
     return map
   }
 
@@ -57,7 +67,9 @@ data class TextSpatialSpan(
       confidence == other.confidence &&
       origin == other.origin &&
       pageNumber == other.pageNumber &&
-      ptsMs == other.ptsMs
+      ptsMs == other.ptsMs &&
+      pageWidth == other.pageWidth &&
+      pageHeight == other.pageHeight
   }
 
   override fun hashCode(): Int {
@@ -71,6 +83,8 @@ data class TextSpatialSpan(
     result = 31 * result + origin.hashCode()
     result = 31 * result + (pageNumber ?: 0)
     result = 31 * result + (ptsMs?.hashCode() ?: 0)
+    result = 31 * result + (pageWidth?.hashCode() ?: 0)
+    result = 31 * result + (pageHeight?.hashCode() ?: 0)
     return result
   }
 }

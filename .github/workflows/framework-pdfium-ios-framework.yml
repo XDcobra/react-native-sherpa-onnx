@@ -1,0 +1,103 @@
+# Package PDFium as a real iOS XCFramework and publish a GitHub Release.
+# Tag from third_party/pdfium_prebuilt/IOS_RELEASE_TAG.
+#
+# Feature-branch: gh workflow run framework-pdfium-ios-framework.yml --ref <branch>
+#
+name: Prebuilt - PDFium (iOS) XCFramework
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-pdfium-ios:
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/pdfium_prebuilt/IOS_RELEASE_TAG
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$RELEASE_TAG" | sed 's/^pdfium-ios-v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (chromium/$VERSION)"
+
+      - name: Assemble pdfium.xcframework
+        run: |
+          chmod +x third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh
+          third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh "${{ steps.tag.outputs.version }}"
+          find third_party/pdfium_prebuilt/pdfium.xcframework -maxdepth 3 | head -40
+
+      - name: Zip XCFramework
+        run: |
+          cd third_party/pdfium_prebuilt
+          zip -r ../../pdfium-ios.zip pdfium.xcframework
+          cd ../..
+          ls -la pdfium-ios.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: pdfium iOS ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            ## Archive Structure
+            Prebuilt **PDFium** XCFramework for iOS (device + simulator). Used by offline PDF text-layer extract in `react-native-sherpa-onnx` (`react-native-sherpa-onnx/pdf`).
+            - **pdfium-ios.zip** – Contains `pdfium.xcframework` (arm64 device; arm64 + x86_64 simulator; `libpdfium.dylib` + headers).
+
+            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.version }}`.
+
+            ## Automatic Installation
+
+            If you're using the `react-native-sherpa-onnx` SDK with `SHERPA_ONNX_ENABLE_PDFIUM=1`, the XCFramework is downloaded by `scripts/setup-ios-framework.sh` during `pod install` (tag from `third_party/pdfium_prebuilt/IOS_RELEASE_TAG`).
+
+            ## Manual Installation
+
+            1. Download `pdfium-ios.zip` from the Assets below
+            2. Extract and install:
+               ```bash
+               unzip pdfium-ios.zip
+               cp -R pdfium.xcframework /path/to/react-native-sherpa-onnx/ios/Frameworks/
+               ```
+            3. Enable PDFium and run `pod install`:
+               ```bash
+               export SHERPA_ONNX_ENABLE_PDFIUM=1
+               pod install
+               ```
+
+            ## Framework Details
+
+            - **Version:** ${{ steps.tag.outputs.release_tag }}
+            - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
+            - **Contents:** `libpdfium.dylib`, public PDFium headers under each slice’s `Headers/`
+            - **Tag pin:** `third_party/pdfium_prebuilt/IOS_RELEASE_TAG`
+
+            Opt-in (default off): set `SHERPA_ONNX_ENABLE_PDFIUM=1`. Without it, PDFium is not vendored and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`.
+          files: |
+            pdfium-ios.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## pdfium iOS release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`pdfium-ios.zip\` | \`pdfium.xcframework\` (device arm64 + simulator arm64/x86_64) |" >> $GITHUB_STEP_SUMMARY

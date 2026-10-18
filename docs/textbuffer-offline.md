@@ -204,19 +204,28 @@ function getOfflineTextBufferSpatialSpansSlice(
 ```ts
 type TextSpatialSpanLevel = 'line' | 'word' | 'block';
 type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
+// textLayer: PDF glyph layer (react-native-sherpa-onnx/pdf); see pdf-offline.md
 
 interface TextSpatialSpan {
   utf16Start: number;
   utf16End: number;
   level: TextSpatialSpanLevel;
-  sourceImageBufferId: string;
+  /** Required for `ocr`. Empty / omitted for `textLayer` (PDF) when no image frame. */
+  sourceImageBufferId?: string;
   frameIndex: number;
-  /** Pixel coords: x0,y0,x1,y1,x2,y2,x3,y3 */
+  /**
+   * Quad corners x0,y0,…x3,y3.
+   * OCR: decoded-frame pixels. textLayer: PDF user-space, top-left origin, y-down.
+   */
   quad: [number, number, number, number, number, number, number, number];
   confidence?: number;
   origin: TextSpatialSpanOrigin;
+  /** 1-based PDF page when origin is textLayer. */
   pageNumber?: number;
   ptsMs?: number;
+  /** PDF user-space page size when origin is textLayer. */
+  pageWidth?: number;
+  pageHeight?: number;
 }
 ```
 

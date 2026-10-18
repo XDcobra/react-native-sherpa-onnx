@@ -557,3 +557,33 @@ set_tests_properties(imagebuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# PDF text-layer host test (disabled path by default; no PDFium required)
+set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
+set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+if(TARGET gtest AND TARGET gtest_main)
+  set(PDF_GTEST_LIBS gtest gtest_main)
+else()
+  find_package(GTest QUIET)
+  if(GTest_FOUND)
+    set(PDF_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  else()
+    set(PDF_GTEST_LIBS gtest gtest_main)
+  endif()
+endif()
+
+add_executable(pdf_text_layer_host_test
+  "${PDF_TEST_DIR}/pdf_text_layer_host_test.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
+)
+target_include_directories(pdf_text_layer_host_test PRIVATE
+  "${PDF_CPP_ROOT}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+)
+target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
+# Default host builds leave HAVE_PDFIUM undefined (disabled stub).
+add_test(NAME pdf_text_layer_host_test COMMAND $<TARGET_FILE:pdf_text_layer_host_test>)
+set_tests_properties(pdf_text_layer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+

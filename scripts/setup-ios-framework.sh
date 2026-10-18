@@ -115,6 +115,13 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_FFMPEG is set. Skipping FFmpeg framework download.${NC}" >&2
 fi
 
+# PDFium is opt-in (default off) — only download when explicitly enabled.
+if [ "${SHERPA_ONNX_ENABLE_PDFIUM:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_PDFIUM:-false}" = "true" ]; then
+  FRAMEWORK_SLUGS+=(pdfium)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_ENABLE_PDFIUM not set. Skipping pdfium framework download.${NC}" >&2
+fi
+
 # Set config variables for a given framework slug. Call before using TAG_* XCFRAMEWORK_* etc.
 get_framework_config() {
   local slug="$1"
@@ -162,6 +169,17 @@ get_framework_config() {
       LIB_SIMULATOR="libwebp.a"
       HEADER_CHECK="Headers/webp/decode.h"
       DISPLAY_NAME="libwebp"
+      ;;
+    pdfium)
+      TAG_FILE="$PROJECT_ROOT/third_party/pdfium_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="pdfium-ios-v"
+      XCFRAMEWORK_NAME="pdfium.xcframework"
+      ZIP_ASSET_NAME="pdfium-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-pdfium"
+      LIB_DEVICE="libpdfium.dylib"
+      LIB_SIMULATOR="libpdfium.dylib"
+      HEADER_CHECK="Headers/fpdfview.h"
+      DISPLAY_NAME="pdfium"
       ;;
     *)
       echo "Unknown framework: $slug" >&2

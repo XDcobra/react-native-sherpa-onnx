@@ -951,13 +951,15 @@ function mapNativeSpatialSpan(raw: {
   utf16Start: number;
   utf16End: number;
   level: string;
-  sourceImageBufferId: string;
+  sourceImageBufferId?: string;
   frameIndex: number;
   quad: number[];
   confidence?: number;
   origin: string;
   pageNumber?: number;
   ptsMs?: number;
+  pageWidth?: number;
+  pageHeight?: number;
 }): TextSpatialSpan {
   const level: TextSpatialSpanLevel = SPATIAL_SPAN_LEVELS.has(
     raw.level as TextSpatialSpanLevel
@@ -980,15 +982,18 @@ function mapNativeSpatialSpan(raw: {
     Number(q[6] ?? 0),
     Number(q[7] ?? 0),
   ];
+  const imageId = String(raw.sourceImageBufferId ?? '');
   const span: TextSpatialSpan = {
     utf16Start: Math.trunc(raw.utf16Start),
     utf16End: Math.trunc(raw.utf16End),
     level,
-    sourceImageBufferId: String(raw.sourceImageBufferId ?? ''),
     frameIndex: Math.trunc(raw.frameIndex),
     quad,
     origin,
   };
+  if (imageId.length > 0) {
+    span.sourceImageBufferId = imageId;
+  }
   if (raw.confidence != null && Number.isFinite(raw.confidence)) {
     span.confidence = raw.confidence;
   }
@@ -997,6 +1002,12 @@ function mapNativeSpatialSpan(raw: {
   }
   if (raw.ptsMs != null && Number.isFinite(raw.ptsMs)) {
     span.ptsMs = raw.ptsMs;
+  }
+  if (raw.pageWidth != null && Number.isFinite(raw.pageWidth)) {
+    span.pageWidth = raw.pageWidth;
+  }
+  if (raw.pageHeight != null && Number.isFinite(raw.pageHeight)) {
+    span.pageHeight = raw.pageHeight;
   }
   return span;
 }

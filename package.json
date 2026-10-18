@@ -160,6 +160,11 @@
       "types": "./lib/typescript/src/ocr/index.d.ts",
       "default": "./lib/module/ocr/index.js"
     },
+    "./pdf": {
+      "source": "./src/pdf/index.ts",
+      "types": "./lib/typescript/src/pdf/index.d.ts",
+      "default": "./lib/module/pdf/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",

@@ -91,14 +91,25 @@ export interface TextSpatialSpan {
   utf16Start: number;
   utf16End: number;
   level: TextSpatialSpanLevel;
-  sourceImageBufferId: string;
+  /**
+   * Source offline ImageBuffer id for `ocr` spans.
+   * Empty / omitted for `textLayer` (PDF) and `markup` when no image frame exists.
+   */
+  sourceImageBufferId?: string;
   frameIndex: number;
-  /** Pixel coords of the frame: x0,y0,x1,y1,x2,y2,x3,y3 */
+  /**
+   * Quad corners x0,y0,…x3,y3.
+   * OCR: decoded-frame pixels. textLayer: PDF user-space, top-left origin, y-down.
+   */
   quad: [number, number, number, number, number, number, number, number];
   confidence?: number;
   origin: TextSpatialSpanOrigin;
+  /** 1-based PDF page when origin is textLayer. */
   pageNumber?: number;
   ptsMs?: number;
+  /** PDF user-space page size when origin is textLayer. */
+  pageWidth?: number;
+  pageHeight?: number;
 }
 
 // ========== Info Types ==========
