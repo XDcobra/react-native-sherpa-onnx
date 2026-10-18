@@ -948,7 +948,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
       def zipFile = new File(downloadDir, "pdfium-android.zip")
       def url = "${baseUrl}/${tag}/pdfium-android.zip"
-      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      // -f: HTTP errors (e.g. 404) fail the exec instead of writing an HTML/text body as a "zip".
+      project.exec { commandLine 'curl', '-fsSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) {
         throw new RuntimeException("PDFium download failed: ${url}")
       }
