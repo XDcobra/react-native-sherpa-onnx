@@ -148,10 +148,7 @@ function pathFromRaw(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Family-aware OCR pack detect (ppocr Det+Rec+dict co-occurrence).
- * Accepts a {@link FileSource} like alignment/punctuation detect.
- */
+/** Detect OCR pack layout without loading the engine. */
 export async function detectOcrModel(
   source: FileSource,
   options?: { modelType?: OcrModelType }
@@ -276,43 +273,11 @@ export async function detectOcrModel(
         }
       : undefined;
 
-  // Family-aware completeness: ppocr det+rec+rec_dict; doctr det+rec+manifest;
-  // doc_vlm vision/embed/decoder (+ .onnx_data), tokenizer, and manifest.
-  const family = typeof raw.modelType === 'string' ? raw.modelType : '';
-  let pathsComplete: boolean;
-  if (family === 'doctr') {
-    pathsComplete = Boolean(det && rec && manifest);
-  } else if (family === 'doc_vlm') {
-    pathsComplete = Boolean(
-      visionEncoder &&
-        visionEncoderData &&
-        embedTokens &&
-        embedTokensData &&
-        decoder &&
-        decoderData &&
-        tokenizer &&
-        manifest
-    );
-  } else {
-    pathsComplete = Boolean(det && rec && recDict);
-  }
-  const success = successFlag && pathsComplete;
-  const missingPathsError =
-    family === 'doctr'
-      ? 'OCR detect reported success but required paths (det/rec/manifest) were missing'
-      : family === 'doc_vlm'
-      ? 'OCR detect reported success but required paths (vision_encoder/embed_tokens/decoder/tokenizer/manifest and .onnx_data) were missing'
-      : 'OCR detect reported success but required paths (det/rec/rec_dict) were missing';
-
   return {
-    success,
+    success: successFlag,
     isStreaming: false,
     detectedModels,
-    ...(err.length > 0 || (successFlag && !pathsComplete)
-      ? {
-          error: err.length > 0 ? err : missingPathsError,
-        }
-      : {}),
+    ...(err.length > 0 ? { error: err } : {}),
     ...(modelType != null ? { modelType } : {}),
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
@@ -331,22 +296,26 @@ function readRecognizeResult(
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
-    throw Object.assign(new Error('OCR recognize result missing extras'), {
-      code: OcrErrorCode.INTERNAL_ERROR,
-    });
-  }
   if (typeof raw.spanCount !== 'number' || !Number.isFinite(raw.spanCount)) {
     throw Object.assign(new Error('OCR recognize result missing spanCount'), {
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  return {
-    family,
-    spanCount: raw.spanCount,
-    doctags: raw.doctags,
-    markdown: raw.markdown,
-  };
+  if (family === 'doc_vlm') {
+    if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
+    return {
+      family,
+      spanCount: raw.spanCount,
+      doctags: raw.doctags,
+      markdown: raw.markdown,
+    };
+  }
+  // ppocr / doctr: DocTags are unsupported — omit fields (ignore native "").
+  return { family, spanCount: raw.spanCount };
 }
 
 /**
@@ -359,7 +328,9 @@ export async function createOCR(
   const bridge = await buildOcrInitBridgeOptions(options);
   if (__DEV__) {
     console.log(
-      `[SherpaOnnx:ocr] createOCR instance=${instanceId} type=${bridge.modelType} dir=${bridge.modelDir}`
+      `[SherpaOnnx:ocr] createOCR instance=${instanceId} mode=${
+        bridge.initMode ?? 'auto'
+      } type=${bridge.modelType} dir=${bridge.modelDir ?? '(custom paths)'}`
     );
   }
   await getNative().initializeOcr(instanceId, bridge);
@@ -423,6 +394,7 @@ export type {
   OcrInitializeOptionsPpocr,
   OcrInitializeOptionsDoctr,
   OcrInitializeOptionsDocVlm,
+  OcrCustomInitializeOptions,
   OcrRecognizeOptions,
   OcrRecognizeResult,
   OcrDetectResult,
@@ -431,17 +403,19 @@ export type {
 } from './types';
 
 export type {
-  OcrDetectModelResult,
-  OcrPpocrSuccessPaths,
-  OcrDoctrSuccessPaths,
-  OcrDocVlmSuccessPaths,
-} from '../types/modelDetect';
+  OcrCustomPathKey,
+  OcrCustomConfig,
+  OcrPpocrCustomConfig,
+  OcrDoctrCustomConfig,
+  OcrDocVlmCustomConfig,
+  OcrCustomConfigByModelType,
+} from './customConfig';
 
 export {
-  OcrErrorCode,
-  isOcrPpocrDetectSuccess,
-  isOcrDoctrDetectSuccess,
-  isOcrDocVlmDetectSuccess,
-  OCR_MODEL_TYPES,
-  isOcrModelType,
-} from './types';
+  assertOcrCustomConfig,
+  resolveOcrCustomConfigPaths,
+} from './customConfig';
+
+export type { OcrDetectModelResult } from '../types/modelDetect';
+
+export { OcrErrorCode, OCR_MODEL_TYPES, isOcrModelType } from './types';

@@ -368,6 +368,17 @@ const frameAt = (positionMs: number) => {
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/vis_static.png) | ![Example 2](./images/example/vis_heatmap.png) | ![Example 3](./images/example/vis_3d.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Audio visualization** (`example/src/screens/audio-visualization/AudioVisualizationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#audio-visualization-showcase).
+
+---
+
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK last-activity ring buffer (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) - Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

@@ -48,6 +48,26 @@ struct OcrResult {
   std::string markdown_utf8;
 };
 
+/** Prefer absolute override; otherwise `model_dir/canonical`. */
+inline std::string OcrResolvePath(const std::string& override_path,
+                                  const std::string& model_dir,
+                                  const char* canonical) {
+  if (!override_path.empty()) {
+    return override_path;
+  }
+  if (model_dir.empty()) {
+    return canonical ? std::string(canonical) : std::string();
+  }
+  std::string out = model_dir;
+  if (!out.empty() && out.back() != '/' && out.back() != '\\') {
+    out.push_back('/');
+  }
+  if (canonical) {
+    out += canonical;
+  }
+  return out;
+}
+
 struct OcrLoadOptions {
   int num_threads = 4;
   /** Longest side for det resize (PP-OCR style). */
@@ -66,6 +86,23 @@ struct OcrLoadOptions {
    * Phase 3 maps TS `docVlm.maxNewTokens` here.
    */
   int max_new_tokens = 0;
+
+  /**
+   * Absolute path overrides for custom init. Empty string → use
+   * `JoinPath(model_dir, canonical_name)` in the backend.
+   */
+  std::string path_det;
+  std::string path_rec;
+  std::string path_cls;
+  std::string path_rec_dict;
+  std::string path_manifest;
+  std::string path_vision_encoder;
+  std::string path_vision_encoder_data;
+  std::string path_embed_tokens;
+  std::string path_embed_tokens_data;
+  std::string path_decoder;
+  std::string path_decoder_data;
+  std::string path_tokenizer;
 };
 
 enum class OcrGranularity : uint8_t {

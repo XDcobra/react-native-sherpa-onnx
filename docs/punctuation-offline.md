@@ -442,6 +442,17 @@ await punct.punctuate(textIn, textOut);
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/punctuation_offline_1.png) | ![Example 2](./images/example/punctuation_offline_2.png) | ![Example 3](./images/example/punctuation_offline_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Punctuation (offline)** (`example/src/screens/punctuation/PunctuationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#punctuation-offline).
+
+---
+
 ## See also
 
 - [Text buffers — offline](textbuffer-offline.md)

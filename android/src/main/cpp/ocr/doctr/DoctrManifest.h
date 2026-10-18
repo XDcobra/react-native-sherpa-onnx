@@ -47,6 +47,9 @@ struct DoctrManifest {
  */
 DoctrManifest ParseDoctrManifest(const std::string& model_dir);
 
+/** Parse an absolute path to ocr_manifest.json. */
+DoctrManifest ParseDoctrManifestFile(const std::string& manifest_path);
+
 }  // namespace doctr
 }  // namespace ocr
 }  // namespace sherpa_onnx

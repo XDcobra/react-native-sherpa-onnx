@@ -308,6 +308,17 @@ await releasePipelineSegmentBuffer(segOut);
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/language_identification_live_1.png) | ![Example 2](./images/example/language_identification_live_2.png) | ![Example 3](./images/example/language_identification_live_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Spoken language identification (live overload)** (`example/src/screens/language-identification/LanguageIdentificationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#spoken-language-identification-live-overload).
+
+---
+
 ## See also
 
 - [Spoken language identification (offline)](language-identification-offline.md)

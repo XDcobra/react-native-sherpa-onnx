@@ -37,6 +37,12 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
   ],
   [ModelCategory.Punctuation]: [],
   [ModelCategory.Qnn]: [],
+  [ModelCategory.Ocr]: [
+    // Bundled via example/scripts/model-download-config.json (one pack per family)
+    'ppocrv6-tiny',
+    'doctr-mobile',
+    'docvlm-granite-258m',
+  ],
 };
 
 /**

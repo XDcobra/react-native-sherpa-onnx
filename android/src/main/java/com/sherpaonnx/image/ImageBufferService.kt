@@ -194,8 +194,8 @@ internal object ImageBufferService {
       val rgb = ByteArray(w * h * 3)
       var o = 0
       for (p in pixels) {
-        rgb[o++] = ((p shr 16) & 0xff).toByte()
-        rgb[o++] = ((p shr 8) & 0xff).toByte()
+        rgb[o++] = ((p shr 16) and 0xff).toByte()
+        rgb[o++] = ((p shr 8) and 0xff).toByte()
         rgb[o++] = (p and 0xff).toByte()
       }
       bitmap.recycle()

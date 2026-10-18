@@ -74,6 +74,24 @@
       "category": "audioTagging",
       "tag": "audio-tagging-models",
       "id": "sherpa-onnx-zipformer-small-audio-tagging-2024-04-15"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "ppocrv6-tiny"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "doctr-mobile"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "docvlm-granite-258m"
     }
   ]
 }

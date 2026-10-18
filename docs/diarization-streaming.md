@@ -557,6 +557,17 @@ await pipeline.reset(); // clear Sortformer state; pipeline keeps running
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/diarization_streaming_1.png) | ![Example 2](./images/example/diarization_streaming_2.png) | ![Example 3](./images/example/diarization_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speaker diarization (streaming)** as a developer showcase for this API. See [example/README.md](../example/README.md#speaker-diarization-streaming).
+
+---
+
 ## See also
 
 - [Diarization (offline)](diarization-offline.md)

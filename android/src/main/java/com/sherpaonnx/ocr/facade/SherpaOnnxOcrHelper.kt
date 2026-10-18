@@ -7,11 +7,14 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.sherpaonnx.SherpaOnnxModule
+import com.sherpaonnx.bridge.InitModeModelPathsParser
+import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.ocr.OcrNative
 import com.sherpaonnx.ocr.core.OcrErrorCodes
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import com.sherpaonnx.text.pipeline.TextSpatialSpan
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 class SherpaOnnxOcrHelper(
@@ -51,12 +54,44 @@ class SherpaOnnxOcrHelper(
 
   fun initializeOcr(instanceId: String, options: ReadableMap, promise: Promise) {
     try {
-      val modelDir = options.getString("modelDir")?.trim().orEmpty()
-      if (modelDir.isEmpty()) {
-        promise.reject(OcrErrorCodes.INVALID_ARGUMENT, "modelDir is required")
+      val core = InitModeModelPathsParser.parseCore(options)
+      if (core == null) {
+        promise.reject(
+          OcrErrorCodes.INVALID_ARGUMENT,
+          if (options.hasKey("initMode") && options.getString("initMode") == "custom") {
+            "custom init requires initMode, modelType, and modelPaths"
+          } else {
+            "auto init requires modelDir"
+          },
+        )
         return
       }
-      val modelType = options.getString("modelType")?.trim().orEmpty().ifEmpty { "auto" }
+
+      val modelType = core.modelType?.trim().orEmpty().ifEmpty { "auto" }
+      var modelDir = core.modelDir.orEmpty()
+      var pathOverrides: HashMap<String, String>? = null
+
+      if (core.initMode == "custom") {
+        if (modelType == "auto" ||
+          (modelType != "ppocr" && modelType != "doctr" && modelType != "doc_vlm")
+        ) {
+          promise.reject(
+            OcrErrorCodes.INVALID_ARGUMENT,
+            "custom init requires a concrete modelType (ppocr|doctr|doc_vlm)",
+          )
+          return
+        }
+        val pathStrings = core.modelPaths.orEmpty()
+        ModelPathValidationNative.validate("ocr", modelType, pathStrings)?.let { errorMsg ->
+          promise.reject(OcrErrorCodes.INVALID_ARGUMENT, errorMsg)
+          return
+        }
+        pathOverrides = HashMap(pathStrings)
+        if (modelDir.isEmpty()) {
+          modelDir = parentDirOfFirstPath(pathStrings).orEmpty()
+        }
+      }
+
       val numThreads =
         if (options.hasKey("numThreads")) options.getDouble("numThreads").toInt() else 4
       val provider =
@@ -93,12 +128,16 @@ class SherpaOnnxOcrHelper(
           detBoxScoreThresh,
           detUnclipRatio,
           maxNewTokens,
+          pathOverrides,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
         throw e
       }
-      Log.i(TAG, "initialized instance=$instanceId type=$modelType dir=$modelDir")
+      Log.i(
+        TAG,
+        "initialized instance=$instanceId mode=${core.initMode} type=$modelType dir=$modelDir",
+      )
       val out = Arguments.createMap()
       out.putString("instanceId", instanceId)
       out.putString("modelType", modelType)
@@ -107,6 +146,22 @@ class SherpaOnnxOcrHelper(
       Log.e(TAG, "initializeOcr failed", e)
       promise.reject(OcrErrorCodes.INTERNAL_ERROR, e.message, e)
     }
+  }
+
+  private fun parentDirOfFirstPath(paths: Map<String, String>): String? {
+    for (key in listOf(
+      "det",
+      "vision_encoder",
+      "manifest",
+      "rec",
+      "tokenizer",
+    )) {
+      val p = paths[key] ?: continue
+      val parent = File(p).parent
+      if (!parent.isNullOrBlank()) return parent
+    }
+    val first = paths.values.firstOrNull() ?: return null
+    return File(first).parent
   }
 
   fun unloadOcr(instanceId: String, promise: Promise) {

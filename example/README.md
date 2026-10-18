@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -39,6 +39,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Models** | `android/app/src/main/assets/models/<model-id>/` | `ios/sherpa_models/models/<model-id>/` |
 | **Test audio WAVs** | `android/app/src/main/assets/test_wavs/` | `ios/sherpa_models/test_wavs/` |
 | **Codec samples** | `android/app/src/main/assets/test_codec/` | `ios/sherpa_models/test_codec/` |
+| **Test images (OCR)** | `android/app/src/main/assets/test_images/` | `ios/sherpa_models/test_images/` |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 > - **iOS Build (`Xcode`):** The Xcode build phase automatically pulls models and test audios from both `android/app/src/main/assets/models/` and `ios/sherpa_models/models/` into the iOS app bundle (`App.app/models/`).
@@ -54,7 +55,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 |     |     |     |
 
 
-This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD feature screens.
+This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD/OCR feature screens.
 
 ## Speech-to-Text (offline)
 
@@ -295,3 +296,12 @@ This screen evaluates multi-speaker audio recordings with offline diarization en
 | --- | --- | --- |
 
 This screen demonstrates true real-time streaming speaker diarization powered by Sortformer ONNX models. It streams live audio from a microphone or test audio files directly into the native streaming engine, outputting speaker segments to a `LiveSegmentBuffer` in real time. Features include an active speaker HUD with customizable speaker aliases, meeting analytics (speaking percentages, talk times, turn counts), runtime parameter tuning (onset/offset thresholds, min durations), and full pipeline lifecycle controls (start, flush, reset, stop). See [docs/diarization-streaming.md](../docs/diarization-streaming.md).
+
+## OCR (offline)
+
+
+| ![OCR offline 1](../docs/images/example/ocr_offline_1.png) | ![OCR offline 2](../docs/images/example/ocr_offline_2.png) | ![OCR offline 3](../docs/images/example/ocr_offline_3.png) |
+| --- | --- | --- |
+
+
+Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).

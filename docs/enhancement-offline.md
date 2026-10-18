@@ -412,6 +412,17 @@ await cleanPlayer.play();
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/enhancement_offline_1.png) | ![Example 2](./images/example/enhancement_offline_2.png) | ![Example 3](./images/example/enhancement_offline_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speech enhancement (offline)** (`example/src/screens/enhancement/EnhancementScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-enhancement-offline).
+
+---
+
 ## See also
 
 - [Speech enhancement (streaming / live)](enhancement-streaming.md)

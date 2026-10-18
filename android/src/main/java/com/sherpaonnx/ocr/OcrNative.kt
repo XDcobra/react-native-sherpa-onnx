@@ -22,6 +22,8 @@ internal object OcrNative {
     detBoxScoreThresh: Float = 0.5f,
     detUnclipRatio: Float = 1.5f,
     maxNewTokens: Int = 0,
+    /** Absolute path overrides keyed like ValidateOcrPaths (`det`, `rec`, …). */
+    pathOverrides: HashMap<String, String>? = null,
   )
 
   @JvmStatic external fun nativeUnload(instanceId: String)

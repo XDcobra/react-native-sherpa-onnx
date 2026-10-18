@@ -19,6 +19,7 @@ const SECTION_ORDER = [
   'Download & Models',
   'Speech Recognition',
   'Speech Synthesis',
+  'Vision',
   'Pipelines & Demos',
   'Alignment & Subtitles',
   'Speech Enhancement',
@@ -75,6 +76,16 @@ const FEATURES: HomeFeature[] = [
       'Use incremental TTS to start synthesis before the full prompt is built offline',
     icon: 'volume-medium',
     screen: 'TTSStreaming',
+    implemented: true,
+  },
+  {
+    id: 'ocr',
+    sectionTitle: 'Vision',
+    title: 'OCR',
+    description:
+      'ImageBuffer → recognize → text + spatial quads; switch ppocr / doctr / doc_vlm and overlay boxes on the image',
+    icon: 'scan-outline',
+    screen: 'OCR',
     implemented: true,
   },
   {
@@ -266,7 +277,7 @@ export default function HomeScreen({ navigation }: Props) {
   const renderFeatureCard = ({ item }: { item: HomeFeature }) => (
     <TouchableOpacity
       style={[styles.card, !item.implemented && styles.cardDisabled]}
-      onPress={() => navigation.navigate(item.screen)}
+      onPress={() => navigation.navigate(item.screen as never)}
       activeOpacity={0.7}
     >
       <View style={styles.cardContent}>

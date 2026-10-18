@@ -502,6 +502,17 @@ await engine.destroy();
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/kws_1.png) | ![Example 2](./images/example/kws_2.png) | ![Example 3](./images/example/kws_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Keyword spotting** (`example/src/screens/kws/KeywordSpottingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#keyword-spotting-streaming).
+
+---
+
 ## See also
 
 - Example app: **Keyword Spotting** screen (`example/src/screens/kws/`) — developer lab for pack init, keywords textarea / `keywordsPath`, mic + file ingest, hit HUD, unload-while-running

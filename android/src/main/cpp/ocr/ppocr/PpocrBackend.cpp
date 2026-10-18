@@ -54,15 +54,18 @@ void PpocrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   Release();
   options_ = options;
 
-  const std::string det_path = JoinPath(model_dir, "det.onnx");
-  const std::string rec_path = JoinPath(model_dir, "rec.onnx");
-  const std::string cls_path = JoinPath(model_dir, "cls.onnx");
-  const std::string yml_path = JoinPath(model_dir, "rec_inference.yml");
+  const std::string det_path =
+      OcrResolvePath(options.path_det, model_dir, "det.onnx");
+  const std::string rec_path =
+      OcrResolvePath(options.path_rec, model_dir, "rec.onnx");
+  const std::string cls_path =
+      OcrResolvePath(options.path_cls, model_dir, "cls.onnx");
+  const std::string yml_path =
+      OcrResolvePath(options.path_rec_dict, model_dir, "rec_inference.yml");
 
   if (!fs::exists(det_path) || !fs::exists(rec_path) || !fs::exists(yml_path)) {
     throw std::runtime_error(
-        "PpocrBackend: model dir must contain det.onnx, rec.onnx, rec_inference.yml: " +
-        model_dir);
+        "PpocrBackend: need det, rec, and rec_dict (det.onnx/rec.onnx/rec_inference.yml or path overrides)");
   }
 
   dict_ = LoadCharacterDictFromYml(yml_path);

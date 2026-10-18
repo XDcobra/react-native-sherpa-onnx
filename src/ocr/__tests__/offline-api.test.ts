@@ -46,14 +46,10 @@ jest.mock('../../textbuffer', () => ({
 }));
 
 import { TurboModuleRegistry } from 'react-native';
-import type { OcrDetectModelResult } from '../../types/modelDetect';
 import {
   createOCR,
   detectOcrModel,
-  isOcrDocVlmDetectSuccess,
-  isOcrDoctrDetectSuccess,
   isOcrModelType,
-  isOcrPpocrDetectSuccess,
   OCR_MODEL_TYPES,
 } from '../index';
 import type { OcrInitializeOptions } from '../types';
@@ -225,15 +221,12 @@ describe('ocr offline API', () => {
       { iso6391Hint: 'en', id: 'en' },
       { iso6391Hint: 'de', id: 'de' },
     ]);
-    expect(isOcrPpocrDetectSuccess(result)).toBe(true);
-    if (isOcrPpocrDetectSuccess(result)) {
-      expect(result.paths.det.length).toBeGreaterThan(0);
-      expect(result.paths.rec.length).toBeGreaterThan(0);
-      expect(result.paths.rec_dict.length).toBeGreaterThan(0);
-    }
+    expect(result.paths?.det?.length).toBeGreaterThan(0);
+    expect(result.paths?.rec?.length).toBeGreaterThan(0);
+    expect(result.paths?.rec_dict?.length).toBeGreaterThan(0);
   });
 
-  it('detectOcrModel fails when required paths are missing despite ok', async () => {
+  it('detectOcrModel trusts native success without TS path completeness', async () => {
     mockNative.detectOcrModel.mockResolvedValue({
       success: true,
       ok: true,
@@ -245,8 +238,10 @@ describe('ocr offline API', () => {
       kind: 'fs',
       path: '/models/x',
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/required paths/i);
+    expect(result.success).toBe(true);
+    expect(result.modelType).toBe('ppocr');
+    expect(result.paths?.det).toContain('det.onnx');
+    expect(result.paths?.rec).toBeUndefined();
   });
 
   // ──── Phase 3: doctr tests ────────────────────────────────────────────
@@ -300,40 +295,7 @@ describe('ocr offline API', () => {
     expect(result.paths?.rec_dict).toBeUndefined();
   });
 
-  it('isOcrDoctrDetectSuccess narrows doctr paths', () => {
-    const result: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'doctr', modelDir: '/m' }],
-      modelType: 'doctr',
-      paths: {
-        det: '/m/det.onnx',
-        rec: '/m/rec.onnx',
-        manifest: '/m/ocr_manifest.json',
-      },
-    };
-    expect(isOcrDoctrDetectSuccess(result)).toBe(true);
-    if (isOcrDoctrDetectSuccess(result)) {
-      expect(result.paths.manifest.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('isOcrDoctrDetectSuccess rejects ppocr result', () => {
-    const result: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'ppocr', modelDir: '/m' }],
-      modelType: 'ppocr',
-      paths: {
-        det: '/m/det.onnx',
-        rec: '/m/rec.onnx',
-        rec_dict: '/m/dict.yml',
-      },
-    };
-    expect(isOcrDoctrDetectSuccess(result)).toBe(false);
-  });
-
-  it('detectOcrModel fails for doctr when manifest is missing', async () => {
+  it('detectOcrModel trusts native success when doctr manifest is absent from paths', async () => {
     mockNative.detectOcrModel.mockResolvedValue({
       success: true,
       ok: true,
@@ -342,8 +304,9 @@ describe('ocr offline API', () => {
       detectedModels: [],
     });
     const result = await detectOcrModel({ kind: 'fs', path: '/m' });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/required paths/i);
+    expect(result.success).toBe(true);
+    expect(result.modelType).toBe('doctr');
+    expect(result.paths?.manifest).toBeUndefined();
   });
 
   it('isOcrModelType recognizes valid types', () => {
@@ -368,6 +331,29 @@ describe('ocr offline API', () => {
   });
 
   // ──── Phase 5: doctr round-trip tests ─────────────────────────────────
+
+  it('createOCR ppocr forwards detUnclipRatio from ppocr options', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_ppocr_unclip',
+      modelType: 'ppocr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+      ppocr: { detUnclipRatio: 1.2 },
+    });
+
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/ppocrv6-tiny',
+        modelType: 'ppocr',
+        detUnclipRatio: 1.2,
+      })
+    );
+    await ocr.destroy();
+  });
 
   it('createOCR doctr + recognize round-trip passes doctr bridge options', async () => {
     mockNative.initializeOcr.mockResolvedValue({
@@ -596,7 +582,7 @@ describe('ocr offline API', () => {
     }
   });
 
-  it('ppocr recognize resolves empty doctags and markdown', async () => {
+  it('ppocr recognize omits doctags and markdown', async () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
       modelType: 'ppocr',
@@ -609,13 +595,13 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'ppocr',
       spanCount: 1,
-      doctags: '',
-      markdown: '',
     });
+    expect(page).not.toHaveProperty('doctags');
+    expect(page).not.toHaveProperty('markdown');
     await ocr.destroy();
   });
 
-  it('doctr recognize resolves empty doctags and markdown', async () => {
+  it('doctr recognize omits doctags and markdown', async () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doctr',
       spanCount: 2,
@@ -633,9 +619,9 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'doctr',
       spanCount: 2,
-      doctags: '',
-      markdown: '',
     });
+    expect(page).not.toHaveProperty('doctags');
+    expect(page).not.toHaveProperty('markdown');
     await ocr.destroy();
   });
 
@@ -720,67 +706,6 @@ describe('ocr offline API', () => {
     await ocr.destroy();
   });
 
-  it('isOcrDocVlmDetectSuccess narrows a complete pack', () => {
-    const result: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'doc_vlm', modelDir: '/models/docvlm' }],
-      modelType: 'doc_vlm',
-      paths: docVlmPaths,
-    };
-    expect(isOcrDocVlmDetectSuccess(result)).toBe(true);
-    if (isOcrDocVlmDetectSuccess(result)) {
-      expect(typeof result.paths.decoder).toBe('string');
-    }
-  });
-
-  it('isOcrDocVlmDetectSuccess rejects other families', () => {
-    const ppocr: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'ppocr', modelDir: '/m' }],
-      modelType: 'ppocr',
-      paths: {
-        det: '/m/det.onnx',
-        rec: '/m/rec.onnx',
-        rec_dict: '/m/dict.yml',
-      },
-    };
-    const doctr: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'doctr', modelDir: '/m' }],
-      modelType: 'doctr',
-      paths: {
-        det: '/m/det.onnx',
-        rec: '/m/rec.onnx',
-        manifest: '/m/ocr_manifest.json',
-      },
-    };
-    expect(isOcrDocVlmDetectSuccess(ppocr)).toBe(false);
-    expect(isOcrDocVlmDetectSuccess(doctr)).toBe(false);
-  });
-
-  it('isOcrDocVlmDetectSuccess rejects a pack missing decoder_data', () => {
-    const shortPaths = {
-      vision_encoder: docVlmPaths.vision_encoder,
-      vision_encoder_data: docVlmPaths.vision_encoder_data,
-      embed_tokens: docVlmPaths.embed_tokens,
-      embed_tokens_data: docVlmPaths.embed_tokens_data,
-      decoder: docVlmPaths.decoder,
-      tokenizer: docVlmPaths.tokenizer,
-      manifest: docVlmPaths.manifest,
-    };
-    const result: OcrDetectModelResult = {
-      success: true,
-      isStreaming: false,
-      detectedModels: [{ type: 'doc_vlm', modelDir: '/models/docvlm' }],
-      modelType: 'doc_vlm',
-      paths: shortPaths,
-    };
-    expect(isOcrDocVlmDetectSuccess(result)).toBe(false);
-  });
-
   it('detectOcrModel accepts a mocked doc_vlm payload', async () => {
     mockNative.detectOcrModel.mockResolvedValue({
       success: true,
@@ -796,12 +721,13 @@ describe('ocr offline API', () => {
       path: '/models/docvlm-granite-258m',
     });
     expect(result.success).toBe(true);
-    expect(isOcrDocVlmDetectSuccess(result)).toBe(true);
+    expect(result.modelType).toBe('doc_vlm');
     expect(result.paths?.rec_dict).toBeUndefined();
     expect(result.paths?.vision_encoder).toContain('vision_encoder.onnx');
+    expect(typeof result.paths?.decoder).toBe('string');
   });
 
-  it('detectOcrModel marks an incomplete doc_vlm pack failed', async () => {
+  it('detectOcrModel trusts native success for a partial doc_vlm paths map', async () => {
     mockNative.detectOcrModel.mockResolvedValue({
       success: true,
       ok: true,
@@ -813,7 +739,9 @@ describe('ocr offline API', () => {
       kind: 'fs',
       path: '/models/docvlm',
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/required paths/i);
+    expect(result.success).toBe(true);
+    expect(result.modelType).toBe('doc_vlm');
+    expect(result.paths?.vision_encoder).toContain('vision_encoder.onnx');
+    expect(result.paths?.decoder).toBeUndefined();
   });
 });

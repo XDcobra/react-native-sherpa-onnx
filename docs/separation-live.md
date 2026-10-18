@@ -264,6 +264,17 @@ for (const live of liveOuts) {
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/separation_streaming_1.png) | ![Example 2](./images/example/separation_streaming_2.png) | ![Example 3](./images/example/separation_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Source separation (live overload)** (`example/src/screens/separation/SeparationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#source-separation-live-overload).
+
+---
+
 ## See also
 
 - [Source separation (offline)](separation-offline.md)

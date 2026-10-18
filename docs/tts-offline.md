@@ -593,6 +593,17 @@ await tts.destroy();
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/tts_1.png) | ![Example 2](./images/example/tts_2.png) | ![Example 3](./images/example/tts_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Text-to-Speech (offline)** (`example/src/screens/tts/OfflineTTSScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#text-to-speech-offline).
+
+---
+
 ## See also
 
 - [tts-live.md](tts-live.md) — live overload (offline weights on live text/audio buffers)

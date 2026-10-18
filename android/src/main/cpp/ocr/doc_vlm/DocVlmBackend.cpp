@@ -146,15 +146,30 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
   Release();
   options_ = options;
 
-  const char* kFiles[] = {
-      "vision_encoder.onnx",     "vision_encoder.onnx_data",
-      "embed_tokens.onnx",       "embed_tokens.onnx_data",
-      "decoder_model_merged.onnx", "decoder_model_merged.onnx_data",
-      "tokenizer.json",          "ocr_manifest.json",
-  };
-  for (const char* file : kFiles) RequireNonEmptyFile(JoinPath(model_dir, file));
+  const std::string vision_path = OcrResolvePath(
+      options.path_vision_encoder, model_dir, "vision_encoder.onnx");
+  const std::string vision_data_path = OcrResolvePath(
+      options.path_vision_encoder_data, model_dir, "vision_encoder.onnx_data");
+  const std::string embed_path =
+      OcrResolvePath(options.path_embed_tokens, model_dir, "embed_tokens.onnx");
+  const std::string embed_data_path = OcrResolvePath(
+      options.path_embed_tokens_data, model_dir, "embed_tokens.onnx_data");
+  const std::string decoder_path = OcrResolvePath(
+      options.path_decoder, model_dir, "decoder_model_merged.onnx");
+  const std::string decoder_data_path = OcrResolvePath(
+      options.path_decoder_data, model_dir, "decoder_model_merged.onnx_data");
+  const std::string tokenizer_path =
+      OcrResolvePath(options.path_tokenizer, model_dir, "tokenizer.json");
+  const std::string manifest_path =
+      OcrResolvePath(options.path_manifest, model_dir, "ocr_manifest.json");
 
-  manifest_ = ParseDocVlmManifest(model_dir);
+  for (const auto& path :
+       {vision_path, vision_data_path, embed_path, embed_data_path, decoder_path,
+        decoder_data_path, tokenizer_path, manifest_path}) {
+    RequireNonEmptyFile(path);
+  }
+
+  manifest_ = ParseDocVlmManifestFile(manifest_path);
   if (manifest_.num_key_value_heads != 3 || manifest_.head_dim != 64 ||
       manifest_.max_position_embeddings != kMaxPositions) {
     throw std::runtime_error(
@@ -165,7 +180,7 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
     throw std::runtime_error("DocVlmBackend: special token ids do not match granite-docling");
   }
 
-  tokenizer_ = DocVlmTokenizer::Load(JoinPath(model_dir, "tokenizer.json"));
+  tokenizer_ = DocVlmTokenizer::Load(tokenizer_path);
   if (tokenizer_.TokenId("<|start_of_role|>") != manifest_.bos_token_id ||
       tokenizer_.TokenId("<|end_of_text|>") != manifest_.eos_token_id ||
       tokenizer_.TokenId("<image>") != manifest_.image_token_id) {
@@ -186,19 +201,19 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
   session_options_->SetInterOpNumThreads(1);
   session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-  const auto open_session = [&](const char* file) {
+  const auto open_session = [&](const std::string& path, const char* label) {
     const auto t0 = std::chrono::steady_clock::now();
-    auto session = std::make_unique<Ort::Session>(
-        *env_, JoinPath(model_dir, file).c_str(), *session_options_);
+    auto session =
+        std::make_unique<Ort::Session>(*env_, path.c_str(), *session_options_);
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();
-    OCR_LOGI("doc_vlm session %s %lld ms", file, static_cast<long long>(ms));
+    OCR_LOGI("doc_vlm session %s %lld ms", label, static_cast<long long>(ms));
     return session;
   };
-  vision_session_ = open_session("vision_encoder.onnx");
-  embed_session_ = open_session("embed_tokens.onnx");
-  decoder_session_ = open_session("decoder_model_merged.onnx");
+  vision_session_ = open_session(vision_path, "vision_encoder.onnx");
+  embed_session_ = open_session(embed_path, "embed_tokens.onnx");
+  decoder_session_ = open_session(decoder_path, "decoder_model_merged.onnx");
 
   const auto vision_in = IoNames(*vision_session_, true);
   const auto vision_out = IoNames(*vision_session_, false);

@@ -239,7 +239,7 @@ flowchart LR
   D --> E[UI overlay or offline TTS]
 ```
 
-`ppocr`, `doctr`, and `doc_vlm` use the same `createOCR` → `recognize` pipeline. `modelType: 'auto'` resolves from the manifest `family`, then from pack layout. `doc_vlm` also returns `doctags` and `markdown` on the promise; those strings are not stored on the text buffer.
+`ppocr`, `doctr`, and `doc_vlm` use the same `createOCR` → `recognize` pipeline. `modelType: 'auto'` resolves from the manifest `family`, then from pack layout. `OcrRecognizeResult` is discriminated on `family`: only `doc_vlm` carries `doctags` / `markdown` on the promise (not on the text buffer).
 
 When to use:
 - Batch page/document OCR with deterministic completion.
@@ -348,6 +348,18 @@ When to use:
 Read the full segmentation and memory guidance:
 - [segmentation-engine.md](segmentation-engine.md)
 - [memory-and-models.md](memory-and-models.md)
+
+## Example app
+
+
+| ![Example 1](./images/example/pipeline_offline_1.png) | ![Example 2](./images/example/pipeline_offline_2.png) | ![Example 3](./images/example/pipeline_offline_3.png) |
+| --- | --- | --- |
+| ![Example 4](./images/example/pipeline_streaming_1.png) | ![Example 5](./images/example/pipeline_streaming_2.png) | ![Example 6](./images/example/pipeline_streaming_3.png) |
+
+
+The monorepo example exposes **Offline Pipeline Showcase** and **Live Pipeline Showcase** as developer compositions across STT/TTS buffers. See [example/README.md](../example/README.md#offline-pipeline-showcase-file---stt---tts---playback) and [Live Pipeline Showcase](../example/README.md#live-pipeline-showcase-micfile---stt---tts---playback).
+
+---
 
 ## Native crash diagnostics
 

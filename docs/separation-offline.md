@@ -385,6 +385,17 @@ await saveAudioAsFile(stems[1]!, { kind: 'fs', path: '/output/accompaniment.wav'
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/separation_offline_1.png) | ![Example 2](./images/example/separation_offline_2.png) | ![Example 3](./images/example/separation_offline_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Source separation (offline)** (`example/src/screens/separation/SeparationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#source-separation-offline).
+
+---
+
 ## See also
 
 - [Source separation (live overload)](separation-live.md)

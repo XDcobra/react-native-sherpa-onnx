@@ -24,6 +24,7 @@ export type RootStackParamList = {
   Settings: undefined;
   FileIO: undefined;
   AudioVisualization: undefined;
+  OCR: undefined;
 };
 
 export type FeatureId =
@@ -49,7 +50,8 @@ export type FeatureId =
   | 'enhancement_streaming'
   | 'separation'
   | 'fileio'
-  | 'audio_visualization';
+  | 'audio_visualization'
+  | 'ocr';
 
 export interface Feature {
   id: FeatureId;
