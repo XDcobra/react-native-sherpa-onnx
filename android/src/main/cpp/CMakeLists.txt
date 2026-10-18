@@ -197,6 +197,7 @@ set(SOURCES
     crypto/sha256.cpp
     image/ImageMmapThreshold.cpp
     image/ImageRegistry.cpp
+    image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
     ocr/OcrFactory.cpp
@@ -494,7 +495,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

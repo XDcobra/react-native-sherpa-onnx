@@ -4,9 +4,13 @@
  * LiveImageBuffer is reserved for a future epic (types only).
  */
 
-import type { FileSource } from '../fileio/types';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
 
-export type { FileSource };
+export type { FileDestination, FileSource, ResolvedFileRef };
 
 export type OfflineImageBufferState = 'immutable';
 
@@ -83,6 +87,21 @@ export const ImageErrorCode = {
   DECODE_FAILED: 'ERR_IMAGE_DECODE_FAILED',
   FORMAT_UNSUPPORTED: 'ERR_IMAGE_FORMAT_UNSUPPORTED',
   BUFFER_NOT_FOUND: 'ERR_IMAGE_BUFFER_NOT_FOUND',
+  ENCODE_FAILED: 'ERR_IMAGE_ENCODE_FAILED',
   CANCELLED: 'ERR_IMAGE_CANCELLED',
   INTERNAL: 'ERR_IMAGE_INTERNAL',
 } as const;
+
+/** Encode formats for {@link exportOfflineImageBufferFrame}. */
+export type ImageExportFormat = 'jpeg' | 'png' | 'webp';
+
+export interface ExportOfflineImageBufferFrameOptions {
+  /** Default `jpeg`. */
+  format?: ImageExportFormat;
+  /** JPEG/WebP quality 1..100 (default 85). Ignored for PNG. */
+  quality?: number;
+  /** Downscale longest edge on export only; does not mutate the buffer. */
+  maxSide?: number;
+}
+
+export type ImageFrameResizeMode = 'contain' | 'cover' | 'stretch';

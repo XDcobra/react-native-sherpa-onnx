@@ -1079,6 +1079,19 @@ export interface Spec extends TurboModule {
   /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */
   cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
 
+  /**
+   * Encode one OfflineImageBuffer frame to a FileDestination.
+   * `destination` is a serialized FileDestination map (same as saveAudioBufferToFile).
+   * `options`: `{ format?: string, quality?: number, maxSide?: number }`.
+   * Returns `{ outputKind, outputPath }` for ResolvedFileRef parsing.
+   */
+  exportOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number,
+    destination: Object,
+    options?: Object
+  ): Promise<{ outputKind: string; outputPath: string }>;
+
   // ==================== Offline OCR ====================
 
   /** Family-aware OCR pack detect (ppocr Det+Rec+dict). */

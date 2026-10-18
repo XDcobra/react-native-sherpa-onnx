@@ -5,6 +5,7 @@
 #import <ImageIO/ImageIO.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include "ImageFrameEncoder.h"
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
 
@@ -390,6 +391,58 @@ int MaxSideFromOptions(NSDictionary *options) {
                                 reject:(RCTPromiseRejectBlock)reject {
   SetCancel(operationId, true);
   resolve(nil);
+}
+
+- (void)exportOfflineImageBufferFrame:(NSString *)bufferId
+                           frameIndex:(double)frameIndex
+                          destination:(NSDictionary *)destination
+                              options:(NSDictionary *)options
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+
+  NSString *formatStr = [(options[@"format"] ?: @"jpeg") lowercaseString];
+  int quality = options[@"quality"] != nil ? [options[@"quality"] intValue] : 85;
+  int maxSide = options[@"maxSide"] != nil ? [options[@"maxSide"] intValue] : 0;
+
+  sherpa_onnx::image::ExportFormat format = sherpa_onnx::image::ExportFormat::Jpeg;
+  if (!sherpa_onnx::image::ParseExportFormat([formatStr UTF8String], &format)) {
+    reject(@"ERR_IMAGE_INVALID_ARGUMENT", @"unsupported export format", nil);
+    return;
+  }
+
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOWriteHandle *wh =
+      [FileIOResolver resolveDestination:destination
+                               overwrite:YES
+                  createParentDirectories:YES
+                                    error:&errCode
+                                  message:&errMsg];
+  if (!wh || wh.filePath.length == 0) {
+    reject(errCode ?: @"ERR_IMAGE_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileDestination", nil);
+    return;
+  }
+
+  sherpa_onnx::image::ExportOptions opts;
+  opts.format = format;
+  opts.quality = quality;
+  opts.maxSide = maxSide;
+
+  const auto result = sherpa_onnx::image::ExportFrameToFile(
+      [bufferId UTF8String], (int)frameIndex, [wh.filePath UTF8String], opts);
+  if (!result.ok) {
+    [wh cleanup];
+    [[NSFileManager defaultManager] removeItemAtPath:wh.filePath error:nil];
+    reject([NSString stringWithUTF8String:result.errorCode.c_str()],
+           [NSString stringWithUTF8String:result.errorMessage.c_str()], nil);
+    return;
+  }
+
+  NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
+  [wh cleanup];
+  resolve(@{ @"outputKind" : @"fs", @"outputPath" : resultPath ?: wh.filePath });
 }
 
 @end

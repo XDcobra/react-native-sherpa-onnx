@@ -8,12 +8,20 @@ jest.mock('react-native', () => {
     getOfflineImageBufferFrameInfo: jest.fn(),
     releaseOfflineImageBuffer: jest.fn(),
     cancelOfflineImageBufferCreate: jest.fn(),
+    exportOfflineImageBufferFrame: jest.fn(),
   };
 
   return {
     NativeModules: {
       SherpaOnnx: {},
     },
+    Platform: { OS: 'ios' },
+    requireNativeComponent: jest.fn(() => {
+      const React = require('react');
+      return function MockNativeView() {
+        return React.createElement('OfflineImageBufferFrameView');
+      };
+    }),
     NativeEventEmitter: class {
       addListener(
         event: string,
@@ -45,6 +53,7 @@ import {
   createEmptyOfflineImageBuffer,
   createOfflineImageBufferFromBase64,
   createOfflineImageBufferFromFiles,
+  exportOfflineImageBufferFrame,
   getOfflineImageBufferFrameInfo,
   getOfflineImageBufferInfo,
   releaseOfflineImageBuffer,
@@ -61,6 +70,7 @@ describe('offline ImageBuffer public API', () => {
       getOfflineImageBufferFrameInfo: jest.Mock;
       releaseOfflineImageBuffer: jest.Mock;
       cancelOfflineImageBufferCreate: jest.Mock;
+      exportOfflineImageBufferFrame: jest.Mock;
     };
     __emitImageProgress: (event: unknown) => void;
     __listenerCount: () => number;
@@ -231,5 +241,27 @@ describe('offline ImageBuffer public API', () => {
       )
     ).rejects.toMatchObject({ code: 'ERR_IMAGE_CANCELLED' });
     expect(mockNative.createOfflineImageBufferFromFiles).not.toHaveBeenCalled();
+  });
+
+  it('exportOfflineImageBufferFrame passes FileDestination and returns ResolvedFileRef', async () => {
+    mockNative.exportOfflineImageBufferFrame.mockResolvedValue({
+      outputKind: 'fs',
+      outputPath: '/tmp/out.jpg',
+    });
+
+    const ref = await exportOfflineImageBufferFrame(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.jpg' },
+      { format: 'jpeg', quality: 90 }
+    );
+
+    expect(mockNative.exportOfflineImageBufferFrame).toHaveBeenCalledWith(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.jpg' },
+      { format: 'jpeg', quality: 90, maxSide: 0 }
+    );
+    expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.jpg' });
   });
 });

@@ -73,6 +73,41 @@ internal object ImageBufferService {
     ImageBufferNative.nativeGetFrameInfo(bufferId, frameIndex)
 
   /**
+   * Encode [frameIndex] to an absolute filesystem path (caller owns FileDestination).
+   * @return null on success; otherwise a map with errorCode/errorMessage.
+   */
+  fun exportFrameToPath(
+    bufferId: String,
+    frameIndex: Int,
+    outPath: String,
+    format: String,
+    quality: Int,
+    maxSide: Int,
+  ): Map<String, Any>? {
+    val result = ImageBufferNative.nativeExportFrame(
+      bufferId,
+      frameIndex,
+      outPath,
+      format,
+      quality,
+      maxSide,
+    ) ?: return mapOf(
+      "errorCode" to "ERR_IMAGE_INTERNAL",
+      "errorMessage" to "nativeExportFrame returned null",
+    )
+    val ok = result["ok"] as? Boolean ?: false
+    if (ok) return null
+    return mapOf(
+      "errorCode" to (result["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"),
+      "errorMessage" to (result["errorMessage"] as? String ?: "encode failed"),
+    )
+  }
+
+  /** Build an ARGB_8888 bitmap for FrameView preview (JNI fill; not via JS). */
+  fun copyFrameBitmap(bufferId: String, frameIndex: Int, maxSide: Int): Bitmap? =
+    ImageBufferNative.nativeCreateFrameBitmap(bufferId, frameIndex, maxSide)
+
+  /**
    * Create from already-resolved image bytes.
    * [fileOrigin] selects mmap threshold path (true for FileSource create, false for base64/heap).
    */

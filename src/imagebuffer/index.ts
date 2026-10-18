@@ -11,10 +11,18 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
-import type { FileSource } from '../fileio/types';
+import { assertFileDestinationSupportedOnPlatform } from '../fileio';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
 import { ImageErrorCode } from './types';
 import type {
   CreateOfflineImageBufferOptions,
+  ExportOfflineImageBufferFrameOptions,
+  ImageExportFormat,
+  ImageFrameResizeMode,
   ImageProgressEvent,
   ImageStorageKind,
   LiveImageBufferInfo,
@@ -24,6 +32,10 @@ import type {
   OfflineImageBufferRef,
   OfflineImageFrameInfo,
 } from './types';
+import {
+  OfflineImageBufferFrameView,
+  type OfflineImageBufferFrameViewProps,
+} from './OfflineImageBufferFrameView';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -299,10 +311,77 @@ export async function releaseOfflineImageBuffer(
   }
 }
 
+function parseResolvedFileRef(result: {
+  outputKind: string;
+  outputPath: string;
+}): ResolvedFileRef {
+  if (result.outputKind === 'contentUri') {
+    return { kind: 'contentUri', uri: result.outputPath };
+  }
+  return { kind: 'fs', path: result.outputPath };
+}
+
+/**
+ * Encode one frame to a {@link FileDestination} (same write model as `saveAudioAsFile`).
+ * Returns a {@link ResolvedFileRef} for the written file.
+ */
+export async function exportOfflineImageBufferFrame(
+  buffer: OfflineImageBufferIdSource,
+  frameIndex: number,
+  output: FileDestination,
+  options?: ExportOfflineImageBufferFrameOptions
+): Promise<ResolvedFileRef> {
+  const id = resolveImageBufferId(buffer);
+  assertImageBufferId(id);
+  if (!Number.isFinite(frameIndex) || frameIndex < 0) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: frameIndex must be a non-negative integer`
+    );
+  }
+  assertFileDestinationSupportedOnPlatform(output);
+
+  const format: ImageExportFormat = options?.format ?? 'jpeg';
+  if (format !== 'jpeg' && format !== 'png' && format !== 'webp') {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: unsupported export format: ${String(
+        format
+      )}`
+    );
+  }
+
+  const result = await getNative().exportOfflineImageBufferFrame(
+    id,
+    Math.trunc(frameIndex),
+    output as unknown as Object,
+    {
+      format,
+      quality: options?.quality ?? 85,
+      maxSide: options?.maxSide ?? 0,
+    }
+  );
+
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:image] exportFrame',
+      id,
+      frameIndex,
+      format,
+      result
+    );
+  }
+
+  return parseResolvedFileRef(result);
+}
+
 export type {
   CreateOfflineImageBufferOptions,
+  ExportOfflineImageBufferFrameOptions,
+  FileDestination,
   FileSource,
+  ImageExportFormat,
+  ImageFrameResizeMode,
   ImageProgressEvent,
+  OfflineImageBufferFrameViewProps,
   OfflineImageBufferHandle,
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
@@ -310,6 +389,7 @@ export type {
   OfflineImageFrameInfo,
   LiveImageBufferInfo,
   ImageStorageKind,
+  ResolvedFileRef,
 };
 
-export { ImageErrorCode };
+export { ImageErrorCode, OfflineImageBufferFrameView };
