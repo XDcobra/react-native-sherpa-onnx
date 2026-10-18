@@ -349,6 +349,18 @@ Read the full segmentation and memory guidance:
 - [segmentation-engine.md](segmentation-engine.md)
 - [memory-and-models.md](memory-and-models.md)
 
+## Example app
+
+
+| ![Example 1](./images/example/pipeline_offline_1.png) | ![Example 2](./images/example/pipeline_offline_2.png) | ![Example 3](./images/example/pipeline_offline_3.png) |
+| --- | --- | --- |
+| ![Example 4](./images/example/pipeline_streaming_1.png) | ![Example 5](./images/example/pipeline_streaming_2.png) | ![Example 6](./images/example/pipeline_streaming_3.png) |
+
+
+The monorepo example exposes **Offline Pipeline Showcase** and **Live Pipeline Showcase** as developer compositions across STT/TTS buffers. See [example/README.md](../example/README.md#offline-pipeline-showcase-file---stt---tts---playback) and [Live Pipeline Showcase](../example/README.md#live-pipeline-showcase-micfile---stt---tts---playback).
+
+---
+
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

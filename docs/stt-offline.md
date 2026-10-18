@@ -492,6 +492,17 @@ await punct.destroy();
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/stt_1.png) | ![Example 2](./images/example/stt_2.png) | ![Example 3](./images/example/stt_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speech-to-Text (offline)** (`example/src/screens/stt/STTScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-to-text-offline).
+
+---
+
 ## See also
 
 - [Streaming STT](stt-streaming.md)

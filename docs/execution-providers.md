@@ -306,6 +306,15 @@ console.log('Available EPs:', providers);
 - Core ML with Neural Engine gives significant speedup on Apple A12+ and M1+ chips
 - Always measure latency with your specific model — `canInit` doesn't guarantee speed improvement
 
+## Example app
+
+
+| ![Example 1](./images/example/settings_1.png) | ![Example 2](./images/example/settings_2.png) | ![Example 3](./images/example/settings_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Settings** (provider diagnostics) as a developer showcase for execution-provider checks. See [example/README.md](../example/README.md#settings-and-provider-diagnostics).
+
 ---
 
 ## See also

@@ -102,7 +102,6 @@ export default function OCRScreen() {
   const [numThreads, setNumThreads] = useState(2);
   const [provider, setProvider] = useState('cpu');
   const [detUnclipRatio, setDetUnclipRatio] = useState(DEFAULT_UNCLIP);
-  const [unclipSliderWidth, setUnclipSliderWidth] = useState(0);
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const [initBusy, setInitBusy] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
@@ -347,24 +346,34 @@ export default function OCRScreen() {
     selectedFolder,
   ]);
 
-  const applyUnclipFromPress = useCallback(
-    (event: GestureResponderEvent) => {
-      if (unclipSliderWidth <= 0 || initBusy || runBusy) return;
-      const x = Math.max(
-        0,
-        Math.min(unclipSliderWidth, event.nativeEvent.locationX)
-      );
-      const t = x / unclipSliderWidth;
+  const unclipTrackWidthRef = useRef(0);
+
+  const applyUnclipFromLocationX = useCallback(
+    (locationX: number) => {
+      if (initBusy || runBusy) return;
+      const width = unclipTrackWidthRef.current;
+      if (width <= 0) return;
+      const x = Math.max(0, Math.min(width, locationX));
+      const t = x / width;
       setDetUnclipRatio(
         clampUnclipRatio(MIN_UNCLIP + t * (MAX_UNCLIP - MIN_UNCLIP))
       );
     },
-    [initBusy, runBusy, unclipSliderWidth]
+    [initBusy, runBusy]
+  );
+
+  const onUnclipTouch = useCallback(
+    (event: GestureResponderEvent) => {
+      applyUnclipFromLocationX(event.nativeEvent.locationX);
+    },
+    [applyUnclipFromLocationX]
   );
 
   const onUnclipSliderLayout = useCallback((event: LayoutChangeEvent) => {
-    setUnclipSliderWidth(event.nativeEvent.layout.width);
+    unclipTrackWidthRef.current = event.nativeEvent.layout.width;
   }, []);
+
+  const unclipSliderDisabled = initBusy || runBusy;
 
   const clearResults = useCallback(() => {
     setResultText('');
@@ -594,19 +603,22 @@ export default function OCRScreen() {
               </Text>
             </View>
             <Text style={styles.sectionHint}>
-              DB box expansion for ppocr/doctr (1.0 tight … 2.5 loose). Default
-              1.5. Re-initialize to apply.
+              Expands DB detection boxes for ppocr/doctr (1.0 tight … 2.5
+              loose). Default 1.5 — not glyph-perfect bounds. Re-init to apply.
             </Text>
-            <Pressable
+            <View
               style={[
                 styles.sliderTrack,
-                (initBusy || runBusy) && styles.sliderTrackDisabled,
+                unclipSliderDisabled && styles.sliderTrackDisabled,
               ]}
               onLayout={onUnclipSliderLayout}
-              onPress={applyUnclipFromPress}
-              disabled={initBusy || runBusy}
+              onStartShouldSetResponder={() => !unclipSliderDisabled}
+              onMoveShouldSetResponder={() => !unclipSliderDisabled}
+              onResponderTerminationRequest={() => false}
+              onResponderGrant={onUnclipTouch}
+              onResponderMove={onUnclipTouch}
             >
-              <View style={styles.sliderRail}>
+              <View style={styles.sliderRail} pointerEvents="none">
                 <View
                   style={[
                     styles.sliderFill,
@@ -621,6 +633,7 @@ export default function OCRScreen() {
                 />
               </View>
               <View
+                pointerEvents="none"
                 style={[
                   styles.sliderThumb,
                   {
@@ -632,7 +645,7 @@ export default function OCRScreen() {
                   },
                 ]}
               />
-            </Pressable>
+            </View>
             <View style={styles.sliderLegend}>
               <Text style={styles.sliderLegendText}>
                 {MIN_UNCLIP.toFixed(1)}

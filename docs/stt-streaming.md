@@ -490,6 +490,17 @@ await releasePipelineAudioBuffer(audioIn);
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/stt_streaming_1.png) | ![Example 2](./images/example/stt_streaming_2.png) | ![Example 3](./images/example/stt_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speech-to-Text (streaming)** (`example/src/screens/stt-streaming/STTStreamingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-to-text-streaming).
+
+---
+
 ## See also
 
 - [Offline STT](stt-offline.md)

@@ -654,6 +654,17 @@ try {
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/vad_1.png) | ![Example 2](./images/example/vad_2.png) | ![Example 3](./images/example/vad_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Voice Activity Detection** (`example/src/screens/vad/VADScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#voice-activity-detection).
+
+---
+
 ## See also
 
 - [Segmentation engine](segmentation-engine.md)

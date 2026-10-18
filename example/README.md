@@ -57,10 +57,6 @@ If you do not want to download models at runtime via the **Download Manager Show
 
 This screen exercises the runtime model delivery flow from [docs/download-manager.md](../docs/download-manager.md). It covers refresh, metadata lookup, download, extraction, pause/resume for both download and extraction phases, cleanup of incomplete state, and deletion of installed models. It is the main screen for testing real-world model lifecycle behavior before opening STT/TTS/VAD/OCR feature screens.
 
-## OCR (offline)
-
-Home → **Vision** → **OCR**. Developer showcase for [docs/ocr-offline.md](../docs/ocr-offline.md): download an OCR pack (`ModelCategory.Ocr`), initialize `createOCR` (`auto` / `ppocr` / `doctr` / `doc_vlm`), load a bundled `test_images/` sample or pick your own file into an `OfflineImageBuffer`, run `recognize` with progress/cancel, then inspect plain text, spatial `span.quad` overlays on the image, and (for `doc_vlm`) Markdown / DocTags extras. Shared UI: `OfflineImageBufferWidget` (mirrors the offline audio picker).
-
 ## Speech-to-Text (offline)
 
 
@@ -300,3 +296,12 @@ This screen evaluates multi-speaker audio recordings with offline diarization en
 | --- | --- | --- |
 
 This screen demonstrates true real-time streaming speaker diarization powered by Sortformer ONNX models. It streams live audio from a microphone or test audio files directly into the native streaming engine, outputting speaker segments to a `LiveSegmentBuffer` in real time. Features include an active speaker HUD with customizable speaker aliases, meeting analytics (speaking percentages, talk times, turn counts), runtime parameter tuning (onset/offset thresholds, min durations), and full pipeline lifecycle controls (start, flush, reset, stop). See [docs/diarization-streaming.md](../docs/diarization-streaming.md).
+
+## OCR (offline)
+
+
+| ![OCR offline 1](../docs/images/example/ocr_offline_1.png) | ![OCR offline 2](../docs/images/example/ocr_offline_2.png) | ![OCR offline 3](../docs/images/example/ocr_offline_3.png) |
+| --- | --- | --- |
+
+
+Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).

@@ -287,6 +287,17 @@ await pipeline.completed;
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/tts_streaming_1.png) | ![Example 2](./images/example/tts_streaming_2.png) | ![Example 3](./images/example/tts_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Text-to-Speech (streaming)** (`example/src/screens/tts-streaming/StreamingTTSScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#text-to-speech-streaming).
+
+---
+
 ## See also
 
 - [Text-to-Speech (offline)](tts-offline.md)

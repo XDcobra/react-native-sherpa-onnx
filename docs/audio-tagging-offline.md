@@ -391,6 +391,17 @@ await releasePipelineSegmentBuffer(segOut);
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/audio_tagging_offline_1.png) | ![Example 2](./images/example/audio_tagging_offline_2.png) | ![Example 3](./images/example/audio_tagging_offline_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Audio tagging (offline)** (`example/src/screens/audio-tagging/AudioTaggingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#audio-tagging-offline).
+
+---
+
 ## See also
 
 - [Audio tagging (live overload)](audio-tagging-live.md)
