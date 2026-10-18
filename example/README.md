@@ -305,3 +305,5 @@ This screen demonstrates true real-time streaming speaker diarization powered by
 
 
 Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).
+
+The same screen includes a **PDF text layer** probe (`react-native-sherpa-onnx/pdf`). The example enables PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`); consumer apps keep the SDK default off. See [docs/pdf-offline.md](../docs/pdf-offline.md).
