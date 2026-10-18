@@ -3611,6 +3611,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pdfHelper.extractPdfTextLayer(source, textOutBufferId, options, promise)
   }
 
+  override fun rasterizePdfPages(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    pdfHelper.rasterizePdfPages(source, options, promise)
+  }
+
   override fun createEmptyOfflineImageBuffer(promise: Promise) {
     try {
       com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)

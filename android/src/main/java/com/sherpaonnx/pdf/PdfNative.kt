@@ -1,6 +1,6 @@
 package com.sherpaonnx.pdf
 
-/** JNI bridge for PDFium text-layer extract (stub when HAVE_PDFIUM is off). */
+/** JNI bridge for PDFium text-layer extract / page raster (stub when HAVE_PDFIUM is off). */
 internal object PdfNative {
   init {
     System.loadLibrary("sherpaonnx")
@@ -16,4 +16,15 @@ internal object PdfNative {
     pdfBytes: ByteArray,
     pages: IntArray?,
   ): Array<Any?>
+
+  /**
+   * Rasterize pages into a new OfflineImageBuffer.
+   * Returns HashMap: ok, errorCode?, errorMessage?, bufferId, frameCount, …
+   */
+  external fun nativeRasterizePages(
+    pdfBytes: ByteArray,
+    pages: IntArray?,
+    dpi: Int,
+    maxSide: Int,
+  ): HashMap<String, Any>
 }

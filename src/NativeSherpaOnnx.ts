@@ -1130,6 +1130,23 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Rasterize PDF pages into a new OfflineImageBuffer (RGB8 frames with pageNumber).
+   * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   */
+  rasterizePdfPages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+    pageCount: number;
+  }>;
+
+  /**
    * Get a slice of hypothesis text from an offline text buffer.
    */
   getOfflineTextBufferTextSlice(

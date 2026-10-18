@@ -575,10 +575,12 @@ add_executable(pdf_text_layer_host_test
   "${PDF_TEST_DIR}/pdf_text_layer_host_test.cpp"
   "${PDF_CPP_ROOT}/PdfDocument.cpp"
   "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
 )
 target_include_directories(pdf_text_layer_host_test PRIVATE
   "${PDF_CPP_ROOT}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image"
 )
 target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
 # Default host builds leave HAVE_PDFIUM undefined (disabled stub).

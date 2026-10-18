@@ -44,6 +44,21 @@ class SherpaOnnxPdfHelper(
     }
   }
 
+  fun rasterizePdfPages(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        doRasterize(source, options, promise)
+      } catch (e: Exception) {
+        Log.e(TAG, "rasterizePdfPages failed", e)
+        promise.reject(ERR_INTERNAL, e.message, e)
+      }
+    }
+  }
+
   private fun doExtract(
     source: ReadableMap,
     textOutBufferId: String,
@@ -131,6 +146,82 @@ class SherpaOnnxPdfHelper(
     result.putInt("pagesWithText", pagesWithText)
     result.putInt("utf16Length", text.length)
     result.putInt("spatialSpanCount", spans.size)
+    promise.resolve(result)
+  }
+
+  private fun doRasterize(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    if (!PdfNative.nativeIsPdfiumEnabled()) {
+      promise.reject(
+        ERR_DISABLED,
+        "PDFium is not linked. Rebuild with sherpaOnnxEnablePdfium=true " +
+          "(Android gradle.properties) and ensure pdfium prebuilts resolve.",
+      )
+      return
+    }
+
+    com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactContext)
+
+    val bytes =
+      try {
+        val file = fileIO.resolveSourceToFilePath(source)
+        file.readBytes()
+      } catch (e: Exception) {
+        promise.reject(ERR_OPEN, "Failed to read PDF FileSource: ${e.message}", e)
+        return
+      }
+    if (bytes.isEmpty()) {
+      promise.reject(ERR_INVALID, "PDF FileSource is empty")
+      return
+    }
+
+    val pages = readPages(options)
+    val dpi =
+      if (options != null && options.hasKey("dpi") && !options.isNull("dpi")) {
+        options.getDouble("dpi").toInt().coerceAtLeast(1)
+      } else {
+        144
+      }
+    val maxSide =
+      if (options != null && options.hasKey("maxSide") && !options.isNull("maxSide")) {
+        options.getDouble("maxSide").toInt()
+      } else {
+        4096
+      }
+
+    emitProgress(0, 1, "raster")
+    val raw = PdfNative.nativeRasterizePages(bytes, pages, dpi, maxSide)
+    val ok = raw["ok"] as? Boolean ?: false
+    if (!ok) {
+      val code = raw["errorCode"] as? String ?: ERR_INTERNAL
+      val msg = raw["errorMessage"] as? String ?: "PDF rasterize failed"
+      promise.reject(code, msg)
+      return
+    }
+    emitProgress(1, 1, "done")
+
+    val bufferId = raw["bufferId"] as? String
+    if (bufferId.isNullOrEmpty()) {
+      promise.reject(ERR_INTERNAL, "rasterize returned no bufferId")
+      return
+    }
+
+    Log.i(
+      TAG,
+      "rasterize ok bufferId=$bufferId frames=${raw["frameCount"]} pageCount=${raw["pageCount"]}",
+    )
+
+    val result: WritableMap = Arguments.createMap()
+    result.putString("bufferId", bufferId)
+    result.putString("kind", raw["kind"] as? String ?: "offlineImageBuffer")
+    result.putString("state", raw["state"] as? String ?: "immutable")
+    result.putInt("frameCount", (raw["frameCount"] as? Number)?.toInt() ?: 0)
+    result.putDouble("totalBytes", (raw["totalBytes"] as? Number)?.toDouble() ?: 0.0)
+    result.putString("storageKind", raw["storageKind"] as? String ?: "ram")
+    result.putInt("pageCount", (raw["pageCount"] as? Number)?.toInt() ?: 0)
     promise.resolve(result)
   }
 
