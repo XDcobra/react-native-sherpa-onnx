@@ -134,12 +134,14 @@ example/android/app/src/main/assets/models/**
 !example/android/app/src/main/assets/models/**/README.md
 !example/android/app/src/main/assets/models/README.md
 example/android/sherpa_models/src/main/assets/models/**
-# Ignore sherpa_models contents except small example audio folders
+# Ignore sherpa_models contents except small example fixture folders
 example/ios/sherpa_models/*
 !example/ios/sherpa_models/test_codec/
 !example/ios/sherpa_models/test_wavs/
+!example/ios/sherpa_models/test_pdfs/
 !example/ios/sherpa_models/test_codec/**
 !example/ios/sherpa_models/test_wavs/**
+!example/ios/sherpa_models/test_pdfs/**
 example/.model-cache/
 example/models/
 
@@ -152,6 +154,8 @@ android/src/main/cpp/include/ffmpeg/
 android/src/main/cpp/include/libarchive/
 # libwebp headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/webp/
+# pdfium headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/pdfium/
 # sherpa-onnx C-API headers (from Maven AAR or release; Gradle extracts to here)
 android/src/main/cpp/include/sherpa-onnx/
 android/src/main/cpp/include/onnxruntime/
