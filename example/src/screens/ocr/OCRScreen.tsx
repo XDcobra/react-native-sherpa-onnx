@@ -1264,7 +1264,7 @@ export default function OCRScreen() {
                 </View>
                 {overlayEnabled && resultTextBufferId ? (
                   <OfflineImageBufferAnnotatedView
-                    image={imageInfo.bufferId}
+                    buffer={imageInfo.bufferId}
                     text={resultTextBufferId}
                     frameIndex={resultFrameIndex}
                     selectedIndex={selectedSpanIndex}
@@ -1296,14 +1296,14 @@ export default function OCRScreen() {
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={[
-                    styles.secondaryButton,
+                    styles.primaryButton,
                     styles.actionButtonFlex,
                     resultFrameIndex <= 0 && styles.primaryButtonDisabled,
                   ]}
                   disabled={resultFrameIndex <= 0}
                   onPress={() => setResultFrameIndex((i) => Math.max(0, i - 1))}
                 >
-                  <Text style={styles.secondaryButtonText}>Previous</Text>
+                  <Text style={styles.primaryButtonText}>Previous</Text>
                 </TouchableOpacity>
                 <Text style={styles.toggleLabel}>
                   Page {resultFrameIndex + 1} / {resultPageCount}
@@ -1316,7 +1316,7 @@ export default function OCRScreen() {
                 </Text>
                 <TouchableOpacity
                   style={[
-                    styles.secondaryButton,
+                    styles.primaryButton,
                     styles.actionButtonFlex,
                     resultFrameIndex >= resultPageCount - 1 &&
                       styles.primaryButtonDisabled,
@@ -1328,7 +1328,7 @@ export default function OCRScreen() {
                     )
                   }
                 >
-                  <Text style={styles.secondaryButtonText}>Next</Text>
+                  <Text style={styles.primaryButtonText}>Next</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
