@@ -303,16 +303,7 @@ export async function getOfflineImageBufferInfo(
   return mapInfo(await getNative().getOfflineImageBufferInfo(id));
 }
 
-export async function getOfflineImageBufferFrameInfo(
-  buffer: OfflineImageBufferIdSource,
-  frameIndex: number
-): Promise<OfflineImageFrameInfo> {
-  const id = resolveImageBufferId(buffer);
-  assertImageBufferId(id);
-  return mapFrameInfo(
-    await getNative().getOfflineImageBufferFrameInfo(id, frameIndex)
-  );
-}
+export { getOfflineImageBufferFrameInfo } from './getFrameInfo';
 
 /**
  * Ensure frame RGB is resident. No-op (returns frame info) for immutable buffers.
@@ -436,3 +427,14 @@ export type {
 };
 
 export { ImageErrorCode, OfflineImageBufferFrameView };
+export {
+  OfflineImageBufferAnnotatedView,
+  type OfflineImageBufferAnnotatedViewProps,
+  type OfflineImageBufferSpanPressEvent,
+} from './OfflineImageBufferAnnotatedView';
+export {
+  mapTextSpatialSpansToFrame,
+  type MapTextSpatialSpansToFrameOptions,
+  type MapTextSpatialSpansToFrameOrigin,
+  type MappedTextSpatialSpan,
+} from './mapToFrame';
