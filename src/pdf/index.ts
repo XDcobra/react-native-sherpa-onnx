@@ -30,9 +30,18 @@ import {
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
 
-function mapPdfiumDisabled(err: unknown): never {
+function nativeErrorCode(err: unknown): string {
+  if (err && typeof err === 'object' && 'code' in err) {
+    return String((err as { code: unknown }).code);
+  }
+  return '';
+}
+
+function mapPdfNativeError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
+  const code = nativeErrorCode(err);
   if (
+    code === PdfErrorCode.PDFIUM_DISABLED ||
     msg.includes(PdfErrorCode.PDFIUM_DISABLED) ||
     msg.includes('PDFium is not linked')
   ) {
@@ -41,6 +50,20 @@ function mapPdfiumDisabled(err: unknown): never {
         `${PdfErrorCode.PDFIUM_DISABLED}: PDFium is not linked. Rebuild with sherpaOnnxEnablePdfium=true (Android) or SHERPA_ONNX_ENABLE_PDFIUM=1 (iOS) and ensure pdfium prebuilts resolve.`
       ),
       { code: PdfErrorCode.PDFIUM_DISABLED, cause: err }
+    );
+  }
+  // RN promise.reject(code, message) puts the code on error.code; message is
+  // often the human sentence without ERR_PDF_NO_TEXT_LAYER.
+  if (
+    code === PdfErrorCode.NO_TEXT_LAYER ||
+    msg.includes(PdfErrorCode.NO_TEXT_LAYER) ||
+    /no extractable text layer/i.test(msg)
+  ) {
+    throw Object.assign(
+      new Error(
+        `${PdfErrorCode.NO_TEXT_LAYER}: No extractable text layer on the selected pages (scan-only PDF or empty)`
+      ),
+      { code: PdfErrorCode.NO_TEXT_LAYER, cause: err }
     );
   }
   throw err;
@@ -146,7 +169,7 @@ export async function extractPdfTextLayer(
       spatialSpanCount: Number(raw.spatialSpanCount ?? 0),
     };
   } catch (err: unknown) {
-    return mapPdfiumDisabled(err);
+    return mapPdfNativeError(err);
   } finally {
     progressSub?.remove();
   }
@@ -237,7 +260,7 @@ export async function rasterizePdfPages(
       pageCount: Number(raw.pageCount ?? 0),
     };
   } catch (err: unknown) {
-    return mapPdfiumDisabled(err);
+    return mapPdfNativeError(err);
   } finally {
     progressSub?.remove();
   }

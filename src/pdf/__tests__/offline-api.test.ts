@@ -38,6 +38,23 @@ describe('pdf offline api', () => {
     await expect(isPdfiumEnabled()).resolves.toBe(true);
   });
 
+  it('maps message-only no-text-layer reject to ERR_PDF_NO_TEXT_LAYER', async () => {
+    mockNative.extractPdfTextLayer.mockRejectedValue(
+      Object.assign(
+        new Error(
+          'No extractable text layer on the selected pages (scan-only PDF or empty)'
+        ),
+        { code: PdfErrorCode.NO_TEXT_LAYER }
+      )
+    );
+    await expect(
+      extractPdfTextLayer(
+        { kind: 'fs', path: '/tmp/scan.pdf' },
+        'txt_off_00000000-0000-0000-0000-000000000001'
+      )
+    ).rejects.toMatchObject({ code: PdfErrorCode.NO_TEXT_LAYER });
+  });
+
   it('maps disabled native error to ERR_PDF_PDFIUM_DISABLED', async () => {
     mockNative.extractPdfTextLayer.mockRejectedValue(
       new Error('ERR_PDF_PDFIUM_DISABLED: PDFium is not linked')
