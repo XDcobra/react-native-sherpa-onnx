@@ -278,7 +278,9 @@ const ref = await exportOfflineImageBufferFrame(
 
 React Native view that shows one buffer frame.
 
-![OfflineImageBufferFrameView](./images/imagebuffer-frame-view.png)
+<p align="center">
+  <img src="./images/imagebuffer-frame-view.png" alt="OfflineImageBufferFrameView" />
+</p>
 
 ```tsx
 import { OfflineImageBufferFrameView } from 'react-native-sherpa-onnx/imagebuffer';
@@ -340,13 +342,15 @@ For a ready-made overlay on `OfflineImageBufferFrameView`, use `OfflineImageBuff
 
 FrameView plus spatial-span boxes. Maps `origin: 'ocr'` (already frame pixels) and `origin: 'textLayer'` (PDF user-space → frame pixels via `pageWidth` / `pageHeight`). Caller still owns `release` on both buffers.
 
-![OfflineImageBufferAnnotatedView](./images/imagebuffer-annotated-view.png)
+<p align="center">
+  <img src="./images/imagebuffer-annotated-view.png" alt="OfflineImageBufferAnnotatedView" />
+</p>
 
 ```tsx
 import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imagebuffer';
 
 <OfflineImageBufferAnnotatedView
-  image={pages}
+  buffer={pages}
   text={textOut}
   frameIndex={0}
   origins={['ocr', 'textLayer']}
@@ -362,7 +366,7 @@ import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imageb
 
 | Prop | Notes |
 |------|--------|
-| `image` | `OfflineImageBufferIdSource` |
+| `buffer` | `OfflineImageBufferIdSource` |
 | `text` | Offline text buffer with spatial spans |
 | `frameIndex` | Frame to show (default `0`) |
 | `origins` | `'ocr'` and/or `'textLayer'` (default both) |
@@ -546,11 +550,11 @@ function aabb(quad: TextSpatialSpan['quad']) {
 }
 
 function CustomSpanOverlay({
-  image,
+  buffer,
   text,
   frameIndex = 0,
 }: {
-  image: OfflineImageBufferIdSource;
+  buffer: OfflineImageBufferIdSource;
   text: OfflineTextBufferIdSource;
   frameIndex?: number;
 }) {
@@ -561,10 +565,10 @@ function CustomSpanOverlay({
 
   // Target space for the mapper: decoded ImageBuffer pixels, not PDF user-space.
   useEffect(() => {
-    getOfflineImageBufferFrameInfo(image, frameIndex).then((info) =>
+    getOfflineImageBufferFrameInfo(buffer, frameIndex).then((info) =>
       setFrame({ width: info.width, height: info.height })
     );
-  }, [image, frameIndex]);
+  }, [buffer, frameIndex]);
 
   // Spans stay on the text buffer (`ocr` = frame px, `textLayer` = PDF user-space).
   useEffect(() => {
@@ -614,7 +618,7 @@ function CustomSpanOverlay({
       }}
     >
       <OfflineImageBufferFrameView
-        buffer={image}
+        buffer={buffer}
         frameIndex={frameIndex}
         resizeMode="contain"
         style={{ width: '100%', height: '100%' }}

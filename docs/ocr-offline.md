@@ -422,7 +422,7 @@ console.log(page.spanCount);
 import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imagebuffer';
 
 <OfflineImageBufferAnnotatedView
-  image={image}
+  buffer={image}
   text={textOut}
   frameIndex={0}
   onSpanPress={(e) => console.log(e.index, e.utf16Start, e.quad)}
