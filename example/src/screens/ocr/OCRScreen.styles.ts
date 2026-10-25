@@ -72,6 +72,64 @@ export const styles = StyleSheet.create({
     flex: 1.2,
     fontWeight: '600',
   },
+  matrixPathCol: {
+    flex: 1.35,
+    fontWeight: '600',
+  },
+  matrixCell: {
+    flex: 1,
+    fontSize: 10,
+    color: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    lineHeight: 13,
+  },
+  pathCardList: {
+    gap: 8,
+  },
+  pathCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+  },
+  pathCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  pathCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+    flex: 1,
+  },
+  pathCardChevron: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '700',
+  },
+  pathCardBody: {
+    gap: 6,
+  },
+  pathCardLine: {
+    fontSize: 12,
+    color: '#334155',
+    lineHeight: 17,
+  },
+  pathCardLabel: {
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  pathCardMono: {
+    fontFamily: 'Menlo',
+    fontSize: 11,
+    color: '#1e293b',
+    lineHeight: 16,
+  },
   sectionBody: {
     gap: 10,
   },
@@ -196,6 +254,10 @@ export const styles = StyleSheet.create({
     color: '#111',
     lineHeight: 22,
   },
+  resultTextHighlight: {
+    backgroundColor: 'rgba(255, 59, 48, 0.22)',
+    color: '#111',
+  },
   tabRow: {
     flexDirection: 'row',
     gap: 8,
@@ -237,11 +299,19 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+    gap: 8,
+  },
+  toggleTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   toggleLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#334155',
+    flex: 1,
   },
   progressBox: {
     backgroundColor: '#f0f0f0',

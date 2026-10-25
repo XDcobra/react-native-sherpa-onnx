@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -66,6 +66,7 @@ import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
 } from '../../utils/ocrCustomInitFill';
+import { OcrInputPathLegend } from './OcrInputPathLegend';
 import { OcrQuadOverlay } from './OcrQuadOverlay';
 import { styles } from './OCRScreen.styles';
 
@@ -85,6 +86,78 @@ function isGranitePack(id: string): boolean {
 function utf16Slice(text: string, start: number, end: number): string {
   // TextBuffer offsets are UTF-16 code units; string.slice matches for BMP text.
   return text.slice(start, end);
+}
+
+function textForFrame(
+  text: string,
+  spans: TextSpatialSpan[],
+  frameIndex: number
+): string {
+  return spans
+    .filter((span) => span.frameIndex === frameIndex)
+    .map((span) => utf16Slice(text, span.utf16Start, span.utf16End))
+    .filter((slice) => slice.length > 0)
+    .join('\n');
+}
+
+function HighlightedResultText({
+  fullText,
+  spans,
+  selectedIndex,
+  pageOnly,
+  frameIndex,
+}: {
+  fullText: string;
+  spans: TextSpatialSpan[];
+  selectedIndex: number | null;
+  pageOnly: boolean;
+  frameIndex: number;
+}) {
+  if (pageOnly) {
+    const pageSpans = spans
+      .map((span, index) => ({ span, index }))
+      .filter(({ span }) => span.frameIndex === frameIndex);
+    if (pageSpans.length === 0) {
+      return <Text style={styles.resultText}>(empty text)</Text>;
+    }
+    return (
+      <Text style={styles.resultText}>
+        {pageSpans.map(({ span, index }, i) => {
+          const slice = utf16Slice(fullText, span.utf16Start, span.utf16End);
+          return (
+            <Text key={index}>
+              {i > 0 ? '\n' : ''}
+              <Text
+                style={
+                  selectedIndex === index
+                    ? styles.resultTextHighlight
+                    : undefined
+                }
+              >
+                {slice}
+              </Text>
+            </Text>
+          );
+        })}
+      </Text>
+    );
+  }
+
+  const selected = selectedIndex != null ? spans[selectedIndex] ?? null : null;
+  if (!selected || fullText.length === 0) {
+    return <Text style={styles.resultText}>{fullText || '(empty text)'}</Text>;
+  }
+  const start = Math.max(0, selected.utf16Start);
+  const end = Math.min(fullText.length, selected.utf16End);
+  return (
+    <Text style={styles.resultText}>
+      {fullText.slice(0, start)}
+      <Text style={styles.resultTextHighlight}>
+        {fullText.slice(start, end)}
+      </Text>
+      {fullText.slice(end)}
+    </Text>
+  );
 }
 
 function clampUnclipRatio(value: number): number {
@@ -144,6 +217,9 @@ export default function OCRScreen() {
     null
   );
   const [overlayEnabled, setOverlayEnabled] = useState(true);
+  const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [textShowAllPages, setTextShowAllPages] = useState(false);
+  const [spansShowAllPages, setSpansShowAllPages] = useState(false);
   const [resultTab, setResultTab] = useState<'text' | 'markdown' | 'doctags'>(
     'text'
   );
@@ -428,6 +504,9 @@ export default function OCRScreen() {
     setProgressLabel(null);
     setProgressPercent(null);
     setResultTab('text');
+    setResultFrameIndex(0);
+    setTextShowAllPages(false);
+    setSpansShowAllPages(false);
   }, []);
 
   const releasePdfTextBuffer = useCallback(async () => {
@@ -457,7 +536,8 @@ export default function OCRScreen() {
   const handlePdfSelected = useCallback(
     (selection: PdfSourceSelection) => {
       clearResults();
-      setImageInfo(null);
+      // Widget already rasterized a preview buffer and called onBufferReady —
+      // keep imageInfo; do not release the widget-owned buffer.
       setPdfSelection(selection);
       setPdfExtractStatus('idle');
       setPdfExtractMessage(null);
@@ -541,22 +621,56 @@ export default function OCRScreen() {
       setError('Select a PDF first.');
       return;
     }
+    // Reuse widget preview buffer when already rasterized on PDF select.
+    if (imageInfo?.bufferId && imageInfo.kind === 'pdf') {
+      setPdfExtractMessage(
+        (prev) =>
+          `${
+            prev ?? PdfErrorCode.NO_TEXT_LAYER
+          } → raster ready (reused) frames=${imageInfo.frameCount} state=${
+            imageInfo.state ?? '?'
+          }`
+      );
+      return;
+    }
+
     setRunBusy(true);
     setError(null);
     clearResults();
     await releaseRasterBuffer();
     try {
-      const pages = await rasterizePdfPages(pdfSelection.source, {
+      const onProgress = (p: {
+        phase: string;
+        done: number;
+        total: number;
+      }) => {
+        setProgressLabel(`${p.phase} (${p.done}/${p.total})`);
+        setProgressPercent(
+          p.total > 0 ? Math.round((100 * p.done) / p.total) : null
+        );
+      };
+
+      // Probe with lazy-lru (cheap cold slots). Single page → rasterize-all.
+      let pages = await rasterizePdfPages(pdfSelection.source, {
         pages: 'all',
         dpi: 144,
         maxSide: 2048,
-        onProgress: (p) => {
-          setProgressLabel(`${p.phase} (${p.done}/${p.total})`);
-          setProgressPercent(
-            p.total > 0 ? Math.round((100 * p.done) / p.total) : null
-          );
-        },
+        strategy: 'lazy-lru',
+        onProgress,
       });
+      let state: 'immutable' | 'lazy' = 'lazy';
+      if (pages.info.frameCount <= 1) {
+        await releaseOfflineImageBuffer(pages.bufferId).catch(() => {});
+        pages = await rasterizePdfPages(pdfSelection.source, {
+          pages: 'all',
+          dpi: 144,
+          maxSide: 2048,
+          strategy: 'rasterize-all',
+          onProgress,
+        });
+        state = 'immutable';
+      }
+
       rasterBufferIdRef.current = pages.bufferId;
       const frame = await getOfflineImageBufferFrameInfo(pages, 0);
       setImageInfo({
@@ -566,11 +680,15 @@ export default function OCRScreen() {
         width: frame.width,
         height: frame.height,
         frameCount: pages.info.frameCount,
+        kind: 'pdf',
+        state,
       });
       setPdfExtractMessage(
         (prev) =>
           `${prev ?? PdfErrorCode.NO_TEXT_LAYER} → raster ok frames=${
             pages.info.frameCount
+          } strategy=${
+            state === 'lazy' ? 'lazy-lru' : 'rasterize-all'
           } pageNumber=${frame.pageNumber ?? '?'} dpi=${frame.dpi ?? '?'}`
       );
     } catch (err) {
@@ -581,7 +699,7 @@ export default function OCRScreen() {
       setProgressLabel(null);
       setProgressPercent(null);
     }
-  }, [clearResults, pdfSelection, releaseRasterBuffer]);
+  }, [clearResults, imageInfo, pdfSelection, releaseRasterBuffer]);
 
   const handleRecognize = useCallback(async () => {
     const engine = engineRef.current;
@@ -659,17 +777,32 @@ export default function OCRScreen() {
     abortRef.current?.abort();
   }, []);
 
-  const selectedSpanText =
-    selectedSpanIndex != null && spans[selectedSpanIndex]
-      ? utf16Slice(
-          resultText,
-          spans[selectedSpanIndex]!.utf16Start,
-          spans[selectedSpanIndex]!.utf16End
-        )
-      : null;
+  const resultPageCount = useMemo(() => {
+    const fromBuffer = imageInfo?.frameCount ?? 0;
+    const fromSpans =
+      spans.length > 0
+        ? Math.max(...spans.map((span) => span.frameIndex)) + 1
+        : 0;
+    return Math.max(fromBuffer, fromSpans, 1);
+  }, [imageInfo?.frameCount, spans]);
+
+  useEffect(() => {
+    setResultFrameIndex((i) =>
+      Math.min(Math.max(0, i), Math.max(0, resultPageCount - 1))
+    );
+  }, [resultPageCount, imageInfo?.bufferId]);
+
+  const multiPage = resultPageCount > 1;
+  const scopedSpans = spansShowAllPages
+    ? spans
+    : spans.filter((span) => span.frameIndex === resultFrameIndex);
+  const scopedText = textShowAllPages
+    ? resultText
+    : textForFrame(resultText, spans, resultFrameIndex);
 
   const docVlmExtras = resultMeta?.family === 'doc_vlm' ? resultMeta : null;
   const showDocVlmTabs =
+    textShowAllPages &&
     docVlmExtras != null &&
     (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
 
@@ -687,9 +820,8 @@ export default function OCRScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. OCR model</Text>
           <Text style={styles.sectionHint}>
-            Catalog merges bundled assets, PAD packs, and Download Manager
-            (OCR). Recommended demo start: ppocrv6-tiny. Recreate the engine
-            when switching families.
+            Recommended start: ppocrv6-tiny (bundled assets or Download Manager
+            → OCR).
           </Text>
 
           <View style={styles.sectionBody}>
@@ -701,9 +833,6 @@ export default function OCRScreen() {
 
             {initMode === 'auto' ? (
               <>
-                <Text style={styles.sectionHint}>
-                  Init uses modelType=auto (manifest / layout detect).
-                </Text>
                 <ModelFolderGrid
                   entries={catalogEntries}
                   selectedId={selectedFolder}
@@ -921,72 +1050,38 @@ export default function OCRScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. Input (image or PDF)</Text>
-          <View style={styles.compareFrame}>
-            <Text style={styles.compareTitle}>
-              Input paths
-              {pdfiumOn === false
-                ? ' · PDFium off'
-                : pdfiumOn
-                ? ' · PDFium on'
-                : ''}
-            </Text>
-            <View style={styles.compareTable}>
-              <View style={[styles.compareRow, styles.compareHeaderRow]}>
-                <Text style={[styles.compareCell, styles.compareCellWide]}>
-                  Input
-                </Text>
-                <Text style={styles.compareCell}>Steps</Text>
-                <Text style={styles.compareCell}>Output</Text>
-              </View>
-              <View style={styles.compareRow}>
-                <Text style={[styles.compareCell, styles.compareCellWide]}>
-                  Image
-                </Text>
-                <Text style={styles.compareCell}>ImageBuffer → recognize</Text>
-                <Text style={styles.compareCell}>TextBuffer origin=ocr</Text>
-              </View>
-              <View style={styles.compareRow}>
-                <Text style={[styles.compareCell, styles.compareCellWide]}>
-                  PDF + text layer
-                </Text>
-                <Text style={styles.compareCell}>extractPdfTextLayer</Text>
-                <Text style={styles.compareCell}>
-                  TextBuffer origin=textLayer
-                </Text>
-              </View>
-              <View style={styles.compareRow}>
-                <Text style={[styles.compareCell, styles.compareCellWide]}>
-                  PDF scan-only
-                </Text>
-                <Text style={styles.compareCell}>
-                  {PdfErrorCode.NO_TEXT_LAYER} → rasterize → recognize
-                </Text>
-                <Text style={styles.compareCell}>TextBuffer origin=ocr</Text>
-              </View>
-            </View>
-          </View>
+          <OcrInputPathLegend pdfiumOn={pdfiumOn} />
           {initializedFolder ? (
-            <OfflineImageBufferWidget
-              ref={imageWidgetRef}
-              imageFiles={IMAGE_FILES}
-              pdfFiles={PDF_FILES}
-              visible
-              disabled={runBusy || initBusy}
-              onBufferReady={(info) => {
-                clearPdfState().catch(() => {});
-                setImageInfo(info);
-                clearResults();
-              }}
-              onBufferReleased={() => {
-                setImageInfo(null);
-                clearResults();
-              }}
-              onPdfSelected={handlePdfSelected}
-              onPdfCleared={() => {
-                clearPdfState().catch(() => {});
-                clearResults();
-              }}
-            />
+            <>
+              <Text style={styles.sectionHint}>
+                Pick a fixture below. Paths, spans, and overlay rules are in the
+                legend above.
+              </Text>
+              <OfflineImageBufferWidget
+                ref={imageWidgetRef}
+                imageFiles={IMAGE_FILES}
+                pdfFiles={PDF_FILES}
+                visible
+                disabled={runBusy || initBusy}
+                onBufferReady={(info) => {
+                  if (info.kind !== 'pdf') {
+                    clearPdfState().catch(() => {});
+                  }
+                  setImageInfo(info);
+                  clearResults();
+                }}
+                onBufferReleased={() => {
+                  setImageInfo(null);
+                  clearResults();
+                }}
+                onPdfSelected={handlePdfSelected}
+                onPdfCleared={() => {
+                  clearPdfState().catch(() => {});
+                  setImageInfo(null);
+                  clearResults();
+                }}
+              />
+            </>
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>
@@ -1033,8 +1128,9 @@ export default function OCRScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>3. rasterizePdfPages</Text>
             <Text style={styles.sectionHint}>
-              No text layer — raster selected pages into OfflineImageBuffer
-              (dpi=144), then OCR like an image.
+              No text layer — ensure pages are in OfflineImageBuffer (dpi=144),
+              then OCR like an image. Multi-page uses lazy-lru; single-page uses
+              rasterize-all. Skips if preview buffer already exists.
             </Text>
             <TouchableOpacity
               style={[
@@ -1050,7 +1146,9 @@ export default function OCRScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  Run rasterizePdfPages
+                  {imageInfo?.kind === 'pdf'
+                    ? 'Ensure rasterizePdfPages'
+                    : 'Run rasterizePdfPages'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -1060,6 +1158,7 @@ export default function OCRScreen() {
                 {'\n'}
                 {imageInfo.width}×{imageInfo.height} · frames{' '}
                 {imageInfo.frameCount}
+                {imageInfo.state ? ` · ${imageInfo.state}` : ''}
               </Text>
             ) : null}
           </View>
@@ -1139,30 +1238,70 @@ export default function OCRScreen() {
               </Text>
             </View>
 
-            {imageInfo?.previewUri ? (
+            {imageInfo?.bufferId ? (
               <View>
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>
-                    Spatial overlay (span.quad)
+                    {resultOrigin === 'ocr'
+                      ? 'Spatial overlay (span.quad)'
+                      : 'Result page view'}
                   </Text>
-                  <Switch
-                    value={overlayEnabled}
-                    onValueChange={setOverlayEnabled}
-                  />
+                  {resultOrigin === 'ocr' && spans.length > 0 ? (
+                    <Switch
+                      value={overlayEnabled}
+                      onValueChange={setOverlayEnabled}
+                    />
+                  ) : null}
                 </View>
                 <OcrQuadOverlay
+                  buffer={imageInfo.bufferId}
+                  frameCount={resultPageCount}
                   previewUri={imageInfo.previewUri}
                   frameWidth={imageInfo.width}
                   frameHeight={imageInfo.height}
                   spans={spans}
                   selectedIndex={selectedSpanIndex}
                   onSelectIndex={setSelectedSpanIndex}
-                  overlayEnabled={overlayEnabled}
+                  overlayEnabled={
+                    overlayEnabled && resultOrigin === 'ocr' && spans.length > 0
+                  }
+                  overlayOcrSpansOnly
+                  frameIndex={resultFrameIndex}
+                  onFrameIndexChange={setResultFrameIndex}
                 />
-                <Text style={[styles.sectionHint, { marginTop: 8 }]}>
-                  Boxes are axis-aligned bounds of each quad in decoded-frame
-                  pixels. Tap a box to highlight the text slice.
+              </View>
+            ) : multiPage ? (
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryButton,
+                    styles.actionButtonFlex,
+                    resultFrameIndex <= 0 && styles.primaryButtonDisabled,
+                  ]}
+                  disabled={resultFrameIndex <= 0}
+                  onPress={() => setResultFrameIndex((i) => Math.max(0, i - 1))}
+                >
+                  <Text style={styles.secondaryButtonText}>Previous</Text>
+                </TouchableOpacity>
+                <Text style={styles.toggleLabel}>
+                  Page {resultFrameIndex + 1} / {resultPageCount}
                 </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryButton,
+                    styles.actionButtonFlex,
+                    resultFrameIndex >= resultPageCount - 1 &&
+                      styles.primaryButtonDisabled,
+                  ]}
+                  disabled={resultFrameIndex >= resultPageCount - 1}
+                  onPress={() =>
+                    setResultFrameIndex((i) =>
+                      Math.min(resultPageCount - 1, i + 1)
+                    )
+                  }
+                >
+                  <Text style={styles.secondaryButtonText}>Next</Text>
+                </TouchableOpacity>
               </View>
             ) : null}
 
@@ -1194,27 +1333,57 @@ export default function OCRScreen() {
             ) : null}
 
             <View style={styles.card}>
-              <Text style={styles.resultText}>
-                {resultTab === 'markdown' && docVlmExtras
-                  ? docVlmExtras.markdown || '(empty markdown)'
-                  : resultTab === 'doctags' && docVlmExtras
-                  ? docVlmExtras.doctags || '(empty doctags)'
-                  : resultText || '(empty text)'}
-              </Text>
-              {selectedSpanText != null ? (
-                <Text style={[styles.mono, { marginTop: 10 }]}>
-                  selected span: {JSON.stringify(selectedSpanText)}
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>
+                  {textShowAllPages
+                    ? 'Text · all pages'
+                    : `Text · page ${resultFrameIndex + 1}`}
                 </Text>
-              ) : null}
+                {multiPage ? (
+                  <View style={styles.toggleTrailing}>
+                    <Text style={styles.sectionHint}>All pages</Text>
+                    <Switch
+                      value={textShowAllPages}
+                      onValueChange={(on) => {
+                        setTextShowAllPages(on);
+                        if (!on) {
+                          setResultTab('text');
+                        }
+                      }}
+                    />
+                  </View>
+                ) : null}
+              </View>
+              {textShowAllPages && resultTab === 'markdown' && docVlmExtras ? (
+                <Text style={styles.resultText}>
+                  {docVlmExtras.markdown || '(empty markdown)'}
+                </Text>
+              ) : textShowAllPages &&
+                resultTab === 'doctags' &&
+                docVlmExtras ? (
+                <Text style={styles.resultText}>
+                  {docVlmExtras.doctags || '(empty doctags)'}
+                </Text>
+              ) : (
+                <HighlightedResultText
+                  fullText={resultText}
+                  spans={spans}
+                  selectedIndex={selectedSpanIndex}
+                  pageOnly={!textShowAllPages}
+                  frameIndex={resultFrameIndex}
+                />
+              )}
               <TouchableOpacity
                 style={[styles.primaryButton, { marginTop: 12 }]}
                 onPress={() => {
                   const payload =
-                    resultTab === 'markdown' && docVlmExtras
+                    textShowAllPages && resultTab === 'markdown' && docVlmExtras
                       ? docVlmExtras.markdown
-                      : resultTab === 'doctags' && docVlmExtras
+                      : textShowAllPages &&
+                        resultTab === 'doctags' &&
+                        docVlmExtras
                       ? docVlmExtras.doctags
-                      : resultText;
+                      : scopedText;
                   Clipboard.setString(payload);
                 }}
               >
@@ -1224,8 +1393,26 @@ export default function OCRScreen() {
 
             {spans.length > 0 ? (
               <View style={styles.card}>
-                <Text style={styles.toggleLabel}>Spans ({spans.length})</Text>
-                {spans.map((span, index) => {
+                <View style={styles.toggleRow}>
+                  <Text style={styles.toggleLabel}>
+                    Spans ({scopedSpans.length}
+                    {spansShowAllPages
+                      ? ` · ${spans.length} total`
+                      : ` · page ${resultFrameIndex + 1}`}
+                    )
+                  </Text>
+                  {multiPage ? (
+                    <View style={styles.toggleTrailing}>
+                      <Text style={styles.sectionHint}>All pages</Text>
+                      <Switch
+                        value={spansShowAllPages}
+                        onValueChange={setSpansShowAllPages}
+                      />
+                    </View>
+                  ) : null}
+                </View>
+                {scopedSpans.map((span) => {
+                  const index = spans.indexOf(span);
                   const active = selectedSpanIndex === index;
                   const slice = utf16Slice(
                     resultText,
@@ -1236,15 +1423,16 @@ export default function OCRScreen() {
                     <TouchableOpacity
                       key={`list-${index}`}
                       style={[styles.spanRow, active && styles.spanRowActive]}
-                      onPress={() =>
-                        setSelectedSpanIndex(active ? null : index)
-                      }
+                      onPress={() => {
+                        setSelectedSpanIndex(active ? null : index);
+                        setResultFrameIndex(span.frameIndex);
+                      }}
                     >
                       <Text style={styles.resultText} numberOfLines={2}>
                         {slice || '(empty slice)'}
                       </Text>
                       <Text style={styles.spanMeta}>
-                        #{index} {span.level} conf=
+                        #{index} frame {span.frameIndex + 1} {span.level} conf=
                         {(span.confidence ?? 0).toFixed(2)} utf16=
                         {span.utf16Start}-{span.utf16End} quad=
                         {span.quad.map((n) => Math.round(n)).join(',')}
