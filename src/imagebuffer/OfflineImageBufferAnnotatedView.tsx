@@ -36,7 +36,7 @@ export type OfflineImageBufferSpanPressEvent = {
 };
 
 export type OfflineImageBufferAnnotatedViewProps = {
-  image: OfflineImageBufferIdSource;
+  buffer: OfflineImageBufferIdSource;
   /** Caller-owned offline text buffer (spatial spans). */
   text: OfflineTextBufferIdSource;
   frameIndex?: number;
@@ -70,10 +70,10 @@ function aabbFromQuad(quad: TextSpatialSpan['quad']): {
 
 /**
  * FrameView plus mapped spatial-span boxes (OCR pixels / textLayer user-space).
- * Does not take ownership of `image` or `text`.
+ * Does not take ownership of `buffer` or `text`.
  */
 export function OfflineImageBufferAnnotatedView({
-  image,
+  buffer,
   text,
   frameIndex = 0,
   origins,
@@ -89,7 +89,7 @@ export function OfflineImageBufferAnnotatedView({
 
   React.useEffect(() => {
     let cancelled = false;
-    getOfflineImageBufferFrameInfo(image, frameIndex)
+    getOfflineImageBufferFrameInfo(buffer, frameIndex)
       .then((info) => {
         if (cancelled) return;
         setFrameSize({ width: info.width, height: info.height });
@@ -100,7 +100,7 @@ export function OfflineImageBufferAnnotatedView({
     return () => {
       cancelled = true;
     };
-  }, [image, frameIndex]);
+  }, [buffer, frameIndex]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -179,7 +179,7 @@ export function OfflineImageBufferAnnotatedView({
   return (
     <View style={[styles.root, style]} onLayout={onLayout}>
       <OfflineImageBufferFrameView
-        buffer={image}
+        buffer={buffer}
         frameIndex={frameIndex}
         maxSide={maxSide}
         resizeMode={resizeMode}
