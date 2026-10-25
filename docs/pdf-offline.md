@@ -288,7 +288,7 @@ await releaseOfflineImageBuffer(pages);
 
 ## Example app
 
-Fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`). The example enables PDFium (`example/android/gradle.properties` + `example/ios/Podfile`); apps should leave the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
+Fixtures: `example/.../test_pdfs/` (`digital_hello.pdf` / `digital_multipage.pdf` / `scan_only_page.pdf` / `scan_only_multipage.pdf`). The example enables PDFium (`example/android/gradle.properties` + `example/ios/Podfile`); apps should leave the SDK default off unless they need PDF. See [example/README.md](../example/README.md).
 
 Preview: [`OfflineImageBufferFrameView`](./imagebuffer-offline.md). Export: `exportOfflineImageBufferFrame` with a [`FileDestination`](./fileio.md).
 

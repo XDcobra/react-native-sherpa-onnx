@@ -307,7 +307,7 @@ This screen demonstrates true real-time streaming speaker diarization powered by
 
 Offline image-to-text for the `ppocr`, `doctr`, and `doc_vlm` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). See [docs/ocr-offline.md](../docs/ocr-offline.md).
 
-The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` / `scan_only_page.pdf`) or a custom PDF. The example **shows the app-dev switch** (no SDK auto):
+The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` / `digital_multipage.pdf` / `scan_only_page.pdf` / `scan_only_multipage.pdf`) or a custom PDF. The example **shows the app-dev switch** (no SDK auto):
 
 1. `extractPdfTextLayer` — digital PDFs → TextBuffer (`origin: textLayer`); **no OCR**.
 2. On `ERR_PDF_NO_TEXT_LAYER` — unlock `rasterizePdfPages` → `OfflineImageBuffer` → `recognize` like an image.

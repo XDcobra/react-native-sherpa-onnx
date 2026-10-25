@@ -6,7 +6,9 @@
 
 export const TEST_PDF_FILES = {
   DIGITAL_HELLO: 'test_pdfs/digital_hello.pdf',
+  DIGITAL_MULTIPAGE: 'test_pdfs/digital_multipage.pdf',
   SCAN_ONLY_PAGE: 'test_pdfs/scan_only_page.pdf',
+  SCAN_ONLY_MULTIPAGE: 'test_pdfs/scan_only_multipage.pdf',
 } as const;
 
 export type PdfFileId = (typeof TEST_PDF_FILES)[keyof typeof TEST_PDF_FILES];
@@ -29,9 +31,25 @@ export const PDF_FILES: PdfFileInfo[] = [
     section: 'Text layer',
   },
   {
+    id: TEST_PDF_FILES.DIGITAL_MULTIPAGE,
+    name: 'Digital — 3 pages',
+    description:
+      'Text layer + 3 pages → lazy-lru preview / FramePager (OCR still all frames)',
+    expect: 'textLayer',
+    section: 'Text layer',
+  },
+  {
     id: TEST_PDF_FILES.SCAN_ONLY_PAGE,
     name: 'Scan-only page',
     description: 'Image-only → ERR_PDF_NO_TEXT_LAYER (no OCR fallback)',
+    expect: 'noTextLayer',
+    section: 'No text layer',
+  },
+  {
+    id: TEST_PDF_FILES.SCAN_ONLY_MULTIPAGE,
+    name: 'Scan-only — 3 pages',
+    description:
+      'Image-only ×3 → NO_TEXT_LAYER → lazy-lru rasterize → OCR all frames',
     expect: 'noTextLayer',
     section: 'No text layer',
   },
