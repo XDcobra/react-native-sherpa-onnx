@@ -30,4 +30,4 @@ HEIC is platform-only (Android `ImageDecoder` API 28+, iOS ImageIO). On a device
 
 1. Call `createOfflineImageBufferFromFiles` with a `.heic` `FileSource`.
 2. Expect `frameCount >= 1`, non-zero width/height.
-3. Confirm WebP still works with libwebp linked; with `sherpaOnnxDisableLibwebp=true` expect `ERR_IMAGE_FORMAT_UNSUPPORTED`.
+3. Confirm WebP works with `sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`; without enable expect `ERR_IMAGE_WEBP_DISABLED`.

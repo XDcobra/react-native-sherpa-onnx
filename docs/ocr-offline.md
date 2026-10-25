@@ -230,7 +230,7 @@ console.log(ocr.instanceId);
 
 | Source / feature | Buffer or handle | Notes |
 | --- | --- | --- |
-| App image files / URIs | `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` — PNG/JPEG/WebP; HEIC via platform decoder |
+| App image files / URIs | `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` — PNG/JPEG; WebP when libwebp is opted in; HEIC via platform decoder |
 | Reused page buffer | `OfflineImageBuffer` | Decode once; run OCR on `frames` subsets |
 
 ### Typical downstream

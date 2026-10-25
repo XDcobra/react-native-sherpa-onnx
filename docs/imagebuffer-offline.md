@@ -22,11 +22,24 @@ Live / streaming ImageBuffer is not implemented yet (types may be reserved). Fil
 | Format | Notes |
 | --- | --- |
 | JPEG / PNG / BMP / GIF | Via `createOfflineImageBufferFromFiles` / `FromBase64`. EXIF orientation applied for JPEG. |
-| WebP | Same create APIs (libwebp; default SDK prebuilt). |
+| WebP | Same create APIs. **Opt-in libwebp** (default off) — see below. Without enable → `ERR_IMAGE_WEBP_DISABLED`. |
 | HEIC / HEIF | Same create APIs. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
 | PDF (page raster) | Not via image create APIs — use [`rasterizePdfPages`](pdf-offline.md). Frames may include `pageNumber` / `dpi`. |
 
 Optional **`maxSide`** caps the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` — see [pdf-offline.md](pdf-offline.md).
+
+## Opt-in libwebp (default OFF)
+
+Default SDK builds do **not** include libwebp.
+
+| Platform | Enable |
+|----------|--------|
+| Android | `sherpaOnnxEnableLibwebp=true` in the app (or library) `gradle.properties` |
+| iOS | `SHERPA_ONNX_ENABLE_LIBWEBP=1` when installing pods / building |
+
+Prebuilts: [third_party/libwebp_prebuilt/README.md](../third_party/libwebp_prebuilt/README.md).
+
+Without enable, WebP decode (`createOfflineImageBufferFromFiles` / `FromBase64`) and `exportOfflineImageBufferFrame({ format: 'webp' })` reject with `ERR_IMAGE_WEBP_DISABLED`. JPEG/PNG/BMP/GIF are unchanged. The example app opts in (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`).
 
 ---
 
@@ -433,12 +446,11 @@ import { ImageErrorCode } from 'react-native-sherpa-onnx/imagebuffer';
 | --- | --- |
 | `ERR_IMAGE_INVALID_ARGUMENT` | Invalid buffer id, empty sources, or bad argument |
 | `ERR_IMAGE_DECODE_FAILED` | Decode / I/O failure while reading an image |
-| `ERR_IMAGE_FORMAT_UNSUPPORTED` | HEIC without platform support, or WebP disabled |
+| `ERR_IMAGE_FORMAT_UNSUPPORTED` | HEIC without platform support |
+| `ERR_IMAGE_WEBP_DISABLED` | WebP used without libwebp opted in at build time |
 | `ERR_IMAGE_BUFFER_NOT_FOUND` | Unknown buffer id or frame |
 | `ERR_IMAGE_CANCELLED` | Create cancelled via `AbortSignal` |
 | `ERR_IMAGE_INTERNAL` | Generic failure |
-
-Optional: disable WebP with `sherpaOnnxDisableLibwebp=true` (Gradle) / `SHERPA_ONNX_DISABLE_LIBWEBP=1` (iOS) → `ERR_IMAGE_FORMAT_UNSUPPORTED` for WebP.
 
 ---
 
