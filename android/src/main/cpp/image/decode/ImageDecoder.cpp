@@ -271,8 +271,11 @@ DecodeResult ImageDecoder::DecodeBytes(const uint8_t* data, size_t size,
     frame.rgb.assign(decoded, decoded + static_cast<size_t>(w) * static_cast<size_t>(h) * 3u);
     WebPFree(decoded);
 #else
-    return Fail("ERR_IMAGE_FORMAT_UNSUPPORTED",
-                "WebP support disabled (libwebp not linked)", format);
+    return Fail("ERR_IMAGE_WEBP_DISABLED",
+                "libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true "
+                "(Android) or SHERPA_ONNX_ENABLE_LIBWEBP=1 (iOS) and ensure libwebp "
+                "prebuilts resolve.",
+                format);
 #endif
   } else {
     int w = 0;

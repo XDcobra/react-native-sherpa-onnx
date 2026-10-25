@@ -210,8 +210,10 @@ ExportResult EncodeRgbBytesToFile(const uint8_t* rgb, int width, int height,
       }
       return Ok();
 #else
-      return Fail("ERR_IMAGE_FORMAT_UNSUPPORTED",
-                  "WebP support disabled (libwebp not linked)");
+      return Fail("ERR_IMAGE_WEBP_DISABLED",
+                  "libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true "
+                  "(Android) or SHERPA_ONNX_ENABLE_LIBWEBP=1 (iOS) and ensure libwebp "
+                  "prebuilts resolve.");
 #endif
     }
   }

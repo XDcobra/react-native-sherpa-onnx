@@ -17,6 +17,7 @@ jest.mock('react-native', () => {
       SherpaOnnx: {},
     },
     Platform: { OS: 'ios' },
+    StyleSheet: { create: (s: unknown) => s },
     requireNativeComponent: jest.fn(() => {
       const React = require('react');
       return function MockNativeView() {
@@ -58,6 +59,7 @@ import {
   exportOfflineImageBufferFrame,
   getOfflineImageBufferFrameInfo,
   getOfflineImageBufferInfo,
+  ImageErrorCode,
   releaseOfflineImageBuffer,
 } from '../index';
 
@@ -244,6 +246,31 @@ describe('offline ImageBuffer public API', () => {
       )
     ).rejects.toMatchObject({ code: 'ERR_IMAGE_CANCELLED' });
     expect(mockNative.createOfflineImageBufferFromFiles).not.toHaveBeenCalled();
+  });
+
+  it('maps disabled native error to ERR_IMAGE_WEBP_DISABLED', async () => {
+    mockNative.createOfflineImageBufferFromFiles.mockRejectedValue(
+      new Error('ERR_IMAGE_WEBP_DISABLED: libwebp is not linked')
+    );
+    await expect(
+      createOfflineImageBufferFromFiles({ kind: 'fs', path: '/tmp/a.webp' })
+    ).rejects.toMatchObject({ code: ImageErrorCode.WEBP_DISABLED });
+  });
+
+  it('export webp maps disabled native error to ERR_IMAGE_WEBP_DISABLED', async () => {
+    mockNative.exportOfflineImageBufferFrame.mockRejectedValue(
+      new Error('ERR_IMAGE_WEBP_DISABLED: libwebp is not linked')
+    );
+    await expect(
+      exportOfflineImageBufferFrame(
+        bufferId,
+        0,
+        { kind: 'fs', path: '/tmp/out.webp' },
+        {
+          format: 'webp',
+        }
+      )
+    ).rejects.toMatchObject({ code: ImageErrorCode.WEBP_DISABLED });
   });
 
   it('exportOfflineImageBufferFrame passes FileDestination and returns ResolvedFileRef', async () => {

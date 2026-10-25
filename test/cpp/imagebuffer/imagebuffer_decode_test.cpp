@@ -116,3 +116,14 @@ TEST(ImageBufferDecode, Decode_Webp_WhenLibwebpAvailable) {
   EXPECT_EQ(r.frame.height, 48);
 #endif
 }
+
+TEST(ImageBufferDecode, Decode_Webp_WhenLibwebpDisabled) {
+#if defined(HAVE_LIBWEBP)
+  GTEST_SKIP() << "HAVE_LIBWEBP set";
+#else
+  const auto r = ImageDecoder::DecodeFile(FixturePath("solid_red_64x48.webp"));
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.errorCode, "ERR_IMAGE_WEBP_DISABLED");
+  EXPECT_NE(r.errorMessage.find("sherpaOnnxEnableLibwebp"), std::string::npos);
+#endif
+}

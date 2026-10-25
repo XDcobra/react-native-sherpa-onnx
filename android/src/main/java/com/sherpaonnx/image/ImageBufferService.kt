@@ -15,7 +15,7 @@ import kotlin.math.roundToInt
 
 /**
  * Offline ImageBuffer create/release with HEIC via platform ImageDecoder,
- * JPEG/PNG/WebP/… via C++ (stb + libwebp).
+ * JPEG/PNG/BMP/GIF via C++ (stb). WebP via libwebp when opted in.
  */
 internal object ImageBufferService {
   private const val TAG = "SherpaOnnx:image"

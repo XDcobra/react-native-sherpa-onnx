@@ -3,6 +3,10 @@
  *
  * Multi-frame RGB8 buffers with RAM|mmap storage.
  * LiveImageBuffer is reserved (types only).
+ *
+ * WebP is opt-in: rebuild with `sherpaOnnxEnableLibwebp=true` (Android) or
+ * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode/export
+ * with `ERR_IMAGE_WEBP_DISABLED`.
  */
 
 import {
@@ -197,6 +201,22 @@ function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
   };
 }
 
+function mapWebpDisabled(err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.includes(ImageErrorCode.WEBP_DISABLED) ||
+    msg.includes('libwebp is not linked')
+  ) {
+    throw Object.assign(
+      new Error(
+        `${ImageErrorCode.WEBP_DISABLED}: libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true (Android) or SHERPA_ONNX_ENABLE_LIBWEBP=1 (iOS) and ensure libwebp prebuilts resolve.`
+      ),
+      { code: ImageErrorCode.WEBP_DISABLED, cause: err }
+    );
+  }
+  throw err;
+}
+
 function mapCreateError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
   if (
@@ -206,7 +226,7 @@ function mapCreateError(err: unknown): never {
   ) {
     throw cancelledError();
   }
-  throw err;
+  mapWebpDisabled(err);
 }
 
 export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBufferRef> {
@@ -382,28 +402,32 @@ export async function exportOfflineImageBufferFrame(
     );
   }
 
-  const result = await getNative().exportOfflineImageBufferFrame(
-    id,
-    Math.trunc(frameIndex),
-    output as unknown as Object,
-    {
-      format,
-      quality: options?.quality ?? 85,
-      maxSide: options?.maxSide ?? 0,
-    }
-  );
-
-  if (__DEV__) {
-    console.log(
-      '[SherpaOnnx:image] exportFrame',
+  try {
+    const result = await getNative().exportOfflineImageBufferFrame(
       id,
-      frameIndex,
-      format,
-      result
+      Math.trunc(frameIndex),
+      output as unknown as Object,
+      {
+        format,
+        quality: options?.quality ?? 85,
+        maxSide: options?.maxSide ?? 0,
+      }
     );
-  }
 
-  return parseResolvedFileRef(result);
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:image] exportFrame',
+        id,
+        frameIndex,
+        format,
+        result
+      );
+    }
+
+    return parseResolvedFileRef(result);
+  } catch (err) {
+    mapWebpDisabled(err);
+  }
 }
 
 export type {

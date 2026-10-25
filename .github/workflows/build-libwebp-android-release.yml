@@ -145,7 +145,7 @@ jobs:
             }
             ```
 
-            Optional: disable linking with Gradle property `sherpaOnnxDisableLibwebp=true` (WebP decode then returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
+            Opt-in (default off): set `sherpaOnnxEnableLibwebp=true` to link. Without it, WebP decode/export returns `ERR_IMAGE_WEBP_DISABLED`.
           files: |
             libwebp-android.zip
             libwebp-${{ steps.tag.outputs.maven_version }}.aar

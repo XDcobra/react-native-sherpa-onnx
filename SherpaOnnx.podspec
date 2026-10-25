@@ -115,9 +115,10 @@ Pod::Spec.new do |s|
     has_libarchive = true
   end
 
+  # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_LIBWEBP=1 and xcframework present.
   has_libwebp = false
-  disable_libwebp = ENV['SHERPA_ONNX_DISABLE_LIBWEBP']
-  if (!disable_libwebp || disable_libwebp == '0' || disable_libwebp == 'false') && File.exist?(libwebp_xcframework)
+  enable_libwebp = ENV['SHERPA_ONNX_ENABLE_LIBWEBP']
+  if (enable_libwebp == '1' || enable_libwebp == 'true') && File.exist?(libwebp_xcframework)
     has_libwebp = true
   end
 

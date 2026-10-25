@@ -59,8 +59,8 @@ android {
   def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, libarchive is not linked; extractTarBz2/cancelExtractTarBz2 will fail at runtime. See docs/disable-libarchive.md.
   def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
-  // When true, libwebp is not linked; WebP decode fails at runtime with ERR_IMAGE_FORMAT_UNSUPPORTED.
-  def sherpaOnnxDisableLibwebp = (project.findProperty("sherpaOnnxDisableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
+  // When true, libwebp is linked for WebP decode/export. Default false (opt-in; binary size).
+  def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, PDFium is linked for PDF text-layer extract. Default false (opt-in; binary size).
   def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
 
@@ -79,7 +79,7 @@ android {
         def cmakeArgList = ["-DANDROID_STL=c++_shared"]
         if (sherpaOnnxDisableFfmpeg) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_FFMPEG=ON")
         if (sherpaOnnxDisableLibarchive) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBARCHIVE=ON")
-        if (sherpaOnnxDisableLibwebp) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBWEBP=ON")
+        if (sherpaOnnxEnableLibwebp) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_LIBWEBP=ON")
         if (sherpaOnnxEnablePdfium) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_PDFIUM=ON")
         arguments(*cmakeArgList)
       }
@@ -129,6 +129,15 @@ android {
     packaging {
       jniLibs {
         excludes += ["**/libarchive.so"]
+      }
+    }
+  }
+
+  // When libwebp is not opted in, exclude leftover WebP .so from a previous enabled build.
+  if (!sherpaOnnxEnableLibwebp) {
+    packaging {
+      jniLibs {
+        excludes += ["**/libwebp.so", "**/libsharpyuv.so"]
       }
     }
   }
@@ -185,7 +194,10 @@ dependencies {
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
-  libwebpAar "com.xdcobra.sherpa:libwebp:${libwebpVersion}@aar"
+  def enableLibwebpDep = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
+  if (enableLibwebpDep) {
+    libwebpAar "com.xdcobra.sherpa:libwebp:${libwebpVersion}@aar"
+  }
   def enablePdfiumDep = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
   if (enablePdfiumDep) {
     pdfiumAar "com.xdcobra.sherpa:pdfium:${pdfiumVersion}@aar"
