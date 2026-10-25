@@ -26,7 +26,7 @@ export const PDF_FILES: PdfFileInfo[] = [
   {
     id: TEST_PDF_FILES.DIGITAL_HELLO,
     name: 'Digital — Hello',
-    description: 'Native text layer → extractPdfTextLayer succeeds',
+    description: 'Native text layer → extract boxes on the preview',
     expect: 'textLayer',
     section: 'Text layer',
   },
@@ -34,7 +34,7 @@ export const PDF_FILES: PdfFileInfo[] = [
     id: TEST_PDF_FILES.DIGITAL_MULTIPAGE,
     name: 'Digital — 3 pages',
     description:
-      'Text layer + 3 pages → lazy-lru preview / FramePager (OCR still all frames)',
+      'Text layer + 3 pages → extract boxes on lazy-lru preview (OCR still all frames)',
     expect: 'textLayer',
     section: 'Text layer',
   },

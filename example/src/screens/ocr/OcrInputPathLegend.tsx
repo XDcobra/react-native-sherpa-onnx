@@ -19,21 +19,21 @@ const MATRIX: {
     text: 'yes · ocr',
     spans: 'yes',
     coords: 'pixels+frameIndex',
-    overlay: 'FrameView yes',
+    overlay: 'AnnotatedView',
   },
   {
     path: 'PDF + text layer',
     text: 'yes · textLayer',
     spans: 'yes',
     coords: 'PDF user-space',
-    overlay: 'list only',
+    overlay: 'AnnotatedView',
   },
   {
     path: 'PDF scan-only',
     text: 'yes · ocr',
     spans: 'yes',
     coords: 'pixels+frameIndex',
-    overlay: 'FrameView yes',
+    overlay: 'AnnotatedView',
   },
 ];
 
@@ -100,8 +100,7 @@ export function OcrInputPathLegend({ pdfiumOn }: Props) {
     <View style={styles.compareFrame}>
       <Text style={styles.compareTitle}>Input paths{badge}</Text>
       <Text style={styles.sectionHint}>
-        Which SDK path applies, and whether spans have coordinates you can
-        overlay.
+        Which SDK path applies, and whether boxes map onto the current frame.
       </Text>
 
       <View style={styles.compareTable}>
@@ -140,7 +139,7 @@ export function OcrInputPathLegend({ pdfiumOn }: Props) {
           }
           textBuffer="origin=ocr"
           spans="yes · quad in decoded ImageBuffer pixels + frameIndex"
-          example="FrameView preview; overlay boxes on the current page."
+          example="Results keep the text buffer and draw boxes with OfflineImageBufferAnnotatedView."
         />
         <PathCard
           title="2. PDF + text layer"
@@ -150,7 +149,7 @@ export function OcrInputPathLegend({ pdfiumOn }: Props) {
           }
           textBuffer="origin=textLayer · no OCR engine"
           spans="yes · quad in PDF user-space (y-down, pageNumber / pageWidth / pageHeight)"
-          example="Pick still rasterizes lazy-lru for FrameView preview only. Overlay list-only (wrong space for FrameView)."
+          example="Pick still rasterizes lazy-lru for the underlay. Extract boxes map user-space onto the frame."
         />
         <PathCard
           title="3. PDF scan-only"
@@ -158,7 +157,7 @@ export function OcrInputPathLegend({ pdfiumOn }: Props) {
           steps={`1. extractPdfTextLayer → ${PdfErrorCode.NO_TEXT_LAYER}\n2. rasterizePdfPages (lazy-lru if multi-page; rasterize-all if 1 page)\n3. recognize(buffer, textOut) — omit frames → all pages`}
           textBuffer="origin=ocr"
           spans="yes · quad in decoded raster pixels + frameIndex"
-          example="FrameView preview; overlay boxes on the current page. Recognize onProgress walks every frame."
+          example="AnnotatedView after recognize (raster pixels). onProgress walks every frame."
         />
       </View>
     </View>

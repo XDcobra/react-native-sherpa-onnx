@@ -83,7 +83,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Vision',
     title: 'OCR',
     description:
-      'ImageBuffer → recognize → text + spatial quads; switch ppocr / doctr / doc_vlm and overlay boxes on the image',
+      'Image or PDF → extract / recognize → text + spatial boxes (ocr + textLayer) on the page',
     icon: 'scan-outline',
     screen: 'OCR',
     implemented: true,

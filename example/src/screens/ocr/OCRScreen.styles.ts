@@ -313,6 +313,13 @@ export const styles = StyleSheet.create({
     color: '#334155',
     flex: 1,
   },
+  resultPreview: {
+    width: '100%',
+    height: 280,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   progressBox: {
     backgroundColor: '#f0f0f0',
     borderRadius: 8,

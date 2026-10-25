@@ -32,6 +32,8 @@ import {
 } from 'react-native-sherpa-onnx/pdf';
 import {
   getOfflineImageBufferFrameInfo,
+  OfflineImageBufferAnnotatedView,
+  OfflineImageBufferFrameView,
   releaseOfflineImageBuffer,
 } from 'react-native-sherpa-onnx/imagebuffer';
 import {
@@ -67,7 +69,6 @@ import {
   fillOcrCustomConfigFromModelFolder,
 } from '../../utils/ocrCustomInitFill';
 import { OcrInputPathLegend } from './OcrInputPathLegend';
-import { OcrQuadOverlay } from './OcrQuadOverlay';
 import { styles } from './OCRScreen.styles';
 
 type PdfExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'error';
@@ -217,6 +218,9 @@ export default function OCRScreen() {
     null
   );
   const [overlayEnabled, setOverlayEnabled] = useState(true);
+  const [resultTextBufferId, setResultTextBufferId] = useState<string | null>(
+    null
+  );
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [textShowAllPages, setTextShowAllPages] = useState(false);
   const [spansShowAllPages, setSpansShowAllPages] = useState(false);
@@ -229,7 +233,7 @@ export default function OCRScreen() {
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const pdfTextBufferIdRef = useRef<string | null>(null);
+  const resultTextBufferIdRef = useRef<string | null>(null);
   const rasterBufferIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -270,10 +274,10 @@ export default function OCRScreen() {
       const engine = engineRef.current;
       engineRef.current = null;
       engine?.destroy().catch(() => {});
-      const pdfTxt = pdfTextBufferIdRef.current;
-      pdfTextBufferIdRef.current = null;
-      if (pdfTxt) {
-        releasePipelineTextBuffer(pdfTxt).catch(() => {});
+      const resultTxt = resultTextBufferIdRef.current;
+      resultTextBufferIdRef.current = null;
+      if (resultTxt) {
+        releasePipelineTextBuffer(resultTxt).catch(() => {});
       }
       const rasterId = rasterBufferIdRef.current;
       rasterBufferIdRef.current = null;
@@ -507,11 +511,18 @@ export default function OCRScreen() {
     setResultFrameIndex(0);
     setTextShowAllPages(false);
     setSpansShowAllPages(false);
+    const id = resultTextBufferIdRef.current;
+    resultTextBufferIdRef.current = null;
+    setResultTextBufferId(null);
+    if (id) {
+      releasePipelineTextBuffer(id).catch(() => {});
+    }
   }, []);
 
-  const releasePdfTextBuffer = useCallback(async () => {
-    const id = pdfTextBufferIdRef.current;
-    pdfTextBufferIdRef.current = null;
+  const releaseResultTextBuffer = useCallback(async () => {
+    const id = resultTextBufferIdRef.current;
+    resultTextBufferIdRef.current = null;
+    setResultTextBufferId(null);
     if (id) {
       await releasePipelineTextBuffer(id).catch(() => {});
     }
@@ -529,9 +540,9 @@ export default function OCRScreen() {
     setPdfSelection(null);
     setPdfExtractStatus('idle');
     setPdfExtractMessage(null);
-    await releasePdfTextBuffer();
+    await releaseResultTextBuffer();
     await releaseRasterBuffer();
-  }, [releasePdfTextBuffer, releaseRasterBuffer]);
+  }, [releaseResultTextBuffer, releaseRasterBuffer]);
 
   const handlePdfSelected = useCallback(
     (selection: PdfSourceSelection) => {
@@ -541,10 +552,10 @@ export default function OCRScreen() {
       setPdfSelection(selection);
       setPdfExtractStatus('idle');
       setPdfExtractMessage(null);
-      releasePdfTextBuffer().catch(() => {});
+      releaseResultTextBuffer().catch(() => {});
       releaseRasterBuffer().catch(() => {});
     },
-    [clearResults, releasePdfTextBuffer, releaseRasterBuffer]
+    [clearResults, releaseResultTextBuffer, releaseRasterBuffer]
   );
 
   const handleExtractPdf = useCallback(async () => {
@@ -555,7 +566,7 @@ export default function OCRScreen() {
     setRunBusy(true);
     setError(null);
     clearResults();
-    await releasePdfTextBuffer();
+    await releaseResultTextBuffer();
     const t0 = Date.now();
     try {
       const enabled = await isPdfiumEnabled();
@@ -569,7 +580,8 @@ export default function OCRScreen() {
         return;
       }
       const textOut = await createEmptyOfflineTextBuffer();
-      pdfTextBufferIdRef.current = textOut.bufferId;
+      resultTextBufferIdRef.current = textOut.bufferId;
+      setResultTextBufferId(textOut.bufferId);
       const result = await extractPdfTextLayer(pdfSelection.source, textOut, {
         pages: 'all',
       });
@@ -599,7 +611,7 @@ export default function OCRScreen() {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await releasePdfTextBuffer();
+      await releaseResultTextBuffer();
       if (msg.includes(PdfErrorCode.NO_TEXT_LAYER)) {
         setPdfExtractStatus('noTextLayer');
         setPdfExtractMessage(PdfErrorCode.NO_TEXT_LAYER);
@@ -614,7 +626,7 @@ export default function OCRScreen() {
     } finally {
       setRunBusy(false);
     }
-  }, [clearResults, pdfSelection, releasePdfTextBuffer]);
+  }, [clearResults, pdfSelection, releaseResultTextBuffer]);
 
   const handleRasterizePdf = useCallback(async () => {
     if (!pdfSelection) {
@@ -711,14 +723,15 @@ export default function OCRScreen() {
     setRunBusy(true);
     setError(null);
     clearResults();
+    await releaseResultTextBuffer();
     const controller = new AbortController();
     abortRef.current = controller;
     const t0 = Date.now();
 
-    let textOutId: string | null = null;
     try {
       const textOut = await createEmptyOfflineTextBuffer();
-      textOutId = textOut.bufferId;
+      resultTextBufferIdRef.current = textOut.bufferId;
+      setResultTextBufferId(textOut.bufferId);
 
       const page = await engine.recognize(imageInfo.bufferId, textOut, {
         granularity: 'line',
@@ -757,21 +770,19 @@ export default function OCRScreen() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await releaseResultTextBuffer();
       if (msg.includes('CANCELLED') || msg.includes('cancelled')) {
         setError('Recognize cancelled (OCR_CANCELLED).');
       } else {
         setError(msg);
       }
     } finally {
-      if (textOutId) {
-        await releasePipelineTextBuffer(textOutId).catch(() => {});
-      }
       abortRef.current = null;
       setRunBusy(false);
       setProgressLabel(null);
       setProgressPercent(null);
     }
-  }, [clearResults, imageInfo]);
+  }, [clearResults, imageInfo, releaseResultTextBuffer]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -1242,35 +1253,46 @@ export default function OCRScreen() {
               <View>
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>
-                    {resultOrigin === 'ocr'
-                      ? 'Spatial overlay (span.quad)'
-                      : 'Result page view'}
+                    Spatial overlay (ocr + textLayer)
                   </Text>
-                  {resultOrigin === 'ocr' && spans.length > 0 ? (
+                  {spans.length > 0 && resultTextBufferId ? (
                     <Switch
                       value={overlayEnabled}
                       onValueChange={setOverlayEnabled}
                     />
                   ) : null}
                 </View>
-                <OcrQuadOverlay
-                  buffer={imageInfo.bufferId}
-                  frameCount={resultPageCount}
-                  previewUri={imageInfo.previewUri}
-                  frameWidth={imageInfo.width}
-                  frameHeight={imageInfo.height}
-                  spans={spans}
-                  selectedIndex={selectedSpanIndex}
-                  onSelectIndex={setSelectedSpanIndex}
-                  overlayEnabled={
-                    overlayEnabled && resultOrigin === 'ocr' && spans.length > 0
-                  }
-                  overlayOcrSpansOnly
-                  frameIndex={resultFrameIndex}
-                  onFrameIndexChange={setResultFrameIndex}
-                />
+                {overlayEnabled && resultTextBufferId ? (
+                  <OfflineImageBufferAnnotatedView
+                    image={imageInfo.bufferId}
+                    text={resultTextBufferId}
+                    frameIndex={resultFrameIndex}
+                    selectedIndex={selectedSpanIndex}
+                    onSpanPress={(event) =>
+                      setSelectedSpanIndex(
+                        selectedSpanIndex === event.index ? null : event.index
+                      )
+                    }
+                    maxSide={1280}
+                    style={styles.resultPreview}
+                  />
+                ) : (
+                  <OfflineImageBufferFrameView
+                    buffer={imageInfo.bufferId}
+                    frameIndex={resultFrameIndex}
+                    maxSide={1280}
+                    resizeMode="contain"
+                    style={styles.resultPreview}
+                  />
+                )}
+                {overlayEnabled && resultTextBufferId && spans.length > 0 ? (
+                  <Text style={styles.sectionHint}>
+                    Tap a box to highlight that span in the text below.
+                  </Text>
+                ) : null}
               </View>
-            ) : multiPage ? (
+            ) : null}
+            {multiPage ? (
               <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={[
@@ -1285,6 +1307,12 @@ export default function OCRScreen() {
                 </TouchableOpacity>
                 <Text style={styles.toggleLabel}>
                   Page {resultFrameIndex + 1} / {resultPageCount}
+                  {overlayEnabled && resultTextBufferId
+                    ? ` · ${
+                        spans.filter((s) => s.frameIndex === resultFrameIndex)
+                          .length
+                      } spans`
+                    : ''}
                 </Text>
                 <TouchableOpacity
                   style={[
