@@ -28,10 +28,8 @@ import {
   extractPdfTextLayer,
   isPdfiumEnabled,
   PdfErrorCode,
-  rasterizePdfPages,
 } from 'react-native-sherpa-onnx/pdf';
 import {
-  getOfflineImageBufferFrameInfo,
   OfflineImageBufferAnnotatedView,
   OfflineImageBufferFrameView,
   releaseOfflineImageBuffer,
@@ -611,13 +609,41 @@ export default function OCRScreen() {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      const noTextLayer =
+        code === PdfErrorCode.NO_TEXT_LAYER ||
+        msg.includes(PdfErrorCode.NO_TEXT_LAYER);
+      if (__DEV__) {
+        console.log('[OCR] extractPdf catch', {
+          code,
+          msg,
+          branch: noTextLayer ? 'noTextLayer' : 'error',
+        });
+      }
       await releaseResultTextBuffer();
-      if (msg.includes(PdfErrorCode.NO_TEXT_LAYER)) {
+      if (noTextLayer) {
+        const strategy =
+          imageInfo?.state === 'lazy'
+            ? 'lazy-lru'
+            : imageInfo?.state === 'immutable'
+            ? 'rasterize-all'
+            : null;
         setPdfExtractStatus('noTextLayer');
-        setPdfExtractMessage(PdfErrorCode.NO_TEXT_LAYER);
-        setError(
-          `${PdfErrorCode.NO_TEXT_LAYER} — next: rasterizePdfPages, then Run OCR`
+        setPdfExtractMessage(
+          [
+            PdfErrorCode.NO_TEXT_LAYER,
+            imageInfo?.frameCount != null
+              ? `frames=${imageInfo.frameCount}`
+              : null,
+            strategy,
+          ]
+            .filter(Boolean)
+            .join(' · ')
         );
+        setError(null);
       } else {
         setPdfExtractStatus('error');
         setPdfExtractMessage(msg);
@@ -626,92 +652,7 @@ export default function OCRScreen() {
     } finally {
       setRunBusy(false);
     }
-  }, [clearResults, pdfSelection, releaseResultTextBuffer]);
-
-  const handleRasterizePdf = useCallback(async () => {
-    if (!pdfSelection) {
-      setError('Select a PDF first.');
-      return;
-    }
-    // Reuse widget preview buffer when already rasterized on PDF select.
-    if (imageInfo?.bufferId && imageInfo.kind === 'pdf') {
-      setPdfExtractMessage(
-        (prev) =>
-          `${
-            prev ?? PdfErrorCode.NO_TEXT_LAYER
-          } → raster ready (reused) frames=${imageInfo.frameCount} state=${
-            imageInfo.state ?? '?'
-          }`
-      );
-      return;
-    }
-
-    setRunBusy(true);
-    setError(null);
-    clearResults();
-    await releaseRasterBuffer();
-    try {
-      const onProgress = (p: {
-        phase: string;
-        done: number;
-        total: number;
-      }) => {
-        setProgressLabel(`${p.phase} (${p.done}/${p.total})`);
-        setProgressPercent(
-          p.total > 0 ? Math.round((100 * p.done) / p.total) : null
-        );
-      };
-
-      // Probe with lazy-lru (cheap cold slots). Single page → rasterize-all.
-      let pages = await rasterizePdfPages(pdfSelection.source, {
-        pages: 'all',
-        dpi: 144,
-        maxSide: 2048,
-        strategy: 'lazy-lru',
-        onProgress,
-      });
-      let state: 'immutable' | 'lazy' = 'lazy';
-      if (pages.info.frameCount <= 1) {
-        await releaseOfflineImageBuffer(pages.bufferId).catch(() => {});
-        pages = await rasterizePdfPages(pdfSelection.source, {
-          pages: 'all',
-          dpi: 144,
-          maxSide: 2048,
-          strategy: 'rasterize-all',
-          onProgress,
-        });
-        state = 'immutable';
-      }
-
-      rasterBufferIdRef.current = pages.bufferId;
-      const frame = await getOfflineImageBufferFrameInfo(pages, 0);
-      setImageInfo({
-        bufferId: pages.bufferId,
-        sourceLabel: `Raster: ${pdfSelection.label}`,
-        previewUri: null,
-        width: frame.width,
-        height: frame.height,
-        frameCount: pages.info.frameCount,
-        kind: 'pdf',
-        state,
-      });
-      setPdfExtractMessage(
-        (prev) =>
-          `${prev ?? PdfErrorCode.NO_TEXT_LAYER} → raster ok frames=${
-            pages.info.frameCount
-          } strategy=${
-            state === 'lazy' ? 'lazy-lru' : 'rasterize-all'
-          } pageNumber=${frame.pageNumber ?? '?'} dpi=${frame.dpi ?? '?'}`
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-    } finally {
-      setRunBusy(false);
-      setProgressLabel(null);
-      setProgressPercent(null);
-    }
-  }, [clearResults, imageInfo, pdfSelection, releaseRasterBuffer]);
+  }, [clearResults, imageInfo, pdfSelection, releaseResultTextBuffer]);
 
   const handleRecognize = useCallback(async () => {
     const engine = engineRef.current;
@@ -1137,41 +1078,11 @@ export default function OCRScreen() {
 
         {showRasterStep ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. rasterizePdfPages</Text>
+            <Text style={styles.sectionTitle}>3. No text layer</Text>
             <Text style={styles.sectionHint}>
-              No text layer — ensure pages are in OfflineImageBuffer (dpi=144),
-              then OCR like an image. Multi-page uses lazy-lru; single-page uses
-              rasterize-all. Skips if preview buffer already exists.
+              This PDF has no extractable text layer. Call recognize on the
+              OfflineImageBuffer that already holds the rasterized pages.
             </Text>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                (runBusy || !pdfSelection) && styles.primaryButtonDisabled,
-              ]}
-              onPress={() => {
-                handleRasterizePdf().catch(() => {});
-              }}
-              disabled={runBusy || !pdfSelection}
-            >
-              {runBusy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>
-                  {imageInfo?.kind === 'pdf'
-                    ? 'Ensure rasterizePdfPages'
-                    : 'Run rasterizePdfPages'}
-                </Text>
-              )}
-            </TouchableOpacity>
-            {imageInfo ? (
-              <Text style={styles.mono}>
-                buffer={imageInfo.bufferId}
-                {'\n'}
-                {imageInfo.width}×{imageInfo.height} · frames{' '}
-                {imageInfo.frameCount}
-                {imageInfo.state ? ` · ${imageInfo.state}` : ''}
-              </Text>
-            ) : null}
           </View>
         ) : null}
 

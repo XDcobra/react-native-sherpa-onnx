@@ -154,7 +154,7 @@ export function OcrInputPathLegend({ pdfiumOn }: Props) {
         <PathCard
           title="3. PDF scan-only"
           when="Scan-only page / Scan-only — 3 pages (image-only PDF)."
-          steps={`1. extractPdfTextLayer → ${PdfErrorCode.NO_TEXT_LAYER}\n2. rasterizePdfPages (lazy-lru if multi-page; rasterize-all if 1 page)\n3. recognize(buffer, textOut) — omit frames → all pages`}
+          steps={`1. extractPdfTextLayer → ${PdfErrorCode.NO_TEXT_LAYER}\n2. Pick already rasterized the OfflineImageBuffer\n3. recognize(buffer, textOut) — omit frames → all pages`}
           textBuffer="origin=ocr"
           spans="yes · quad in decoded raster pixels + frameIndex"
           example="AnnotatedView after recognize (raster pixels). onProgress walks every frame."

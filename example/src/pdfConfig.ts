@@ -41,7 +41,7 @@ export const PDF_FILES: PdfFileInfo[] = [
   {
     id: TEST_PDF_FILES.SCAN_ONLY_PAGE,
     name: 'Scan-only page',
-    description: 'Image-only → ERR_PDF_NO_TEXT_LAYER (no OCR fallback)',
+    description: 'Image-only → ERR_PDF_NO_TEXT_LAYER → OCR the preview buffer',
     expect: 'noTextLayer',
     section: 'No text layer',
   },
@@ -49,7 +49,7 @@ export const PDF_FILES: PdfFileInfo[] = [
     id: TEST_PDF_FILES.SCAN_ONLY_MULTIPAGE,
     name: 'Scan-only — 3 pages',
     description:
-      'Image-only ×3 → NO_TEXT_LAYER → lazy-lru rasterize → OCR all frames',
+      'Image-only ×3 → NO_TEXT_LAYER → OCR the lazy-lru preview buffer',
     expect: 'noTextLayer',
     section: 'No text layer',
   },
