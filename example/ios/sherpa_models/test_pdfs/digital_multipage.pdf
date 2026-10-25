@@ -13,27 +13,27 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>
 endobj
 5 0 obj
-<< /Length 142 >>
+<< /Length 154 >>
 stream
-BT /F1 24 Tf 72 720 Td (Page 1 of 3) Tj T* /F1 14 Tf (Multi-page digital PDF) Tj T* /F1 14 Tf (SherpaOnnx lazy-lru / FramePager sample) Tj ET
+BT /F1 24 Tf 72 720 Td (Page 1 of 3) Tj 0 -34 Td /F1 14 Tf (Multi-page digital PDF) Tj 0 -24 Td /F1 14 Tf (SherpaOnnx lazy-lru / FramePager sample) Tj ET
 endstream
 endobj
 6 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 7 0 R /Resources << /Font << /F1 3 0 R >> >> >>
 endobj
 7 0 obj
-<< /Length 144 >>
+<< /Length 156 >>
 stream
-BT /F1 24 Tf 72 720 Td (Page 2 of 3) Tj T* /F1 14 Tf (Second page - swipe or Next) Tj T* /F1 14 Tf (extractPdfTextLayer covers all pages) Tj ET
+BT /F1 24 Tf 72 720 Td (Page 2 of 3) Tj 0 -34 Td /F1 14 Tf (Second page - swipe or Next) Tj 0 -24 Td /F1 14 Tf (extractPdfTextLayer covers all pages) Tj ET
 endstream
 endobj
 8 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 9 0 R /Resources << /Font << /F1 3 0 R >> >> >>
 endobj
 9 0 obj
-<< /Length 140 >>
+<< /Length 152 >>
 stream
-BT /F1 24 Tf 72 720 Td (Page 3 of 3) Tj T* /F1 14 Tf (Third page - end of fixture) Tj T* /F1 14 Tf (OCR would also run on all frames) Tj ET
+BT /F1 24 Tf 72 720 Td (Page 3 of 3) Tj 0 -34 Td /F1 14 Tf (Third page - end of fixture) Tj 0 -24 Td /F1 14 Tf (OCR would also run on all frames) Tj ET
 endstream
 endobj
 xref
@@ -44,12 +44,12 @@ xref
 0000000133 00000 n 
 0000000203 00000 n 
 0000000329 00000 n 
-0000000521 00000 n 
-0000000647 00000 n 
-0000000841 00000 n 
-0000000967 00000 n 
+0000000533 00000 n 
+0000000659 00000 n 
+0000000865 00000 n 
+0000000991 00000 n 
 trailer
 << /Size 10 /Root 1 0 R >>
 startxref
-1157
+1193
 %%EOF
