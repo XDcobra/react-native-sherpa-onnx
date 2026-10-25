@@ -14,13 +14,7 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
@@ -29,6 +23,7 @@ import {
   releaseOfflineImageBuffer,
 } from 'react-native-sherpa-onnx/imagebuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { rasterizePdfPages } from 'react-native-sherpa-onnx/pdf';
 import type { ImageFileInfo } from '../imageConfig';
 import type { PdfFileInfo } from '../pdfConfig';
 import {
@@ -36,6 +31,7 @@ import {
   toFileSource as toFileSourceWithHint,
 } from '../utils/fileSourceFromUri';
 import { resolveImageDisplayUri } from '../utils/imageDisplayUri';
+import { OfflineImageBufferFramePager } from './OfflineImageBufferFramePager';
 import { widgetStyles as s } from './OfflineImageBufferWidget.styles';
 
 /** Bundled fixture row for image or PDF pickers. */
@@ -45,16 +41,21 @@ export type ExampleBundledFileInfo = {
   description: string;
   section?: string;
   kind?: 'image' | 'pdf';
+  /** Multi-frame image: asset paths decoded as separate OfflineImageBuffer frames. */
+  framePaths?: string[];
 };
 
 export type OfflineImageBufferInfo = {
   bufferId: string;
   sourceLabel: string;
-  /** URI for `<Image>` preview (may be a cache copy of a bundled asset). */
+  /** URI for legacy overlays; FrameView preview does not require it. */
   previewUri: string | null;
   width: number;
   height: number;
   frameCount: number;
+  kind?: 'image' | 'pdf';
+  /** PDF raster strategy used when kind === 'pdf'. */
+  state?: 'immutable' | 'lazy';
 };
 
 export type PdfSourceSelection = {
@@ -249,9 +250,12 @@ export const OfflineImageBufferWidget = forwardRef<
 
   const exampleFiles = useMemo((): ExampleBundledFileInfo[] => {
     const images: ExampleBundledFileInfo[] = imageFiles.map((f) => ({
-      ...f,
+      id: f.id,
+      name: f.name,
+      description: f.description,
       kind: 'image' as const,
       section: f.section ? `Images — ${f.section}` : 'Images',
+      framePaths: f.framePaths,
     }));
     const pdfs: ExampleBundledFileInfo[] = pdfFiles.map((f) => ({
       id: f.id,
@@ -322,18 +326,23 @@ export const OfflineImageBufferWidget = forwardRef<
   );
 
   const loadSource = useCallback(
-    async (label: string, source: FileSource) => {
+    async (label: string, sources: FileSource | FileSource[]) => {
       const requestId = ++requestRef.current;
       await releaseBuffer();
 
+      const list = Array.isArray(sources) ? sources : [sources];
       setLoading(true);
       setLoadProgress(0);
-      setLoadStatus(`Decoding "${label}" into OfflineImageBuffer…`);
+      setLoadStatus(
+        list.length > 1
+          ? `Decoding "${label}" (${list.length} frames)…`
+          : `Decoding "${label}" into OfflineImageBuffer…`
+      );
       setLoadError(null);
 
       try {
         setPdfActiveLabel(null);
-        const created = await createOfflineImageBufferFromFiles(source, {
+        const created = await createOfflineImageBufferFromFiles(list, {
           maxSide,
           onProgress: (event: { percent?: number; phase?: string }) => {
             if (requestId !== requestRef.current) return;
@@ -353,9 +362,11 @@ export const OfflineImageBufferWidget = forwardRef<
         }
 
         const frame = await getOfflineImageBufferFrameInfo(created, 0);
-        const previewUri = await resolveImageDisplayUri(source).catch(
-          () => null
-        );
+        // Overlay URI only for single-file images; multi-frame uses FrameView alone.
+        const previewUri =
+          list.length === 1
+            ? await resolveImageDisplayUri(list[0]!).catch(() => null)
+            : null;
 
         bufferIdRef.current = created.bufferId;
         const info: OfflineImageBufferInfo = {
@@ -365,6 +376,8 @@ export const OfflineImageBufferWidget = forwardRef<
           width: frame.width,
           height: frame.height,
           frameCount: created.info.frameCount,
+          kind: 'image',
+          state: 'immutable',
         };
         setBufferInfo(info);
         setLoadProgress(null);
@@ -391,14 +404,68 @@ export const OfflineImageBufferWidget = forwardRef<
 
   const selectPdf = useCallback(
     async (selection: PdfSourceSelection) => {
+      const requestId = ++requestRef.current;
       await releaseBuffer();
       setBufferInfo(null);
       onBufferReleased();
       setPdfActiveLabel(selection.label);
       setLoadError(null);
-      onPdfSelected?.(selection);
+      setLoading(true);
+      setLoadProgress(0);
+      setLoadStatus(`Rasterizing "${selection.label}" (lazy-lru)…`);
+
+      try {
+        // Always lazy-lru first; single-page UX is equivalent. Multi-page keeps
+        // cold slots + LRUs hot frames for the slide viewer.
+        const pages = await rasterizePdfPages(selection.source, {
+          strategy: 'lazy-lru',
+          dpi: 144,
+          maxSide,
+          onProgress: (p) => {
+            if (requestId !== requestRef.current) return;
+            const pct = p.total > 0 ? Math.round((100 * p.done) / p.total) : 0;
+            setLoadProgress(pct);
+            setLoadStatus(
+              `Rasterizing "${selection.label}"… ${p.phase} (${p.done}/${p.total})`
+            );
+          },
+        });
+
+        if (requestId !== requestRef.current) {
+          await releaseOfflineImageBuffer(pages.bufferId).catch(() => {});
+          return;
+        }
+
+        const frame = await getOfflineImageBufferFrameInfo(pages, 0);
+        bufferIdRef.current = pages.bufferId;
+        const info: OfflineImageBufferInfo = {
+          bufferId: pages.bufferId,
+          sourceLabel: selection.label,
+          previewUri: null,
+          width: frame.width,
+          height: frame.height,
+          frameCount: pages.info.frameCount,
+          kind: 'pdf',
+          state: 'lazy',
+        };
+        setBufferInfo(info);
+        setLoadProgress(null);
+        setLoadStatus(null);
+        onBufferReady(info);
+        onPdfSelected?.(selection);
+      } catch (err) {
+        if (requestId !== requestRef.current) return;
+        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadProgress(null);
+        setLoadStatus(null);
+        setPdfActiveLabel(null);
+      } finally {
+        if (requestId === requestRef.current) {
+          setLoading(false);
+        }
+      }
     },
-    [onBufferReleased, onPdfSelected, releaseBuffer]
+    [maxSide, onBufferReady, onBufferReleased, onPdfSelected, releaseBuffer]
   );
 
   const handleExamplePick = useCallback(
@@ -413,6 +480,13 @@ export const OfflineImageBufferWidget = forwardRef<
         return;
       }
       clearPdfUi();
+      if (file.framePaths && file.framePaths.length > 0) {
+        await loadSource(
+          file.name,
+          file.framePaths.map((path) => toImageFileSource(path))
+        );
+        return;
+      }
       await loadSource(file.name, toImageFileSource(file.id));
     },
     [clearPdfUi, loadSource, selectPdf]
@@ -538,31 +612,6 @@ export const OfflineImageBufferWidget = forwardRef<
         </View>
       ) : null}
 
-      {pdfActiveLabel && bufferInfo == null ? (
-        <View style={s.readyCard}>
-          <View style={s.readyHeader}>
-            <Text style={s.readyTitle} numberOfLines={2}>
-              PDF: {pdfActiveLabel}
-            </Text>
-            <TouchableOpacity
-              style={s.deleteButton}
-              onPress={async () => {
-                await resetAll(false);
-                setSelectedExampleId(null);
-                setSourceType(null);
-                clearPdfUi();
-              }}
-              disabled={busy}
-            >
-              <Ionicons name="trash-outline" size={22} color="#c00" />
-            </TouchableOpacity>
-          </View>
-          <Text style={s.metaText}>
-            Text-layer extract next (or rasterize if no text layer).
-          </Text>
-        </View>
-      ) : null}
-
       {loading ? (
         <View style={s.progressBox}>
           <Text style={s.progressLabel}>{loadStatus ?? 'Decoding image…'}</Text>
@@ -582,31 +631,39 @@ export const OfflineImageBufferWidget = forwardRef<
         <View style={s.readyCard}>
           <View style={s.readyHeader}>
             <Text style={s.readyTitle} numberOfLines={2}>
+              {bufferInfo.kind === 'pdf' ? 'PDF: ' : ''}
               {bufferInfo.sourceLabel}
             </Text>
             <TouchableOpacity
               style={s.deleteButton}
               onPress={async () => {
+                const wasPdf = bufferInfo.kind === 'pdf';
                 await resetAll(false);
                 onBufferReleased();
+                if (wasPdf) {
+                  clearPdfUi();
+                }
               }}
               disabled={busy}
             >
               <Ionicons name="trash-outline" size={22} color="#c00" />
             </TouchableOpacity>
           </View>
-          {bufferInfo.previewUri ? (
-            <Image
-              source={{ uri: bufferInfo.previewUri }}
-              style={s.thumb}
-              resizeMode="contain"
-            />
-          ) : null}
+          <OfflineImageBufferFramePager
+            buffer={bufferInfo.bufferId}
+            frameCount={bufferInfo.frameCount}
+            maxSide={Math.min(1280, maxSide)}
+          />
           <Text style={s.metaText}>
             {bufferInfo.bufferId}
             {'\n'}
             {bufferInfo.width}×{bufferInfo.height} · frames{' '}
             {bufferInfo.frameCount}
+            {bufferInfo.kind === 'pdf' && bufferInfo.frameCount > 1
+              ? '\nlazy-lru preview · pager ensures pages on access'
+              : bufferInfo.kind === 'pdf'
+              ? '\nlazy-lru preview'
+              : ''}
           </Text>
         </View>
       ) : null}
