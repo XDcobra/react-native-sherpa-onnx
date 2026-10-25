@@ -194,7 +194,7 @@ Text-layer spans on the TextBuffer:
 | `sourceImageBufferId` | Empty (no ImageBuffer) |
 | `quad` | Top-left origin, y-down, PDF user space |
 
-Raster frames use the same top-left / y-down convention, so overlays can map quads onto frame pixels via page size and frame size.
+Raster frames use the same top-left / y-down convention, so overlays can map quads onto frame pixels via page size and frame size (`mapTextSpatialSpansToFrame` or `OfflineImageBufferAnnotatedView` in [imagebuffer-offline.md](./imagebuffer-offline.md)).
 
 See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md](./imagebuffer-offline.md).
 
@@ -215,7 +215,7 @@ See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md
 <details>
 <summary>Page slider / swipe viewer for a large PDF (lazy-lru)</summary>
 
-Keep memory bounded while the user flips through pages. FrameView ensures the visible page; older pages drop out of the hot set automatically.
+Keep memory bounded while the user flips through pages. FrameView ensures the visible page; older pages drop out of the hot set automatically. After extract or OCR, overlay boxes with [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview) (same `frameIndex`).
 
 ```tsx
 import { useState } from 'react';

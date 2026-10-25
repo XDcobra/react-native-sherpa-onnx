@@ -238,7 +238,7 @@ console.log(ocr.instanceId);
 | Destination / feature | Buffer or handle | Notes |
 | --- | --- | --- |
 | Plain transcript | `OfflineTextBuffer` (`txt_off_*`) | `getOfflineTextBufferTextSlice` |
-| Box overlay / layout UI | Spatial spans on same text buffer | `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`) |
+| Box overlay / layout UI | Spatial spans on same text buffer | `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`). Ready-made: [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview); own UI: [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) |
 | Offline TTS | `OfflineTextBuffer` | Read aloud recognized text |
 | Offline punctuation | `OfflineTextBuffer` | Optional cleanup before TTS |
 
@@ -418,6 +418,19 @@ console.log(page.spanCount);
 <details>
 <summary>Read spatial spans for a box overlay</summary>
 
+```tsx
+import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imagebuffer';
+
+<OfflineImageBufferAnnotatedView
+  image={image}
+  text={textOut}
+  frameIndex={0}
+  onSpanPress={(e) => console.log(e.index, e.utf16Start, e.quad)}
+/>
+```
+
+Or map yourself (`ocr` quads are already frame pixels; `textLayer` needs `mapTextSpatialSpansToFrame`):
+
 ```ts
 const info = (await getPipelineTextBufferInfo(textOut)) as OfflineTextBufferInfo;
 if (info.hasSpatialSpans) {
@@ -427,7 +440,7 @@ if (info.hasSpatialSpans) {
     info.spatialSpanCount
   );
   for (const s of spans) {
-    console.log(s.text, s.boxes, s.frameIndex);
+    console.log(s.origin, s.frameIndex, s.quad);
   }
 }
 ```
