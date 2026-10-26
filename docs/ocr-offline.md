@@ -146,7 +146,7 @@ Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `
 | `docvlm-granite-258m-fp16` | ~632 MB | Float16 KV. |
 | `docvlm-granite-258m-q4f16` | ~265 MB | Float16 KV + MatMulNBits. |
 
-Each archive includes vision, embed, decoder, tokenizer, and manifest. Detect still looks for the eight flattened names (`vision_encoder.onnx`, …). `ppocrv6-tiny` stays the phone default.
+Each archive includes vision, embed, decoder, tokenizer, and manifest. `ppocrv6-tiny` stays the phone default.
 
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
@@ -172,7 +172,7 @@ File-based detection without initializing the engine. Unified detection: [model-
 ```ts
 function detectOcrModel(
   source: FileSource,
-  options?: { modelType?: OcrModelType }
+  options?: { modelType?: OcrModelType; quantization?: QuantizationPreference }
 ): Promise<OcrDetectModelResult>;
 ```
 
@@ -194,6 +194,7 @@ function createOCR(options: OcrInitializeOptions): Promise<OcrEngine>;
 const ocr = await createOCR({
   modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
   modelType: 'auto',
+  quantization: 'auto',
   provider: 'cpu',
   numThreads: 2,
 });
