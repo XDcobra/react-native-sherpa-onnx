@@ -272,8 +272,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private val ocrHelper = com.sherpaonnx.ocr.facade.SherpaOnnxOcrHelper(
-    emitProgress = { operationId, done, total, phase ->
-      emitOcrProgress(operationId, done, total, phase)
+    emitProgress = { operationId, done, total, phase, frameIndex, frameCount ->
+      emitOcrProgress(operationId, done, total, phase, frameIndex, frameCount)
     }
   )
   private val pdfHelper = com.sherpaonnx.pdf.facade.SherpaOnnxPdfHelper(reactApplicationContext)
@@ -3557,7 +3557,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun emitOcrProgress(operationId: String?, done: Int, total: Int, phase: String) {
+  private fun emitOcrProgress(
+    operationId: String?,
+    done: Int,
+    total: Int,
+    phase: String,
+    frameIndex: Int,
+    frameCount: Int,
+  ) {
     if (operationId.isNullOrEmpty()) return
     try {
       val event = Arguments.createMap()
@@ -3565,6 +3572,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       event.putInt("done", done)
       event.putInt("total", total)
       event.putString("phase", phase)
+      event.putInt("frameIndex", frameIndex)
+      event.putInt("frameCount", frameCount)
       reactApplicationContext
         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         .emit("SherpaOnnxOcrProgress", event)

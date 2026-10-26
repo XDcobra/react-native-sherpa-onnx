@@ -3,6 +3,7 @@
 #include "DoctrDbPostprocess.h"
 #include "DoctrImageOps.h"
 #include "DoctrRecDecode.h"
+#include "OcrOrtEnv.h"
 #include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -84,16 +86,16 @@ void DoctrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
            manifest_.rec_arch.c_str(), manifest_.rec_h, manifest_.rec_w,
            manifest_.rec_vocab.size());
 
-  env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "sherpa-onnx-ocr-doctr");
+  Ort::Env& env = SharedOrtEnv();
   session_options_ = std::make_unique<Ort::SessionOptions>();
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
   ApplyOrtProvider(*session_options_, options_.provider);
 
   det_session_ =
-      std::make_unique<Ort::Session>(*env_, det_path.c_str(), *session_options_);
+      std::make_unique<Ort::Session>(env, det_path.c_str(), *session_options_);
   rec_session_ =
-      std::make_unique<Ort::Session>(*env_, rec_path.c_str(), *session_options_);
+      std::make_unique<Ort::Session>(env, rec_path.c_str(), *session_options_);
   det_input_name_ = FirstInputName(*det_session_);
   det_output_name_ = FirstOutputName(*det_session_);
   rec_input_name_ = FirstInputName(*rec_session_);
@@ -107,11 +109,11 @@ void DoctrBackend::Release() {
   det_session_.reset();
   rec_session_.reset();
   session_options_.reset();
-  env_.reset();
   manifest_ = DoctrManifest{};
 }
 
-OcrResult DoctrBackend::Recognize(const OcrFrameView& frame) {
+OcrResult DoctrBackend::Recognize(const OcrFrameView& frame,
+                                  const OcrRecognizeContext& ctx) {
   if (!loaded_) {
     throw std::runtime_error("DoctrBackend::Recognize called before Load");
   }
@@ -119,40 +121,44 @@ OcrResult DoctrBackend::Recognize(const OcrFrameView& frame) {
     throw std::invalid_argument("DoctrBackend::Recognize: invalid frame");
   }
 
-  // --- Detection: stretch to fixed det input size from manifest ---
   const int det_h = manifest_.det_h;
   const int det_w = manifest_.det_w;
-  RgbImage resized = ResizeRgb(frame.rgb, frame.width, frame.height, det_w, det_h);
-  auto det_input = SubtractMeanNormalizeRgb(
-      resized.rgb.data(), resized.width, resized.height,
-      manifest_.det_mean.data(), manifest_.det_std.data());
+  RgbImage resized;
+  std::vector<float> det_input;
+  ctx.RunPhase(kOcrPhasePreprocess, [&] {
+    resized = ResizeRgb(frame.rgb, frame.width, frame.height, det_w, det_h);
+    det_input = SubtractMeanNormalizeRgb(resized.rgb.data(), resized.width, resized.height,
+                                         manifest_.det_mean.data(), manifest_.det_std.data());
+  });
 
   std::array<int64_t, 4> det_shape{
       1, 3, static_cast<int64_t>(det_h), static_cast<int64_t>(det_w)};
   Ort::MemoryInfo mem =
       Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-  Ort::Value det_tensor = Ort::Value::CreateTensor<float>(
-      mem, det_input.data(), det_input.size(), det_shape.data(), det_shape.size());
 
-  const char* det_in[] = {det_input_name_.c_str()};
-  const char* det_out[] = {det_output_name_.c_str()};
-  auto det_outs = det_session_->Run(
-      Ort::RunOptions{nullptr}, det_in, &det_tensor, 1, det_out, 1);
-  auto det_info = det_outs[0].GetTensorTypeAndShapeInfo();
-  auto det_dims = det_info.GetShape();
-
+  std::vector<Ort::Value> det_outs;
   int pred_h = 0;
   int pred_w = 0;
-  if (det_dims.size() == 4) {
-    pred_h = static_cast<int>(det_dims[2]);
-    pred_w = static_cast<int>(det_dims[3]);
-  } else if (det_dims.size() == 3) {
-    pred_h = static_cast<int>(det_dims[1]);
-    pred_w = static_cast<int>(det_dims[2]);
-  } else {
-    throw std::runtime_error("Unexpected det output rank");
-  }
-  const float* logits = det_outs[0].GetTensorData<float>();
+  const float* logits = nullptr;
+  ctx.RunPhase(kOcrPhaseDetect, [&] {
+    Ort::Value det_tensor = Ort::Value::CreateTensor<float>(
+        mem, det_input.data(), det_input.size(), det_shape.data(), det_shape.size());
+    const char* det_in[] = {det_input_name_.c_str()};
+    const char* det_out[] = {det_output_name_.c_str()};
+    det_outs = det_session_->Run(Ort::RunOptions{nullptr}, det_in, &det_tensor, 1, det_out, 1);
+    auto det_info = det_outs[0].GetTensorTypeAndShapeInfo();
+    auto det_dims = det_info.GetShape();
+    if (det_dims.size() == 4) {
+      pred_h = static_cast<int>(det_dims[2]);
+      pred_w = static_cast<int>(det_dims[3]);
+    } else if (det_dims.size() == 3) {
+      pred_h = static_cast<int>(det_dims[1]);
+      pred_w = static_cast<int>(det_dims[2]);
+    } else {
+      throw std::runtime_error("Unexpected det output rank");
+    }
+    logits = det_outs[0].GetTensorData<float>();
+  });
 
   // doctr det outputs logits (not probabilities); sigmoid + postprocess maps
   // boxes from det input space back to source image coords.
@@ -171,8 +177,13 @@ OcrResult DoctrBackend::Recognize(const OcrFrameView& frame) {
   // --- Recognition per box ---
   OcrResult result;
   int utf16_cursor = 0;
-
+  const int box_n = static_cast<int>(boxes.size());
+  if (box_n == 0) {
+    ctx.Report(kOcrPhaseRecognize, 1, 1);
+  }
   for (size_t bi = 0; bi < boxes.size(); ++bi) {
+    ctx.ThrowIfCancelled();
+    ctx.Report(kOcrPhaseRecognize, static_cast<int>(bi), box_n);
     const auto& box = boxes[bi];
     const float bw = std::hypot(box.quad[2] - box.quad[0], box.quad[3] - box.quad[1]);
     const float bh = std::hypot(box.quad[6] - box.quad[0], box.quad[7] - box.quad[1]);
@@ -260,6 +271,9 @@ OcrResult DoctrBackend::Recognize(const OcrFrameView& frame) {
       span.quad.xy[i] = box.quad[i];
     }
     result.spans.push_back(span);
+  }
+  if (box_n > 0) {
+    ctx.Report(kOcrPhaseRecognize, box_n, box_n);
   }
 
   return result;

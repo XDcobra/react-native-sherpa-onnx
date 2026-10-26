@@ -1,10 +1,10 @@
 #pragma once
 
 #include "OcrBackend.h"
+#include "OcrRecognizeContext.h"
 #include "OcrTypes.h"
 
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,9 +20,8 @@ namespace ocr {
  */
 class OcrEngine {
  public:
-  using ProgressFn =
-      std::function<void(int done, int total, const std::string& phase)>;
-  using CancelFn = std::function<bool()>;
+  using ProgressFn = OcrProgressFn;
+  using CancelFn = OcrCancelFn;
 
   struct RecognizeOptions {
     /** Empty → all frames in the image buffer. */
@@ -30,6 +29,7 @@ class OcrEngine {
     OcrGranularity granularity = OcrGranularity::kLine;
     ProgressFn progress;
     CancelFn cancel;
+    int progress_min_interval_ms = kOcrProgressMinIntervalMs;
   };
 
   struct RecognizeOutcome {

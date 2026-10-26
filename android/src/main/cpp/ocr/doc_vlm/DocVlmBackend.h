@@ -15,7 +15,6 @@
 #include <vector>
 
 namespace Ort {
-class Env;
 class Session;
 class SessionOptions;
 }  // namespace Ort
@@ -30,7 +29,8 @@ class DocVlmBackend final : public OcrBackend {
   ~DocVlmBackend() override;
 
   void Load(const std::string& model_dir, const OcrLoadOptions& options) override;
-  OcrResult Recognize(const OcrFrameView& frame) override;
+  OcrResult Recognize(const OcrFrameView& frame,
+                      const OcrRecognizeContext& ctx = {}) override;
   void Release() override;
   const char* Family() const override { return "doc_vlm"; }
 
@@ -40,7 +40,6 @@ class DocVlmBackend final : public OcrBackend {
   DocVlmTokenizer tokenizer_{};
   bool loaded_ = false;
 
-  std::unique_ptr<Ort::Env> env_;
   std::unique_ptr<Ort::SessionOptions> session_options_;
   std::unique_ptr<Ort::Session> vision_session_;
   std::unique_ptr<Ort::Session> embed_session_;

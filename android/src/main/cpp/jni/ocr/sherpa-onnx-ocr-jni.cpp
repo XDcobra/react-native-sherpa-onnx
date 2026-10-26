@@ -417,7 +417,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring imageBufferId,
-    jintArray frameIndices, jstring granularity, jstring operationId) {
+    jintArray frameIndices, jstring granularity, jstring operationId,
+    jint progressMinIntervalMs) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string imageId = JstringToStd(env, imageBufferId);
   const std::string opId = JstringToStd(env, operationId);
@@ -437,6 +438,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
 
   sherpa_onnx::ocr::OcrEngine::RecognizeOptions opts;
   opts.granularity = ParseGranularity(gran);
+  opts.progress_min_interval_ms =
+      progressMinIntervalMs < 0 ? 0 : static_cast<int>(progressMinIntervalMs);
   if (frameIndices != nullptr) {
     const jsize n = env->GetArrayLength(frameIndices);
     jint* elems = env->GetIntArrayElements(frameIndices, nullptr);
@@ -459,7 +462,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   jmethodID progressMethod =
       progressClass
           ? env->GetStaticMethodID(progressClass, "onNativeProgress",
-                                   "(Ljava/lang/String;IILjava/lang/String;)V")
+                                   "(Ljava/lang/String;IILjava/lang/String;II)V")
           : nullptr;
   jobject globalClass =
       progressClass ? env->NewGlobalRef(progressClass) : nullptr;
@@ -467,7 +470,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
 
   if (jvm && globalClass && progressMethod && !opId.empty()) {
     opts.progress = [jvm, globalClass, progressMethod, opId](
-                        int done, int total, const std::string& phase) {
+                        const sherpa_onnx::ocr::OcrProgressTick& tick) {
       JNIEnv* cbEnv = nullptr;
       bool attached = false;
       if (jvm->GetEnv(reinterpret_cast<void**>(&cbEnv), JNI_VERSION_1_6) !=
@@ -476,9 +479,10 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
         attached = true;
       }
       jstring jop = cbEnv->NewStringUTF(opId.c_str());
-      jstring jphase = cbEnv->NewStringUTF(phase.c_str());
-      cbEnv->CallStaticVoidMethod(static_cast<jclass>(globalClass),
-                                  progressMethod, jop, done, total, jphase);
+      jstring jphase = cbEnv->NewStringUTF(tick.phase.c_str());
+      cbEnv->CallStaticVoidMethod(static_cast<jclass>(globalClass), progressMethod, jop,
+                                  tick.done, tick.total, jphase, tick.frame_index,
+                                  tick.frame_count);
       cbEnv->DeleteLocalRef(jop);
       cbEnv->DeleteLocalRef(jphase);
       if (attached) jvm->DetachCurrentThread();

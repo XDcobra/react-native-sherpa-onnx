@@ -330,6 +330,8 @@ export type OcrRecognizeBridgeOptions = {
   frames?: number[];
   granularity?: string;
   operationId?: string;
+  /** Native coalesce interval. Default 200. `0` = unthrottled. */
+  progressMinIntervalMs?: number;
 };
 
 /** Native result from `detectOcrModel`. */
@@ -1136,7 +1138,10 @@ export interface Spec extends TurboModule {
 
   /**
    * Recognize frames from an offline ImageBuffer into an empty OfflineTextBuffer.
-   * Progress events: `SherpaOnnxOcrProgress` with `{ operationId, done, total, phase }`.
+   * Progress events: `SherpaOnnxOcrProgress` with
+   * `{ operationId, done, total, phase, frameIndex, frameCount }`.
+   * `total === 0` means the phase has no determinate bar.
+   * Native coalesces ticks at `progressMinIntervalMs` (default 200).
    */
   ocrRecognize(
     instanceId: string,

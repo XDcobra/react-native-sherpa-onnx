@@ -201,20 +201,29 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
       return out;
     }
 
-    if (options.progress) {
-      options.progress(done, total, "recognize");
-    }
-
     OcrFrameView view;
     view.rgb = rgb;
     view.width = width;
     view.height = height;
     view.frame_index = frame_index;
 
+    OcrRecognizeContext ctx;
+    ctx.progress = options.progress;
+    ctx.cancel = options.cancel;
+    ctx.frame_index = frame_index;
+    ctx.frame_count = total;
+    ctx.progress_min_interval_ms = options.progress_min_interval_ms;
+
     OcrResult frame_result;
     try {
       // Backend may run for a while; keep lock so unload cannot race Release.
-      frame_result = backend_->Recognize(view);
+      frame_result = backend_->Recognize(view, ctx);
+    } catch (const OcrCancelled&) {
+      out.cancelled = true;
+      out.errorCode = "OCR_CANCELLED";
+      out.errorMessage = "OCR recognize cancelled";
+      OCR_LOGI("recognize cancelled in backend after %d/%d", done, total);
+      return out;
     } catch (const std::exception& e) {
       out.errorCode = "OCR_RECOGNIZE_FAILED";
       out.errorMessage = e.what() ? e.what() : "recognize failed";
@@ -247,9 +256,6 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
         frame_result.raw_utf8.size(), frame_result.markdown_utf8.size());
 
     ++done;
-    if (options.progress) {
-      options.progress(done, total, "recognize");
-    }
   }
 
   FilterSpansByGranularity(merged, options.granularity);

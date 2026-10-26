@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include "OcrRecognizeContext.h"
 #include "OcrTypes.h"
 
 #include <memory>
@@ -16,7 +17,8 @@ class OcrBackend {
   virtual ~OcrBackend() = default;
 
   virtual void Load(const std::string& model_dir, const OcrLoadOptions& options) = 0;
-  virtual OcrResult Recognize(const OcrFrameView& frame) = 0;
+  virtual OcrResult Recognize(const OcrFrameView& frame,
+                              const OcrRecognizeContext& ctx = {}) = 0;
   virtual void Release() = 0;
 
   /** Stable family id, e.g. "ppocr". */

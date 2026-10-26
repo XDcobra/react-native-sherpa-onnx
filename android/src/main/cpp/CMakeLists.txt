@@ -207,6 +207,8 @@ set(SOURCES
     ocr/OcrDetect.cpp
     ocr/OcrTextUtils.cpp
     ocr/OcrEngine.cpp
+    ocr/OcrRecognizeContext.cpp
+    ocr/OcrOrtEnv.cpp
     ocr/ppocr/PpocrBackend.cpp
     ocr/ppocr/PpocrCtcDecoder.cpp
     ocr/ppocr/PpocrDbPostprocess.cpp

@@ -40,10 +40,33 @@ export function isOcrModelType(s: string): s is OcrModelType {
  */
 export type OcrGranularity = TextSpatialSpanLevel;
 
+/** Known OCR recognize phases. Families may emit additional strings. */
+export const OCR_PROGRESS_PHASES = [
+  'preprocess',
+  'patch',
+  'vision',
+  'embed',
+  'prefill',
+  'decode',
+  'detect',
+  'recognize',
+  'parse',
+] as const;
+
+export type OcrProgressPhase =
+  | (typeof OCR_PROGRESS_PHASES)[number]
+  | (string & {});
+
+/** Native→JS OCR progress coalesce. Matches download progress (200ms). */
+export const OCR_PROGRESS_MIN_INTERVAL_MS = 200;
+
 export type OcrProgress = {
+  phase: OcrProgressPhase;
   done: number;
+  /** 0 = indeterminate (phase label only; no percent). */
   total: number;
-  phase: string;
+  frameIndex: number;
+  frameCount: number;
 };
 
 /** Native `SherpaOnnxOcrProgress` event payload. */
@@ -52,6 +75,8 @@ export type OcrProgressNativeEvent = {
   done: number;
   total: number;
   phase: string;
+  frameIndex?: number;
+  frameCount?: number;
 };
 
 export type OcrPpocrOptions = {
@@ -154,7 +179,16 @@ export type OcrRecognizeOptions = {
   /** Span level filter (default `'line'`). */
   granularity?: OcrGranularity;
   onProgress?: (progress: OcrProgress) => void;
-  /** Abort between frames → `OCR_CANCELLED`. */
+  /**
+   * Minimum ms between native progress events. Default
+   * {@link OCR_PROGRESS_MIN_INTERVAL_MS} (200). `0` = unthrottled.
+   * Phase / frame changes and `done === total` always emit.
+   */
+  progressMinIntervalMs?: number;
+  /**
+   * Abort at the same hooks as progress (before each Ort::Run and each
+   * decode / box step). Mid-Run cancel is not supported.
+   */
   signal?: AbortSignal;
 };
 

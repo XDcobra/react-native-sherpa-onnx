@@ -160,7 +160,9 @@ describe('ocr offline API', () => {
       operationId: opId,
       done: 1,
       total: 2,
-      phase: 'recognize',
+      phase: 'decode',
+      frameIndex: 0,
+      frameCount: 1,
     });
     holder.listener!({
       operationId: 'other',
@@ -172,9 +174,39 @@ describe('ocr offline API', () => {
     expect(onProgress).toHaveBeenCalledWith({
       done: 1,
       total: 2,
-      phase: 'recognize',
+      phase: 'decode',
+      frameIndex: 0,
+      frameCount: 1,
     });
     expect(onProgress).toHaveBeenCalledTimes(1);
+    await ocr.destroy();
+  });
+
+  it('recognize passes default progressMinIntervalMs and allows 0', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+    });
+    await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(mockNative.ocrRecognize).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ progressMinIntervalMs: 200 })
+    );
+    await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { progressMinIntervalMs: 0 }
+    );
+    expect(mockNative.ocrRecognize).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ progressMinIntervalMs: 0 })
+    );
     await ocr.destroy();
   });
 

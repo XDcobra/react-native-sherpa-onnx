@@ -4,6 +4,7 @@
 #include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
+#include "OcrOrtEnv.h"
 #include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -140,7 +141,6 @@ void DocVlmBackend::Release() {
   embed_session_.reset();
   decoder_session_.reset();
   session_options_.reset();
-  env_.reset();
   tokenizer_ = DocVlmTokenizer{};
   manifest_ = DocVlmManifest{};
   kv_float16_ = false;
@@ -222,7 +222,7 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
     }
   }
 
-  env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "sherpa-onnx-ocr-doc-vlm");
+  Ort::Env& env = SharedOrtEnv();
   session_options_ = std::make_unique<Ort::SessionOptions>();
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetInterOpNumThreads(1);
@@ -232,7 +232,7 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
   const auto open_session = [&](const std::string& path, const char* label) {
     const auto t0 = std::chrono::steady_clock::now();
     auto session =
-        std::make_unique<Ort::Session>(*env_, path.c_str(), *session_options_);
+        std::make_unique<Ort::Session>(env, path.c_str(), *session_options_);
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();
@@ -273,7 +273,8 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
            manifest_.hidden_size, manifest_.vocab_size);
 }
 
-OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
+OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame,
+                                   const OcrRecognizeContext& ctx) {
   if (!loaded_) {
     throw std::runtime_error("DocVlmBackend::Recognize called before Load");
   }
@@ -284,10 +285,12 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
     throw std::runtime_error("DocVlmBackend: sessions not loaded");
   }
 
-  DocVlmTiles tiles = PreprocessRgb(
-      frame.rgb, frame.width, frame.height, manifest_.size_longest_edge,
-      manifest_.image_size, manifest_.rescale_factor, manifest_.mean.data(),
-      manifest_.std.data());
+  DocVlmTiles tiles;
+  ctx.RunPhase(kOcrPhasePreprocess, [&] {
+    tiles = PreprocessRgb(frame.rgb, frame.width, frame.height, manifest_.size_longest_edge,
+                          manifest_.image_size, manifest_.rescale_factor, manifest_.mean.data(),
+                          manifest_.std.data());
+  });
   OCR_LOGI("doc_vlm tiles rows=%d cols=%d num_images=%d canvas=%dx%d", tiles.rows, tiles.cols,
            tiles.num_images, tiles.canvas_width, tiles.canvas_height);
   const int num_images = tiles.num_images;
@@ -296,7 +299,7 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
 
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   std::vector<float> features;
-  {
+  ctx.RunPhase(kOcrPhaseVision, [&] {
     const std::array<int64_t, 5> pixel_shape{
         1, num_images, 3, manifest_.image_size, manifest_.image_size};
     const std::array<int64_t, 4> mask_shape{
@@ -321,7 +324,7 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
     const float* data = outputs[0].GetTensorData<float>();
     const size_t count = static_cast<size_t>(dims[0] * dims[1] * dims[2]);
     features.assign(data, data + count);
-  }
+  });
   tiles = DocVlmTiles{};
 
   const std::vector<int32_t> prompt = BuildPromptIds(tokenizer_, rows, cols);
@@ -336,7 +339,7 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
 
   const int64_t seq0 = static_cast<int64_t>(prompt.size());
   std::vector<float> embeds;
-  {
+  ctx.RunPhase(kOcrPhaseEmbed, [&] {
     std::vector<int64_t> ids64(prompt.begin(), prompt.end());
     const std::array<int64_t, 2> id_shape{1, seq0};
     Ort::Value ids = Ort::Value::CreateTensor<int64_t>(
@@ -350,25 +353,25 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
     }
     const float* data = outputs[0].GetTensorData<float>();
     embeds.assign(data, data + static_cast<size_t>(seq0 * manifest_.hidden_size));
-  }
 
-  size_t feat_cursor = 0;
-  int scattered = 0;
-  for (size_t i = 0; i < prompt.size(); ++i) {
-    if (prompt[i] != manifest_.image_token_id) continue;
-    if (feat_cursor + static_cast<size_t>(manifest_.hidden_size) > features.size()) {
-      throw std::runtime_error("DocVlmBackend: image feature cursor overflow");
+    size_t feat_cursor = 0;
+    int scattered = 0;
+    for (size_t i = 0; i < prompt.size(); ++i) {
+      if (prompt[i] != manifest_.image_token_id) continue;
+      if (feat_cursor + static_cast<size_t>(manifest_.hidden_size) > features.size()) {
+        throw std::runtime_error("DocVlmBackend: image feature cursor overflow");
+      }
+      std::copy_n(features.data() + feat_cursor, static_cast<size_t>(manifest_.hidden_size),
+                  embeds.data() + i * static_cast<size_t>(manifest_.hidden_size));
+      feat_cursor += static_cast<size_t>(manifest_.hidden_size);
+      ++scattered;
     }
-    std::copy_n(features.data() + feat_cursor, static_cast<size_t>(manifest_.hidden_size),
-                embeds.data() + i * static_cast<size_t>(manifest_.hidden_size));
-    feat_cursor += static_cast<size_t>(manifest_.hidden_size);
-    ++scattered;
-  }
-  if (scattered != image_tokens || feat_cursor != features.size()) {
-    throw std::runtime_error("DocVlmBackend: image feature scatter did not consume features");
-  }
-  features.clear();
-  features.shrink_to_fit();
+    if (scattered != image_tokens || feat_cursor != features.size()) {
+      throw std::runtime_error("DocVlmBackend: image feature scatter did not consume features");
+    }
+    features.clear();
+    features.shrink_to_fit();
+  });
 
   const int max_new = ResolveMaxNewTokens(options_.max_new_tokens, static_cast<int>(prompt.size()));
   const int layers = manifest_.num_hidden_layers;
@@ -437,32 +440,45 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
   };
 
   std::vector<int64_t> mask(static_cast<size_t>(seq0), 1);
-  const auto t_prefill = std::chrono::steady_clock::now();
-  auto prefill_out = run_decoder(embeds, seq0, mask);
-  embeds.clear();
-  embeds.shrink_to_fit();
-  int32_t next = take_next(prefill_out, seq0);
-  const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              std::chrono::steady_clock::now() - t_prefill)
-                              .count();
+  int32_t next = 0;
+  long long prefill_ms = 0;
+  ctx.RunPhase(kOcrPhasePrefill, [&] {
+    const auto t_prefill = std::chrono::steady_clock::now();
+    auto prefill_out = run_decoder(embeds, seq0, mask);
+    embeds.clear();
+    embeds.shrink_to_fit();
+    next = take_next(prefill_out, seq0);
+    prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - t_prefill)
+                     .count();
+  });
 
   std::vector<int32_t> generated_ids;
   int generated = 0;
   std::string stop_reason = "max_new_tokens";
   int step = 0;
   DocTagsPrefix prefix;
+  auto snap_decode = [&]() {
+    const int shown = generated > 0 ? generated : 1;
+    ctx.Report(kOcrPhaseDecode, shown, shown);
+  };
+  ctx.ThrowIfCancelled();
+  ctx.Report(kOcrPhaseDecode, 0, max_new);
   const auto t_decode = std::chrono::steady_clock::now();
   while (generated < max_new) {
+    ctx.ThrowIfCancelled();
     ++step;
     const bool log_step = (step % 32 == 0);
     if (next == manifest_.eos_token_id) {
       stop_reason = "eos";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     if (prompt_only_ids_.count(next) != 0) {
       stop_reason = "invalid_sequence";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     const std::string piece = tokenizer_.Decode(std::vector<int32_t>{next});
@@ -470,18 +486,22 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
       stop_reason = "invalid_sequence";
       OCR_LOGI("doc_vlm decode step=%d token=%d prefix_reject piece=%s", step,
                next, piece.c_str());
+      snap_decode();
       break;
     }
     generated_ids.push_back(next);
     ++generated;
+    ctx.Report(kOcrPhaseDecode, generated, max_new);
     if (next == doctag_end_id_) {
       stop_reason = "doctag_end";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     if (generated == max_new) {
       stop_reason = "max_new_tokens";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     if (log_step) OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
@@ -509,13 +529,16 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
       generated > 0 ? static_cast<double>(decode_ms) / static_cast<double>(generated) : 0.0;
 
   OcrResult result;
-  result.doctags_utf8 = tokenizer_.Decode(generated_ids);
-  LstripAsciiWs(result.doctags_utf8);
-  result.raw_utf8 = result.doctags_utf8;
-  DocTagsParse parsed = ParseDocTags(result.doctags_utf8, frame.width, frame.height, frame.frame_index);
-  result.text_utf8 = std::move(parsed.text_utf8);
-  result.markdown_utf8 = std::move(parsed.markdown_utf8);
-  result.spans = std::move(parsed.spans);
+  ctx.RunPhase(kOcrPhaseParse, [&] {
+    result.doctags_utf8 = tokenizer_.Decode(generated_ids);
+    LstripAsciiWs(result.doctags_utf8);
+    result.raw_utf8 = result.doctags_utf8;
+    DocTagsParse parsed =
+        ParseDocTags(result.doctags_utf8, frame.width, frame.height, frame.frame_index);
+    result.text_utf8 = std::move(parsed.text_utf8);
+    result.markdown_utf8 = std::move(parsed.markdown_utf8);
+    result.spans = std::move(parsed.spans);
+  });
   result.stop_reason = stop_reason;
   result.complete = (stop_reason == "doctag_end");
   OCR_LOGI("doc_vlm decode_perf prefill_ms=%lld decode_ms=%lld generated=%d ms_per_token=%.2f",

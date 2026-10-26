@@ -44,7 +44,7 @@ import type {
   OcrRecognizeOptions,
   OcrRecognizeResult,
 } from './types';
-import { OcrErrorCode } from './types';
+import { OCR_PROGRESS_MIN_INTERVAL_MS, OcrErrorCode } from './types';
 
 type NativeSubscription = { remove: () => void };
 
@@ -80,15 +80,22 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
     frames?: number[];
     granularity?: OcrGranularity;
     operationId: string;
+    progressMinIntervalMs: number;
   };
   cleanup: () => void;
 } {
   const operationId = `ocr_rec_${Date.now()}_${++opIdCounter}`;
+  const rawInterval = options?.progressMinIntervalMs;
+  const progressMinIntervalMs =
+    typeof rawInterval === 'number' && Number.isFinite(rawInterval)
+      ? Math.max(0, Math.trunc(rawInterval))
+      : OCR_PROGRESS_MIN_INTERVAL_MS;
   const nativeOptions: {
     frames?: number[];
     granularity?: OcrGranularity;
     operationId: string;
-  } = { operationId };
+    progressMinIntervalMs: number;
+  } = { operationId, progressMinIntervalMs };
 
   if (options?.frames !== undefined) {
     nativeOptions.frames = options.frames;
@@ -117,6 +124,8 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
             done: event.done,
             total: event.total,
             phase: event.phase,
+            frameIndex: event.frameIndex ?? 0,
+            frameCount: event.frameCount ?? 1,
           });
         }
       }
@@ -450,6 +459,7 @@ export type {
   OcrGranularity,
   OcrProgress,
   OcrProgressNativeEvent,
+  OcrProgressPhase,
   OcrPpocrOptions,
   OcrDoctrOptions,
   OcrDocVlmOptions,
@@ -483,4 +493,10 @@ export {
 
 export type { OcrDetectModelResult } from '../types/modelDetect';
 
-export { OcrErrorCode, OCR_MODEL_TYPES, isOcrModelType } from './types';
+export {
+  OcrErrorCode,
+  OCR_MODEL_TYPES,
+  OCR_PROGRESS_MIN_INTERVAL_MS,
+  OCR_PROGRESS_PHASES,
+  isOcrModelType,
+} from './types';

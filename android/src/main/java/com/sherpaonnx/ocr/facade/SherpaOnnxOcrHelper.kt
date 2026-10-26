@@ -18,7 +18,14 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 class SherpaOnnxOcrHelper(
-  private val emitProgress: (operationId: String, done: Int, total: Int, phase: String) -> Unit,
+  private val emitProgress: (
+    operationId: String,
+    done: Int,
+    total: Int,
+    phase: String,
+    frameIndex: Int,
+    frameCount: Int,
+  ) -> Unit,
 ) {
   companion object {
     private const val TAG = "SherpaOnnx:ocr"
@@ -240,6 +247,13 @@ class SherpaOnnxOcrHelper(
         ?.getString("granularity")
         ?: "line"
     val frameIndices = readFrameIndices(options)
+    val progressMinIntervalMs =
+      options
+        ?.takeIf { it.hasKey("progressMinIntervalMs") && !it.isNull("progressMinIntervalMs") }
+        ?.getDouble("progressMinIntervalMs")
+        ?.toInt()
+        ?.coerceAtLeast(0)
+        ?: 200
 
     val gateKey = NativeInstanceGate.keyFor(sentinel)
     if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -249,9 +263,9 @@ class SherpaOnnxOcrHelper(
 
     val prevListener = OcrNative.progressListener
     if (operationId.isNotEmpty()) {
-      OcrNative.progressListener = { opId, done, total, phase ->
+      OcrNative.progressListener = { opId, done, total, phase, frameIndex, frameCount ->
         if (opId == operationId) {
-          emitProgress(opId, done, total, phase)
+          emitProgress(opId, done, total, phase, frameIndex, frameCount)
         }
       }
     }
@@ -264,6 +278,7 @@ class SherpaOnnxOcrHelper(
           frameIndices,
           granularity,
           operationId.ifEmpty { null },
+          progressMinIntervalMs,
         )
           ?: run {
             promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, "nativeRecognize returned null")

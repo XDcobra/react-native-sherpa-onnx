@@ -5,6 +5,7 @@
 #include "NemotronParseMarkup.h"
 #include "NemotronParseNavit.h"
 #include "NemotronParseNpy.h"
+#include "OcrOrtEnv.h"
 #include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -132,7 +133,6 @@ void NemotronParseBackend::Release() {
   embed_session_.reset();
   decoder_session_.reset();
   session_options_.reset();
-  env_.reset();
   tokenizer_ = NemotronParseTokenizer{};
   manifest_ = NemotronParseManifest{};
   pos_embed_.clear();
@@ -184,7 +184,7 @@ void NemotronParseBackend::Load(const std::string& model_dir, const OcrLoadOptio
   OCR_LOGI("nemotron_parse pos_embed n=%zu dtype_pack=%s", pos_embed_.size(),
            manifest_.onnx_dtype.c_str());
 
-  env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "sherpa-onnx-ocr-nemotron-parse");
+  Ort::Env& env = SharedOrtEnv();
   session_options_ = std::make_unique<Ort::SessionOptions>();
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetInterOpNumThreads(1);
@@ -193,7 +193,7 @@ void NemotronParseBackend::Load(const std::string& model_dir, const OcrLoadOptio
 
   const auto open_session = [&](const std::string& path, const char* label) {
     const auto t0 = std::chrono::steady_clock::now();
-    auto session = std::make_unique<Ort::Session>(*env_, path.c_str(), *session_options_);
+    auto session = std::make_unique<Ort::Session>(env, path.c_str(), *session_options_);
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();
@@ -232,20 +232,24 @@ void NemotronParseBackend::Load(const std::string& model_dir, const OcrLoadOptio
            kHeadDim, kVocab);
 }
 
-OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
+OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame,
+                                          const OcrRecognizeContext& ctx) {
   if (!loaded_) throw std::runtime_error("NemotronParseBackend::Recognize called before Load");
   if (frame.rgb == nullptr || frame.width <= 0 || frame.height <= 0) {
     throw std::invalid_argument("NemotronParseBackend: invalid frame");
   }
 
-  NemotronParsePatches page = PreprocessRgb(frame.rgb, frame.width, frame.height);
+  NemotronParsePatches page;
+  ctx.RunPhase(kOcrPhasePreprocess, [&] {
+    page = PreprocessRgb(frame.rgb, frame.width, frame.height);
+  });
   OCR_LOGI("nemotron_parse image content=%dx%d padded=%dx%d rows=%d cols=%d", page.content_h,
            page.content_w, page.image_h, page.image_w, page.rows, page.cols);
 
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   const int64_t n_patches = static_cast<int64_t>(page.rows) * page.cols;
   std::vector<float> patch_emb;
-  {
+  ctx.RunPhase(kOcrPhasePatch, [&] {
     const std::array<int64_t, 2> shape{n_patches, kPatchIn};
     Ort::Value in = Ort::Value::CreateTensor<float>(
         mem, page.patches.data(), page.patches.size(), shape.data(), shape.size());
@@ -258,7 +262,7 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
     }
     const float* data = outputs[0].GetTensorData<float>();
     patch_emb.assign(data, data + static_cast<size_t>(n_patches * kVisionWidth));
-  }
+  });
 
   std::vector<float> positioned = AddNavitPositions(
       patch_emb, pos_embed_, page.image_h, page.image_w, page.content_h, page.content_w);
@@ -267,7 +271,7 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
 
   std::vector<float> vision;
   std::vector<float> visual_mask;
-  {
+  ctx.RunPhase(kOcrPhaseVision, [&] {
     const std::array<int64_t, 4> shape{1, page.rows, page.cols, kVisionWidth};
     Ort::Value in = Ort::Value::CreateTensor<float>(
         mem, positioned.data(), positioned.size(), shape.data(), shape.size());
@@ -297,7 +301,7 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
       visual_mask.assign(static_cast<size_t>(vis_len), 1.f);
     }
     OCR_LOGI("nemotron_parse vision_len=%lld", static_cast<long long>(vis_len));
-  }
+  });
   positioned.clear();
 
   const std::vector<int32_t> prompt = tokenizer_.Encode(kPrompt);
@@ -307,7 +311,7 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
   OCR_LOGI("nemotron_parse prompt_len=%zu", prompt.size());
 
   std::vector<float> text_embeds;
-  {
+  ctx.RunPhase(kOcrPhaseEmbed, [&] {
     std::vector<int64_t> ids64(prompt.begin(), prompt.end());
     const std::array<int64_t, 2> shape{1, static_cast<int64_t>(ids64.size())};
     Ort::Value ids = Ort::Value::CreateTensor<int64_t>(
@@ -321,7 +325,7 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
     }
     const float* data = outputs[0].GetTensorData<float>();
     text_embeds.assign(data, data + static_cast<size_t>(dims[1] * kDecoderWidth));
-  }
+  });
 
   const int64_t vis_len = static_cast<int64_t>(vision.size() / kDecoderWidth);
   const int64_t prompt_len = static_cast<int64_t>(prompt.size());
@@ -381,33 +385,48 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
     outputs.clear();
   };
 
-  const auto t_prefill = std::chrono::steady_clock::now();
-  auto prefill_out = run_decoder(prefill, seq0, attn);
-  const float* prefill_logits = take_logits(prefill_out, seq0);
-  int32_t next = ArgmaxWithPenalty(prefill_logits + static_cast<size_t>(seq0 - 1) * kVocab,
-                                   kVocab, prompt, kRepetitionPenalty);
-  keep_past(prefill_out);
-  prefill.clear();
-  const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              std::chrono::steady_clock::now() - t_prefill)
-                              .count();
+  int32_t next = 0;
+  long long prefill_ms = 0;
+  ctx.RunPhase(kOcrPhasePrefill, [&] {
+    const auto t_prefill = std::chrono::steady_clock::now();
+    auto prefill_out = run_decoder(prefill, seq0, attn);
+    const float* prefill_logits = take_logits(prefill_out, seq0);
+    next = ArgmaxWithPenalty(prefill_logits + static_cast<size_t>(seq0 - 1) * kVocab, kVocab,
+                             prompt, kRepetitionPenalty);
+    keep_past(prefill_out);
+    prefill.clear();
+    prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - t_prefill)
+                     .count();
+  });
 
   std::vector<int32_t> generated;
   std::vector<int32_t> all_ids = prompt;
   std::string stop_reason = "max_new_tokens";
+  auto snap_decode = [&]() {
+    const int n = static_cast<int>(generated.size());
+    const int shown = n > 0 ? n : 1;
+    ctx.Report(kOcrPhaseDecode, shown, shown);
+  };
+  ctx.ThrowIfCancelled();
+  ctx.Report(kOcrPhaseDecode, 0, max_new);
   const auto t_decode = std::chrono::steady_clock::now();
   for (int step = 1; step <= max_new; ++step) {
+    ctx.ThrowIfCancelled();
     const bool log_step = (step % 32 == 0);
     if (next == kEosId) {
       stop_reason = "eos";
       OCR_LOGI("nemotron_parse decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     generated.push_back(next);
     all_ids.push_back(next);
+    ctx.Report(kOcrPhaseDecode, static_cast<int>(generated.size()), max_new);
     if (static_cast<int>(generated.size()) == max_new) {
       stop_reason = "max_new_tokens";
       OCR_LOGI("nemotron_parse decode step=%d token=%d", step, next);
+      snap_decode();
       break;
     }
     if (log_step) OCR_LOGI("nemotron_parse decode step=%d token=%d", step, next);
@@ -432,9 +451,11 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame) {
                              std::chrono::steady_clock::now() - t_decode)
                              .count();
 
-  const std::string decoded = tokenizer_.Decode(generated);
-  NemotronParseMarkup parsed =
-      ParseNemotronMarkup(decoded, frame.width, frame.height, frame.frame_index);
+  NemotronParseMarkup parsed;
+  ctx.RunPhase(kOcrPhaseParse, [&] {
+    const std::string decoded = tokenizer_.Decode(generated);
+    parsed = ParseNemotronMarkup(decoded, frame.width, frame.height, frame.frame_index);
+  });
   OcrResult result;
   result.raw_utf8 = std::move(parsed.raw_utf8);
   result.markdown_utf8 = std::move(parsed.markdown_utf8);

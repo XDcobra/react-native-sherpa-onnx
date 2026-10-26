@@ -107,8 +107,9 @@ const ac = new AbortController();
 try {
   const page = await ocr.recognize(pages, textOut, {
     frames: [0, 2], // subset of frame indices; default = all
-    onProgress: ({ done, total, phase }) => console.log(phase, done, '/', total),
-    signal: ac.signal, // abort between frames → OCR_CANCELLED
+    onProgress: ({ phase, done, total, frameIndex, frameCount }) =>
+      console.log(phase, done, '/', total, 'frame', frameIndex, '/', frameCount),
+    signal: ac.signal, // abort at phase / decode / box hooks → OCR_CANCELLED
   });
   console.log(page.family, page.spanCount);
 } finally {
@@ -257,7 +258,7 @@ recognize(
 const page = await ocr.recognize(image, textOut, {
   granularity: 'line',
   frames: [0],
-  onProgress: (p) => console.log(p.done, p.total),
+  onProgress: (p) => console.log(p.phase, p.done, p.total),
   signal: ac.signal,
 });
 ```
@@ -309,11 +310,16 @@ More end-to-end patterns: [feature-pipelines.md#ocr-offline-patterns](feature-pi
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `{ done, total, phase }` | Per frame during `recognize` | Native event `SherpaOnnxOcrProgress` filtered by `operationId` |
+| `onProgress` | `{ phase, done, total, frameIndex, frameCount }` | Before/after each backend phase; decode tokens; rec boxes | Native event `SherpaOnnxOcrProgress` filtered by `operationId`. Coalesced at `progressMinIntervalMs` (default 200, same as download). Phase / frame changes and `done === total` always emit. `0` = unthrottled. `total === 0` is indeterminate (no percent). `AbortSignal` is observed at the same hooks (not mid-`Ort::Run`). |
+
+Known `phase` values (`OCR_PROGRESS_PHASES`): `preprocess`, `patch` (nemotron only), `vision`, `embed`, `prefill`, `decode` (VLM), `detect` / `recognize` (ppocr/doctr boxes), `parse` (VLM). Families may emit extra strings; do not switch on an exhaustive enum.
 
 ```ts
 const page = await ocr.recognize(image, textOut, {
-  onProgress: (p) => console.log(p.phase, p.done, p.total),
+  onProgress: (p) => {
+    if (p.total > 0) console.log(p.phase, `${p.done}/${p.total}`);
+    else console.log(p.phase, '…');
+  },
 });
 ```
 
@@ -331,10 +337,11 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
 | `OcrInitializeOptions` | Discriminated on `modelType`; shared `provider?`, `numThreads?`, `maxNewTokens?` |
 | `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrVlmOptions` | Family init bags |
-| `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
+| `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `progressMinIntervalMs?` (default 200), `signal?` |
 | `OcrRecognizeResult` | Discriminated on `family`. VLM families share `raw`/`markdown`/`complete`/`stopReason`; `doc_vlm` also has `doctags` |
 | `OcrVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
-| `OcrProgress` | `{ done, total, phase }` |
+| `OcrProgress` | `{ phase, done, total, frameIndex, frameCount }`. `total === 0` → indeterminate |
+| `OCR_PROGRESS_PHASES` | Known phase names; extra strings are allowed |
 | `OcrDetectModelResult` | `detectOcrModel` return |
 | `OcrEngine` | `recognize` / `destroy` / `instanceId` |
 | `OcrErrorCode` | Error code constants |
@@ -365,7 +372,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_FRAME_READ_FAILED` | Could not read a requested frame. |
 | `OCR_RECOGNIZE_FAILED` | Native recognize / backend failure. |
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
-| `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
+| `OCR_CANCELLED` | `AbortSignal` aborted at a progress hook (phase / decode step / rec box). |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
 | `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for VLM families, missing `raw` / `markdown` / `complete` / `stopReason` (`doc_vlm` also requires `doctags`); and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
