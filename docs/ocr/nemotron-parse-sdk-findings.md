@@ -141,12 +141,12 @@ The model emits markup in-stream, for example:
 | `<x_a><y_b>…<x_c><y_d>` | Axis-aligned box, **normalized 0–1** (not granite `loc_0…499`) |
 | `<class_Text>` / heading / table / … | Layout class after the box |
 | Body | Markdown when the prompt includes `<output_markdown>` (native, not reconstructed) |
-| Tables | LaTeX `tabular`, not OTSL / GFM from `EmitTable` |
+| Tables | Model emits LaTeX `tabular`. Public `markdown` converts those to GFM pipe tables; `raw` keeps `tabular`. |
 
 So:
 
-- **Markdown** comes from the VLM (prompt flag), not from `MarkdownFor` in `DocVlmDocTags.cpp`.
-- **Plaintext** is the same stream with coord/class tags stripped (and maybe LaTeX left as-is or lightly flattened).
+- **Markdown** is GFM we produce from the VLM body (tags stripped, `tabular` → pipe tables), not granite `MarkdownFor`.
+- **Plaintext** on `textOut` is that body flattened (no tags, no LaTeX, no pipes).
 - **Spans** are one box per tagged run. Map `(x,y)` pairs × frame width/height → `OcrQuad`. Default level `line`; headings/tables can be `line` as well so `granularity: 'line'` keeps them (same lesson as granite titles/tables).
 - **Do not** run `ParseDocTags` on this stream. `page_header` in granite DocTags is unrelated to Nemotron `<class_*>` names.
 
@@ -338,8 +338,8 @@ Nemotron’s stream is **not DocTags**. Stuffing it into `doctags` would lie to 
 | Field | Meaning |
 |-------|---------|
 | `raw` | `infer_ort` decode, `skip_special_tokens=False`, EOS stripped. Overlay/debug/copy. |
-| `markdown` | Same body without `<x_*>/<y_*>/<class_*>`. Tables stay LaTeX `tabular`. Not `MarkdownFor`. |
-| `textOut` | Tag-stripped plaintext + `line` spans from boxes (already the public text/span contract). |
+| `markdown` | GFM we produce: tags stripped, LaTeX `tabular` → pipe tables. |
+| `textOut` | Flattened plaintext (no tags, no LaTeX, no pipes) + `line` spans from boxes. |
 | `complete` | Natural stop (EOS id 2). `false` on token cap. No `doctag_end` / `invalid_sequence`. |
 
 TS / Kotlin extras checks must branch on family: granite still requires `doctags`; Nemotron requires `raw` and must **not** accept `doctags`. Example tabs: `Spans \| Markdown \| Raw`.

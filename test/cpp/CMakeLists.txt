@@ -341,6 +341,8 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   # --- OCR PpocrBackend host tests (unit + real ppocrv6-tiny golden) ---
   set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
   set(OCR_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ocr")
+  set(OCR_CONTEXT_SOURCE "${OCR_CPP_ROOT}/OcrRecognizeContext.cpp")
+  set(OCR_ORT_ENV_SOURCE "${OCR_CPP_ROOT}/OcrOrtEnv.cpp")
   set(NEMOTRON_PARSE_SOURCES
     "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseBackend.cpp"
     "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseImageOps.cpp"
@@ -353,6 +355,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   add_executable(ppocr_host_test
     "${OCR_TEST_DIR}/ppocr_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_TEST_DIR}/ocr_recognize_context_host_test.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrFactory.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
@@ -412,6 +417,8 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   add_executable(doctr_host_test
     "${OCR_TEST_DIR}/doctr_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrFactory.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
@@ -470,6 +477,8 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   add_executable(doc_vlm_host_test
     "${OCR_TEST_DIR}/doc_vlm_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
@@ -516,6 +525,8 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   add_executable(nemotron_parse_host_test
     "${OCR_TEST_DIR}/nemotron_parse_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     ${NEMOTRON_PARSE_SOURCES}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"

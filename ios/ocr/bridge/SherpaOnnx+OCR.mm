@@ -35,7 +35,8 @@ static NSString *kOcrRecognizeFailed = @"OCR_RECOGNIZE_FAILED";
 static NSString *kOcrAlreadyPopulated = @"OCR_ALREADY_POPULATED";
 
 static void EmitOcrProgress(SherpaOnnx *bridge, NSString *operationId, int done,
-                            int total, NSString *phase) {
+                            int total, NSString *phase, int frameIndex,
+                            int frameCount) {
   if (operationId.length == 0 || bridge == nil) return;
   std::lock_guard<std::mutex> lock(g_ocr_emit_mutex);
   [bridge sendEventWithName:@"SherpaOnnxOcrProgress"
@@ -44,6 +45,8 @@ static void EmitOcrProgress(SherpaOnnx *bridge, NSString *operationId, int done,
                          @"done" : @(done),
                          @"total" : @(total),
                          @"phase" : phase ?: @"recognize",
+                         @"frameIndex" : @(frameIndex),
+                         @"frameCount" : @(frameCount),
                        }];
 }
 
@@ -423,9 +426,16 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       NSString *granularity = options[@"granularity"] ?: @"line";
       std::string opId = operationId ? [operationId UTF8String] : "";
       std::string imageId = imageBufferId ? [imageBufferId UTF8String] : "";
+      int progressMinIntervalMs = sherpa_onnx::ocr::kOcrProgressMinIntervalMs;
+      id intervalObj = options[@"progressMinIntervalMs"];
+      if ([intervalObj respondsToSelector:@selector(intValue)]) {
+        int parsed = [intervalObj intValue];
+        progressMinIntervalMs = parsed < 0 ? 0 : parsed;
+      }
 
       OcrEngine::RecognizeOptions ropts;
       ropts.granularity = ParseGranularity(granularity);
+      ropts.progress_min_interval_ms = progressMinIntervalMs;
       id framesObj = options[@"frames"];
       if ([framesObj isKindOfClass:[NSArray class]]) {
         for (id v in (NSArray *)framesObj) {
@@ -438,10 +448,11 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
           return OcrCancelRegistry::Instance().IsCancelled(opId);
         };
         __weak SherpaOnnx *weakSelf = self;
-        ropts.progress = [weakSelf, operationId](int done, int total,
-                                                 const std::string &phase) {
-          EmitOcrProgress(weakSelf, operationId, done, total,
-                          [NSString stringWithUTF8String:phase.c_str()]);
+        ropts.progress = [weakSelf, operationId](
+                             const sherpa_onnx::ocr::OcrProgressTick &tick) {
+          EmitOcrProgress(weakSelf, operationId, tick.done, tick.total,
+                          [NSString stringWithUTF8String:tick.phase.c_str()],
+                          tick.frame_index, tick.frame_count);
         };
       }
 

@@ -50,7 +50,22 @@ export function isOcrModelFolder(folder: string, hint?: string): boolean {
     normalized.startsWith('docvlm') ||
     normalized.includes('pp-ocr') ||
     normalized.includes('onnxtr') ||
-    normalized.includes('granite-docling')
+    normalized.includes('granite-docling') ||
+    normalized.includes('nemotron-3.5-parse') ||
+    normalized.includes('nemotron-parse') ||
+    normalized.includes('nemotron_parse')
+  );
+}
+
+/** Shared VLM packs that expose maxNewTokens (granite + Nemotron Parse). */
+export function isVlmOcrPack(id: string): boolean {
+  const lower = id.toLowerCase();
+  return (
+    lower.includes('docvlm') ||
+    lower.includes('granite') ||
+    lower.includes('nemotron-3.5-parse') ||
+    lower.includes('nemotron-parse') ||
+    lower.includes('nemotron_parse')
   );
 }
 

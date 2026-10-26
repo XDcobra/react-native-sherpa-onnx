@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), **`doc_vlm`** (Granite Docling), and **`nemotron_parse`** (Nemotron-3.5-Parse). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse'` (alias `nemotron-parse` only — never bare `nemotron`). VLM families share `raw` + `markdown` + `complete` + `stopReason`. `doc_vlm` also keeps `doctags` (same stream as `raw`). Nemotron `raw` is native `<x_*>/<y_*>/<class_*>` markup, not DocTags. `maxNewTokens` is a shared createOCR field (omit or `0` → 8192). `complete` is `true` after a natural stop (`</doctag>` or EOS). Hitting `maxNewTokens` is not a finished document. The image overlay draws spans; it does not parse markup.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), **`doc_vlm`** (Granite Docling), and **`nemotron_parse`** (Nemotron-3.5-Parse). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse'` (alias `nemotron-parse` only — never bare `nemotron`). VLM families share `raw` + `markdown` + `complete` + `stopReason`. `doc_vlm` also keeps `doctags` (same stream as `raw`). `raw` is the native model stream. `markdown` is **GFM we produce** (Granite from DocTags; Nemotron from the tag-stripped body, with LaTeX `tabular` turned into pipe tables). Plain text on `textOut` has no tags, no LaTeX, and no pipes. Nemotron `raw` is `<x_*>/<y_*>/<class_*>` markup, not DocTags. `maxNewTokens` is a shared createOCR field (omit or `0` → 8192). `complete` is `true` after a natural stop (`</doctag>` or EOS). Hitting `maxNewTokens` is not a finished document. The image overlay draws spans; it does not parse markup.
 
 ---
 
@@ -107,8 +107,9 @@ const ac = new AbortController();
 try {
   const page = await ocr.recognize(pages, textOut, {
     frames: [0, 2], // subset of frame indices; default = all
-    onProgress: ({ done, total, phase }) => console.log(phase, done, '/', total),
-    signal: ac.signal, // abort between frames → OCR_CANCELLED
+    onProgress: ({ phase, done, total, frameIndex, frameCount }) =>
+      console.log(phase, done, '/', total, 'frame', frameIndex, '/', frameCount),
+    signal: ac.signal, // abort at phase / decode / box hooks → OCR_CANCELLED
   });
   console.log(page.family, page.spanCount);
 } finally {
@@ -183,7 +184,7 @@ if (page.family === 'nemotron_parse') {
 
 Hardcoded control prompt (no Jinja):
 `</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>`.
-Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is that stream with bbox/class tags stripped. Overlay boxes come from line spans, not from parsing `raw`.
+Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is GFM: bbox/class tags stripped and LaTeX `tabular` converted to pipe tables. `textOut` is the same body flattened to plaintext. Overlay boxes come from line spans on `textOut`, not from parsing `raw`.
 
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
@@ -257,7 +258,7 @@ recognize(
 const page = await ocr.recognize(image, textOut, {
   granularity: 'line',
   frames: [0],
-  onProgress: (p) => console.log(p.done, p.total),
+  onProgress: (p) => console.log(p.phase, p.done, p.total),
   signal: ac.signal,
 });
 ```
@@ -309,11 +310,16 @@ More end-to-end patterns: [feature-pipelines.md#ocr-offline-patterns](feature-pi
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `{ done, total, phase }` | Per frame during `recognize` | Native event `SherpaOnnxOcrProgress` filtered by `operationId` |
+| `onProgress` | `{ phase, done, total, frameIndex, frameCount }` | Before/after each backend phase; decode tokens; rec boxes | Native event `SherpaOnnxOcrProgress` filtered by `operationId`. Coalesced at `progressMinIntervalMs` (default 200, same as download). Phase / frame changes and `done === total` always emit. `0` = unthrottled. `total === 0` is indeterminate (no percent). `AbortSignal` is observed at the same hooks (not mid-`Ort::Run`). |
+
+Known `phase` values (`OCR_PROGRESS_PHASES`): `preprocess`, `patch` (nemotron only), `vision`, `embed`, `prefill`, `decode` (VLM), `detect` / `recognize` (ppocr/doctr boxes), `parse` (VLM). Families may emit extra strings; do not switch on an exhaustive enum.
 
 ```ts
 const page = await ocr.recognize(image, textOut, {
-  onProgress: (p) => console.log(p.phase, p.done, p.total),
+  onProgress: (p) => {
+    if (p.total > 0) console.log(p.phase, `${p.done}/${p.total}`);
+    else console.log(p.phase, '…');
+  },
 });
 ```
 
@@ -331,10 +337,11 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
 | `OcrInitializeOptions` | Discriminated on `modelType`; shared `provider?`, `numThreads?`, `maxNewTokens?` |
 | `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrVlmOptions` | Family init bags |
-| `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
+| `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `progressMinIntervalMs?` (default 200), `signal?` |
 | `OcrRecognizeResult` | Discriminated on `family`. VLM families share `raw`/`markdown`/`complete`/`stopReason`; `doc_vlm` also has `doctags` |
 | `OcrVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
-| `OcrProgress` | `{ done, total, phase }` |
+| `OcrProgress` | `{ phase, done, total, frameIndex, frameCount }`. `total === 0` → indeterminate |
+| `OCR_PROGRESS_PHASES` | Known phase names; extra strings are allowed |
 | `OcrDetectModelResult` | `detectOcrModel` return |
 | `OcrEngine` | `recognize` / `destroy` / `instanceId` |
 | `OcrErrorCode` | Error code constants |
@@ -365,7 +372,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_FRAME_READ_FAILED` | Could not read a requested frame. |
 | `OCR_RECOGNIZE_FAILED` | Native recognize / backend failure. |
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
-| `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
+| `OCR_CANCELLED` | `AbortSignal` aborted at a progress hook (phase / decode step / rec box). |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
 | `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for VLM families, missing `raw` / `markdown` / `complete` / `stopReason` (`doc_vlm` also requires `doctags`); and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |

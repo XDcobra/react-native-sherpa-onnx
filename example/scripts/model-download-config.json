@@ -92,6 +92,12 @@
       "repo": "XDcobra/react-native-sherpa-onnx",
       "tag": "ocr-models",
       "id": "docvlm-granite-258m-fp32"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "nemotron-3.5-parse-int8"
     }
   ]
 }

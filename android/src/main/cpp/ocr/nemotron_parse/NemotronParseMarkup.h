@@ -15,7 +15,7 @@ struct NemotronParseMarkup {
   std::vector<OcrSpan> spans;
 };
 
-/** Split generated markup into raw / markdown / line spans. */
+/** Split generated markup into raw, GFM markdown, plaintext, and line spans. */
 NemotronParseMarkup ParseNemotronMarkup(const std::string& generated, int frame_w,
                                         int frame_h, int frame_index);
 

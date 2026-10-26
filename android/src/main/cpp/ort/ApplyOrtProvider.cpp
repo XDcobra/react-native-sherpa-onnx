@@ -11,19 +11,32 @@
 #elif __has_include(<onnxruntime_c_api.h>)
 #include <onnxruntime_c_api.h>
 #endif
-#if defined(__APPLE__) && __has_include(<coreml_provider_factory.h>)
+#if defined(__APPLE__)
+#if __has_include(<onnxruntime/core/providers/coreml/coreml_provider_factory.h>)
+#include <onnxruntime/core/providers/coreml/coreml_provider_factory.h>
+#define SHERPA_ONNX_HAS_COREML_FACTORY 1
+#elif __has_include(<onnxruntime/coreml_provider_factory.h>)
+#include <onnxruntime/coreml_provider_factory.h>
+#define SHERPA_ONNX_HAS_COREML_FACTORY 1
+#elif __has_include(<coreml_provider_factory.h>)
 #include <coreml_provider_factory.h>
 #define SHERPA_ONNX_HAS_COREML_FACTORY 1
-#elif defined(__APPLE__) && __has_include("coreml_provider_factory.h")
+#elif __has_include("coreml_provider_factory.h")
 #include "coreml_provider_factory.h"
 #define SHERPA_ONNX_HAS_COREML_FACTORY 1
 #endif
-#if defined(__ANDROID__) && __has_include(<nnapi_provider_factory.h>)
+#endif
+#if defined(__ANDROID__)
+#if __has_include(<onnxruntime/core/providers/nnapi/nnapi_provider_factory.h>)
+#include <onnxruntime/core/providers/nnapi/nnapi_provider_factory.h>
+#define SHERPA_ONNX_HAS_NNAPI_FACTORY 1
+#elif __has_include(<nnapi_provider_factory.h>)
 #include <nnapi_provider_factory.h>
 #define SHERPA_ONNX_HAS_NNAPI_FACTORY 1
-#elif defined(__ANDROID__) && __has_include("nnapi_provider_factory.h")
+#elif __has_include("nnapi_provider_factory.h")
 #include "nnapi_provider_factory.h"
 #define SHERPA_ONNX_HAS_NNAPI_FACTORY 1
+#endif
 #endif
 #endif
 
@@ -153,7 +166,11 @@ void ApplyOrtProvider(const OrtApi* api, OrtSessionOptions* options,
     OrtStatus* status = OrtSessionOptionsAppendExecutionProvider_Nnapi(options, nnapi_flags);
     if (status != nullptr) {
       ReleaseIfStatus(api, status, "NNAPI", available);
+    } else {
+      ORT_PROVIDER_LOGI("enabled NNAPI available=%s", available.c_str());
     }
+#elif defined(__ANDROID__)
+    ORT_PROVIDER_LOGI("NNAPI factory header not found at build time. Fallback to cpu");
 #else
     ORT_PROVIDER_LOGI("NNAPI is for Android only. Fallback to cpu");
 #endif
@@ -166,7 +183,11 @@ void ApplyOrtProvider(const OrtApi* api, OrtSessionOptions* options,
     OrtStatus* status = OrtSessionOptionsAppendExecutionProvider_CoreML(options, coreml_flags);
     if (status != nullptr) {
       ReleaseIfStatus(api, status, "CoreML", available);
+    } else {
+      ORT_PROVIDER_LOGI("enabled CoreML available=%s", available.c_str());
     }
+#elif defined(__APPLE__)
+    ORT_PROVIDER_LOGI("CoreML factory header not found at build time. Fallback to cpu");
 #else
     ORT_PROVIDER_LOGI(
         "CoreML is for Apple only since onnxruntime>=1.15. Fallback to cpu!");

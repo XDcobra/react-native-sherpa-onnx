@@ -133,6 +133,40 @@ TEST(NemotronParseMarkup, HelloWorld) {
   EXPECT_NEAR(parsed.spans[0].quad.xy[4], 99.61f, 0.2f);
 }
 
+TEST(NemotronParseMarkup, TabularBecomesGfmAndPlaintext) {
+  const std::string raw =
+      "<x_0.0><y_0.0>\\begin{tabular}{cc}A & B \\\\ C & D\\end{tabular}"
+      "<x_1.0><y_1.0><class_Table></s>";
+  const NemotronParseMarkup parsed = ParseNemotronMarkup(raw, 100, 50, 0);
+  EXPECT_NE(parsed.raw_utf8.find("\\begin{tabular}"), std::string::npos);
+  EXPECT_EQ(parsed.markdown_utf8,
+            "| A | B |\n| --- | --- |\n| C | D |");
+  EXPECT_EQ(parsed.text_utf8, "A B\nC D");
+  EXPECT_EQ(parsed.markdown_utf8.find("\\begin{tabular}"), std::string::npos);
+  EXPECT_EQ(parsed.text_utf8.find("\\begin"), std::string::npos);
+  ASSERT_EQ(parsed.spans.size(), 1u);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 7);
+}
+
+TEST(NemotronParseMarkup, ProsePlusTabularKeepsGfmHeading) {
+  const std::string raw =
+      "<x_0.0><y_0.0># Invoice<x_0.9><y_0.1><class_Title>"
+      "<x_0.0><y_0.2>\\begin{tabular}{lrr}\n"
+      "Item & Qty & Price \\\\\n"
+      "\\hline\n"
+      "Widget & 2 & 10 \\\\\n"
+      "\\end{tabular}<x_1.0><y_0.8><class_Table></s>";
+  const NemotronParseMarkup parsed = ParseNemotronMarkup(raw, 200, 200, 0);
+  EXPECT_EQ(parsed.markdown_utf8,
+            "# Invoice\n| Item | Qty | Price |\n| --- | --- | --- |\n| Widget | 2 | "
+            "10 |");
+  EXPECT_EQ(parsed.text_utf8, "# Invoice\nItem Qty Price\nWidget 2 10");
+  ASSERT_EQ(parsed.spans.size(), 2u);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 9);
+  EXPECT_EQ(parsed.spans[1].utf16_start, 10);
+}
+
 TEST(NemotronParseMarkup, EmptyPictureStillEmitsSpan) {
   const std::string raw =
       "<x_0.2><y_0.3><x_0.8><y_0.7><class_Picture></s>";

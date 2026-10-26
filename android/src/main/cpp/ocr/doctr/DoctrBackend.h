@@ -18,7 +18,6 @@
 #include <string>
 
 namespace Ort {
-class Env;
 class Session;
 class SessionOptions;
 }  // namespace Ort
@@ -33,7 +32,8 @@ class DoctrBackend final : public OcrBackend {
   ~DoctrBackend() override;
 
   void Load(const std::string& model_dir, const OcrLoadOptions& options) override;
-  OcrResult Recognize(const OcrFrameView& frame) override;
+  OcrResult Recognize(const OcrFrameView& frame,
+                      const OcrRecognizeContext& ctx = {}) override;
   void Release() override;
   const char* Family() const override { return "doctr"; }
 
@@ -42,7 +42,6 @@ class DoctrBackend final : public OcrBackend {
   DoctrManifest manifest_{};
   bool loaded_ = false;
 
-  std::unique_ptr<Ort::Env> env_;
   std::unique_ptr<Ort::SessionOptions> session_options_;
   std::unique_ptr<Ort::Session> det_session_;
   std::unique_ptr<Ort::Session> rec_session_;

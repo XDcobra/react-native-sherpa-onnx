@@ -6,8 +6,14 @@ package com.sherpaonnx.ocr
  */
 internal object OcrNative {
   @Volatile
-  var progressListener: ((operationId: String, done: Int, total: Int, phase: String) -> Unit)? =
-    null
+  var progressListener: ((
+    operationId: String,
+    done: Int,
+    total: Int,
+    phase: String,
+    frameIndex: Int,
+    frameCount: Int,
+  ) -> Unit)? = null
 
   @JvmStatic
   external fun nativeLoad(
@@ -36,6 +42,7 @@ internal object OcrNative {
     frameIndices: IntArray?,
     granularity: String?,
     operationId: String?,
+    progressMinIntervalMs: Int,
   ): HashMap<String, Any>?
 
   @JvmStatic external fun nativeCancelRecognize(operationId: String)
@@ -47,10 +54,24 @@ internal object OcrNative {
     quantization: String?,
   ): HashMap<String, Any>?
 
-  /** Called from JNI during multi-frame recognize. */
+  /** Called from JNI during recognize (per backend phase). */
   @JvmStatic
-  fun onNativeProgress(operationId: String?, done: Int, total: Int, phase: String?) {
+  fun onNativeProgress(
+    operationId: String?,
+    done: Int,
+    total: Int,
+    phase: String?,
+    frameIndex: Int,
+    frameCount: Int,
+  ) {
     val op = operationId ?: return
-    progressListener?.invoke(op, done, total, phase ?: "recognize")
+    progressListener?.invoke(
+      op,
+      done,
+      total,
+      phase ?: "recognize",
+      frameIndex,
+      frameCount,
+    )
   }
 }

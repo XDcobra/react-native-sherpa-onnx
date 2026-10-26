@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +28,7 @@ import {
   assertOcrCustomConfig,
   createOCR,
   detectOcrModel,
+  type OcrConcreteModelType,
   type OcrCustomConfig,
   type OcrEngine,
   type OcrInitializeOptions,
@@ -64,6 +74,7 @@ import { IMAGE_FILES } from '../../imageConfig';
 import { PDF_FILES } from '../../pdfConfig';
 import { getModelDisplayName, toDetectSource } from '../../modelConfig';
 import { useDeviceProviders } from '../../providers/DeviceProvidersContext';
+import { isVlmOcrPack } from '../../utils/ocrModelCatalog';
 import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
@@ -79,9 +90,19 @@ const MIN_UNCLIP = 1.0;
 const MAX_UNCLIP = 2.5;
 const DEFAULT_UNCLIP = 1.5;
 
-function isGranitePack(id: string): boolean {
+function largeVlmPackWarning(id: string): string | null {
   const lower = id.toLowerCase();
-  return lower.includes('docvlm') || lower.includes('granite');
+  if (lower.includes('docvlm') || lower.includes('granite')) {
+    return 'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
+  }
+  if (
+    lower.includes('nemotron-3.5-parse') ||
+    lower.includes('nemotron-parse') ||
+    lower.includes('nemotron_parse')
+  ) {
+    return 'nemotron-3.5-parse INT8 is ~753 MB unpacked (FP16 ~1.44 GB) and needs significant RAM. Continue?';
+  }
+  return null;
 }
 
 function utf16Slice(text: string, start: number, end: number): string {
@@ -104,6 +125,134 @@ function clampUnclipRatio(value: number): number {
   const clamped = Math.min(MAX_UNCLIP, Math.max(MIN_UNCLIP, value));
   return Math.round(clamped * 20) / 20; // 0.05 steps
 }
+
+/** Per-family recognize phases. `total` on progress events is in-phase only. */
+const OCR_PHASES_BY_FAMILY: Record<OcrConcreteModelType, readonly string[]> = {
+  nemotron_parse: [
+    'preprocess',
+    'patch',
+    'vision',
+    'embed',
+    'prefill',
+    'decode',
+    'parse',
+  ],
+  doc_vlm: ['preprocess', 'vision', 'embed', 'prefill', 'decode', 'parse'],
+  ppocr: ['preprocess', 'detect', 'recognize'],
+  doctr: ['preprocess', 'detect', 'recognize'],
+};
+
+function asOcrFamily(
+  value: string | undefined | null
+): OcrConcreteModelType | null {
+  if (
+    value === 'ppocr' ||
+    value === 'doctr' ||
+    value === 'doc_vlm' ||
+    value === 'nemotron_parse'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+/** One-shot Ort::Run phases (0/1). Can sit for many seconds with no bar motion. */
+const LONG_ONESHOT_PHASES = new Set(['vision', 'prefill', 'detect']);
+
+function phaseIndexOf(
+  family: OcrConcreteModelType | null,
+  phase: string
+): { index: number; count: number } | null {
+  if (!family) {
+    return null;
+  }
+  const phases = OCR_PHASES_BY_FAMILY[family];
+  const idx = phases.indexOf(phase);
+  if (idx < 0) {
+    return null;
+  }
+  return { index: idx + 1, count: phases.length };
+}
+
+type OcrProgressBoxHandle = {
+  apply(progress: OcrProgress): void;
+  reset(): void;
+};
+
+const OcrRecognizeProgressBox = memo(
+  forwardRef<OcrProgressBoxHandle, { family: OcrConcreteModelType | null }>(
+    function OcrRecognizeProgressBox({ family }, ref) {
+      const [phase, setPhase] = useState<string | null>(null);
+      const [label, setLabel] = useState<string | null>(null);
+      const [phaseIndex, setPhaseIndex] = useState<number | null>(null);
+      const [phaseCount, setPhaseCount] = useState<number | null>(null);
+      const [percent, setPercent] = useState<number | null>(null);
+
+      const reset = useCallback(() => {
+        setPhase(null);
+        setLabel(null);
+        setPhaseIndex(null);
+        setPhaseCount(null);
+        setPercent(null);
+      }, []);
+
+      const apply = useCallback(
+        (p: OcrProgress) => {
+          const nextPercent =
+            p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
+          const frameBit =
+            p.frameCount > 1 ? `frame ${p.frameIndex + 1}/${p.frameCount}` : '';
+          const inPhaseBit = p.total > 0 ? `${p.done}/${p.total}` : '…';
+          const detail = [frameBit, inPhaseBit]
+            .filter((bit) => bit.length > 0)
+            .join(' · ');
+          const phaseMeta = phaseIndexOf(family, p.phase);
+          setPhase(p.phase);
+          setLabel(detail);
+          setPhaseIndex(phaseMeta?.index ?? null);
+          setPhaseCount(phaseMeta?.count ?? null);
+          setPercent(nextPercent);
+        },
+        [family]
+      );
+
+      useImperativeHandle(ref, () => ({ apply, reset }), [apply, reset]);
+
+      if (!phase) {
+        return null;
+      }
+      const showLongOneshotHint =
+        LONG_ONESHOT_PHASES.has(phase) && percent === 0;
+      return (
+        <View style={styles.progressBox}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressPhase} numberOfLines={1}>
+              {phase}
+              {label ? ` · ${label}` : ''}
+            </Text>
+            {phaseIndex != null && phaseCount != null ? (
+              <Text style={styles.progressPhaseCount}>
+                {phaseIndex} / {phaseCount}
+              </Text>
+            ) : null}
+          </View>
+          {showLongOneshotHint ? (
+            <Text style={styles.progressWaitHint}>
+              This step can take a while (single model run, no in-step ticks).
+              The app is not frozen — please wait.
+            </Text>
+          ) : null}
+          {percent != null ? (
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${percent}%` }]} />
+            </View>
+          ) : null}
+        </View>
+      );
+    }
+  )
+);
+OcrRecognizeProgressBox.displayName = 'OcrRecognizeProgressBox';
 
 export default function OCRScreen() {
   const {
@@ -165,14 +314,16 @@ export default function OCRScreen() {
   const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'raw'>(
     'spans'
   );
-  const [progressLabel, setProgressLabel] = useState<string | null>(null);
-  const [progressPercent, setProgressPercent] = useState<number | null>(null);
+  const [engineFamily, setEngineFamily] = useState<OcrConcreteModelType | null>(
+    null
+  );
   const [lastMs, setLastMs] = useState<number | null>(null);
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultTextBufferIdRef = useRef<string | null>(null);
   const rasterBufferIdRef = useRef<string | null>(null);
+  const progressBoxRef = useRef<OcrProgressBoxHandle>(null);
 
   useEffect(() => {
     if (selectedFolder && catalogEntries.some((e) => e.id === selectedFolder)) {
@@ -233,6 +384,7 @@ export default function OCRScreen() {
     setInitializedFolder(null);
     setInitMessage(null);
     setDetectSummary(null);
+    setEngineFamily(null);
     if (engine) {
       await engine.destroy().catch(() => {});
     }
@@ -295,7 +447,7 @@ export default function OCRScreen() {
       try {
         await destroyEngine();
         const modelSource = await toDetectSource(resolveModelPath(folderId));
-        await runDetect(folderId);
+        const det = await runDetect(folderId);
 
         const maxLabel =
           customInitForm.maxNewTokens === 0
@@ -312,6 +464,7 @@ export default function OCRScreen() {
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
+        setEngineFamily(asOcrFamily(det.success ? det.modelType : null));
         setInitializedFolder(folderId);
         setInitMessage(
           `Ready · instance=${
@@ -357,6 +510,7 @@ export default function OCRScreen() {
           ...(wantVlmOpts ? { maxNewTokens: customInitForm.maxNewTokens } : {}),
         });
         engineRef.current = ocr;
+        setEngineFamily(asOcrFamily(customInitForm.modelType));
         setInitializedFolder(
           selectedFolder
             ? `custom:${selectedFolder}`
@@ -388,20 +542,17 @@ export default function OCRScreen() {
       return;
     }
 
-    if (isGranitePack(selectedFolder)) {
-      Alert.alert(
-        'Large Doc-VLM pack',
-        'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Initialize',
-            onPress: () => {
-              proceedAuto(selectedFolder).catch(() => {});
-            },
+    const vlmWarning = largeVlmPackWarning(selectedFolder);
+    if (vlmWarning) {
+      Alert.alert('Large VLM pack', vlmWarning, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Initialize',
+          onPress: () => {
+            proceedAuto(selectedFolder).catch(() => {});
           },
-        ]
-      );
+        },
+      ]);
       return;
     }
 
@@ -456,8 +607,7 @@ export default function OCRScreen() {
     setSpans([]);
     setSelectedSpanIndex(null);
     setLastMs(null);
-    setProgressLabel(null);
-    setProgressPercent(null);
+    progressBoxRef.current?.reset();
     setResultTab('spans');
     setResultFrameIndex(0);
     setSpansShowAllPages(false);
@@ -630,10 +780,7 @@ export default function OCRScreen() {
         granularity: 'line',
         signal: controller.signal,
         onProgress: (p: OcrProgress) => {
-          setProgressLabel(`${p.phase} (${p.done}/${p.total})`);
-          setProgressPercent(
-            p.total > 0 ? Math.round((100 * p.done) / p.total) : null
-          );
+          progressBoxRef.current?.apply(p);
         },
       });
 
@@ -670,8 +817,7 @@ export default function OCRScreen() {
     } finally {
       abortRef.current = null;
       setRunBusy(false);
-      setProgressLabel(null);
-      setProgressPercent(null);
+      progressBoxRef.current?.reset();
     }
   }, [clearResults, imageInfo, releaseResultTextBuffer]);
 
@@ -755,7 +901,7 @@ export default function OCRScreen() {
                   disabled={initBusy || runBusy}
                   emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
                 />
-                {selectedFolder && isGranitePack(selectedFolder) ? (
+                {selectedFolder && isVlmOcrPack(selectedFolder) ? (
                   <DocVlmInitOptionChips
                     maxNewTokens={customInitForm.maxNewTokens}
                     onChangeMaxNewTokens={(maxNewTokens) =>
@@ -1082,21 +1228,10 @@ export default function OCRScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            {progressLabel ? (
-              <View style={styles.progressBox}>
-                <Text style={styles.progressLabel}>{progressLabel}</Text>
-                {progressPercent != null ? (
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { width: `${progressPercent}%` },
-                      ]}
-                    />
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
+            <OcrRecognizeProgressBox
+              ref={progressBoxRef}
+              family={engineFamily}
+            />
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
           </View>
         ) : null}
