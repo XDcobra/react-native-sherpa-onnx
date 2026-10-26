@@ -38,9 +38,14 @@ class SherpaOnnxOcrHelper(
     }
   }
 
-  fun detectOcrModel(modelDir: String, modelType: String?, promise: Promise) {
+  fun detectOcrModel(
+    modelDir: String,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise,
+  ) {
     try {
-      val raw = OcrNative.nativeDetect(modelDir, modelType)
+      val raw = OcrNative.nativeDetect(modelDir, modelType, quantization)
         ?: run {
           promise.reject(OcrErrorCodes.DETECT_FAILED, "detectOcrModel returned null")
           return
@@ -112,6 +117,12 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
       val maxNewTokens =
         if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
+      val quantization =
+        if (options.hasKey("quantization") && !options.isNull("quantization")) {
+          options.getString("quantization")
+        } else {
+          null
+        }
 
       val sentinel = Any()
       instances[instanceId] = sentinel
@@ -128,6 +139,7 @@ class SherpaOnnxOcrHelper(
           detBoxScoreThresh,
           detUnclipRatio,
           maxNewTokens,
+          quantization,
           pathOverrides,
         )
       } catch (e: Exception) {
@@ -282,7 +294,16 @@ class SherpaOnnxOcrHelper(
       }
       val doctags = raw["doctags"] as? String
       val markdown = raw["markdown"] as? String
-      if (doctags == null || markdown == null) {
+      val stopReason = raw["stopReason"] as? String
+      val complete = raw["complete"] as? Boolean
+      if (doctags == null || markdown == null ||
+          (family == "doc_vlm" && (stopReason.isNullOrBlank() || complete == null))) {
+        Log.e(
+          TAG,
+          "recognize extras missing family=$family doctags=${doctags != null} " +
+            "markdown=${markdown != null} stopReason=${stopReason ?: "null"} " +
+            "complete=$complete",
+        )
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
         return
       }
@@ -312,6 +333,10 @@ class SherpaOnnxOcrHelper(
       result.putInt("spanCount", spans.size)
       result.putString("doctags", doctags)
       result.putString("markdown", markdown)
+      if (family == "doc_vlm" && stopReason != null && complete != null) {
+        result.putString("stopReason", stopReason)
+        result.putBoolean("complete", complete)
+      }
       promise.resolve(result)
     } catch (e: Exception) {
       Log.e(TAG, "ocrRecognize failed", e)

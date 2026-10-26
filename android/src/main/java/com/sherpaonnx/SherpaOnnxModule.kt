@@ -3572,8 +3572,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun detectOcrModel(modelDir: String, modelType: String?, promise: Promise) {
-    ocrHelper.detectOcrModel(modelDir, modelType, promise)
+  override fun detectOcrModel(
+    modelDir: String,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise,
+  ) {
+    ocrHelper.detectOcrModel(modelDir, modelType, quantization, promise)
   }
 
   override fun initializeOcr(instanceId: String, options: ReadableMap, promise: Promise) {
@@ -3609,6 +3614,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) {
     pdfHelper.extractPdfTextLayer(source, textOutBufferId, options, promise)
+  }
+
+  override fun rasterizePdfPages(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    pdfHelper.rasterizePdfPages(source, options, promise)
   }
 
   override fun createEmptyOfflineImageBuffer(promise: Promise) {
@@ -3731,9 +3744,53 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       m.putInt("height", (info["height"] as? Number)?.toInt() ?: 0)
       m.putDouble("byteSize", (info["byteSize"] as? Number)?.toDouble() ?: 0.0)
       m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+      (info["pageNumber"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+        m.putInt("pageNumber", it)
+      }
+      (info["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+        m.putInt("dpi", it)
+      }
       promise.resolve(m)
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun ensureOfflineImageBufferFrame(
+    bufferId: String,
+    frameIndex: Double,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      try {
+        com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+        val info =
+          com.sherpaonnx.image.ImageBufferService.ensureFrame(bufferId, frameIndex.toInt())
+        if (info == null) {
+          promise.reject("ERR_IMAGE_INTERNAL", "ensureFrame returned null")
+          return@execute
+        }
+        val errCode = info["errorCode"] as? String
+        if (!errCode.isNullOrEmpty()) {
+          promise.reject(errCode, info["errorMessage"] as? String ?: "ensure frame failed")
+          return@execute
+        }
+        val m = Arguments.createMap()
+        m.putInt("index", (info["index"] as? Number)?.toInt() ?: frameIndex.toInt())
+        m.putInt("width", (info["width"] as? Number)?.toInt() ?: 0)
+        m.putInt("height", (info["height"] as? Number)?.toInt() ?: 0)
+        m.putDouble("byteSize", (info["byteSize"] as? Number)?.toDouble() ?: 0.0)
+        m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+        (info["pageNumber"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+          m.putInt("pageNumber", it)
+        }
+        (info["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
+          m.putInt("dpi", it)
+        }
+        promise.resolve(m)
+      } catch (e: Exception) {
+        promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+      }
     }
   }
 
@@ -3753,6 +3810,67 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun exportOfflineImageBufferFrame(
+    bufferId: String,
+    frameIndex: Double,
+    destination: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    decodeExecutor.execute {
+      var dest: ResolvedDestination? = null
+      try {
+        com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+        val format = (options?.getString("format") ?: "jpeg").lowercase()
+        val quality = if (options != null && options.hasKey("quality") && !options.isNull("quality")) {
+          options.getDouble("quality").toInt()
+        } else {
+          85
+        }
+        val maxSide = if (options != null && options.hasKey("maxSide") && !options.isNull("maxSide")) {
+          options.getDouble("maxSide").toInt()
+        } else {
+          0
+        }
+        val ext = when (format) {
+          "png" -> "png"
+          "webp" -> "webp"
+          else -> "jpg"
+        }
+        dest = resolveDestinationForSave(destination, ext)
+        val err = com.sherpaonnx.image.ImageBufferService.exportFrameToPath(
+          bufferId,
+          frameIndex.toInt(),
+          dest.outputPath,
+          format,
+          quality,
+          maxSide,
+        )
+        if (err != null) {
+          cleanupOutputFile(dest.outputPath)
+          val code = err["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"
+          val msg = err["errorMessage"] as? String ?: "encode failed"
+          promise.reject(code, msg)
+          return@execute
+        }
+        copyTmpToStreamIfNeeded(dest)
+        val result = com.facebook.react.bridge.Arguments.createMap().apply {
+          putString("outputKind", sanitizeOutputKind(dest))
+          putString("outputPath", sanitizeResolvedOutputPath(dest))
+        }
+        promise.resolve(result)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject(e.code, e.message, e)
+      } catch (e: Exception) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+      } finally {
+        cleanupSaveDestination(dest)
+      }
     }
   }
 
@@ -5096,6 +5214,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     alignmentHelper.alignAccurateForcedCtcFromPcm(
@@ -5106,6 +5226,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       granularity,
       language,
       vocabPath,
+      provider,
+      numThreads,
       promise,
     )
   }
@@ -5118,6 +5240,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     alignmentHelper.alignAccurateFromPcm(
@@ -5128,6 +5252,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       granularity,
       language,
       vocabPath,
+      provider,
+      numThreads,
       promise,
     )
   }

@@ -131,6 +131,19 @@ describe('AlignmentEngine options validation', () => {
     expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
   });
 
+  it('emits ALIGNMENT_OPTIONS_INVALID for invalid numThreads', async () => {
+    const engine = createAlignment();
+
+    await expect(
+      engine.alignTextToAudio('txt_off', 'off_audio', 'seg_off', {
+        mode: 'accurate',
+        modelSource: { kind: 'fs', path: '/tmp/model' },
+        numThreads: 0,
+      } as any)
+    ).rejects.toMatchObject({ code: 'ALIGNMENT_OPTIONS_INVALID' });
+    expect(native.alignOfflineTextToAudio).not.toHaveBeenCalled();
+  });
+
   it('emits ALIGNMENT_OPTIONS_INVALID for non-function onProgress', async () => {
     const engine = createAlignment();
 

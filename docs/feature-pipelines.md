@@ -244,7 +244,7 @@ flowchart LR
 When to use:
 - Batch page/document OCR with deterministic completion.
 - Reuse a multi-frame image buffer and select `frames` subsets.
-- Consume `origin: 'ocr'` spatial spans for box overlays.
+- Consume spatial spans for box overlays: [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview) (`origin: 'ocr'` or mapped `'textLayer'`).
 
 Related docs:
 - [ocr-offline.md](ocr-offline.md)

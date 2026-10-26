@@ -6,8 +6,8 @@
  * DocVlmSmoke.EnHello run only when the pack is present (local unpack or
  * workflow_dispatch); otherwise they skip. Strict golden is opt-in.
  *
- * Pack: DOCVLM_MODEL_DIR, else build/ocr-models/docvlm-granite-258m,
- * else dist/ocr-models/docvlm-granite-258m.
+ * Pack: DOCVLM_MODEL_DIR, else build/ocr-models/docvlm-granite-258m-fp32
+ * (or another granite dtype dir).
  */
 
 #include <gtest/gtest.h>
@@ -26,6 +26,7 @@
 
 #include "DocVlmBackend.h"
 #include "DocVlmDocTags.h"
+#include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
 #include "DocVlmTokenizer.h"
@@ -43,9 +44,9 @@ constexpr uint64_t kMiB = 1024ull * 1024ull;
 const char* kUnpackHint =
     "docvlm-granite-258m pack not found. Unpack with:\n"
     "mkdir -p build/ocr-models\n"
-    "curl -fsSL -o /tmp/docvlm-granite-258m.tar.bz2 \\\n"
-    "  https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m.tar.bz2\n"
-    "tar xjf /tmp/docvlm-granite-258m.tar.bz2 -C build/ocr-models";
+    "curl -fsSL -o /tmp/docvlm-granite-258m-fp32.tar.bz2 \\\n"
+    "  https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m-fp32.tar.bz2\n"
+    "tar xjf /tmp/docvlm-granite-258m-fp32.tar.bz2 -C build/ocr-models";
 
 std::string RepoRelativeFixture(const char* relative_from_test_fixtures) {
   const char* env = std::getenv("TEST_FIXTURES_DIR");
@@ -76,8 +77,14 @@ std::string ResolveDocVlmModelDir() {
     if (env[0] != '\0' && fs::is_directory(env)) return env;
   }
   const char* candidates[] = {
-      "build/ocr-models/docvlm-granite-258m",
-      "dist/ocr-models/docvlm-granite-258m",
+      "build/ocr-models/docvlm-granite-258m-fp32",
+      "dist/ocr-models/docvlm-granite-258m-fp32",
+      "build/ocr-models/docvlm-granite-258m-q8",
+      "dist/ocr-models/docvlm-granite-258m-q8",
+      "build/ocr-models/docvlm-granite-258m-fp16",
+      "dist/ocr-models/docvlm-granite-258m-fp16",
+      "build/ocr-models/docvlm-granite-258m-q4f16",
+      "dist/ocr-models/docvlm-granite-258m-q4f16",
   };
   for (const char* candidate : candidates) {
     if (fs::is_directory(candidate)) return candidate;
@@ -327,24 +334,173 @@ TEST(DocTags, TitleMarkdown) {
       "<doctag><title><loc_0><loc_0><loc_10><loc_10>Hi</title></doctag>", 1000, 240, 0);
   EXPECT_EQ(parsed.markdown_utf8, "# Hi");
   EXPECT_EQ(parsed.text_utf8, "Hi");
+  ASSERT_EQ(parsed.spans.size(), 1u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
 }
 
 TEST(DocTags, FallbackStripsTags) {
   const DocTagsParse parsed = ParseDocTags("<doctag>Hello</doctag>", 1000, 240, 3);
-  EXPECT_TRUE(parsed.used_fallback);
+  EXPECT_TRUE(parsed.text_utf8.empty());
+  EXPECT_TRUE(parsed.markdown_utf8.empty());
+  EXPECT_TRUE(parsed.spans.empty());
+}
+
+TEST(DocTags, OtslUnclosedTwoByTwo) {
+  const DocTagsParse parsed =
+      ParseDocTags("<fcel>A<fcel>B<nl><fcel>C<fcel>D", 1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  EXPECT_EQ(parsed.markdown_utf8, "| A | B |\n| --- | --- |\n| C | D |");
+  EXPECT_TRUE(parsed.spans.empty());
+}
+
+TEST(DocTags, OtslClosedWithWrapperLocs) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><loc_0><loc_0><loc_250><loc_250><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl>",
+      1000, 240, 1);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 1u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  EXPECT_EQ(parsed.spans[0].frame_index, 1);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 11);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[0], 0.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 500.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[5], 120.f);
+}
+
+TEST(DocTags, OtslCellLocsEmitLineSpans) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><fcel><loc_0><loc_0><loc_100><loc_50>A"
+      "<fcel><loc_100><loc_0><loc_200><loc_50>B<nl>"
+      "<fcel><loc_0><loc_50><loc_100><loc_100>C"
+      "<fcel><loc_100><loc_50><loc_200><loc_100>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 4u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 1);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[0], 0.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 200.f);
+  EXPECT_EQ(parsed.spans[1].utf16_start, 4);
+  EXPECT_EQ(parsed.spans[1].utf16_end, 5);
+  EXPECT_FLOAT_EQ(parsed.spans[1].quad.xy[0], 200.f);
+  EXPECT_FLOAT_EQ(parsed.spans[1].quad.xy[2], 400.f);
+  EXPECT_EQ(parsed.spans[2].utf16_start, 6);
+  EXPECT_EQ(parsed.spans[2].utf16_end, 7);
+  EXPECT_EQ(parsed.spans[3].utf16_start, 10);
+  EXPECT_EQ(parsed.spans[3].utf16_end, 11);
+  EXPECT_EQ(parsed.spans[3].level, OcrSpanLevel::kLine);
+}
+
+TEST(DocTags, OtslMixedCellLocsSkipCellsWithoutLoc) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><loc_0><loc_0><loc_250><loc_250>"
+      "<fcel><loc_0><loc_0><loc_100><loc_50>A<fcel>B<nl>"
+      "<fcel>C<fcel><loc_100><loc_50><loc_200><loc_100>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 2u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 1);
+  EXPECT_EQ(parsed.spans[1].utf16_start, 10);
+  EXPECT_EQ(parsed.spans[1].utf16_end, 11);
+}
+
+TEST(DocTags, OtslEmptyCellKeepsColumn) {
+  const DocTagsParse parsed =
+      ParseDocTags("<fcel>A<ecel><fcel>B<nl><fcel>C<fcel>D<fcel>E", 1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A |  | B\nC | D | E");
+  EXPECT_EQ(parsed.markdown_utf8,
+            "| A |  | B |\n| --- | --- | --- |\n| C | D | E |");
+}
+
+TEST(DocTags, OtslCaptionBeforeTable) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><caption>Notes</caption><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "Notes\nA | B\nC | D");
+  EXPECT_EQ(parsed.markdown_utf8,
+            "Notes\n| A | B |\n| --- | --- |\n| C | D |");
+}
+
+TEST(DocTags, UnknownTagDoesNotDropNeighbors) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<text>A</text><unknown>x</unknown><text>B</text>", 1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A\nB");
+}
+
+TEST(DocTags, TruncatedTextIsBestEffort) {
+  const DocTagsParse parsed = ParseDocTags("<text>Hello", 1000, 240, 0);
   EXPECT_EQ(parsed.text_utf8, "Hello");
   ASSERT_EQ(parsed.spans.size(), 1u);
-  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kBlock);
-  EXPECT_EQ(parsed.spans[0].frame_index, 3);
-  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 1000.f);
-  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[5], 240.f);
-  EXPECT_FLOAT_EQ(parsed.spans[0].confidence, 1.f);
+}
+
+TEST(DocTagsPrefix, RejectsStartWithoutDoctag) {
+  DocTagsPrefix prefix;
+  EXPECT_FALSE(prefix.Feed("Fo"));
+}
+
+TEST(DocTagsPrefix, RejectsLocWithoutOpen) {
+  DocTagsPrefix prefix;
+  EXPECT_FALSE(prefix.Feed("<loc_0>"));
+}
+
+TEST(DocTagsPrefix, RejectsPromptOnly) {
+  DocTagsPrefix start;
+  EXPECT_FALSE(start.Feed("<image>"));
+  DocTagsPrefix after_open;
+  EXPECT_TRUE(after_open.Feed("<doctag>"));
+  EXPECT_FALSE(after_open.Feed("<fake_token_around_image>"));
+  DocTagsPrefix role;
+  EXPECT_TRUE(role.Feed("<doctag>"));
+  EXPECT_FALSE(role.Feed("<|start_of_role|>"));
+  DocTagsPrefix tile;
+  EXPECT_TRUE(tile.Feed("<doctag>"));
+  EXPECT_FALSE(tile.Feed("<row_1_col_2>"));
+}
+
+TEST(DocTagsPrefix, RejectsTextAfterClose) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("<doctag></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+  EXPECT_FALSE(prefix.Feed("Hello"));
+}
+
+TEST(DocTagsPrefix, AcceptsMiniDocument) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("\n<doctag><text>Hi</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsUnclosedOtslPrefix) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("<doctag><otsl><fcel>A<fcel>B<nl>"));
+  EXPECT_FALSE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsUnclosedOtslCloseThenText) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed(
+      "<doctag><table><otsl><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl></table>"
+      "<text>After</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsTableCloseWithoutOtslClose) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed(
+      "<doctag><table><otsl><fcel>A<fcel>B</table><text>After</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
 }
 
 TEST(OcrResult, ExtrasDefaultEmpty) {
   OcrResult result;
   EXPECT_TRUE(result.doctags_utf8.empty());
   EXPECT_TRUE(result.markdown_utf8.empty());
+  EXPECT_TRUE(result.stop_reason.empty());
+  EXPECT_TRUE(result.complete);
   OcrLoadOptions options;
   EXPECT_EQ(options.max_new_tokens, 0);
 }

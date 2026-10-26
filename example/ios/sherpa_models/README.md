@@ -13,7 +13,7 @@ Content placed here is copied into the app at build time by the “Copy Sherpa m
 
   The Xcode “Download SherpaOnnx Models” phase only fetches models listed in
   `example/scripts/model-download-config.json` (currently includes Spleeter, not UVR;
-  OCR packs `ppocrv6-tiny`, `doctr-mobile`, and `docvlm-granite-258m` come from the
+  OCR packs `ppocrv6-tiny`, `doctr-mobile`, and `docvlm-granite-258m-fp32` come from the
   `XDcobra/react-native-sherpa-onnx` `ocr-models` release).
   Place UVR (and any other unlisted packs) here so the Copy build phase bundles them.
 

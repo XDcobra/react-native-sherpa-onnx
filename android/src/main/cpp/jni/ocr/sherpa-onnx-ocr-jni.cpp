@@ -149,7 +149,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring modelDir,
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
     jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
-    jfloat detUnclipRatio, jint maxNewTokens, jobject pathOverrides) {
+    jfloat detUnclipRatio, jint maxNewTokens, jstring quantization,
+    jobject pathOverrides) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -164,6 +165,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.det_unclip_ratio = detUnclipRatio;
     opts.max_new_tokens = maxNewTokens;
     opts.provider = JstringToStd(env, provider);
+    opts.quantization = JstringToStd(env, quantization);
     ApplyPathOverrides(env, pathOverrides, opts);
     engine.Load(type.empty() ? "auto" : type, dir, opts);
   } catch (const std::exception& e) {
@@ -191,10 +193,12 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeCancelRecognize(JNIEnv* env,
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
                                                jstring modelDir,
-                                               jstring modelType) {
+                                               jstring modelType,
+                                               jstring quantization) {
   const std::string type = JstringToStd(env, modelType);
   auto detect = sherpa_onnx::ocr::DetectOcrModel(
-      JstringToStd(env, modelDir), type.empty() ? "auto" : type);
+      JstringToStd(env, modelDir), type.empty() ? "auto" : type,
+      JstringToStd(env, quantization));
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
@@ -472,6 +476,10 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   PutString(env, map, put, "text", outcome.result.text_utf8);
   PutString(env, map, put, "doctags", outcome.result.doctags_utf8);
   PutString(env, map, put, "markdown", outcome.result.markdown_utf8);
+  if (outcome.family == "doc_vlm") {
+    PutString(env, map, put, "stopReason", outcome.result.stop_reason);
+    PutBool(env, map, put, "complete", outcome.result.complete ? JNI_TRUE : JNI_FALSE);
+  }
 
   jclass arrayListClass = env->FindClass("java/util/ArrayList");
   jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");

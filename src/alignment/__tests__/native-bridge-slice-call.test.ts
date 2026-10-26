@@ -181,4 +181,100 @@ describe('alignment/native bridge slice calls', () => {
       undefined
     );
   });
+
+  test('row 4a asrMediated forwards provider to native accurate call', async () => {
+    const native = SherpaOnnx as unknown as {
+      alignAccurateFromPcm: jest.Mock;
+    };
+
+    await runAccurateAsrMediated({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      hypothesisTextBuffer: 'txt_hyp',
+      model: { modelSource: { kind: 'fs', path: '/m' }, provider: 'xnnpack' },
+      granularity: 'word',
+      language: 'en',
+    });
+
+    expect(native.alignAccurateFromPcm).toHaveBeenCalledWith(
+      '/resolved/alignment.onnx',
+      expect.any(String),
+      {
+        audioBufferId: 'off_audio',
+        startSample: 0,
+        sampleCount: 16000,
+      },
+      16000,
+      'word',
+      'en',
+      undefined,
+      'xnnpack'
+    );
+  });
+
+  test('row 4b chunkedForcedCtc forwards provider to forced-ctc call', async () => {
+    const native = SherpaOnnx as unknown as {
+      alignAccurateForcedCtcFromPcm: jest.Mock;
+    };
+
+    await runAccurateChunkedForcedCtc({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      model: { modelSource: { kind: 'fs', path: '/m' }, provider: 'coreml' },
+      granularity: 'word',
+      language: 'en',
+    });
+
+    expect(native.alignAccurateForcedCtcFromPcm).toHaveBeenCalledWith(
+      '/resolved/alignment.onnx',
+      expect.any(String),
+      {
+        audioBufferId: 'off_audio',
+        startSample: 0,
+        sampleCount: 16000,
+      },
+      16000,
+      'word',
+      'en',
+      undefined,
+      'coreml'
+    );
+  });
+
+  test('row 4a asrMediated forwards numThreads to native accurate call', async () => {
+    const native = SherpaOnnx as unknown as {
+      alignAccurateFromPcm: jest.Mock;
+    };
+
+    await runAccurateAsrMediated({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      hypothesisTextBuffer: 'txt_hyp',
+      model: { modelSource: { kind: 'fs', path: '/m' }, numThreads: 2 },
+      granularity: 'word',
+      language: 'en',
+    });
+
+    expect(native.alignAccurateFromPcm).toHaveBeenCalledWith(
+      '/resolved/alignment.onnx',
+      expect.any(String),
+      {
+        audioBufferId: 'off_audio',
+        startSample: 0,
+        sampleCount: 16000,
+      },
+      16000,
+      'word',
+      'en',
+      undefined,
+      undefined,
+      2
+    );
+  });
 });

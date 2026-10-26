@@ -126,15 +126,15 @@ std::string BasenameLastPathComponent(const std::string& path) {
 
 std::string DeriveQuantization(const std::string& id) {
     std::string lower = model_detect::ToLower(id);
+    if (lower.find("q4f16") != std::string::npos) return "q4f16";
     if (lower.find("int8") != std::string::npos && lower.find("quant") != std::string::npos) {
         return "int8-quantized";
     }
     if (lower.find("uint8") != std::string::npos || model_detect::ContainsWord(lower, "u8")) {
         return "uint8";
     }
-    if (lower.find("int8") != std::string::npos || model_detect::ContainsWord(lower, "q8")) {
-        return "int8";
-    }
+    if (model_detect::ContainsWord(lower, "q8")) return "q8";
+    if (lower.find("int8") != std::string::npos) return "int8";
     if (lower.find("int4") != std::string::npos || model_detect::ContainsWord(lower, "q4")) {
         return "int4";
     }

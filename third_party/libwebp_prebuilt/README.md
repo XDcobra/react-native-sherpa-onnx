@@ -11,5 +11,6 @@ Build [libwebp](https://github.com/webmproject/libwebp) for Android and iOS and 
   - `.github/workflows/build-libwebp-android-release.yml` — zip + AAR + GitHub Release + Maven publish
   - `.github/workflows/framework-libwebp-ios-framework.yml` — XCFramework zip + GitHub Release
 - **SDK resolution:** Gradle (`prebuilt-download.gradle`) cascade THIRD_PARTY → LOCAL_SDK → MAVEN_AAR → GITHUB_RELEASE. iOS: `scripts/setup-ios-framework.sh` downloads the XCFramework from the iOS release tag.
+- **Opt-in (default off):** link only with `sherpaOnnxEnableLibwebp=true` (Android) or `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Without enable, WebP APIs reject with `ERR_IMAGE_WEBP_DISABLED`. The example app opts in.
 
 Bump version: update submodule pin + both `*_RELEASE_TAG` files + re-run the release workflows.

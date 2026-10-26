@@ -18,7 +18,11 @@ import {
 import type { FileSource } from '../fileio/types';
 import { resolveOfflineImageBufferId } from '../imagebuffer';
 import { resolveOfflineTextBufferId } from '../textbuffer';
-import { ModelCategory, type SizeTier } from '../download/types';
+import {
+  ModelCategory,
+  type QuantizationPreference,
+  type SizeTier,
+} from '../download/types';
 import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
@@ -30,6 +34,7 @@ import {
 } from '../types/modelDetect';
 import { buildOcrInitBridgeOptions } from './ocrNativeBridge';
 import type {
+  OcrDocVlmStopReason,
   OcrEngine,
   OcrGranularity,
   OcrInitializeOptions,
@@ -151,7 +156,7 @@ function pathFromRaw(value: unknown): string | undefined {
 /** Detect OCR pack layout without loading the engine. */
 export async function detectOcrModel(
   source: FileSource,
-  options?: { modelType?: OcrModelType }
+  options?: { modelType?: OcrModelType; quantization?: QuantizationPreference }
 ): Promise<OcrDetectModelResult> {
   const resolved = await resolveFileSourceForDetect(source);
   const modelDir = resolved.modelDir;
@@ -166,7 +171,8 @@ export async function detectOcrModel(
 
   const raw = await getNative().detectOcrModel(
     modelDir,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
 
   const successFlag = Boolean(raw.success ?? raw.ok);
@@ -307,11 +313,29 @@ function readRecognizeResult(
         code: OcrErrorCode.INTERNAL_ERROR,
       });
     }
+    const stopReason = raw.stopReason;
+    if (
+      stopReason !== 'doctag_end' &&
+      stopReason !== 'eos' &&
+      stopReason !== 'max_new_tokens' &&
+      stopReason !== 'invalid_sequence'
+    ) {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
+    if (typeof raw.complete !== 'boolean') {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
     return {
       family,
       spanCount: raw.spanCount,
       doctags: raw.doctags,
       markdown: raw.markdown,
+      complete: raw.complete,
+      stopReason: stopReason as OcrDocVlmStopReason,
     };
   }
   // ppocr / doctr: DocTags are unsupported — omit fields (ignore native "").
@@ -389,6 +413,7 @@ export type {
   OcrPpocrOptions,
   OcrDoctrOptions,
   OcrDocVlmOptions,
+  OcrDocVlmStopReason,
   OcrInitializeOptions,
   OcrInitializeOptionsAuto,
   OcrInitializeOptionsPpocr,

@@ -312,6 +312,7 @@ export type OcrInitBridgeOptions = {
   detUnclipRatio?: number;
   /** doc_vlm generation cap. Omit → native 0 → backend default 8192. */
   maxNewTokens?: number;
+  quantization?: string;
 };
 
 export type OcrRecognizeNativeResult = {
@@ -319,6 +320,8 @@ export type OcrRecognizeNativeResult = {
   spanCount: number;
   doctags: string;
   markdown: string;
+  stopReason?: string;
+  complete?: boolean;
 };
 
 /** `ocrRecognize(..., options)`. */
@@ -1070,6 +1073,25 @@ export interface Spec extends TurboModule {
     height: number;
     byteSize: number;
     storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
+  }>;
+
+  /**
+   * Ensure a frame's RGB is resident (no-op info for non-lazy buffers).
+   * For lazy-lru PDF buffers: rasterize cold slot, update LRU, may prefetch ±1.
+   */
+  ensureOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number
+  ): Promise<{
+    index: number;
+    width: number;
+    height: number;
+    byteSize: number;
+    storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
@@ -1077,12 +1099,26 @@ export interface Spec extends TurboModule {
   /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */
   cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
 
+  /**
+   * Encode one OfflineImageBuffer frame to a FileDestination.
+   * `destination` is a serialized FileDestination map (same as saveAudioBufferToFile).
+   * `options`: `{ format?: string, quality?: number, maxSide?: number }`.
+   * Returns `{ outputKind, outputPath }` for ResolvedFileRef parsing.
+   */
+  exportOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number,
+    destination: Object,
+    options?: Object
+  ): Promise<{ outputKind: string; outputPath: string }>;
+
   // ==================== Offline OCR ====================
 
   /** Family-aware OCR pack detect (ppocr Det+Rec+dict). */
   detectOcrModel(
     modelDir: string,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<OcrDetectNativeResult>;
 
   /** Load an OCR engine instance (Cpp OcrEngine + backend). */
@@ -1125,6 +1161,23 @@ export interface Spec extends TurboModule {
     pagesWithText: number;
     utf16Length: number;
     spatialSpanCount: number;
+  }>;
+
+  /**
+   * Rasterize PDF pages into a new OfflineImageBuffer (RGB8 frames with pageNumber).
+   * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   */
+  rasterizePdfPages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+    pageCount: number;
   }>;
 
   /**
@@ -1737,7 +1790,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word' | 'character',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     subtitles: Array<{
       text: string;
@@ -1762,7 +1817,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     tokens: Array<{
       text: string;

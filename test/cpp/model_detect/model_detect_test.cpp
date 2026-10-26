@@ -932,6 +932,21 @@ std::vector<std::string> DocVlmFileLines(const std::string& root,
     return lines;
 }
 
+std::vector<std::string> DocVlmSuffixedFileLines(const std::string& root,
+                                                 const std::string& suffix) {
+    return {
+        root + "/",
+        root + "/vision_encoder" + suffix + ".onnx",
+        root + "/vision_encoder" + suffix + ".onnx_data",
+        root + "/embed_tokens" + suffix + ".onnx",
+        root + "/embed_tokens" + suffix + ".onnx_data",
+        root + "/decoder_model_merged" + suffix + ".onnx",
+        root + "/decoder_model_merged" + suffix + ".onnx_data",
+        root + "/tokenizer.json",
+        root + "/ocr_manifest.json",
+    };
+}
+
 void ExpectDocVlmPathsFilled(const sherpaonnx::OcrDetectResult& result) {
     EXPECT_FALSE(result.paths.vision_encoder.empty());
     EXPECT_FALSE(result.paths.vision_encoder_data.empty());
@@ -989,7 +1004,7 @@ TEST(ModelDetectTest, DetectOcrDocVlmTokenizerConfigIsNotTokenizer) {
 
 TEST(ModelDetectTest, DetectOcrDocVlmNameOnly) {
     auto result = sherpaonnx::DetectOcrModelFromFileList(
-        {}, "docvlm-granite-258m", "auto");
+        {}, "docvlm-granite-258m-fp32", "auto");
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
     EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);
@@ -1095,6 +1110,75 @@ TEST(ModelDetectTest, DetectOcrNoFamilyKeyUsesDocVlmLayout) {
         std::optional<std::string>(dir.path), std::nullopt, "auto", "");
     ASSERT_TRUE(result.ok) << result.error;
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+}
+
+TEST(ModelDetectTest, MatchesQuantizationFp16ExcludesQ4f16) {
+    using sherpaonnx::model_detect::MatchesQuantization;
+    EXPECT_TRUE(MatchesQuantization("vision_encoder_fp16.onnx", "fp16"));
+    EXPECT_FALSE(MatchesQuantization("vision_encoder_q4f16.onnx", "fp16"));
+    EXPECT_TRUE(MatchesQuantization("vision_encoder_q4f16.onnx", "q4f16"));
+    EXPECT_TRUE(MatchesQuantization("vision_encoder_quantized.onnx", "q8"));
+    EXPECT_FALSE(MatchesQuantization("vision_encoder_quantized.onnx", "int8"));
+    EXPECT_TRUE(MatchesQuantization("det.int8.onnx", "int8"));
+    EXPECT_FALSE(MatchesQuantization("vision_encoder.onnx", "fp16"));
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmFlattenFolderFp16) {
+    const std::string root = "docvlm-granite-258m-fp16";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmFileLines(root, true, true));
+    auto ok = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto", "fp16");
+    ASSERT_TRUE(ok.ok) << ok.error;
+    EXPECT_EQ(ok.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
+    EXPECT_NE(ok.paths.vision_encoder.find("vision_encoder.onnx"), std::string::npos);
+
+    auto fail =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "auto", "q4f16");
+    EXPECT_FALSE(fail.ok);
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmHubTwinsPickQ4f16) {
+    const std::string root = "hub-mixed";
+    auto unsuffixed = DocVlmFileLines(root, true, true);
+    auto q4 = DocVlmSuffixedFileLines(root, "_q4f16");
+    unsuffixed.insert(unsuffixed.end(), q4.begin(), q4.end());
+    auto files =
+        model_detect_test::BuildFileEntriesFromPathLines(root, unsuffixed);
+
+    auto q4hit =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "doc_vlm", "q4f16");
+    ASSERT_TRUE(q4hit.ok) << q4hit.error;
+    EXPECT_NE(q4hit.paths.vision_encoder.find("vision_encoder_q4f16.onnx"),
+              std::string::npos);
+    EXPECT_NE(q4hit.paths.decoder_data.find("decoder_model_merged_q4f16.onnx_data"),
+              std::string::npos);
+
+    auto fp16hit =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "doc_vlm", "fp16");
+    EXPECT_FALSE(fp16hit.ok);
+}
+
+TEST(ModelDetectTest, DetectOcrDocVlmQuantizedTripleIsQ8) {
+    const std::string root = "hub-q8";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, DocVlmSuffixedFileLines(root, "_quantized"));
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "auto", "q8");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_NE(result.paths.embed_tokens.find("embed_tokens_quantized.onnx"),
+              std::string::npos);
+}
+
+TEST(ModelDetectTest, DetectOcrPpocrPicksInt8Det) {
+    const std::string root = "ppocr-int8-mix";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, {root + "/det.onnx", root + "/det.int8.onnx", root + "/rec.onnx",
+               root + "/rec.int8.onnx", root + "/rec_inference.yml"});
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "ppocr", "int8");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_NE(result.paths.det.find("det.int8.onnx"), std::string::npos);
+    EXPECT_NE(result.paths.rec.find("rec.int8.onnx"), std::string::npos);
 }
 
 TEST(UnifiedModelDetectTest, DocVlmDirectoryIsOcrNotStt) {

@@ -383,6 +383,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
       } else if (modeStr == "accurate") {
         std::string modelPathStr = sherpaonnx::alignment::bridge::ParseAlignmentModelPath(options);
         const std::string vocabPathStr = sherpaonnx::alignment::bridge::ParseAlignmentVocabPath(options);
+        const std::string providerStr = sherpaonnx::alignment::bridge::ParseAlignmentProvider(options);
+        const int32_t numThreads = sherpaonnx::alignment::bridge::ParseAlignmentNumThreads(options);
         const std::string segmentationSource = sherpaonnx::alignment::bridge::ParseSegmentationSource(options);
         if (segmentationSource == "vad") {
           if (granularityStr == "character") {
@@ -470,7 +472,9 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                   end - start,
                   pcmSampleRate,
                   granularityStr,
-                  vocabPathStr);
+                  vocabPathStr,
+                  providerStr,
+                  numThreads);
             } catch (const std::exception &e) {
               throw std::runtime_error(
                   std::string("ALIGNMENT_CONSTRAINED_ACCURATE_ERROR: constrained accurate run failed for anchor ") +
@@ -546,7 +550,9 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             pcm.size(),
             pcmSampleRate,
             granularityStr,
-            vocabPathStr);
+            vocabPathStr,
+            providerStr,
+            numThreads);
       } else if (modeStr == "vad") {
         const std::string segSourceId = sherpaonnx::alignment::bridge::ParseSegmentationBufferId(options);
         if (segSourceId.find("seg_off_") != 0) {
@@ -707,6 +713,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                   granularity:(NSString *)granularity
                      language:(NSString *)language
                     vocabPath:(NSString *)vocabPath
+                     provider:(NSString *)provider
+                   numThreads:(NSNumber *)numThreads
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
@@ -722,6 +730,15 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
           (language != nil) ? std::string([language UTF8String]) : std::string();
       const std::string vocabPathStr =
           (vocabPath != nil) ? std::string([vocabPath UTF8String]) : std::string();
+      NSString *providerTrimmed = provider != nil
+          ? [provider stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          : @"";
+      const std::string providerStr =
+          (providerTrimmed != nil && providerTrimmed.length > 0)
+              ? std::string([providerTrimmed UTF8String])
+              : std::string();
+      const int32_t numThreadsValue =
+          sherpaonnx::alignment::bridge::ParseOptionalNumThreads(numThreads);
         (void)languageStr;
 
       if (modelPathStr.empty()) {
@@ -815,7 +832,9 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             samples.size(),
             requestedSampleRate,
             granularityStr,
-            vocabPathStr);
+            vocabPathStr,
+            providerStr,
+            numThreadsValue);
       } catch (const std::exception &e) {
         throw std::runtime_error(
             std::string("ALIGNMENT_NATIVE_ACCURATE_FAILED: ") + e.what());
@@ -862,6 +881,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
                           granularity:(NSString *)granularity
                              language:(NSString *)language
                             vocabPath:(NSString *)vocabPath
+                             provider:(NSString *)provider
+                           numThreads:(NSNumber *)numThreads
                               resolve:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject
 {
@@ -877,6 +898,15 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
           (language != nil) ? std::string([language UTF8String]) : std::string();
       const std::string vocabPathStr =
           (vocabPath != nil) ? std::string([vocabPath UTF8String]) : std::string();
+      NSString *providerTrimmed = provider != nil
+          ? [provider stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          : @"";
+      const std::string providerStr =
+          (providerTrimmed != nil && providerTrimmed.length > 0)
+              ? std::string([providerTrimmed UTF8String])
+              : std::string();
+      const int32_t numThreadsValue =
+          sherpaonnx::alignment::bridge::ParseOptionalNumThreads(numThreads);
 
       if (modelPathStr.empty()) {
         reject(kAlignmentErrModelLoadFailed,
@@ -973,7 +1003,9 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             requestedSampleRate,
             effectiveGranularity,
             languageStr,
-            vocabPathStr);
+            vocabPathStr,
+            providerStr,
+            numThreadsValue);
       } catch (const std::exception &e) {
         throw std::runtime_error(
             std::string("ALIGNMENT_FORCED_CTC_FAILED: ") + e.what());

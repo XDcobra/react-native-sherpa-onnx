@@ -3,6 +3,7 @@
 #include "DoctrDbPostprocess.h"
 #include "DoctrImageOps.h"
 #include "DoctrRecDecode.h"
+#include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
 
@@ -87,6 +88,7 @@ void DoctrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   session_options_ = std::make_unique<Ort::SessionOptions>();
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+  ApplyOrtProvider(*session_options_, options_.provider);
 
   det_session_ =
       std::make_unique<Ort::Session>(*env_, det_path.c_str(), *session_options_);

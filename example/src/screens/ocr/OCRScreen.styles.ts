@@ -31,6 +31,105 @@ export const styles = StyleSheet.create({
     marginBottom: 0,
     lineHeight: 18,
   },
+  compareFrame: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    gap: 8,
+  },
+  compareTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  compareTable: {
+    gap: 0,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  compareRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#fff',
+  },
+  compareHeaderRow: {
+    backgroundColor: '#e2e8f0',
+  },
+  compareCell: {
+    flex: 1,
+    fontSize: 11,
+    color: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    lineHeight: 14,
+  },
+  compareCellWide: {
+    flex: 1.2,
+    fontWeight: '600',
+  },
+  matrixPathCol: {
+    flex: 1.35,
+    fontWeight: '600',
+  },
+  matrixCell: {
+    flex: 1,
+    fontSize: 10,
+    color: '#334155',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    lineHeight: 13,
+  },
+  pathCardList: {
+    gap: 8,
+  },
+  pathCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+  },
+  pathCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  pathCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+    flex: 1,
+  },
+  pathCardChevron: {
+    fontSize: 14,
+    color: '#64748b',
+    fontWeight: '700',
+  },
+  pathCardBody: {
+    gap: 6,
+  },
+  pathCardLine: {
+    fontSize: 12,
+    color: '#334155',
+    lineHeight: 17,
+  },
+  pathCardLabel: {
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  pathCardMono: {
+    fontFamily: 'Menlo',
+    fontSize: 11,
+    color: '#1e293b',
+    lineHeight: 16,
+  },
   sectionBody: {
     gap: 10,
   },
@@ -155,10 +254,34 @@ export const styles = StyleSheet.create({
     color: '#111',
     lineHeight: 22,
   },
+  resultTextHighlight: {
+    backgroundColor: 'rgba(255, 59, 48, 0.22)',
+    color: '#111',
+  },
   tabRow: {
     flexDirection: 'row',
     gap: 8,
     marginBottom: 10,
+  },
+  tabRowInline: {
+    flexDirection: 'row',
+    gap: 8,
+    flex: 1,
+  },
+  copyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#E8F1FF',
+    flexShrink: 0,
+  },
+  copyChipLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
   },
   tab: {
     flex: 1,
@@ -179,9 +302,19 @@ export const styles = StyleSheet.create({
     color: '#007AFF',
   },
   spanRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#e2e8f0',
+  },
+  spanRowBody: {
+    flex: 1,
+  },
+  spanCopyButton: {
+    padding: 6,
+    marginTop: 2,
   },
   spanRowActive: {
     backgroundColor: '#fff1f2',
@@ -196,11 +329,26 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 10,
+    gap: 8,
+  },
+  toggleTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   toggleLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#334155',
+    flex: 1,
+  },
+  resultPreview: {
+    width: '100%',
+    height: 280,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   progressBox: {
     backgroundColor: '#f0f0f0',

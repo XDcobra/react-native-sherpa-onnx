@@ -1,3 +1,4 @@
+import type { QuantizationPreference } from '../download/types';
 import type { FileSource } from '../fileio/types';
 import type { OfflineImageBufferIdSource } from '../imagebuffer/types';
 import type {
@@ -26,7 +27,11 @@ export function isOcrModelType(s: string): s is OcrModelType {
   return (OCR_MODEL_TYPES as readonly string[]).includes(s);
 }
 
-/** Span granularity requested at recognize time. Backends produce `line` spans. */
+/**
+ * Span granularity requested at recognize time. Backends produce `line` spans.
+ * `doc_vlm` titles and tables are `line` when locs exist; `block` is media
+ * (picture/chart).
+ */
 export type OcrGranularity = TextSpatialSpanLevel;
 
 export type OcrProgress = {
@@ -78,6 +83,7 @@ type OcrInitShared = {
 
 type OcrInitFolderShared = OcrInitShared & {
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
 };
 
 export type OcrInitializeOptionsAuto = OcrInitFolderShared & {
@@ -141,9 +147,17 @@ export type OcrRecognizeOptions = {
   signal?: AbortSignal;
 };
 
+/** Why `doc_vlm` greedy decode stopped. */
+export type OcrDocVlmStopReason =
+  | 'doctag_end'
+  | 'eos'
+  | 'max_new_tokens'
+  | 'invalid_sequence';
+
 /**
  * Result of `OcrEngine.recognize`. Plain text and spans live on `textOut`.
- * Discriminated on `family`: `doctags` / `markdown` only for `doc_vlm`.
+ * Discriminated on `family`: `doctags` / `markdown` / `complete` /
+ * `stopReason` only for `doc_vlm`.
  */
 export type OcrRecognizeResult =
   | {
@@ -158,6 +172,9 @@ export type OcrRecognizeResult =
       doctags: string;
       /** Lossy markdown from the DocTags walk (`""` when plain text is empty). */
       markdown: string;
+      /** `true` only after a generated `</doctag>`. */
+      complete: boolean;
+      stopReason: OcrDocVlmStopReason;
     };
 
 /** @deprecated Use {@link OcrDetectModelResult} from `../types/modelDetect`. */

@@ -91,13 +91,19 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
 
 - (void)detectOcrModel:(NSString *)modelDir
              modelType:(NSString *)modelType
+          quantization:(NSString *)quantization
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject {
   @try {
     const std::string type =
-        modelType.length > 0 ? [modelType UTF8String] : "auto";
+        (modelType != nil && modelType.length > 0) ? [modelType UTF8String]
+                                                   : "auto";
+    const std::string quant =
+        (quantization != nil && quantization.length > 0)
+            ? [quantization UTF8String]
+            : "";
     auto detect =
-        DetectOcrModel(modelDir ? [modelDir UTF8String] : "", type);
+        DetectOcrModel(modelDir ? [modelDir UTF8String] : "", type, quant);
     NSMutableDictionary *files = [NSMutableDictionary dictionary];
     NSMutableDictionary *paths = [NSMutableDictionary dictionary];
     if (!detect.detPath.empty()) {
@@ -325,6 +331,10 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.det_unclip_ratio = detUnclipRatio;
       opts.max_new_tokens = maxNewTokens;
       opts.provider = provider ? [provider UTF8String] : "cpu";
+      NSString *quantization = options[@"quantization"];
+      if ([quantization isKindOfClass:[NSString class]] && quantization.length > 0) {
+        opts.quantization = [quantization UTF8String];
+      }
       if (isCustom && modelPaths != nil) {
         auto take = ^std::string(NSString *key) {
           id v = modelPaths[key];
@@ -451,14 +461,20 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         reject(kOcrInternal, @"recognize result missing family", nil);
         return;
       }
-      resolve(@{
+      NSMutableDictionary *payload = [@{
         @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
         @"spanCount" : @(static_cast<NSInteger>(spans.size())),
         @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
             ?: @"",
         @"markdown" :
             [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
-      });
+      } mutableCopy];
+      if (outcome.family == "doc_vlm") {
+        payload[@"stopReason"] =
+            [NSString stringWithUTF8String:outcome.result.stop_reason.c_str()] ?: @"";
+        payload[@"complete"] = @(outcome.result.complete);
+      }
+      resolve(payload);
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
     }

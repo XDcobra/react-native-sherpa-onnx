@@ -346,7 +346,9 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jfloatArray jSamples,
     jint jSampleRate,
     jstring jGranularity,
-    jstring jVocabPath) {
+    jstring jVocabPath,
+    jstring jProvider,
+    jint jNumThreads) {
   try {
     if (!jModelPath || !jText || !jSamples) {
       throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: null argument");
@@ -356,6 +358,7 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     const std::string text = JStringToUtf8(env, jText);
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::string vocabPath = JStringToUtf8(env, jVocabPath);
+    const std::string provider = JStringToUtf8(env, jProvider);
 
     if (modelPath.empty()) {
       throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
@@ -375,7 +378,9 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
         samples.size(),
         static_cast<int32_t>(jSampleRate),
         granularity,
-        vocabPath);
+        vocabPath,
+        provider,
+        static_cast<int32_t>(jNumThreads));
 
     return AlignmentResultToJavaHashMap(env, result);
   } catch (const std::bad_alloc&) {
@@ -399,7 +404,9 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jstring jText,
     jstring jAudioPath,
     jstring jGranularity,
-    jstring jVocabPath) {
+    jstring jVocabPath,
+    jstring jProvider,
+    jint jNumThreads) {
   try {
     if (!jModelPath || !jText || !jAudioPath) {
       throw std::runtime_error("nativeAlignAccurateFromFile: null argument");
@@ -410,13 +417,16 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     const std::string audioPath = JStringToUtf8(env, jAudioPath);
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::string vocabPath = JStringToUtf8(env, jVocabPath);
+    const std::string provider = JStringToUtf8(env, jProvider);
 
     auto result = sherpa_onnx::alignment::AlignAccurateFromFile(
         modelPath,
         text,
         audioPath,
         granularity,
-        vocabPath);
+        vocabPath,
+        provider,
+        static_cast<int32_t>(jNumThreads));
 
     return AlignmentResultToJavaHashMap(env, result);
   } catch (const std::exception& e) {
@@ -437,7 +447,9 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jint jSampleRate,
     jstring jGranularity,
     jstring jLanguage,
-    jstring jVocabPath) {
+    jstring jVocabPath,
+    jstring jProvider,
+    jint jNumThreads) {
   try {
     if (!jModelPath || !jWindowText || !jSamples) {
       throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: null argument");
@@ -448,6 +460,7 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::string language = JStringToUtf8(env, jLanguage);
     const std::string vocabPath = JStringToUtf8(env, jVocabPath);
+    const std::string provider = JStringToUtf8(env, jProvider);
 
     if (modelPath.empty()) {
       throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
@@ -468,7 +481,9 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
         static_cast<int32_t>(jSampleRate),
         granularity,
         language,
-        vocabPath);
+        vocabPath,
+        provider,
+        static_cast<int32_t>(jNumThreads));
 
     return ForcedCtcResultToJavaHashMap(env, result);
   } catch (const std::bad_alloc&) {

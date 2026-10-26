@@ -448,6 +448,15 @@ export async function runAccurateAsrMediated(
   const alignmentProfile = resolvedModel.profile;
   const languageOpt =
     typeof input.language === 'string' ? input.language : undefined;
+  const providerOpt =
+    typeof input.model.provider === 'string' &&
+    input.model.provider.trim().length > 0
+      ? input.model.provider.trim()
+      : undefined;
+  const numThreadsOpt =
+    typeof input.model.numThreads === 'number'
+      ? input.model.numThreads
+      : undefined;
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);
   const anchorInfo = asOfflineSegmentBufferInfo(
@@ -533,18 +542,46 @@ export async function runAccurateAsrMediated(
     );
     const nativeResultRaw = await (async () => {
       try {
+        const vocabPath =
+          resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined;
+        const pcm = {
+          audioBufferId: audioInBufferId,
+          startSample: job.anchor.startSample,
+          sampleCount: frameCount,
+        };
+        if (numThreadsOpt != null) {
+          return SherpaOnnx.alignAccurateFromPcm(
+            resolvedModelPath,
+            preparedText,
+            pcm,
+            audioInfo.sampleRate,
+            granularity,
+            languageOpt,
+            vocabPath,
+            providerOpt,
+            numThreadsOpt
+          );
+        }
+        if (providerOpt) {
+          return SherpaOnnx.alignAccurateFromPcm(
+            resolvedModelPath,
+            preparedText,
+            pcm,
+            audioInfo.sampleRate,
+            granularity,
+            languageOpt,
+            vocabPath,
+            providerOpt
+          );
+        }
         return SherpaOnnx.alignAccurateFromPcm(
           resolvedModelPath,
           preparedText,
-          {
-            audioBufferId: audioInBufferId,
-            startSample: job.anchor.startSample,
-            sampleCount: frameCount,
-          },
+          pcm,
           audioInfo.sampleRate,
           granularity,
           languageOpt,
-          resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined
+          vocabPath
         );
       } catch (error) {
         throw mapNativeAsrMediatedError(error);

@@ -135,6 +135,8 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
   mode: 'accurate',
   granularity: 'word',
   modelSource: { kind: 'fs', path: '/abs/path/to/model.onnx' },
+  provider: 'cpu',
+  numThreads: 2,
 });
 ```
 
@@ -472,7 +474,9 @@ Caveats:
 | `AlignTextToAudioOptions` | Union of `Proportional \| Estimated \| Accurate \| Vad` option types |
 | `AlignTextToAudioOptionsProportional` | `{ mode: 'proportional'; granularity?: 'sentence' \| 'word'; language?: string }` |
 | `AlignTextToAudioOptionsEstimated` | `{ mode: 'estimated'; chunks: AlignmentChunkTimeline; granularity?: 'sentence' \| 'word'; language?: string }` |
-| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelSource: FileSource; granularity?: 'sentence' \| 'word' \| 'character'; segmentation?: { mode: 'auto'; anchorSegmentBuffer; mappingStrategy; asr? } }` |
+| `AlignTextToAudioOptionsAccurate` | `{ mode: 'accurate'; modelSource: FileSource; provider?: string; numThreads?: number; granularity?: 'sentence' \| 'word' \| 'character'; segmentation?: { mode: 'auto'; anchorSegmentBuffer; mappingStrategy; asr? } }` |
+| `AlignmentAccurateModelAuto` | `{ initMode?: 'auto'; modelSource: FileSource; quantization?; provider?; numThreads? }` |
+| `AlignmentAccurateModelCustom` | `{ initMode: 'custom'; modelType: 'wav2vec2'; customConfig; provider?; numThreads? }` |
 | `AlignTextToAudioOptionsVad` | `{ mode: 'vad'; granularity?: 'sentence' \| 'word'; segmentation: { source: 'vad'; segmentBuffer } }` |
 | `AlignTextToAudioWriteResult` | `{ outputSegmentBufferId, segmentsWritten, linkMap?, warningCode?, warnings?, vadAnchorCount?, minAnchorsApplied? }` |
 | `AlignmentChunkTimeline` | `{ sampleRate: number; segmentSampleCounts: readonly number[] }` |

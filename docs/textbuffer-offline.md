@@ -241,6 +241,8 @@ if (info.hasSpatialSpans) {
 }
 ```
 
+To project quads onto a decoded ImageBuffer frame, use [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) from `react-native-sherpa-onnx/imagebuffer` (or [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview)).
+
 **Known limit:** Text-to-text transforms (e.g. punctuation) currently drop spatial spans (same class of issue as timestamp loss). Offset-mapping will come later.
 
 #### `getOfflineTextBufferLang(buffer)` / `getOfflineTextBufferEmotion(buffer)` / `getOfflineTextBufferEvent(buffer)`

@@ -103,7 +103,7 @@ jobs:
             - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
             - **Contents:** libwebp (+ sharpyuv), headers under the XCFramework slices
 
-            Optional: set `SHERPA_ONNX_DISABLE_LIBWEBP=1` so the podspec skips vendoring libwebp (WebP decode then returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
+            Opt-in (default off): set `SHERPA_ONNX_ENABLE_LIBWEBP=1` so the podspec vendors libwebp. Without it, WebP decode/export returns `ERR_IMAGE_WEBP_DISABLED`.
           files: libwebp-ios.zip
           draft: false
           prerelease: false

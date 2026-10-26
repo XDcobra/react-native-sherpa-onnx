@@ -1,4 +1,5 @@
 #include "pyannote-segmentation-model.h"
+#include "ort/ApplyOrtProvider.h"
 
 #include <algorithm>
 #include <array>
@@ -178,7 +179,7 @@ Status PyannoteSegmentationModel::Load(const PyannoteLoadOptions& options) {
         std::max(1, options.num_threads));
     impl->session_options.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_ALL);
-    (void)options.provider;
+    sherpa_onnx::ApplyOrtProvider(impl->session_options, options.provider);
 
     const std::string model_file_path =
         ResolveSegmentationModelFile(options.model_path);

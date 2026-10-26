@@ -8,13 +8,16 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 |------:|-------|---------|
 | **1** | `THIRD_PARTY` | Prebuilt files committed under `third_party/<bundle>/android/` — no network required. Requires both JNI libs and headers to be complete; partial trees fall through to stage 3. |
 | **2** | `LOCAL_SDK` | Already present under the Android library module (`android/src/main/jniLibs/<abi>/`, `android/src/main/cpp/include/…`) with a matching version stamp under `android/build/prebuilt-downloads/*-version.txt`. |
-| **3** | `MAVEN_AAR` | Gradle configurations: `sherpaOnnxAar`, `ffmpegAar`, `libarchiveAar`, `libwebpAar`, `pdfiumAar` (opt-in), `onnxruntimeAar` (e.g. `com.xdcobra.sherpa:*`). |
+| **3** | `MAVEN_AAR` | Gradle configurations: `sherpaOnnxAar`, `ffmpegAar`, `libarchiveAar`, `libwebpAar` (opt-in), `pdfiumAar` (opt-in), `onnxruntimeAar` (e.g. `com.xdcobra.sherpa:*`). |
 | **4** | `GITHUB_RELEASE` | `curl` from `https://github.com/<repo>/releases/download/<tag>/<asset>.zip`. The tag is read from `third_party/*/ANDROID_RELEASE_TAG`. |
 | **5** | `ERROR` | `RuntimeException` / failed build when a required artifact is still missing after all applicable stages. |
 
-**Optional skips:** FFmpeg, libarchive, and libwebp are skipped entirely when `sherpaOnnxDisableFfmpeg`, `sherpaOnnxDisableLibarchive`, or `sherpaOnnxDisableLibwebp` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md). Libwebp disable has no separate doc yet — property only (WebP decode returns `ERR_IMAGE_FORMAT_UNSUPPORTED`).
+**Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md).
 
-**Opt-in (default off):** PDFium resolves only when `sherpaOnnxEnablePdfium=true`. Otherwise download/link is skipped and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`. See [pdf-offline.md](../pdf-offline.md) and `third_party/pdfium_prebuilt/README.md`.
+**Opt-in (default off):**
+
+- **libwebp** resolves only when `sherpaOnnxEnableLibwebp=true`. Otherwise download/link is skipped and WebP decode/export rejects with `ERR_IMAGE_WEBP_DISABLED`. See [imagebuffer-offline.md](../imagebuffer-offline.md) and `third_party/libwebp_prebuilt/README.md`.
+- **PDFium** resolves only when `sherpaOnnxEnablePdfium=true`. Otherwise download/link is skipped and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`. See [pdf-offline.md](../pdf-offline.md) and `third_party/pdfium_prebuilt/README.md`.
 
 ## Artifact matrix
 

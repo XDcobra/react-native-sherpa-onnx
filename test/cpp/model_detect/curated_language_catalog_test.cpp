@@ -215,7 +215,7 @@ TEST(CuratedLanguageCatalog, OcrDocVlmFamilyRows) {
 
 TEST(CuratedLanguageCatalog, OcrDocVlmPackRows) {
     using namespace sherpaonnx::model_language_catalog;
-    const auto& rows = OcrPackRowsForModelKey("docvlm-granite-258m");
+    const auto& rows = OcrPackRowsForModelKey("docvlm-granite-258m-fp32");
     ASSERT_EQ(rows.size(), 4u);
     EXPECT_EQ(rows[0].iso6391Hint, "en");
     EXPECT_EQ(rows[1].iso6391Hint, "ja");
@@ -225,7 +225,7 @@ TEST(CuratedLanguageCatalog, OcrDocVlmPackRows) {
 
 TEST(CuratedLanguageCatalog, OcrDocVlmNameOnlyPackLanguages) {
     auto result = sherpaonnx::DetectOcrModelFromFileList(
-        {}, "docvlm-granite-258m", "auto");
+        {}, "docvlm-granite-258m-fp32", "auto");
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
     ASSERT_EQ(result.derivedLanguages.size(), 4u);

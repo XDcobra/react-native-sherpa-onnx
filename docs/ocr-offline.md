@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`. `complete` is `true` only after a generated `</doctag>`; hitting `maxNewTokens` or an illegal prefix is not a finished document (`stopReason` says why). Recognize does not invent plaintext by stripping tags. `doc_vlm` writes title and table spatial spans as `line` when the DocTags carry `<loc_*>` (one box per cell when cells have locs, otherwise one box on the `<otsl>` wrapper). `picture` / `chart` stay `block` and drop at the default `granularity: 'line'`. The image overlay draws those spans; it does not parse DocTags.
 
 ---
 
@@ -75,7 +75,9 @@ try {
       )
     : [];
   console.log(text, spans.length, page.spanCount);
-  // if (page.family === 'doc_vlm') console.log(page.doctags, page.markdown);
+  // if (page.family === 'doc_vlm') {
+  //   console.log(page.complete, page.stopReason, page.doctags, page.markdown);
+  // }
 } finally {
   // Step 6: release buffers + engine
   await releaseOfflineImageBuffer(image);
@@ -135,6 +137,17 @@ try {
 | `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — |
 | `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — |
 
+Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `_quantized` filename):
+
+| ID | Weights | Notes |
+| --- | --- | --- |
+| `docvlm-granite-258m-fp32` | ~1.26 GiB | Canonical. Float KV. |
+| `docvlm-granite-258m-q8` | ~320 MB | Hub `_quantized` triple. Float KV. |
+| `docvlm-granite-258m-fp16` | ~632 MB | Float16 KV. |
+| `docvlm-granite-258m-q4f16` | ~265 MB | Float16 KV + MatMulNBits. |
+
+Each archive includes vision, embed, decoder, tokenizer, and manifest. `ppocrv6-tiny` stays the phone default.
+
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
 ```ts
@@ -159,7 +172,7 @@ File-based detection without initializing the engine. Unified detection: [model-
 ```ts
 function detectOcrModel(
   source: FileSource,
-  options?: { modelType?: OcrModelType }
+  options?: { modelType?: OcrModelType; quantization?: QuantizationPreference }
 ): Promise<OcrDetectModelResult>;
 ```
 
@@ -181,6 +194,8 @@ function createOCR(options: OcrInitializeOptions): Promise<OcrEngine>;
 const ocr = await createOCR({
   modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
   modelType: 'auto',
+  quantization: 'auto',
+  provider: 'cpu',
   numThreads: 2,
 });
 ```
@@ -230,7 +245,7 @@ console.log(ocr.instanceId);
 
 | Source / feature | Buffer or handle | Notes |
 | --- | --- | --- |
-| App image files / URIs | `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` — PNG/JPEG/WebP; HEIC via platform decoder |
+| App image files / URIs | `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` — PNG/JPEG; WebP when libwebp is opted in; HEIC via platform decoder |
 | Reused page buffer | `OfflineImageBuffer` | Decode once; run OCR on `frames` subsets |
 
 ### Typical downstream
@@ -238,7 +253,7 @@ console.log(ocr.instanceId);
 | Destination / feature | Buffer or handle | Notes |
 | --- | --- | --- |
 | Plain transcript | `OfflineTextBuffer` (`txt_off_*`) | `getOfflineTextBufferTextSlice` |
-| Box overlay / layout UI | Spatial spans on same text buffer | `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`) |
+| Box overlay / layout UI | Spatial spans on same text buffer | `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`). Ready-made: [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview); own UI: [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) |
 | Offline TTS | `OfflineTextBuffer` | Read aloud recognized text |
 | Offline punctuation | `OfflineTextBuffer` | Optional cleanup before TTS |
 
@@ -277,10 +292,11 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrConcreteModelType` | Exclude `auto` |
 | `OcrFamily` | Concrete backend family after load |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
-| `OcrInitializeOptions` | Discriminated on `modelType` for option bags |
+| `OcrInitializeOptions` | Discriminated on `modelType` for option bags; shared `provider?`, `numThreads?` |
 | `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrDocVlmOptions` | Family init bags |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
-| `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown` only for `doc_vlm`) |
+| `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown`/`complete`/`stopReason` only for `doc_vlm`) |
+| `OcrDocVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrDetectModelResult` | `detectOcrModel` return |
 | `OcrEngine` | `recognize` / `destroy` / `instanceId` |
@@ -314,7 +330,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
 | `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
-| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for `doc_vlm`, missing `doctags` / `markdown`; and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
+| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for `doc_vlm`, missing `doctags` / `markdown` / `complete` / `stopReason`; and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
@@ -377,7 +393,7 @@ import {
   detectOcrModel,
 } from 'react-native-sherpa-onnx/ocr';
 
-const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-fp32');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
 if (!det.success) {
@@ -390,7 +406,7 @@ const ocr = await createOCR({
 });
 const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 if (page.family === 'doc_vlm') {
-  console.log(page.doctags, page.markdown);
+  console.log(page.complete, page.stopReason, page.doctags, page.markdown);
 }
 await ocr.destroy();
 ```
@@ -418,6 +434,19 @@ console.log(page.spanCount);
 <details>
 <summary>Read spatial spans for a box overlay</summary>
 
+```tsx
+import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imagebuffer';
+
+<OfflineImageBufferAnnotatedView
+  buffer={image}
+  text={textOut}
+  frameIndex={0}
+  onSpanPress={(e) => console.log(e.index, e.utf16Start, e.quad)}
+/>
+```
+
+Or map yourself (`ocr` quads are already frame pixels; `textLayer` needs `mapTextSpatialSpansToFrame`):
+
 ```ts
 const info = (await getPipelineTextBufferInfo(textOut)) as OfflineTextBufferInfo;
 if (info.hasSpatialSpans) {
@@ -427,10 +456,53 @@ if (info.hasSpatialSpans) {
     info.spatialSpanCount
   );
   for (const s of spans) {
-    console.log(s.text, s.boxes, s.frameIndex);
+    console.log(s.origin, s.frameIndex, s.quad);
   }
 }
 ```
+
+</details>
+
+<details>
+<summary>Scan-only PDF (no text layer) → rasterize → recognize</summary>
+
+```ts
+import { createEmptyOfflineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import { releaseOfflineImageBuffer } from 'react-native-sherpa-onnx/imagebuffer';
+import {
+  extractPdfTextLayer,
+  PdfErrorCode,
+  rasterizePdfPages,
+} from 'react-native-sherpa-onnx/pdf';
+
+const pdf = { kind: 'fs' as const, path: '/tmp/scan.pdf' };
+
+// 1) Prefer digital text when present (app-owned switch; no SDK auto).
+const probeOut = await createEmptyOfflineTextBuffer();
+try {
+  await extractPdfTextLayer(pdf, probeOut);
+  // Digital PDF: text + spans already in probeOut — skip OCR.
+} catch (err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!msg.includes(PdfErrorCode.NO_TEXT_LAYER)) throw err;
+
+  // 2) No glyph layer → page bitmaps into OfflineImageBuffer.
+  const pages = await rasterizePdfPages(pdf, {
+    pages: 'all',
+    dpi: 144,
+    maxSide: 2048,
+  });
+
+  // 3) Same OCR path as a normal image buffer.
+  const textOut = await createEmptyOfflineTextBuffer();
+  const page = await ocr.recognize(pages, textOut, { granularity: 'line' });
+  console.log(page.spanCount);
+
+  await releaseOfflineImageBuffer(pages);
+}
+```
+
+Requires opt-in PDFium — see [pdf-offline.md](pdf-offline.md).
 
 </details>
 
@@ -449,7 +521,7 @@ The monorepo example exposes **Home → Vision → OCR** (`example/src/screens/o
 
 ## See also
 
-- [PDF text layer](pdf-offline.md) (digital PDFs → TextBuffer; opt-in PDFium; not OCR)
+- [PDF](pdf-offline.md) (text-layer extract + page raster → ImageBuffer; opt-in PDFium; OCR stays explicit)
 - [ImageBuffer offline](imagebuffer-offline.md) (typical **source** of frames)
 - [TextBuffer offline](textbuffer-offline.md) (text + spatial spans)
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)

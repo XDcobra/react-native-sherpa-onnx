@@ -9,7 +9,7 @@ namespace sherpa_onnx {
 namespace image {
 
 /**
- * Portable decode: JPEG/PNG/BMP/GIF via stb_image, WebP via libwebp,
+ * Portable decode: JPEG/PNG/BMP/GIF via stb_image, WebP via libwebp when linked,
  * EXIF orientation for JPEG, then optional maxSide downscale.
  * HEIC is not handled here (platform bridge → AdoptRgbFrame).
  */

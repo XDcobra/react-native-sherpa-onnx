@@ -28,6 +28,38 @@ internal object ImageBufferNative {
   @JvmStatic external fun nativeGetInfo(bufferId: String): HashMap<String, Any>?
   @JvmStatic
   external fun nativeGetFrameInfo(bufferId: String, frameIndex: Int): HashMap<String, Any>?
+
+  /**
+   * Ensure frame RGB is resident (lazy-lru rasterize if cold).
+   * Returns map with `ok` and frame info fields, or `errorCode`/`errorMessage`.
+   */
+  @JvmStatic
+  external fun nativeEnsureFrame(bufferId: String, frameIndex: Int): HashMap<String, Any>?
+
   @JvmStatic external fun nativeRelease(bufferId: String): Boolean
   @JvmStatic external fun nativeDetectFormat(bytes: ByteArray): String
+
+  /**
+   * Encode one frame to an absolute filesystem path.
+   * Returns map with `ok`, and on failure `errorCode` / `errorMessage`.
+   */
+  @JvmStatic
+  external fun nativeExportFrame(
+    bufferId: String,
+    frameIndex: Int,
+    outPath: String,
+    format: String,
+    quality: Int,
+    maxSide: Int,
+  ): HashMap<String, Any>?
+
+  /**
+   * Build an ARGB_8888 Bitmap for FrameView (fills pixels in JNI; no RGB ByteArray hop).
+   */
+  @JvmStatic
+  external fun nativeCreateFrameBitmap(
+    bufferId: String,
+    frameIndex: Int,
+    maxSide: Int,
+  ): android.graphics.Bitmap?
 }

@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Ort {
@@ -48,6 +49,8 @@ class DocVlmBackend final : public OcrBackend {
   std::vector<std::string> decoder_input_names_;
   std::vector<std::string> decoder_output_names_;
   int doctag_end_id_ = 0;
+  std::unordered_set<int32_t> prompt_only_ids_;
+  bool kv_float16_ = false;
 };
 
 }  // namespace doc_vlm

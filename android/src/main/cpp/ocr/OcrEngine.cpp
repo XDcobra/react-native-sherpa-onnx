@@ -55,6 +55,33 @@ void FilterSpansByGranularity(OcrResult& result, OcrGranularity granularity) {
   result.spans = std::move(kept);
 }
 
+bool HasCustomOcrPaths(const OcrLoadOptions& options) {
+  return !options.path_det.empty() || !options.path_rec.empty() ||
+         !options.path_cls.empty() || !options.path_rec_dict.empty() ||
+         !options.path_manifest.empty() ||
+         !options.path_vision_encoder.empty() ||
+         !options.path_vision_encoder_data.empty() ||
+         !options.path_embed_tokens.empty() ||
+         !options.path_embed_tokens_data.empty() ||
+         !options.path_decoder.empty() || !options.path_decoder_data.empty() ||
+         !options.path_tokenizer.empty();
+}
+
+void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
+  options.path_det = detect.detPath;
+  options.path_rec = detect.recPath;
+  options.path_cls = detect.clsPath;
+  options.path_rec_dict = detect.recDictPath;
+  options.path_manifest = detect.manifestPath;
+  options.path_vision_encoder = detect.visionEncoderPath;
+  options.path_vision_encoder_data = detect.visionEncoderDataPath;
+  options.path_embed_tokens = detect.embedTokensPath;
+  options.path_embed_tokens_data = detect.embedTokensDataPath;
+  options.path_decoder = detect.decoderPath;
+  options.path_decoder_data = detect.decoderDataPath;
+  options.path_tokenizer = detect.tokenizerPath;
+}
+
 }  // namespace
 
 void OcrEngine::Load(const std::string& model_type, const std::string& model_dir,
@@ -64,16 +91,18 @@ void OcrEngine::Load(const std::string& model_type, const std::string& model_dir
   options_ = options;
 
   std::string resolved = model_type.empty() ? "auto" : model_type;
-  if (resolved == "auto") {
-    auto detect = DetectOcrModel(model_dir);
+  if (!HasCustomOcrPaths(options_)) {
+    auto detect = DetectOcrModel(model_dir, resolved, options_.quantization);
     if (!detect.ok) {
       throw std::runtime_error(detect.errorMessage.empty()
                                    ? "OCR auto-detect failed"
                                    : detect.errorMessage);
     }
     resolved = detect.modelType;
-    OCR_LOGI("auto-detect → family=%s modelType=%s dir=%s", detect.family.c_str(),
-             resolved.c_str(), model_dir.c_str());
+    CopyDetectPaths(options_, detect);
+    OCR_LOGI("detect → family=%s modelType=%s quant=%s dir=%s",
+             detect.family.c_str(), resolved.c_str(),
+             options_.quantization.c_str(), model_dir.c_str());
   }
 
   backend_ = CreateOcrBackend(resolved);
@@ -202,6 +231,13 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
     appendField(merged.doctags_utf8, frame_result.doctags_utf8);
     appendField(merged.markdown_utf8, frame_result.markdown_utf8);
+    merged.stop_reason = frame_result.stop_reason;
+    merged.complete = frame_result.complete;
+    OCR_LOGI(
+        "recognize extras frame=%d stop=%s complete=%d doctags=%zu markdown=%zu",
+        frame_index, frame_result.stop_reason.c_str(),
+        frame_result.complete ? 1 : 0, frame_result.doctags_utf8.size(),
+        frame_result.markdown_utf8.size());
 
     ++done;
     if (options.progress) {
@@ -213,9 +249,11 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   out.ok = true;
   out.result = std::move(merged);
   OCR_LOGI(
-      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu",
+      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu "
+      "stop=%s complete=%d",
       image_buffer_id.c_str(), out.result.spans.size(), utf16_cursor,
-      out.result.doctags_utf8.size(), out.result.markdown_utf8.size());
+      out.result.doctags_utf8.size(), out.result.markdown_utf8.size(),
+      out.result.stop_reason.c_str(), out.result.complete ? 1 : 0);
   return out;
 }
 

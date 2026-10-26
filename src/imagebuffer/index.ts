@@ -3,6 +3,10 @@
  *
  * Multi-frame RGB8 buffers with RAM|mmap storage.
  * LiveImageBuffer is reserved (types only).
+ *
+ * WebP is opt-in: rebuild with `sherpaOnnxEnableLibwebp=true` (Android) or
+ * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode/export
+ * with `ERR_IMAGE_WEBP_DISABLED`.
  */
 
 import {
@@ -11,10 +15,18 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
-import type { FileSource } from '../fileio/types';
+import { assertFileDestinationSupportedOnPlatform } from '../fileio';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
 import { ImageErrorCode } from './types';
 import type {
   CreateOfflineImageBufferOptions,
+  ExportOfflineImageBufferFrameOptions,
+  ImageExportFormat,
+  ImageFrameResizeMode,
   ImageProgressEvent,
   ImageStorageKind,
   LiveImageBufferInfo,
@@ -22,8 +34,13 @@ import type {
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
   OfflineImageBufferRef,
+  OfflineImageBufferState,
   OfflineImageFrameInfo,
 } from './types';
+import {
+  OfflineImageBufferFrameView,
+  type OfflineImageBufferFrameViewProps,
+} from './OfflineImageBufferFrameView';
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -81,11 +98,40 @@ function mapInfo(raw: {
   return {
     bufferId: raw.bufferId,
     kind: 'offlineImageBuffer',
-    state: 'immutable',
+    state: raw.state === 'lazy' ? 'lazy' : 'immutable',
     frameCount: raw.frameCount,
     totalBytes: raw.totalBytes,
     storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
   };
+}
+
+function mapFrameInfo(raw: {
+  index: number;
+  width: number;
+  height: number;
+  byteSize: number;
+  storageKind: string;
+  pageNumber?: number;
+  dpi?: number;
+}): OfflineImageFrameInfo {
+  const frame: OfflineImageFrameInfo = {
+    index: raw.index,
+    width: raw.width,
+    height: raw.height,
+    byteSize: raw.byteSize,
+    storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
+  };
+  if (
+    raw.pageNumber != null &&
+    Number.isFinite(raw.pageNumber) &&
+    raw.pageNumber > 0
+  ) {
+    frame.pageNumber = Math.trunc(raw.pageNumber);
+  }
+  if (raw.dpi != null && Number.isFinite(raw.dpi) && raw.dpi > 0) {
+    frame.dpi = Math.trunc(raw.dpi);
+  }
+  return frame;
 }
 
 function toRef(info: OfflineImageBufferInfo): OfflineImageBufferRef {
@@ -155,6 +201,22 @@ function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
   };
 }
 
+function mapWebpDisabled(err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.includes(ImageErrorCode.WEBP_DISABLED) ||
+    msg.includes('libwebp is not linked')
+  ) {
+    throw Object.assign(
+      new Error(
+        `${ImageErrorCode.WEBP_DISABLED}: libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true (Android) or SHERPA_ONNX_ENABLE_LIBWEBP=1 (iOS) and ensure libwebp prebuilts resolve.`
+      ),
+      { code: ImageErrorCode.WEBP_DISABLED, cause: err }
+    );
+  }
+  throw err;
+}
+
 function mapCreateError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
   if (
@@ -164,7 +226,7 @@ function mapCreateError(err: unknown): never {
   ) {
     throw cancelledError();
   }
-  throw err;
+  mapWebpDisabled(err);
 }
 
 export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBufferRef> {
@@ -261,20 +323,34 @@ export async function getOfflineImageBufferInfo(
   return mapInfo(await getNative().getOfflineImageBufferInfo(id));
 }
 
-export async function getOfflineImageBufferFrameInfo(
+export { getOfflineImageBufferFrameInfo } from './getFrameInfo';
+
+/**
+ * Ensure frame RGB is resident. No-op (returns frame info) for immutable buffers.
+ * For lazy-lru PDF buffers: rasterize cold slots, update LRU, may prefetch ±1.
+ */
+export async function ensureOfflineImageBufferFrame(
   buffer: OfflineImageBufferIdSource,
   frameIndex: number
 ): Promise<OfflineImageFrameInfo> {
   const id = resolveImageBufferId(buffer);
   assertImageBufferId(id);
-  const raw = await getNative().getOfflineImageBufferFrameInfo(id, frameIndex);
-  return {
-    index: raw.index,
-    width: raw.width,
-    height: raw.height,
-    byteSize: raw.byteSize,
-    storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
-  };
+  if (!Number.isFinite(frameIndex) || frameIndex < 0) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: frameIndex must be a non-negative integer`
+    );
+  }
+  const raw = await getNative().ensureOfflineImageBufferFrame(
+    id,
+    Math.trunc(frameIndex)
+  );
+  if (__DEV__) {
+    console.log('[SherpaOnnx:image] ensureFrame', id, frameIndex, {
+      width: raw.width,
+      height: raw.height,
+    });
+  }
+  return mapFrameInfo(raw);
 }
 
 export async function releaseOfflineImageBuffer(
@@ -288,17 +364,102 @@ export async function releaseOfflineImageBuffer(
   }
 }
 
+function parseResolvedFileRef(result: {
+  outputKind: string;
+  outputPath: string;
+}): ResolvedFileRef {
+  if (result.outputKind === 'contentUri') {
+    return { kind: 'contentUri', uri: result.outputPath };
+  }
+  return { kind: 'fs', path: result.outputPath };
+}
+
+/**
+ * Encode one frame to a {@link FileDestination} (same write model as `saveAudioAsFile`).
+ * Returns a {@link ResolvedFileRef} for the written file.
+ */
+export async function exportOfflineImageBufferFrame(
+  buffer: OfflineImageBufferIdSource,
+  frameIndex: number,
+  output: FileDestination,
+  options?: ExportOfflineImageBufferFrameOptions
+): Promise<ResolvedFileRef> {
+  const id = resolveImageBufferId(buffer);
+  assertImageBufferId(id);
+  if (!Number.isFinite(frameIndex) || frameIndex < 0) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: frameIndex must be a non-negative integer`
+    );
+  }
+  assertFileDestinationSupportedOnPlatform(output);
+
+  const format: ImageExportFormat = options?.format ?? 'jpeg';
+  if (format !== 'jpeg' && format !== 'png' && format !== 'webp') {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: unsupported export format: ${String(
+        format
+      )}`
+    );
+  }
+
+  try {
+    const result = await getNative().exportOfflineImageBufferFrame(
+      id,
+      Math.trunc(frameIndex),
+      output as unknown as Object,
+      {
+        format,
+        quality: options?.quality ?? 85,
+        maxSide: options?.maxSide ?? 0,
+      }
+    );
+
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:image] exportFrame',
+        id,
+        frameIndex,
+        format,
+        result
+      );
+    }
+
+    return parseResolvedFileRef(result);
+  } catch (err) {
+    mapWebpDisabled(err);
+  }
+}
+
 export type {
   CreateOfflineImageBufferOptions,
+  ExportOfflineImageBufferFrameOptions,
+  FileDestination,
   FileSource,
+  ImageExportFormat,
+  ImageFrameResizeMode,
   ImageProgressEvent,
+  OfflineImageBufferFrameViewProps,
   OfflineImageBufferHandle,
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
   OfflineImageBufferRef,
+  OfflineImageBufferState,
   OfflineImageFrameInfo,
   LiveImageBufferInfo,
   ImageStorageKind,
+  ResolvedFileRef,
 };
 
-export { ImageErrorCode };
+export { ImageErrorCode, OfflineImageBufferFrameView };
+export {
+  OfflineImageBufferAnnotatedView,
+  type OfflineImageBufferAnnotatedViewProps,
+  type OfflineImageBufferSpanPressEvent,
+  type OfflineImageBufferSpanRange,
+} from './OfflineImageBufferAnnotatedView';
+export {
+  mapTextSpatialSpansToFrame,
+  type MapTextSpatialSpansToFrameOptions,
+  type MapTextSpatialSpansToFrameOrigin,
+  type MappedTextSpatialSpan,
+} from './mapToFrame';

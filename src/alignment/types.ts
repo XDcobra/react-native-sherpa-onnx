@@ -31,12 +31,16 @@ export type AlignmentAccurateModelAuto = {
   initMode?: 'auto';
   modelSource: FileSource;
   quantization?: QuantizationPreference;
+  provider?: string;
+  numThreads?: number;
 };
 
 export type AlignmentAccurateModelCustom = {
   initMode: 'custom';
   modelType: AlignmentConcreteModelFamily;
   customConfig: import('./customConfig').AlignmentCustomConfig;
+  provider?: string;
+  numThreads?: number;
 };
 
 export type AlignmentAccurateModelConfig =

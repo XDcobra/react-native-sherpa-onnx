@@ -203,6 +203,7 @@ describe('ocr offline API', () => {
     });
     expect(mockNative.detectOcrModel).toHaveBeenCalledWith(
       '/models/ppocrv6-tiny',
+      null,
       null
     );
     expect(result.success).toBe(true);
@@ -224,6 +225,34 @@ describe('ocr offline API', () => {
     expect(result.paths?.det?.length).toBeGreaterThan(0);
     expect(result.paths?.rec?.length).toBeGreaterThan(0);
     expect(result.paths?.rec_dict?.length).toBeGreaterThan(0);
+  });
+
+  it('detectOcrModel forwards quantization to native', async () => {
+    await detectOcrModel(
+      { kind: 'fs', path: '/models/docvlm-granite-258m-q4f16' },
+      { modelType: 'doc_vlm', quantization: 'q4f16' }
+    );
+    expect(mockNative.detectOcrModel).toHaveBeenCalledWith(
+      '/models/docvlm-granite-258m-q4f16',
+      'doc_vlm',
+      'q4f16'
+    );
+  });
+
+  it('createOCR auto forwards quantization to native', async () => {
+    await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp16' },
+      modelType: 'doc_vlm',
+      quantization: 'fp16',
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/docvlm-granite-258m-fp16',
+        modelType: 'doc_vlm',
+        quantization: 'fp16',
+      })
+    );
   });
 
   it('detectOcrModel trusts native success without TS path completeness', async () => {
@@ -435,10 +464,12 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
 
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
       docVlm: { maxNewTokens: 512 },
     });
@@ -446,7 +477,7 @@ describe('ocr offline API', () => {
     expect(mockNative.initializeOcr).toHaveBeenCalledWith(
       expect.stringMatching(/^ocr_/),
       expect.objectContaining({
-        modelDir: '/models/docvlm-granite-258m',
+        modelDir: '/models/docvlm-granite-258m-fp32',
         modelType: 'doc_vlm',
         maxNewTokens: 512,
       })
@@ -472,6 +503,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
 
     await ocr.destroy();
@@ -487,7 +520,7 @@ describe('ocr offline API', () => {
     });
 
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
     });
     await ocr.destroy();
@@ -514,7 +547,7 @@ describe('ocr offline API', () => {
 
   it('createOCR doc_vlm forwards maxNewTokens', async () => {
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
       docVlm: { maxNewTokens: 512 },
     });
@@ -530,7 +563,7 @@ describe('ocr offline API', () => {
 
   it('createOCR doc_vlm omits maxNewTokens when docVlm is absent', async () => {
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
     });
     const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as {
@@ -542,7 +575,7 @@ describe('ocr offline API', () => {
 
   it('createOCR doc_vlm forwards maxNewTokens 0', async () => {
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
       docVlm: { maxNewTokens: 0 },
     });
@@ -557,7 +590,7 @@ describe('ocr offline API', () => {
     for (const alias of ['docling', 'docvlm'] as const) {
       mockNative.initializeOcr.mockClear();
       const ocr = await createOCR({
-        modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+        modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
         modelType: alias,
       } as unknown as OcrInitializeOptions);
       expect(mockNative.initializeOcr).toHaveBeenCalledWith(
@@ -573,7 +606,7 @@ describe('ocr offline API', () => {
       mockNative.initializeOcr.mockClear();
       await expect(
         createOCR({
-          modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+          modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
           modelType: 'doc_vlm',
           docVlm: { maxNewTokens },
         })
@@ -631,9 +664,11 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
     });
     const page = await ocr.recognize(
@@ -645,6 +680,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
     await ocr.destroy();
   });
@@ -655,8 +692,42 @@ describe('ocr offline API', () => {
       spanCount: 0,
     });
     const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('recognize rejects when doc_vlm complete or stopReason is missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
+      modelType: 'doc_vlm',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+      complete: true,
+      stopReason: 'not_a_reason',
     });
     await expect(
       ocr.recognize(
@@ -713,12 +784,12 @@ describe('ocr offline API', () => {
       modelType: 'doc_vlm',
       paths: docVlmPaths,
       detectedModels: [
-        { type: 'doc_vlm', modelDir: '/models/docvlm-granite-258m' },
+        { type: 'doc_vlm', modelDir: '/models/docvlm-granite-258m-fp32' },
       ],
     });
     const result = await detectOcrModel({
       kind: 'fs',
-      path: '/models/docvlm-granite-258m',
+      path: '/models/docvlm-granite-258m-fp32',
     });
     expect(result.success).toBe(true);
     expect(result.modelType).toBe('doc_vlm');

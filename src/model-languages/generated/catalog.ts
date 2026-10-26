@@ -4,405 +4,405 @@ import type { ModelLanguage } from '../types';
 
 export const WHISPER_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'ru',
-    name: 'russian',
+    "id": "ru",
+    "name": "russian"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'tr',
-    name: 'turkish',
+    "id": "tr",
+    "name": "turkish"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'ca',
-    name: 'catalan',
+    "id": "ca",
+    "name": "catalan"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'ar',
-    name: 'arabic',
+    "id": "ar",
+    "name": "arabic"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'id',
-    name: 'indonesian',
+    "id": "id",
+    "name": "indonesian"
   },
   {
-    id: 'hi',
-    name: 'hindi',
+    "id": "hi",
+    "name": "hindi"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'he',
-    name: 'hebrew',
+    "id": "he",
+    "name": "hebrew"
   },
   {
-    id: 'uk',
-    name: 'ukrainian',
+    "id": "uk",
+    "name": "ukrainian"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'ms',
-    name: 'malay',
+    "id": "ms",
+    "name": "malay"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'ro',
-    name: 'romanian',
+    "id": "ro",
+    "name": "romanian"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'ta',
-    name: 'tamil',
+    "id": "ta",
+    "name": "tamil"
   },
   {
-    id: 'no',
-    name: 'norwegian',
+    "id": "no",
+    "name": "norwegian"
   },
   {
-    id: 'th',
-    name: 'thai',
+    "id": "th",
+    "name": "thai"
   },
   {
-    id: 'ur',
-    name: 'urdu',
+    "id": "ur",
+    "name": "urdu"
   },
   {
-    id: 'hr',
-    name: 'croatian',
+    "id": "hr",
+    "name": "croatian"
   },
   {
-    id: 'bg',
-    name: 'bulgarian',
+    "id": "bg",
+    "name": "bulgarian"
   },
   {
-    id: 'lt',
-    name: 'lithuanian',
+    "id": "lt",
+    "name": "lithuanian"
   },
   {
-    id: 'la',
-    name: 'latin',
+    "id": "la",
+    "name": "latin"
   },
   {
-    id: 'mi',
-    name: 'maori',
+    "id": "mi",
+    "name": "maori"
   },
   {
-    id: 'ml',
-    name: 'malayalam',
+    "id": "ml",
+    "name": "malayalam"
   },
   {
-    id: 'cy',
-    name: 'welsh',
+    "id": "cy",
+    "name": "welsh"
   },
   {
-    id: 'sk',
-    name: 'slovak',
+    "id": "sk",
+    "name": "slovak"
   },
   {
-    id: 'te',
-    name: 'telugu',
+    "id": "te",
+    "name": "telugu"
   },
   {
-    id: 'fa',
-    name: 'persian',
+    "id": "fa",
+    "name": "persian"
   },
   {
-    id: 'lv',
-    name: 'latvian',
+    "id": "lv",
+    "name": "latvian"
   },
   {
-    id: 'bn',
-    name: 'bengali',
+    "id": "bn",
+    "name": "bengali"
   },
   {
-    id: 'sr',
-    name: 'serbian',
+    "id": "sr",
+    "name": "serbian"
   },
   {
-    id: 'az',
-    name: 'azerbaijani',
+    "id": "az",
+    "name": "azerbaijani"
   },
   {
-    id: 'sl',
-    name: 'slovenian',
+    "id": "sl",
+    "name": "slovenian"
   },
   {
-    id: 'kn',
-    name: 'kannada',
+    "id": "kn",
+    "name": "kannada"
   },
   {
-    id: 'et',
-    name: 'estonian',
+    "id": "et",
+    "name": "estonian"
   },
   {
-    id: 'mk',
-    name: 'macedonian',
+    "id": "mk",
+    "name": "macedonian"
   },
   {
-    id: 'br',
-    name: 'breton',
+    "id": "br",
+    "name": "breton"
   },
   {
-    id: 'eu',
-    name: 'basque',
+    "id": "eu",
+    "name": "basque"
   },
   {
-    id: 'is',
-    name: 'icelandic',
+    "id": "is",
+    "name": "icelandic"
   },
   {
-    id: 'hy',
-    name: 'armenian',
+    "id": "hy",
+    "name": "armenian"
   },
   {
-    id: 'ne',
-    name: 'nepali',
+    "id": "ne",
+    "name": "nepali"
   },
   {
-    id: 'mn',
-    name: 'mongolian',
+    "id": "mn",
+    "name": "mongolian"
   },
   {
-    id: 'bs',
-    name: 'bosnian',
+    "id": "bs",
+    "name": "bosnian"
   },
   {
-    id: 'kk',
-    name: 'kazakh',
+    "id": "kk",
+    "name": "kazakh"
   },
   {
-    id: 'sq',
-    name: 'albanian',
+    "id": "sq",
+    "name": "albanian"
   },
   {
-    id: 'sw',
-    name: 'swahili',
+    "id": "sw",
+    "name": "swahili"
   },
   {
-    id: 'gl',
-    name: 'galician',
+    "id": "gl",
+    "name": "galician"
   },
   {
-    id: 'mr',
-    name: 'marathi',
+    "id": "mr",
+    "name": "marathi"
   },
   {
-    id: 'pa',
-    name: 'punjabi',
+    "id": "pa",
+    "name": "punjabi"
   },
   {
-    id: 'si',
-    name: 'sinhala',
+    "id": "si",
+    "name": "sinhala"
   },
   {
-    id: 'km',
-    name: 'khmer',
+    "id": "km",
+    "name": "khmer"
   },
   {
-    id: 'sn',
-    name: 'shona',
+    "id": "sn",
+    "name": "shona"
   },
   {
-    id: 'yo',
-    name: 'yoruba',
+    "id": "yo",
+    "name": "yoruba"
   },
   {
-    id: 'so',
-    name: 'somali',
+    "id": "so",
+    "name": "somali"
   },
   {
-    id: 'af',
-    name: 'afrikaans',
+    "id": "af",
+    "name": "afrikaans"
   },
   {
-    id: 'oc',
-    name: 'occitan',
+    "id": "oc",
+    "name": "occitan"
   },
   {
-    id: 'ka',
-    name: 'georgian',
+    "id": "ka",
+    "name": "georgian"
   },
   {
-    id: 'be',
-    name: 'belarusian',
+    "id": "be",
+    "name": "belarusian"
   },
   {
-    id: 'tg',
-    name: 'tajik',
+    "id": "tg",
+    "name": "tajik"
   },
   {
-    id: 'sd',
-    name: 'sindhi',
+    "id": "sd",
+    "name": "sindhi"
   },
   {
-    id: 'gu',
-    name: 'gujarati',
+    "id": "gu",
+    "name": "gujarati"
   },
   {
-    id: 'am',
-    name: 'amharic',
+    "id": "am",
+    "name": "amharic"
   },
   {
-    id: 'yi',
-    name: 'yiddish',
+    "id": "yi",
+    "name": "yiddish"
   },
   {
-    id: 'lo',
-    name: 'lao',
+    "id": "lo",
+    "name": "lao"
   },
   {
-    id: 'uz',
-    name: 'uzbek',
+    "id": "uz",
+    "name": "uzbek"
   },
   {
-    id: 'fo',
-    name: 'faroese',
+    "id": "fo",
+    "name": "faroese"
   },
   {
-    id: 'ht',
-    name: 'haitian creole',
+    "id": "ht",
+    "name": "haitian creole"
   },
   {
-    id: 'ps',
-    name: 'pashto',
+    "id": "ps",
+    "name": "pashto"
   },
   {
-    id: 'tk',
-    name: 'turkmen',
+    "id": "tk",
+    "name": "turkmen"
   },
   {
-    id: 'nn',
-    name: 'nynorsk',
+    "id": "nn",
+    "name": "nynorsk"
   },
   {
-    id: 'mt',
-    name: 'maltese',
+    "id": "mt",
+    "name": "maltese"
   },
   {
-    id: 'sa',
-    name: 'sanskrit',
+    "id": "sa",
+    "name": "sanskrit"
   },
   {
-    id: 'lb',
-    name: 'luxembourgish',
+    "id": "lb",
+    "name": "luxembourgish"
   },
   {
-    id: 'my',
-    name: 'myanmar',
+    "id": "my",
+    "name": "myanmar"
   },
   {
-    id: 'bo',
-    name: 'tibetan',
+    "id": "bo",
+    "name": "tibetan"
   },
   {
-    id: 'tl',
-    name: 'tagalog',
+    "id": "tl",
+    "name": "tagalog"
   },
   {
-    id: 'mg',
-    name: 'malagasy',
+    "id": "mg",
+    "name": "malagasy"
   },
   {
-    id: 'as',
-    name: 'assamese',
+    "id": "as",
+    "name": "assamese"
   },
   {
-    id: 'tt',
-    name: 'tatar',
+    "id": "tt",
+    "name": "tatar"
   },
   {
-    id: 'haw',
-    name: 'hawaiian',
+    "id": "haw",
+    "name": "hawaiian"
   },
   {
-    id: 'ln',
-    name: 'lingala',
+    "id": "ln",
+    "name": "lingala"
   },
   {
-    id: 'ha',
-    name: 'hausa',
+    "id": "ha",
+    "name": "hausa"
   },
   {
-    id: 'ba',
-    name: 'bashkir',
+    "id": "ba",
+    "name": "bashkir"
   },
   {
-    id: 'jw',
-    name: 'javanese',
+    "id": "jw",
+    "name": "javanese"
   },
   {
-    id: 'su',
-    name: 'sundanese',
+    "id": "su",
+    "name": "sundanese"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
-  },
+    "id": "yue",
+    "name": "cantonese"
+  }
 ] as const;
 
 export function getWhisperLanguages(): readonly ModelLanguage[] {
@@ -411,29 +411,29 @@ export function getWhisperLanguages(): readonly ModelLanguage[] {
 
 export const SENSEVOICE_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'auto',
-    name: 'auto',
+    "id": "auto",
+    "name": "auto"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
+    "id": "yue",
+    "name": "cantonese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'ko',
-    name: 'korean',
-  },
+    "id": "ko",
+    "name": "korean"
+  }
 ] as const;
 
 export function getSenseVoiceLanguages(): readonly ModelLanguage[] {
@@ -442,21 +442,21 @@ export function getSenseVoiceLanguages(): readonly ModelLanguage[] {
 
 export const CANARY_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'fr',
-    name: 'french',
-  },
+    "id": "fr",
+    "name": "french"
+  }
 ] as const;
 
 export function getCanaryLanguages(): readonly ModelLanguage[] {
@@ -465,144 +465,144 @@ export function getCanaryLanguages(): readonly ModelLanguage[] {
 
 export const FUNASR_NANO_ENTRIES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '日文',
-    name: 'japanese',
+    "id": "日文",
+    "name": "japanese"
   },
   {
-    id: '粤语',
-    name: 'cantonese',
+    "id": "粤语",
+    "name": "cantonese"
   },
   {
-    id: '韩文',
-    name: 'korean',
+    "id": "韩文",
+    "name": "korean"
   },
   {
-    id: '越南语',
-    name: 'vietnamese',
+    "id": "越南语",
+    "name": "vietnamese"
   },
   {
-    id: '印尼语',
-    name: 'indonesian',
+    "id": "印尼语",
+    "name": "indonesian"
   },
   {
-    id: '泰语',
-    name: 'thai',
+    "id": "泰语",
+    "name": "thai"
   },
   {
-    id: '马来语',
-    name: 'malay',
+    "id": "马来语",
+    "name": "malay"
   },
   {
-    id: '菲律宾语',
-    name: 'filipino',
+    "id": "菲律宾语",
+    "name": "filipino"
   },
   {
-    id: '阿拉伯语',
-    name: 'arabic',
+    "id": "阿拉伯语",
+    "name": "arabic"
   },
   {
-    id: '印地语',
-    name: 'hindi',
+    "id": "印地语",
+    "name": "hindi"
   },
   {
-    id: '保加利亚语',
-    name: 'bulgarian',
+    "id": "保加利亚语",
+    "name": "bulgarian"
   },
   {
-    id: '克罗地亚语',
-    name: 'croatian',
+    "id": "克罗地亚语",
+    "name": "croatian"
   },
   {
-    id: '捷克语',
-    name: 'czech',
+    "id": "捷克语",
+    "name": "czech"
   },
   {
-    id: '丹麦语',
-    name: 'danish',
+    "id": "丹麦语",
+    "name": "danish"
   },
   {
-    id: '荷兰语',
-    name: 'dutch',
+    "id": "荷兰语",
+    "name": "dutch"
   },
   {
-    id: '爱沙尼亚语',
-    name: 'estonian',
+    "id": "爱沙尼亚语",
+    "name": "estonian"
   },
   {
-    id: '芬兰语',
-    name: 'finnish',
+    "id": "芬兰语",
+    "name": "finnish"
   },
   {
-    id: '希腊语',
-    name: 'greek',
+    "id": "希腊语",
+    "name": "greek"
   },
   {
-    id: '匈牙利语',
-    name: 'hungarian',
+    "id": "匈牙利语",
+    "name": "hungarian"
   },
   {
-    id: '爱尔兰语',
-    name: 'irish',
+    "id": "爱尔兰语",
+    "name": "irish"
   },
   {
-    id: '拉脱维亚语',
-    name: 'latvian',
+    "id": "拉脱维亚语",
+    "name": "latvian"
   },
   {
-    id: '立陶宛语',
-    name: 'lithuanian',
+    "id": "立陶宛语",
+    "name": "lithuanian"
   },
   {
-    id: '马耳他语',
-    name: 'maltese',
+    "id": "马耳他语",
+    "name": "maltese"
   },
   {
-    id: '波兰语',
-    name: 'polish',
+    "id": "波兰语",
+    "name": "polish"
   },
   {
-    id: '葡萄牙语',
-    name: 'portuguese',
+    "id": "葡萄牙语",
+    "name": "portuguese"
   },
   {
-    id: '罗马尼亚语',
-    name: 'romanian',
+    "id": "罗马尼亚语",
+    "name": "romanian"
   },
   {
-    id: '斯洛伐克语',
-    name: 'slovak',
+    "id": "斯洛伐克语",
+    "name": "slovak"
   },
   {
-    id: '斯洛文尼亚语',
-    name: 'slovenian',
+    "id": "斯洛文尼亚语",
+    "name": "slovenian"
   },
   {
-    id: '瑞典语',
-    name: 'swedish',
-  },
+    "id": "瑞典语",
+    "name": "swedish"
+  }
 ] as const;
 
 export const FUNASR_NANO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '日文',
-    name: 'japanese',
-  },
+    "id": "日文",
+    "name": "japanese"
+  }
 ] as const;
 
 export function getFunasrNanoLanguages(): readonly ModelLanguage[] {
@@ -611,129 +611,129 @@ export function getFunasrNanoLanguages(): readonly ModelLanguage[] {
 
 export const FUNASR_MLT_NANO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: '中文',
-    name: 'chinese',
+    "id": "中文",
+    "name": "chinese"
   },
   {
-    id: '英文',
-    name: 'english',
+    "id": "英文",
+    "name": "english"
   },
   {
-    id: '粤语',
-    name: 'cantonese',
+    "id": "粤语",
+    "name": "cantonese"
   },
   {
-    id: '日文',
-    name: 'japanese',
+    "id": "日文",
+    "name": "japanese"
   },
   {
-    id: '韩文',
-    name: 'korean',
+    "id": "韩文",
+    "name": "korean"
   },
   {
-    id: '越南语',
-    name: 'vietnamese',
+    "id": "越南语",
+    "name": "vietnamese"
   },
   {
-    id: '印尼语',
-    name: 'indonesian',
+    "id": "印尼语",
+    "name": "indonesian"
   },
   {
-    id: '泰语',
-    name: 'thai',
+    "id": "泰语",
+    "name": "thai"
   },
   {
-    id: '马来语',
-    name: 'malay',
+    "id": "马来语",
+    "name": "malay"
   },
   {
-    id: '菲律宾语',
-    name: 'filipino',
+    "id": "菲律宾语",
+    "name": "filipino"
   },
   {
-    id: '阿拉伯语',
-    name: 'arabic',
+    "id": "阿拉伯语",
+    "name": "arabic"
   },
   {
-    id: '印地语',
-    name: 'hindi',
+    "id": "印地语",
+    "name": "hindi"
   },
   {
-    id: '保加利亚语',
-    name: 'bulgarian',
+    "id": "保加利亚语",
+    "name": "bulgarian"
   },
   {
-    id: '克罗地亚语',
-    name: 'croatian',
+    "id": "克罗地亚语",
+    "name": "croatian"
   },
   {
-    id: '捷克语',
-    name: 'czech',
+    "id": "捷克语",
+    "name": "czech"
   },
   {
-    id: '丹麦语',
-    name: 'danish',
+    "id": "丹麦语",
+    "name": "danish"
   },
   {
-    id: '荷兰语',
-    name: 'dutch',
+    "id": "荷兰语",
+    "name": "dutch"
   },
   {
-    id: '爱沙尼亚语',
-    name: 'estonian',
+    "id": "爱沙尼亚语",
+    "name": "estonian"
   },
   {
-    id: '芬兰语',
-    name: 'finnish',
+    "id": "芬兰语",
+    "name": "finnish"
   },
   {
-    id: '希腊语',
-    name: 'greek',
+    "id": "希腊语",
+    "name": "greek"
   },
   {
-    id: '匈牙利语',
-    name: 'hungarian',
+    "id": "匈牙利语",
+    "name": "hungarian"
   },
   {
-    id: '爱尔兰语',
-    name: 'irish',
+    "id": "爱尔兰语",
+    "name": "irish"
   },
   {
-    id: '拉脱维亚语',
-    name: 'latvian',
+    "id": "拉脱维亚语",
+    "name": "latvian"
   },
   {
-    id: '立陶宛语',
-    name: 'lithuanian',
+    "id": "立陶宛语",
+    "name": "lithuanian"
   },
   {
-    id: '马耳他语',
-    name: 'maltese',
+    "id": "马耳他语",
+    "name": "maltese"
   },
   {
-    id: '波兰语',
-    name: 'polish',
+    "id": "波兰语",
+    "name": "polish"
   },
   {
-    id: '葡萄牙语',
-    name: 'portuguese',
+    "id": "葡萄牙语",
+    "name": "portuguese"
   },
   {
-    id: '罗马尼亚语',
-    name: 'romanian',
+    "id": "罗马尼亚语",
+    "name": "romanian"
   },
   {
-    id: '斯洛伐克语',
-    name: 'slovak',
+    "id": "斯洛伐克语",
+    "name": "slovak"
   },
   {
-    id: '斯洛文尼亚语',
-    name: 'slovenian',
+    "id": "斯洛文尼亚语",
+    "name": "slovenian"
   },
   {
-    id: '瑞典语',
-    name: 'swedish',
-  },
+    "id": "瑞典语",
+    "name": "swedish"
+  }
 ] as const;
 
 export function getFunasrMltNanoLanguages(): readonly ModelLanguage[] {
@@ -742,125 +742,125 @@ export function getFunasrMltNanoLanguages(): readonly ModelLanguage[] {
 
 export const QWEN3_ASR_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'yue',
-    name: 'cantonese',
+    "id": "yue",
+    "name": "cantonese"
   },
   {
-    id: 'ar',
-    name: 'arabic',
+    "id": "ar",
+    "name": "arabic"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'id',
-    name: 'indonesian',
+    "id": "id",
+    "name": "indonesian"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'ru',
-    name: 'russian',
+    "id": "ru",
+    "name": "russian"
   },
   {
-    id: 'th',
-    name: 'thai',
+    "id": "th",
+    "name": "thai"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'tr',
-    name: 'turkish',
+    "id": "tr",
+    "name": "turkish"
   },
   {
-    id: 'hi',
-    name: 'hindi',
+    "id": "hi",
+    "name": "hindi"
   },
   {
-    id: 'ms',
-    name: 'malay',
+    "id": "ms",
+    "name": "malay"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'fil',
-    name: 'filipino',
+    "id": "fil",
+    "name": "filipino"
   },
   {
-    id: 'fa',
-    name: 'persian',
+    "id": "fa",
+    "name": "persian"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'mk',
-    name: 'macedonian',
+    "id": "mk",
+    "name": "macedonian"
   },
   {
-    id: 'ro',
-    name: 'romanian',
-  },
+    "id": "ro",
+    "name": "romanian"
+  }
 ] as const;
 
 export function getQwen3AsrLanguages(): readonly ModelLanguage[] {
@@ -869,61 +869,61 @@ export function getQwen3AsrLanguages(): readonly ModelLanguage[] {
 
 export const COHERE_TRANSCRIBE_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'el',
-    name: 'greek',
+    "id": "el",
+    "name": "greek"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'ko',
-    name: 'korean',
+    "id": "ko",
+    "name": "korean"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
+    "id": "vi",
+    "name": "vietnamese"
   },
   {
-    id: 'ar',
-    name: 'arabic',
-  },
+    "id": "ar",
+    "name": "arabic"
+  }
 ] as const;
 
 export function getCohereTranscribeLanguages(): readonly ModelLanguage[] {
@@ -932,359 +932,320 @@ export function getCohereTranscribeLanguages(): readonly ModelLanguage[] {
 
 export const DOLPHIN_INFO_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'zh-cn',
-    name: 'chinese (mandarin)',
+    "id": "zh-cn",
+    "name": "chinese (mandarin)"
   },
   {
-    id: 'zh-tw',
-    name: 'chinese (taiwan)',
+    "id": "zh-tw",
+    "name": "chinese (taiwan)"
   },
   {
-    id: 'zh-wu',
-    name: 'chinese (wuyu)',
+    "id": "zh-wu",
+    "name": "chinese (wuyu)"
   },
   {
-    id: 'zh-sichuan',
-    name: 'chinese (sichuan)',
+    "id": "zh-sichuan",
+    "name": "chinese (sichuan)"
   },
   {
-    id: 'zh-shanxi',
-    name: 'chinese (shanxi)',
+    "id": "zh-shanxi",
+    "name": "chinese (shanxi)"
   },
   {
-    id: 'zh-anhui',
-    name: 'chinese (anhui)',
+    "id": "zh-anhui",
+    "name": "chinese (anhui)"
   },
   {
-    id: 'zh-tianjin',
-    name: 'chinese (tianjin)',
+    "id": "zh-tianjin",
+    "name": "chinese (tianjin)"
   },
   {
-    id: 'zh-ningxia',
-    name: 'chinese (ningxia)',
+    "id": "zh-ningxia",
+    "name": "chinese (ningxia)"
   },
   {
-    id: 'zh-shaanxi',
-    name: 'chinese (shaanxi)',
+    "id": "zh-shaanxi",
+    "name": "chinese (shaanxi)"
   },
   {
-    id: 'zh-hebei',
-    name: 'chinese (hebei)',
+    "id": "zh-hebei",
+    "name": "chinese (hebei)"
   },
   {
-    id: 'zh-shandong',
-    name: 'chinese (shandong)',
+    "id": "zh-shandong",
+    "name": "chinese (shandong)"
   },
   {
-    id: 'zh-guangdong',
-    name: 'chinese (guangdong)',
+    "id": "zh-guangdong",
+    "name": "chinese (guangdong)"
   },
   {
-    id: 'zh-shanghai',
-    name: 'chinese (shanghai)',
+    "id": "zh-shanghai",
+    "name": "chinese (shanghai)"
   },
   {
-    id: 'zh-hubei',
-    name: 'chinese (hubei)',
+    "id": "zh-hubei",
+    "name": "chinese (hubei)"
   },
   {
-    id: 'zh-liaoning',
-    name: 'chinese (liaoning)',
+    "id": "zh-liaoning",
+    "name": "chinese (liaoning)"
   },
   {
-    id: 'zh-gansu',
-    name: 'chinese (gansu)',
+    "id": "zh-gansu",
+    "name": "chinese (gansu)"
   },
   {
-    id: 'zh-fujian',
-    name: 'chinese (fujian)',
+    "id": "zh-fujian",
+    "name": "chinese (fujian)"
   },
   {
-    id: 'zh-hunan',
-    name: 'chinese (hunan)',
+    "id": "zh-hunan",
+    "name": "chinese (hunan)"
   },
   {
-    id: 'zh-henan',
-    name: 'chinese (henan)',
+    "id": "zh-henan",
+    "name": "chinese (henan)"
   },
   {
-    id: 'zh-yunnan',
-    name: 'chinese (yunnan)',
+    "id": "zh-yunnan",
+    "name": "chinese (yunnan)"
   },
   {
-    id: 'zh-minnan',
-    name: 'chinese (minnan)',
+    "id": "zh-minnan",
+    "name": "chinese (minnan)"
   },
   {
-    id: 'zh-wenzhou',
-    name: 'chinese (wenzhou)',
+    "id": "zh-wenzhou",
+    "name": "chinese (wenzhou)"
   },
   {
-    id: 'ja-jp',
-    name: 'japanese',
+    "id": "ja-jp",
+    "name": "japanese"
   },
   {
-    id: 'th-th',
-    name: 'thai',
+    "id": "th-th",
+    "name": "thai"
   },
   {
-    id: 'ru-ru',
-    name: 'russian',
+    "id": "ru-ru",
+    "name": "russian"
   },
   {
-    id: 'ko-kr',
-    name: 'korean',
+    "id": "ko-kr",
+    "name": "korean"
   },
   {
-    id: 'id-id',
-    name: 'indonesian',
+    "id": "id-id",
+    "name": "indonesian"
   },
   {
-    id: 'vi-vn',
-    name: 'vietnamese',
+    "id": "vi-vn",
+    "name": "vietnamese"
   },
   {
-    id: 'ct-null',
-    name: 'yue (unknown)',
+    "id": "ct-null",
+    "name": "yue (unknown)"
   },
   {
-    id: 'ct-hk',
-    name: 'yue (hong kong)',
+    "id": "ct-hk",
+    "name": "yue (hong kong)"
   },
   {
-    id: 'ct-gz',
-    name: 'yue (guangdong)',
+    "id": "ct-gz",
+    "name": "yue (guangdong)"
   },
   {
-    id: 'hi-in',
-    name: 'hindi',
+    "id": "hi-in",
+    "name": "hindi"
   },
   {
-    id: 'ur-in',
-    name: 'urdu',
+    "id": "ur-in",
+    "name": "urdu"
   },
   {
-    id: 'ur-pk',
-    name: 'urdu (pakistan)',
+    "id": "ur-pk",
+    "name": "urdu (pakistan)"
   },
   {
-    id: 'ms-my',
-    name: 'malay',
+    "id": "ms-my",
+    "name": "malay"
   },
   {
-    id: 'uz-uz',
-    name: 'uzbek',
+    "id": "uz-uz",
+    "name": "uzbek"
   },
   {
-    id: 'ar-ma',
-    name: 'arabic (morocco)',
+    "id": "ar-ma",
+    "name": "arabic (morocco)"
   },
   {
-    id: 'ar-gla',
-    name: 'arabic',
+    "id": "ar-gla",
+    "name": "arabic"
   },
   {
-    id: 'ar-sa',
-    name: 'arabic (saudi arabia)',
+    "id": "ar-sa",
+    "name": "arabic (saudi arabia)"
   },
   {
-    id: 'ar-eg',
-    name: 'arabic (egypt)',
+    "id": "ar-eg",
+    "name": "arabic (egypt)"
   },
   {
-    id: 'ar-kw',
-    name: 'arabic (kuwait)',
+    "id": "ar-kw",
+    "name": "arabic (kuwait)"
   },
   {
-    id: 'ar-ly',
-    name: 'arabic (libya)',
+    "id": "ar-ly",
+    "name": "arabic (libya)"
   },
   {
-    id: 'ar-jo',
-    name: 'arabic (jordan)',
+    "id": "ar-jo",
+    "name": "arabic (jordan)"
   },
   {
-    id: 'ar-ae',
-    name: 'arabic (uae)',
+    "id": "ar-ae",
+    "name": "arabic (uae)"
   },
   {
-    id: 'ar-lvt',
-    name: 'arabic (levant)',
+    "id": "ar-lvt",
+    "name": "arabic (levant)"
   },
   {
-    id: 'fa-ir',
-    name: 'persian',
+    "id": "fa-ir",
+    "name": "persian"
   },
   {
-    id: 'bn-bd',
-    name: 'bengali',
+    "id": "bn-bd",
+    "name": "bengali"
   },
   {
-    id: 'ta-sg',
-    name: 'tamil (singapore)',
+    "id": "ta-sg",
+    "name": "tamil (singapore)"
   },
   {
-    id: 'ta-lk',
-    name: 'tamil (sri lanka)',
+    "id": "ta-lk",
+    "name": "tamil (sri lanka)"
   },
   {
-    id: 'ta-in',
-    name: 'tamil (india)',
+    "id": "ta-in",
+    "name": "tamil (india)"
   },
   {
-    id: 'ta-my',
-    name: 'tamil (malaysia)',
+    "id": "ta-my",
+    "name": "tamil (malaysia)"
   },
   {
-    id: 'te-in',
-    name: 'telugu',
+    "id": "te-in",
+    "name": "telugu"
   },
   {
-    id: 'ug-null',
-    name: 'uighur',
+    "id": "ug-null",
+    "name": "uighur"
   },
   {
-    id: 'ug-cn',
-    name: 'uighur (china)',
+    "id": "ug-cn",
+    "name": "uighur (china)"
   },
   {
-    id: 'gu-in',
-    name: 'gujarati',
+    "id": "gu-in",
+    "name": "gujarati"
   },
   {
-    id: 'my-mm',
-    name: 'burmese',
+    "id": "my-mm",
+    "name": "burmese"
   },
   {
-    id: 'tl-ph',
-    name: 'tagalog',
+    "id": "tl-ph",
+    "name": "tagalog"
   },
   {
-    id: 'kk-kz',
-    name: 'kazakh',
+    "id": "kk-kz",
+    "name": "kazakh"
   },
   {
-    id: 'or-in',
-    name: 'odia',
+    "id": "or-in",
+    "name": "odia"
   },
   {
-    id: 'ne-np',
-    name: 'nepali',
+    "id": "ne-np",
+    "name": "nepali"
   },
   {
-    id: 'mn-mn',
-    name: 'mongolian',
+    "id": "mn-mn",
+    "name": "mongolian"
   },
   {
-    id: 'km-kh',
-    name: 'khmer',
+    "id": "km-kh",
+    "name": "khmer"
   },
   {
-    id: 'jv-id',
-    name: 'javanese',
+    "id": "jv-id",
+    "name": "javanese"
   },
   {
-    id: 'lo-la',
-    name: 'lao',
+    "id": "lo-la",
+    "name": "lao"
   },
   {
-    id: 'si-lk',
-    name: 'sinhala',
+    "id": "si-lk",
+    "name": "sinhala"
   },
   {
-    id: 'fil-ph',
-    name: 'filipino',
+    "id": "fil-ph",
+    "name": "filipino"
   },
   {
-    id: 'ps-af',
-    name: 'pushto',
+    "id": "ps-af",
+    "name": "pushto"
   },
   {
-    id: 'pa-in',
-    name: 'panjabi',
+    "id": "pa-in",
+    "name": "panjabi"
   },
   {
-    id: 'kab-null',
-    name: 'kabyle',
+    "id": "kab-null",
+    "name": "kabyle"
   },
   {
-    id: 'ba-null',
-    name: 'bashkir',
+    "id": "ba-null",
+    "name": "bashkir"
   },
   {
-    id: 'ks-in',
-    name: 'kashmiri',
+    "id": "ks-in",
+    "name": "kashmiri"
   },
   {
-    id: 'tg-tj',
-    name: 'tajik',
+    "id": "tg-tj",
+    "name": "tajik"
   },
   {
-    id: 'su-id',
-    name: 'sundanese',
+    "id": "su-id",
+    "name": "sundanese"
   },
   {
-    id: 'mr-in',
-    name: 'marathi',
+    "id": "mr-in",
+    "name": "marathi"
   },
   {
-    id: 'ky-kg',
-    name: 'kirghiz',
+    "id": "ky-kg",
+    "name": "kirghiz"
   },
   {
-    id: 'az-az',
-    name: 'azerbaijani',
-  },
+    "id": "az-az",
+    "name": "azerbaijani"
+  }
 ] as const;
 
 export function getDolphinInfoLanguages(): readonly ModelLanguage[] {
   return DOLPHIN_INFO_LANGUAGES;
 }
 
-export const POCKET_TTS_ISO6391_HINTS = ['en'] as const;
+export const POCKET_TTS_ISO6391_HINTS = ["en"] as const;
 
-export const SUPERTONIC3_TTS_ISO6391_HINTS = [
-  'ar',
-  'bg',
-  'hr',
-  'cs',
-  'da',
-  'nl',
-  'en',
-  'et',
-  'fi',
-  'fr',
-  'de',
-  'el',
-  'hi',
-  'hu',
-  'id',
-  'it',
-  'ja',
-  'ko',
-  'lv',
-  'lt',
-  'pl',
-  'pt',
-  'ro',
-  'ru',
-  'sk',
-  'sl',
-  'es',
-  'sv',
-  'tr',
-  'uk',
-  'vi',
-  'na',
-] as const;
+export const SUPERTONIC3_TTS_ISO6391_HINTS = ["ar","bg","hr","cs","da","nl","en","et","fi","fr","de","el","hi","hu","id","it","ja","ko","lv","lt","pl","pt","ro","ru","sk","sl","es","sv","tr","uk","vi","na"] as const;
 
-export const SUPERTONIC_TTS_ISO6391_HINTS = [
-  'en',
-  'ko',
-  'fr',
-  'es',
-  'pt',
-] as const;
+export const SUPERTONIC_TTS_ISO6391_HINTS = ["en","ko","fr","es","pt"] as const;
 
 /** True when modelKey denotes Supertonic 3 (not legacy Supertonic bundles). */
 export function isSupertonic3ModelKey(modelKey: string | undefined): boolean {
@@ -1317,307 +1278,428 @@ export function iso6391HintsForTtsModelType(
   }
 }
 
-export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ['en'] as const;
-export const VOXPOPULI_ALIGNMENT_ISO6391_HINTS = [
-  'de',
-  'es',
-  'fr',
-  'it',
-] as const;
+export const WAV2VEC2_ALIGNMENT_ISO6391_HINTS = ["en"] as const;
+export const VOXPOPULI_ALIGNMENT_ISO6391_HINTS = ["de","es","fr","it"] as const;
 export const MMS_ALIGNMENT_ISO6391_HINTS = [] as const;
-export const XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS = [
-  'ar',
-  'as',
-  'br',
-  'ca',
-  'cnh',
-  'cs',
-  'cv',
-  'cy',
-  'de',
-  'dv',
-  'el',
-  'en',
-  'eo',
-  'es',
-  'et',
-  'eu',
-  'fa',
-  'fi',
-  'fr',
-  'hi',
-  'hsb',
-  'hu',
-  'ia',
-  'id',
-  'ja',
-  'ka',
-  'ky',
-  'lg',
-  'lt',
-  'ly',
-  'mn',
-  'mt',
-  'nl',
-  'or',
-  'pl',
-  'pt',
-  'ro',
-  'ru',
-  'sah',
-  'sl',
-  'ta',
-  'th',
-  'tr',
-  'tt',
-  'uk',
-  'vi',
-] as const;
-export const XLSR_ALIGNMENT_ISO6391_HINTS =
-  XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS;
-export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<
-  Record<string, readonly string[]>
-> = {
-  'mms-300m-1130-forced-aligner-int8': [],
-  'mms-300m-1130-forced-aligner-q4f16': [],
-  'wav2vec2-base-960h': ['en'],
-  'wav2vec2-base-960h-fp16': ['en'],
-  'wav2vec2-base-960h-int8': ['en'],
-  'wav2vec2-base-960h-q4f16': ['en'],
-  'wav2vec2-base-arabic-q4f16': ['ar'],
-  'wav2vec2-voxpopuli-de-base': ['de'],
-  'wav2vec2-voxpopuli-es-base': ['es'],
-  'wav2vec2-voxpopuli-fr-base': ['fr'],
-  'wav2vec2-voxpopuli-it-base': ['it'],
-  'wav2vec2-voxrex-swedish-fp16': ['sv'],
-  'wav2vec2-voxrex-swedish-int8': ['sv'],
-  'wav2vec2-xlsr-53-chinese-zh-cn-int8': ['zh'],
-  'wav2vec2-xlsr-53-chinese-zh-cn-q4f16': ['zh'],
-  'wav2vec2-xlsr-53-dutch-fp16': ['nl'],
-  'wav2vec2-xlsr-53-dutch-int8': ['nl'],
-  'wav2vec2-xlsr-53-estonian-fp16': ['et'],
-  'wav2vec2-xlsr-53-estonian-int8': ['et'],
-  'wav2vec2-xlsr-53-finnish-fp16': ['fi'],
-  'wav2vec2-xlsr-53-finnish-int8': ['fi'],
-  'wav2vec2-xlsr-53-french-fp16': ['fr'],
-  'wav2vec2-xlsr-53-french-int8': ['fr'],
-  'wav2vec2-xlsr-53-german-fp16': ['de'],
-  'wav2vec2-xlsr-53-german-int8': ['de'],
-  'wav2vec2-xlsr-53-greek-fp16': ['el'],
-  'wav2vec2-xlsr-53-greek-int8': ['el'],
-  'wav2vec2-xlsr-53-hebrew-fp16': ['he'],
-  'wav2vec2-xlsr-53-hebrew-int8': ['he'],
-  'wav2vec2-xlsr-53-hungarian-fp16': ['hu'],
-  'wav2vec2-xlsr-53-hungarian-int8': ['hu'],
-  'wav2vec2-xlsr-53-italian-fp16': ['it'],
-  'wav2vec2-xlsr-53-italian-int8': ['it'],
-  'wav2vec2-xlsr-53-japanese-fp16': ['ja'],
-  'wav2vec2-xlsr-53-japanese-int8': ['ja'],
-  'wav2vec2-xlsr-53-korean-fp16': ['ko'],
-  'wav2vec2-xlsr-53-korean-int8': ['ko'],
-  'wav2vec2-xlsr-53-persian-fp16': ['fa'],
-  'wav2vec2-xlsr-53-persian-int8': ['fa'],
-  'wav2vec2-xlsr-53-polish-fp16': ['pl'],
-  'wav2vec2-xlsr-53-polish-int8': ['pl'],
-  'wav2vec2-xlsr-53-portuguese-q4f16': ['pt'],
-  'wav2vec2-xlsr-53-punjabi-fp16': ['pa'],
-  'wav2vec2-xlsr-53-punjabi-int8': ['pa'],
-  'wav2vec2-xlsr-53-romanian-fp16': ['ro'],
-  'wav2vec2-xlsr-53-romanian-int8': ['ro'],
-  'wav2vec2-xlsr-53-russian-int8': ['ru'],
-  'wav2vec2-xlsr-53-russian-q4f16': ['ru'],
-  'wav2vec2-xlsr-53-slovenian-fp16': ['sl'],
-  'wav2vec2-xlsr-53-slovenian-int8': ['sl'],
-  'wav2vec2-xlsr-53-spanish-fp16': ['es'],
-  'wav2vec2-xlsr-53-spanish-int8': ['es'],
-  'wav2vec2-xlsr-53-telugu-fp16': ['te'],
-  'wav2vec2-xlsr-53-telugu-int8': ['te'],
-  'wav2vec2-xlsr-53-ukrainian-fp16': ['uk'],
-  'wav2vec2-xlsr-53-ukrainian-int8': ['uk'],
-  'wav2vec2-xlsr-53-vietnamese-fp16': ['vi'],
-  'wav2vec2-xlsr-53-vietnamese-int8': ['vi'],
-  'wav2vec2-xlsr-multilingual-56-fp16': [
-    'ar',
-    'as',
-    'br',
-    'ca',
-    'cnh',
-    'cs',
-    'cv',
-    'cy',
-    'de',
-    'dv',
-    'el',
-    'en',
-    'eo',
-    'es',
-    'et',
-    'eu',
-    'fa',
-    'fi',
-    'fr',
-    'hi',
-    'hsb',
-    'hu',
-    'ia',
-    'id',
-    'ja',
-    'ka',
-    'ky',
-    'lg',
-    'lt',
-    'ly',
-    'mn',
-    'mt',
-    'nl',
-    'or',
-    'pl',
-    'pt',
-    'ro',
-    'ru',
-    'sah',
-    'sl',
-    'ta',
-    'th',
-    'tr',
-    'tt',
-    'uk',
-    'vi',
+export const XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS = ["ar","as","br","ca","cnh","cs","cv","cy","de","dv","el","en","eo","es","et","eu","fa","fi","fr","hi","hsb","hu","ia","id","ja","ka","ky","lg","lt","ly","mn","mt","nl","or","pl","pt","ro","ru","sah","sl","ta","th","tr","tt","uk","vi"] as const;
+export const XLSR_ALIGNMENT_ISO6391_HINTS = XLSR_MULTILINGUAL_ALIGNMENT_ISO6391_HINTS;
+export const ALIGNMENT_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
+  "mms-300m-1130-forced-aligner-int8": [],
+  "mms-300m-1130-forced-aligner-q4f16": [],
+  "wav2vec2-base-960h": [
+    "en"
   ],
-  'wav2vec2-xlsr-multilingual-56-q4f16': [
-    'ar',
-    'as',
-    'br',
-    'ca',
-    'cnh',
-    'cs',
-    'cv',
-    'cy',
-    'de',
-    'dv',
-    'el',
-    'en',
-    'eo',
-    'es',
-    'et',
-    'eu',
-    'fa',
-    'fi',
-    'fr',
-    'hi',
-    'hsb',
-    'hu',
-    'ia',
-    'id',
-    'ja',
-    'ka',
-    'ky',
-    'lg',
-    'lt',
-    'ly',
-    'mn',
-    'mt',
-    'nl',
-    'or',
-    'pl',
-    'pt',
-    'ro',
-    'ru',
-    'sah',
-    'sl',
-    'ta',
-    'th',
-    'tr',
-    'tt',
-    'uk',
-    'vi',
+  "wav2vec2-base-960h-fp16": [
+    "en"
   ],
-  'wav2vec2-xlsr-turkish-int8': ['tr'],
-  'wav2vec2-xlsr-turkish-q4f16': ['tr'],
+  "wav2vec2-base-960h-int8": [
+    "en"
+  ],
+  "wav2vec2-base-960h-q4f16": [
+    "en"
+  ],
+  "wav2vec2-base-arabic-q4f16": [
+    "ar"
+  ],
+  "wav2vec2-voxpopuli-de-base": [
+    "de"
+  ],
+  "wav2vec2-voxpopuli-es-base": [
+    "es"
+  ],
+  "wav2vec2-voxpopuli-fr-base": [
+    "fr"
+  ],
+  "wav2vec2-voxpopuli-it-base": [
+    "it"
+  ],
+  "wav2vec2-voxrex-swedish-fp16": [
+    "sv"
+  ],
+  "wav2vec2-voxrex-swedish-int8": [
+    "sv"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn-int8": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn-q4f16": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-dutch-fp16": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-dutch-int8": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-estonian-fp16": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-estonian-int8": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-finnish-fp16": [
+    "fi"
+  ],
+  "wav2vec2-xlsr-53-finnish-int8": [
+    "fi"
+  ],
+  "wav2vec2-xlsr-53-french-fp16": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-french-int8": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-german-fp16": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-german-int8": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-greek-fp16": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-greek-int8": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-hebrew-fp16": [
+    "he"
+  ],
+  "wav2vec2-xlsr-53-hebrew-int8": [
+    "he"
+  ],
+  "wav2vec2-xlsr-53-hungarian-fp16": [
+    "hu"
+  ],
+  "wav2vec2-xlsr-53-hungarian-int8": [
+    "hu"
+  ],
+  "wav2vec2-xlsr-53-italian-fp16": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-italian-int8": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-japanese-fp16": [
+    "ja"
+  ],
+  "wav2vec2-xlsr-53-japanese-int8": [
+    "ja"
+  ],
+  "wav2vec2-xlsr-53-korean-fp16": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-korean-int8": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-persian-fp16": [
+    "fa"
+  ],
+  "wav2vec2-xlsr-53-persian-int8": [
+    "fa"
+  ],
+  "wav2vec2-xlsr-53-polish-fp16": [
+    "pl"
+  ],
+  "wav2vec2-xlsr-53-polish-int8": [
+    "pl"
+  ],
+  "wav2vec2-xlsr-53-portuguese-q4f16": [
+    "pt"
+  ],
+  "wav2vec2-xlsr-53-punjabi-fp16": [
+    "pa"
+  ],
+  "wav2vec2-xlsr-53-punjabi-int8": [
+    "pa"
+  ],
+  "wav2vec2-xlsr-53-romanian-fp16": [
+    "ro"
+  ],
+  "wav2vec2-xlsr-53-romanian-int8": [
+    "ro"
+  ],
+  "wav2vec2-xlsr-53-russian-int8": [
+    "ru"
+  ],
+  "wav2vec2-xlsr-53-russian-q4f16": [
+    "ru"
+  ],
+  "wav2vec2-xlsr-53-slovenian-fp16": [
+    "sl"
+  ],
+  "wav2vec2-xlsr-53-slovenian-int8": [
+    "sl"
+  ],
+  "wav2vec2-xlsr-53-spanish-fp16": [
+    "es"
+  ],
+  "wav2vec2-xlsr-53-spanish-int8": [
+    "es"
+  ],
+  "wav2vec2-xlsr-53-telugu-fp16": [
+    "te"
+  ],
+  "wav2vec2-xlsr-53-telugu-int8": [
+    "te"
+  ],
+  "wav2vec2-xlsr-53-ukrainian-fp16": [
+    "uk"
+  ],
+  "wav2vec2-xlsr-53-ukrainian-int8": [
+    "uk"
+  ],
+  "wav2vec2-xlsr-53-vietnamese-fp16": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-53-vietnamese-int8": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56-fp16": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56-q4f16": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-turkish-int8": [
+    "tr"
+  ],
+  "wav2vec2-xlsr-turkish-q4f16": [
+    "tr"
+  ]
 } as const;
-export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<
-  Record<string, readonly string[]>
-> = {
-  'mms-300m-1130-forced-aligner': [],
-  'wav2vec2-base-960h': ['en'],
-  'wav2vec2-base-arabic': ['ar'],
-  'wav2vec2-voxpopuli-de': ['de'],
-  'wav2vec2-voxpopuli-es': ['es'],
-  'wav2vec2-voxpopuli-fr': ['fr'],
-  'wav2vec2-voxpopuli-it': ['it'],
-  'wav2vec2-voxrex-swedish': ['sv'],
-  'wav2vec2-xlsr-53-chinese-zh-cn': ['zh'],
-  'wav2vec2-xlsr-53-dutch': ['nl'],
-  'wav2vec2-xlsr-53-estonian': ['et'],
-  'wav2vec2-xlsr-53-finnish': ['fi'],
-  'wav2vec2-xlsr-53-french': ['fr'],
-  'wav2vec2-xlsr-53-german': ['de'],
-  'wav2vec2-xlsr-53-greek': ['el'],
-  'wav2vec2-xlsr-53-hebrew': ['he'],
-  'wav2vec2-xlsr-53-hungarian': ['hu'],
-  'wav2vec2-xlsr-53-italian': ['it'],
-  'wav2vec2-xlsr-53-japanese': ['ja'],
-  'wav2vec2-xlsr-53-korean': ['ko'],
-  'wav2vec2-xlsr-53-persian': ['fa'],
-  'wav2vec2-xlsr-53-polish': ['pl'],
-  'wav2vec2-xlsr-53-portuguese': ['pt'],
-  'wav2vec2-xlsr-53-punjabi': ['pa'],
-  'wav2vec2-xlsr-53-romanian': ['ro'],
-  'wav2vec2-xlsr-53-russian': ['ru'],
-  'wav2vec2-xlsr-53-slovenian': ['sl'],
-  'wav2vec2-xlsr-53-spanish': ['es'],
-  'wav2vec2-xlsr-53-telugu': ['te'],
-  'wav2vec2-xlsr-53-ukrainian': ['uk'],
-  'wav2vec2-xlsr-53-vietnamese': ['vi'],
-  'wav2vec2-xlsr-multilingual-56': [
-    'ar',
-    'as',
-    'br',
-    'ca',
-    'cnh',
-    'cs',
-    'cv',
-    'cy',
-    'de',
-    'dv',
-    'el',
-    'en',
-    'eo',
-    'es',
-    'et',
-    'eu',
-    'fa',
-    'fi',
-    'fr',
-    'hi',
-    'hsb',
-    'hu',
-    'ia',
-    'id',
-    'ja',
-    'ka',
-    'ky',
-    'lg',
-    'lt',
-    'ly',
-    'mn',
-    'mt',
-    'nl',
-    'or',
-    'pl',
-    'pt',
-    'ro',
-    'ru',
-    'sah',
-    'sl',
-    'ta',
-    'th',
-    'tr',
-    'tt',
-    'uk',
-    'vi',
+export const ALIGNMENT_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, readonly string[]>> = {
+  "mms-300m-1130-forced-aligner": [],
+  "wav2vec2-base-960h": [
+    "en"
   ],
-  'wav2vec2-xlsr-turkish': ['tr'],
+  "wav2vec2-base-arabic": [
+    "ar"
+  ],
+  "wav2vec2-voxpopuli-de": [
+    "de"
+  ],
+  "wav2vec2-voxpopuli-es": [
+    "es"
+  ],
+  "wav2vec2-voxpopuli-fr": [
+    "fr"
+  ],
+  "wav2vec2-voxpopuli-it": [
+    "it"
+  ],
+  "wav2vec2-voxrex-swedish": [
+    "sv"
+  ],
+  "wav2vec2-xlsr-53-chinese-zh-cn": [
+    "zh"
+  ],
+  "wav2vec2-xlsr-53-dutch": [
+    "nl"
+  ],
+  "wav2vec2-xlsr-53-estonian": [
+    "et"
+  ],
+  "wav2vec2-xlsr-53-finnish": [
+    "fi"
+  ],
+  "wav2vec2-xlsr-53-french": [
+    "fr"
+  ],
+  "wav2vec2-xlsr-53-german": [
+    "de"
+  ],
+  "wav2vec2-xlsr-53-greek": [
+    "el"
+  ],
+  "wav2vec2-xlsr-53-hebrew": [
+    "he"
+  ],
+  "wav2vec2-xlsr-53-hungarian": [
+    "hu"
+  ],
+  "wav2vec2-xlsr-53-italian": [
+    "it"
+  ],
+  "wav2vec2-xlsr-53-japanese": [
+    "ja"
+  ],
+  "wav2vec2-xlsr-53-korean": [
+    "ko"
+  ],
+  "wav2vec2-xlsr-53-persian": [
+    "fa"
+  ],
+  "wav2vec2-xlsr-53-polish": [
+    "pl"
+  ],
+  "wav2vec2-xlsr-53-portuguese": [
+    "pt"
+  ],
+  "wav2vec2-xlsr-53-punjabi": [
+    "pa"
+  ],
+  "wav2vec2-xlsr-53-romanian": [
+    "ro"
+  ],
+  "wav2vec2-xlsr-53-russian": [
+    "ru"
+  ],
+  "wav2vec2-xlsr-53-slovenian": [
+    "sl"
+  ],
+  "wav2vec2-xlsr-53-spanish": [
+    "es"
+  ],
+  "wav2vec2-xlsr-53-telugu": [
+    "te"
+  ],
+  "wav2vec2-xlsr-53-ukrainian": [
+    "uk"
+  ],
+  "wav2vec2-xlsr-53-vietnamese": [
+    "vi"
+  ],
+  "wav2vec2-xlsr-multilingual-56": [
+    "ar",
+    "as",
+    "br",
+    "ca",
+    "cnh",
+    "cs",
+    "cv",
+    "cy",
+    "de",
+    "dv",
+    "el",
+    "en",
+    "eo",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fr",
+    "hi",
+    "hsb",
+    "hu",
+    "ia",
+    "id",
+    "ja",
+    "ka",
+    "ky",
+    "lg",
+    "lt",
+    "ly",
+    "mn",
+    "mt",
+    "nl",
+    "or",
+    "pl",
+    "pt",
+    "ro",
+    "ru",
+    "sah",
+    "sl",
+    "ta",
+    "th",
+    "tr",
+    "tt",
+    "uk",
+    "vi"
+  ],
+  "wav2vec2-xlsr-turkish": [
+    "tr"
+  ]
 } as const;
 
 const ALIGNMENT_PACK_QUANT_SUFFIX_RE =
@@ -1655,10 +1737,7 @@ export function iso6391HintsForAlignmentModelType(
 
   // 3) Family fallbacks only for explicit multilingual markers.
   // Never map bare "xlsr" → multilingual list (mono fine-tunes also contain xlsr).
-  if (
-    key.includes('mms') &&
-    (key.includes('forced-aligner') || key.includes('1130'))
-  ) {
+  if (key.includes('mms') && (key.includes('forced-aligner') || key.includes('1130'))) {
     return [...MMS_ALIGNMENT_ISO6391_HINTS];
   }
   if (key.includes('multilingual-56')) {
@@ -1681,692 +1760,656 @@ export function iso6391HintsForAlignmentModelType(
 
 export const PPOCR_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'zh',
-    name: 'chinese',
+    "id": "zh",
+    "name": "chinese"
   },
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'ja',
-    name: 'japanese',
+    "id": "ja",
+    "name": "japanese"
   },
   {
-    id: 'af',
-    name: 'afrikaans',
+    "id": "af",
+    "name": "afrikaans"
   },
   {
-    id: 'az',
-    name: 'azerbaijani',
+    "id": "az",
+    "name": "azerbaijani"
   },
   {
-    id: 'bs',
-    name: 'bosnian',
+    "id": "bs",
+    "name": "bosnian"
   },
   {
-    id: 'ca',
-    name: 'catalan',
+    "id": "ca",
+    "name": "catalan"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'cy',
-    name: 'welsh',
+    "id": "cy",
+    "name": "welsh"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'et',
-    name: 'estonian',
+    "id": "et",
+    "name": "estonian"
   },
   {
-    id: 'eu',
-    name: 'basque',
+    "id": "eu",
+    "name": "basque"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'ga',
-    name: 'irish',
+    "id": "ga",
+    "name": "irish"
   },
   {
-    id: 'gl',
-    name: 'galician',
+    "id": "gl",
+    "name": "galician"
   },
   {
-    id: 'hr',
-    name: 'croatian',
+    "id": "hr",
+    "name": "croatian"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'id',
-    name: 'indonesian',
+    "id": "id",
+    "name": "indonesian"
   },
   {
-    id: 'is',
-    name: 'icelandic',
+    "id": "is",
+    "name": "icelandic"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'ku',
-    name: 'kurdish',
+    "id": "ku",
+    "name": "kurdish"
   },
   {
-    id: 'la',
-    name: 'latin',
+    "id": "la",
+    "name": "latin"
   },
   {
-    id: 'lb',
-    name: 'luxembourgish',
+    "id": "lb",
+    "name": "luxembourgish"
   },
   {
-    id: 'lt',
-    name: 'lithuanian',
+    "id": "lt",
+    "name": "lithuanian"
   },
   {
-    id: 'lv',
-    name: 'latvian',
+    "id": "lv",
+    "name": "latvian"
   },
   {
-    id: 'mi',
-    name: 'maori',
+    "id": "mi",
+    "name": "maori"
   },
   {
-    id: 'ms',
-    name: 'malay',
+    "id": "ms",
+    "name": "malay"
   },
   {
-    id: 'mt',
-    name: 'maltese',
+    "id": "mt",
+    "name": "maltese"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'no',
-    name: 'norwegian',
+    "id": "no",
+    "name": "norwegian"
   },
   {
-    id: 'oc',
-    name: 'occitan',
+    "id": "oc",
+    "name": "occitan"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'qu',
-    name: 'quechua',
+    "id": "qu",
+    "name": "quechua"
   },
   {
-    id: 'rm',
-    name: 'romansh',
+    "id": "rm",
+    "name": "romansh"
   },
   {
-    id: 'ro',
-    name: 'romanian',
+    "id": "ro",
+    "name": "romanian"
   },
   {
-    id: 'sk',
-    name: 'slovak',
+    "id": "sk",
+    "name": "slovak"
   },
   {
-    id: 'sl',
-    name: 'slovenian',
+    "id": "sl",
+    "name": "slovenian"
   },
   {
-    id: 'sq',
-    name: 'albanian',
+    "id": "sq",
+    "name": "albanian"
   },
   {
-    id: 'sr',
-    name: 'serbian',
+    "id": "sr",
+    "name": "serbian"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'sw',
-    name: 'swahili',
+    "id": "sw",
+    "name": "swahili"
   },
   {
-    id: 'tl',
-    name: 'tagalog',
+    "id": "tl",
+    "name": "tagalog"
   },
   {
-    id: 'tr',
-    name: 'turkish',
+    "id": "tr",
+    "name": "turkish"
   },
   {
-    id: 'uz',
-    name: 'uzbek',
+    "id": "uz",
+    "name": "uzbek"
   },
   {
-    id: 'vi',
-    name: 'vietnamese',
-  },
+    "id": "vi",
+    "name": "vietnamese"
+  }
 ] as const;
 
 export function getPpocrLanguages(): readonly ModelLanguage[] {
   return PPOCR_LANGUAGES;
 }
 
-export const PPOCR_ISO6391_HINTS = [
-  'zh',
-  'en',
-  'ja',
-  'af',
-  'az',
-  'bs',
-  'ca',
-  'cs',
-  'cy',
-  'da',
-  'de',
-  'es',
-  'et',
-  'eu',
-  'fi',
-  'fr',
-  'ga',
-  'gl',
-  'hr',
-  'hu',
-  'id',
-  'is',
-  'it',
-  'ku',
-  'la',
-  'lb',
-  'lt',
-  'lv',
-  'mi',
-  'ms',
-  'mt',
-  'nl',
-  'no',
-  'oc',
-  'pl',
-  'pt',
-  'qu',
-  'rm',
-  'ro',
-  'sk',
-  'sl',
-  'sq',
-  'sr',
-  'sv',
-  'sw',
-  'tl',
-  'tr',
-  'uz',
-  'vi',
-] as const;
+export const PPOCR_ISO6391_HINTS = ["zh","en","ja","af","az","bs","ca","cs","cy","da","de","es","et","eu","fi","fr","ga","gl","hr","hu","id","is","it","ku","la","lb","lt","lv","mi","ms","mt","nl","no","oc","pl","pt","qu","rm","ro","sk","sl","sq","sr","sv","sw","tl","tr","uz","vi"] as const;
 export const DOCTR_LANGUAGES: readonly ModelLanguage[] = [
   {
-    id: 'en',
-    name: 'english',
+    "id": "en",
+    "name": "english"
   },
   {
-    id: 'fr',
-    name: 'french',
+    "id": "fr",
+    "name": "french"
   },
   {
-    id: 'pt',
-    name: 'portuguese',
+    "id": "pt",
+    "name": "portuguese"
   },
   {
-    id: 'es',
-    name: 'spanish',
+    "id": "es",
+    "name": "spanish"
   },
   {
-    id: 'de',
-    name: 'german',
+    "id": "de",
+    "name": "german"
   },
   {
-    id: 'it',
-    name: 'italian',
+    "id": "it",
+    "name": "italian"
   },
   {
-    id: 'cs',
-    name: 'czech',
+    "id": "cs",
+    "name": "czech"
   },
   {
-    id: 'pl',
-    name: 'polish',
+    "id": "pl",
+    "name": "polish"
   },
   {
-    id: 'da',
-    name: 'danish',
+    "id": "da",
+    "name": "danish"
   },
   {
-    id: 'no',
-    name: 'norwegian',
+    "id": "no",
+    "name": "norwegian"
   },
   {
-    id: 'sv',
-    name: 'swedish',
+    "id": "sv",
+    "name": "swedish"
   },
   {
-    id: 'fi',
-    name: 'finnish',
+    "id": "fi",
+    "name": "finnish"
   },
   {
-    id: 'nl',
-    name: 'dutch',
+    "id": "nl",
+    "name": "dutch"
   },
   {
-    id: 'hu',
-    name: 'hungarian',
+    "id": "hu",
+    "name": "hungarian"
   },
   {
-    id: 'ro',
-    name: 'romanian',
-  },
+    "id": "ro",
+    "name": "romanian"
+  }
 ] as const;
 
 export function getDoctrLanguages(): readonly ModelLanguage[] {
   return DOCTR_LANGUAGES;
 }
 
-export const DOCTR_ISO6391_HINTS = [
-  'en',
-  'fr',
-  'pt',
-  'es',
-  'de',
-  'it',
-  'cs',
-  'pl',
-  'da',
-  'no',
-  'sv',
-  'fi',
-  'nl',
-  'hu',
-  'ro',
-] as const;
-export const DOC_VLM_ISO6391_HINTS = ['en', 'ja', 'ar', 'zh'] as const;
-export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<
-  Record<string, readonly string[]>
-> = {
-  'doctr-default': [
-    'en',
-    'fr',
-    'pt',
-    'es',
-    'de',
-    'it',
-    'cs',
-    'pl',
-    'da',
-    'no',
-    'sv',
-    'fi',
-    'nl',
-    'hu',
-    'ro',
+export const DOCTR_ISO6391_HINTS = ["en","fr","pt","es","de","it","cs","pl","da","no","sv","fi","nl","hu","ro"] as const;
+export const DOC_VLM_ISO6391_HINTS = ["en","ja","ar","zh"] as const;
+export const OCR_PACK_ISO6391_HINTS_BY_ID: Readonly<Record<string, readonly string[]>> = {
+  "doctr-default": [
+    "en",
+    "fr",
+    "pt",
+    "es",
+    "de",
+    "it",
+    "cs",
+    "pl",
+    "da",
+    "no",
+    "sv",
+    "fi",
+    "nl",
+    "hu",
+    "ro"
   ],
-  'doctr-mobile': ['en', 'fr'],
-  'docvlm-granite-258m': ['en', 'ja', 'ar', 'zh'],
-  'ppocrv6-medium': [
-    'zh',
-    'en',
-    'ja',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "doctr-mobile": [
+    "en",
+    "fr"
   ],
-  'ppocrv6-small': [
-    'zh',
-    'en',
-    'ja',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "docvlm-granite-258m-fp16": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
   ],
-  'ppocrv6-tiny': [
-    'zh',
-    'en',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "docvlm-granite-258m-fp32": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
   ],
+  "docvlm-granite-258m-q4f16": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
+  ],
+  "docvlm-granite-258m-q8": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
+  ],
+  "ppocrv6-medium": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-small": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-tiny": [
+    "zh",
+    "en",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ]
 } as const;
-export const OCR_PACK_ISO6391_HINTS_BY_STEM: Readonly<
-  Record<string, readonly string[]>
-> = {
-  'doctr-default': [
-    'en',
-    'fr',
-    'pt',
-    'es',
-    'de',
-    'it',
-    'cs',
-    'pl',
-    'da',
-    'no',
-    'sv',
-    'fi',
-    'nl',
-    'hu',
-    'ro',
+export const OCR_PACK_ISO6391_HINTS_BY_STEM: Readonly<Record<string, readonly string[]>> = {
+  "doctr-default": [
+    "en",
+    "fr",
+    "pt",
+    "es",
+    "de",
+    "it",
+    "cs",
+    "pl",
+    "da",
+    "no",
+    "sv",
+    "fi",
+    "nl",
+    "hu",
+    "ro"
   ],
-  'doctr-mobile': ['en', 'fr'],
-  'docvlm-granite-258m': ['en', 'ja', 'ar', 'zh'],
-  'ppocrv6-medium': [
-    'zh',
-    'en',
-    'ja',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "doctr-mobile": [
+    "en",
+    "fr"
   ],
-  'ppocrv6-small': [
-    'zh',
-    'en',
-    'ja',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "docvlm-granite-258m": [
+    "en",
+    "ja",
+    "ar",
+    "zh"
   ],
-  'ppocrv6-tiny': [
-    'zh',
-    'en',
-    'af',
-    'az',
-    'bs',
-    'ca',
-    'cs',
-    'cy',
-    'da',
-    'de',
-    'es',
-    'et',
-    'eu',
-    'fi',
-    'fr',
-    'ga',
-    'gl',
-    'hr',
-    'hu',
-    'id',
-    'is',
-    'it',
-    'ku',
-    'la',
-    'lb',
-    'lt',
-    'lv',
-    'mi',
-    'ms',
-    'mt',
-    'nl',
-    'no',
-    'oc',
-    'pl',
-    'pt',
-    'qu',
-    'rm',
-    'ro',
-    'sk',
-    'sl',
-    'sq',
-    'sr',
-    'sv',
-    'sw',
-    'tl',
-    'tr',
-    'uz',
-    'vi',
+  "ppocrv6-medium": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
   ],
+  "ppocrv6-small": [
+    "zh",
+    "en",
+    "ja",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ],
+  "ppocrv6-tiny": [
+    "zh",
+    "en",
+    "af",
+    "az",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "es",
+    "et",
+    "eu",
+    "fi",
+    "fr",
+    "ga",
+    "gl",
+    "hr",
+    "hu",
+    "id",
+    "is",
+    "it",
+    "ku",
+    "la",
+    "lb",
+    "lt",
+    "lv",
+    "mi",
+    "ms",
+    "mt",
+    "nl",
+    "no",
+    "oc",
+    "pl",
+    "pt",
+    "qu",
+    "rm",
+    "ro",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "tl",
+    "tr",
+    "uz",
+    "vi"
+  ]
 } as const;
 
 const OCR_PACK_QUANT_SUFFIX_RE =
@@ -2421,13 +2464,13 @@ export function iso6391HintsForOcrModelType(
 }
 
 const STT_ENTRIES: Readonly<Record<string, readonly ModelLanguage[]>> = {
-  whisper: WHISPER_LANGUAGES,
-  sense_voice: SENSEVOICE_LANGUAGES,
-  canary: CANARY_LANGUAGES,
-  funasr_nano: FUNASR_NANO_ENTRIES,
-  qwen3_asr: QWEN3_ASR_LANGUAGES,
-  cohere_transcribe: COHERE_TRANSCRIBE_LANGUAGES,
-  dolphin: DOLPHIN_INFO_LANGUAGES,
+  "whisper": WHISPER_LANGUAGES,
+  "sense_voice": SENSEVOICE_LANGUAGES,
+  "canary": CANARY_LANGUAGES,
+  "funasr_nano": FUNASR_NANO_ENTRIES,
+  "qwen3_asr": QWEN3_ASR_LANGUAGES,
+  "cohere_transcribe": COHERE_TRANSCRIBE_LANGUAGES,
+  "dolphin": DOLPHIN_INFO_LANGUAGES,
 };
 
 export function sttModelLanguagesForModelType(
@@ -2446,233 +2489,15 @@ export function iso6391HintsForSttModelType(
 }
 
 const STT_HINTS: Readonly<Record<string, readonly string[]>> = {
-  whisper: [
-    'en',
-    'zh',
-    'de',
-    'es',
-    'ru',
-    'ko',
-    'fr',
-    'ja',
-    'pt',
-    'tr',
-    'pl',
-    'ca',
-    'nl',
-    'ar',
-    'sv',
-    'it',
-    'id',
-    'hi',
-    'fi',
-    'vi',
-    'he',
-    'uk',
-    'el',
-    'ms',
-    'cs',
-    'ro',
-    'da',
-    'hu',
-    'ta',
-    'no',
-    'th',
-    'ur',
-    'hr',
-    'bg',
-    'lt',
-    'la',
-    'mi',
-    'ml',
-    'cy',
-    'sk',
-    'te',
-    'fa',
-    'lv',
-    'bn',
-    'sr',
-    'az',
-    'sl',
-    'kn',
-    'et',
-    'mk',
-    'br',
-    'eu',
-    'is',
-    'hy',
-    'ne',
-    'mn',
-    'bs',
-    'kk',
-    'sq',
-    'sw',
-    'gl',
-    'mr',
-    'pa',
-    'si',
-    'km',
-    'sn',
-    'yo',
-    'so',
-    'af',
-    'oc',
-    'ka',
-    'be',
-    'tg',
-    'sd',
-    'gu',
-    'am',
-    'yi',
-    'lo',
-    'uz',
-    'fo',
-    'ht',
-    'ps',
-    'tk',
-    'nn',
-    'mt',
-    'sa',
-    'lb',
-    'my',
-    'bo',
-    'tl',
-    'mg',
-    'as',
-    'tt',
-    'haw',
-    'ln',
-    'ha',
-    'ba',
-    'jv',
-    'su',
-    'yue',
-  ],
-  sense_voice: ['zh', 'en', 'yue', 'ja', 'ko'],
-  canary: ['en', 'es', 'de', 'fr'],
-  funasr_nano: [
-    'zh',
-    'en',
-    'ja',
-    'yue',
-    'ko',
-    'vi',
-    'id',
-    'th',
-    'ms',
-    'fil',
-    'ar',
-    'hi',
-    'bg',
-    'hr',
-    'cs',
-    'da',
-    'nl',
-    'et',
-    'fi',
-    'el',
-    'hu',
-    'ga',
-    'lv',
-    'lt',
-    'mt',
-    'pl',
-    'pt',
-    'ro',
-    'sk',
-    'sl',
-    'sv',
-  ],
-  qwen3_asr: [
-    'zh',
-    'en',
-    'yue',
-    'ar',
-    'de',
-    'fr',
-    'es',
-    'pt',
-    'id',
-    'it',
-    'ko',
-    'ru',
-    'th',
-    'vi',
-    'ja',
-    'tr',
-    'hi',
-    'ms',
-    'nl',
-    'sv',
-    'da',
-    'fi',
-    'pl',
-    'cs',
-    'fil',
-    'fa',
-    'el',
-    'hu',
-    'mk',
-    'ro',
-  ],
-  cohere_transcribe: [
-    'en',
-    'fr',
-    'de',
-    'it',
-    'es',
-    'pt',
-    'el',
-    'nl',
-    'pl',
-    'zh',
-    'ja',
-    'ko',
-    'vi',
-    'ar',
-  ],
-  dolphin: [
-    'zh',
-    'ja',
-    'th',
-    'ru',
-    'ko',
-    'id',
-    'vi',
-    'yue',
-    'hi',
-    'ur',
-    'ms',
-    'uz',
-    'ar',
-    'fa',
-    'bn',
-    'ta',
-    'te',
-    'ug',
-    'gu',
-    'my',
-    'tl',
-    'kk',
-    'or',
-    'ne',
-    'mn',
-    'km',
-    'jv',
-    'lo',
-    'si',
-    'ps',
-    'pa',
-    'ba',
-    'ks',
-    'tg',
-    'su',
-    'mr',
-    'ky',
-    'az',
-  ],
-  moonshine: ['en'],
-  moonshine_v2: ['en'],
+  "whisper": ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jv","su","yue"],
+  "sense_voice": ["zh","en","yue","ja","ko"],
+  "canary": ["en","es","de","fr"],
+  "funasr_nano": ["zh","en","ja","yue","ko","vi","id","th","ms","fil","ar","hi","bg","hr","cs","da","nl","et","fi","el","hu","ga","lv","lt","mt","pl","pt","ro","sk","sl","sv"],
+  "qwen3_asr": ["zh","en","yue","ar","de","fr","es","pt","id","it","ko","ru","th","vi","ja","tr","hi","ms","nl","sv","da","fi","pl","cs","fil","fa","el","hu","mk","ro"],
+  "cohere_transcribe": ["en","fr","de","it","es","pt","el","nl","pl","zh","ja","ko","vi","ar"],
+  "dolphin": ["zh","ja","th","ru","ko","id","vi","yue","hi","ur","ms","uz","ar","fa","bn","ta","te","ug","gu","my","tl","kk","or","ne","mn","km","jv","lo","si","ps","pa","ba","ks","tg","su","mr","ky","az"],
+  "moonshine": ["en"],
+  "moonshine_v2": ["en"],
 };
 
 export const CATALOG_VERSION = 1;

@@ -236,9 +236,11 @@ add_executable(diarization_core_test
   "${DIARIZATION_CORE_DIR}/sortformer-post-processor.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-streaming-model.cpp"
   "${DIARIZATION_CORE_DIR}/sherpa-onnx-streaming-diarization-wrapper.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
 )
 target_include_directories(diarization_core_test PRIVATE
   "${DIARIZATION_CORE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
   "${_ORT_API_WRAPPER}"
   "${_ORT_HOST_INCLUDE}"
@@ -305,11 +307,14 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   set(ALIGNMENT_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp")
   add_executable(ctc_alignment_host_test
     "${CMAKE_CURRENT_SOURCE_DIR}/alignment/ctc_alignment_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ort/apply_ort_provider_host_test.cpp"
     "${ALIGNMENT_CPP}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ctc_alignment_host_test PRIVATE
     "${_ORT_API_WRAPPER}"
     "${_ORT_HOST_INCLUDE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment"
   )
   target_link_directories(ctc_alignment_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
@@ -352,12 +357,15 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ppocr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doctr"
     "${OCR_CPP_ROOT}/doc_vlm"
@@ -407,12 +415,15 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doctr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doctr"
     "${OCR_CPP_ROOT}/doc_vlm"
@@ -451,12 +462,15 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doc_vlm_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doc_vlm"
     "${OCR_TEST_DIR}"
@@ -500,21 +514,33 @@ else()
   set(IMAGEBUFFER_GTEST_LIBS gtest gtest_main)
 endif()
 
+set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
+
 add_executable(imagebuffer_host_test
   "${IMAGEBUFFER_TEST_DIR}/image_test_utils.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_decode_test.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_registry_test.cpp"
   "${IMAGEBUFFER_TEST_DIR}/imagebuffer_mmap_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_lazy_lru_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_export_test.cpp"
   "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
   "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
   "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
 )
 target_include_directories(imagebuffer_host_test PRIVATE
   "${IMAGE_CPP_ROOT}"
   "${IMAGE_CPP_ROOT}/decode"
+  "${PDF_CPP_ROOT}"
   "${IMAGEBUFFER_TEST_DIR}"
 )
 target_link_libraries(imagebuffer_host_test PRIVATE ${IMAGEBUFFER_GTEST_LIBS})
+# Threads for ImageRegistry neighbor prefetch (std::thread).
+find_package(Threads REQUIRED)
+target_link_libraries(imagebuffer_host_test PRIVATE Threads::Threads)
 
 # Optional libwebp for WebP decode tests
 find_package(PkgConfig QUIET)
@@ -558,7 +584,6 @@ set_tests_properties(imagebuffer_host_test PROPERTIES
 )
 
 # PDF text-layer host test (disabled path by default; no PDFium required)
-set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
   set(PDF_GTEST_LIBS gtest gtest_main)
@@ -575,10 +600,13 @@ add_executable(pdf_text_layer_host_test
   "${PDF_TEST_DIR}/pdf_text_layer_host_test.cpp"
   "${PDF_CPP_ROOT}/PdfDocument.cpp"
   "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
 )
 target_include_directories(pdf_text_layer_host_test PRIVATE
   "${PDF_CPP_ROOT}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image"
 )
 target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
 # Default host builds leave HAVE_PDFIUM undefined (disabled stub).

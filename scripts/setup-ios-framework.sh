@@ -103,10 +103,11 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
-if [ "${SHERPA_ONNX_DISABLE_LIBWEBP:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_LIBWEBP:-false}" != "true" ]; then
+# libwebp is opt-in (default off) — only download when explicitly enabled.
+if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then
   FRAMEWORK_SLUGS+=(libwebp)
 else
-  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBWEBP is set. Skipping libwebp framework download.${NC}" >&2
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_ENABLE_LIBWEBP not set. Skipping libwebp framework download.${NC}" >&2
 fi
 
 if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then

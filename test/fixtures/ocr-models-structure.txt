@@ -12,28 +12,94 @@ doctr-mobile/det.onnx
 doctr-mobile/LICENSE
 doctr-mobile/rec.onnx
 doctr-mobile/ocr_manifest.json
-# Asset: docvlm-granite-258m.tar.bz2
-# updated_at: 2026-10-15T12:34:41Z
-docvlm-granite-258m/
-docvlm-granite-258m/tokenizer.json
-docvlm-granite-258m/chat_template.jinja
-docvlm-granite-258m/vision_encoder.onnx
-docvlm-granite-258m/preprocessor_config.json
-docvlm-granite-258m/special_tokens_map.json
-docvlm-granite-258m/added_tokens.json
-docvlm-granite-258m/vision_encoder.onnx_data
-docvlm-granite-258m/LICENSE
-docvlm-granite-258m/embed_tokens.onnx_data
-docvlm-granite-258m/merges.txt
-docvlm-granite-258m/config.json
-docvlm-granite-258m/processor_config.json
-docvlm-granite-258m/decoder_model_merged.onnx_data
-docvlm-granite-258m/embed_tokens.onnx
-docvlm-granite-258m/ocr_manifest.json
-docvlm-granite-258m/tokenizer_config.json
-docvlm-granite-258m/generation_config.json
-docvlm-granite-258m/vocab.json
-docvlm-granite-258m/decoder_model_merged.onnx
+# Asset: docvlm-granite-258m-fp16.tar.bz2
+# updated_at: 2026-10-26T10:09:08Z
+docvlm-granite-258m-fp16/
+docvlm-granite-258m-fp16/ocr_manifest.json
+docvlm-granite-258m-fp16/added_tokens.json
+docvlm-granite-258m-fp16/LICENSE
+docvlm-granite-258m-fp16/tokenizer_config.json
+docvlm-granite-258m-fp16/special_tokens_map.json
+docvlm-granite-258m-fp16/config.json
+docvlm-granite-258m-fp16/tokenizer.json
+docvlm-granite-258m-fp16/embed_tokens.onnx_data
+docvlm-granite-258m-fp16/processor_config.json
+docvlm-granite-258m-fp16/generation_config.json
+docvlm-granite-258m-fp16/merges.txt
+docvlm-granite-258m-fp16/vision_encoder.onnx
+docvlm-granite-258m-fp16/chat_template.jinja
+docvlm-granite-258m-fp16/decoder_model_merged.onnx
+docvlm-granite-258m-fp16/decoder_model_merged.onnx_data
+docvlm-granite-258m-fp16/vocab.json
+docvlm-granite-258m-fp16/embed_tokens.onnx
+docvlm-granite-258m-fp16/vision_encoder.onnx_data
+docvlm-granite-258m-fp16/preprocessor_config.json
+# Asset: docvlm-granite-258m-fp32.tar.bz2
+# updated_at: 2026-10-26T10:09:08Z
+docvlm-granite-258m-fp32/
+docvlm-granite-258m-fp32/ocr_manifest.json
+docvlm-granite-258m-fp32/added_tokens.json
+docvlm-granite-258m-fp32/LICENSE
+docvlm-granite-258m-fp32/tokenizer_config.json
+docvlm-granite-258m-fp32/special_tokens_map.json
+docvlm-granite-258m-fp32/config.json
+docvlm-granite-258m-fp32/tokenizer.json
+docvlm-granite-258m-fp32/embed_tokens.onnx_data
+docvlm-granite-258m-fp32/processor_config.json
+docvlm-granite-258m-fp32/generation_config.json
+docvlm-granite-258m-fp32/merges.txt
+docvlm-granite-258m-fp32/vision_encoder.onnx
+docvlm-granite-258m-fp32/chat_template.jinja
+docvlm-granite-258m-fp32/decoder_model_merged.onnx
+docvlm-granite-258m-fp32/decoder_model_merged.onnx_data
+docvlm-granite-258m-fp32/vocab.json
+docvlm-granite-258m-fp32/embed_tokens.onnx
+docvlm-granite-258m-fp32/vision_encoder.onnx_data
+docvlm-granite-258m-fp32/preprocessor_config.json
+# Asset: docvlm-granite-258m-q4f16.tar.bz2
+# updated_at: 2026-10-26T10:09:08Z
+docvlm-granite-258m-q4f16/
+docvlm-granite-258m-q4f16/ocr_manifest.json
+docvlm-granite-258m-q4f16/added_tokens.json
+docvlm-granite-258m-q4f16/LICENSE
+docvlm-granite-258m-q4f16/tokenizer_config.json
+docvlm-granite-258m-q4f16/special_tokens_map.json
+docvlm-granite-258m-q4f16/config.json
+docvlm-granite-258m-q4f16/tokenizer.json
+docvlm-granite-258m-q4f16/embed_tokens.onnx_data
+docvlm-granite-258m-q4f16/processor_config.json
+docvlm-granite-258m-q4f16/generation_config.json
+docvlm-granite-258m-q4f16/merges.txt
+docvlm-granite-258m-q4f16/vision_encoder.onnx
+docvlm-granite-258m-q4f16/chat_template.jinja
+docvlm-granite-258m-q4f16/decoder_model_merged.onnx
+docvlm-granite-258m-q4f16/decoder_model_merged.onnx_data
+docvlm-granite-258m-q4f16/vocab.json
+docvlm-granite-258m-q4f16/embed_tokens.onnx
+docvlm-granite-258m-q4f16/vision_encoder.onnx_data
+docvlm-granite-258m-q4f16/preprocessor_config.json
+# Asset: docvlm-granite-258m-q8.tar.bz2
+# updated_at: 2026-10-26T10:09:08Z
+docvlm-granite-258m-q8/
+docvlm-granite-258m-q8/ocr_manifest.json
+docvlm-granite-258m-q8/added_tokens.json
+docvlm-granite-258m-q8/LICENSE
+docvlm-granite-258m-q8/tokenizer_config.json
+docvlm-granite-258m-q8/special_tokens_map.json
+docvlm-granite-258m-q8/config.json
+docvlm-granite-258m-q8/tokenizer.json
+docvlm-granite-258m-q8/embed_tokens.onnx_data
+docvlm-granite-258m-q8/processor_config.json
+docvlm-granite-258m-q8/generation_config.json
+docvlm-granite-258m-q8/merges.txt
+docvlm-granite-258m-q8/vision_encoder.onnx
+docvlm-granite-258m-q8/chat_template.jinja
+docvlm-granite-258m-q8/decoder_model_merged.onnx
+docvlm-granite-258m-q8/decoder_model_merged.onnx_data
+docvlm-granite-258m-q8/vocab.json
+docvlm-granite-258m-q8/embed_tokens.onnx
+docvlm-granite-258m-q8/vision_encoder.onnx_data
+docvlm-granite-258m-q8/preprocessor_config.json
 # Asset: ppocrv6-medium.tar.bz2
 # updated_at: 2026-10-14T09:05:51Z
 ppocrv6-medium/

@@ -46,6 +46,13 @@ struct OcrResult {
   std::string doctags_utf8;
   /** doc_vlm: lossy markdown from DocTags. Empty for ppocr/doctr. */
   std::string markdown_utf8;
+  /**
+   * doc_vlm stop: doctag_end | eos | max_new_tokens | invalid_sequence.
+   * Empty for ppocr/doctr.
+   */
+  std::string stop_reason;
+  /** doc_vlm: true only after </doctag>. ppocr/doctr stay true. */
+  bool complete = true;
 };
 
 /** Prefer absolute override; otherwise `model_dir/canonical`. */
@@ -76,16 +83,13 @@ struct OcrLoadOptions {
   float det_box_thresh = 0.3f;
   float det_box_score_thresh = 0.5f;
   float det_unclip_ratio = 1.5f;
-  /**
-   * ORT execution provider id (e.g. "cpu"). Empty → cpu.
-   * Unknown providers fall back to cpu with a warning log.
-   */
   std::string provider;
   /**
    * doc_vlm generation cap. 0 → 8192. Ignored by ppocr/doctr.
    * Phase 3 maps TS `docVlm.maxNewTokens` here.
    */
   int max_new_tokens = 0;
+  std::string quantization;
 
   /**
    * Absolute path overrides for custom init. Empty string → use

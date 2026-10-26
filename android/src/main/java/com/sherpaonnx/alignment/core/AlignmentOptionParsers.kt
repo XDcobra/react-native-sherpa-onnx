@@ -43,6 +43,37 @@ internal object AlignmentOptionParsers {
     return options?.getString("vocabPath")?.trim().orEmpty()
   }
 
+  fun parseAlignmentProvider(options: ReadableMap?): String {
+    return options?.getString("provider")?.trim().orEmpty()
+  }
+
+  fun parseAlignmentNumThreads(options: ReadableMap?): Int {
+    if (options?.hasKey("numThreads") != true) {
+      return 0
+    }
+    val raw = options.getDouble("numThreads")
+    val intValue = raw.toInt()
+    if (!raw.isFinite() || raw != intValue.toDouble() || intValue < 1) {
+      throw IllegalArgumentException(
+        "ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.",
+      )
+    }
+    return intValue
+  }
+
+  fun parseOptionalNumThreads(numThreads: Double?): Int {
+    if (numThreads == null) {
+      return 0
+    }
+    val intValue = numThreads.toInt()
+    if (!numThreads.isFinite() || numThreads != intValue.toDouble() || intValue < 1) {
+      throw IllegalArgumentException(
+        "ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.",
+      )
+    }
+    return intValue
+  }
+
   fun parseSegmentSampleCounts(options: ReadableMap?): IntArray {
     val direct = options?.getArray("segmentSampleCounts")
     if (direct != null) {

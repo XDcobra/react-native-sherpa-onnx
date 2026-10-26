@@ -6,14 +6,24 @@ jest.mock('react-native', () => {
     createOfflineImageBufferFromBase64: jest.fn(),
     getOfflineImageBufferInfo: jest.fn(),
     getOfflineImageBufferFrameInfo: jest.fn(),
+    ensureOfflineImageBufferFrame: jest.fn(),
     releaseOfflineImageBuffer: jest.fn(),
     cancelOfflineImageBufferCreate: jest.fn(),
+    exportOfflineImageBufferFrame: jest.fn(),
   };
 
   return {
     NativeModules: {
       SherpaOnnx: {},
     },
+    Platform: { OS: 'ios' },
+    StyleSheet: { create: (s: unknown) => s },
+    requireNativeComponent: jest.fn(() => {
+      const React = require('react');
+      return function MockNativeView() {
+        return React.createElement('OfflineImageBufferFrameView');
+      };
+    }),
     NativeEventEmitter: class {
       addListener(
         event: string,
@@ -45,8 +55,11 @@ import {
   createEmptyOfflineImageBuffer,
   createOfflineImageBufferFromBase64,
   createOfflineImageBufferFromFiles,
+  ensureOfflineImageBufferFrame,
+  exportOfflineImageBufferFrame,
   getOfflineImageBufferFrameInfo,
   getOfflineImageBufferInfo,
+  ImageErrorCode,
   releaseOfflineImageBuffer,
 } from '../index';
 
@@ -59,8 +72,10 @@ describe('offline ImageBuffer public API', () => {
       createOfflineImageBufferFromBase64: jest.Mock;
       getOfflineImageBufferInfo: jest.Mock;
       getOfflineImageBufferFrameInfo: jest.Mock;
+      ensureOfflineImageBufferFrame: jest.Mock;
       releaseOfflineImageBuffer: jest.Mock;
       cancelOfflineImageBufferCreate: jest.Mock;
+      exportOfflineImageBufferFrame: jest.Mock;
     };
     __emitImageProgress: (event: unknown) => void;
     __listenerCount: () => number;
@@ -231,5 +246,89 @@ describe('offline ImageBuffer public API', () => {
       )
     ).rejects.toMatchObject({ code: 'ERR_IMAGE_CANCELLED' });
     expect(mockNative.createOfflineImageBufferFromFiles).not.toHaveBeenCalled();
+  });
+
+  it('maps disabled native error to ERR_IMAGE_WEBP_DISABLED', async () => {
+    mockNative.createOfflineImageBufferFromFiles.mockRejectedValue(
+      new Error('ERR_IMAGE_WEBP_DISABLED: libwebp is not linked')
+    );
+    await expect(
+      createOfflineImageBufferFromFiles({ kind: 'fs', path: '/tmp/a.webp' })
+    ).rejects.toMatchObject({ code: ImageErrorCode.WEBP_DISABLED });
+  });
+
+  it('export webp maps disabled native error to ERR_IMAGE_WEBP_DISABLED', async () => {
+    mockNative.exportOfflineImageBufferFrame.mockRejectedValue(
+      new Error('ERR_IMAGE_WEBP_DISABLED: libwebp is not linked')
+    );
+    await expect(
+      exportOfflineImageBufferFrame(
+        bufferId,
+        0,
+        { kind: 'fs', path: '/tmp/out.webp' },
+        {
+          format: 'webp',
+        }
+      )
+    ).rejects.toMatchObject({ code: ImageErrorCode.WEBP_DISABLED });
+  });
+
+  it('exportOfflineImageBufferFrame passes FileDestination and returns ResolvedFileRef', async () => {
+    mockNative.exportOfflineImageBufferFrame.mockResolvedValue({
+      outputKind: 'fs',
+      outputPath: '/tmp/out.jpg',
+    });
+
+    const ref = await exportOfflineImageBufferFrame(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.jpg' },
+      { format: 'jpeg', quality: 90 }
+    );
+
+    expect(mockNative.exportOfflineImageBufferFrame).toHaveBeenCalledWith(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.jpg' },
+      { format: 'jpeg', quality: 90, maxSide: 0 }
+    );
+    expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.jpg' });
+  });
+
+  it('ensureOfflineImageBufferFrame forwards to native and maps frame info', async () => {
+    mockNative.ensureOfflineImageBufferFrame.mockResolvedValue({
+      index: 1,
+      width: 800,
+      height: 600,
+      byteSize: 800 * 600 * 3,
+      storageKind: 'ram',
+      pageNumber: 2,
+      dpi: 144,
+    });
+
+    const frame = await ensureOfflineImageBufferFrame(bufferId, 1);
+    expect(mockNative.ensureOfflineImageBufferFrame).toHaveBeenCalledWith(
+      bufferId,
+      1
+    );
+    expect(frame).toEqual({
+      index: 1,
+      width: 800,
+      height: 600,
+      byteSize: 800 * 600 * 3,
+      storageKind: 'ram',
+      pageNumber: 2,
+      dpi: 144,
+    });
+  });
+
+  it('mapInfo preserves lazy state from native', async () => {
+    mockNative.getOfflineImageBufferInfo.mockResolvedValue({
+      ...infoPayload,
+      state: 'lazy',
+      totalBytes: 0,
+    });
+    const info = await getOfflineImageBufferInfo(bufferId);
+    expect(info.state).toBe('lazy');
   });
 });

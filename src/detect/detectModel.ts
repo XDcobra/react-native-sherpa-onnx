@@ -147,7 +147,9 @@ function normalizeQuantization(raw: string | undefined): Quantization {
     raw === 'int4' ||
     raw === 'uint8' ||
     raw === 'fp32' ||
-    raw === 'bf16'
+    raw === 'bf16' ||
+    raw === 'q8' ||
+    raw === 'q4f16'
   ) {
     return raw;
   }

@@ -17,7 +17,9 @@ export function normalizeQuantization(raw: unknown): Quantization | undefined {
     lower === 'int4' ||
     lower === 'uint8' ||
     lower === 'fp32' ||
-    lower === 'bf16'
+    lower === 'bf16' ||
+    lower === 'q8' ||
+    lower === 'q4f16'
   ) {
     return lower as Quantization;
   }
@@ -73,7 +75,7 @@ export interface ModelDetectResultBase {
   isStreaming: boolean;
   /** Normalized primary hints (`iso6391Hint`); from native heuristics + SDK fallback. */
   languages?: PublicLanguageHint[];
-  /** fp16, int8, int8-quantized, int4, uint8, fp32, bf16, unknown — from name heuristics or file detection. */
+  /** fp16, int8, int8-quantized, int4, uint8, fp32, bf16, q8, q4f16, unknown — from name heuristics or file detection. */
   quantization?: Quantization;
   /** Trace of how native detection chose the model kind. */
   detectionSources?: readonly DetectionSource[];

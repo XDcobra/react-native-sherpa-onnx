@@ -28,6 +28,8 @@ const OCR_CONCRETE_TYPES: readonly OcrConcreteModelType[] = [
 export type OcrCustomInitFormState = {
   modelType: OcrConcreteModelType;
   fileSources: Partial<Record<OcrCustomPathKey, FileSource>>;
+  /** 0 → backend default (8192). Ignored unless modelType is doc_vlm. */
+  maxNewTokens: number;
 };
 
 type OcrCustomInitFormProps = {
@@ -40,6 +42,56 @@ type OcrCustomInitFormProps = {
   disabled?: boolean;
   fillHint?: string | null;
 };
+
+const MAX_NEW_TOKEN_PRESETS = [0, 512, 2048, 4096, 8192] as const;
+
+type DocVlmInitOptionChipsProps = {
+  maxNewTokens: number;
+  onChangeMaxNewTokens: (value: number) => void;
+  disabled?: boolean;
+};
+
+export function DocVlmInitOptionChips({
+  maxNewTokens,
+  onChangeMaxNewTokens,
+  disabled = false,
+}: DocVlmInitOptionChipsProps) {
+  return (
+    <View>
+      <Text style={styles.subheading}>maxNewTokens</Text>
+      <Text style={styles.hint}>
+        Cap on generated DocTags. 0 uses the backend default (8192). 512 is only
+        enough for short goldens; invoices need a higher cap.
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.typeRow}
+      >
+        {MAX_NEW_TOKEN_PRESETS.map((preset) => {
+          const active = maxNewTokens === preset;
+          return (
+            <TouchableOpacity
+              key={preset}
+              style={[styles.typeChip, active && styles.typeChipActive]}
+              onPress={() => onChangeMaxNewTokens(preset)}
+              disabled={disabled}
+            >
+              <Text
+                style={[
+                  styles.typeChipText,
+                  active && styles.typeChipTextActive,
+                ]}
+              >
+                {preset === 0 ? 'default' : String(preset)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
 
 const PATH_LABELS: Record<OcrCustomPathKey, string> = {
   det: 'Det ONNX',
@@ -103,7 +155,18 @@ export function OcrCustomInitForm({
     if (modelType === value.modelType) {
       return;
     }
-    onChange({ modelType, fileSources: {} });
+    onChange({
+      modelType,
+      fileSources: {},
+      maxNewTokens: value.maxNewTokens,
+    });
+  };
+
+  const setMaxNewTokens = (maxNewTokens: number) => {
+    if (maxNewTokens === value.maxNewTokens) {
+      return;
+    }
+    onChange({ ...value, maxNewTokens });
   };
 
   const setFileSource = (
@@ -148,6 +211,14 @@ export function OcrCustomInitForm({
           );
         })}
       </ScrollView>
+
+      {value.modelType === 'doc_vlm' ? (
+        <DocVlmInitOptionChips
+          maxNewTokens={value.maxNewTokens}
+          onChangeMaxNewTokens={setMaxNewTokens}
+          disabled={disabled || fillLoading}
+        />
+      ) : null}
 
       <View style={styles.helperRow}>
         <TouchableOpacity

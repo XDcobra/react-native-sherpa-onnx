@@ -5,6 +5,7 @@
 #include "model_language_catalog.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -51,34 +52,8 @@ const char* OcrKindToTag(sherpaonnx::OcrModelKind kind) {
     }
 }
 
-std::string PreferExactOnnx(const std::vector<FileEntry>& files,
-                            const std::vector<std::string>& exactNames,
-                            const std::string& quantization) {
-    if (!quantization.empty() && quantization != "auto") {
-        const std::string q = ToLower(quantization);
-        for (const auto& base : exactNames) {
-            // e.g. det.onnx → det.int8.onnx when quant requested
-            const auto dot = base.rfind('.');
-            if (dot == std::string::npos) continue;
-            const std::string candidate =
-                base.substr(0, dot) + "." + q + base.substr(dot);
-            std::string hit = FindFileByName(files, candidate);
-            if (!hit.empty()) return hit;
-        }
-    }
-    for (const auto& name : exactNames) {
-        std::string hit = FindFileByName(files, name);
-        if (!hit.empty()) return hit;
-    }
-    return "";
-}
-
 std::string FindDetOnnx(const std::vector<FileEntry>& files,
                         const std::string& quantization) {
-    std::string exact =
-        PreferExactOnnx(files, {"det.onnx", "det.int8.onnx", "det.fp16.onnx"},
-                        quantization);
-    if (!exact.empty()) return exact;
     return FindOnnxByAnyTokenExcluding(
         files,
         {"det", "detection", "dbnet", "db_"},
@@ -89,10 +64,6 @@ std::string FindDetOnnx(const std::vector<FileEntry>& files,
 
 std::string FindRecOnnx(const std::vector<FileEntry>& files,
                         const std::string& quantization) {
-    std::string exact =
-        PreferExactOnnx(files, {"rec.onnx", "rec.int8.onnx", "rec.fp16.onnx"},
-                        quantization);
-    if (!exact.empty()) return exact;
     return FindOnnxByAnyTokenExcluding(
         files,
         {"rec", "recognition", "crnn", "svtr"},
@@ -102,10 +73,6 @@ std::string FindRecOnnx(const std::vector<FileEntry>& files,
 
 std::string FindClsOnnx(const std::vector<FileEntry>& files,
                         const std::string& quantization) {
-    std::string exact =
-        PreferExactOnnx(files, {"cls.onnx", "cls.int8.onnx", "cls.fp16.onnx"},
-                        quantization);
-    if (!exact.empty()) return exact;
     return FindOnnxByAnyTokenExcluding(
         files,
         {"cls", "ori", "orientation", "angle"},
@@ -175,23 +142,150 @@ std::string FindOcrManifest(const std::vector<FileEntry>& files) {
  * DocTR / OnnxTR layout: det + rec ONNX plus ocr_manifest.json (family discriminator).
  * Distinct from ppocr which requires rec_inference.yml / dict.
  */
-bool CanDoctrLayout(const std::vector<FileEntry>& files) {
-    const std::string det = FindDetOnnx(files, "");
-    const std::string rec = FindRecOnnx(files, "");
+bool CanDoctrLayout(const std::vector<FileEntry>& files,
+                    const std::string& quantization) {
+    const std::string det = FindDetOnnx(files, quantization);
+    const std::string rec = FindRecOnnx(files, quantization);
     const std::string manifest = FindOcrManifest(files);
     return !det.empty() && !rec.empty() && !manifest.empty();
 }
 
-/** Granite-docling octet. Exact basenames; no int8/fp16 twin in v1. */
-bool CanDocVlmLayout(const std::vector<FileEntry>& files) {
-    return !FindFileByName(files, "vision_encoder.onnx").empty() &&
-           !FindFileByName(files, "vision_encoder.onnx_data").empty() &&
-           !FindFileByName(files, "embed_tokens.onnx").empty() &&
-           !FindFileByName(files, "embed_tokens.onnx_data").empty() &&
-           !FindFileByName(files, "decoder_model_merged.onnx").empty() &&
-           !FindFileByName(files, "decoder_model_merged.onnx_data").empty() &&
-           !FindFileByName(files, "tokenizer.json").empty() &&
-           !FindFileByName(files, "ocr_manifest.json").empty();
+bool EndsWithOnnxGraph(const std::string& nameLower) {
+    const std::string kOnnx = ".onnx";
+    if (nameLower.size() < kOnnx.size()) return false;
+    if (nameLower.compare(nameLower.size() - kOnnx.size(), kOnnx.size(), kOnnx) !=
+        0) {
+        return false;
+    }
+    const std::string kData = ".onnx_data";
+    if (nameLower.size() >= kData.size() &&
+        nameLower.compare(nameLower.size() - kData.size(), kData.size(), kData) ==
+            0) {
+        return false;
+    }
+    return true;
+}
+
+std::string OnnxSuffixAfterStem(const std::string& nameLower,
+                                const std::string& stem) {
+    const std::string kOnnx = ".onnx";
+    if (nameLower.size() < stem.size() + kOnnx.size()) return {};
+    if (nameLower.compare(0, stem.size(), stem) != 0) return {};
+    if (nameLower.compare(nameLower.size() - kOnnx.size(), kOnnx.size(), kOnnx) !=
+        0) {
+        return {};
+    }
+    return nameLower.substr(stem.size(),
+                            nameLower.size() - stem.size() - kOnnx.size());
+}
+
+std::uint64_t FileSizeByPath(const std::vector<FileEntry>& files,
+                             const std::string& path) {
+    for (const auto& entry : files) {
+        if (entry.path == path) return entry.size;
+    }
+    return 0;
+}
+
+struct DocVlmGroup {
+    std::string suffix;
+    std::string vision;
+    std::string vision_data;
+    std::string embed;
+    std::string embed_data;
+    std::string decoder;
+    std::string decoder_data;
+    std::uint64_t decoder_size = 0;
+};
+
+bool TryCompleteDocVlmGroup(const std::vector<FileEntry>& files,
+                            const std::string& suffix, DocVlmGroup& out) {
+    const std::string vision = FindFileByName(files, "vision_encoder" + suffix + ".onnx");
+    const std::string vision_data =
+        FindFileByName(files, "vision_encoder" + suffix + ".onnx_data");
+    const std::string embed = FindFileByName(files, "embed_tokens" + suffix + ".onnx");
+    const std::string embed_data =
+        FindFileByName(files, "embed_tokens" + suffix + ".onnx_data");
+    const std::string decoder =
+        FindFileByName(files, "decoder_model_merged" + suffix + ".onnx");
+    const std::string decoder_data =
+        FindFileByName(files, "decoder_model_merged" + suffix + ".onnx_data");
+    if (vision.empty() || vision_data.empty() || embed.empty() ||
+        embed_data.empty() || decoder.empty() || decoder_data.empty()) {
+        return false;
+    }
+    out.suffix = suffix;
+    out.vision = vision;
+    out.vision_data = vision_data;
+    out.embed = embed;
+    out.embed_data = embed_data;
+    out.decoder = decoder;
+    out.decoder_data = decoder_data;
+    out.decoder_size = FileSizeByPath(files, decoder);
+    return true;
+}
+
+std::vector<DocVlmGroup> CollectDocVlmGroups(const std::vector<FileEntry>& files) {
+    static const std::string kVisionStem = "vision_encoder";
+    std::vector<std::string> suffixes;
+    for (const auto& entry : files) {
+        if (!EndsWithOnnxGraph(entry.nameLower)) continue;
+        if (entry.nameLower.size() < kVisionStem.size() + 5) continue;
+        if (entry.nameLower.compare(0, kVisionStem.size(), kVisionStem) != 0) {
+            continue;
+        }
+        const std::string suffix =
+            OnnxSuffixAfterStem(entry.nameLower, kVisionStem);
+        if (std::find(suffixes.begin(), suffixes.end(), suffix) == suffixes.end()) {
+            suffixes.push_back(suffix);
+        }
+    }
+
+    std::vector<DocVlmGroup> groups;
+    for (const auto& suffix : suffixes) {
+        DocVlmGroup group;
+        if (TryCompleteDocVlmGroup(files, suffix, group)) {
+            groups.push_back(std::move(group));
+        }
+    }
+    return groups;
+}
+
+bool FlattenFolderAccepts(const std::string& quantization,
+                          const std::string& modelDir) {
+    const std::string q = ToLower(quantization);
+    if (q.empty() || q == "auto") return true;
+    const std::string derived =
+        sherpaonnx::DeriveQuantization(BaseName(modelDir));
+    if (derived == q) return true;
+    if ((derived.empty() || derived == "unknown") && q == "fp32") return true;
+    return false;
+}
+
+const DocVlmGroup* SelectDocVlmGroup(const std::vector<DocVlmGroup>& groups,
+                                     const std::string& quantization,
+                                     const std::string& modelDir) {
+    if (groups.empty()) return nullptr;
+
+    const bool onlyUnsuffixed =
+        groups.size() == 1 && groups.front().suffix.empty();
+    if (onlyUnsuffixed) {
+        return FlattenFolderAccepts(quantization, modelDir) ? &groups.front()
+                                                            : nullptr;
+    }
+
+    std::vector<const DocVlmGroup*> matching;
+    for (const auto& group : groups) {
+        if (MatchesQuantization(ToLower(BaseName(group.vision)), quantization)) {
+            matching.push_back(&group);
+        }
+    }
+    if (matching.empty()) return nullptr;
+    const DocVlmGroup* best = matching.front();
+    for (const auto* group : matching) {
+        if (group->decoder_size > best->decoder_size) best = group;
+    }
+    return best;
 }
 
 size_t SkipJsonWs(const std::string& s, size_t pos) {
@@ -322,13 +416,13 @@ ManifestFamilyRead ReadManifestFamily(const std::string& manifestPath) {
 
 void FillDocVlmPaths(sherpaonnx::OcrModelPaths& paths,
                      const std::vector<FileEntry>& files,
-                     const std::string& manifest) {
-    paths.vision_encoder = FindFileByName(files, "vision_encoder.onnx");
-    paths.vision_encoder_data = FindFileByName(files, "vision_encoder.onnx_data");
-    paths.embed_tokens = FindFileByName(files, "embed_tokens.onnx");
-    paths.embed_tokens_data = FindFileByName(files, "embed_tokens.onnx_data");
-    paths.decoder = FindFileByName(files, "decoder_model_merged.onnx");
-    paths.decoder_data = FindFileByName(files, "decoder_model_merged.onnx_data");
+                     const DocVlmGroup& group, const std::string& manifest) {
+    paths.vision_encoder = group.vision;
+    paths.vision_encoder_data = group.vision_data;
+    paths.embed_tokens = group.embed;
+    paths.embed_tokens_data = group.embed_data;
+    paths.decoder = group.decoder;
+    paths.decoder_data = group.decoder_data;
     paths.tokenizer = FindFileByName(files, "tokenizer.json");
     paths.manifest =
         manifest.empty() ? FindFileByName(files, "ocr_manifest.json") : manifest;
@@ -416,10 +510,16 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
     const std::string cls = FindClsOnnx(files, quantization);
     const std::string recDict = FindRecDict(files);
     const std::string manifest = FindOcrManifest(files);
+    const std::string tokenizer = FindFileByName(files, "tokenizer.json");
 
-    const bool canDocVlm = CanDocVlmLayout(files);
+    const auto docVlmGroups = CollectDocVlmGroups(files);
+    const DocVlmGroup* docVlmGroup =
+        (!tokenizer.empty() && !manifest.empty())
+            ? SelectDocVlmGroup(docVlmGroups, quantization, modelDir)
+            : nullptr;
+    const bool canDocVlm = docVlmGroup != nullptr;
     const bool canPpocr = !det.empty() && !rec.empty() && !recDict.empty();
-    const bool canDoctr = CanDoctrLayout(files) && !manifest.empty();
+    const bool canDoctr = CanDoctrLayout(files, quantization) && !manifest.empty();
 
     if (canDocVlm) {
         result.detectedModels.push_back({"doc_vlm", modelDir});
@@ -467,13 +567,11 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else {
             result.error =
-                "OCR: unrecognized pack layout (need the doc_vlm octet "
-                "vision_encoder.onnx, vision_encoder.onnx_data, "
-                "embed_tokens.onnx, embed_tokens.onnx_data, "
-                "decoder_model_merged.onnx, decoder_model_merged.onnx_data, "
-                "tokenizer.json, and ocr_manifest.json, or det + rec ONNX and "
-                "either a rec dictionary yml/txt for ppocr, or "
-                "ocr_manifest.json for doctr) in " +
+                "OCR: unrecognized pack layout (need a complete doc_vlm "
+                "vision/embed/decoder triple plus tokenizer.json and "
+                "ocr_manifest.json, or det + rec ONNX and either a rec "
+                "dictionary yml/txt for ppocr, or ocr_manifest.json for "
+                "doctr) in " +
                 modelDir;
             return result;
         }
@@ -481,7 +579,11 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
 
     result.selectedKind = selected;
     if (selected == OK::kDocVlm) {
-        FillDocVlmPaths(result.paths, files, manifest);
+        if (docVlmGroup == nullptr) {
+            result.error = LayoutMissingError(selected, modelDir);
+            return result;
+        }
+        FillDocVlmPaths(result.paths, files, *docVlmGroup, manifest);
     } else if (selected == OK::kPpocr) {
         result.paths.det = det;
         result.paths.rec = rec;
@@ -510,12 +612,16 @@ void FillOcrCatalogHeuristics(sherpaonnx::OcrDetectResult& result,
     sherpaonnx::FillDerivedCatalogMetadataFromBasename(
         result.derivedLanguages, result.quantization, result.sizeTier,
         nameHint);
-    if ((result.quantization.empty() || result.quantization == "unknown") &&
-        !result.paths.rec.empty()) {
-        std::string fileQuant =
-            sherpaonnx::DeriveQuantization(BaseName(result.paths.rec));
-        if (fileQuant != "unknown") {
-            result.quantization = fileQuant;
+    if (result.quantization.empty() || result.quantization == "unknown") {
+        std::string graphPath = result.paths.vision_encoder;
+        if (graphPath.empty()) graphPath = result.paths.det;
+        if (graphPath.empty()) graphPath = result.paths.rec;
+        if (!graphPath.empty()) {
+            std::string fileQuant =
+                sherpaonnx::DeriveQuantization(BaseName(graphPath));
+            if (fileQuant != "unknown") {
+                result.quantization = fileQuant;
+            }
         }
     }
     // Basename heuristics first; curated pack/family rows only when empty.

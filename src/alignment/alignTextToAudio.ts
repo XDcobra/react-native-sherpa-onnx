@@ -74,15 +74,18 @@ async function buildNativeOptions(
     typeof options.language === 'string' ? options.language.trim() : '';
 
   if (options.mode === 'accurate') {
-    const resolved = await resolveAlignmentOnnxPath(
-      accurateOptionsToModelConfig(options)
-    );
+    const model = accurateOptionsToModelConfig(options);
+    const resolved = await resolveAlignmentOnnxPath(model);
+    const provider =
+      typeof model.provider === 'string' ? model.provider.trim() : '';
     const base: Record<string, unknown> = {
       modelPath: resolved.modelPath,
       ...(resolved.vocabPath.length > 0
         ? { vocabPath: resolved.vocabPath }
         : {}),
       ...(language.length > 0 ? { language } : {}),
+      ...(provider.length > 0 ? { provider } : {}),
+      ...(model.numThreads != null ? { numThreads: model.numThreads } : {}),
     };
     if (options.segmentation?.mode !== 'off' && options.segmentation != null) {
       throw new Error(

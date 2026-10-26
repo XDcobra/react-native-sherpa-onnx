@@ -12,6 +12,10 @@ struct RgbFrame {
   int width = 0;
   int height = 0;
   std::vector<uint8_t> rgb;
+  /** 1-based PDF page number; 0 = unset (file/base64 creates). */
+  int pageNumber = 0;
+  /** Raster DPI used when producing this frame; 0 = unset. */
+  int dpi = 0;
 
   size_t byteSize() const {
     return static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
@@ -31,12 +35,26 @@ inline const char* StorageKindName(ImageStorageKind kind) {
   return kind == ImageStorageKind::Mmap ? "mmap" : "ram";
 }
 
+/** Buffer lifecycle state exposed to JS. */
+enum class ImageBufferState {
+  Immutable,
+  Lazy,
+};
+
+inline const char* BufferStateName(ImageBufferState state) {
+  return state == ImageBufferState::Lazy ? "lazy" : "immutable";
+}
+
 struct ImageFrameInfo {
   int index = 0;
   int width = 0;
   int height = 0;
   int64_t byteSize = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
+  /** 1-based PDF page number; 0 = unset. */
+  int pageNumber = 0;
+  /** Raster DPI; 0 = unset. */
+  int dpi = 0;
 };
 
 struct ImageBufferInfo {
@@ -44,6 +62,7 @@ struct ImageBufferInfo {
   int frameCount = 0;
   int64_t totalBytes = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
+  ImageBufferState state = ImageBufferState::Immutable;
 };
 
 /** Decode options. maxSide <= 0 means no downscale. Default 4096. */

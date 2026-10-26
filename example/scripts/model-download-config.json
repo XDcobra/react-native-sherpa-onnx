@@ -91,7 +91,7 @@
       "category": "ocr",
       "repo": "XDcobra/react-native-sherpa-onnx",
       "tag": "ocr-models",
-      "id": "docvlm-granite-258m"
+      "id": "docvlm-granite-258m-fp32"
     }
   ]
 }

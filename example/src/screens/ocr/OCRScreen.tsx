@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   assertOcrCustomConfig,
   createOCR,
@@ -25,6 +26,16 @@ import {
   type OcrRecognizeResult,
 } from 'react-native-sherpa-onnx/ocr';
 import {
+  extractPdfTextLayer,
+  isPdfiumEnabled,
+  PdfErrorCode,
+} from 'react-native-sherpa-onnx/pdf';
+import {
+  OfflineImageBufferAnnotatedView,
+  OfflineImageBufferFrameView,
+  releaseOfflineImageBuffer,
+} from 'react-native-sherpa-onnx/imagebuffer';
+import {
   createEmptyOfflineTextBuffer,
   getOfflineTextBufferSpatialSpansSlice,
   getOfflineTextBufferTextSlice,
@@ -34,6 +45,7 @@ import {
   type TextSpatialSpan,
 } from 'react-native-sherpa-onnx/textbuffer';
 import {
+  DocVlmInitOptionChips,
   InitModeSelector,
   ModelFolderGrid,
   OcrCustomInitForm,
@@ -44,18 +56,22 @@ import {
   OfflineImageBufferWidget,
   type OfflineImageBufferInfo,
   type OfflineImageBufferWidgetHandle,
+  type PdfSourceSelection,
 } from '../../components/OfflineImageBufferWidget';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { useOcrModelCatalog } from '../../hooks/useOcrModelCatalog';
 import { IMAGE_FILES } from '../../imageConfig';
+import { PDF_FILES } from '../../pdfConfig';
 import { getModelDisplayName, toDetectSource } from '../../modelConfig';
 import { useDeviceProviders } from '../../providers/DeviceProvidersContext';
 import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
 } from '../../utils/ocrCustomInitFill';
-import { OcrQuadOverlay } from './OcrQuadOverlay';
+import { OcrInputPathLegend } from './OcrInputPathLegend';
 import { styles } from './OCRScreen.styles';
+
+type PdfExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'error';
 
 const MIN_THREADS = 1;
 const MAX_THREADS = 8;
@@ -71,6 +87,17 @@ function isGranitePack(id: string): boolean {
 function utf16Slice(text: string, start: number, end: number): string {
   // TextBuffer offsets are UTF-16 code units; string.slice matches for BMP text.
   return text.slice(start, end);
+}
+
+function spanSliceText(text: string, span: TextSpatialSpan): string {
+  return utf16Slice(text, span.utf16Start, span.utf16End);
+}
+
+function joinSpanTexts(text: string, list: TextSpatialSpan[]): string {
+  return list
+    .map((span) => spanSliceText(text, span))
+    .filter((slice) => slice.length > 0)
+    .join('\n');
 }
 
 function clampUnclipRatio(value: number): number {
@@ -111,15 +138,32 @@ export default function OCRScreen() {
   const [imageInfo, setImageInfo] = useState<OfflineImageBufferInfo | null>(
     null
   );
+  const [pdfSelection, setPdfSelection] = useState<PdfSourceSelection | null>(
+    null
+  );
+  const [pdfExtractStatus, setPdfExtractStatus] =
+    useState<PdfExtractStatus>('idle');
+  const [pdfExtractMessage, setPdfExtractMessage] = useState<string | null>(
+    null
+  );
+  const [pdfiumOn, setPdfiumOn] = useState<boolean | null>(null);
   const [resultText, setResultText] = useState('');
   const [resultMeta, setResultMeta] = useState<OcrRecognizeResult | null>(null);
+  const [resultOrigin, setResultOrigin] = useState<'ocr' | 'textLayer' | null>(
+    null
+  );
   const [spans, setSpans] = useState<TextSpatialSpan[]>([]);
   const [selectedSpanIndex, setSelectedSpanIndex] = useState<number | null>(
     null
   );
   const [overlayEnabled, setOverlayEnabled] = useState(true);
-  const [resultTab, setResultTab] = useState<'text' | 'markdown' | 'doctags'>(
-    'text'
+  const [resultTextBufferId, setResultTextBufferId] = useState<string | null>(
+    null
+  );
+  const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [spansShowAllPages, setSpansShowAllPages] = useState(false);
+  const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'doctags'>(
+    'spans'
   );
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
@@ -127,6 +171,8 @@ export default function OCRScreen() {
   const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const resultTextBufferIdRef = useRef<string | null>(null);
+  const rasterBufferIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (selectedFolder && catalogEntries.some((e) => e.id === selectedFolder)) {
@@ -155,11 +201,27 @@ export default function OCRScreen() {
   }, [providerOptions]);
 
   useEffect(() => {
+    isPdfiumEnabled()
+      .then(setPdfiumOn)
+      .catch(() => setPdfiumOn(false));
+  }, []);
+
+  useEffect(() => {
     return () => {
       abortRef.current?.abort();
       const engine = engineRef.current;
       engineRef.current = null;
       engine?.destroy().catch(() => {});
+      const resultTxt = resultTextBufferIdRef.current;
+      resultTextBufferIdRef.current = null;
+      if (resultTxt) {
+        releasePipelineTextBuffer(resultTxt).catch(() => {});
+      }
+      const rasterId = rasterBufferIdRef.current;
+      rasterBufferIdRef.current = null;
+      if (rasterId) {
+        releaseOfflineImageBuffer(rasterId).catch(() => {});
+      }
     };
   }, []);
 
@@ -202,10 +264,11 @@ export default function OCRScreen() {
       const fillResult = await fillOcrCustomConfigFromModelFolder(
         await toDetectSource(resolveModelPath(selectedFolder))
       );
-      setCustomInitForm({
+      setCustomInitForm((prev) => ({
         modelType: fillResult.modelType,
         fileSources: fillResult.customConfig,
-      });
+        maxNewTokens: prev.maxNewTokens,
+      }));
       const missing =
         fillResult.missingKeys.length > 0
           ? ` Missing: ${fillResult.missingKeys.join(', ')}`
@@ -234,9 +297,11 @@ export default function OCRScreen() {
         const modelSource = await toDetectSource(resolveModelPath(folderId));
         await runDetect(folderId);
 
-        const wantDocVlmOpts =
-          folderId.toLowerCase().includes('docvlm') ||
-          folderId.toLowerCase().includes('granite');
+        const wantDocVlmOpts = isGranitePack(folderId);
+        const maxLabel =
+          customInitForm.maxNewTokens === 0
+            ? 'default'
+            : String(customInitForm.maxNewTokens);
         const initOptions: OcrInitializeOptions = {
           modelSource,
           modelType: 'auto',
@@ -244,7 +309,9 @@ export default function OCRScreen() {
           numThreads: threads,
           ppocr: { detUnclipRatio },
           doctr: { detUnclipRatio },
-          ...(wantDocVlmOpts ? { docVlm: { maxNewTokens: 512 } } : {}),
+          ...(wantDocVlmOpts
+            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
+            : {}),
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
@@ -252,7 +319,9 @@ export default function OCRScreen() {
         setInitMessage(
           `Ready · instance=${
             ocr.instanceId
-          } · modelType=auto · ${getModelDisplayName(folderId)}`
+          } · modelType=auto · ${getModelDisplayName(folderId)}${
+            wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''
+          }`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -286,7 +355,9 @@ export default function OCRScreen() {
           ...(customInitForm.modelType === 'doctr'
             ? { doctr: { detUnclipRatio } }
             : {}),
-          ...(wantDocVlmOpts ? { docVlm: { maxNewTokens: 512 } } : {}),
+          ...(wantDocVlmOpts
+            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
+            : {}),
         });
         engineRef.current = ocr;
         setInitializedFolder(
@@ -294,8 +365,14 @@ export default function OCRScreen() {
             ? `custom:${selectedFolder}`
             : `custom:${customInitForm.modelType}`
         );
+        const maxLabel =
+          customInitForm.maxNewTokens === 0
+            ? 'default'
+            : String(customInitForm.maxNewTokens);
         setInitMessage(
-          `Ready · instance=${ocr.instanceId} · custom:${customInitForm.modelType}`
+          `Ready · instance=${ocr.instanceId} · custom:${
+            customInitForm.modelType
+          }${wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -334,6 +411,7 @@ export default function OCRScreen() {
     await proceedAuto(selectedFolder);
   }, [
     customInitForm.fileSources,
+    customInitForm.maxNewTokens,
     customInitForm.modelType,
     destroyEngine,
     detUnclipRatio,
@@ -377,13 +455,159 @@ export default function OCRScreen() {
   const clearResults = useCallback(() => {
     setResultText('');
     setResultMeta(null);
+    setResultOrigin(null);
     setSpans([]);
     setSelectedSpanIndex(null);
     setLastMs(null);
     setProgressLabel(null);
     setProgressPercent(null);
-    setResultTab('text');
+    setResultTab('spans');
+    setResultFrameIndex(0);
+    setSpansShowAllPages(false);
+    const id = resultTextBufferIdRef.current;
+    resultTextBufferIdRef.current = null;
+    setResultTextBufferId(null);
+    if (id) {
+      releasePipelineTextBuffer(id).catch(() => {});
+    }
   }, []);
+
+  const releaseResultTextBuffer = useCallback(async () => {
+    const id = resultTextBufferIdRef.current;
+    resultTextBufferIdRef.current = null;
+    setResultTextBufferId(null);
+    if (id) {
+      await releasePipelineTextBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const releaseRasterBuffer = useCallback(async () => {
+    const id = rasterBufferIdRef.current;
+    rasterBufferIdRef.current = null;
+    if (id) {
+      await releaseOfflineImageBuffer(id).catch(() => {});
+    }
+  }, []);
+
+  const clearPdfState = useCallback(async () => {
+    setPdfSelection(null);
+    setPdfExtractStatus('idle');
+    setPdfExtractMessage(null);
+    await releaseResultTextBuffer();
+    await releaseRasterBuffer();
+  }, [releaseResultTextBuffer, releaseRasterBuffer]);
+
+  const handlePdfSelected = useCallback(
+    (selection: PdfSourceSelection) => {
+      clearResults();
+      // Widget already rasterized a preview buffer and called onBufferReady —
+      // keep imageInfo; do not release the widget-owned buffer.
+      setPdfSelection(selection);
+      setPdfExtractStatus('idle');
+      setPdfExtractMessage(null);
+      releaseResultTextBuffer().catch(() => {});
+      releaseRasterBuffer().catch(() => {});
+    },
+    [clearResults, releaseResultTextBuffer, releaseRasterBuffer]
+  );
+
+  const handleExtractPdf = useCallback(async () => {
+    if (!pdfSelection) {
+      setError('Select a PDF first.');
+      return;
+    }
+    setRunBusy(true);
+    setError(null);
+    clearResults();
+    await releaseResultTextBuffer();
+    const t0 = Date.now();
+    try {
+      const enabled = await isPdfiumEnabled();
+      setPdfiumOn(enabled);
+      if (!enabled) {
+        setPdfExtractStatus('error');
+        setPdfExtractMessage(PdfErrorCode.PDFIUM_DISABLED);
+        setError(
+          `${PdfErrorCode.PDFIUM_DISABLED}: rebuild with sherpaOnnxEnablePdfium=true / SHERPA_ONNX_ENABLE_PDFIUM=1`
+        );
+        return;
+      }
+      const textOut = await createEmptyOfflineTextBuffer();
+      resultTextBufferIdRef.current = textOut.bufferId;
+      setResultTextBufferId(textOut.bufferId);
+      const result = await extractPdfTextLayer(pdfSelection.source, textOut, {
+        pages: 'all',
+      });
+      const info = (await getPipelineTextBufferInfo(
+        textOut
+      )) as OfflineTextBufferInfo;
+      const text =
+        info.utf16Length > 0
+          ? await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length)
+          : '';
+      const spatial =
+        info.hasSpatialSpans && info.spatialSpanCount > 0
+          ? await getOfflineTextBufferSpatialSpansSlice(
+              textOut,
+              0,
+              info.spatialSpanCount
+            )
+          : [];
+      setResultText(text);
+      setResultMeta(null);
+      setResultOrigin('textLayer');
+      setSpans(spatial);
+      setLastMs(Date.now() - t0);
+      setPdfExtractStatus('ok');
+      setPdfExtractMessage(
+        `ok pages=${result.pageCount} withText=${result.pagesWithText} spans=${result.spatialSpanCount}`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      const noTextLayer =
+        code === PdfErrorCode.NO_TEXT_LAYER ||
+        msg.includes(PdfErrorCode.NO_TEXT_LAYER);
+      if (__DEV__) {
+        console.log('[OCR] extractPdf catch', {
+          code,
+          msg,
+          branch: noTextLayer ? 'noTextLayer' : 'error',
+        });
+      }
+      await releaseResultTextBuffer();
+      if (noTextLayer) {
+        const strategy =
+          imageInfo?.state === 'lazy'
+            ? 'lazy-lru'
+            : imageInfo?.state === 'immutable'
+            ? 'rasterize-all'
+            : null;
+        setPdfExtractStatus('noTextLayer');
+        setPdfExtractMessage(
+          [
+            PdfErrorCode.NO_TEXT_LAYER,
+            imageInfo?.frameCount != null
+              ? `frames=${imageInfo.frameCount}`
+              : null,
+            strategy,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        );
+        setError(null);
+      } else {
+        setPdfExtractStatus('error');
+        setPdfExtractMessage(msg);
+        setError(msg);
+      }
+    } finally {
+      setRunBusy(false);
+    }
+  }, [clearResults, imageInfo, pdfSelection, releaseResultTextBuffer]);
 
   const handleRecognize = useCallback(async () => {
     const engine = engineRef.current;
@@ -395,14 +619,15 @@ export default function OCRScreen() {
     setRunBusy(true);
     setError(null);
     clearResults();
+    await releaseResultTextBuffer();
     const controller = new AbortController();
     abortRef.current = controller;
     const t0 = Date.now();
 
-    let textOutId: string | null = null;
     try {
       const textOut = await createEmptyOfflineTextBuffer();
-      textOutId = textOut.bufferId;
+      resultTextBufferIdRef.current = textOut.bufferId;
+      setResultTextBufferId(textOut.bufferId);
 
       const page = await engine.recognize(imageInfo.bufferId, textOut, {
         granularity: 'line',
@@ -433,46 +658,68 @@ export default function OCRScreen() {
 
       setResultText(text);
       setResultMeta(page);
+      setResultOrigin('ocr');
       setSpans(spatial);
       setLastMs(Date.now() - t0);
-      if (page.family === 'doc_vlm' && page.markdown.trim().length > 0) {
-        setResultTab('markdown');
-      }
+      setResultTab('spans');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await releaseResultTextBuffer();
       if (msg.includes('CANCELLED') || msg.includes('cancelled')) {
         setError('Recognize cancelled (OCR_CANCELLED).');
       } else {
         setError(msg);
       }
     } finally {
-      if (textOutId) {
-        await releasePipelineTextBuffer(textOutId).catch(() => {});
-      }
       abortRef.current = null;
       setRunBusy(false);
       setProgressLabel(null);
       setProgressPercent(null);
     }
-  }, [clearResults, imageInfo]);
+  }, [clearResults, imageInfo, releaseResultTextBuffer]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
-  const selectedSpanText =
-    selectedSpanIndex != null && spans[selectedSpanIndex]
-      ? utf16Slice(
-          resultText,
-          spans[selectedSpanIndex]!.utf16Start,
-          spans[selectedSpanIndex]!.utf16End
-        )
-      : null;
+  const resultPageCount = useMemo(() => {
+    const fromBuffer = imageInfo?.frameCount ?? 0;
+    const fromSpans =
+      spans.length > 0
+        ? Math.max(...spans.map((span) => span.frameIndex)) + 1
+        : 0;
+    return Math.max(fromBuffer, fromSpans, 1);
+  }, [imageInfo?.frameCount, spans]);
+
+  useEffect(() => {
+    setResultFrameIndex((i) =>
+      Math.min(Math.max(0, i), Math.max(0, resultPageCount - 1))
+    );
+  }, [resultPageCount, imageInfo?.bufferId]);
+
+  const multiPage = resultPageCount > 1;
+  const scopedSpans = spansShowAllPages
+    ? spans
+    : spans.filter((span) => span.frameIndex === resultFrameIndex);
+  const scopedSpanText = joinSpanTexts(resultText, scopedSpans);
 
   const docVlmExtras = resultMeta?.family === 'doc_vlm' ? resultMeta : null;
   const showDocVlmTabs =
     docVlmExtras != null &&
     (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
+  const extrasPayload =
+    resultTab === 'doctags'
+      ? docVlmExtras?.doctags ?? ''
+      : docVlmExtras?.markdown ?? '';
+  const showingExtras =
+    showDocVlmTabs && (resultTab === 'markdown' || resultTab === 'doctags');
+
+  const showPdfPipeline = pdfSelection != null;
+  const showRasterStep = pdfExtractStatus === 'noTextLayer';
+  const showRecognizeStep =
+    !showPdfPipeline || (showRasterStep && imageInfo != null);
+  const showResults =
+    resultOrigin === 'textLayer' || resultMeta != null || spans.length > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -481,9 +728,8 @@ export default function OCRScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>1. OCR model</Text>
           <Text style={styles.sectionHint}>
-            Catalog merges bundled assets, PAD packs, and Download Manager
-            (OCR). Recommended demo start: ppocrv6-tiny. Recreate the engine
-            when switching families.
+            Recommended start: ppocrv6-tiny (bundled assets or Download Manager
+            → OCR).
           </Text>
 
           <View style={styles.sectionBody}>
@@ -495,9 +741,6 @@ export default function OCRScreen() {
 
             {initMode === 'auto' ? (
               <>
-                <Text style={styles.sectionHint}>
-                  Init uses modelType=auto (manifest / layout detect).
-                </Text>
                 <ModelFolderGrid
                   entries={catalogEntries}
                   selectedId={selectedFolder}
@@ -514,6 +757,15 @@ export default function OCRScreen() {
                   disabled={initBusy || runBusy}
                   emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
                 />
+                {selectedFolder && isGranitePack(selectedFolder) ? (
+                  <DocVlmInitOptionChips
+                    maxNewTokens={customInitForm.maxNewTokens}
+                    onChangeMaxNewTokens={(maxNewTokens) =>
+                      setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
+                    }
+                    disabled={initBusy || runBusy}
+                  />
+                ) : null}
               </>
             ) : (
               <OcrCustomInitForm
@@ -714,210 +966,423 @@ export default function OCRScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. Image buffer</Text>
-          <Text style={styles.sectionHint}>
-            Bundled test_images/ or pick your own. Creates an OfflineImageBuffer
-            (native RGB8) for recognize.
-          </Text>
+          <Text style={styles.sectionTitle}>2. Input (image or PDF)</Text>
+          <OcrInputPathLegend pdfiumOn={pdfiumOn} />
           {initializedFolder ? (
-            <OfflineImageBufferWidget
-              ref={imageWidgetRef}
-              imageFiles={IMAGE_FILES}
-              visible
-              disabled={runBusy || initBusy}
-              onBufferReady={(info) => {
-                setImageInfo(info);
-                clearResults();
-              }}
-              onBufferReleased={() => {
-                setImageInfo(null);
-                clearResults();
-              }}
-            />
+            <>
+              <Text style={styles.sectionHint}>
+                Pick a fixture below. Paths, spans, and overlay rules are in the
+                legend above.
+              </Text>
+              <OfflineImageBufferWidget
+                ref={imageWidgetRef}
+                imageFiles={IMAGE_FILES}
+                pdfFiles={PDF_FILES}
+                visible
+                disabled={runBusy || initBusy}
+                onBufferReady={(info) => {
+                  if (info.kind !== 'pdf') {
+                    clearPdfState().catch(() => {});
+                  }
+                  setImageInfo(info);
+                  clearResults();
+                }}
+                onBufferReleased={() => {
+                  setImageInfo(null);
+                  clearResults();
+                }}
+                onPdfSelected={handlePdfSelected}
+                onPdfCleared={() => {
+                  clearPdfState().catch(() => {});
+                  setImageInfo(null);
+                  clearResults();
+                }}
+              />
+            </>
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>
-                Initialize an OCR engine above to enable the image picker.
+                Initialize an OCR engine above to enable the input picker.
               </Text>
             </View>
           )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. Recognize</Text>
-          <View style={styles.actionRow}>
+        {showPdfPipeline ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>2b. extractPdfTextLayer</Text>
+            <Text style={styles.sectionHint}>
+              Selected: {pdfSelection?.label}
+            </Text>
             <TouchableOpacity
               style={[
                 styles.primaryButton,
-                styles.actionButtonFlex,
-                (!initializedFolder || !imageInfo || runBusy) &&
-                  styles.primaryButtonDisabled,
+                (runBusy || !pdfSelection) && styles.primaryButtonDisabled,
               ]}
               onPress={() => {
-                handleRecognize().catch(() => {});
+                handleExtractPdf().catch(() => {});
               }}
-              disabled={!initializedFolder || !imageInfo || runBusy}
+              disabled={runBusy || !pdfSelection}
             >
-              {runBusy ? (
+              {runBusy && !showRasterStep && !imageInfo ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryButtonText}>Run OCR</Text>
+                <Text style={styles.primaryButtonText}>
+                  Run extractPdfTextLayer
+                </Text>
               )}
             </TouchableOpacity>
-            {runBusy ? (
-              <TouchableOpacity
-                style={[styles.secondaryButton, styles.actionButtonFlex]}
-                onPress={handleCancel}
-              >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
-              </TouchableOpacity>
+            {pdfExtractMessage ? (
+              <Text style={styles.mono}>status: {pdfExtractMessage}</Text>
+            ) : null}
+            {error && !showRecognizeStep ? (
+              <Text style={styles.errorText}>{error}</Text>
             ) : null}
           </View>
-          {progressLabel ? (
-            <View style={styles.progressBox}>
-              <Text style={styles.progressLabel}>{progressLabel}</Text>
-              {progressPercent != null ? (
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${progressPercent}%` },
-                    ]}
-                  />
-                </View>
+        ) : null}
+
+        {showRasterStep ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>3. No text layer</Text>
+            <Text style={styles.sectionHint}>
+              This PDF has no extractable text layer. Call recognize on the
+              OfflineImageBuffer that already holds the rasterized pages.
+            </Text>
+          </View>
+        ) : null}
+
+        {showRecognizeStep ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              {showPdfPipeline ? '4. Recognize' : '3. Recognize'}
+            </Text>
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.actionButtonFlex,
+                  (!initializedFolder || !imageInfo || runBusy) &&
+                    styles.primaryButtonDisabled,
+                ]}
+                onPress={() => {
+                  handleRecognize().catch(() => {});
+                }}
+                disabled={!initializedFolder || !imageInfo || runBusy}
+              >
+                {runBusy && showRecognizeStep ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Run OCR</Text>
+                )}
+              </TouchableOpacity>
+              {runBusy ? (
+                <TouchableOpacity
+                  style={[styles.secondaryButton, styles.actionButtonFlex]}
+                  onPress={handleCancel}
+                >
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </TouchableOpacity>
               ) : null}
             </View>
-          ) : null}
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
+            {progressLabel ? (
+              <View style={styles.progressBox}>
+                <Text style={styles.progressLabel}>{progressLabel}</Text>
+                {progressPercent != null ? (
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        { width: `${progressPercent}%` },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          </View>
+        ) : null}
 
-        {resultMeta ? (
+        {showResults ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>4. Results</Text>
+            <Text style={styles.sectionTitle}>
+              {showPdfPipeline
+                ? showRasterStep
+                  ? '5. Results'
+                  : '3. Results'
+                : '4. Results'}
+            </Text>
             <View style={styles.card}>
               <Text style={styles.mono}>
-                family={resultMeta.family}
-                {'\n'}
-                spanCount={resultMeta.spanCount}
+                origin={resultOrigin ?? 'ocr'}
+                {resultMeta
+                  ? `\nfamily=${resultMeta.family}\nspanCount=${resultMeta.spanCount}`
+                  : `\nspanCount=${spans.length}`}
+                {resultMeta?.family === 'doc_vlm'
+                  ? `\ncomplete=${resultMeta.complete}\nstopReason=${resultMeta.stopReason}`
+                  : ''}
                 {lastMs != null ? `\nwall=${lastMs}ms` : ''}
-                {'\n'}
-                frame={imageInfo?.width}×{imageInfo?.height}
+                {imageInfo
+                  ? `\nframe=${imageInfo.width}×${imageInfo.height}`
+                  : ''}
               </Text>
+              {resultMeta?.family === 'doc_vlm' && !resultMeta.complete ? (
+                <Text style={styles.sectionHint}>
+                  Incomplete DocTags ({resultMeta.stopReason}). Raw output is
+                  still on the DocTags tab.
+                </Text>
+              ) : null}
             </View>
 
-            {imageInfo?.previewUri ? (
+            {imageInfo?.bufferId ? (
               <View>
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>
-                    Spatial overlay (span.quad)
+                    Spatial overlay (ocr + textLayer)
                   </Text>
-                  <Switch
-                    value={overlayEnabled}
-                    onValueChange={setOverlayEnabled}
-                  />
+                  {spans.length > 0 && resultTextBufferId ? (
+                    <Switch
+                      value={overlayEnabled}
+                      onValueChange={setOverlayEnabled}
+                    />
+                  ) : null}
                 </View>
-                <OcrQuadOverlay
-                  previewUri={imageInfo.previewUri}
-                  frameWidth={imageInfo.width}
-                  frameHeight={imageInfo.height}
-                  spans={spans}
-                  selectedIndex={selectedSpanIndex}
-                  onSelectIndex={setSelectedSpanIndex}
-                  overlayEnabled={overlayEnabled}
-                />
-                <Text style={[styles.sectionHint, { marginTop: 8 }]}>
-                  Boxes are axis-aligned bounds of each quad in decoded-frame
-                  pixels. Tap a box to highlight the text slice.
+                {overlayEnabled && resultTextBufferId ? (
+                  <OfflineImageBufferAnnotatedView
+                    buffer={imageInfo.bufferId}
+                    text={resultTextBufferId}
+                    frameIndex={resultFrameIndex}
+                    selectedIndex={selectedSpanIndex}
+                    originBoxStyle={{
+                      ocr: {
+                        borderColor: '#007AFF',
+                        backgroundColor: 'rgba(0, 122, 255, 0.28)',
+                      },
+                      textLayer: {
+                        borderColor: '#34C759',
+                        backgroundColor: 'rgba(52, 199, 89, 0.28)',
+                      },
+                    }}
+                    onSpanPress={(event) => {
+                      setResultTab('spans');
+                      setSelectedSpanIndex(
+                        selectedSpanIndex === event.index ? null : event.index
+                      );
+                    }}
+                    maxSide={1280}
+                    style={styles.resultPreview}
+                  />
+                ) : (
+                  <OfflineImageBufferFrameView
+                    buffer={imageInfo.bufferId}
+                    frameIndex={resultFrameIndex}
+                    maxSide={1280}
+                    resizeMode="contain"
+                    style={styles.resultPreview}
+                  />
+                )}
+                {overlayEnabled && resultTextBufferId && spans.length > 0 ? (
+                  <Text style={styles.sectionHint}>
+                    Tap a box to highlight that span in the list below. Blue =
+                    ocr, green = textLayer.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+            {multiPage ? (
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    styles.actionButtonFlex,
+                    resultFrameIndex <= 0 && styles.primaryButtonDisabled,
+                  ]}
+                  disabled={resultFrameIndex <= 0}
+                  onPress={() => setResultFrameIndex((i) => Math.max(0, i - 1))}
+                >
+                  <Text style={styles.primaryButtonText}>Previous</Text>
+                </TouchableOpacity>
+                <Text style={styles.toggleLabel}>
+                  Page {resultFrameIndex + 1} / {resultPageCount}
+                  {overlayEnabled && resultTextBufferId
+                    ? ` · ${
+                        spans.filter((s) => s.frameIndex === resultFrameIndex)
+                          .length
+                      } spans`
+                    : ''}
                 </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    styles.actionButtonFlex,
+                    resultFrameIndex >= resultPageCount - 1 &&
+                      styles.primaryButtonDisabled,
+                  ]}
+                  disabled={resultFrameIndex >= resultPageCount - 1}
+                  onPress={() =>
+                    setResultFrameIndex((i) =>
+                      Math.min(resultPageCount - 1, i + 1)
+                    )
+                  }
+                >
+                  <Text style={styles.primaryButtonText}>Next</Text>
+                </TouchableOpacity>
               </View>
             ) : null}
 
-            {showDocVlmTabs ? (
-              <View style={styles.tabRow}>
-                {(
-                  [
-                    ['text', 'Plain'],
-                    ['markdown', 'Markdown'],
-                    ['doctags', 'DocTags'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <TouchableOpacity
-                    key={id}
-                    style={[styles.tab, resultTab === id && styles.tabActive]}
-                    onPress={() => setResultTab(id)}
-                  >
-                    <Text
-                      style={[
-                        styles.tabText,
-                        resultTab === id && styles.tabTextActive,
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : null}
-
-            <View style={styles.card}>
-              <Text style={styles.resultText}>
-                {resultTab === 'markdown' && docVlmExtras
-                  ? docVlmExtras.markdown || '(empty markdown)'
-                  : resultTab === 'doctags' && docVlmExtras
-                  ? docVlmExtras.doctags || '(empty doctags)'
-                  : resultText || '(empty text)'}
-              </Text>
-              {selectedSpanText != null ? (
-                <Text style={[styles.mono, { marginTop: 10 }]}>
-                  selected span: {JSON.stringify(selectedSpanText)}
-                </Text>
-              ) : null}
-              <TouchableOpacity
-                style={[styles.primaryButton, { marginTop: 12 }]}
-                onPress={() => {
-                  const payload =
-                    resultTab === 'markdown' && docVlmExtras
-                      ? docVlmExtras.markdown
-                      : resultTab === 'doctags' && docVlmExtras
-                      ? docVlmExtras.doctags
-                      : resultText;
-                  Clipboard.setString(payload);
-                }}
-              >
-                <Text style={styles.primaryButtonText}>Copy</Text>
-              </TouchableOpacity>
-            </View>
-
-            {spans.length > 0 ? (
+            {spans.length > 0 || resultText.length > 0 || showDocVlmTabs ? (
               <View style={styles.card}>
-                <Text style={styles.toggleLabel}>Spans ({spans.length})</Text>
-                {spans.map((span, index) => {
-                  const active = selectedSpanIndex === index;
-                  const slice = utf16Slice(
-                    resultText,
-                    span.utf16Start,
-                    span.utf16End
-                  );
-                  return (
-                    <TouchableOpacity
-                      key={`list-${index}`}
-                      style={[styles.spanRow, active && styles.spanRowActive]}
-                      onPress={() =>
-                        setSelectedSpanIndex(active ? null : index)
-                      }
-                    >
-                      <Text style={styles.resultText} numberOfLines={2}>
-                        {slice || '(empty slice)'}
+                {showDocVlmTabs ? (
+                  <View style={styles.toggleRow}>
+                    <View style={styles.tabRowInline}>
+                      {(
+                        [
+                          ['spans', 'Spans'],
+                          ['markdown', 'Markdown'],
+                          ['doctags', 'DocTags'],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <TouchableOpacity
+                          key={id}
+                          style={[
+                            styles.tab,
+                            resultTab === id && styles.tabActive,
+                          ]}
+                          onPress={() => setResultTab(id)}
+                        >
+                          <Text
+                            style={[
+                              styles.tabText,
+                              resultTab === id && styles.tabTextActive,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                {showingExtras ? (
+                  <>
+                    <View style={styles.toggleRow}>
+                      <Text style={styles.toggleLabel}>
+                        {resultTab === 'doctags' ? 'DocTags' : 'Markdown'}
                       </Text>
-                      <Text style={styles.spanMeta}>
-                        #{index} {span.level} conf=
-                        {(span.confidence ?? 0).toFixed(2)} utf16=
-                        {span.utf16Start}-{span.utf16End} quad=
-                        {span.quad.map((n) => Math.round(n)).join(',')}
+                      <TouchableOpacity
+                        style={styles.copyChip}
+                        onPress={() => Clipboard.setString(extrasPayload)}
+                        accessibilityLabel={`Copy ${resultTab}`}
+                      >
+                        <Ionicons
+                          name="copy-outline"
+                          size={16}
+                          color="#007AFF"
+                        />
+                        <Text style={styles.copyChipLabel}>Copy</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.resultText}>
+                      {extrasPayload ||
+                        (resultTab === 'doctags'
+                          ? '(empty doctags)'
+                          : '(empty markdown)')}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.toggleRow}>
+                      <Text style={styles.toggleLabel}>
+                        Spans ({scopedSpans.length}
+                        {spansShowAllPages
+                          ? ` · ${spans.length} total`
+                          : ` · page ${resultFrameIndex + 1}`}
+                        )
                       </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                      <View style={styles.toggleTrailing}>
+                        {multiPage ? (
+                          <>
+                            <Text style={styles.sectionHint}>All pages</Text>
+                            <Switch
+                              value={spansShowAllPages}
+                              onValueChange={setSpansShowAllPages}
+                            />
+                          </>
+                        ) : null}
+                        <TouchableOpacity
+                          style={styles.copyChip}
+                          onPress={() =>
+                            Clipboard.setString(
+                              scopedSpanText.length > 0
+                                ? scopedSpanText
+                                : resultText
+                            )
+                          }
+                          accessibilityLabel="Copy all span text"
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={16}
+                            color="#007AFF"
+                          />
+                          <Text style={styles.copyChipLabel}>Copy all</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {scopedSpans.length > 0 ? (
+                      scopedSpans.map((span) => {
+                        const index = spans.indexOf(span);
+                        const active = selectedSpanIndex === index;
+                        const slice = spanSliceText(resultText, span);
+                        return (
+                          <View
+                            key={`list-${index}`}
+                            style={[
+                              styles.spanRow,
+                              active && styles.spanRowActive,
+                            ]}
+                          >
+                            <TouchableOpacity
+                              style={styles.spanRowBody}
+                              onPress={() => {
+                                setSelectedSpanIndex(active ? null : index);
+                                setResultFrameIndex(span.frameIndex);
+                              }}
+                            >
+                              <Text style={styles.resultText} numberOfLines={2}>
+                                {slice || '(empty slice)'}
+                              </Text>
+                              <Text style={styles.spanMeta}>
+                                #{index} frame {span.frameIndex + 1}{' '}
+                                {span.level} conf=
+                                {(span.confidence ?? 0).toFixed(2)} utf16=
+                                {span.utf16Start}-{span.utf16End} quad=
+                                {span.quad.map((n) => Math.round(n)).join(',')}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.spanCopyButton}
+                              onPress={() => Clipboard.setString(slice)}
+                              accessibilityLabel={`Copy span ${index}`}
+                              hitSlop={8}
+                            >
+                              <Ionicons
+                                name="copy-outline"
+                                size={18}
+                                color="#007AFF"
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <Text style={styles.resultText}>
+                        {resultText || '(empty text)'}
+                      </Text>
+                    )}
+                  </>
+                )}
               </View>
             ) : null}
           </View>

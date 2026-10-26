@@ -5,6 +5,7 @@
 #import <ImageIO/ImageIO.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include "ImageFrameEncoder.h"
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
 
@@ -62,12 +63,31 @@ NSDictionary *InfoDict(const sherpa_onnx::image::ImageBufferInfo &info) {
   return @{
     @"bufferId" : [NSString stringWithUTF8String:info.bufferId.c_str()],
     @"kind" : @"offlineImageBuffer",
-    @"state" : @"immutable",
+    @"state" : [NSString
+        stringWithUTF8String:sherpa_onnx::image::BufferStateName(info.state)],
     @"frameCount" : @(info.frameCount),
     @"totalBytes" : @(info.totalBytes),
     @"storageKind" :
         [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
   };
+}
+
+NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
+  NSMutableDictionary *dict = [@{
+    @"index" : @(info.index),
+    @"width" : @(info.width),
+    @"height" : @(info.height),
+    @"byteSize" : @(info.byteSize),
+    @"storageKind" :
+        [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
+  } mutableCopy];
+  if (info.pageNumber > 0) {
+    dict[@"pageNumber"] = @(info.pageNumber);
+  }
+  if (info.dpi > 0) {
+    dict[@"dpi"] = @(info.dpi);
+  }
+  return dict;
 }
 
 void EmitProgress(SherpaOnnx *bridge, NSString *operationId, int done, int total,
@@ -360,13 +380,28 @@ int MaxSideFromOptions(NSDictionary *options) {
     reject(@"ERR_IMAGE_BUFFER_NOT_FOUND", @"Frame not found", nil);
     return;
   }
-  resolve(@{
-    @"index" : @(info.index),
-    @"width" : @(info.width),
-    @"height" : @(info.height),
-    @"byteSize" : @(info.byteSize),
-    @"storageKind" :
-        [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
+  resolve(FrameInfoDict(info));
+}
+
+- (void)ensureOfflineImageBufferFrame:(NSString *)bufferId
+                           frameIndex:(double)frameIndex
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    auto ensured = ImageRegistry::Instance().EnsureFrame(
+        [bufferId UTF8String], (int)frameIndex);
+    if (!ensured.ok) {
+      NSString *code = ensured.errorCode.empty()
+                           ? @"ERR_IMAGE_INTERNAL"
+                           : [NSString stringWithUTF8String:ensured.errorCode.c_str()];
+      NSString *msg = ensured.errorMessage.empty()
+                          ? @"ensure frame failed"
+                          : [NSString stringWithUTF8String:ensured.errorMessage.c_str()];
+      reject(code, msg, nil);
+      return;
+    }
+    resolve(FrameInfoDict(ensured.info));
   });
 }
 
@@ -383,6 +418,58 @@ int MaxSideFromOptions(NSDictionary *options) {
                                 reject:(RCTPromiseRejectBlock)reject {
   SetCancel(operationId, true);
   resolve(nil);
+}
+
+- (void)exportOfflineImageBufferFrame:(NSString *)bufferId
+                           frameIndex:(double)frameIndex
+                          destination:(NSDictionary *)destination
+                              options:(NSDictionary *)options
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+
+  NSString *formatStr = [(options[@"format"] ?: @"jpeg") lowercaseString];
+  int quality = options[@"quality"] != nil ? [options[@"quality"] intValue] : 85;
+  int maxSide = options[@"maxSide"] != nil ? [options[@"maxSide"] intValue] : 0;
+
+  sherpa_onnx::image::ExportFormat format = sherpa_onnx::image::ExportFormat::Jpeg;
+  if (!sherpa_onnx::image::ParseExportFormat([formatStr UTF8String], &format)) {
+    reject(@"ERR_IMAGE_INVALID_ARGUMENT", @"unsupported export format", nil);
+    return;
+  }
+
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOWriteHandle *wh =
+      [FileIOResolver resolveDestination:destination
+                               overwrite:YES
+                  createParentDirectories:YES
+                                    error:&errCode
+                                  message:&errMsg];
+  if (!wh || wh.filePath.length == 0) {
+    reject(errCode ?: @"ERR_IMAGE_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileDestination", nil);
+    return;
+  }
+
+  sherpa_onnx::image::ExportOptions opts;
+  opts.format = format;
+  opts.quality = quality;
+  opts.maxSide = maxSide;
+
+  const auto result = sherpa_onnx::image::ExportFrameToFile(
+      [bufferId UTF8String], (int)frameIndex, [wh.filePath UTF8String], opts);
+  if (!result.ok) {
+    [wh cleanup];
+    [[NSFileManager defaultManager] removeItemAtPath:wh.filePath error:nil];
+    reject([NSString stringWithUTF8String:result.errorCode.c_str()],
+           [NSString stringWithUTF8String:result.errorMessage.c_str()], nil);
+    return;
+  }
+
+  NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
+  [wh cleanup];
+  resolve(@{ @"outputKind" : @"fs", @"outputPath" : resultPath ?: wh.filePath });
 }
 
 @end

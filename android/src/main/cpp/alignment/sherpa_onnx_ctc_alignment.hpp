@@ -74,7 +74,9 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
     const std::string& vocab_json_utf8,
     const float* samples,
     size_t sample_count,
-    int32_t source_sample_rate);
+    int32_t source_sample_rate,
+    const std::string& provider = "",
+    int32_t num_threads = 0);
 
 }  // namespace ctc_alignment
 }  // namespace sherpa_onnx

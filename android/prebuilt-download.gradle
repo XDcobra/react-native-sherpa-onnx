@@ -10,11 +10,12 @@
 //   (5) ERROR           — build failure if artifact still missing
 // When sherpaOnnxDisableFfmpeg=true (gradle.properties), FFmpeg is not required; see docs/disable-ffmpeg.md.
 // When sherpaOnnxDisableLibarchive=true (gradle.properties), libarchive is not required; see docs/disable-libarchive.md.
-// When sherpaOnnxDisableLibwebp=true (gradle.properties), libwebp is not required (ImageBuffer WebP decode disabled).
+// When sherpaOnnxEnableLibwebp=false (default), libwebp is not required (ImageBuffer WebP decode/export disabled).
 
 def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
 def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
-def sherpaOnnxDisableLibwebp = (project.findProperty("sherpaOnnxDisableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
+// Opt-in (default false). When false, skip all libwebp download/link requirements.
+def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
 // Opt-in (default false). When false, skip all PDFium download/link requirements.
 def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
 
@@ -510,9 +511,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     // =====================================================================
     // libwebp: JNI (.so) + C headers (ImageBuffer WebP decode)
     // =====================================================================
-    if (sherpaOnnxDisableLibwebp) {
+    if (!sherpaOnnxEnableLibwebp) {
       libwebpResolved = true
-      logPrebuilt("libwebp", "skipped", "disabled", "sherpaOnnxDisableLibwebp=true")
+      logPrebuilt("libwebp", "skipped", "disabled", "sherpaOnnxEnableLibwebp=false (default)")
     } else if (libwebpNeedsUpdate) {
       // Stage 1: THIRD_PARTY (jni/<abi>/ or <abi>/lib/)
       def tpHdr = new File(thirdPartyLibwebpDir, "include/webp/decode.h").exists()
@@ -798,7 +799,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     if (!repo) {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && !ffmpegResolved
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
-      def needLibwebp = !sherpaOnnxDisableLibwebp && !libwebpResolved
+      def needLibwebp = sherpaOnnxEnableLibwebp && !libwebpResolved
       def needPdfium = sherpaOnnxEnablePdfium && !pdfiumResolved
       def needSherpa = !sherpaResolved
       if (needFfmpeg || needLibarchive || needLibwebp || needPdfium || needSherpa) {
@@ -809,7 +810,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
           "sherpaOnnxDisableFfmpeg=${sherpaOnnxDisableFfmpeg}",
           "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
-          "sherpaOnnxDisableLibwebp=${sherpaOnnxDisableLibwebp}",
+          "sherpaOnnxEnableLibwebp=${sherpaOnnxEnableLibwebp}",
           "sherpaOnnxEnablePdfium=${sherpaOnnxEnablePdfium}",
           "sherpaResolved=${sherpaResolved}",
           "ffmpegResolved=${ffmpegResolved}",
@@ -823,7 +824,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / libwebp / pdfium), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
-          (sherpaOnnxDisableLibwebp ? "(libwebp disabled via sherpaOnnxDisableLibwebp=true.) " : "") +
+          (!sherpaOnnxEnableLibwebp ? "(libwebp disabled via sherpaOnnxEnableLibwebp=false.) " : "") +
           (!sherpaOnnxEnablePdfium ? "(pdfium disabled via sherpaOnnxEnablePdfium=false.) " : "") +
           "Diagnostics: [${diag}]"
         )
@@ -833,7 +834,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def willUseGithub = !sherpaResolved ||
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
         (!sherpaOnnxDisableLibarchive && !libarchiveResolved) ||
-        (!sherpaOnnxDisableLibwebp && !libwebpResolved) ||
+        (sherpaOnnxEnableLibwebp && !libwebpResolved) ||
         (sherpaOnnxEnablePdfium && !pdfiumResolved)
     if (willUseGithub) {
       println "[prebuilt] GITHUB_RELEASE repo=${repo}"
@@ -904,7 +905,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       logPrebuilt("libarchive", "native", "GITHUB_RELEASE", tag)
     }
 
-    if (!sherpaOnnxDisableLibwebp && !libwebpResolved) {
+    if (sherpaOnnxEnableLibwebp && !libwebpResolved) {
       def tagFile = file("${project.projectDir.parent}/third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
       if (!tag) throw new RuntimeException("Missing or empty third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG")
@@ -1044,11 +1045,11 @@ project.tasks.register("checkJniLibs") {
           }
         }
       }
-      if (!sherpaOnnxDisableLibwebp) {
+      if (sherpaOnnxEnableLibwebp) {
         requiredLibwebpSoFiles.each { soName ->
           def soFile = new File(dir, soName)
           if (!soFile.exists()) {
-            throw new RuntimeException("Missing required libwebp library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libwebp resolves. Or set sherpaOnnxDisableLibwebp=true in gradle.properties.")
+            throw new RuntimeException("Missing required libwebp library '${soName}' for ABI ${abi}. sherpaOnnxEnableLibwebp=true requires prebuilts (see third_party/libwebp_prebuilt/README.md).")
           }
         }
       }

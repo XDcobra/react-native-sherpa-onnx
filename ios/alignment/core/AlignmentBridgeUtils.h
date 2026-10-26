@@ -4,9 +4,11 @@
 @class NSString;
 @class NSDictionary;
 @class NSArray;
+@class NSNumber;
 #elif defined(__cplusplus)
 class NSString;
 class NSDictionary;
+class NSNumber;
 #else
 typedef struct NSString NSString;
 typedef struct NSDictionary NSDictionary;
@@ -36,6 +38,9 @@ int32_t ParseEstimatedSampleRate(NSDictionary *options, int32_t fallbackSampleRa
 std::string ParseAlignmentModelPath(NSDictionary *options);
 /** Optional sidecar vocab.json path; empty when absent. */
 std::string ParseAlignmentVocabPath(NSDictionary *options);
+std::string ParseAlignmentProvider(NSDictionary *options);
+int32_t ParseAlignmentNumThreads(NSDictionary *options);
+int32_t ParseOptionalNumThreads(NSNumber *numThreads);
 PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm);
 std::string ParseSegmentationBufferId(NSDictionary *options);
 std::string ParseSegmentationSource(NSDictionary *options);

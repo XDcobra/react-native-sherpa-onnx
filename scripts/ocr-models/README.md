@@ -93,11 +93,14 @@ No `det.onnx`, `rec.onnx`, `cls.onnx`, or `rec_inference.yml`, and no nested `on
 
 Packs:
 
-| ID | Repo (`hf_repo`) | Weights | Languages (hints) |
+| ID | Repo (`hf_repo`) | Hub files (flattened to canonical names) | Languages (hints) |
 | --- | --- | --- | --- |
-| `docvlm-granite-258m` | `onnx-community/granite-docling-258M-ONNX` | Unsuffixed fp32 graphs under `onnx/` | `en` plus experimental `ja`, `ar`, `zh` |
+| `docvlm-granite-258m-fp32` | `onnx-community/granite-docling-258M-ONNX` | Unsuffixed fp32 graphs | `en` plus experimental `ja`, `ar`, `zh` |
+| `docvlm-granite-258m-q8` | same | `*_quantized` graphs (technique is q8, not the Hub filename) | same |
+| `docvlm-granite-258m-fp16` | same | `*_fp16` graphs | same |
+| `docvlm-granite-258m-q4f16` | same | `*_q4f16` graphs | same |
 
-`en` is the only non-experimental language on the IBM Granite Docling card. Japanese, Arabic, and Chinese are included because IBM names them as experimental. Uncompressed weights are about 1.18 GiB. The `.tar.bz2` is about 420 MiB. Quantized siblings (`q4`, `q4f16`, `fp16`, `int8`, and the rest) are not in this release.
+Each archive is self-contained (vision + embed + decoder + tokenizer + manifest). Hub graphs keep suffixed `_data` locations; the packer rewrites them to the eight canonical names via `rewrite_onnx_external_location.py`. Hub `_int8` is not a pack: it has no merged decoder. `en` is the only non-experimental language on the IBM Granite Docling card.
 
 ### `checksum.txt`
 
@@ -140,5 +143,5 @@ exists on the release, that id is skipped.
 ## Host GTests (PpocrBackend / DoctrBackend / DocVlmBackend)
 
 - `ppocr_host_test` and `doctr_host_test` run in `.github/workflows/test-ocr-host.yml` with their packs downloaded.
-- `doc_vlm_host_test` unit tests (grid math, DocTags, `Family`, empty extras) run in that same job **without** the granite pack. Tokenizer, prompt, and `DocVlmSmoke.EnHello` skip until `DOCVLM_MODEL_DIR` or `build/ocr-models/docvlm-granite-258m` exists.
+- `doc_vlm_host_test` unit tests (grid math, DocTags, `Family`, empty extras) run in that same job **without** the granite pack. Tokenizer, prompt, and `DocVlmSmoke.EnHello` skip until `DOCVLM_MODEL_DIR` or `build/ocr-models/docvlm-granite-258m-fp32` exists.
 - The smoke is not on pull requests. Dispatch the workflow with `run_doc_vlm_golden`, or unpack locally with the `curl` / `tar` already printed by the skip message.

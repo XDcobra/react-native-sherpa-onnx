@@ -442,7 +442,7 @@ See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [segmentbuffer-strea
 - **Android**:
   - Worker thread runs in `DiarizationStreamingPipelineWorker.kt`.
   - Audio drained from `LiveEntry` cursor $\rightarrow$ JNI $\rightarrow$ `StreamingDiarizationWrapper` $\rightarrow$ `LiveSegmentEntry.appendSegment(...)`.
-  - Runs on ONNX Runtime mobile library with CPU or NNAPI/QNN providers.
+  - Runs on ONNX Runtime mobile library with CPU, NNAPI, XNNPACK, or CoreML providers.
 - **iOS**:
   - Worker thread runs in `DiarizationStreamingPipelineWorker.mm`.
   - Audio drained from `PaLiveEntry` cursor $\rightarrow$ C++ `StreamingDiarizationWrapper` $\rightarrow$ `seg_live_append_segment(...)`.

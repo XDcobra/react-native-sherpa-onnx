@@ -77,11 +77,13 @@ if(SHERPA_ONNX_DISABLE_LIBARCHIVE)
     message(STATUS "libarchive disabled (SHERPA_ONNX_DISABLE_LIBARCHIVE=ON). extractTarBz2/cancelExtractTarBz2 will return an error at runtime.")
 endif()
 
-# Optional: disable libwebp (gradle.properties: sherpaOnnxDisableLibwebp=true). ImageBuffer WebP decode requires it.
-set(USE_LIBWEBP ON)
-if(SHERPA_ONNX_DISABLE_LIBWEBP)
-    set(USE_LIBWEBP OFF)
-    message(STATUS "libwebp disabled (SHERPA_ONNX_DISABLE_LIBWEBP=ON). WebP decode will return ERR_IMAGE_FORMAT_UNSUPPORTED at runtime.")
+# Optional: enable libwebp (gradle.properties: sherpaOnnxEnableLibwebp=true). Default OFF.
+set(USE_LIBWEBP OFF)
+if(SHERPA_ONNX_ENABLE_LIBWEBP)
+    set(USE_LIBWEBP ON)
+    message(STATUS "libwebp enabled (SHERPA_ONNX_ENABLE_LIBWEBP=ON).")
+else()
+    message(STATUS "libwebp disabled (default). Set sherpaOnnxEnableLibwebp=true to link WebP decode/encode.")
 endif()
 
 # Optional: enable PDFium (gradle.properties: sherpaOnnxEnablePdfium=true). Default OFF.
@@ -95,6 +97,7 @@ endif()
 
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
+    ort/ApplyOrtProvider.cpp
     alignment/sherpa_onnx_ctc_alignment.cpp
     alignment/sherpa_onnx_alignment_engine.cpp
     jni/alignment/sherpa-onnx-alignment-jni.cpp
@@ -197,6 +200,7 @@ set(SOURCES
     crypto/sha256.cpp
     image/ImageMmapThreshold.cpp
     image/ImageRegistry.cpp
+    image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
     ocr/OcrFactory.cpp
@@ -214,6 +218,7 @@ set(SOURCES
     ocr/doctr/DoctrRecDecode.cpp
     ocr/doc_vlm/DocVlmBackend.cpp
     ocr/doc_vlm/DocVlmDocTags.cpp
+    ocr/doc_vlm/DocVlmDocTagsPrefix.cpp
     ocr/doc_vlm/DocVlmImageOps.cpp
     ocr/doc_vlm/DocVlmManifest.cpp
     ocr/doc_vlm/DocVlmPrompt.cpp
@@ -221,6 +226,8 @@ set(SOURCES
     jni/ocr/sherpa-onnx-ocr-jni.cpp
     pdf/PdfDocument.cpp
     pdf/PdfTextLayerExtractor.cpp
+    pdf/PdfPageRasterizer.cpp
+    pdf/PdfLazySession.cpp
     jni/pdf/sherpa-onnx-pdf-jni.cpp
 )
 
@@ -294,8 +301,8 @@ if(USE_LIBWEBP_PREBUILT AND LIBWEBP_INCLUDE_DIR)
     message(STATUS "libwebp: using prebuilt (libs: ${LIBWEBP_LIB_DIR}, include: ${LIBWEBP_INCLUDE_DIR})")
 else()
     message(WARNING "libwebp prebuilt not found for ${ANDROID_ABI}. "
-                    "Run: (cd third_party/libwebp_prebuilt && ./build_libwebp_android.sh) "
-                    "or let Gradle resolve Maven/GitHub release. Or set SHERPA_ONNX_DISABLE_LIBWEBP=ON.")
+                    "sherpaOnnxEnableLibwebp=true requires prebuilts "
+                    "(third_party/libwebp_prebuilt or Maven/GitHub).")
 endif()
 endif(USE_LIBWEBP)
 
@@ -493,7 +500,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

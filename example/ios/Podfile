@@ -1,4 +1,7 @@
 ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+# Example enables libwebp for ImageBuffer WebP decode/export.
+# Requires ios/Frameworks/libwebp.xcframework (or pod install after prebuilts are present).
+ENV['SHERPA_ONNX_ENABLE_LIBWEBP'] = '1'
 # Example enables PDFium text-layer extract (react-native-sherpa-onnx/pdf).
 # Requires ios/Frameworks/pdfium.xcframework (or pod install after prebuilts are present).
 ENV['SHERPA_ONNX_ENABLE_PDFIUM'] = '1'

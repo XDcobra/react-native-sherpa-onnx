@@ -1,6 +1,8 @@
+#include "ImageFrameEncoder.h"
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
 
+#include <android/bitmap.h>
 #include <android/log.h>
 #include <jni.h>
 
@@ -89,7 +91,8 @@ jobject InfoToMap(JNIEnv* env, const sherpa_onnx::image::ImageBufferInfo& info) 
   if (!map) return nullptr;
   PutString(env, map, put, "bufferId", info.bufferId);
   PutString(env, map, put, "kind", "offlineImageBuffer");
-  PutString(env, map, put, "state", "immutable");
+  PutString(env, map, put, "state",
+            sherpa_onnx::image::BufferStateName(info.state));
   PutInt(env, map, put, "frameCount", info.frameCount);
   PutLong(env, map, put, "totalBytes", info.totalBytes);
   PutString(env, map, put, "storageKind",
@@ -273,6 +276,12 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   PutLong(env, map, put, "byteSize", info.byteSize);
   PutString(env, map, put, "storageKind",
             sherpa_onnx::image::StorageKindName(info.storageKind));
+  if (info.pageNumber > 0) {
+    PutInt(env, map, put, "pageNumber", info.pageNumber);
+  }
+  if (info.dpi > 0) {
+    PutInt(env, map, put, "dpi", info.dpi);
+  }
   return map;
 }
 
@@ -296,6 +305,150 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeDetectFormat(
       reinterpret_cast<const uint8_t*>(bytes), static_cast<size_t>(len));
   env->ReleaseByteArrayElements(jBytes, bytes, JNI_ABORT);
   return env->NewStringUTF(sherpa_onnx::image::DecodeFormatName(fmt));
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
+    JNIEnv* env, jclass, jstring jBufferId, jint frameIndex, jstring jOutPath,
+    jstring jFormat, jint quality, jint maxSide) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
+
+  const std::string bufferId = JstringToStd(env, jBufferId);
+  const std::string outPath = JstringToStd(env, jOutPath);
+  const std::string formatName = JstringToStd(env, jFormat);
+
+  sherpa_onnx::image::ExportFormat format = sherpa_onnx::image::ExportFormat::Jpeg;
+  if (!sherpa_onnx::image::ParseExportFormat(formatName, &format)) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", "ERR_IMAGE_INVALID_ARGUMENT");
+    PutString(env, map, put, "errorMessage", "unsupported export format");
+    return map;
+  }
+
+  sherpa_onnx::image::ExportOptions opts;
+  opts.format = format;
+  opts.quality = quality;
+  opts.maxSide = maxSide;
+
+  const auto result = sherpa_onnx::image::ExportFrameToFile(
+      bufferId, frameIndex, outPath, opts);
+  PutBool(env, map, put, "ok", result.ok ? JNI_TRUE : JNI_FALSE);
+  if (!result.ok) {
+    PutString(env, map, put, "errorCode", result.errorCode);
+    PutString(env, map, put, "errorMessage", result.errorMessage);
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
+    JNIEnv* env, jclass, jstring jBufferId, jint frameIndex) {
+  auto ensured = sherpa_onnx::image::ImageRegistry::Instance().EnsureFrame(
+      JstringToStd(env, jBufferId), frameIndex);
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
+  PutBool(env, map, put, "ok", ensured.ok ? JNI_TRUE : JNI_FALSE);
+  if (!ensured.ok) {
+    PutString(env, map, put, "errorCode", ensured.errorCode);
+    PutString(env, map, put, "errorMessage", ensured.errorMessage);
+    return map;
+  }
+  PutInt(env, map, put, "index", ensured.info.index);
+  PutInt(env, map, put, "width", ensured.info.width);
+  PutInt(env, map, put, "height", ensured.info.height);
+  PutLong(env, map, put, "byteSize", ensured.info.byteSize);
+  PutString(env, map, put, "storageKind",
+            sherpa_onnx::image::StorageKindName(ensured.info.storageKind));
+  if (ensured.info.pageNumber > 0) {
+    PutInt(env, map, put, "pageNumber", ensured.info.pageNumber);
+  }
+  if (ensured.info.dpi > 0) {
+    PutInt(env, map, put, "dpi", ensured.info.dpi);
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFrameBitmap(
+    JNIEnv* env, jclass, jstring jBufferId, jint frameIndex, jint maxSide) {
+  sherpa_onnx::image::RgbFrame scratch;
+  const uint8_t* rgb = nullptr;
+  int width = 0;
+  int height = 0;
+  if (!sherpa_onnx::image::ResolveFrameRgb(JstringToStd(env, jBufferId),
+                                           frameIndex, maxSide, scratch, &rgb,
+                                           &width, &height) ||
+      !rgb || width <= 0 || height <= 0) {
+    return nullptr;
+  }
+
+  jclass bitmapClass = env->FindClass("android/graphics/Bitmap");
+  if (!bitmapClass) return nullptr;
+  jclass configClass = env->FindClass("android/graphics/Bitmap$Config");
+  if (!configClass) {
+    env->DeleteLocalRef(bitmapClass);
+    return nullptr;
+  }
+  jfieldID argbField = env->GetStaticFieldID(
+      configClass, "ARGB_8888", "Landroid/graphics/Bitmap$Config;");
+  jmethodID createBitmap = env->GetStaticMethodID(
+      bitmapClass, "createBitmap",
+      "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;");
+  if (!argbField || !createBitmap) {
+    env->DeleteLocalRef(configClass);
+    env->DeleteLocalRef(bitmapClass);
+    return nullptr;
+  }
+  jobject config = env->GetStaticObjectField(configClass, argbField);
+  env->DeleteLocalRef(configClass);
+  if (!config) {
+    env->DeleteLocalRef(bitmapClass);
+    return nullptr;
+  }
+
+  jobject bitmap = env->CallStaticObjectMethod(bitmapClass, createBitmap, width,
+                                               height, config);
+  env->DeleteLocalRef(config);
+  env->DeleteLocalRef(bitmapClass);
+  if (!bitmap || env->ExceptionCheck()) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return nullptr;
+  }
+
+  AndroidBitmapInfo info;
+  if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
+      info.format != ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+      static_cast<int>(info.width) != width ||
+      static_cast<int>(info.height) != height) {
+    return nullptr;
+  }
+
+  void* pixels = nullptr;
+  if (AndroidBitmap_lockPixels(env, bitmap, &pixels) !=
+          ANDROID_BITMAP_RESULT_SUCCESS ||
+      !pixels) {
+    return nullptr;
+  }
+
+  // Android Bitmap ARGB_8888 is stored as RGBA byte order on little-endian
+  // (R,G,B,A in memory). Fill row-by-row respecting stride.
+  auto* dstBase = static_cast<uint8_t*>(pixels);
+  for (int y = 0; y < height; ++y) {
+    uint8_t* row = dstBase + static_cast<size_t>(y) * info.stride;
+    const uint8_t* src =
+        rgb + static_cast<size_t>(y) * static_cast<size_t>(width) * 3u;
+    for (int x = 0; x < width; ++x) {
+      row[x * 4 + 0] = src[x * 3 + 0];
+      row[x * 4 + 1] = src[x * 3 + 1];
+      row[x * 4 + 2] = src[x * 3 + 2];
+      row[x * 4 + 3] = 255;
+    }
+  }
+  AndroidBitmap_unlockPixels(env, bitmap);
+  return bitmap;
 }
 
 }  // extern "C"
