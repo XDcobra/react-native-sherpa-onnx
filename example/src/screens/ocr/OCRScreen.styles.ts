@@ -263,6 +263,26 @@ export const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 10,
   },
+  tabRowInline: {
+    flexDirection: 'row',
+    gap: 8,
+    flex: 1,
+  },
+  copyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#E8F1FF',
+    flexShrink: 0,
+  },
+  copyChipLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
+  },
   tab: {
     flex: 1,
     paddingVertical: 10,
@@ -282,9 +302,19 @@ export const styles = StyleSheet.create({
     color: '#007AFF',
   },
   spanRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#e2e8f0',
+  },
+  spanRowBody: {
+    flex: 1,
+  },
+  spanCopyButton: {
+    padding: 6,
+    marginTop: 2,
   },
   spanRowActive: {
     backgroundColor: '#fff1f2',

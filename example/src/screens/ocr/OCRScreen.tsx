@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   assertOcrCustomConfig,
   createOCR,
@@ -88,76 +89,15 @@ function utf16Slice(text: string, start: number, end: number): string {
   return text.slice(start, end);
 }
 
-function textForFrame(
-  text: string,
-  spans: TextSpatialSpan[],
-  frameIndex: number
-): string {
-  return spans
-    .filter((span) => span.frameIndex === frameIndex)
-    .map((span) => utf16Slice(text, span.utf16Start, span.utf16End))
-    .filter((slice) => slice.length > 0)
-    .join('\n');
+function spanSliceText(text: string, span: TextSpatialSpan): string {
+  return utf16Slice(text, span.utf16Start, span.utf16End);
 }
 
-function HighlightedResultText({
-  fullText,
-  spans,
-  selectedIndex,
-  pageOnly,
-  frameIndex,
-}: {
-  fullText: string;
-  spans: TextSpatialSpan[];
-  selectedIndex: number | null;
-  pageOnly: boolean;
-  frameIndex: number;
-}) {
-  if (pageOnly) {
-    const pageSpans = spans
-      .map((span, index) => ({ span, index }))
-      .filter(({ span }) => span.frameIndex === frameIndex);
-    if (pageSpans.length === 0) {
-      return <Text style={styles.resultText}>(empty text)</Text>;
-    }
-    return (
-      <Text style={styles.resultText}>
-        {pageSpans.map(({ span, index }, i) => {
-          const slice = utf16Slice(fullText, span.utf16Start, span.utf16End);
-          return (
-            <Text key={index}>
-              {i > 0 ? '\n' : ''}
-              <Text
-                style={
-                  selectedIndex === index
-                    ? styles.resultTextHighlight
-                    : undefined
-                }
-              >
-                {slice}
-              </Text>
-            </Text>
-          );
-        })}
-      </Text>
-    );
-  }
-
-  const selected = selectedIndex != null ? spans[selectedIndex] ?? null : null;
-  if (!selected || fullText.length === 0) {
-    return <Text style={styles.resultText}>{fullText || '(empty text)'}</Text>;
-  }
-  const start = Math.max(0, selected.utf16Start);
-  const end = Math.min(fullText.length, selected.utf16End);
-  return (
-    <Text style={styles.resultText}>
-      {fullText.slice(0, start)}
-      <Text style={styles.resultTextHighlight}>
-        {fullText.slice(start, end)}
-      </Text>
-      {fullText.slice(end)}
-    </Text>
-  );
+function joinSpanTexts(text: string, list: TextSpatialSpan[]): string {
+  return list
+    .map((span) => spanSliceText(text, span))
+    .filter((slice) => slice.length > 0)
+    .join('\n');
 }
 
 function clampUnclipRatio(value: number): number {
@@ -221,10 +161,9 @@ export default function OCRScreen() {
     null
   );
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
-  const [textShowAllPages, setTextShowAllPages] = useState(false);
   const [spansShowAllPages, setSpansShowAllPages] = useState(false);
-  const [resultTab, setResultTab] = useState<'text' | 'markdown' | 'doctags'>(
-    'text'
+  const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'doctags'>(
+    'spans'
   );
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
@@ -522,9 +461,8 @@ export default function OCRScreen() {
     setLastMs(null);
     setProgressLabel(null);
     setProgressPercent(null);
-    setResultTab('text');
+    setResultTab('spans');
     setResultFrameIndex(0);
-    setTextShowAllPages(false);
     setSpansShowAllPages(false);
     const id = resultTextBufferIdRef.current;
     resultTextBufferIdRef.current = null;
@@ -723,9 +661,7 @@ export default function OCRScreen() {
       setResultOrigin('ocr');
       setSpans(spatial);
       setLastMs(Date.now() - t0);
-      if (page.family === 'doc_vlm' && page.markdown.trim().length > 0) {
-        setResultTab('markdown');
-      }
+      setResultTab('spans');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await releaseResultTextBuffer();
@@ -765,15 +701,18 @@ export default function OCRScreen() {
   const scopedSpans = spansShowAllPages
     ? spans
     : spans.filter((span) => span.frameIndex === resultFrameIndex);
-  const scopedText = textShowAllPages
-    ? resultText
-    : textForFrame(resultText, spans, resultFrameIndex);
+  const scopedSpanText = joinSpanTexts(resultText, scopedSpans);
 
   const docVlmExtras = resultMeta?.family === 'doc_vlm' ? resultMeta : null;
   const showDocVlmTabs =
-    textShowAllPages &&
     docVlmExtras != null &&
     (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
+  const extrasPayload =
+    resultTab === 'doctags'
+      ? docVlmExtras?.doctags ?? ''
+      : docVlmExtras?.markdown ?? '';
+  const showingExtras =
+    showDocVlmTabs && (resultTab === 'markdown' || resultTab === 'doctags');
 
   const showPdfPipeline = pdfSelection != null;
   const showRasterStep = pdfExtractStatus === 'noTextLayer';
@@ -1224,11 +1163,12 @@ export default function OCRScreen() {
                         backgroundColor: 'rgba(52, 199, 89, 0.28)',
                       },
                     }}
-                    onSpanPress={(event) =>
+                    onSpanPress={(event) => {
+                      setResultTab('spans');
                       setSelectedSpanIndex(
                         selectedSpanIndex === event.index ? null : event.index
-                      )
-                    }
+                      );
+                    }}
                     maxSide={1280}
                     style={styles.resultPreview}
                   />
@@ -1243,7 +1183,7 @@ export default function OCRScreen() {
                 )}
                 {overlayEnabled && resultTextBufferId && spans.length > 0 ? (
                   <Text style={styles.sectionHint}>
-                    Tap a box to highlight that span in the text below. Blue =
+                    Tap a box to highlight that span in the list below. Blue =
                     ocr, green = textLayer.
                   </Text>
                 ) : null}
@@ -1290,141 +1230,159 @@ export default function OCRScreen() {
               </View>
             ) : null}
 
-            {showDocVlmTabs ? (
-              <View style={styles.tabRow}>
-                {(
-                  [
-                    ['text', 'Plain'],
-                    ['markdown', 'Markdown'],
-                    ['doctags', 'DocTags'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <TouchableOpacity
-                    key={id}
-                    style={[styles.tab, resultTab === id && styles.tabActive]}
-                    onPress={() => setResultTab(id)}
-                  >
-                    <Text
-                      style={[
-                        styles.tabText,
-                        resultTab === id && styles.tabTextActive,
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : null}
-
-            <View style={styles.card}>
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>
-                  {textShowAllPages
-                    ? 'Text · all pages'
-                    : `Text · page ${resultFrameIndex + 1}`}
-                </Text>
-                {multiPage ? (
-                  <View style={styles.toggleTrailing}>
-                    <Text style={styles.sectionHint}>All pages</Text>
-                    <Switch
-                      value={textShowAllPages}
-                      onValueChange={(on) => {
-                        setTextShowAllPages(on);
-                        if (!on) {
-                          setResultTab('text');
-                        }
-                      }}
-                    />
+            {spans.length > 0 || resultText.length > 0 || showDocVlmTabs ? (
+              <View style={styles.card}>
+                {showDocVlmTabs ? (
+                  <View style={styles.toggleRow}>
+                    <View style={styles.tabRowInline}>
+                      {(
+                        [
+                          ['spans', 'Spans'],
+                          ['markdown', 'Markdown'],
+                          ['doctags', 'DocTags'],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <TouchableOpacity
+                          key={id}
+                          style={[
+                            styles.tab,
+                            resultTab === id && styles.tabActive,
+                          ]}
+                          onPress={() => setResultTab(id)}
+                        >
+                          <Text
+                            style={[
+                              styles.tabText,
+                              resultTab === id && styles.tabTextActive,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
                 ) : null}
-              </View>
-              {textShowAllPages && resultTab === 'markdown' && docVlmExtras ? (
-                <Text style={styles.resultText}>
-                  {docVlmExtras.markdown || '(empty markdown)'}
-                </Text>
-              ) : textShowAllPages &&
-                resultTab === 'doctags' &&
-                docVlmExtras ? (
-                <Text style={styles.resultText}>
-                  {docVlmExtras.doctags || '(empty doctags)'}
-                </Text>
-              ) : (
-                <HighlightedResultText
-                  fullText={resultText}
-                  spans={spans}
-                  selectedIndex={selectedSpanIndex}
-                  pageOnly={!textShowAllPages}
-                  frameIndex={resultFrameIndex}
-                />
-              )}
-              <TouchableOpacity
-                style={[styles.primaryButton, { marginTop: 12 }]}
-                onPress={() => {
-                  const payload =
-                    textShowAllPages && resultTab === 'markdown' && docVlmExtras
-                      ? docVlmExtras.markdown
-                      : textShowAllPages &&
-                        resultTab === 'doctags' &&
-                        docVlmExtras
-                      ? docVlmExtras.doctags
-                      : scopedText;
-                  Clipboard.setString(payload);
-                }}
-              >
-                <Text style={styles.primaryButtonText}>Copy</Text>
-              </TouchableOpacity>
-            </View>
 
-            {spans.length > 0 ? (
-              <View style={styles.card}>
-                <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>
-                    Spans ({scopedSpans.length}
-                    {spansShowAllPages
-                      ? ` · ${spans.length} total`
-                      : ` · page ${resultFrameIndex + 1}`}
-                    )
-                  </Text>
-                  {multiPage ? (
-                    <View style={styles.toggleTrailing}>
-                      <Text style={styles.sectionHint}>All pages</Text>
-                      <Switch
-                        value={spansShowAllPages}
-                        onValueChange={setSpansShowAllPages}
-                      />
+                {showingExtras ? (
+                  <>
+                    <View style={styles.toggleRow}>
+                      <Text style={styles.toggleLabel}>
+                        {resultTab === 'doctags' ? 'DocTags' : 'Markdown'}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.copyChip}
+                        onPress={() => Clipboard.setString(extrasPayload)}
+                        accessibilityLabel={`Copy ${resultTab}`}
+                      >
+                        <Ionicons
+                          name="copy-outline"
+                          size={16}
+                          color="#007AFF"
+                        />
+                        <Text style={styles.copyChipLabel}>Copy</Text>
+                      </TouchableOpacity>
                     </View>
-                  ) : null}
-                </View>
-                {scopedSpans.map((span) => {
-                  const index = spans.indexOf(span);
-                  const active = selectedSpanIndex === index;
-                  const slice = utf16Slice(
-                    resultText,
-                    span.utf16Start,
-                    span.utf16End
-                  );
-                  return (
-                    <TouchableOpacity
-                      key={`list-${index}`}
-                      style={[styles.spanRow, active && styles.spanRowActive]}
-                      onPress={() => {
-                        setSelectedSpanIndex(active ? null : index);
-                        setResultFrameIndex(span.frameIndex);
-                      }}
-                    >
-                      <Text style={styles.resultText} numberOfLines={2}>
-                        {slice || '(empty slice)'}
+                    <Text style={styles.resultText}>
+                      {extrasPayload ||
+                        (resultTab === 'doctags'
+                          ? '(empty doctags)'
+                          : '(empty markdown)')}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.toggleRow}>
+                      <Text style={styles.toggleLabel}>
+                        Spans ({scopedSpans.length}
+                        {spansShowAllPages
+                          ? ` · ${spans.length} total`
+                          : ` · page ${resultFrameIndex + 1}`}
+                        )
                       </Text>
-                      <Text style={styles.spanMeta}>
-                        #{index} frame {span.frameIndex + 1} {span.level} conf=
-                        {(span.confidence ?? 0).toFixed(2)} utf16=
-                        {span.utf16Start}-{span.utf16End} quad=
-                        {span.quad.map((n) => Math.round(n)).join(',')}
+                      <View style={styles.toggleTrailing}>
+                        {multiPage ? (
+                          <>
+                            <Text style={styles.sectionHint}>All pages</Text>
+                            <Switch
+                              value={spansShowAllPages}
+                              onValueChange={setSpansShowAllPages}
+                            />
+                          </>
+                        ) : null}
+                        <TouchableOpacity
+                          style={styles.copyChip}
+                          onPress={() =>
+                            Clipboard.setString(
+                              scopedSpanText.length > 0
+                                ? scopedSpanText
+                                : resultText
+                            )
+                          }
+                          accessibilityLabel="Copy all span text"
+                        >
+                          <Ionicons
+                            name="copy-outline"
+                            size={16}
+                            color="#007AFF"
+                          />
+                          <Text style={styles.copyChipLabel}>Copy all</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {scopedSpans.length > 0 ? (
+                      scopedSpans.map((span) => {
+                        const index = spans.indexOf(span);
+                        const active = selectedSpanIndex === index;
+                        const slice = spanSliceText(resultText, span);
+                        return (
+                          <View
+                            key={`list-${index}`}
+                            style={[
+                              styles.spanRow,
+                              active && styles.spanRowActive,
+                            ]}
+                          >
+                            <TouchableOpacity
+                              style={styles.spanRowBody}
+                              onPress={() => {
+                                setSelectedSpanIndex(active ? null : index);
+                                setResultFrameIndex(span.frameIndex);
+                              }}
+                            >
+                              <Text style={styles.resultText} numberOfLines={2}>
+                                {slice || '(empty slice)'}
+                              </Text>
+                              <Text style={styles.spanMeta}>
+                                #{index} frame {span.frameIndex + 1}{' '}
+                                {span.level} conf=
+                                {(span.confidence ?? 0).toFixed(2)} utf16=
+                                {span.utf16Start}-{span.utf16End} quad=
+                                {span.quad.map((n) => Math.round(n)).join(',')}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.spanCopyButton}
+                              onPress={() => Clipboard.setString(slice)}
+                              accessibilityLabel={`Copy span ${index}`}
+                              hitSlop={8}
+                            >
+                              <Ionicons
+                                name="copy-outline"
+                                size={18}
+                                color="#007AFF"
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <Text style={styles.resultText}>
+                        {resultText || '(empty text)'}
                       </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                    )}
+                  </>
+                )}
               </View>
             ) : null}
           </View>
