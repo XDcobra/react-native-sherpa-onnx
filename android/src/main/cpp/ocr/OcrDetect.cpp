@@ -10,16 +10,8 @@ namespace ocr {
 namespace {
 
 const char* KindToFamily(sherpaonnx::OcrModelKind kind) {
-  switch (kind) {
-    case sherpaonnx::OcrModelKind::kPpocr:
-      return "ppocr";
-    case sherpaonnx::OcrModelKind::kDoctr:
-      return "doctr";
-    case sherpaonnx::OcrModelKind::kDocVlm:
-      return "doc_vlm";
-    default:
-      return "";
-  }
+  if (kind == sherpaonnx::OcrModelKind::kUnknown) return "";
+  return sherpaonnx::OcrModelKindToLiteral(kind);
 }
 
 }  // namespace
@@ -57,6 +49,9 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
   out.decoderPath = native.paths.decoder;
   out.decoderDataPath = native.paths.decoder_data;
   out.tokenizerPath = native.paths.tokenizer;
+  out.patchEmbedPath = native.paths.patch_embed;
+  out.patchEmbedDataPath = native.paths.patch_embed_data;
+  out.posEmbedPath = native.paths.pos_embed;
   out.hasDet = !out.detPath.empty();
   out.hasRec = !out.recPath.empty();
   out.hasCls = !out.clsPath.empty();

@@ -276,6 +276,34 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         {"rec_dict", true, std::nullopt},
         {"cls", false, std::nullopt},
     });
+    ExpectRequirementsMatch("ocr", "doctr", {
+        {"det", true, std::nullopt},
+        {"rec", true, std::nullopt},
+        {"manifest", true, std::nullopt},
+        {"cls", false, std::nullopt},
+        {"rec_dict", false, std::nullopt},
+    });
+    const FieldList kOcrDocVlmFields = {
+        {"vision_encoder", true, std::nullopt},
+        {"vision_encoder_data", true, std::nullopt},
+        {"embed_tokens", true, std::nullopt},
+        {"embed_tokens_data", true, std::nullopt},
+        {"decoder", true, std::nullopt},
+        {"decoder_data", true, std::nullopt},
+        {"tokenizer", true, std::nullopt},
+        {"manifest", true, std::nullopt},
+    };
+    ExpectRequirementsMatch("ocr", "doc_vlm", kOcrDocVlmFields);
+    FieldList kOcrNemotronParseFields = kOcrDocVlmFields;
+    kOcrNemotronParseFields.insert(
+        kOcrNemotronParseFields.end(),
+        {
+            {"patch_embed", true, std::nullopt},
+            {"patch_embed_data", false, std::nullopt},
+            {"pos_embed", true, std::nullopt},
+        });
+    ExpectRequirementsMatch("ocr", "nemotron_parse", kOcrNemotronParseFields);
+    ExpectRequirementsMatch("ocr", "nemotron-parse", kOcrNemotronParseFields);
     ExpectRequirementsMatch("punctuation", "ct_transformer", {{"ct_transformer", true, std::nullopt}});
     ExpectRequirementsMatch("punctuation", "cnn_bilstm", {
         {"cnn_bilstm", true, std::nullopt},

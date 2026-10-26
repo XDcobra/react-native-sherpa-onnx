@@ -31,6 +31,20 @@ static const OcrFieldRequirement kDocVlmReqs[] = {
     {"manifest", &OcrModelPaths::manifest, true},
 };
 
+static const OcrFieldRequirement kNemotronParseReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, true},
+    {"embed_tokens", &OcrModelPaths::embed_tokens, true},
+    {"embed_tokens_data", &OcrModelPaths::embed_tokens_data, true},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, true},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+    {"patch_embed", &OcrModelPaths::patch_embed, true},
+    {"patch_embed_data", &OcrModelPaths::patch_embed_data, false},
+    {"pos_embed", &OcrModelPaths::pos_embed, true},
+};
+
 static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& count) {
     switch (kind) {
         case OcrModelKind::kPpocr:
@@ -42,6 +56,9 @@ static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& cou
         case OcrModelKind::kDocVlm:
             count = std::size(kDocVlmReqs);
             return kDocVlmReqs;
+        case OcrModelKind::kNemotronParse:
+            count = std::size(kNemotronParseReqs);
+            return kNemotronParseReqs;
         default:
             count = 0;
             return nullptr;
@@ -49,16 +66,7 @@ static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& cou
 }
 
 static const char* OcrKindToName(OcrModelKind kind) {
-    switch (kind) {
-        case OcrModelKind::kPpocr:
-            return "ppocr";
-        case OcrModelKind::kDoctr:
-            return "doctr";
-        case OcrModelKind::kDocVlm:
-            return "doc_vlm";
-        default:
-            return "unknown";
-    }
+    return OcrModelKindToLiteral(kind);
 }
 
 }  // namespace

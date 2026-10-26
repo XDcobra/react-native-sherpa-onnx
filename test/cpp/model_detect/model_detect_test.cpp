@@ -910,6 +910,14 @@ TEST(ModelDetectTest, OcrKindStringsMapDocVlmAliases) {
     EXPECT_EQ(model_detect_test::OcrKindFromString("doctr"), OcrModelKind::kDoctr);
     EXPECT_EQ(model_detect_test::OcrKindFromString("doc-tr"), OcrModelKind::kDoctr);
     EXPECT_NE(model_detect_test::OcrKindFromString("docvlm"), OcrModelKind::kDoctr);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("nemotron_parse"),
+              OcrModelKind::kNemotronParse);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("nemotron-parse"),
+              OcrModelKind::kNemotronParse);
+    EXPECT_EQ(model_detect_test::OcrKindToString(OcrModelKind::kNemotronParse),
+              "nemotron_parse");
+    EXPECT_EQ(model_detect_test::OcrKindFromString("nemotron"),
+              OcrModelKind::kUnknown);
 }
 
 std::vector<std::string> DocVlmFileLines(const std::string& root,
@@ -1179,6 +1187,94 @@ TEST(ModelDetectTest, DetectOcrPpocrPicksInt8Det) {
     ASSERT_TRUE(result.ok) << result.error;
     EXPECT_NE(result.paths.det.find("det.int8.onnx"), std::string::npos);
     EXPECT_NE(result.paths.rec.find("rec.int8.onnx"), std::string::npos);
+}
+
+std::vector<std::string> NemotronParseFileLines(const std::string& root) {
+    auto lines = DocVlmFileLines(root, true, true);
+    lines.push_back(root + "/patch_embed.onnx");
+    lines.push_back(root + "/patch_embed.onnx_data");
+    lines.push_back(root + "/pos_embed.npy");
+    return lines;
+}
+
+void TouchNemotronParsePack(const ScopedOcrDir& dir) {
+    TouchDocVlmOctet(dir);
+    dir.Touch("patch_embed.onnx");
+    dir.Touch("patch_embed.onnx_data");
+    dir.Touch("pos_embed.npy");
+}
+
+TEST(ModelDetectTest, DetectOcrNemotronParseFromFileList) {
+    const std::string root = "nemotron-3.5-parse-int8";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, NemotronParseFileLines(root));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kNemotronParse);
+    ExpectDocVlmPathsFilled(result);
+    EXPECT_FALSE(result.paths.patch_embed.empty());
+    EXPECT_FALSE(result.paths.pos_embed.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrExplicitNemotronParseAlias) {
+    const std::string root = "nemotron-3.5-parse-int8";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, NemotronParseFileLines(root));
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "nemotron-parse");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kNemotronParse);
+}
+
+TEST(ModelDetectTest, DetectOcrBareNemotronIsNotOcr) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "nemotron-ctc-en", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kUnknown);
+}
+
+TEST(ModelDetectTest, DetectOcrNemotronParseNameOnly) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "nemotron-3.5-parse-int8", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kNemotronParse);
+}
+
+TEST(ModelDetectTest, DetectOcrManifestFamilyNemotronParseWinsOverGraniteOctet) {
+    ScopedOcrDir dir("family-nemotron");
+    TouchNemotronParsePack(dir);
+    dir.Write("ocr_manifest.json", "{\"family\":\"nemotron_parse\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kNemotronParse);
+    EXPECT_FALSE(result.paths.patch_embed.empty());
+    EXPECT_FALSE(result.paths.pos_embed.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrNemotronParseFailsWithoutPosEmbed) {
+    const std::string root = "nemotron-missing-pos";
+    auto lines = DocVlmFileLines(root, true, true);
+    lines.push_back(root + "/patch_embed.onnx");
+    auto files =
+        model_detect_test::BuildFileEntriesFromPathLines(root, lines);
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "nemotron_parse");
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(UnifiedModelDetectTest, NemotronParseDirectoryIsOcrNotEnhancementOrStt) {
+    ScopedOcrDir dir("unified-nemotron");
+    TouchNemotronParsePack(dir);
+    dir.Write("ocr_manifest.json", "{\"family\":\"nemotron_parse\"}");
+    dir.Touch("vocab.json");
+    dir.Touch("merges.txt");
+    auto result = sherpaonnx::DetectModel(
+        std::optional<std::string>(dir.path), std::nullopt);
+    EXPECT_TRUE(result.matched) << result.error << " category=" << result.category
+                                << " type=" << result.modelType;
+    EXPECT_EQ(result.category, "ocr");
+    EXPECT_EQ(result.modelType, "nemotron_parse");
 }
 
 TEST(UnifiedModelDetectTest, DocVlmDirectoryIsOcrNotStt) {

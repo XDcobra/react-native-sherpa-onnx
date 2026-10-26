@@ -24,32 +24,12 @@ void AppendUniqueSource(std::vector<sherpaonnx::DetectionSource>& out,
 
 sherpaonnx::OcrModelKind ParseOcrModelTypeStrict(const std::string& modelType) {
     const std::string t = ToLower(modelType);
-    if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
-        return sherpaonnx::OcrModelKind::kPpocr;
-    }
-    // doc_vlm aliases before doctr so "docvlm" / "docling" cannot fall through.
-    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
-        t == "granite-docling" || t == "docling") {
-        return sherpaonnx::OcrModelKind::kDocVlm;
-    }
-    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
-        return sherpaonnx::OcrModelKind::kDoctr;
-    }
     if (t == "auto") return sherpaonnx::OcrModelKind::kUnknown;
-    return sherpaonnx::OcrModelKind::kUnknown;
+    return sherpaonnx::ParseOcrModelType(t);
 }
 
 const char* OcrKindToTag(sherpaonnx::OcrModelKind kind) {
-    switch (kind) {
-        case sherpaonnx::OcrModelKind::kPpocr:
-            return "ppocr";
-        case sherpaonnx::OcrModelKind::kDoctr:
-            return "doctr";
-        case sherpaonnx::OcrModelKind::kDocVlm:
-            return "doc_vlm";
-        default:
-            return "unknown";
-    }
+    return sherpaonnx::OcrModelKindToLiteral(kind);
 }
 
 std::string FindDetOnnx(const std::vector<FileEntry>& files,
@@ -108,6 +88,13 @@ std::string FindRecDict(const std::vector<FileEntry>& files) {
         }
     }
     return "";
+}
+
+bool InferNemotronParseNameOnly(const std::string& nameHint) {
+    const std::string lower = ToLower(nameHint);
+    return lower.find("nemotron_parse") != std::string::npos ||
+           lower.find("nemotron-parse") != std::string::npos ||
+           lower.find("nemotron-3.5-parse") != std::string::npos;
 }
 
 bool InferDocVlmNameOnly(const std::string& nameHint) {
@@ -428,9 +415,22 @@ void FillDocVlmPaths(sherpaonnx::OcrModelPaths& paths,
         manifest.empty() ? FindFileByName(files, "ocr_manifest.json") : manifest;
 }
 
-bool LayoutPresent(sherpaonnx::OcrModelKind kind, bool canDocVlm, bool canPpocr,
-                   bool canDoctr) {
+void FillNemotronParsePaths(sherpaonnx::OcrModelPaths& paths,
+                            const std::vector<FileEntry>& files,
+                            const DocVlmGroup& group, const std::string& manifest) {
+    FillDocVlmPaths(paths, files, group, manifest);
+    paths.patch_embed =
+        FindFileByName(files, "patch_embed" + group.suffix + ".onnx");
+    paths.patch_embed_data =
+        FindFileByName(files, "patch_embed" + group.suffix + ".onnx_data");
+    paths.pos_embed = FindFileByName(files, "pos_embed.npy");
+}
+
+bool LayoutPresent(sherpaonnx::OcrModelKind kind, bool canNemotronParse,
+                   bool canDocVlm, bool canPpocr, bool canDoctr) {
     switch (kind) {
+        case sherpaonnx::OcrModelKind::kNemotronParse:
+            return canNemotronParse;
         case sherpaonnx::OcrModelKind::kDocVlm:
             return canDocVlm;
         case sherpaonnx::OcrModelKind::kPpocr:
@@ -482,7 +482,10 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             result.error = kNameOnlyErr;
             return result;
         }
-        if (InferDocVlmNameOnly(modelDir)) {
+        if (InferNemotronParseNameOnly(modelDir)) {
+            result.selectedKind = OK::kNemotronParse;
+            result.detectedModels.push_back({"nemotron_parse", modelDir});
+        } else if (InferDocVlmNameOnly(modelDir)) {
             result.selectedKind = OK::kDocVlm;
             result.detectedModels.push_back({"doc_vlm", modelDir});
         } else if (InferPpocrNameOnly(modelDir)) {
@@ -518,9 +521,17 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             ? SelectDocVlmGroup(docVlmGroups, quantization, modelDir)
             : nullptr;
     const bool canDocVlm = docVlmGroup != nullptr;
+    const bool canNemotronParse =
+        canDocVlm &&
+        !FindFileByName(files, "patch_embed" + docVlmGroup->suffix + ".onnx")
+             .empty() &&
+        !FindFileByName(files, "pos_embed.npy").empty();
     const bool canPpocr = !det.empty() && !rec.empty() && !recDict.empty();
     const bool canDoctr = CanDoctrLayout(files, quantization) && !manifest.empty();
 
+    if (canNemotronParse) {
+        result.detectedModels.push_back({"nemotron_parse", modelDir});
+    }
     if (canDocVlm) {
         result.detectedModels.push_back({"doc_vlm", modelDir});
     }
@@ -539,7 +550,8 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         }
         selected = requestedExplicit;
         AppendUniqueSource(result.detectionSources, DS::kExplicitModelType);
-        if (!LayoutPresent(selected, canDocVlm, canPpocr, canDoctr)) {
+        if (!LayoutPresent(selected, canNemotronParse, canDocVlm, canPpocr,
+                           canDoctr)) {
             result.error = LayoutMissingError(selected, modelDir);
             return result;
         }
@@ -552,10 +564,14 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         }
         if (family.status == ManifestFamilyStatus::kKnown) {
             selected = family.kind;
-            if (!LayoutPresent(selected, canDocVlm, canPpocr, canDoctr)) {
+            if (!LayoutPresent(selected, canNemotronParse, canDocVlm, canPpocr,
+                               canDoctr)) {
                 result.error = LayoutMissingError(selected, modelDir);
                 return result;
             }
+        } else if (canNemotronParse) {
+            selected = OK::kNemotronParse;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else if (canDocVlm) {
             selected = OK::kDocVlm;
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
@@ -567,18 +583,25 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else {
             result.error =
-                "OCR: unrecognized pack layout (need a complete doc_vlm "
-                "vision/embed/decoder triple plus tokenizer.json and "
-                "ocr_manifest.json, or det + rec ONNX and either a rec "
-                "dictionary yml/txt for ppocr, or ocr_manifest.json for "
-                "doctr) in " +
+                "OCR: unrecognized pack layout (need a complete "
+                "nemotron_parse patch_embed + pos_embed.npy + vision/embed/"
+                "decoder triple, a complete doc_vlm vision/embed/decoder "
+                "triple plus tokenizer.json and ocr_manifest.json, or det + "
+                "rec ONNX and either a rec dictionary yml/txt for ppocr, or "
+                "ocr_manifest.json for doctr) in " +
                 modelDir;
             return result;
         }
     }
 
     result.selectedKind = selected;
-    if (selected == OK::kDocVlm) {
+    if (selected == OK::kNemotronParse) {
+        if (docVlmGroup == nullptr) {
+            result.error = LayoutMissingError(selected, modelDir);
+            return result;
+        }
+        FillNemotronParsePaths(result.paths, files, *docVlmGroup, manifest);
+    } else if (selected == OK::kDocVlm) {
         if (docVlmGroup == nullptr) {
             result.error = LayoutMissingError(selected, modelDir);
             return result;

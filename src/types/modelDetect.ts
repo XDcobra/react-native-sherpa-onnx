@@ -193,8 +193,14 @@ export interface OcrDetectModelResult extends ModelDetectResultBase {
     decoder?: string;
     /** `decoder_model_merged.onnx_data` — doc_vlm. */
     decoder_data?: string;
-    /** `tokenizer.json` — doc_vlm. */
+    /** `tokenizer.json` — doc_vlm / nemotron_parse. */
     tokenizer?: string;
+    /** `patch_embed.onnx` — nemotron_parse. */
+    patch_embed?: string;
+    /** `patch_embed.onnx_data` — nemotron_parse. */
+    patch_embed_data?: string;
+    /** `pos_embed.npy` — nemotron_parse. */
+    pos_embed?: string;
   };
 }
 

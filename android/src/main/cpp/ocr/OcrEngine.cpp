@@ -64,7 +64,9 @@ bool HasCustomOcrPaths(const OcrLoadOptions& options) {
          !options.path_embed_tokens.empty() ||
          !options.path_embed_tokens_data.empty() ||
          !options.path_decoder.empty() || !options.path_decoder_data.empty() ||
-         !options.path_tokenizer.empty();
+         !options.path_tokenizer.empty() || !options.path_patch_embed.empty() ||
+         !options.path_patch_embed_data.empty() ||
+         !options.path_pos_embed.empty();
 }
 
 void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
@@ -80,6 +82,9 @@ void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
   options.path_decoder = detect.decoderPath;
   options.path_decoder_data = detect.decoderDataPath;
   options.path_tokenizer = detect.tokenizerPath;
+  options.path_patch_embed = detect.patchEmbedPath;
+  options.path_patch_embed_data = detect.patchEmbedDataPath;
+  options.path_pos_embed = detect.posEmbedPath;
 }
 
 }  // namespace
@@ -230,14 +235,16 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     merged.text_utf8 += frame_result.text_utf8;
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
     appendField(merged.doctags_utf8, frame_result.doctags_utf8);
+    appendField(merged.raw_utf8, frame_result.raw_utf8);
     appendField(merged.markdown_utf8, frame_result.markdown_utf8);
     merged.stop_reason = frame_result.stop_reason;
     merged.complete = frame_result.complete;
     OCR_LOGI(
-        "recognize extras frame=%d stop=%s complete=%d doctags=%zu markdown=%zu",
+        "recognize extras frame=%d stop=%s complete=%d doctags=%zu raw=%zu "
+        "markdown=%zu",
         frame_index, frame_result.stop_reason.c_str(),
         frame_result.complete ? 1 : 0, frame_result.doctags_utf8.size(),
-        frame_result.markdown_utf8.size());
+        frame_result.raw_utf8.size(), frame_result.markdown_utf8.size());
 
     ++done;
     if (options.progress) {
@@ -249,10 +256,11 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   out.ok = true;
   out.result = std::move(merged);
   OCR_LOGI(
-      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu "
-      "stop=%s complete=%d",
+      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu raw=%zu "
+      "markdown=%zu stop=%s complete=%d",
       image_buffer_id.c_str(), out.result.spans.size(), utf16_cursor,
-      out.result.doctags_utf8.size(), out.result.markdown_utf8.size(),
+      out.result.doctags_utf8.size(), out.result.raw_utf8.size(),
+      out.result.markdown_utf8.size(),
       out.result.stop_reason.c_str(), out.result.complete ? 1 : 0);
   return out;
 }

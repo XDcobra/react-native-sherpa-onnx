@@ -111,15 +111,55 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
-/** Offline OCR families: ppocr (PP-OCR Det/Rec/Cls), doctr (OnnxTR Det/Rec), and doc_vlm (granite-docling). */
+/** Offline OCR families: ppocr, doctr, doc_vlm (granite-docling), nemotron_parse. */
 enum class OcrModelKind {
     kUnknown,
     kPpocr,
     /** docTR / OnnxTR Det+Rec packs (`ocr_manifest.json`). */
     kDoctr,
     /** Granite-Docling packs: vision encoder, embed tokens, merged decoder, tokenizer, manifest. */
-    kDocVlm
+    kDocVlm,
+    /** Nemotron-3.5-Parse: granite octet plus patch_embed + pos_embed.npy. */
+    kNemotronParse
 };
+
+/** Canonical family token. Alias only `nemotron-parse` (never bare `nemotron`). */
+inline OcrModelKind ParseOcrModelType(const std::string& modelType) {
+    const std::string t = model_detect::ToLower(modelType);
+    if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
+        return OcrModelKind::kPpocr;
+    }
+    if (t == "nemotron_parse" || t == "nemotron-parse") {
+        return OcrModelKind::kNemotronParse;
+    }
+    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
+        t == "granite-docling" || t == "docling") {
+        return OcrModelKind::kDocVlm;
+    }
+    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
+        return OcrModelKind::kDoctr;
+    }
+    return OcrModelKind::kUnknown;
+}
+
+inline const char* OcrModelKindToLiteral(OcrModelKind kind) {
+    switch (kind) {
+        case OcrModelKind::kPpocr:
+            return "ppocr";
+        case OcrModelKind::kDoctr:
+            return "doctr";
+        case OcrModelKind::kDocVlm:
+            return "doc_vlm";
+        case OcrModelKind::kNemotronParse:
+            return "nemotron_parse";
+        default:
+            return "unknown";
+    }
+}
+
+inline bool IsOcrVlmKind(OcrModelKind kind) {
+    return kind == OcrModelKind::kDocVlm || kind == OcrModelKind::kNemotronParse;
+}
 
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
 enum class SeparationModelKind {
@@ -366,8 +406,14 @@ struct OcrModelPaths {
     std::string decoder;
     /** doc_vlm: `decoder_model_merged.onnx_data`. */
     std::string decoder_data;
-    /** doc_vlm: `tokenizer.json`. */
+    /** doc_vlm / nemotron_parse: `tokenizer.json`. */
     std::string tokenizer;
+    /** nemotron_parse: `patch_embed.onnx`. */
+    std::string patch_embed;
+    /** nemotron_parse: `patch_embed.onnx_data` (optional when the graph is self-contained). */
+    std::string patch_embed_data;
+    /** nemotron_parse: `pos_embed.npy`. */
+    std::string pos_embed;
 };
 
 struct LanguageIdModelPaths {

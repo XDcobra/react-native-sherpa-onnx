@@ -44,14 +44,19 @@ struct OcrResult {
   std::vector<OcrSpan> spans;
   /** doc_vlm: raw DocTags after ASCII lstrip. Empty for ppocr/doctr. */
   std::string doctags_utf8;
-  /** doc_vlm: lossy markdown from DocTags. Empty for ppocr/doctr. */
+  /**
+   * Family markup stream. doc_vlm: same as doctags. nemotron_parse: xy/class
+   * tags. Empty for ppocr/doctr.
+   */
+  std::string raw_utf8;
+  /** VLM markdown (reconstructed or native). Empty for ppocr/doctr. */
   std::string markdown_utf8;
   /**
-   * doc_vlm stop: doctag_end | eos | max_new_tokens | invalid_sequence.
+   * VLM stop: doctag_end | eos | max_new_tokens | invalid_sequence.
    * Empty for ppocr/doctr.
    */
   std::string stop_reason;
-  /** doc_vlm: true only after </doctag>. ppocr/doctr stay true. */
+  /** VLM: true after a natural stop (</doctag> or EOS). ppocr/doctr stay true. */
   bool complete = true;
 };
 
@@ -85,8 +90,8 @@ struct OcrLoadOptions {
   float det_unclip_ratio = 1.5f;
   std::string provider;
   /**
-   * doc_vlm generation cap. 0 → 8192. Ignored by ppocr/doctr.
-   * Phase 3 maps TS `docVlm.maxNewTokens` here.
+   * VLM generation cap (`doc_vlm` / `nemotron_parse`). 0 → 8192.
+   * Ignored by ppocr/doctr.
    */
   int max_new_tokens = 0;
   std::string quantization;
@@ -107,6 +112,9 @@ struct OcrLoadOptions {
   std::string path_decoder;
   std::string path_decoder_data;
   std::string path_tokenizer;
+  std::string path_patch_embed;
+  std::string path_patch_embed_data;
+  std::string path_pos_embed;
 };
 
 enum class OcrGranularity : uint8_t {
@@ -114,6 +122,10 @@ enum class OcrGranularity : uint8_t {
   kWord = 1,
   kBlock = 2,
 };
+
+inline bool IsOcrVlmFamily(const std::string& family) {
+  return family == "doc_vlm" || family == "nemotron_parse";
+}
 
 }  // namespace ocr
 }  // namespace sherpa_onnx

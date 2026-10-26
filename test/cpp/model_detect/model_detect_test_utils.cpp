@@ -321,31 +321,11 @@ std::string PunctuationKindToString(PunctuationModelKind kind) {
 }
 
 OcrModelKind OcrKindFromString(const std::string& modelType) {
-    std::string t = ToLower(Trim(modelType));
-    if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
-        return OcrModelKind::kPpocr;
-    }
-    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
-        t == "granite-docling" || t == "docling") {
-        return OcrModelKind::kDocVlm;
-    }
-    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
-        return OcrModelKind::kDoctr;
-    }
-    return OcrModelKind::kUnknown;
+    return sherpaonnx::ParseOcrModelType(modelType);
 }
 
 std::string OcrKindToString(OcrModelKind kind) {
-    switch (kind) {
-        case OcrModelKind::kPpocr:
-            return "ppocr";
-        case OcrModelKind::kDoctr:
-            return "doctr";
-        case OcrModelKind::kDocVlm:
-            return "doc_vlm";
-        default:
-            return "unknown";
-    }
+    return sherpaonnx::OcrModelKindToLiteral(kind);
 }
 
 AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType) {

@@ -40,6 +40,10 @@ struct OcrDetectResult {
   std::string decoderPath;
   std::string decoderDataPath;
   std::string tokenizerPath;
+  /** nemotron_parse extras. Empty for other families. */
+  std::string patchEmbedPath;
+  std::string patchEmbedDataPath;
+  std::string posEmbedPath;
   /** DetectionSource literals (fileListing, fallbackOrder, …). */
   std::vector<std::string> detectionSources;
   std::vector<OcrDetectedModelEntry> detectedModels;
