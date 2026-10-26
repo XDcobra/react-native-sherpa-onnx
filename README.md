@@ -16,12 +16,12 @@ A high-performance React Native TurboModule for on-device speech AI powered by [
 
 **More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Audio Tagging, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
 
-> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.0**
+> **⚠️ SDK 1.0.0 – Breaking changes from 0.4.X  **
 > This project started as a side hobby. In practice I kept hitting the same wall: sherpa-onnx (and other React Native speech libraries) struggle with **long audio on real mobile devices**—OOM crashes, UI stalls, and brittle one-shot pipelines. Fixing that properly meant redesigning the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK built for low-end and mid-range phones, with significantly better performance and a cleaner, more consistent public API.
 
 ## Built with this SDK: VoiceLab
 
-**VoiceLab** is a separate production Android & iOS app built on top of this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship with `react-native-sherpa-onnx`.
+**[VoiceLab](https://xdcobra.github.io/voice-lab-offline-tools/)** is a separate production Android & iOS app built on top of this SDK — a full offline voice toolkit (STT, TTS, voice cloning, punctuation, VAD, NPU acceleration, and more). Use it to try the capabilities end-to-end, or as a reference for what you can ship with `react-native-sherpa-onnx`.
 
 <p align="center">
   <a href="https://play.google.com/store/apps/details?id=com.xdcobra.voicelab"><img src="./docs/images/badge-google-play.png" alt="Get it on Google Play" height="61" /></a>
@@ -30,9 +30,9 @@ A high-performance React Native TurboModule for on-device speech AI powered by [
 </p>
 
 <div align="center">
-  <img src="./docs/images/voicelab-01-home.png" alt="VoiceLab home — eight offline voice features" width="30%" />
-  <img src="./docs/images/voicelab-02-download.png" alt="VoiceLab library — download and manage on-device models" width="30%" />
-  <img src="./docs/images/voicelab-03-provider.png" alt="VoiceLab settings — NPU / execution provider" width="30%" />
+  <img src="./docs/images/voicelab-01-sdk.png" alt="VoiceLab — try the SDK, every feature bundled" width="30%" />
+  <img src="./docs/images/voicelab-02-privacy.png" alt="VoiceLab privacy — stays on your device, no cloud required" width="30%" />
+  <img src="./docs/images/voicelab-03-models.png" alt="VoiceLab library — 1000+ on-device models, downloaded when you need them" width="30%" />
 </div>
 
 ## Installation
