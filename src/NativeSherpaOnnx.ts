@@ -1788,7 +1788,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word' | 'character',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     subtitles: Array<{
       text: string;
@@ -1813,7 +1815,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     tokens: Array<{
       text: string;

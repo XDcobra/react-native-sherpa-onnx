@@ -48,6 +48,8 @@ internal class SherpaOnnxAlignmentHelper {
     sampleRate: Int,
     granularity: String,
     vocabPath: String,
+    provider: String,
+    numThreads: Int,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateFromFile(
@@ -56,6 +58,8 @@ internal class SherpaOnnxAlignmentHelper {
     audioPath: String,
     granularity: String,
     vocabPath: String,
+    provider: String,
+    numThreads: Int,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateForcedCtcFromFloatPcm(
@@ -66,6 +70,8 @@ internal class SherpaOnnxAlignmentHelper {
     granularity: String,
     language: String,
     vocabPath: String,
+    provider: String,
+    numThreads: Int,
   ): HashMap<String, Any>
 
   private data class VadaAnchor(
@@ -292,6 +298,8 @@ internal class SherpaOnnxAlignmentHelper {
           "accurate" -> {
             val modelPath = AlignmentOptionParsers.parseAlignmentModelPath(options)
             val vocabPath = AlignmentOptionParsers.parseAlignmentVocabPath(options)
+            val provider = AlignmentOptionParsers.parseAlignmentProvider(options)
+            val numThreads = AlignmentOptionParsers.parseAlignmentNumThreads(options)
             val segmentationSource = AlignmentOptionParsers.parseSegmentationSource(options)
             if (segmentationSource == "vad") {
               if (normalizedGranularity == "character") {
@@ -358,6 +366,8 @@ internal class SherpaOnnxAlignmentHelper {
                     audioEntry.sampleRate,
                     normalizedGranularity,
                     vocabPath,
+                    provider,
+                    numThreads,
                   )
                 } catch (e: Exception) {
                   throw IllegalStateException(
@@ -425,6 +435,8 @@ internal class SherpaOnnxAlignmentHelper {
               audioEntry.sampleRate,
               normalizedGranularity,
               vocabPath,
+              provider,
+              numThreads,
             )
           }
 
@@ -605,6 +617,8 @@ internal class SherpaOnnxAlignmentHelper {
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     executor.execute {
@@ -638,6 +652,8 @@ internal class SherpaOnnxAlignmentHelper {
 
         val normalizedGranularity = AlignmentOptionParsers.normalizeGranularity(granularity)
         val normalizedVocabPath = vocabPath?.trim().orEmpty()
+        val normalizedProvider = provider?.trim().orEmpty()
+        val normalizedNumThreads = AlignmentOptionParsers.parseOptionalNumThreads(numThreads)
         val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
         val raw = nativeAlignAccurateFromFloatPcm(
           normalizedModelPath,
@@ -646,6 +662,8 @@ internal class SherpaOnnxAlignmentHelper {
           normalizedSampleRate,
           normalizedGranularity,
           normalizedVocabPath,
+          normalizedProvider,
+          normalizedNumThreads,
         )
 
         promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
@@ -673,6 +691,8 @@ internal class SherpaOnnxAlignmentHelper {
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     executor.execute {
@@ -710,6 +730,8 @@ internal class SherpaOnnxAlignmentHelper {
 
         val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
         val normalizedVocabPath = vocabPath?.trim().orEmpty()
+        val normalizedProvider = provider?.trim().orEmpty()
+        val normalizedNumThreads = AlignmentOptionParsers.parseOptionalNumThreads(numThreads)
 
         val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
           normalizedModelPath,
@@ -719,6 +741,8 @@ internal class SherpaOnnxAlignmentHelper {
           normalizedGranularity,
           language?.trim().orEmpty(),
           normalizedVocabPath,
+          normalizedProvider,
+          normalizedNumThreads,
         )
 
         promise.resolve(AlignmentResultMapper.forcedCtcResultToWritable(raw))
@@ -786,6 +810,8 @@ internal class SherpaOnnxAlignmentHelper {
               sampleRate,
               normalizedGranularity,
               "",
+              "",
+              0,
             )
           }
 

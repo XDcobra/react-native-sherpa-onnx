@@ -449,6 +449,15 @@ export async function runAccurateChunkedForcedCtc(
   const alignmentProfile = resolvedModel.profile;
   const languageOpt =
     typeof input.language === 'string' ? input.language : undefined;
+  const providerOpt =
+    typeof input.model.provider === 'string' &&
+    input.model.provider.trim().length > 0
+      ? input.model.provider.trim()
+      : undefined;
+  const numThreadsOpt =
+    typeof input.model.numThreads === 'number'
+      ? input.model.numThreads
+      : undefined;
 
   const audioInfo = asOfflineAudioBufferInfo(audioInfoRaw);
   const anchorInfo = asOfflineSegmentBufferInfo(
@@ -583,19 +592,49 @@ export async function runAccurateChunkedForcedCtc(
         let nativeResult: ChunkedForcedCtcNativeResult;
         try {
           nativeResult = parseNativeResult(
-            await SherpaOnnx.alignAccurateForcedCtcFromPcm(
-              resolvedModelPath,
-              preparedWindowText,
-              {
+            await (async () => {
+              const vocabPath =
+                resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined;
+              const pcm = {
                 audioBufferId: audioInBufferId,
                 startSample: anchor.startSample,
                 sampleCount: anchorFrameCount,
-              },
-              audioInfo.sampleRate,
-              granularity,
-              languageOpt,
-              resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined
-            )
+              };
+              if (numThreadsOpt != null) {
+                return SherpaOnnx.alignAccurateForcedCtcFromPcm(
+                  resolvedModelPath,
+                  preparedWindowText,
+                  pcm,
+                  audioInfo.sampleRate,
+                  granularity,
+                  languageOpt,
+                  vocabPath,
+                  providerOpt,
+                  numThreadsOpt
+                );
+              }
+              if (providerOpt) {
+                return SherpaOnnx.alignAccurateForcedCtcFromPcm(
+                  resolvedModelPath,
+                  preparedWindowText,
+                  pcm,
+                  audioInfo.sampleRate,
+                  granularity,
+                  languageOpt,
+                  vocabPath,
+                  providerOpt
+                );
+              }
+              return SherpaOnnx.alignAccurateForcedCtcFromPcm(
+                resolvedModelPath,
+                preparedWindowText,
+                pcm,
+                audioInfo.sampleRate,
+                granularity,
+                languageOpt,
+                vocabPath
+              );
+            })()
           );
         } catch (error) {
           if (isNoAlignableTokensNativeError(error)) {

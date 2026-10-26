@@ -5209,6 +5209,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     alignmentHelper.alignAccurateForcedCtcFromPcm(
@@ -5219,6 +5221,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       granularity,
       language,
       vocabPath,
+      provider,
+      numThreads,
       promise,
     )
   }
@@ -5231,6 +5235,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     granularity: String,
     language: String?,
     vocabPath: String?,
+    provider: String?,
+    numThreads: Double?,
     promise: Promise,
   ) {
     alignmentHelper.alignAccurateFromPcm(
@@ -5241,6 +5247,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       granularity,
       language,
       vocabPath,
+      provider,
+      numThreads,
       promise,
     )
   }
