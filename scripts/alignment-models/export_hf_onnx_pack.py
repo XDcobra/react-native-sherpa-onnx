@@ -109,7 +109,7 @@ the app.
 
 ## Try it live in VoiceLab
 
-Download and run this model on device in **VoiceLab** (built on the same SDK):
+Download and run these on-device models in your pocket — anytime, anywhere — in the mobile app **VoiceLab**:
 
 - Android: [VoiceLab on Google Play]({VOICELAB_ANDROID_URL})
 - iOS: [VoiceLab on the App Store]({VOICELAB_IOS_URL})
