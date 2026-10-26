@@ -54,14 +54,14 @@ export const IMAGE_FILES: ImageFileInfo[] = [
   {
     id: TEST_IMAGE_FILES.PAGE_MULTILINE,
     name: 'Multi-line page',
-    description: 'Denser page for box overlays and DocTags',
+    description: 'Denser page for box overlays and VLM markup',
     section: 'Page',
   },
   {
     id: TEST_IMAGE_FILES.INVOICE_NORTHWIND,
     name: 'Invoice — Northwind',
     description:
-      'Dummy commercial invoice: title, key-values, parties, line-item table, totals, numbered terms. Best showcase for doc_vlm (DocTags / markdown); also usable with ppocr and doctr',
+      'Dummy commercial invoice: title, key-values, parties, line-item table, totals, numbered terms. Best showcase for VLM packs (granite DocTags or Nemotron native markup / markdown); also usable with ppocr and doctr',
     section: 'Document',
   },
   {

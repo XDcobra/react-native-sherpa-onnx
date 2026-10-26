@@ -64,6 +64,7 @@ import { IMAGE_FILES } from '../../imageConfig';
 import { PDF_FILES } from '../../pdfConfig';
 import { getModelDisplayName, toDetectSource } from '../../modelConfig';
 import { useDeviceProviders } from '../../providers/DeviceProvidersContext';
+import { isVlmOcrPack } from '../../utils/ocrModelCatalog';
 import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
@@ -79,9 +80,19 @@ const MIN_UNCLIP = 1.0;
 const MAX_UNCLIP = 2.5;
 const DEFAULT_UNCLIP = 1.5;
 
-function isGranitePack(id: string): boolean {
+function largeVlmPackWarning(id: string): string | null {
   const lower = id.toLowerCase();
-  return lower.includes('docvlm') || lower.includes('granite');
+  if (lower.includes('docvlm') || lower.includes('granite')) {
+    return 'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
+  }
+  if (
+    lower.includes('nemotron-3.5-parse') ||
+    lower.includes('nemotron-parse') ||
+    lower.includes('nemotron_parse')
+  ) {
+    return 'nemotron-3.5-parse INT8 is ~753 MB unpacked (FP16 ~1.44 GB) and needs significant RAM. Continue?';
+  }
+  return null;
 }
 
 function utf16Slice(text: string, start: number, end: number): string {
@@ -388,20 +399,17 @@ export default function OCRScreen() {
       return;
     }
 
-    if (isGranitePack(selectedFolder)) {
-      Alert.alert(
-        'Large Doc-VLM pack',
-        'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Initialize',
-            onPress: () => {
-              proceedAuto(selectedFolder).catch(() => {});
-            },
+    const vlmWarning = largeVlmPackWarning(selectedFolder);
+    if (vlmWarning) {
+      Alert.alert('Large VLM pack', vlmWarning, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Initialize',
+          onPress: () => {
+            proceedAuto(selectedFolder).catch(() => {});
           },
-        ]
-      );
+        },
+      ]);
       return;
     }
 
@@ -755,7 +763,7 @@ export default function OCRScreen() {
                   disabled={initBusy || runBusy}
                   emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
                 />
-                {selectedFolder && isGranitePack(selectedFolder) ? (
+                {selectedFolder && isVlmOcrPack(selectedFolder) ? (
                   <DocVlmInitOptionChips
                     maxNewTokens={customInitForm.maxNewTokens}
                     onChangeMaxNewTokens={(maxNewTokens) =>

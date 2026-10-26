@@ -42,6 +42,7 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     'ppocrv6-tiny',
     'doctr-mobile',
     'docvlm-granite-258m-fp32',
+    'nemotron-3.5-parse-int8',
   ],
 };
 
