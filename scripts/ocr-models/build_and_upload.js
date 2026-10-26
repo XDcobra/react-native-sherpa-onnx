@@ -36,23 +36,50 @@ const VALID_FAMILIES = new Set(['ppocr', 'doctr', 'doc_vlm']);
 const DOC_VLM_HF_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GIT_LFS_POINTER_FIRST_LINE = 'version https://git-lfs.github.com/spec/v1';
 const MIB = 1024 * 1024;
-/** fp32 Granite Docling only. A later variant gets its own table. */
-const DOC_VLM_GRANITE_FP32_FILES = [
-  { repoPath: 'onnx/vision_encoder.onnx', name: 'vision_encoder.onnx' },
-  {
-    repoPath: 'onnx/vision_encoder.onnx_data',
-    name: 'vision_encoder.onnx_data',
+/** Hub filename tag is not the pack-id technique (`_quantized` → pack `-q8`). */
+const DOC_VLM_VARIANTS = {
+  fp32: {
+    hubSuffix: '',
+    onnxDtype: 'fp32',
+    minBytes: new Map([
+      ['vision_encoder.onnx_data', 300 * MIB],
+      ['embed_tokens.onnx_data', 200 * MIB],
+      ['decoder_model_merged.onnx_data', 600 * MIB],
+      ['tokenizer.json', 1 * MIB],
+    ]),
   },
-  { repoPath: 'onnx/embed_tokens.onnx', name: 'embed_tokens.onnx' },
-  { repoPath: 'onnx/embed_tokens.onnx_data', name: 'embed_tokens.onnx_data' },
-  {
-    repoPath: 'onnx/decoder_model_merged.onnx',
-    name: 'decoder_model_merged.onnx',
+  q8: {
+    hubSuffix: '_quantized',
+    onnxDtype: 'q8',
+    minBytes: new Map([
+      ['vision_encoder.onnx_data', 70 * MIB],
+      ['embed_tokens.onnx_data', 40 * MIB],
+      ['decoder_model_merged.onnx_data', 120 * MIB],
+      ['tokenizer.json', 1 * MIB],
+    ]),
   },
-  {
-    repoPath: 'onnx/decoder_model_merged.onnx_data',
-    name: 'decoder_model_merged.onnx_data',
+  fp16: {
+    hubSuffix: '_fp16',
+    onnxDtype: 'fp16',
+    minBytes: new Map([
+      ['vision_encoder.onnx_data', 140 * MIB],
+      ['embed_tokens.onnx_data', 80 * MIB],
+      ['decoder_model_merged.onnx_data', 250 * MIB],
+      ['tokenizer.json', 1 * MIB],
+    ]),
   },
+  q4f16: {
+    hubSuffix: '_q4f16',
+    onnxDtype: 'q4f16',
+    minBytes: new Map([
+      ['vision_encoder.onnx_data', 40 * MIB],
+      ['embed_tokens.onnx_data', 80 * MIB],
+      ['decoder_model_merged.onnx_data', 70 * MIB],
+      ['tokenizer.json', 1 * MIB],
+    ]),
+  },
+};
+const DOC_VLM_SHARED_FILES = [
   { repoPath: 'tokenizer.json', name: 'tokenizer.json' },
   { repoPath: 'tokenizer_config.json', name: 'tokenizer_config.json' },
   { repoPath: 'vocab.json', name: 'vocab.json' },
@@ -65,12 +92,48 @@ const DOC_VLM_GRANITE_FP32_FILES = [
   { repoPath: 'preprocessor_config.json', name: 'preprocessor_config.json' },
   { repoPath: 'processor_config.json', name: 'processor_config.json' },
 ];
-const DOC_VLM_MIN_BYTES = new Map([
-  ['vision_encoder.onnx_data', 300 * MIB],
-  ['embed_tokens.onnx_data', 200 * MIB],
-  ['decoder_model_merged.onnx_data', 600 * MIB],
-  ['tokenizer.json', 1 * MIB],
-]);
+
+/**
+ * Pack-id technique. Check q4f16 before fp16.
+ * @param {string} modelId
+ * @returns {keyof typeof DOC_VLM_VARIANTS}
+ */
+function docVlmVariantFromId(modelId) {
+  const id = String(modelId ?? '');
+  if (id.endsWith('-q4f16')) return 'q4f16';
+  if (id.endsWith('-fp16')) return 'fp16';
+  if (id.endsWith('-q8')) return 'q8';
+  if (id.endsWith('-fp32')) return 'fp32';
+  throw new Error(
+    `${id}: doc_vlm id must end with -fp32, -q8, -fp16, or -q4f16`
+  );
+}
+
+/**
+ * Flatten Hub suffixed graphs onto the eight canonical pack names.
+ * Each returned list is a complete archive (no files borrowed from another pack).
+ * @param {keyof typeof DOC_VLM_VARIANTS} variantKey
+ */
+function docVlmPackFiles(variantKey) {
+  const variant = DOC_VLM_VARIANTS[variantKey];
+  if (!variant) {
+    throw new Error(`Unknown doc_vlm variant '${variantKey}'`);
+  }
+  const suffix = variant.hubSuffix;
+  const onnxPair = (base) => {
+    const hub = suffix ? `${base}${suffix}` : base;
+    return [
+      { repoPath: `onnx/${hub}.onnx`, name: `${base}.onnx` },
+      { repoPath: `onnx/${hub}.onnx_data`, name: `${base}.onnx_data` },
+    ];
+  };
+  return [
+    ...onnxPair('vision_encoder'),
+    ...onnxPair('embed_tokens'),
+    ...onnxPair('decoder_model_merged'),
+    ...DOC_VLM_SHARED_FILES,
+  ];
+}
 const DOC_VLM_IMAGE_TOKEN = '<image>';
 const DOC_VLM_IMAGE_TOKEN_ID = 100270;
 const DOC_VLM_BOS_TOKEN_ID = 100264;
@@ -390,6 +453,12 @@ async function readSources(csvPath) {
           `Line ${lineNumber}: hf_repo must be owner/name with no scheme (got "${hfRepo}")`
         );
       }
+      try {
+        docVlmVariantFromId(modelId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Line ${lineNumber}: ${message}`);
+      }
     }
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
@@ -418,6 +487,8 @@ async function readSources(csvPath) {
       commercialUse,
       languages,
       hfRepo,
+      docVlmVariant:
+        family === 'doc_vlm' ? docVlmVariantFromId(modelId) : undefined,
     });
   }
 
@@ -533,6 +604,53 @@ function runCommand(command, args, options = {}) {
 
   if (result.status !== 0) {
     throw new Error(`${command} exited with code ${result.status}`);
+  }
+}
+
+function pythonHasOnnx(python) {
+  const probe = spawnSync(python, ['-c', 'import onnx'], { encoding: 'utf8' });
+  return probe.status === 0;
+}
+
+function resolveOnnxPython() {
+  if (process.env.DOCVLM_ONNX_PYTHON) {
+    return process.env.DOCVLM_ONNX_PYTHON;
+  }
+  for (const candidate of ['python3', 'python']) {
+    if (pythonHasOnnx(candidate)) return candidate;
+  }
+  const venvDir = path.join(__dirname, '../../build/ocr-models/.venv-onnx');
+  const venvPython = path.join(venvDir, 'bin', 'python');
+  if (pythonHasOnnx(venvPython)) return venvPython;
+  console.log('[onnx] creating venv to flatten DocVLM external-data locations');
+  runCommand('python3', ['-m', 'venv', venvDir]);
+  runCommand(venvPython, ['-m', 'pip', 'install', '--quiet', 'onnx']);
+  return venvPython;
+}
+
+/**
+ * Point a flattened graph at `<graph>.onnx_data` instead of the Hub suffix.
+ * @param {string} graphPath
+ * @param {string} dataBasename
+ */
+function rewriteOnnxExternalLocation(graphPath, dataBasename) {
+  const scriptPath = path.join(__dirname, 'rewrite_onnx_external_location.py');
+  const python = resolveOnnxPython();
+  const result = spawnSync(python, [scriptPath, graphPath, dataBasename], {
+    encoding: 'utf8',
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.status !== 0) {
+    const detail = (result.stderr || '').trim();
+    throw new Error(
+      `Failed to rewrite ONNX external data in ${graphPath}` +
+        (detail ? `: ${detail}` : ` (${python} exited ${result.status})`)
+    );
   }
 }
 
@@ -995,18 +1113,30 @@ async function readPackJson(modelDir, name) {
 }
 
 /**
- * Build a doc_vlm pack: flattened fp32 ONNX graphs plus tokenizer files.
+ * Build a self-contained doc_vlm pack: flattened ONNX graphs plus tokenizer files.
  * @param {object} source
  * @param {string} modelDir
  */
 async function buildDocVlmPack(source, modelDir) {
-  for (const file of DOC_VLM_GRANITE_FP32_FILES) {
+  const variantKey =
+    source.docVlmVariant ?? docVlmVariantFromId(source.modelId);
+  const variant = DOC_VLM_VARIANTS[variantKey];
+  const packFiles = docVlmPackFiles(variantKey);
+  for (const file of packFiles) {
     const destination = path.join(modelDir, file.name);
     const url = docVlmFileUrl(source.hfRepo, file.repoPath);
-    console.log(`[download] ${source.modelId}: ${file.name}`);
+    console.log(
+      `[download] ${source.modelId}: ${file.name} ← ${file.repoPath}`
+    );
     await downloadFile(url, destination);
     await assertNotGitLfsPointer(destination);
-    const minBytes = DOC_VLM_MIN_BYTES.get(file.name);
+    if (
+      file.name.endsWith('.onnx') &&
+      path.basename(file.repoPath) !== file.name
+    ) {
+      rewriteOnnxExternalLocation(destination, `${file.name}_data`);
+    }
+    const minBytes = variant.minBytes.get(file.name);
     const size = minBytes
       ? await assertMinBytes(destination, minBytes)
       : (await fsp.stat(destination)).size;
@@ -1129,11 +1259,13 @@ async function buildDocVlmPack(source, modelDir) {
     family: 'doc_vlm',
     id: source.modelId,
     arch,
-    onnx_dtype: 'fp32',
+    onnx_dtype: variant.onnxDtype,
     source: {
       repo: source.hfRepo,
       subfolder: 'onnx',
       config_dtype: configDtype,
+      hub_suffix: variant.hubSuffix,
+      pack_dtype: variant.onnxDtype,
     },
     files: manifestFiles,
     vision: {
@@ -1428,7 +1560,7 @@ if (require.main === module) {
 }
 
 const OCR_PACK_QUANT_SUFFIX_RE =
-  /-(int8|fp16|fp32|q4f16|q4|uint8|bnb4|quantized)$/i;
+  /-(int8|fp16|fp32|q4f16|q8|q4|uint8|bnb4|quantized)$/i;
 
 /**
  * Strip archive extension and common quant suffixes for pack language lookup.
