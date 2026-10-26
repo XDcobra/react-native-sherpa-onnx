@@ -341,6 +341,15 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   # --- OCR PpocrBackend host tests (unit + real ppocrv6-tiny golden) ---
   set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
   set(OCR_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ocr")
+  set(NEMOTRON_PARSE_SOURCES
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseBackend.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseImageOps.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseManifest.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseMarkup.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseNavit.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseNpy.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseTokenizer.cpp"
+  )
   add_executable(ppocr_host_test
     "${OCR_TEST_DIR}/ppocr_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
@@ -362,6 +371,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ppocr_host_test PRIVATE
@@ -420,6 +430,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doctr_host_test PRIVATE
@@ -501,6 +512,46 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     TIMEOUT 300
   )
   message(STATUS "OCR doc_vlm_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  add_executable(nemotron_parse_host_test
+    "${OCR_TEST_DIR}/nemotron_parse_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(nemotron_parse_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/nemotron_parse"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(nemotron_parse_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(nemotron_parse_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(nemotron_parse_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(nemotron_parse_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(nemotron_parse_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(nemotron_parse_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(nemotron_parse_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME nemotron_parse_host_test COMMAND $<TARGET_FILE:nemotron_parse_host_test>)
+  set_tests_properties(nemotron_parse_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 600
+  )
+  message(STATUS "OCR nemotron_parse_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
 else()
   message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()

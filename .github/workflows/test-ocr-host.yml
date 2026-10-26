@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   ocr-host:
-    name: OCR host tests — ppocr + doctr + doc_vlm units (no granite pack)
+    name: OCR host tests — ppocr + doctr + doc_vlm + nemotron_parse units (no VLM packs)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -89,11 +89,11 @@ jobs:
           test -f build/ocr-models/doctr-mobile/ocr_manifest.json
 
       # ── build + run ─────────────────────────────────────────────
-      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test
+      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test
         run: |
           mkdir -p test/cpp/build && cd test/cpp/build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test
+          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test
 
       - name: Run ppocr host tests
         working-directory: ${{ github.workspace }}
@@ -114,6 +114,12 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ctest --test-dir test/cpp/build -R doc_vlm_host_test --output-on-failure
+
+      # Pack-gated nemotron_parse cases GTEST_SKIP. Do not set NEMOTRON_PARSE_MODEL_DIR.
+      - name: Run nemotron_parse host unit tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R nemotron_parse_host_test --output-on-failure
 
   doc-vlm-golden:
     name: OCR host smoke — doc_vlm granite (manual)

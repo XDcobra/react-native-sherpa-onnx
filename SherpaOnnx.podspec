@@ -221,6 +221,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doctr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doc_vlm\"",
+    "\"#{pod_root}/android/src/main/cpp/ocr/nemotron_parse\"",
     "\"#{pod_root}/android/src/main/cpp\"",
     "\"#{pod_root}/android/src/main/cpp/pdf\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",

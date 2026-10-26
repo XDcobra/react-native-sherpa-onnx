@@ -223,6 +223,13 @@ set(SOURCES
     ocr/doc_vlm/DocVlmManifest.cpp
     ocr/doc_vlm/DocVlmPrompt.cpp
     ocr/doc_vlm/DocVlmTokenizer.cpp
+    ocr/nemotron_parse/NemotronParseBackend.cpp
+    ocr/nemotron_parse/NemotronParseImageOps.cpp
+    ocr/nemotron_parse/NemotronParseManifest.cpp
+    ocr/nemotron_parse/NemotronParseMarkup.cpp
+    ocr/nemotron_parse/NemotronParseNavit.cpp
+    ocr/nemotron_parse/NemotronParseNpy.cpp
+    ocr/nemotron_parse/NemotronParseTokenizer.cpp
     jni/ocr/sherpa-onnx-ocr-jni.cpp
     pdf/PdfDocument.cpp
     pdf/PdfTextLayerExtractor.cpp
@@ -423,6 +430,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/nemotron_parse
     ${CMAKE_CURRENT_SOURCE_DIR}/pdf
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
