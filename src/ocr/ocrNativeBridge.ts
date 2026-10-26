@@ -96,5 +96,8 @@ export async function buildOcrInitBridgeOptions(
     modelDir,
     modelType: canonicalOcrModelType(options.modelType ?? 'auto'),
     ...scalarFields,
+    ...(options.quantization !== undefined
+      ? { quantization: options.quantization }
+      : {}),
   };
 }

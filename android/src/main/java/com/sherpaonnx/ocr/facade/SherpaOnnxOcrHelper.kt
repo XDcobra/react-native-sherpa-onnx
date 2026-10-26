@@ -38,9 +38,14 @@ class SherpaOnnxOcrHelper(
     }
   }
 
-  fun detectOcrModel(modelDir: String, modelType: String?, promise: Promise) {
+  fun detectOcrModel(
+    modelDir: String,
+    modelType: String?,
+    quantization: String?,
+    promise: Promise,
+  ) {
     try {
-      val raw = OcrNative.nativeDetect(modelDir, modelType)
+      val raw = OcrNative.nativeDetect(modelDir, modelType, quantization)
         ?: run {
           promise.reject(OcrErrorCodes.DETECT_FAILED, "detectOcrModel returned null")
           return
@@ -112,6 +117,12 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
       val maxNewTokens =
         if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
+      val quantization =
+        if (options.hasKey("quantization") && !options.isNull("quantization")) {
+          options.getString("quantization")
+        } else {
+          null
+        }
 
       val sentinel = Any()
       instances[instanceId] = sentinel
@@ -128,6 +139,7 @@ class SherpaOnnxOcrHelper(
           detBoxScoreThresh,
           detUnclipRatio,
           maxNewTokens,
+          quantization,
           pathOverrides,
         )
       } catch (e: Exception) {

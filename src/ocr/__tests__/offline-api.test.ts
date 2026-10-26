@@ -203,6 +203,7 @@ describe('ocr offline API', () => {
     });
     expect(mockNative.detectOcrModel).toHaveBeenCalledWith(
       '/models/ppocrv6-tiny',
+      null,
       null
     );
     expect(result.success).toBe(true);
@@ -224,6 +225,34 @@ describe('ocr offline API', () => {
     expect(result.paths?.det?.length).toBeGreaterThan(0);
     expect(result.paths?.rec?.length).toBeGreaterThan(0);
     expect(result.paths?.rec_dict?.length).toBeGreaterThan(0);
+  });
+
+  it('detectOcrModel forwards quantization to native', async () => {
+    await detectOcrModel(
+      { kind: 'fs', path: '/models/docvlm-granite-258m-q4f16' },
+      { modelType: 'doc_vlm', quantization: 'q4f16' }
+    );
+    expect(mockNative.detectOcrModel).toHaveBeenCalledWith(
+      '/models/docvlm-granite-258m-q4f16',
+      'doc_vlm',
+      'q4f16'
+    );
+  });
+
+  it('createOCR auto forwards quantization to native', async () => {
+    await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp16' },
+      modelType: 'doc_vlm',
+      quantization: 'fp16',
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/docvlm-granite-258m-fp16',
+        modelType: 'doc_vlm',
+        quantization: 'fp16',
+      })
+    );
   });
 
   it('detectOcrModel trusts native success without TS path completeness', async () => {

@@ -22,6 +22,7 @@ internal object OcrNative {
     detBoxScoreThresh: Float = 0.5f,
     detUnclipRatio: Float = 1.5f,
     maxNewTokens: Int = 0,
+    quantization: String? = null,
     /** Absolute path overrides keyed like ValidateOcrPaths (`det`, `rec`, …). */
     pathOverrides: HashMap<String, String>? = null,
   )
@@ -40,7 +41,11 @@ internal object OcrNative {
   @JvmStatic external fun nativeCancelRecognize(operationId: String)
 
   @JvmStatic
-  external fun nativeDetect(modelDir: String, modelType: String?): HashMap<String, Any>?
+  external fun nativeDetect(
+    modelDir: String,
+    modelType: String?,
+    quantization: String?,
+  ): HashMap<String, Any>?
 
   /** Called from JNI during multi-frame recognize. */
   @JvmStatic

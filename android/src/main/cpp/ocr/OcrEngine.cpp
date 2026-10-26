@@ -55,6 +55,33 @@ void FilterSpansByGranularity(OcrResult& result, OcrGranularity granularity) {
   result.spans = std::move(kept);
 }
 
+bool HasCustomOcrPaths(const OcrLoadOptions& options) {
+  return !options.path_det.empty() || !options.path_rec.empty() ||
+         !options.path_cls.empty() || !options.path_rec_dict.empty() ||
+         !options.path_manifest.empty() ||
+         !options.path_vision_encoder.empty() ||
+         !options.path_vision_encoder_data.empty() ||
+         !options.path_embed_tokens.empty() ||
+         !options.path_embed_tokens_data.empty() ||
+         !options.path_decoder.empty() || !options.path_decoder_data.empty() ||
+         !options.path_tokenizer.empty();
+}
+
+void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
+  options.path_det = detect.detPath;
+  options.path_rec = detect.recPath;
+  options.path_cls = detect.clsPath;
+  options.path_rec_dict = detect.recDictPath;
+  options.path_manifest = detect.manifestPath;
+  options.path_vision_encoder = detect.visionEncoderPath;
+  options.path_vision_encoder_data = detect.visionEncoderDataPath;
+  options.path_embed_tokens = detect.embedTokensPath;
+  options.path_embed_tokens_data = detect.embedTokensDataPath;
+  options.path_decoder = detect.decoderPath;
+  options.path_decoder_data = detect.decoderDataPath;
+  options.path_tokenizer = detect.tokenizerPath;
+}
+
 }  // namespace
 
 void OcrEngine::Load(const std::string& model_type, const std::string& model_dir,
@@ -64,16 +91,18 @@ void OcrEngine::Load(const std::string& model_type, const std::string& model_dir
   options_ = options;
 
   std::string resolved = model_type.empty() ? "auto" : model_type;
-  if (resolved == "auto") {
-    auto detect = DetectOcrModel(model_dir);
+  if (!HasCustomOcrPaths(options_)) {
+    auto detect = DetectOcrModel(model_dir, resolved, options_.quantization);
     if (!detect.ok) {
       throw std::runtime_error(detect.errorMessage.empty()
                                    ? "OCR auto-detect failed"
                                    : detect.errorMessage);
     }
     resolved = detect.modelType;
-    OCR_LOGI("auto-detect → family=%s modelType=%s dir=%s", detect.family.c_str(),
-             resolved.c_str(), model_dir.c_str());
+    CopyDetectPaths(options_, detect);
+    OCR_LOGI("detect → family=%s modelType=%s quant=%s dir=%s",
+             detect.family.c_str(), resolved.c_str(),
+             options_.quantization.c_str(), model_dir.c_str());
   }
 
   backend_ = CreateOcrBackend(resolved);

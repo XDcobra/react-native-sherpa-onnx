@@ -312,6 +312,7 @@ export type OcrInitBridgeOptions = {
   detUnclipRatio?: number;
   /** doc_vlm generation cap. Omit → native 0 → backend default 8192. */
   maxNewTokens?: number;
+  quantization?: string;
 };
 
 export type OcrRecognizeNativeResult = {
@@ -1116,7 +1117,8 @@ export interface Spec extends TurboModule {
   /** Family-aware OCR pack detect (ppocr Det+Rec+dict). */
   detectOcrModel(
     modelDir: string,
-    modelType?: string | null
+    modelType?: string | null,
+    quantization?: string | null
   ): Promise<OcrDetectNativeResult>;
 
   /** Load an OCR engine instance (Cpp OcrEngine + backend). */

@@ -18,7 +18,11 @@ import {
 import type { FileSource } from '../fileio/types';
 import { resolveOfflineImageBufferId } from '../imagebuffer';
 import { resolveOfflineTextBufferId } from '../textbuffer';
-import { ModelCategory, type SizeTier } from '../download/types';
+import {
+  ModelCategory,
+  type QuantizationPreference,
+  type SizeTier,
+} from '../download/types';
 import {
   publicLanguageHintsFromNative,
   readPublicLanguageRows,
@@ -152,7 +156,7 @@ function pathFromRaw(value: unknown): string | undefined {
 /** Detect OCR pack layout without loading the engine. */
 export async function detectOcrModel(
   source: FileSource,
-  options?: { modelType?: OcrModelType }
+  options?: { modelType?: OcrModelType; quantization?: QuantizationPreference }
 ): Promise<OcrDetectModelResult> {
   const resolved = await resolveFileSourceForDetect(source);
   const modelDir = resolved.modelDir;
@@ -167,7 +171,8 @@ export async function detectOcrModel(
 
   const raw = await getNative().detectOcrModel(
     modelDir,
-    options?.modelType ?? null
+    options?.modelType ?? null,
+    options?.quantization ?? null
   );
 
   const successFlag = Boolean(raw.success ?? raw.ok);

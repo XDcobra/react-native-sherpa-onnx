@@ -25,7 +25,8 @@ const char* KindToFamily(sherpaonnx::OcrModelKind kind) {
 }  // namespace
 
 OcrDetectResult DetectOcrModel(const std::string& model_dir,
-                               const std::string& model_type) {
+                               const std::string& model_type,
+                               const std::string& quantization) {
   OcrDetectResult out;
   if (model_dir.empty()) {
     out.errorCode = "OCR_INVALID_ARGUMENT";
@@ -37,7 +38,8 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
       model_type.empty() ? std::string("auto") : model_type;
 
   auto native = sherpaonnx::DetectOcrModel(
-      std::optional<std::string>(model_dir), std::nullopt, requested, "");
+      std::optional<std::string>(model_dir), std::nullopt, requested,
+      quantization);
 
   for (const auto src : native.detectionSources) {
     out.detectionSources.push_back(sherpaonnx::DetectionSourceToLiteral(src));

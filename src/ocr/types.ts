@@ -1,3 +1,4 @@
+import type { QuantizationPreference } from '../download/types';
 import type { FileSource } from '../fileio/types';
 import type { OfflineImageBufferIdSource } from '../imagebuffer/types';
 import type {
@@ -78,6 +79,7 @@ type OcrInitShared = {
 
 type OcrInitFolderShared = OcrInitShared & {
   modelSource: FileSource;
+  quantization?: QuantizationPreference;
 };
 
 export type OcrInitializeOptionsAuto = OcrInitFolderShared & {

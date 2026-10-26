@@ -89,6 +89,7 @@ struct OcrLoadOptions {
    * Phase 3 maps TS `docVlm.maxNewTokens` here.
    */
   int max_new_tokens = 0;
+  std::string quantization;
 
   /**
    * Absolute path overrides for custom init. Empty string → use

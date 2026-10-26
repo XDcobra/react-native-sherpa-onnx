@@ -53,11 +53,12 @@ struct OcrDetectResult {
 
 /**
  * Family-aware OCR pack detect (delegates to jni/model_detect/ocr).
- * Recognizes ppocr via Det+Rec+dict co-occurrence with dynamic filename tokens.
  * @param model_type `"auto"` (default) or concrete family e.g. `"ppocr"`.
+ * @param quantization filename preference (`auto`, `int8`, `fp16`, `q8`, …).
  */
 OcrDetectResult DetectOcrModel(const std::string& model_dir,
-                               const std::string& model_type = "auto");
+                               const std::string& model_type = "auto",
+                               const std::string& quantization = "");
 
 }  // namespace ocr
 }  // namespace sherpa_onnx

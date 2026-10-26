@@ -64,6 +64,21 @@ describe('OCR customConfig / bridge', () => {
     expect(bridge.modelPaths).toBeUndefined();
   });
 
+  it('buildOcrInitBridgeOptions auto forwards quantization', async () => {
+    const bridge = await buildOcrInitBridgeOptions({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-q8' },
+      modelType: 'doc_vlm',
+      quantization: 'q8',
+    });
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        initMode: 'auto',
+        modelType: 'doc_vlm',
+        quantization: 'q8',
+      })
+    );
+  });
+
   it('buildOcrInitBridgeOptions custom uses modelPaths', async () => {
     const bridge = await buildOcrInitBridgeOptions({
       initMode: 'custom',
