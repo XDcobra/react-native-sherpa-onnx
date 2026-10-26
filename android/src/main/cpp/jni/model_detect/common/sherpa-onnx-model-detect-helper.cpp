@@ -257,12 +257,21 @@ bool MatchesQuantization(const std::string& nameLower, const std::string& quant)
     std::string q = ToLower(quant);
     if (q.empty() || q == "auto") return true;
 
+    if (q == "q4f16") {
+        return nameLower.find("q4f16") != std::string::npos;
+    }
+    if (q == "q8") {
+        return ContainsWord(nameLower, "q8") ||
+               nameLower.find("int8") != std::string::npos ||
+               nameLower.find("quantized") != std::string::npos;
+    }
     if (q == "int8" || q == "int8-quantized") {
         return nameLower.find("int8") != std::string::npos ||
                ContainsWord(nameLower, "q8");
     }
     if (q == "fp16") {
-        return nameLower.find("fp16") != std::string::npos;
+        return nameLower.find("fp16") != std::string::npos &&
+               nameLower.find("q4f16") == std::string::npos;
     }
     if (q == "int4") {
         return nameLower.find("int4") != std::string::npos ||
@@ -282,6 +291,7 @@ bool MatchesQuantization(const std::string& nameLower, const std::string& quant)
                nameLower.find("uint8") == std::string::npos &&
                nameLower.find("bf16") == std::string::npos &&
                nameLower.find("quant") == std::string::npos &&
+               nameLower.find("q4f16") == std::string::npos &&
                !ContainsWord(nameLower, "q4") &&
                !ContainsWord(nameLower, "q8") &&
                !ContainsWord(nameLower, "u8");
