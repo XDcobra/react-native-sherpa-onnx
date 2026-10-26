@@ -46,6 +46,13 @@ struct OcrResult {
   std::string doctags_utf8;
   /** doc_vlm: lossy markdown from DocTags. Empty for ppocr/doctr. */
   std::string markdown_utf8;
+  /**
+   * doc_vlm stop: doctag_end | eos | max_new_tokens | invalid_sequence.
+   * Empty for ppocr/doctr.
+   */
+  std::string stop_reason;
+  /** doc_vlm: true only after </doctag>. ppocr/doctr stay true. */
+  bool complete = true;
 };
 
 /** Prefer absolute override; otherwise `model_dir/canonical`. */

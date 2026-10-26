@@ -1,6 +1,7 @@
 #include "DocVlmBackend.h"
 
 #include "DocVlmDocTags.h"
+#include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
 
@@ -131,6 +132,7 @@ DocVlmBackend::~DocVlmBackend() { Release(); }
 void DocVlmBackend::Release() {
   loaded_ = false;
   doctag_end_id_ = 0;
+  prompt_only_ids_.clear();
   decoder_input_names_.clear();
   decoder_output_names_.clear();
   vision_session_.reset();
@@ -189,6 +191,30 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
   doctag_end_id_ = tokenizer_.TokenId("</doctag>");
   if (doctag_end_id_ != kDoctagEndId) {
     throw std::runtime_error("DocVlmBackend: </doctag> id is not 100328");
+  }
+  prompt_only_ids_.clear();
+  prompt_only_ids_.insert(manifest_.image_token_id);
+  const char* kPromptOnly[] = {
+      "<image>",
+      "<fake_token_around_image>",
+      "<global-img>",
+      "<|start_of_role|>",
+      "<|end_of_role|>",
+  };
+  for (const char* token : kPromptOnly) {
+    try {
+      prompt_only_ids_.insert(tokenizer_.TokenId(token));
+    } catch (const std::exception&) {
+    }
+  }
+  for (int row = 1; row <= 4; ++row) {
+    for (int col = 1; col <= 4; ++col) {
+      try {
+        prompt_only_ids_.insert(tokenizer_.TokenId("<row_" + std::to_string(row) +
+                                                   "_col_" + std::to_string(col) + ">"));
+      } catch (const std::exception&) {
+      }
+    }
   }
 
   if (!options_.provider.empty() && options_.provider != "cpu") {
@@ -251,6 +277,9 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
   }
   if (frame.rgb == nullptr || frame.width <= 0 || frame.height <= 0) {
     throw std::invalid_argument("DocVlmBackend: invalid frame");
+  }
+  if (!embed_session_ || !decoder_session_ || !vision_session_) {
+    throw std::runtime_error("DocVlmBackend: sessions not loaded");
   }
 
   DocVlmTiles tiles = PreprocessRgb(
@@ -399,15 +428,21 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
   };
 
   std::vector<int64_t> mask(static_cast<size_t>(seq0), 1);
+  const auto t_prefill = std::chrono::steady_clock::now();
   auto prefill_out = run_decoder(embeds, seq0, mask);
   embeds.clear();
   embeds.shrink_to_fit();
   int32_t next = take_next(prefill_out, seq0);
+  const auto prefill_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - t_prefill)
+                              .count();
 
   std::vector<int32_t> generated_ids;
   int generated = 0;
   std::string stop_reason = "max_new_tokens";
   int step = 0;
+  DocTagsPrefix prefix;
+  const auto t_decode = std::chrono::steady_clock::now();
   while (generated < max_new) {
     ++step;
     const bool log_step = (step % 32 == 0);
@@ -416,24 +451,30 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
       break;
     }
-    if (next == doctag_end_id_) {
-      generated_ids.push_back(next);
-      ++generated;
-      stop_reason = "doctag_end";
+    if (prompt_only_ids_.count(next) != 0) {
+      stop_reason = "invalid_sequence";
+      OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      break;
+    }
+    const std::string piece = tokenizer_.Decode(std::vector<int32_t>{next});
+    if (!prefix.Feed(piece)) {
+      stop_reason = "invalid_sequence";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
       break;
     }
     generated_ids.push_back(next);
     ++generated;
+    if (next == doctag_end_id_) {
+      stop_reason = "doctag_end";
+      OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      break;
+    }
     if (generated == max_new) {
       stop_reason = "max_new_tokens";
       OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
       break;
     }
     if (log_step) OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
-    if (next == manifest_.image_token_id) {
-      throw std::runtime_error("DocVlmBackend: generated image token");
-    }
 
     std::vector<int64_t> one_id{next};
     const std::array<int64_t, 2> one_shape{1, 1};
@@ -451,17 +492,26 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
     auto step_out = run_decoder(one_embed, 1, step_mask);
     next = take_next(step_out, 1);
   }
+  const auto decode_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t_decode)
+                             .count();
+  const double ms_per_token =
+      generated > 0 ? static_cast<double>(decode_ms) / static_cast<double>(generated) : 0.0;
 
   OcrResult result;
   result.doctags_utf8 = tokenizer_.Decode(generated_ids);
   LstripAsciiWs(result.doctags_utf8);
   DocTagsParse parsed = ParseDocTags(result.doctags_utf8, frame.width, frame.height, frame.frame_index);
-  if (parsed.used_fallback) OCR_LOGI("doc_vlm doctags_parse=fallback");
   result.text_utf8 = std::move(parsed.text_utf8);
   result.markdown_utf8 = std::move(parsed.markdown_utf8);
   result.spans = std::move(parsed.spans);
-  OCR_LOGI("doc_vlm stop=%s generated=%d text=%zu spans=%zu", stop_reason.c_str(), generated,
-           result.text_utf8.size(), result.spans.size());
+  result.stop_reason = stop_reason;
+  result.complete = (stop_reason == "doctag_end");
+  OCR_LOGI("doc_vlm decode_perf prefill_ms=%lld decode_ms=%lld generated=%d ms_per_token=%.2f",
+           static_cast<long long>(prefill_ms), static_cast<long long>(decode_ms), generated,
+           ms_per_token);
+  OCR_LOGI("doc_vlm stop=%s complete=%d generated=%d text=%zu spans=%zu", stop_reason.c_str(),
+           result.complete ? 1 : 0, generated, result.text_utf8.size(), result.spans.size());
   return result;
 }
 

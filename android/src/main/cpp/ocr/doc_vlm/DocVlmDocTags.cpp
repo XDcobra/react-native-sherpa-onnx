@@ -185,24 +185,6 @@ std::string CleanInner(const std::string& raw) {
   return TrimAsciiWs(CollapseSpaceTab(StripTags(raw)));
 }
 
-std::string CollapseWhitespace(const std::string& raw) {
-  std::string out;
-  out.reserve(raw.size());
-  bool in_run = false;
-  for (char c : raw) {
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-      if (!in_run) {
-        out.push_back(' ');
-        in_run = true;
-      }
-    } else {
-      in_run = false;
-      out.push_back(c);
-    }
-  }
-  return TrimAsciiWs(out);
-}
-
 std::string InnerText(const std::vector<Tok>& toks, size_t begin, size_t end) {
   std::string raw;
   for (size_t i = begin; i < end && i < toks.size(); ++i) {
@@ -522,23 +504,6 @@ DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
 
   DocTagsParse parsed;
   if (items.empty()) {
-    if (!doctags.empty()) {
-      parsed.used_fallback = true;
-      const std::string plain = CollapseWhitespace(StripTags(doctags));
-      if (!plain.empty()) {
-        parsed.text_utf8 = plain;
-        parsed.markdown_utf8 = plain;
-        OcrSpan span;
-        span.utf16_start = 0;
-        span.utf16_end = Utf8ToUtf16Length(plain);
-        span.quad = MakeQuad(false, nullptr, frame_w, frame_h);
-        // Greedy decode does not record logprobs.
-        span.confidence = 1.f;
-        span.frame_index = frame_index;
-        span.level = OcrSpanLevel::kBlock;
-        parsed.spans.push_back(span);
-      }
-    }
     return parsed;
   }
 

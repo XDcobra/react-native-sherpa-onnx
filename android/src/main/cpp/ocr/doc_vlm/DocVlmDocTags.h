@@ -17,7 +17,6 @@ struct DocTagsParse {
   std::string text_utf8;
   std::string markdown_utf8;
   std::vector<OcrSpan> spans;
-  bool used_fallback = false;
 };
 
 /**

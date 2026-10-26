@@ -217,6 +217,7 @@ set(SOURCES
     ocr/doctr/DoctrRecDecode.cpp
     ocr/doc_vlm/DocVlmBackend.cpp
     ocr/doc_vlm/DocVlmDocTags.cpp
+    ocr/doc_vlm/DocVlmDocTagsPrefix.cpp
     ocr/doc_vlm/DocVlmImageOps.cpp
     ocr/doc_vlm/DocVlmManifest.cpp
     ocr/doc_vlm/DocVlmPrompt.cpp

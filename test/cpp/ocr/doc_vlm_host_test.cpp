@@ -26,6 +26,7 @@
 
 #include "DocVlmBackend.h"
 #include "DocVlmDocTags.h"
+#include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
 #include "DocVlmTokenizer.h"
@@ -331,20 +332,14 @@ TEST(DocTags, TitleMarkdown) {
 
 TEST(DocTags, FallbackStripsTags) {
   const DocTagsParse parsed = ParseDocTags("<doctag>Hello</doctag>", 1000, 240, 3);
-  EXPECT_TRUE(parsed.used_fallback);
-  EXPECT_EQ(parsed.text_utf8, "Hello");
-  ASSERT_EQ(parsed.spans.size(), 1u);
-  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kBlock);
-  EXPECT_EQ(parsed.spans[0].frame_index, 3);
-  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 1000.f);
-  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[5], 240.f);
-  EXPECT_FLOAT_EQ(parsed.spans[0].confidence, 1.f);
+  EXPECT_TRUE(parsed.text_utf8.empty());
+  EXPECT_TRUE(parsed.markdown_utf8.empty());
+  EXPECT_TRUE(parsed.spans.empty());
 }
 
 TEST(DocTags, OtslUnclosedTwoByTwo) {
   const DocTagsParse parsed =
       ParseDocTags("<fcel>A<fcel>B<nl><fcel>C<fcel>D", 1000, 240, 0);
-  EXPECT_FALSE(parsed.used_fallback);
   EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
   EXPECT_EQ(parsed.markdown_utf8, "| A | B |\n| --- | --- |\n| C | D |");
   EXPECT_TRUE(parsed.spans.empty());
@@ -385,21 +380,64 @@ TEST(DocTags, OtslCaptionBeforeTable) {
 TEST(DocTags, UnknownTagDoesNotDropNeighbors) {
   const DocTagsParse parsed = ParseDocTags(
       "<text>A</text><unknown>x</unknown><text>B</text>", 1000, 240, 0);
-  EXPECT_FALSE(parsed.used_fallback);
   EXPECT_EQ(parsed.text_utf8, "A\nB");
 }
 
 TEST(DocTags, TruncatedTextIsBestEffort) {
   const DocTagsParse parsed = ParseDocTags("<text>Hello", 1000, 240, 0);
-  EXPECT_FALSE(parsed.used_fallback);
   EXPECT_EQ(parsed.text_utf8, "Hello");
   ASSERT_EQ(parsed.spans.size(), 1u);
+}
+
+TEST(DocTagsPrefix, RejectsStartWithoutDoctag) {
+  DocTagsPrefix prefix;
+  EXPECT_FALSE(prefix.Feed("Fo"));
+}
+
+TEST(DocTagsPrefix, RejectsLocWithoutOpen) {
+  DocTagsPrefix prefix;
+  EXPECT_FALSE(prefix.Feed("<loc_0>"));
+}
+
+TEST(DocTagsPrefix, RejectsPromptOnly) {
+  DocTagsPrefix start;
+  EXPECT_FALSE(start.Feed("<image>"));
+  DocTagsPrefix after_open;
+  EXPECT_TRUE(after_open.Feed("<doctag>"));
+  EXPECT_FALSE(after_open.Feed("<fake_token_around_image>"));
+  DocTagsPrefix role;
+  EXPECT_TRUE(role.Feed("<doctag>"));
+  EXPECT_FALSE(role.Feed("<|start_of_role|>"));
+  DocTagsPrefix tile;
+  EXPECT_TRUE(tile.Feed("<doctag>"));
+  EXPECT_FALSE(tile.Feed("<row_1_col_2>"));
+}
+
+TEST(DocTagsPrefix, RejectsTextAfterClose) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("<doctag></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+  EXPECT_FALSE(prefix.Feed("Hello"));
+}
+
+TEST(DocTagsPrefix, AcceptsMiniDocument) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("\n<doctag><text>Hi</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsUnclosedOtslPrefix) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed("<doctag><otsl><fcel>A<fcel>B<nl>"));
+  EXPECT_FALSE(prefix.closed_doctag());
 }
 
 TEST(OcrResult, ExtrasDefaultEmpty) {
   OcrResult result;
   EXPECT_TRUE(result.doctags_utf8.empty());
   EXPECT_TRUE(result.markdown_utf8.empty());
+  EXPECT_TRUE(result.stop_reason.empty());
+  EXPECT_TRUE(result.complete);
   OcrLoadOptions options;
   EXPECT_EQ(options.max_new_tokens, 0);
 }
