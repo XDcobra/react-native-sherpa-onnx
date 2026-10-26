@@ -324,10 +324,11 @@ export default function OCRScreen() {
       const fillResult = await fillOcrCustomConfigFromModelFolder(
         await toDetectSource(resolveModelPath(selectedFolder))
       );
-      setCustomInitForm({
+      setCustomInitForm((prev) => ({
         modelType: fillResult.modelType,
         fileSources: fillResult.customConfig,
-      });
+        maxNewTokens: prev.maxNewTokens,
+      }));
       const missing =
         fillResult.missingKeys.length > 0
           ? ` Missing: ${fillResult.missingKeys.join(', ')}`
@@ -356,9 +357,6 @@ export default function OCRScreen() {
         const modelSource = await toDetectSource(resolveModelPath(folderId));
         await runDetect(folderId);
 
-        const wantDocVlmOpts =
-          folderId.toLowerCase().includes('docvlm') ||
-          folderId.toLowerCase().includes('granite');
         const initOptions: OcrInitializeOptions = {
           modelSource,
           modelType: 'auto',
@@ -366,7 +364,6 @@ export default function OCRScreen() {
           numThreads: threads,
           ppocr: { detUnclipRatio },
           doctr: { detUnclipRatio },
-          ...(wantDocVlmOpts ? { docVlm: { maxNewTokens: 512 } } : {}),
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
@@ -408,7 +405,9 @@ export default function OCRScreen() {
           ...(customInitForm.modelType === 'doctr'
             ? { doctr: { detUnclipRatio } }
             : {}),
-          ...(wantDocVlmOpts ? { docVlm: { maxNewTokens: 512 } } : {}),
+          ...(wantDocVlmOpts
+            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
+            : {}),
         });
         engineRef.current = ocr;
         setInitializedFolder(
@@ -417,7 +416,17 @@ export default function OCRScreen() {
             : `custom:${customInitForm.modelType}`
         );
         setInitMessage(
-          `Ready · instance=${ocr.instanceId} · custom:${customInitForm.modelType}`
+          `Ready · instance=${ocr.instanceId} · custom:${
+            customInitForm.modelType
+          }${
+            wantDocVlmOpts
+              ? ` · maxNewTokens=${
+                  customInitForm.maxNewTokens === 0
+                    ? 'default'
+                    : customInitForm.maxNewTokens
+                }`
+              : ''
+          }`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -456,6 +465,7 @@ export default function OCRScreen() {
     await proceedAuto(selectedFolder);
   }, [
     customInitForm.fileSources,
+    customInitForm.maxNewTokens,
     customInitForm.modelType,
     destroyEngine,
     detUnclipRatio,
