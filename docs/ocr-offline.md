@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`. `complete` is `true` only after a generated `</doctag>`; hitting `maxNewTokens` or an illegal prefix is not a finished document (`stopReason` says why). Recognize does not invent plaintext by stripping tags.
 
 ---
 
@@ -75,7 +75,9 @@ try {
       )
     : [];
   console.log(text, spans.length, page.spanCount);
-  // if (page.family === 'doc_vlm') console.log(page.doctags, page.markdown);
+  // if (page.family === 'doc_vlm') {
+  //   console.log(page.complete, page.stopReason, page.doctags, page.markdown);
+  // }
 } finally {
   // Step 6: release buffers + engine
   await releaseOfflineImageBuffer(image);
@@ -280,7 +282,8 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrInitializeOptions` | Discriminated on `modelType` for option bags |
 | `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrDocVlmOptions` | Family init bags |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
-| `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown` only for `doc_vlm`) |
+| `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown`/`complete`/`stopReason` only for `doc_vlm`) |
+| `OcrDocVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrDetectModelResult` | `detectOcrModel` return |
 | `OcrEngine` | `recognize` / `destroy` / `instanceId` |
@@ -314,7 +317,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
 | `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
-| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for `doc_vlm`, missing `doctags` / `markdown`; and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
+| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for `doc_vlm`, missing `doctags` / `markdown` / `complete` / `stopReason`; and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
@@ -390,7 +393,7 @@ const ocr = await createOCR({
 });
 const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 if (page.family === 'doc_vlm') {
-  console.log(page.doctags, page.markdown);
+  console.log(page.complete, page.stopReason, page.doctags, page.markdown);
 }
 await ocr.destroy();
 ```
