@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       run_doc_vlm_golden:
-        description: Download docvlm-granite-258m and run DocVlmSmoke.EnHello
+        description: Download docvlm-granite-258m-fp32 and run DocVlmSmoke.EnHello
         type: boolean
         default: false
 
@@ -129,25 +129,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libgtest-dev
 
-      - name: Cache docvlm-granite-258m archive
+      - name: Cache docvlm-granite-258m-fp32 archive
         id: cache-docvlm-archive
         uses: actions/cache@v4
         with:
-          path: dist/ocr-models/docvlm-granite-258m.tar.bz2
-          key: ocr-models-docvlm-granite-258m-archive-v1
+          path: dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2
+          key: ocr-models-docvlm-granite-258m-fp32-archive-v1
 
-      - name: Download docvlm-granite-258m archive
+      - name: Download docvlm-granite-258m-fp32 archive
         if: steps.cache-docvlm-archive.outputs.cache-hit != 'true'
         run: |
           mkdir -p dist/ocr-models
-          curl -fsSL -o dist/ocr-models/docvlm-granite-258m.tar.bz2 \
-            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m.tar.bz2"
+          curl -fsSL -o dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m-fp32.tar.bz2"
 
-      - name: Extract docvlm-granite-258m
+      - name: Extract docvlm-granite-258m-fp32
         run: |
           mkdir -p build/ocr-models
-          tar xjf dist/ocr-models/docvlm-granite-258m.tar.bz2 -C build/ocr-models
-          test -f build/ocr-models/docvlm-granite-258m/decoder_model_merged.onnx_data
+          tar xjf dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2 -C build/ocr-models
+          test -f build/ocr-models/docvlm-granite-258m-fp32/decoder_model_merged.onnx_data
 
       - name: Configure and build doc_vlm_host_test
         run: |
@@ -158,6 +158,6 @@ jobs:
       - name: Run doc_vlm host tests including EnHello smoke
         working-directory: ${{ github.workspace }}
         env:
-          DOCVLM_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/docvlm-granite-258m
+          DOCVLM_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/docvlm-granite-258m-fp32
         run: |
           ctest --test-dir test/cpp/build -R doc_vlm_host_test --output-on-failure --timeout 1200
